@@ -147,29 +147,40 @@ state-sync manifests authenticate the code needed to reopen the registries.
 cargo test -p <id>                                        # 1. native logic
 cargo clippy -p <id> --tests --no-deps                    # 2. lints, this crate only
 git push                                                  # 3. the guest build reads HEAD out of the repository
-guest-builder crates/modules/apps/<id>                    # 4. rebuild the component (catches native-dep leaks)
-guest-builder --index crates/modules/apps/<id>            #    …and its mapper, if it ships one
-ops/wasm-repro-check.sh                                   # 5. one guest, two scratch dirs: identical bytes, no host path
+make wasm-modules                                         # 4. rebuild every component and mapper
+make wasm-modules-check                                   # 5. …or just prove the committed set matches its source
+ops/wasm-repro-check.sh                                   # 6. one guest, two scratch dirs: identical bytes, no host path
 ```
 
-`guest-builder` bakes its platform root in at compile time. Build it into a
-directory of its own — a host config that points `CARGO_TARGET_DIR` at one
-directory for every worktree leaves ONE binary at ONE path, owned by whichever
-checkout built it last, and running that one refuses every module you own by
-name:
+`guest-builder` lives in ducktape-sdk and is built there; the Makefile reaches
+it through `GUEST_BUILDER`, which defaults to
+`../ducktape-sdk/target/release/guest-builder` and an operator overrides:
 
 ```
-guest-builder: crates/modules/apps/chat is outside the platform checkout <someone else's worktree>
+make wasm-modules GUEST_BUILDER=/path/to/guest-builder
 ```
 
-It can happen MID-SWEEP, when a sibling's build lands between two of your
-guests.
+THE PLATFORM IS THE WORKSPACE THE COMMAND RUNS IN — the builder resolves it
+from the working directory, or from `--platform <dir>`, and reads the
+repository it stands for out of that workspace's root manifest
+(`[workspace.metadata.guest-builder] platform`, this repository's own URL).
+So run it from the root of this checkout. One module at a time:
+
+```
+$GUEST_BUILDER crates/modules/apps/<id>            # the component
+$GUEST_BUILDER --index crates/modules/apps/<id>    # …and its mapper, if it ships one
+```
+
+Add `--out <path>` to leave the module directory untouched (the artifact and
+its lock land at the out path instead) — that is how `wasm-modules-check`
+rebuilds the whole set against a clean tree.
 
 **A guest's bytes move with EVERY crate it compiles in, a deletion included.**
 Five deleted lines shift every panic-path line number below them. Each module's
 `guest.lock` records what it actually compiled, so
-`grep -l 'name = "<crate>"' crates/modules/apps/*/guest.lock` says which guests
-a crate change moves — check the scope by hand before rebuilding anything. A
+`grep -l 'name = "<crate>"' crates/modules/apps/*/guest.lock crates/examples/*/guest.lock`
+says which guests a crate change moves — check the scope by hand before
+rebuilding anything. A
 module that ships an index guest has ONE lock covering both: the builder's
 shell workspace holds every guest the module declares, so the lock is their
 union. A lock names only what a guest COMPILES, so it can never name the
@@ -181,7 +192,7 @@ every guest at once and that grep finds nothing at all.
 | Mistake | Reality |
 |---|---|
 | Building a guest before pushing | guest-builder reads the module out of the repository at HEAD: an unpushed HEAD fails to fetch, an uncommitted edit is refused. Commit, push, then build |
-| Moving the rust channel — or the componentizer — for one guest | bytes depend on BOTH pins (`rust-toolchain.toml` here, the componentizer in the platform repository); moving either rebuilds the whole set and commits it as one change |
+| Moving the rust channel — or the componentizer — for one guest | bytes depend on BOTH pins (`rust-toolchain.toml` here, the componentizer in guest-builder's own manifest in ducktape-sdk); moving either rebuilds the whole set and commits it as one change |
 | Bumping the module SDK without a rebuild | panic locations carry line numbers and every guest expands the SDK's macros, so even a comment line above them moves the set |
 | Native-only dep in the module crate | the wasm32 build breaks; gate it behind a `native` feature |
 | Linking a sibling's module crate for its types | a module links a sibling's WIRE crate; the module crate is the executor and belongs to nobody else |

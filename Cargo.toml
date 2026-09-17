@@ -37,6 +37,13 @@ members = [
     "crates/examples/greeter",
 ]
 
+# which repository this workspace IS. guest-builder reaches every module
+# through this URL as a git source at the revision it builds, and the URL is
+# part of every symbol hash — so it is written once, here, rather than guessed
+# from a checkout's remote.
+[workspace.metadata.guest-builder]
+platform = "https://github.com/ducktape-industries/ducktape-modules"
+
 [workspace.package]
 edition = "2024"
 version = "0.1.0"
