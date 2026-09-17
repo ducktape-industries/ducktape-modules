@@ -1,0 +1,223 @@
+# ducktape-sdk — the contract line of the ducktape platform.
+#
+# What lives here: the module contract (`sdk`), the wasm authoring surface
+# (`crates/module-sdk`: the `ducktape:module` WIT world, the bindings/adapter a
+# guest compiles against, and the wasm32 patch crates in `stubs/`), the
+# dev-only test doubles (`sdk-testkit`), every module's `-wire` crate (the
+# types-only payload/query/reply shapes plus their codecs), and the leaf
+# libraries those surfaces are made of.
+#
+# This workspace depends on NO other ducktape repository. Everything else in
+# the platform depends on it.
+#
+# A MODULE'S NAME RESOLVES TO ITS WIRE CRATE: `identity = { workspace = true }`
+# links `identity-wire` under the name `identity`, so the kernel, a daemon, a
+# service, a view and a sibling module all speak a module's format without
+# linking the module.
+
+[workspace]
+resolver = "2"
+members = [
+    # kernel — the module contract and the pieces that run one
+    "crates/kernel/sdk",
+    "crates/kernel/sdk-testkit",
+    "crates/kernel/keyscheme",
+    "crates/kernel/blobstore",
+    "crates/kernel/index-guest",
+    "crates/kernel/module-artifact",
+    "crates/kernel/node-work",
+    "crates/kernel/wasm-host",
+
+    # cross-plane leaf libraries the wire surfaces are made of
+    "crates/design",
+    "crates/duckdns",
+    "crates/duckfs/core",
+    "crates/duckfs/disk",
+    "crates/git-primitives",
+    "crates/run-envelope",
+    "crates/view-wire",
+
+    # the guest componentizer
+    "bin/guest-builder",
+
+    # system modules — wire surfaces only
+    "crates/modules/system/acl/wire",
+    "crates/modules/system/attribution/wire",
+    "crates/modules/system/capability/wire",
+    "crates/modules/system/dispatch/wire",
+    "crates/modules/system/gateway/wire",
+    "crates/modules/system/governance/wire",
+    "crates/modules/system/identity/wire",
+    "crates/modules/system/kv/wire",
+    "crates/modules/system/modules/wire",
+    "crates/modules/system/saga/wire",
+    "crates/modules/system/valset/wire",
+
+    # app modules — wire surfaces only
+    "crates/modules/apps/agent/wire",
+    "crates/modules/apps/automations/wire",
+    "crates/modules/apps/boards/wire",
+    "crates/modules/apps/chat/message",
+    "crates/modules/apps/chat/wire",
+    "crates/modules/apps/collaboration/wire",
+    "crates/modules/apps/files/wire",
+    "crates/modules/apps/forge/wire",
+    "crates/modules/apps/inbox/wire",
+    "crates/modules/apps/pages/wire",
+    "crates/modules/apps/runs/wire",
+    "crates/modules/apps/tasks/wire",
+]
+# each of these is a standalone workspace with its own Cargo.lock: they compile
+# for wasm32-unknown-unknown only, inside the shell workspace guest-builder
+# synthesizes. Membership here would poison native feature unification.
+exclude = [
+    "crates/module-sdk",
+    "crates/guests",
+    "crates/kernel/index-guest/testmap",
+]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+
+[workspace.dependencies]
+# ---- external
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# borsh — the deterministic store-record and op-row codec (one byte layout, no
+# map ordering games).
+borsh = { version = "1", default-features = false, features = ["derive", "std"] }
+sha2 = "0.10"
+# keccak-256 for the EIP-191 personal-message digest.
+sha3 = "0.10"
+base64 = "0.22"
+async-trait = "0.1"
+futures = "0.3"
+tokio = { version = "1", features = ["rt", "macros", "sync", "time"] }
+# the logging facade.
+tracing = "0.1"
+# duckfs path normalization: NFC so visually-identical names collide instead
+# of coexisting (a consensus-determinism requirement, not cosmetics).
+unicode-normalization = "0.1"
+# tests only: isolated on-disk data dirs.
+tempfile = "3"
+
+# commonware — one ecosystem, version-aligned.
+commonware-cryptography = "2026.9.0"
+commonware-codec = "2026.9.0"
+commonware-utils = "2026.9.0"
+
+p256 = "0.13"
+# secp256k1 with public-key RECOVERY: an Ethereum wallet's `personal_sign`
+# proof carries r‖s‖v and no pubkey, so verify = recover + compare.
+k256 = { version = "0.13", features = ["ecdsa"] }
+# raw (un-namespaced) ed25519 for OpenSSH `SSHSIG` verification — an SSH key
+# signs the SSHSIG blob directly, never commonware's namespaced preimage.
+ed25519-dalek = "2"
+
+# wasmtime — the frozen-substrate wasm runtime that executes hot-swappable
+# modules inside the host. pinned EXACTLY: the runtime IS the module execution
+# semantics, so it is consensus-affecting and every validator must run the
+# identical build.
+wasmtime = "=46.0.3"
+# wit-bindgen — the guest-side binding generator. Only ever compiled inside
+# guest-builder's synthesized wasm32 workspace.
+wit-bindgen = "0.57"
+
+# fluent-guest — fluent31's wasm32 guest SDK. NEVER a host-side dependency:
+# only the index-guest crate's `guest` feature pulls it, and only
+# guest-builder's synthesized wasm32 shells ever enable that feature. It is
+# compiled INTO every committed index guest, so moving this rev moves their
+# bytes.
+fluent-guest = { git = "https://github.com/orthory/fluent31", rev = "76ba1867bc0ba9c09bb8387149c07844f1d2395c", default-features = false }
+
+# ---- internal: kernel
+sdk = { path = "crates/kernel/sdk" }
+# dev-only shared test doubles for the sdk boundary traits (TestCtx + in-memory
+# MerkleStore). MAY ONLY appear in `[dev-dependencies]` of consumers — the
+# Module Rule (modules link only sdk + wire surfaces) is untouched.
+sdk-testkit = { path = "crates/kernel/sdk-testkit" }
+keyscheme = { path = "crates/kernel/keyscheme" }
+blobstore = { path = "crates/kernel/blobstore" }
+# keyed with the underscore ON PURPOSE: module crates declare a feature named
+# `index-guest` (the guest-builder --index contract), and cargo refuses a
+# feature sharing its name with a non-optional dependency key.
+index_guest = { path = "crates/kernel/index-guest", package = "index-guest" }
+module-artifact = { path = "crates/kernel/module-artifact" }
+node-work = { path = "crates/kernel/node-work" }
+wasm-host = { path = "crates/kernel/wasm-host" }
+# the module SDK a guest port compiles against. wasm-only: every module's
+# `guest` feature turns it on, and only guest-builder's shell workspace does.
+ducktape-module-sdk = { path = "crates/module-sdk" }
+
+# ---- internal: cross-plane leaf libraries
+design = { path = "crates/design" }
+# the `.duck` naming library the `gateway` module embeds.
+duckdns = { path = "crates/duckdns" }
+duckfs-core = { path = "crates/duckfs/core" }
+duckfs-disk = { path = "crates/duckfs/disk" }
+# the plain git read types `wasm_host::OdbBacking` speaks and `forge`'s read
+# policy names — a zero-dep leaf on purpose, so naming it drags in nothing.
+git-primitives = { path = "crates/git-primitives" }
+# the run envelope's magic + headless composer.
+run-envelope = { path = "crates/run-envelope" }
+# the host<->wasm-view wire. `manifest` is host-only (it pulls wasmparser to
+# read a built component's custom section); the guests take it bare.
+view-wire = { path = "crates/view-wire" }
+
+# ---- internal: module wire surfaces
+acl = { package = "acl-wire", path = "crates/modules/system/acl/wire" }
+acl-wire = { path = "crates/modules/system/acl/wire" }
+attribution = { package = "attribution-wire", path = "crates/modules/system/attribution/wire" }
+attribution-wire = { path = "crates/modules/system/attribution/wire" }
+capability = { package = "capability-wire", path = "crates/modules/system/capability/wire" }
+capability-wire = { path = "crates/modules/system/capability/wire" }
+dispatch = { package = "dispatch-wire", path = "crates/modules/system/dispatch/wire" }
+dispatch-wire = { path = "crates/modules/system/dispatch/wire" }
+gateway = { package = "gateway-wire", path = "crates/modules/system/gateway/wire" }
+gateway-wire = { path = "crates/modules/system/gateway/wire" }
+governance = { package = "governance-wire", path = "crates/modules/system/governance/wire" }
+governance-wire = { path = "crates/modules/system/governance/wire" }
+identity = { package = "identity-wire", path = "crates/modules/system/identity/wire" }
+identity-wire = { path = "crates/modules/system/identity/wire" }
+kv = { package = "kv-wire", path = "crates/modules/system/kv/wire" }
+kv-wire = { path = "crates/modules/system/kv/wire" }
+modules = { package = "modules-wire", path = "crates/modules/system/modules/wire" }
+modules-wire = { path = "crates/modules/system/modules/wire" }
+saga = { package = "saga-wire", path = "crates/modules/system/saga/wire" }
+saga-wire = { path = "crates/modules/system/saga/wire" }
+valset = { package = "valset-wire", path = "crates/modules/system/valset/wire" }
+valset-wire = { path = "crates/modules/system/valset/wire" }
+
+agent = { package = "agent-wire", path = "crates/modules/apps/agent/wire" }
+agent-wire = { path = "crates/modules/apps/agent/wire" }
+automations = { package = "automations-wire", path = "crates/modules/apps/automations/wire" }
+automations-wire = { path = "crates/modules/apps/automations/wire" }
+boards = { package = "boards-wire", path = "crates/modules/apps/boards/wire" }
+boards-wire = { path = "crates/modules/apps/boards/wire" }
+chat = { package = "chat-wire", path = "crates/modules/apps/chat/wire" }
+chat-wire = { path = "crates/modules/apps/chat/wire" }
+chat-message = { path = "crates/modules/apps/chat/message" }
+collaboration = { package = "collaboration-wire", path = "crates/modules/apps/collaboration/wire" }
+collaboration-wire = { path = "crates/modules/apps/collaboration/wire" }
+files = { package = "files-wire", path = "crates/modules/apps/files/wire" }
+files-wire = { path = "crates/modules/apps/files/wire" }
+forge = { package = "forge-wire", path = "crates/modules/apps/forge/wire" }
+forge-wire = { path = "crates/modules/apps/forge/wire" }
+inbox = { package = "inbox-wire", path = "crates/modules/apps/inbox/wire" }
+inbox-wire = { path = "crates/modules/apps/inbox/wire" }
+pages = { package = "pages-wire", path = "crates/modules/apps/pages/wire" }
+pages-wire = { path = "crates/modules/apps/pages/wire" }
+runs = { package = "runs-wire", path = "crates/modules/apps/runs/wire" }
+runs-wire = { path = "crates/modules/apps/runs/wire" }
+tasks = { package = "tasks-wire", path = "crates/modules/apps/tasks/wire" }
+tasks-wire = { path = "crates/modules/apps/tasks/wire" }
+
+# dev/test builds compile wasm guests through cranelift. unoptimized cranelift
+# is 10-30x slower, so the code generator itself is always built optimized.
+# build-time only; artifacts and semantics unchanged.
+[profile.dev.build-override]
+opt-level = 2
+
+[profile.dev.package.design]
+opt-level = 2
