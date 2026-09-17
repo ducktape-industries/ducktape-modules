@@ -3,13 +3,14 @@
 //! Consequently every protected block's `page` is either the collection root or
 //! a managed record ID: no ancestor walk or unbounded reverse index is needed.
 use super::{
-    Block, BlockKind, MAX_BLOCK_ID_BYTES, MAX_RECORD_ARTIFACTS, MAX_RECORD_BATCH_BYTES,
+    BlockKind, MAX_BLOCK_ID_BYTES, MAX_RECORD_ARTIFACTS, MAX_RECORD_BATCH_BYTES,
     MAX_RECORD_CHANGES, MAX_RECORD_DATA_BYTES, MAX_RECORD_DOCUMENT_BLOCKS,
     MAX_RECORD_METADATA_BYTES, MAX_RECORD_QUERY_LIMIT, MAX_RECORD_STATE_KEYS,
-    MAX_RECORD_STATE_VALUE_BYTES, MAX_RECORDS_PER_COLLECTION, ManagedRecord, NewBlock, PageError,
-    PageMsg, Pages, Party, RecordChange, RecordCollection, RecordDocument, RecordPage,
-    RecordReceipt, RecordState, RecordStateChange, id_is_index_safe, to_page_err,
+    MAX_RECORD_STATE_VALUE_BYTES, MAX_RECORDS_PER_COLLECTION, ManagedRecord, PageError, PageMsg,
+    Pages, Party, RecordChange, RecordCollection, RecordPage, RecordReceipt, RecordState,
+    RecordStateChange, id_is_index_safe, to_page_err,
 };
+pub(crate) use pages_wire::record_ops::{document_ops, receipt_key, request_ids};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
@@ -47,106 +48,12 @@ pub(crate) fn artifact_retention_key(page_id: &str, request_id: &str, index: usi
     format!("records:{}", files::to_hex(&digest))
 }
 
-pub(crate) fn receipt_key(page_id: &str, request_id: &str) -> String {
-    format!(
-        "\0record-receipt:{}",
-        serde_json::to_string(&(page_id, request_id)).expect("string tuple serializes")
-    )
-}
-
 fn valid_id(id: &str) -> Result<(), PageError> {
     let valid = !id.is_empty() && id.len() <= MAX_BLOCK_ID_BYTES && id_is_index_safe(id);
     if !valid {
         return Err(PageError::InvalidRecordBatch);
     }
     Ok(())
-}
-
-pub(super) fn request_ids(msg: &PageMsg) -> Option<(&str, &str)> {
-    match msg {
-        PageMsg::CreateRecordCollection {
-            page_id,
-            request_id,
-        }
-        | PageMsg::CommitRecords {
-            page_id,
-            request_id,
-            ..
-        } => Some((page_id, request_id)),
-        _ => None,
-    }
-}
-
-/// A pure expansion shared by consensus and the derived mapper. The executor
-/// applies these ordinary document operations in order within one checkpoint;
-/// it never routes them back through the public unmanaged mutation guard.
-pub(crate) fn document_ops(
-    page_id: &str,
-    record_id: &str,
-    existing: Option<&Block>,
-    document: &RecordDocument,
-    after: Option<String>,
-) -> Vec<PageMsg> {
-    let mut ops = Vec::new();
-    let old_children = match existing {
-        Some(page) => {
-            ops.push(PageMsg::UpdateText {
-                block_id: record_id.into(),
-                text: document.title.clone(),
-                marks: None,
-            });
-            for child in &page.children {
-                let retained = document.blocks.iter().any(|block| &block.id == child);
-                if !retained {
-                    ops.push(PageMsg::RemoveBlock {
-                        block_id: child.clone(),
-                    });
-                }
-            }
-            page.children.as_slice()
-        }
-        None => {
-            ops.push(PageMsg::InsertBlock {
-                parent: page_id.into(),
-                after,
-                block: NewBlock {
-                    id: record_id.into(),
-                    kind: BlockKind::Page,
-                    text: document.title.clone(),
-                    marks: Vec::new(),
-                },
-            });
-            &[]
-        }
-    };
-    let mut after = None;
-    for block in &document.blocks {
-        let retained = old_children.contains(&block.id);
-        if retained {
-            ops.push(PageMsg::UpdateText {
-                block_id: block.id.clone(),
-                text: block.text.clone(),
-                marks: Some(block.marks.clone()),
-            });
-            ops.push(PageMsg::SetKind {
-                block_id: block.id.clone(),
-                kind: block.kind,
-            });
-            ops.push(PageMsg::MoveBlock {
-                block_id: block.id.clone(),
-                parent: Some(record_id.into()),
-                after: after.clone(),
-            });
-        } else {
-            ops.push(PageMsg::InsertBlock {
-                parent: record_id.into(),
-                after: after.clone(),
-                block: block.clone(),
-            });
-        }
-        after = Some(block.id.clone());
-    }
-    ops
 }
 
 impl Pages {
