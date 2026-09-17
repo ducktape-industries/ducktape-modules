@@ -30,8 +30,8 @@ FIXTURE_GUESTS := \
   hello:crates/guests/hello-wasm::hello_wasm:crates/guests/hello-wasm/component.wasm,crates/kernel/wasm-host/tests/fixtures/hello.component.wasm \
   hello-replacement:crates/guests/hello-wasm-replacement::hello_wasm_replacement:crates/guests/hello-wasm-replacement/component.wasm \
   noop:crates/guests/noop-wasm::noop_wasm:crates/guests/noop-wasm/component.wasm \
-  sibling:crates/guests/sibling-wasm::sibling_wasm:crates/guests/sibling-wasm/component.wasm,crates/kernel/wasm-host/tests/fixtures/sibling.component.wasm \
-  object:crates/guests/object-wasm::object_wasm:crates/guests/object-wasm/component.wasm,crates/kernel/wasm-host/tests/fixtures/object.component.wasm
+  sibling:crates/guests/sibling-wasm::sibling_wasm:crates/kernel/wasm-host/tests/fixtures/sibling.component.wasm \
+  object:crates/guests/object-wasm::object_wasm:crates/kernel/wasm-host/tests/fixtures/object.component.wasm
 
 # Parse one FIXTURE_GUESTS record and build it. Sourced by every recipe that
 # walks the list, so the parsing lives in one place.
