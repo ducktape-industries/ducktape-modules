@@ -13,3 +13,7 @@ saga = { workspace = true }
 borsh = { workspace = true }
 serde = { workspace = true }
 sha2 = { workspace = true }
+
+[dev-dependencies]
+# tests only: hand-rolled foreign json a decoder must refuse.
+serde_json = { workspace = true }
