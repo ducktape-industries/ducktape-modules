@@ -1,28 +1,25 @@
 # Authoring wasm modules
 
 How to write, build, and live-update a Ducktape wasm module. The runtime is
-`crates/kernel/wasm-host` (wasmtime, pinned `=46.0.3`); the authoring contract is
-the `ducktape:module` WIT world (`crates/module-sdk/wit/module.wit`, inside the
-module SDK a module pins by git revision, `crates/module-sdk`);
-the reference modules are `crates/guests/noop-wasm` (the smallest compliant
-module: five exports over the raw WIT world, no state, every op a no-op — the
-floor a module must meet and the admission fixture that touches nothing; a new
-module starts from the SDK instead, see "Out-of-tree modules" below),
-`crates/guests/hello-wasm` (a counter over host-owned state),
-`crates/guests/hello-wasm-replacement` (its live-update target), and
-`crates/guests/sibling-wasm` (the cross-module-read reference) — kernel test
-fixtures, in no genesis set. The first wasm port of a native module is
-`crates/examples/directory` (`src/guest.rs`), bytes-compatible with the native
-implementation it replaced (same root, same snapshot encoding) — the template
-every later port followed. It is in no genesis set either: the crate is a test
-tenant the kernel suites construct directly. The node binary embeds
-no component: `node init` composes every wasm tenant's `<id>.component.wasm`
-and every declared mapper, view and asset tree out of the founding set (`--modules <dir>`,
-default `$DUCKTAPE_MODULES_DIR`, else the `modules/` dir noded's build script
-stages beside the binary) into the workspace `genesis` file, and pins that file
-and every deployment in the network descriptor. A node hydrates its blob store
-from the file and installs the running deployments' mappers at boot; a joiner takes it at `join --genesis` or
-fetches it off the mesh.
+wasmtime, pinned exactly by the platform repository
+(`https://github.com/ducktape-industries/ducktape`); the authoring contract is
+the `ducktape:module` WIT world, which lives in the module SDK a module pins by
+git revision (`ducktape-module-sdk`, in
+`https://github.com/ducktape-industries/ducktape-sdk`).
+
+The first wasm port of a native module is `crates/examples/directory`
+(`src/guest.rs`), bytes-compatible with the native implementation it replaced
+(same root, same snapshot encoding) — the template every later port followed.
+It is in no genesis set: the crate is a test tenant the kernel suites construct
+directly. `crates/examples/greeter` is the other half of the reference pair — a
+CONSUMER module, composed purely out of its siblings' wire types.
+
+The node binary embeds no component: `node init` composes every wasm tenant's
+`<id>.component.wasm` and every declared mapper, view and asset tree out of a
+founding directory into the workspace `genesis` file, and pins that file and
+every deployment in the network descriptor. A node hydrates its blob store from
+the file and installs the running deployments' mappers at boot; a joiner takes
+it at `join --genesis` or fetches it off the mesh.
 
 ## The model (design-B: host-owned state, guest as pure logic)
 
@@ -121,25 +118,26 @@ follow-up ops, never reentrant); `emit-event` for observability records.
 ### Application I/O and native boundaries
 
 Consensus guests remain deterministic. Off-chain application I/O runs in
-[independently installed service processes](../../deploy/application-service.md),
-addressed by a signed Gateway account and route name. A new application uses
-that common transport without a native service enum entry, endpoint handler, or
-topic parser. Its process owns request interpretation, live stream messages, and
-application authorization through committed module queries.
+independently installed service processes, addressed by a signed Gateway
+account and route name. A new application uses that common transport without a
+native service enum entry, endpoint handler, or topic parser. Its process owns
+request interpretation, live stream messages, and application authorization
+through committed module queries.
 
-WASM views call the common host operations in
-`app/src/module_view/kernel.rs`: `net.request` carries HTTP method, path, headers
-and body bytes; `net.stream` and `net.send` carry bidirectional framed traffic.
-The host resolves the current route and signs the exact request with the seated
-user key. That private key stays outside the view and service. Dropping a view cancels
-its requests and streams; an instance from a previous connection cannot submit
-work on the newly selected network.
+WASM views call the common host operations the desktop app exposes:
+`net.request` carries HTTP method, path, headers and body bytes; `net.stream`
+and `net.send` carry bidirectional framed traffic. The host resolves the
+current route and signs the exact request with the seated user key. That
+private key stays outside the view and service. Dropping a view cancels its
+requests and streams; an instance from a previous connection cannot submit work
+on the newly selected network.
 
 Native changes are still required for new storage engines, cryptographic
 schemes, consensus mechanisms, runtime imports, or device/rendering primitives.
 Application policy, query interpretation, service protocols, and screens use
-the existing capabilities. The [independent deployment example](../../../crates/examples/extension-probe/README.md)
-exercises module, view, and service replacement with fixed native executables.
+the existing capabilities. The independent deployment example
+(`crates/examples/extension-probe/README.md`) exercises module, view, and
+service replacement with fixed native executables.
 
 ### Sibling reads (`module-root` / `query-module`)
 
@@ -176,31 +174,29 @@ configuration keys; authors must preserve the data layout within that shape:
 - Keep the layout byte-stable for a code-only swap.
 - If the layout changes while greenfield, replace it outright and re-genesis.
   Do not add a second decoder or lazy migration.
-- `hello-wasm-replacement` demonstrates the discipline: same `count` key, same
-  little-endian `u64` value, different logic (`inc` steps 100, not 1).
 
 ## Build: a module is built alone, out of a repository at a revision
 
 A module's build inputs are its own source, one revision of the platform (the
-module SDK `crates/module-sdk`, plus any sibling's wire types it reads), its
-lock, and the toolchain `rust-toolchain.toml` pins — nothing else. The network
-takes the result by hash. A module in this tree and a module in its own
-repository are built the same way; only who writes the shell differs.
+module SDK, plus any sibling's wire types it reads), its lock, and the
+toolchain `rust-toolchain.toml` pins — nothing else. The network takes the
+result by hash. A module in this tree and a module in its own repository are
+built the same way; only who writes the shell differs.
 
-### In-tree modules
+### Modules in this repository
 
-`bin/guest-builder` builds one module out of the platform repository
-(`https://github.com/orthory/ducktape`) at a revision — the checkout's HEAD by
-default, so push first — and never out of the checkout in place: it synthesizes
-a shell workspace under `target/guest-builder/<id>/` whose one dependency is
-the module (its `guest` feature on) as a git source, pins the revision in the
-shell lock, builds for `wasm32-unknown-unknown`, componentizes through the
-`wit-component` crate it links, and writes `component.wasm` and `guest.lock`
-into the module directory. The lock is the record of the build (the revision, every registry
-version) and the seed of the next one. Uncommitted inputs in the module,
-its resolved SDK and sibling packages, or workspace build configuration are
-refused, including staged and untracked sources. Artifacts and `guest.lock`
-are build outputs and may change during a rebuild.
+`guest-builder` (a binary in the platform repository) builds one module out of
+a repository at a revision — this checkout's HEAD by default, so push first —
+and never out of the checkout in place: it synthesizes a shell workspace whose
+one dependency is the module (its `guest` feature on) as a git source, pins the
+revision in the shell lock, builds for `wasm32-unknown-unknown`, componentizes
+through the `wit-component` crate it links, and writes `component.wasm` and
+`guest.lock` into the module directory. The lock is the record of the build
+(the revision, every registry version) and the seed of the next one.
+Uncommitted inputs in the module, its resolved SDK and sibling packages, or
+workspace build configuration are refused, including staged and untracked
+sources. Artifacts and `guest.lock` are build outputs and may change during a
+rebuild.
 
 Dependency resolution uses an explicit revision, so a new module can build
 before it exists on the repository's default branch. Before compilation,
@@ -208,38 +204,30 @@ the builder removes that selector from both manifests and lock source IDs;
 the lock keeps the precise commit, and `cargo build --locked` verifies it.
 A first build has no seed: an old scratch lock is discarded.
 
-```
-make wasm-modules        # rebuild every guest + refresh ALL committed copies
-make wasm-modules-check  # every committed copy is byte-identical, every guest has its lock
-make wasm-rebuild-check  # every artifact matches a rebuild of its source at HEAD
-make wasm-repro-check    # one guest, two scratch dirs: identical bytes, no host path
-```
-
-One module: `cargo run -p guest-builder -- crates/modules/<plane>/<id>`
-(`--index` for its index guest, `--rev <sha>` for a revision other than HEAD).
+One module: `guest-builder crates/modules/apps/<id>` (`--index` for its index
+guest, `--rev <sha>` for a revision other than HEAD).
+`ops/wasm-repro-check.sh` builds ONE module twice, in two scratch directories,
+and asserts both that the artifacts are byte-identical and that neither carries
+a host path.
 
 Bytes are stable across revisions that change nothing the module compiles:
 the shell names the module by git source alone and the revision lives in the
 lock, which is not hashed into symbol names. "Compiles" includes line numbers:
 a panic location names its line, and a guest expands the SDK's macros, so a
-line added anywhere above them in `crates/module-sdk/src/lib.rs` (a comment
-included) moves every guest that expands them. They are identical from any box:
-the unpacked revision, the cargo home, the rustup home and the scratch are
-remapped to fixed tokens. They are toolchain-dependent, and the toolchain is two pins:
-a rebuild on another rustc, or through another componentizer release (it
-writes the component's own sections and they move between releases), may
-legitimately differ, so moving either pin rebuilds the whole set and commits it
-as one change. `rust-toolchain.toml` holds the channel and
-`bin/guest-builder/Cargo.toml` pins the componentizer (`wit-component`), which
-the builder links rather than finds on a PATH.
+line added anywhere above them in the module SDK (a comment included) moves
+every guest that expands them. They are identical from any box: the unpacked
+revision, the cargo home, the rustup home and the scratch are remapped to fixed
+tokens. They are toolchain-dependent, and the toolchain is two pins: a rebuild
+on another rustc, or through another componentizer release (it writes the
+component's own sections and they move between releases), may legitimately
+differ, so moving either pin rebuilds the whole set and commits it as one
+change. `rust-toolchain.toml` holds the channel; the platform repository pins
+the componentizer (`wit-component`), which the builder links rather than finds
+on a PATH.
 
-The committed copies of one module's component MUST stay byte-identical
-(nothing is embedded: the founder bundles the canonical artifact and the
-descriptor commits the component-plus-mapper deployment hash; the kernel
-test fixtures — the node pins' bundle — carry the same bytes).
-`wasm-modules-check` gates that and rides the pre-push `make test` gate;
-`wasm-rebuild-check` gates the artifact against its source and needs the wasm32
-target and a pushed HEAD.
+The committed copy of one module's component is the canonical artifact: nothing
+is embedded in a binary, the founder bundles these bytes, and the descriptor
+commits the component-plus-mapper deployment hash.
 
 ### Out-of-tree modules
 
@@ -256,15 +244,15 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-ducktape-module-sdk = { git = "https://github.com/orthory/ducktape", rev = "<sha>" }
+ducktape-module-sdk = { git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "<sha>" }
 
-# the wasm32 patch set every guest graph needs (crates/module-sdk/stubs at the
-# same revision): deterministic getrandom refusals, a C-free blst.
+# the wasm32 patch set every guest graph needs (the SDK's stubs at the same
+# revision): deterministic getrandom refusals, a C-free blst.
 [patch.crates-io]
-getrandom-02 = { package = "getrandom", version = "0.2", git = "https://github.com/orthory/ducktape", rev = "<sha>" }
-getrandom-03 = { package = "getrandom", version = "0.3", git = "https://github.com/orthory/ducktape", rev = "<sha>" }
-getrandom-04 = { package = "getrandom", version = "0.4", git = "https://github.com/orthory/ducktape", rev = "<sha>" }
-blst = { git = "https://github.com/orthory/ducktape", rev = "<sha>" }
+getrandom-02 = { package = "getrandom", version = "0.2", git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "<sha>" }
+getrandom-03 = { package = "getrandom", version = "0.3", git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "<sha>" }
+getrandom-04 = { package = "getrandom", version = "0.4", git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "<sha>" }
+blst = { git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "<sha>" }
 ```
 
 `src/lib.rs` is the guest itself: `ducktape_module_sdk::store_guest!` (or
@@ -276,7 +264,7 @@ blst = { git = "https://github.com/orthory/ducktape", rev = "<sha>" }
 cargo build --target wasm32-unknown-unknown --release
 # the componentizer at the revision the module pins — the bytes the network's
 # own modules came out of
-cargo install --locked --git https://github.com/orthory/ducktape --rev <sha> guest-builder
+cargo install --locked --git https://github.com/ducktape-industries/ducktape --rev <sha> guest-builder
 guest-builder componentize target/wasm32-unknown-unknown/release/example_module.wasm --out component.wasm
 ```
 
@@ -304,31 +292,10 @@ module ids remain supported. `Genesis::compose` and runtime artifact reads
 share the same preparation checks. A `<id>.view.pending` marker blocks both,
 even when an older view file is still present.
 
-`make views` bundles the packages declared under `crates/views/`, with fixed
-source-path prefixes and explicit unoptimized output independent of PATH. It
-compiles through `/var/tmp/ducktape-view-root`, a symlink to the checkout: a
-view reaches module crates outside the `crates/views` workspace, and cargo
-hashes such a dependency's absolute location into its `-C metadata` and so into
-every symbol it emits, which would tie a view's bytes to where the checkout
-lives. One build owns that name at a time.
-`make views-repro-check` builds the committed HEAD snapshot in two isolated
-roots, compares all view bytes, and rejects embedded builder-home paths.
-The consensus guest `wasm-rebuild-check` does not cover these views. The noded
-build stages module views for governance, files, pages, chat, and forge when
-that owner's `crates/views/<id>/Cargo.toml` exists. Other desktop views remain
-desktop resources. Missing or empty declared view output leaves a pending
-marker; compiling noded succeeds, but founding or packing that deployment
-fails. Run `make views` and rebuild noded to prepare the founding set. A
-restored view clears pending after its assets are synchronized. Removing the
-owner declaration removes staged view files and assets; removing only a build
-output does not. Asset files removed from a restored source tree are removed
-from staging as well.
-
-Agents commit the artifact and request `modules.update` through their final response
-(see [dogfood](../../dogfood.md)). The operator CLI packages the same unit,
-proposes that hash to governance, and only then stages it on the blob plane — a
-peer admits a pushed digest only when consensus names it, and for a brand-new
-artifact the OPEN proposal is the only record that does:
+The operator CLI packages a deployment, proposes that hash to governance, and
+only then stages it on the blob plane — a peer admits a pushed digest only when
+consensus names it, and for a brand-new artifact the OPEN proposal is the only
+record that does:
 
 ```
 ducktape module register pages pages.component.wasm --index pages.index.wasm
@@ -361,31 +328,29 @@ initial deployments and remains unchanged by later updates.
 
 ## Testing a module
 
-- Runtime-level: `crates/kernel/wasm-host/tests/dispatch.rs` — the
-  staged-writes / commit / abort / determinism / hot-swap / snapshot proofs —
-  and `crates/kernel/wasm-host/tests/sibling.rs` — the sibling-read proofs
-  (replay convergence, memoization, no staging leak across replays, budget).
-- Host-level: `crates/kernel/host/tests/module_swap.rs` — the full live-update
-  boundary (schedule → realize at H → new logic over kept state, fail-closed,
-  joiner reconciliation, cross-node determinism) — plus
-  `crates/kernel/host/tests/cross_module.rs` (a native peer composing with a
-  wasm module) and `crates/kernel/host/tests/wasm_cutover_parity.rs` (the
-  native↔wasm byte-compatibility proof for the directory cutover).
-- Authorization-level: `crates/modules/system/governance/tests/
-  governance_schedules_module_update.rs` — ballot → registry acceptance.
+A module's own tests live beside it (`crates/modules/apps/<id>/tests/`) and run
+natively: the happy path, every rejection, and a `snapshot()` → `install()`
+root round-trip. A store-backed module drives itself the way a host does —
+construct the concrete `QmdbStore` from `statesync` and inject it as
+`Box<dyn MerkleStore>` — so the test exercises the real staging and commit
+boundary rather than a double.
+
+The runtime-level, host-level and authorization-level proofs (staged writes,
+abort, determinism, hot swap, sibling-read replay convergence, the live-update
+boundary, a governance ballot reaching the registry) belong to the platform
+repository, which owns the host they exercise.
 
 ## Porting a native module (the cutover pattern)
 
 The `directory` port is the template: split the native crate so its wire types
-compile standalone (`default-features = false`, the `files`/`duckfs-core`
-shape), author the guest against those SAME wire types (drift is then a compile
-error), and choose the guest's state layout so the host store's canonical
-encoding reproduces the native root — if the native module already hashes
-`le-u64 count ‖ sorted (len‖key ‖ len‖value)`, storing the raw key/value bytes
-makes root(), snapshot(), and install() BYTE-IDENTICAL across the cutover: the
-root-hash does not move and pre-cutover workspaces restore unchanged. Pin that
-claim with a parity test before wiring the module into `host_state`.
+compile standalone (`default-features = false`), author the guest against those
+SAME wire types (drift is then a compile error), and choose the guest's state
+layout so the host store's canonical encoding reproduces the native root — if
+the native module already hashes `le-u64 count ‖ sorted (len‖key ‖ len‖value)`,
+storing the raw key/value bytes makes root(), snapshot(), and install()
+BYTE-IDENTICAL across the cutover: the root-hash does not move and pre-cutover
+workspaces restore unchanged. Pin that claim with a parity test before wiring
+the module into a genesis set.
 
 Point your module's tests at a committed fixture (`include_bytes!`) so the
-proof is self-contained, and register the fixture in `make wasm-modules` so it
-can never drift from the source crate.
+proof is self-contained.

@@ -46,7 +46,7 @@ chat = { path = "../chat", default-features = false }
 # module, where the program origin the effect arrives under is the one it
 # judges.
 collaboration = { workspace = true }
-saga = { path = "../../system/saga", default-features = false }
+saga = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "saga", default-features = false }
 attribution = { workspace = true }
 dispatch = { workspace = true }
 tasks = { path = "../tasks", default-features = false }
@@ -57,7 +57,7 @@ tasks = { path = "../tasks", default-features = false }
 # a module links other modules' wire surface, not their pure-core internals.
 # default-features = false drops files' native `Files`/duckfs-disk (std::fs) so
 # the `runs` guest graph stays pure, same as chat/tasks/pages above.
-files = { path = "../files", default-features = false }
+files = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "files", default-features = false }
 base64 = { workspace = true }
 # the pages wire types (paged PageQuery::GetPage / PageReply / Block) the
 # injector queries for `duck://page/<id>` refs. a normal prod-safe dep — pages pulls
@@ -74,7 +74,7 @@ async-trait = { workspace = true }
 index_guest = { workspace = true }
 
 [dev-dependencies]
-files = { path = "../files", features = ["native"] }
+files = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "files", features = ["native"] }
 tempfile = { workspace = true }
 syn = { version = "2", features = ["full"] }
 # the host-side qmdb store handle the chat test fixtures inject.
