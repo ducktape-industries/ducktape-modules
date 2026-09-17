@@ -80,6 +80,15 @@ exclude = [
 edition = "2024"
 version = "0.1.0"
 
+# The repository guest-builder reaches this workspace's crates through when it
+# builds a guest out of it (`crates/kernel/index-guest/testmap`, the reference
+# index mapper). Every platform workspace — this one, ducktape, ducktape-modules
+# — names itself here: the URL is hashed into every guest symbol, so it is
+# written in the tree it names rather than read off whatever a checkout calls
+# its remote. See bin/guest-builder/src/main.rs.
+[workspace.metadata.guest-builder]
+platform = "https://github.com/ducktape-industries/ducktape-sdk"
+
 [workspace.dependencies]
 # ---- external
 serde = { version = "1", features = ["derive"] }

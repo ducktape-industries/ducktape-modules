@@ -3,31 +3,60 @@
 //!
 //! a module carries its whole guest surface itself: a `src/guest.rs` behind a
 //! wasm-only `guest` feature (the dispatch shell + the component export) over
-//! the module SDK (`crates/module-sdk`). packaging that as a cdylib is
+//! the module SDK (`ducktape-module-sdk`). packaging that as a cdylib is
 //! identical across modules — a manifest, a one-line lib, a `[workspace]`
 //! table, the wasm32 patch set — so none of it is checked in: this tool
 //! synthesizes it into a scratch workspace, builds for
 //! `wasm32-unknown-unknown`, componentizes, and writes the artifact:
 //!
 //! ```text
-//! guest-builder <module-dir> [--index] [--rev <sha>]
+//! guest-builder <module-dir> [--index] [--rev <sha>] [--platform <dir>]
 //!               [--out <artifact.wasm>] [--scratch <dir>]
 //! guest-builder componentize <core.wasm> --out <component.wasm>
+//! guest-builder vendor --out <dir> [--platform <dir>] [--directory <path>]
 //! ```
 //!
-//! the shell's ONE dependency is the module, reached out of the platform
-//! repository as a git source ([`PLATFORM_GIT`]) at the revision the shell
-//! lock pins — never out of the checkout in place. that is what makes a module
-//! independently buildable and its bytes reproducible: the build inputs are
-//! the module's revision, its lock, and the toolchain — the rust channel
-//! `rust-toolchain.toml` pins and the componentizer this crate links
-//! (`wit-component`, pinned in its manifest; see the crate root) — and
+//! # the platform is a workspace, and it names itself
+//!
+//! THE PLATFORM IS THE WORKSPACE THE COMMAND RUNS IN — the one `cargo`
+//! resolves from the working directory, or the one `--platform <dir>` names.
+//! Never a path relative to this binary: the module set lives in other
+//! repositories now (the system modules in `ducktape`, the app modules in
+//! `ducktape-modules`), and a builder that could only read its own tree could
+//! build none of them.
+//!
+//! that workspace's root manifest says which repository it IS:
+//!
+//! ```toml
+//! [workspace.metadata.guest-builder]
+//! platform = "https://github.com/ducktape-industries/ducktape"
+//! ```
+//!
+//! the URL is part of every symbol hash, so it is written once, in the tree it
+//! names, rather than guessed from a checkout's remote — two builders spelling
+//! it differently would produce different bytes for the same revision. a
+//! workspace without the key builds no guest, and says so.
+//!
+//! the shell's ONE dependency is the module, reached out of that repository as
+//! a git source at the revision the shell lock pins — never out of the
+//! checkout in place. that is what makes a module independently buildable and
+//! its bytes reproducible: the build inputs are the module's revision, its
+//! lock, the module SDK revision its platform pins, and the toolchain — the
+//! rust channel `rust-toolchain.toml` pins and the componentizer this crate
+//! links (`wit-component`, pinned in its manifest; see the crate root) — and
 //! nothing else.
 //!
-//! * every platform crate the module reads (the SDK, a sibling's wire types,
-//!   the wasm32 patch stubs) resolves inside that one git source at that one
-//!   revision — a path dependency inside a git checkout IS the git source —
-//!   so a module's platform is one revision by construction.
+//! * every crate of that repository the module reads (a sibling module, its
+//!   own wire types) resolves inside that one git source at that one revision —
+//!   a path dependency inside a git checkout IS the git source — so a module's
+//!   platform is one revision by construction.
+//! * THE MODULE SDK IS ITS HOST'S. `ducktape-module-sdk`, and with it the
+//!   wasm32 patch stubs beside it, come from `ducktape-sdk` — a second
+//!   repository, which the platform's own `Cargo.lock` pins to a revision.
+//!   the shell resolves the same source and then pins the same revision
+//!   ([`ModuleSdk`]), so a guest can never speak an ABI its host does not: the
+//!   host links that revision's `sdk`, the guest compiles that revision's
+//!   bindings.
 //! * a git source's location is no part of a symbol hash (a path dependency's
 //!   absolute location is), so bytes do not depend on where a checkout lives.
 //!   the directory cargo unpacks the revision into is remapped out of panic
@@ -51,9 +80,10 @@
 //!   since a lock that does not describe the bytes beside it is worse than no
 //!   lock at all.
 //!
-//! the revision defaults to the checkout's HEAD and must be reachable at
-//! [`PLATFORM_GIT`]: push before building. uncommitted inputs anywhere in the
-//! resolved platform graph (including the SDK and sibling packages) are
+//! the revision defaults to the platform checkout's HEAD and must be
+//! reachable at the URL that workspace names: push before building.
+//! uncommitted inputs anywhere in the resolved platform graph (the module,
+//! its siblings, the workspace manifest and the lock that pins the SDK) are
 //! refused, since the build would silently compile HEAD instead.
 //!
 //! `--index` builds the module's INDEX guest instead: the fluentabi mapper
@@ -73,16 +103,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{self, Command};
 
-/// the platform repository every shell reaches the module and the platform
-/// crates through. a constant, not the checkout's remote: the URL is part of
-/// every symbol hash, so two builders spelling it differently would produce
-/// different bytes for the same revision.
-const PLATFORM_GIT: &str = "https://github.com/orthory/ducktape";
-
 const USAGE: &str = "usage: guest-builder <module-dir> [--index] [--rev <sha>] \
-     [--out <artifact.wasm>] [--scratch <dir>]\n       \
+     [--platform <dir>] [--out <artifact.wasm>] [--scratch <dir>]\n       \
      guest-builder componentize <core.wasm> --out <component.wasm>\n       \
-     guest-builder vendor --out <dir> [--directory <path the config names>]";
+     guest-builder vendor --out <dir> [--platform <dir>] \
+     [--directory <path the config names>]";
+
+/// the key a platform workspace names itself with, in its root manifest.
+const PLATFORM_KEY: &str = "[workspace.metadata.guest-builder] platform";
 
 /// which of a module's two guests to build. the consensus component and the
 /// index mapper share the shell; everything guest-specific — contract
@@ -148,15 +176,19 @@ fn run() -> Result<(), String> {
     match parse_args()? {
         Args::Build(args) => build_guest(args),
         Args::Componentize { core, out } => componentize(&core, &out),
-        Args::Vendor { out, directory } => vendor(&out, directory.as_deref()),
+        Args::Vendor {
+            out,
+            directory,
+            platform,
+        } => vendor(&out, directory.as_deref(), platform.as_deref()),
     }
 }
 
 fn build_guest(args: BuildArgs) -> Result<(), String> {
     let kind = args.kind;
-    let platform_root = default_platform_root()?;
+    let platform = platform(args.platform.as_deref())?;
     let module_dir = canonical(&args.module_dir)?;
-    let module = read_module(&platform_root, &module_dir)?;
+    let module = read_module(&platform.root, &module_dir)?;
     let declares_requested_guest = module.guests.contains(&kind);
     if !declares_requested_guest {
         return Err(kind.missing_feature_hint(&module.name));
@@ -164,34 +196,32 @@ fn build_guest(args: BuildArgs) -> Result<(), String> {
 
     let rev = match &args.rev {
         Some(rev) => rev.clone(),
-        None => head(&platform_root)?,
+        None => head(&platform.root)?,
     };
+    let sdk = module_sdk(&platform.root)?;
 
     let scratch = match args.scratch {
         Some(dir) => dir,
-        None => platform_root
+        None => platform
+            .root
             .join("target/guest-builder")
             .join(&module.name),
     };
     eprintln!(
-        "guest-builder: {} {} at {rev}",
+        "guest-builder: {} {} at {rev}{}",
         module.name,
-        kind.artifact()
+        kind.artifact(),
+        sdk.note()
     );
     seed_lock(&scratch, &module_dir)?;
-    let graph = pin(&scratch, &module, PLATFORM_GIT, &rev)?;
+    let graph = pin(&scratch, &module, &platform.git, &rev, &sdk)?;
     let checkout = checkout_root(&graph, &module)?;
     let builds_head = args.rev.is_none();
     if builds_head {
-        let inputs = platform_inputs(&graph, &checkout, PLATFORM_GIT)?;
-        refuse_modified_sources(&platform_root, &inputs)?;
+        let inputs = platform_inputs(&graph, &checkout, &platform.git)?;
+        refuse_modified_sources(&platform.root, &inputs)?;
     }
-    build(
-        &scratch,
-        &module.name,
-        kind,
-        &remap_flags(&scratch, &checkout),
-    )?;
+    build(&scratch, &module.name, kind, &remap_flags(&scratch, &graph)?)?;
 
     let cdylib = cdylib_path(&scratch, &module.name, kind);
     // artifact and lock travel together, wherever they land: the lock is the
@@ -242,6 +272,7 @@ enum Args {
         /// not where this run writes it — a guest image builds the set on the
         /// host and mounts it somewhere else entirely.
         directory: Option<String>,
+        platform: Option<PathBuf>,
     },
 }
 
@@ -251,6 +282,9 @@ struct BuildArgs {
     rev: Option<String>,
     out: Option<PathBuf>,
     scratch: Option<PathBuf>,
+    /// the platform workspace to work in, when it is not the one the working
+    /// directory sits in.
+    platform: Option<PathBuf>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -275,6 +309,7 @@ fn parse_args() -> Result<Args, String> {
 fn parse_vendor_args(mut argv: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut out = None;
     let mut directory = None;
+    let mut platform = None;
     while let Some(arg) = argv.next() {
         let value = argv
             .next()
@@ -282,13 +317,18 @@ fn parse_vendor_args(mut argv: impl Iterator<Item = String>) -> Result<Args, Str
         match arg.as_str() {
             "--out" => out = Some(PathBuf::from(value)),
             "--directory" => directory = Some(value),
+            "--platform" => platform = Some(PathBuf::from(value)),
             other => return Err(format!("unknown argument {other}\n{USAGE}")),
         }
     }
     let Some(out) = out else {
         return Err(format!("vendor needs --out <dir>\n{USAGE}"));
     };
-    Ok(Args::Vendor { out, directory })
+    Ok(Args::Vendor {
+        out,
+        directory,
+        platform,
+    })
 }
 
 fn parse_componentize_args(mut argv: impl Iterator<Item = String>) -> Result<Args, String> {
@@ -326,6 +366,7 @@ fn parse_build_args(mut argv: impl Iterator<Item = String>) -> Result<BuildArgs,
     let mut rev = None;
     let mut out = None;
     let mut scratch = None;
+    let mut platform = None;
 
     while let Some(arg) = argv.next() {
         let flag_value = |argv: &mut dyn Iterator<Item = String>| {
@@ -337,6 +378,7 @@ fn parse_build_args(mut argv: impl Iterator<Item = String>) -> Result<BuildArgs,
             "--rev" => rev = Some(flag_value(&mut argv)?),
             "--out" => out = Some(PathBuf::from(flag_value(&mut argv)?)),
             "--scratch" => scratch = Some(PathBuf::from(flag_value(&mut argv)?)),
+            "--platform" => platform = Some(PathBuf::from(flag_value(&mut argv)?)),
             flag if flag.starts_with("--") => {
                 return Err(format!("unknown flag {flag}\n{USAGE}"));
             }
@@ -359,6 +401,152 @@ fn parse_build_args(mut argv: impl Iterator<Item = String>) -> Result<BuildArgs,
         rev,
         out,
         scratch,
+        platform,
+    })
+}
+
+// ============================================================================
+// the platform — the workspace a run works in, and what it says about itself
+// ============================================================================
+
+/// the workspace a guest is built out of: the tree its module crate lives in,
+/// and the repository that tree publishes itself as.
+struct Platform {
+    root: PathBuf,
+    /// `[workspace.metadata.guest-builder] platform`: the git URL the shell
+    /// reaches the module through.
+    git: String,
+}
+
+/// the package name the platform pins its module SDK with.
+const MODULE_SDK: &str = "ducktape-module-sdk";
+
+/// the workspace `dir` sits in, or the working directory's when no
+/// `--platform` was given. `cargo metadata --no-deps` answers both questions
+/// in one call and resolves no dependencies to do it: which workspace this is,
+/// and what it calls itself.
+fn platform(dir: Option<&Path>) -> Result<Platform, String> {
+    let anchor = match dir {
+        Some(dir) => canonical(dir)?,
+        None => env::current_dir().map_err(|e| format!("reading the working directory: {e}"))?,
+    };
+    let output = Command::new(cargo())
+        .args(["metadata", "--no-deps", "--format-version", "1"])
+        .current_dir(&anchor)
+        .output()
+        .map_err(|e| format!("running cargo metadata: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "no cargo workspace at {}: {}",
+            anchor.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let meta: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .map_err(|e| format!("parsing cargo metadata output: {e}"))?;
+    let Some(root) = meta["workspace_root"].as_str() else {
+        return Err("cargo metadata names no workspace root".to_string());
+    };
+    let Some(git) = meta["metadata"]["guest-builder"]["platform"].as_str() else {
+        return Err(format!(
+            "{root}/Cargo.toml declares no `{PLATFORM_KEY}`. a workspace a guest is built \
+             out of names the repository that guest is published from:\n\n    \
+             [workspace.metadata.guest-builder]\n    \
+             platform = \"https://github.com/ducktape-industries/ducktape\"\n\n\
+             the URL is hashed into every guest symbol, so it is written in the tree it \
+             names rather than read off whatever a checkout calls its remote"
+        ));
+    };
+    Ok(Platform {
+        root: canonical(Path::new(root))?,
+        git: git.to_string(),
+    })
+}
+
+/// where a guest's module SDK — and with it the wasm32 patch stubs beside it —
+/// comes from.
+enum ModuleSdk {
+    /// a second repository, at the revision the platform's own `Cargo.lock`
+    /// pins: the host that loads the guest links that revision's `sdk`, so the
+    /// guest compiles that revision's bindings. a guest whose SDK is not its
+    /// host's speaks an ABI its host does not.
+    Pinned(SdkPin),
+    /// the platform IS the SDK's repository — ducktape-sdk builds a guest of
+    /// its own, the reference index mapper — so the SDK rides the module's own
+    /// source and revision, and there is nothing to pin.
+    ThePlatform,
+}
+
+impl ModuleSdk {
+    /// how the shell spells the SDK source, given how it spells the module's.
+    fn source(&self, module_source: &str) -> String {
+        match self {
+            ModuleSdk::Pinned(pin) => pin.source.clone(),
+            ModuleSdk::ThePlatform => module_source.to_string(),
+        }
+    }
+
+    fn note(&self) -> String {
+        match self {
+            ModuleSdk::Pinned(pin) => format!(", module SDK {}", pin.rev),
+            ModuleSdk::ThePlatform => String::new(),
+        }
+    }
+}
+
+struct SdkPin {
+    /// the dependency spelling — `git = "<url>"` plus the reference the
+    /// platform names (`branch = "dev"`) — so the shell's patch stubs and the
+    /// module's own SDK dependency name ONE cargo source, and cargo keeps one
+    /// checkout of it at one revision.
+    source: String,
+    rev: String,
+}
+
+fn module_sdk(platform_root: &Path) -> Result<ModuleSdk, String> {
+    let path = platform_root.join("Cargo.lock");
+    let lock = fs::read_to_string(&path).map_err(|e| format!("reading {}: {e}", path.display()))?;
+    let Some(source) = locked_source(&lock, MODULE_SDK) else {
+        return Ok(ModuleSdk::ThePlatform);
+    };
+    sdk_pin_of(&source)
+        .map(ModuleSdk::Pinned)
+        .map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// the `source = "…"` a lock records for one package.
+fn locked_source(lock: &str, package: &str) -> Option<String> {
+    let name = format!("name = {package:?}");
+    let entry = lock
+        .split("[[package]]")
+        .find(|entry| entry.lines().any(|line| line == name))?;
+    let source = entry
+        .lines()
+        .find_map(|line| line.strip_prefix("source = \"")?.strip_suffix('"'))?;
+    Some(source.to_string())
+}
+
+/// `git+<url>[?<reference>]#<sha>` — a lock's git source — as the dependency
+/// spelling and revision a shell pins it with.
+fn sdk_pin_of(source: &str) -> Result<SdkPin, String> {
+    let Some(locator) = source.strip_prefix("git+") else {
+        return Err(format!("{MODULE_SDK} is not a git source: {source}"));
+    };
+    let Some((locator, rev)) = locator.split_once('#') else {
+        return Err(format!("{MODULE_SDK}'s source names no revision: {source}"));
+    };
+    let (url, reference) = match locator.split_once('?') {
+        None => (locator, String::new()),
+        Some((url, query)) => {
+            let Some((key, value)) = query.split_once('=') else {
+                return Err(format!("{MODULE_SDK}'s source reference is not key=value: {source}"));
+            };
+            (url, format!(", {key} = {value:?}"))
+        }
+    };
+    Ok(SdkPin {
+        source: format!("git = {url:?}{reference}"),
+        rev: rev.to_string(),
     })
 }
 
@@ -382,10 +570,10 @@ struct Module {
 fn read_module(platform_root: &Path, module_dir: &Path) -> Result<Module, String> {
     let Ok(path) = module_dir.strip_prefix(platform_root) else {
         return Err(format!(
-            "{} is outside the platform checkout {} — guest-builder builds the modules of \
-             this repository; a module authored elsewhere is its own cdylib crate pinning \
-             ducktape-module-sdk by git revision, built with cargo and `guest-builder \
-             componentize` directly",
+            "{} is outside the platform workspace {} — run in the workspace that owns the \
+             module, or name it with --platform <dir>. a module authored outside any \
+             ducktape workspace is its own cdylib crate pinning ducktape-module-sdk by git \
+             revision, built with cargo and `guest-builder componentize` directly",
             module_dir.display(),
             platform_root.display()
         ));
@@ -502,9 +690,10 @@ fn refuse_modified_sources(platform_root: &Path, inputs: &BTreeSet<PathBuf>) -> 
     ))
 }
 
-/// Cargo's resolved platform packages include the SDK, sibling wire types,
-/// and active patch crates. Workspace manifests and build configuration are
-/// inputs even though Cargo does not report them as packages.
+/// Cargo's resolved platform packages include the module and its siblings.
+/// Workspace manifests and build configuration are inputs even though Cargo
+/// does not report them as packages — and so is the lock, which is what says
+/// at which revision this guest compiles the module SDK.
 fn platform_inputs(
     graph: &serde_json::Value,
     checkout: &Path,
@@ -512,17 +701,21 @@ fn platform_inputs(
 ) -> Result<BTreeSet<PathBuf>, String> {
     let mut inputs = BTreeSet::from([
         PathBuf::from("Cargo.toml"),
+        PathBuf::from("Cargo.lock"),
         PathBuf::from("rust-toolchain.toml"),
         PathBuf::from(".cargo"),
     ]);
-    let source_prefix = format!("git+{git}?");
     let Some(packages) = graph["packages"].as_array() else {
         return Err("cargo metadata has no packages".to_string());
     };
     for package in packages {
+        // the source ID is `git+<url>` followed by `?<reference>` or `#<sha>`:
+        // matching the URL alone would also claim a repository whose name
+        // merely starts with the platform's.
         let from_platform = package["source"]
             .as_str()
-            .is_some_and(|source| source.starts_with(&source_prefix));
+            .and_then(|source| source.strip_prefix("git+")?.strip_prefix(git))
+            .is_some_and(|rest| rest.starts_with('?') || rest.starts_with('#'));
         if !from_platform {
             continue;
         }
@@ -547,10 +740,10 @@ fn platform_inputs(
 /// write the shell workspace: one cdylib member per guest the module
 /// declares, each depending on the module alone (its contract feature on,
 /// defaults off) out of the platform git source, plus the uniform wasm32 patch
-/// set from the same source. regenerated on every run — nothing here is
+/// set out of the module SDK's. regenerated on every run — nothing here is
 /// hand-maintained state, except the lock, which is seeded from the module's
 /// committed `guest.lock` when there is one.
-fn synthesize(scratch: &Path, module: &Module, source: &str) -> Result<(), String> {
+fn synthesize(scratch: &Path, module: &Module, source: &str, sdk: &str) -> Result<(), String> {
     for kind in &module.guests {
         let member = scratch.join(kind.member());
         let src = member.join("src");
@@ -563,7 +756,7 @@ fn synthesize(scratch: &Path, module: &Module, source: &str) -> Result<(), Strin
     }
     write(
         &scratch.join("Cargo.toml"),
-        &workspace_manifest(&module.guests, source),
+        &workspace_manifest(&module.guests, sdk),
     )
 }
 
@@ -592,7 +785,7 @@ fn seed_lock(scratch: &Path, module_dir: &Path) -> Result<(), String> {
     Err(format!("removing scratch lock: {error}"))
 }
 
-fn workspace_manifest(guests: &[GuestKind], source: &str) -> String {
+fn workspace_manifest(guests: &[GuestKind], sdk: &str) -> String {
     let members: Vec<String> = guests
         .iter()
         .map(|kind| format!("\"{}\"", kind.member()))
@@ -619,17 +812,28 @@ opt-level = 3
 lto = "fat"
 codegen-units = 1
 
-# the uniform wasm32 patch set (crates/module-sdk/stubs in the platform
-# repository, at the module's own revision): applied to every guest; cargo's
-# "unused patch" warning on a module whose graph never pulls one of these
-# crates is expected and harmless.
+{patches}"#,
+        members = members.join(", "),
+        patches = patch_section(sdk)
+    )
+}
+
+/// the uniform wasm32 patch set: the crates a guest substitutes because they
+/// cannot compile to wasm32, out of `crates/module-sdk/stubs` in the module
+/// SDK's repository at the revision the platform pins. Spelled against the
+/// SAME source as the module's own `ducktape-module-sdk` dependency, so one
+/// checkout at one revision serves both. Applied to every guest; cargo's
+/// "unused patch" warning on a module whose graph never pulls one of these
+/// crates is expected and harmless.
+fn patch_section(sdk: &str) -> String {
+    format!(
+        r#"
 [patch.crates-io]
-getrandom-02 = {{ package = "getrandom", version = "0.2", {source} }}
-getrandom-03 = {{ package = "getrandom", version = "0.3", {source} }}
-getrandom-04 = {{ package = "getrandom", version = "0.4", {source} }}
-blst = {{ {source} }}
-"#,
-        members = members.join(", ")
+getrandom-02 = {{ package = "getrandom", version = "0.2", {sdk} }}
+getrandom-03 = {{ package = "getrandom", version = "0.3", {sdk} }}
+getrandom-04 = {{ package = "getrandom", version = "0.4", {sdk} }}
+blst = {{ {sdk} }}
+"#
     )
 }
 
@@ -667,30 +871,61 @@ fn member_lib(name: &str) -> String {
 /// a module that does not exist on the repository's default branch. The
 /// explicit selector is removed from both manifests and lock before rustc
 /// runs: only the lock's precise commit may vary between identical builds.
-fn pin(scratch: &Path, module: &Module, git: &str, rev: &str) -> Result<serde_json::Value, String> {
+///
+/// The module SDK is pinned the other way round — by the lock alone. Its
+/// source is spelled exactly as the platform spells it (a branch, usually), so
+/// resolution lands on that branch's head; `cargo update --precise` then moves
+/// the whole source back to the revision the platform runs. Writing the
+/// revision into the shell instead would make a second cargo source out of the
+/// one the module itself depends on, and the guest would carry two SDKs.
+///
+/// The returned graph is the FINAL one: resolved, pinned, and re-read under
+/// `--locked`, so nothing that follows reads a path or a revision the build
+/// will not use.
+fn pin(
+    scratch: &Path,
+    module: &Module,
+    git: &str,
+    rev: &str,
+    sdk: &ModuleSdk,
+) -> Result<serde_json::Value, String> {
     let locked_source = format!("git = {git:?}");
     let revision_source = format!("{locked_source}, rev = {rev:?}");
-    synthesize(scratch, module, &revision_source)?;
-    let output = Command::new(cargo())
-        .args([
+    synthesize(
+        scratch,
+        module,
+        &revision_source,
+        &sdk.source(&revision_source),
+    )?;
+    let resolve = |locked: bool| -> Result<serde_json::Value, String> {
+        let mut command = Command::new(cargo());
+        command.args([
             "metadata",
             "--format-version",
             "1",
             "--filter-platform",
             "wasm32-unknown-unknown",
-        ])
-        .current_dir(scratch)
-        .output()
-        .map_err(|e| format!("resolving guest dependencies: {e}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "resolving {} at {rev} from {git} failed (push the revision first): {}",
-            module.name,
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    let graph: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .map_err(|e| format!("parsing cargo metadata output: {e}"))?;
+        ]);
+        if locked {
+            command.arg("--locked");
+        }
+        let output = command
+            .current_dir(scratch)
+            .output()
+            .map_err(|e| format!("resolving guest dependencies: {e}"))?;
+        if !output.status.success() {
+            return Err(format!(
+                "resolving {} at {rev} from {git} failed (push the revision first): {}",
+                module.name,
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+        serde_json::from_slice(&output.stdout)
+            .map_err(|e| format!("parsing cargo metadata output: {e}"))
+    };
+    resolve(false)?;
+    pin_module_sdk(scratch, sdk)?;
+
     let lock = scratch.join("Cargo.lock");
     let content = fs::read_to_string(&lock).map_err(|e| format!("reading resolved lock: {e}"))?;
     let selected_source = format!("git+{git}?rev={rev}");
@@ -698,8 +933,40 @@ fn pin(scratch: &Path, module: &Module, git: &str, rev: &str) -> Result<serde_js
     // Cargo uses this source ID in package entries and disambiguated dependency
     // strings. Normalize every occurrence so they continue to name one source.
     write(&lock, &content.replace(&selected_source, &precise_source))?;
-    synthesize(scratch, module, &locked_source)?;
-    Ok(graph)
+    synthesize(scratch, module, &locked_source, &sdk.source(&locked_source))?;
+    resolve(true)
+}
+
+/// Move the module SDK's source to the revision the platform pins. A guest
+/// that declares no SDK dependency at all — an index mapper over the engine
+/// ABI — has nothing to move, and neither has one whose SDK is the platform
+/// it is already being built at.
+fn pin_module_sdk(scratch: &Path, sdk: &ModuleSdk) -> Result<(), String> {
+    let ModuleSdk::Pinned(sdk) = sdk else {
+        return Ok(());
+    };
+    let lock = scratch.join("Cargo.lock");
+    let content = fs::read_to_string(&lock).map_err(|e| format!("reading resolved lock: {e}"))?;
+    let Some(resolved) = locked_source(&content, MODULE_SDK) else {
+        return Ok(());
+    };
+    let already_the_platform_revision = resolved.ends_with(&format!("#{}", sdk.rev));
+    if already_the_platform_revision {
+        return Ok(());
+    }
+    let output = Command::new(cargo())
+        .args(["update", "-p", MODULE_SDK, "--precise", &sdk.rev])
+        .current_dir(scratch)
+        .output()
+        .map_err(|e| format!("pinning {MODULE_SDK}: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "pinning {MODULE_SDK} to {} (the revision the platform's Cargo.lock names): {}",
+            sdk.rev,
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(())
 }
 
 /// Locate the platform checkout from the module's resolved manifest.
@@ -764,28 +1031,81 @@ fn checkout_root_of(manifest_path: &Path, module_path: &Path) -> Result<PathBuf,
 /// forever. `ops/wasm-repro-check.sh` and the host-path scan in
 /// `make wasm-modules-check` are the gates.
 ///
-/// the checkout mapping is last on purpose: the checkout sits under
-/// CARGO_HOME and rustc takes the LAST matching mapping, so the
+/// the checkout mappings come last on purpose: a checkout sits under
+/// CARGO_HOME and rustc takes the LAST matching mapping, so each
 /// revision-specific `git/checkouts/<repo>-<hash>/<rev>` directory becomes the
-/// stable `/ducktape` — the same token at every revision — instead of a path
-/// that would move the bytes on every commit.
-fn remap_flags(scratch: &Path, checkout: &Path) -> String {
+/// stable `/<repo>` — the same token at every revision — instead of a path
+/// that would move the bytes on every commit to it. EVERY git checkout the
+/// guest compiles gets one: the platform's, the module SDK's, and fluent31's
+/// under an index guest.
+fn remap_flags(scratch: &Path, graph: &serde_json::Value) -> Result<String, String> {
     let home = env::var("HOME").unwrap_or_default();
     let tool_home =
         |key: &str, dir: &str| env::var(key).unwrap_or_else(|_| format!("{home}/{dir}"));
-    let mappings = [
-        (tool_home("CARGO_HOME", ".cargo"), "/cargo"),
-        (tool_home("RUSTUP_HOME", ".rustup"), "/rustup"),
-        (scratch.display().to_string(), "/guest-builder"),
-        (checkout.display().to_string(), "/ducktape"),
+    let mut mappings = vec![
+        (tool_home("CARGO_HOME", ".cargo"), "/cargo".to_string()),
+        (tool_home("RUSTUP_HOME", ".rustup"), "/rustup".to_string()),
+        (scratch.display().to_string(), "/guest-builder".to_string()),
     ];
+    mappings.extend(git_checkouts(graph)?);
     let flags: Vec<String> = mappings
         .iter()
         .map(|(from, to)| format!("--remap-path-prefix={from}={to}"))
         .collect();
     // the ENCODED form's separator: plain `RUSTFLAGS` splits on whitespace, so
     // a path containing a space would tear one flag into two.
-    flags.join("\x1f")
+    Ok(flags.join("\x1f"))
+}
+
+/// every git checkout the resolved graph compiles out of, and the stable token
+/// its revision-named directory is remapped to: `<repo>-<url hash>/<rev>`
+/// becomes `/<repo>`. Sorted, so the flag order is the graph's rather than
+/// cargo's.
+fn git_checkouts(graph: &serde_json::Value) -> Result<Vec<(String, String)>, String> {
+    let Some(packages) = graph["packages"].as_array() else {
+        return Err("cargo metadata has no packages".to_string());
+    };
+    let mut checkouts = BTreeSet::new();
+    for package in packages {
+        let from_git = package["source"]
+            .as_str()
+            .is_some_and(|source| source.starts_with("git+"));
+        if !from_git {
+            continue;
+        }
+        let Some(manifest) = package["manifest_path"].as_str() else {
+            return Err("git package has no manifest path".to_string());
+        };
+        let Some(checkout) = git_checkout_of(Path::new(manifest)) else {
+            return Err(format!("{manifest} is not under a cargo git checkout"));
+        };
+        let Some(repository) = checkout
+            .parent()
+            .and_then(|dir| dir.file_name())
+            .and_then(|name| name.to_str())
+            .and_then(|name| name.rsplit_once('-'))
+        else {
+            return Err(format!("{} is not a cargo checkout", checkout.display()));
+        };
+        checkouts.insert((
+            checkout.display().to_string(),
+            format!("/{}", repository.0),
+        ));
+    }
+    Ok(checkouts.into_iter().collect())
+}
+
+/// the `<cargo home>/git/checkouts/<repo>-<hash>/<rev>` a manifest sits under:
+/// the directory named for the revision, which is the one whose name must not
+/// reach the bytes.
+fn git_checkout_of(manifest: &Path) -> Option<&Path> {
+    let checkouts_is_the_grandparent = |dir: &&Path| {
+        dir.parent()
+            .and_then(Path::parent)
+            .and_then(Path::file_name)
+            .is_some_and(|name| name == "checkouts")
+    };
+    manifest.ancestors().find(checkouts_is_the_grandparent)
 }
 
 fn build(scratch: &Path, name: &str, kind: GuestKind, rustflags: &str) -> Result<(), String> {
@@ -867,24 +1187,6 @@ fn cargo() -> String {
     env::var("CARGO").unwrap_or_else(|_| "cargo".to_string())
 }
 
-/// the ducktape checkout this binary was built from: the source of the
-/// default revision, and the tree a module directory must sit in.
-///
-/// Baked in at COMPILE time, which matters whenever worktrees share one cargo
-/// target directory: the binary sitting in it belongs to whichever worktree
-/// built it last, so `cargo run -p guest-builder` from yours can hand you a
-/// sibling's — one that reads a sibling's modules, vendors a sibling's
-/// dependency set, and refuses your own module with "is outside the platform
-/// checkout". Build it into a private `CARGO_TARGET_DIR` when the answer has
-/// to come from THIS tree.
-fn default_platform_root() -> Result<PathBuf, String> {
-    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let Some(root) = manifest_dir.parent().and_then(Path::parent) else {
-        return Err("cannot derive the platform root from the build location".to_string());
-    };
-    canonical(root)
-}
-
 fn canonical(path: &Path) -> Result<PathBuf, String> {
     path.canonicalize()
         .map_err(|e| format!("{}: {e}", path.display()))
@@ -927,14 +1229,15 @@ fn write(path: &Path, content: &str) -> Result<(), String> {
 /// is the same reason `cargo vendor` has no `--target`: it could not honour
 /// one. So `aws-lc-sys` rides along at 69 MB, unreachable and required.
 ///
-/// The tree it reads is [`default_platform_root`], baked in at compile time —
-/// so on a shared cargo target directory this can vendor a SIBLING worktree's
-/// dependency set without saying so. Read that function's note first.
-fn vendor(out: &Path, directory: Option<&str>) -> Result<(), String> {
-    let root = default_platform_root()?;
+/// The tree it reads is the platform workspace — the one the command runs in,
+/// or `--platform`'s — exactly like a build.
+fn vendor(out: &Path, directory: Option<&str>, platform_dir: Option<&Path>) -> Result<(), String> {
+    let platform = platform(platform_dir)?;
+    let root = platform.root;
+    let sdk = module_sdk(&root)?.source(&format!("git = {:?}", platform.git));
     let scratch = root.join("target/guest-builder/vendor-shell");
     let _ = fs::remove_dir_all(&scratch);
-    synthesize_vendor_shell(&scratch, &root)?;
+    synthesize_vendor_shell(&scratch, &root, &sdk)?;
     // the checkout's OWN pins: a run clones this tree, so the versions it asks
     // for are the versions that have to be on disk. Without the seed cargo
     // resolves to latest-compatible and vendors crates the clone never wants.
@@ -980,7 +1283,7 @@ fn vendor(out: &Path, directory: Option<&str>) -> Result<(), String> {
 
 /// one workspace whose sole member depends on EVERY guest crate in the
 /// checkout, carrying the same wasm32 patch set a build shell gets.
-fn synthesize_vendor_shell(scratch: &Path, root: &Path) -> Result<(), String> {
+fn synthesize_vendor_shell(scratch: &Path, root: &Path, sdk: &str) -> Result<(), String> {
     let shell = scratch.join("shell");
     let src = shell.join("src");
     fs::create_dir_all(&src).map_err(|e| format!("creating {}: {e}", src.display()))?;
@@ -1009,7 +1312,7 @@ fn synthesize_vendor_shell(scratch: &Path, root: &Path) -> Result<(), String> {
         &format!(
             "# synthesized by `guest-builder vendor` — do not edit.\n\
              [workspace]\nmembers = [\"shell\"]\nresolver = \"2\"\n{}",
-            wasm32_patch_section(root)?
+            patch_section(sdk)
         ),
     )
 }
@@ -1055,86 +1358,24 @@ fn guest_packages(root: &Path) -> Result<Vec<(String, PathBuf)>, String> {
     Ok(found)
 }
 
-/// the uniform wasm32 patch set, read out of `crates/module-sdk/stubs` rather
-/// than written down again: a build shell spells these as one git source and
-/// finds them by package name, which a path source cannot do, so the two
-/// renderings differ — but the SET does not, because both come from that
-/// directory. A stub added there is patched here without an edit.
-fn wasm32_patch_section(root: &Path) -> Result<String, String> {
-    let stubs = root.join("crates/module-sdk/stubs");
-    let mut entries: Vec<PathBuf> = fs::read_dir(&stubs)
-        .map_err(|e| format!("reading {}: {e}", stubs.display()))?
-        .filter_map(|entry| entry.ok().map(|e| e.path()))
-        .filter(|path| path.is_dir())
-        .collect();
-    entries.sort();
-    let mut lines = String::from(
-        "\n# the uniform wasm32 patch set (crates/module-sdk/stubs): the crates a\n\
-         # guest substitutes because they cannot compile to wasm32. Read from that\n\
-         # directory, so this set cannot drift from the one a build shell applies.\n\
-         [patch.crates-io]\n",
-    );
-    for dir in entries {
-        let alias = dir
-            .file_name()
-            .and_then(|n| n.to_str())
-            .ok_or_else(|| format!("unreadable stub name in {}", stubs.display()))?;
-        let (package, version) = stub_identity(&dir)?;
-        lines.push_str(&format!(
-            "{alias} = {{ package = \"{package}\", version = \"{version}\", path = {:?} }}\n",
-            dir.display().to_string()
-        ));
-    }
-    Ok(lines)
-}
-
-/// a stub's real package name and the `major.minor` requirement it stands in
-/// for, from its own manifest — the first `name` and `version` under
-/// `[package]`, which cargo's normalized manifests put first.
-fn stub_identity(dir: &Path) -> Result<(String, String), String> {
-    let manifest = dir.join("Cargo.toml");
-    let text = fs::read_to_string(&manifest)
-        .map_err(|e| format!("reading {}: {e}", manifest.display()))?;
-    let field = |key: &str| {
-        text.lines().find_map(|line| {
-            line.trim()
-                .strip_prefix(&format!("{key} = "))?
-                .strip_prefix('"')?
-                .strip_suffix('"')
-                .map(str::to_string)
-        })
-    };
-    let (Some(name), Some(version)) = (field("name"), field("version")) else {
-        return Err(format!(
-            "{}: no package name and version",
-            manifest.display()
-        ));
-    };
-    let mut parts = version.split('.');
-    let (Some(major), Some(minor)) = (parts.next(), parts.next()) else {
-        return Err(format!(
-            "{}: version {version} is not major.minor",
-            manifest.display()
-        ));
-    };
-    Ok((name, format!("{major}.{minor}")))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const PLATFORM: &str = "https://github.com/ducktape-industries/ducktape";
+    const SDK: &str = "https://github.com/ducktape-industries/ducktape-sdk";
+
+    fn sdk_fixture() -> SdkPin {
+        sdk_pin_of(&format!("git+{SDK}?branch=dev#abc123")).expect("a lock's git source")
+    }
 
     /// a written git reference is hashed into every symbol name, so the shell
     /// must name the module by source alone and leave the revision to the lock.
     #[test]
     fn the_shell_names_the_module_by_source_alone() {
-        let manifest = member_manifest(
-            "chat",
-            GuestKind::Component,
-            &format!("git = {PLATFORM_GIT:?}"),
-        );
+        let manifest = member_manifest("chat", GuestKind::Component, &format!("git = {PLATFORM:?}"));
         assert!(manifest.contains(
-            "chat = { git = \"https://github.com/orthory/ducktape\", default-features = false, features = [\"guest\"] }"
+            "chat = { git = \"https://github.com/ducktape-industries/ducktape\", default-features = false, features = [\"guest\"] }"
         ));
         assert!(!manifest.contains("rev ="));
         assert!(!manifest.contains("branch ="));
@@ -1143,40 +1384,130 @@ mod tests {
 
     #[test]
     fn the_workspace_has_one_member_per_declared_guest() {
-        let both = workspace_manifest(
-            &[GuestKind::Component, GuestKind::Index],
-            &format!("git = {PLATFORM_GIT:?}"),
-        );
+        let sdk = sdk_fixture();
+        let both = workspace_manifest(&[GuestKind::Component, GuestKind::Index], &sdk.source);
         assert!(both.contains("members = [\"component\", \"index\"]"));
-        let component_only =
-            workspace_manifest(&[GuestKind::Component], &format!("git = {PLATFORM_GIT:?}"));
+        let component_only = workspace_manifest(&[GuestKind::Component], &sdk.source);
         assert!(component_only.contains("members = [\"component\"]"));
-        // the patch stubs ride the same source, with no reference either
-        assert!(both.contains("getrandom-02 = { package = \"getrandom\", version = \"0.2\", git = \"https://github.com/orthory/ducktape\" }"));
-        assert!(!both.contains("rev ="));
     }
 
-    /// rustc takes the last matching mapping, and the checkout lives under
-    /// CARGO_HOME: the checkout's stable token must come after CARGO_HOME's.
+    /// the stubs are the module SDK's, and a module's own dependency on the SDK
+    /// names the source the way its platform does: spell the patches any other
+    /// way and cargo keeps a second checkout, at a second revision.
     #[test]
-    fn the_checkout_mapping_comes_after_cargo_home() {
-        let flags = remap_flags(
-            Path::new("/scratch"),
-            Path::new("/home/u/.cargo/git/checkouts/ducktape-1234/abcdef0"),
-        );
-        let flags: Vec<&str> = flags.split('\x1f').collect();
-        let cargo_home = flags
-            .iter()
-            .position(|f| f.ends_with("=/cargo"))
-            .expect("cargo home mapping");
-        let checkout = flags
-            .iter()
-            .position(|f| f.ends_with("=/ducktape"))
-            .expect("checkout mapping");
-        assert!(checkout > cargo_home, "{flags:?}");
+    fn the_patch_stubs_ride_the_module_sdks_source() {
+        let sdk = sdk_fixture();
+        assert_eq!(sdk.rev, "abc123");
+        let patches = patch_section(&sdk.source);
+        assert!(patches.contains(
+            "getrandom-02 = { package = \"getrandom\", version = \"0.2\", git = \"https://github.com/ducktape-industries/ducktape-sdk\", branch = \"dev\" }"
+        ));
+        assert!(patches.contains("blst = { git = \"https://github.com/ducktape-industries/ducktape-sdk\", branch = \"dev\" }"));
+        // the revision is the lock's job: a written one would be a second source
+        assert!(!patches.contains("rev ="));
+
+        // a platform that pins the SDK by revision is spelled that way instead
+        let by_revision = sdk_pin_of(&format!("git+{SDK}#abc123")).expect("source");
+        assert_eq!(by_revision.source, format!("git = {SDK:?}"));
+        assert_eq!(by_revision.rev, "abc123");
+        assert!(sdk_pin_of("registry+https://crates.io").is_err());
+    }
+
+    #[test]
+    fn a_lock_entry_names_the_source_of_that_package_alone() {
+        let lock = "\
+[[package]]
+name = \"getrandom\"
+version = \"0.2.17\"
+source = \"registry+https://github.com/rust-lang/crates.io-index\"
+
+[[package]]
+name = \"ducktape-module-sdk\"
+version = \"0.0.0\"
+source = \"git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#abc123\"
+dependencies = [
+ \"sdk\",
+]
+";
         assert_eq!(
-            flags[checkout],
+            locked_source(lock, MODULE_SDK).as_deref(),
+            Some("git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#abc123")
+        );
+        assert_eq!(locked_source(lock, "nothing-here"), None);
+    }
+
+    /// rustc takes the last matching mapping, and a checkout lives under
+    /// CARGO_HOME: every checkout's stable token must come after CARGO_HOME's.
+    /// Both repositories get one — a directory named for a revision would
+    /// otherwise move a guest's bytes on every commit to either.
+    #[test]
+    fn every_checkout_mapping_comes_after_cargo_home() {
+        let graph = serde_json::json!({
+            "packages": [
+                {
+                    "name": "chat",
+                    "source": format!("git+{PLATFORM}#abcdef0"),
+                    "manifest_path": "/home/u/.cargo/git/checkouts/ducktape-1234/abcdef0/crates/modules/apps/chat/Cargo.toml",
+                },
+                {
+                    "name": "ducktape-module-sdk",
+                    "source": format!("git+{SDK}?branch=dev#9876543"),
+                    "manifest_path": "/home/u/.cargo/git/checkouts/ducktape-sdk-5678/9876543/crates/module-sdk/Cargo.toml",
+                },
+                {
+                    "name": "serde",
+                    "source": "registry+https://github.com/rust-lang/crates.io-index",
+                    "manifest_path": "/home/u/.cargo/registry/src/index.crates.io-1/serde-1.0.0/Cargo.toml",
+                },
+            ]
+        });
+        let flags = remap_flags(Path::new("/scratch"), &graph).expect("flags");
+        let flags: Vec<&str> = flags.split('\x1f').collect();
+        let at = |token: &str| {
+            flags
+                .iter()
+                .position(|flag| flag.ends_with(token))
+                .unwrap_or_else(|| panic!("{token} mapping in {flags:?}"))
+        };
+        assert!(at("=/ducktape") > at("=/cargo"), "{flags:?}");
+        assert!(at("=/ducktape-sdk") > at("=/cargo"), "{flags:?}");
+        assert_eq!(
+            flags[at("=/ducktape")],
             "--remap-path-prefix=/home/u/.cargo/git/checkouts/ducktape-1234/abcdef0=/ducktape"
+        );
+        assert_eq!(
+            flags[at("=/ducktape-sdk")],
+            "--remap-path-prefix=/home/u/.cargo/git/checkouts/ducktape-sdk-5678/9876543=/ducktape-sdk"
+        );
+        // a registry package is not a checkout: nothing to remap but CARGO_HOME
+        assert_eq!(flags.len(), 5, "{flags:?}");
+    }
+
+    /// the module's own repository, and no repository whose URL merely starts
+    /// with it.
+    #[test]
+    fn platform_inputs_claim_the_platforms_packages_only() {
+        let checkout = "/home/u/.cargo/git/checkouts/ducktape-1234/abcdef0";
+        let graph = serde_json::json!({
+            "packages": [
+                {
+                    "name": "chat",
+                    "source": format!("git+{PLATFORM}#abcdef0"),
+                    "manifest_path": format!("{checkout}/crates/modules/apps/chat/Cargo.toml"),
+                },
+                {
+                    "name": "ducktape-module-sdk",
+                    "source": format!("git+{SDK}?branch=dev#9876543"),
+                    "manifest_path": "/home/u/.cargo/git/checkouts/ducktape-sdk-5678/9876543/crates/module-sdk/Cargo.toml",
+                },
+            ]
+        });
+        let inputs = platform_inputs(&graph, Path::new(checkout), PLATFORM).expect("inputs");
+        assert!(inputs.contains(Path::new("crates/modules/apps/chat")));
+        assert!(inputs.contains(Path::new("Cargo.lock")));
+        assert!(
+            !inputs.iter().any(|path| path.starts_with("crates/module-sdk")),
+            "{inputs:?}"
         );
     }
 
@@ -1346,10 +1677,18 @@ mod tests {
         }
     }
 
+    /// this crate's own tree — where a TEST may look, unlike the tool, which
+    /// works in whatever platform workspace it is pointed at.
+    fn sdk_repository() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .expect("bin/guest-builder sits two directories under the repository root")
+            .to_path_buf()
+    }
+
     fn scratch() -> tempfile::TempDir {
-        let root = default_platform_root()
-            .unwrap()
-            .join("target/guest-builder-tests");
+        let root = sdk_repository().join("target/guest-builder-tests");
         fs::create_dir_all(&root).unwrap();
         tempfile::tempdir_in(root).unwrap()
     }
@@ -1375,7 +1714,63 @@ mod tests {
         fs::write(path, content).unwrap();
     }
 
-    fn platform_fixture(root: &Path) -> (Module, String, String) {
+    /// a second repository standing in for ducktape-sdk: the module SDK and
+    /// the wasm32 patch stubs, at TWO revisions — the platform pins the first,
+    /// the branch has moved on to the second.
+    fn sdk_fixture_repository(root: &Path) -> SdkPin {
+        fs::create_dir_all(root).unwrap();
+        git(root, &["init", "--initial-branch=base"]);
+        git(root, &["config", "user.name", "Guest builder test"]);
+        git(
+            root,
+            &["config", "user.email", "guest-builder@example.invalid"],
+        );
+        fixture_file(
+            root,
+            "Cargo.toml",
+            "[workspace]\nmembers = [\"module-sdk\"]\nresolver = \"2\"\n",
+        );
+        fixture_file(
+            root,
+            "module-sdk/Cargo.toml",
+            "[package]\nname = \"ducktape-module-sdk\"\nversion = \"0.0.0\"\nedition = \"2021\"\n",
+        );
+        fixture_file(root, "module-sdk/src/lib.rs", "pub const REVISION: u32 = 1;\n");
+        for (directory, name, version) in [
+            ("random02", "getrandom", "0.2.17"),
+            ("random03", "getrandom", "0.3.4"),
+            ("random04", "getrandom", "0.4.3"),
+            ("blst", "blst", "0.3.16"),
+        ] {
+            fixture_file(
+                root,
+                &format!("stubs/{directory}/Cargo.toml"),
+                &format!(
+                    "[package]\nname = {name:?}\nversion = {version:?}\nedition = \"2021\"\n[workspace]\n"
+                ),
+            );
+            fixture_file(root, &format!("stubs/{directory}/src/lib.rs"), "");
+        }
+        git(root, &["add", "."]);
+        git(
+            root,
+            &["-c", "commit.gpgsign=false", "commit", "-m", "The SDK"],
+        );
+        let pinned = git(root, &["rev-parse", "HEAD"]);
+        fixture_file(root, "module-sdk/src/lib.rs", "pub const REVISION: u32 = 2;\n");
+        git(root, &["add", "."]);
+        git(
+            root,
+            &["-c", "commit.gpgsign=false", "commit", "-m", "The SDK moves"],
+        );
+        SdkPin {
+            source: format!("git = \"file://{}\"", root.display()),
+            rev: pinned,
+        }
+    }
+
+    fn platform_fixture(root: &Path) -> (Module, String, String, SdkPin) {
+        let sdk = sdk_fixture_repository(&root.parent().unwrap().join("sdk"));
         fs::create_dir_all(root).unwrap();
         git(root, &["init", "--initial-branch=base"]);
         git(root, &["config", "user.name", "Guest builder test"]);
@@ -1395,21 +1790,6 @@ mod tests {
             "[package]\nname = \"shared\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
         );
         fixture_file(root, "shared/src/lib.rs", "pub fn value() -> u32 { 1 }\n");
-        for (directory, name, version) in [
-            ("random02", "getrandom", "0.2.17"),
-            ("random03", "getrandom", "0.3.4"),
-            ("random04", "getrandom", "0.4.3"),
-            ("blst", "blst", "0.3.16"),
-        ] {
-            fixture_file(
-                root,
-                &format!("stubs/{directory}/Cargo.toml"),
-                &format!(
-                    "[package]\nname = {name:?}\nversion = {version:?}\nedition = \"2021\"\n[workspace]\n"
-                ),
-            );
-            fixture_file(root, &format!("stubs/{directory}/src/lib.rs"), "");
-        }
         git(root, &["add", "."]);
         git(
             root,
@@ -1465,6 +1845,9 @@ mod tests {
             "other-shared = {{ package = \"shared\", git = \"file://{}\" }}\n",
             other.display()
         ));
+        // the module reaches its SDK exactly as a real one does: the second
+        // repository, by the source its platform names.
+        content.push_str(&format!("ducktape-module-sdk = {{ {} }}\n", sdk.source));
         fs::write(manifest, content).unwrap();
         fixture_file(
             root,
@@ -1489,14 +1872,18 @@ mod tests {
             path: "module".into(),
             guests: vec![GuestKind::Component],
         };
-        (module, format!("file://{}", root.display()), rev)
+        (module, format!("file://{}", root.display()), rev, sdk)
     }
 
+    /// and pins the module SDK where its platform does, not where the SDK's
+    /// own branch has moved on to.
     #[test]
     fn first_build_resolves_a_package_absent_from_the_default_branch() {
         let work = scratch();
         let repo = work.path().join("platform");
-        let (module, url, rev) = platform_fixture(&repo);
+        let (module, url, rev, sdk) = platform_fixture(&repo);
+        let pinned_sdk = sdk.rev.clone();
+        let sdk = ModuleSdk::Pinned(sdk);
         let shell = work.path().join("shell");
         fixture_file(
             &shell,
@@ -1505,12 +1892,18 @@ mod tests {
         );
         seed_lock(&shell, &repo.join("module")).unwrap();
         assert!(!shell.join("Cargo.lock").exists());
-        let graph = pin(&shell, &module, &url, &rev).unwrap();
+        let graph = pin(&shell, &module, &url, &rev, &sdk).unwrap();
         let checkout = checkout_root(&graph, &module).unwrap();
         assert!(checkout.join("module/src/lib.rs").is_file());
         let lock = fs::read_to_string(shell.join("Cargo.lock")).unwrap();
         assert!(lock.contains(&format!("git+{url}#{rev}")));
         assert!(!lock.contains("?rev="));
+        assert_eq!(
+            locked_source(&lock, MODULE_SDK)
+                .and_then(|source| Some(source.split_once('#')?.1.to_string())),
+            Some(pinned_sdk),
+            "the guest's SDK is its host's revision, not the branch head"
+        );
         assert!(!fs::read_to_string(shell.join("component/Cargo.toml"))
             .unwrap()
             .contains("rev ="));
@@ -1527,9 +1920,9 @@ mod tests {
     fn resolved_inputs_refuse_shared_staged_and_untracked_sources() {
         let work = scratch();
         let repo = work.path().join("platform");
-        let (module, url, rev) = platform_fixture(&repo);
+        let (module, url, rev, sdk) = platform_fixture(&repo);
         let shell = work.path().join("shell");
-        let graph = pin(&shell, &module, &url, &rev).unwrap();
+        let graph = pin(&shell, &module, &url, &rev, &ModuleSdk::Pinned(sdk)).unwrap();
         let checkout = checkout_root(&graph, &module).unwrap();
         let inputs = platform_inputs(&graph, &checkout, &url).unwrap();
         assert!(inputs.contains(Path::new("shared")));
@@ -1580,7 +1973,7 @@ mod tests {
     #[test]
     fn both_macros_compile_with_only_the_module_sdk_platform_dependency() {
         let work = scratch();
-        let sdk = default_platform_root().unwrap().join("crates/module-sdk");
+        let sdk = sdk_repository().join("crates/module-sdk");
         fixture_file(
             work.path(),
             "Cargo.toml",
