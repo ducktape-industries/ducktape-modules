@@ -37,6 +37,9 @@ attribution = { workspace = true }
 async-trait = { workspace = true }
 
 [dev-dependencies]
+inbox = { path = "../inbox" }
+commonware-cryptography = { workspace = true }
+wasm-host = { workspace = true }
 # the NATIVE identity and attribution modules (the `identity`/`attribution`
 # names above are their wire crates): a test composes the real registry the
 # way a host does. They live in the platform repo, so they are named here

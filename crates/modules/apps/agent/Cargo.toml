@@ -41,6 +41,9 @@ sha2 = { workspace = true }
 async-trait = { workspace = true }
 
 [dev-dependencies]
+host = { workspace = true }
+commonware-cryptography = { workspace = true }
+wasm-host = { workspace = true }
 futures = { workspace = true }
 sdk-testkit = { workspace = true }
 # the dispatch-shape lint parses this crate's source as a Rust AST. already in
