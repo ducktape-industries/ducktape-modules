@@ -1244,19 +1244,33 @@ fn rejections_match_and_leave_no_trace() {
                 .await
                 .expect_err("wasm must reject");
 
-            // both reject DETERMINISTICALLY with the native module's reason.
-            // the wasm runtime wraps the reason in its wit-error rendering, so
-            // the parity claim is containment, not string equality.
-            let SubmitError::Rejected(Error::Module(n_msg)) = n_err else {
+            // both reject DETERMINISTICALLY with the native module's refusal.
+            // the wasm host decodes the guest's framed refusal back into its
+            // reason and sentence, so the parity claim is equality of both; a
+            // guest that did not frame it surfaces as `trap` and fails here.
+            let SubmitError::Rejected(Error::Module {
+                reason: n_reason,
+                sentence: n_msg,
+            }) = n_err
+            else {
                 panic!("native rejection shape: {n_err:?}");
             };
-            let SubmitError::Rejected(Error::Module(w_msg)) = w_err else {
+            let SubmitError::Rejected(Error::Module {
+                reason: w_reason,
+                sentence: w_msg,
+            }) = w_err
+            else {
                 panic!("wasm rejection shape: {w_err:?}");
             };
-            assert!(n_msg.contains(needle), "native reason: {n_msg}");
+            assert!(n_msg.contains(needle), "native reason: {n_reason}: {n_msg}");
             assert!(
                 w_msg.contains(needle),
-                "wasm reason must carry the native reason: {w_msg}"
+                "wasm reason must carry the native reason: {w_reason}: {w_msg}"
+            );
+            assert_eq!(
+                (&w_reason, &w_msg),
+                (&n_reason, &n_msg),
+                "wasm refusal must equal the native refusal"
             );
 
             // abort invariance: roots byte-identical to pre-block, still equal.

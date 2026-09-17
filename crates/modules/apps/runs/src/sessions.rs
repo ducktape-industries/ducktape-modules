@@ -37,10 +37,13 @@ use saga::{
 pub(super) fn reserve_session_action(session: &AgentSession) -> Result<AgentSession, Error> {
     let at_capacity = session.actions >= MAX_ACTIONS_PER_SESSION;
     if at_capacity {
-        return Err(Error::Module(format!(
-            "session for run {} has spent its budget of {MAX_ACTIONS_PER_SESSION} actions",
-            session.run_id
-        )));
+        return Err(Error::Module {
+            reason: "session_budget".into(),
+            sentence: format!(
+                "session for run {} has spent its budget of {MAX_ACTIONS_PER_SESSION} actions",
+                session.run_id
+            ),
+        });
     }
     Ok(AgentSession {
         actions: session.actions + 1,
@@ -58,17 +61,21 @@ impl RunsModule {
         session_key: Vec<u8>,
     ) -> Result<(), Error> {
         if session_key.len() != SESSION_KEY_LEN {
-            return Err(Error::Module(format!(
-                "a session key must be {SESSION_KEY_LEN} bytes, not {}",
-                session_key.len()
-            )));
+            return Err(Error::Module {
+                reason: "invalid_session_key".into(),
+                sentence: format!(
+                    "a session key must be {SESSION_KEY_LEN} bytes, not {}",
+                    session_key.len()
+                ),
+            });
         }
         // the ONLY origin shape that can hold a lease: a node key. a module or
         // system origin executes nothing.
         let Origin::External(submitter) = &ctx.env().origin else {
-            return Err(Error::Module(
-                "only the node executing a run may open its agent session".into(),
-            ));
+            return Err(Error::Module {
+                reason: "run_executor_authority".into(),
+                sentence: "only the node executing a run may open its agent session".into(),
+            });
         };
         let submitter = submitter.clone();
         // the run must still be IN FLIGHT. a settled run has no lease, no
@@ -76,20 +83,29 @@ impl RunsModule {
         // unknown one never had any.
         let dispatch_id = dispatch_id_for(&run_id);
         let Some(entry) = self.pending_entry(&dispatch_id).cloned() else {
-            return Err(Error::Module(format!("run is not in flight: {run_id}")));
+            return Err(Error::Module {
+                reason: "run_is_not_in_flight".into(),
+                sentence: format!("run is not in flight: {run_id}"),
+            });
         };
         let lease = self
             .execution_lease(&*ctx, &dispatch_id)
             .await
-            .map_err(Error::Module)?;
+            .map_err(|sentence| Error::Module {
+                reason: "execution_lease".into(),
+                sentence,
+            })?;
         let requested = crate::ExecutionLease {
             holder: submitter,
             attempt,
         };
         if requested != lease {
-            return Err(Error::Module(format!(
-                "only the node holding the run's current execution lease and attempt may open its agent session: {run_id}"
-            )));
+            return Err(Error::Module {
+                reason: "run_lease_authority".into(),
+                sentence: format!(
+                    "only the node holding the run's current execution lease and attempt may open its agent session: {run_id}"
+                ),
+            });
         }
         let previous = self.session(&run_id);
         let already_bound = previous.is_some_and(|open| open.lease == lease);
@@ -98,9 +114,10 @@ impl RunsModule {
             if same_key {
                 return Ok(());
             }
-            return Err(Error::Module(format!(
-                "run already has an open agent session: {run_id}"
-            )));
+            return Err(Error::Module {
+                reason: "run_already_has_an_open_agent_session".into(),
+                sentence: format!("run already has an open agent session: {run_id}"),
+            });
         }
         let actions = previous.map_or(0, |open| open.actions);
         self.record(
@@ -137,35 +154,47 @@ impl RunsModule {
         request_id: String,
         envelope: ActionEnvelope,
     ) -> Result<(), Error> {
-        crate::validate_request_id(&request_id).map_err(Error::Module)?;
+        crate::validate_request_id(&request_id).map_err(|sentence| Error::Module {
+            reason: "request_id".into(),
+            sentence,
+        })?;
         let Origin::External(submitter) = &ctx.env().origin else {
-            return Err(Error::Module(
-                "an agent action must be signed by the run's session key".into(),
-            ));
+            return Err(Error::Module {
+                reason: "agent_action_signer".into(),
+                sentence: "an agent action must be signed by the run's session key".into(),
+            });
         };
         // a settled run has no lease, no agent working, and nothing a session
         // could legitimately write; the session map is pruned with it.
         let Some(entry) = self.pending_entry(&dispatch_id_for(&run_id)).cloned() else {
-            return Err(Error::Module(format!("run is not in flight: {run_id}")));
+            return Err(Error::Module {
+                reason: "run_is_not_in_flight".into(),
+                sentence: format!("run is not in flight: {run_id}"),
+            });
         };
         let Some(session) = self.session(&run_id).cloned() else {
-            return Err(Error::Module(format!(
-                "run has no open agent session: {run_id}"
-            )));
+            return Err(Error::Module {
+                reason: "run_has_no_open_agent_session".into(),
+                sentence: format!("run has no open agent session: {run_id}"),
+            });
         };
         // THE ACL. the origin is the frame's VERIFIED public key, so this
         // comparison is authorship consensus can trust — the whole point of the
         // lane. the owner's key does not pass it either: an owner acts as
         // themselves, never as their agent.
         if *submitter != session.session_key {
-            return Err(Error::Module(format!(
-                "only the bound session key may act for run {run_id}"
-            )));
+            return Err(Error::Module {
+                reason: "session_key_authority".into(),
+                sentence: format!("only the bound session key may act for run {run_id}"),
+            });
         }
         self.session_holds_lease(&*ctx, &run_id, &session).await?;
         let generation = self.active_generation(&*ctx, entry.account).await?;
         if generation != entry.generation {
-            return Err(Error::Module("run program authority changed".into()));
+            return Err(Error::Module {
+                reason: "run_program_authority_changed".into(),
+                sentence: "run program authority changed".into(),
+            });
         }
         let id = crate::action_request_id(&run_id, &request_id);
         let envelope_digest = envelope.digest();
@@ -175,9 +204,10 @@ impl RunsModule {
                 .as_ref()
                 .is_some_and(|invocation| invocation.envelope_digest == envelope_digest);
             if !same_bytes {
-                return Err(Error::Module(
-                    "request_id was already used for a different action".into(),
-                ));
+                return Err(Error::Module {
+                    reason: "request_id_conflict".into(),
+                    sentence: "request_id was already used for a different action".into(),
+                });
             }
             ctx.set_output(sdk::wire::encode(&serde_json::json!({"receipt_id": id})));
             return Ok(());
@@ -233,11 +263,15 @@ impl RunsModule {
                 },
             )
             .await
-            .map_err(Error::Module)?;
-        let [operation]: [Operation; 1] = validated
-            .operations
-            .try_into()
-            .map_err(|_| Error::Module("one action validates as one operation".into()))?;
+            .map_err(|sentence| Error::Module {
+                reason: "response_validation".into(),
+                sentence,
+            })?;
+        let [operation]: [Operation; 1] =
+            validated.operations.try_into().map_err(|_| Error::Module {
+                reason: "one_action_validates_as_one_operation".into(),
+                sentence: "one action validates as one operation".into(),
+            })?;
         let slot = lane.slot(0);
         // `posts` starts empty: this op emits exactly one follow-up, and a
         // sibling op's post is already committed and visible to the probes.
@@ -280,7 +314,10 @@ impl RunsModule {
                 lane.kind_name()
             )),
         };
-        let mut prepared = prepared.map_err(Error::Module)?;
+        let mut prepared = prepared.map_err(|sentence| Error::Module {
+            reason: "session_preparation".into(),
+            sentence,
+        })?;
         // the proposal is pinned to the operation's catalog schema and to the
         // exact envelope bytes the caller's request_id now names.
         prepared.receipt.invocation = Some(Invocation {
@@ -337,86 +374,120 @@ impl RunsModule {
         let session = self
             .session(&run_id)
             .cloned()
-            .ok_or_else(|| Error::Module("run session closed".into()))?;
+            .ok_or_else(|| Error::Module {
+                reason: "run_session_closed".into(),
+                sentence: "run session closed".into(),
+            })?;
         let Some(owner) = self.pending_entry(&dispatch_id_for(&run_id)) else {
-            return Err(Error::Module("run is not in flight".into()));
+            return Err(Error::Module {
+                reason: "run_is_not_in_flight".into(),
+                sentence: "run is not in flight".into(),
+            });
         };
         if ctx.env().origin != Origin::Program(owner.account) {
-            return Err(Error::Module(
-                "only the run's program may delegate work".into(),
-            ));
+            return Err(Error::Module {
+                reason: "run_delegation_authority".into(),
+                sentence: "only the run's program may delegate work".into(),
+            });
         }
         let generation = self.active_generation(&*ctx, owner.account).await?;
         if generation != owner.generation {
-            return Err(Error::Module("run program authority changed".into()));
+            return Err(Error::Module {
+                reason: "run_program_authority_changed".into(),
+                sentence: "run program authority changed".into(),
+            });
         }
         self.session_holds_lease(&*ctx, &run_id, &session).await?;
         let entry = self
             .pending_entry(&dispatch_id_for(&run_id))
             .cloned()
-            .ok_or_else(|| Error::Module(format!("run is not in flight: {run_id}")))?;
+            .ok_or_else(|| Error::Module {
+                reason: "run_is_not_in_flight".into(),
+                sentence: format!("run is not in flight: {run_id}"),
+            })?;
         if entry.job_id.is_some() || page_source(&entry.channel_id).is_some() {
-            return Err(Error::Module(
-                "agent calls currently require a chat or Forge run".into(),
-            ));
+            return Err(Error::Module {
+                reason: "agent_call_source".into(),
+                sentence: "agent calls currently require a chat or Forge run".into(),
+            });
         }
-        crate::validate_request_id(&request_id).map_err(Error::Module)?;
+        crate::validate_request_id(&request_id).map_err(|sentence| Error::Module {
+            reason: "request_id".into(),
+            sentence,
+        })?;
         let delegation_id = delegation_id_for(&run_id, &request_id);
         if let Some(existing) = self.delegation(&delegation_id) {
             return if existing.view.caller_run_id == run_id && existing.request == request {
                 Ok(())
             } else {
-                Err(Error::Module(
-                    "request_id was already used for a different agent call".into(),
-                ))
+                Err(Error::Module {
+                    reason: "request_id_conflict".into(),
+                    sentence: "request_id was already used for a different agent call".into(),
+                })
             };
         }
 
         if request.agent_id == entry.agent_id {
-            return Err(Error::Module("an agent cannot call itself".into()));
+            return Err(Error::Module {
+                reason: "self_agent_call".into(),
+                sentence: "an agent cannot call itself".into(),
+            });
         }
         super::reject_run_separator("callee agent_id", &request.agent_id)?;
         let instruction = request.instruction.trim();
         if instruction.is_empty() || request.instruction.len() > MAX_DELEGATION_INSTRUCTION_BYTES {
-            return Err(Error::Module(format!(
-                "instruction must be non-empty and at most {MAX_DELEGATION_INSTRUCTION_BYTES} bytes"
-            )));
+            return Err(Error::Module {
+                reason: "instruction_length".into(),
+                sentence: format!(
+                    "instruction must be non-empty and at most {MAX_DELEGATION_INSTRUCTION_BYTES} bytes"
+                ),
+            });
         }
         if serde_json::to_vec(&request)
             .expect("delegation requests serialize")
             .len()
             > MAX_DELEGATIONS_BYTES
         {
-            return Err(Error::Module(format!(
-                "agent call exceeds the {MAX_DELEGATIONS_BYTES}-byte request cap"
-            )));
+            return Err(Error::Module {
+                reason: "agent_call_exceeds_the_byte_request_cap".into(),
+                sentence: format!(
+                    "agent call exceeds the {MAX_DELEGATIONS_BYTES}-byte request cap"
+                ),
+            });
         }
 
         let caller = self
             .agent_record(&*ctx, &entry.agent_id)
             .await
-            .map_err(Error::Module)?
-            .ok_or_else(|| {
-                Error::Module(format!(
-                    "caller agent is not registered: {}",
-                    entry.agent_id
-                ))
+            .map_err(|sentence| Error::Module {
+                reason: "agent_record".into(),
+                sentence,
+            })?
+            .ok_or_else(|| Error::Module {
+                reason: "caller_agent_is_not_registered".into(),
+                sentence: format!("caller agent is not registered: {}", entry.agent_id),
             })?;
         if caller.status != ModelStatus::Active {
-            return Err(Error::Module(format!(
-                "caller agent is paused: {}",
-                caller.agent_id
-            )));
+            return Err(Error::Module {
+                reason: "caller_agent_is_paused".into(),
+                sentence: format!("caller agent is paused: {}", caller.agent_id),
+            });
         }
         let root_run_id = match entry.delegation_id.as_deref() {
             Some(id) => self
                 .delegation(id)
                 .map(|state| state.view.root_run_id.clone())
-                .ok_or_else(|| Error::Module("caller run has no delegation edge".into()))?,
+                .ok_or_else(|| Error::Module {
+                    reason: "caller_run_has_no_delegation_edge".into(),
+                    sentence: "caller run has no delegation edge".into(),
+                })?,
             None => run_id.clone(),
         };
         self.pending_entry(&dispatch_id_for(&root_run_id))
-            .ok_or_else(|| Error::Module("delegation root is no longer in flight".into()))?;
+            .ok_or_else(|| Error::Module {
+                reason: "delegation_root_is_no_longer_in_flight".into(),
+                sentence: "delegation root is no longer in flight".into(),
+            })?;
         let spent = self
             .delegation_ids()
             .into_iter()
@@ -427,33 +498,54 @@ impl RunsModule {
             })
             .count();
         if spent >= MAX_DELEGATIONS_PER_RUN {
-            return Err(Error::Module(format!(
-                "delegation tree has reached its concurrency limit of {MAX_DELEGATIONS_PER_RUN} calls"
-            )));
+            return Err(Error::Module {
+                reason: "delegation_concurrency_cap".into(),
+                sentence: format!(
+                    "delegation tree has reached its concurrency limit of {MAX_DELEGATIONS_PER_RUN} calls"
+                ),
+            });
         }
 
         let callee = self
             .active_agent(&*ctx, &request.agent_id)
             .await
-            .map_err(Error::Module)?
-            .ok_or_else(|| {
-                Error::Module(format!("callee agent is unavailable: {}", request.agent_id))
+            .map_err(|sentence| Error::Module {
+                reason: "active_agent".into(),
+                sentence,
+            })?
+            .ok_or_else(|| Error::Module {
+                reason: "callee_agent_is_unavailable".into(),
+                sentence: format!("callee agent is unavailable: {}", request.agent_id),
             })?;
-        let extra = crate::envelope::library_skills(&request.skills).map_err(Error::Module)?;
+        let extra =
+            crate::envelope::library_skills(&request.skills).map_err(|sentence| Error::Module {
+                reason: "library_skills".into(),
+                sentence,
+            })?;
         let workspace_agent = self
             .agent_record(&*ctx, &entry.workspace_agent_id)
             .await
-            .map_err(Error::Module)?
-            .ok_or_else(|| Error::Module("call workspace agent is not registered".into()))?;
+            .map_err(|sentence| Error::Module {
+                reason: "library_skills".into(),
+                sentence,
+            })?
+            .ok_or_else(|| Error::Module {
+                reason: "call_workspace_agent_is_not_registered".into(),
+                sentence: "call workspace agent is not registered".into(),
+            })?;
         let callee_run_id = delegated_run_id_for(&delegation_id, &callee.agent_id);
         if self
             .turn_taken(&*ctx, &dispatch_id_for(&callee_run_id))
             .await
-            .map_err(Error::Module)?
+            .map_err(|sentence| Error::Module {
+                reason: "library_skills".into(),
+                sentence,
+            })?
         {
-            return Err(Error::Module(format!(
-                "delegated run is already taken: {callee_run_id}"
-            )));
+            return Err(Error::Module {
+                reason: "delegated_run_is_already_taken".into(),
+                sentence: format!("delegated run is already taken: {callee_run_id}"),
+            });
         }
         let context = format!(
             "## Agent call\nCaller run: {run_id}\nCaller agent: {}\nRoot run: {root_run_id}\n\nInstruction:\n{instruction}",
@@ -471,7 +563,10 @@ impl RunsModule {
                 budget,
             )
             .await
-            .map_err(Error::Module)?;
+            .map_err(|sentence| Error::Module {
+                reason: "execution_budget".into(),
+                sentence,
+            })?;
         let now = ctx.env().consensus_time;
         self.pending_delegations.insert(
             delegation_id.clone(),
@@ -524,11 +619,17 @@ impl RunsModule {
         let lease = self
             .execution_lease(ctx, &dispatch_id_for(run_id))
             .await
-            .map_err(Error::Module)?;
+            .map_err(|sentence| Error::Module {
+                reason: "execution_lease".into(),
+                sentence,
+            })?;
         if lease != session.lease {
-            return Err(Error::Module(format!(
-                "the run's execution lease has moved; its agent session is no longer authoritative: {run_id}"
-            )));
+            return Err(Error::Module {
+                reason: "execution_lease_changed".into(),
+                sentence: format!(
+                    "the run's execution lease has moved; its agent session is no longer authoritative: {run_id}"
+                ),
+            });
         }
         Ok(())
     }

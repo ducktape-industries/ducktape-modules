@@ -447,7 +447,10 @@ impl Ctx for CaptureCtx {
         match target {
             "identity" => {
                 let query: identity::IdentityQuery =
-                    identity::decode_query(req).map_err(Error::Module)?;
+                    identity::decode_query(req).map_err(|sentence| Error::Module {
+                        reason: "codec".into(),
+                        sentence,
+                    })?;
                 let number = match query {
                     identity::IdentityQuery::Get { number } => number,
                     identity::IdentityQuery::OfKey { .. } => 1,
@@ -470,16 +473,22 @@ impl Ctx for CaptureCtx {
                     }),
                 )))
             }
-            "chat" => match chat::decode_query(req).map_err(Error::Module)? {
+            "chat" => match chat::decode_query(req).map_err(|sentence| Error::Module {
+                reason: "codec".into(),
+                sentence,
+            })? {
                 ChatQuery::MessagesRange {
                     channel_id,
                     from_seq,
                     limit,
                 } => {
-                    let transcript = self
-                        .transcripts
-                        .get(&channel_id)
-                        .ok_or_else(|| Error::Module(format!("unknown channel: {channel_id}")))?;
+                    let transcript =
+                        self.transcripts
+                            .get(&channel_id)
+                            .ok_or_else(|| Error::Module {
+                                reason: "unknown_channel".into(),
+                                sentence: format!("unknown channel: {channel_id}"),
+                            })?;
                     let head = transcript.len() as u64;
                     let from = from_seq.max(1);
                     let mut window = Vec::new();
@@ -542,7 +551,10 @@ impl Ctx for CaptureCtx {
             },
             // the board answers the SAME two reads the real module does: the
             // by-id `Get` the validator probes with, and a bounded `List` page.
-            "tasks" => match tasks::decode_task_query(req).map_err(Error::Module)? {
+            "tasks" => match tasks::decode_task_query(req).map_err(|sentence| Error::Module {
+                reason: "codec".into(),
+                sentence,
+            })? {
                 TaskQuery::Get { task_id } => Ok(tasks_encode_reply(&TaskReply::Task(
                     self.tasks.iter().find(|t| t.id == task_id).cloned(),
                 ))),
@@ -565,7 +577,10 @@ impl Ctx for CaptureCtx {
                 if let Some(module) = &self.jobs_module {
                     return module.query(req).await;
                 }
-                match tasks::decode_job_query(req).map_err(Error::Module)? {
+                match tasks::decode_job_query(req).map_err(|sentence| Error::Module {
+                    reason: "codec".into(),
+                    sentence,
+                })? {
                     JobsQuery::Get { job_id } => Ok(jobs_encode_reply(&JobsReply::Job(
                         self.jobs.get(&job_id).cloned(),
                     ))),
@@ -578,7 +593,10 @@ impl Ctx for CaptureCtx {
                     ))),
                 }
             }
-            "dispatch" => match dispatch::decode_query(req).map_err(Error::Module)? {
+            "dispatch" => match dispatch::decode_query(req).map_err(|sentence| Error::Module {
+                reason: "codec".into(),
+                sentence,
+            })? {
                 DispatchQuery::Dispatch { dispatch_id, .. } => {
                     // an awaiting dispatch still names its saga (the lease lives
                     // there); a merely `taken` one already delivered.
@@ -611,7 +629,10 @@ impl Ctx for CaptureCtx {
                 }
                 _ => Err(Error::QueryUnsupported),
             },
-            "files" => match files_decode_query(req).map_err(Error::Module)? {
+            "files" => match files_decode_query(req).map_err(|sentence| Error::Module {
+                reason: "codec".into(),
+                sentence,
+            })? {
                 FilesQuery::Refs {} => Ok(files_encode_reply(&FilesReply::Refs(files::RefsInfo {
                     head: self.files_head.clone(),
                     pins: BTreeMap::new(),
@@ -654,7 +675,10 @@ impl Ctx for CaptureCtx {
                 }
                 _ => Err(Error::QueryUnsupported),
             },
-            "forge" => match forge::decode_query(req).map_err(Error::Module)? {
+            "forge" => match forge::decode_query(req).map_err(|sentence| Error::Module {
+                reason: "codec".into(),
+                sentence,
+            })? {
                 forge::ForgeQuery::ListRefs { repo } => {
                     let refs = self
                         .forge_refs
@@ -686,7 +710,10 @@ impl Ctx for CaptureCtx {
                 }
                 _ => Err(Error::QueryUnsupported),
             },
-            "pages" => match pages::decode_query(req).map_err(Error::Module)? {
+            "pages" => match pages::decode_query(req).map_err(|sentence| Error::Module {
+                reason: "codec".into(),
+                sentence,
+            })? {
                 pages::PageQuery::RecordCollection { .. }
                 | pages::PageQuery::Records { .. }
                 | pages::PageQuery::Record { .. }
@@ -783,7 +810,10 @@ impl Ctx for CaptureCtx {
                     &pages::PageReply::PageCount(self.pages.len() as u64),
                 )),
             },
-            "saga" => match saga::decode_query(req).map_err(Error::Module)? {
+            "saga" => match saga::decode_query(req).map_err(|sentence| Error::Module {
+                reason: "codec".into(),
+                sentence,
+            })? {
                 saga::SagaQuery::Get { saga_id } => {
                     let view = self.sagas.get(&saga_id).cloned();
                     Ok(saga::encode_reply(&saga::SagaReply::Saga(view)))

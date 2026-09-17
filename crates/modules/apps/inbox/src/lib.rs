@@ -100,8 +100,11 @@ use sdk::{
     ResolverSyncTarget, StagedStore, StateRoot, StateSyncHandle,
 };
 
-fn module_error(text: impl Into<String>) -> Error {
-    Error::Module(text.into())
+fn module_error(reason: &'static str, text: impl Into<String>) -> Error {
+    Error::Module {
+        reason: reason.into(),
+        sentence: text.into(),
+    }
 }
 
 /// per-account META record key: prefix + 0 + the account number. every key
@@ -193,10 +196,13 @@ fn decide_delivery(
     match change.seq.cmp(&meta.last_change) {
         Ordering::Equal => return Ok(Ingest::Duplicate),
         Ordering::Less => {
-            return Err(module_error(format!(
-                "change {} reached account {account}'s inbox after change {}: deliveries arrive in change order",
-                change.seq, meta.last_change
-            )));
+            return Err(module_error(
+                "inbox_change_order",
+                format!(
+                    "change {} reached account {account}'s inbox after change {}: deliveries arrive in change order",
+                    change.seq, meta.last_change
+                ),
+            ));
         }
         Ordering::Greater => {}
     }
@@ -204,9 +210,12 @@ fn decide_delivery(
     // seq-space exhaustion is a deterministic rejection, checked BEFORE any
     // mutation — never a panic or a wrapping re-assignment of an old seq.
     let seq = meta.next_seq;
-    meta.next_seq = seq
-        .checked_add(1)
-        .ok_or_else(|| module_error(format!("inbox seq space exhausted for account {account}")))?;
+    meta.next_seq = seq.checked_add(1).ok_or_else(|| {
+        module_error(
+            "inbox_sequence",
+            format!("inbox seq space exhausted for account {account}"),
+        )
+    })?;
     meta.last_change = change.seq;
     meta.seqs.push(seq);
     // overflow: drop the OLDEST (lowest seq) items. one insert per delivery
@@ -217,9 +226,10 @@ fn decide_delivery(
         .evicted
         .checked_add(evicted.len() as u64)
         .ok_or_else(|| {
-            module_error(format!(
-                "inbox eviction count exhausted for account {account}"
-            ))
+            module_error(
+                "inbox_eviction_counter",
+                format!("inbox eviction count exhausted for account {account}"),
+            )
         })?;
     let record = borsh::to_vec(&Notification {
         seq,
@@ -230,10 +240,13 @@ fn decide_delivery(
     .expect("inbox record is serializable");
     let fits_the_store = record.len() <= MAX_STORE_VALUE_BYTES;
     if !fits_the_store {
-        return Err(module_error(format!(
-            "a notification of {} bytes exceeds the store's value bound of {MAX_STORE_VALUE_BYTES}",
-            record.len()
-        )));
+        return Err(module_error(
+            "notification_size",
+            format!(
+                "a notification of {} bytes exceeds the store's value bound of {MAX_STORE_VALUE_BYTES}",
+                record.len()
+            ),
+        ));
     }
     Ok(Ingest::Queued {
         meta,
@@ -280,7 +293,7 @@ impl Inbox {
     {
         match self.staged.get(key).await? {
             Some(bytes) => Ok(Some(
-                borsh::from_slice(&bytes).map_err(|e| module_error(e.to_string()))?,
+                borsh::from_slice(&bytes).map_err(|e| module_error("codec", e.to_string()))?,
             )),
             None => Ok(None),
         }
@@ -303,9 +316,9 @@ impl Inbox {
     /// record is a store bug — loud, never skipped.
     #[cfg(feature = "testkit")]
     async fn item(&self, account: AccountNumber, seq: u64) -> Result<Notification, Error> {
-        self.load(&item_key(account, seq))
-            .await?
-            .ok_or_else(|| module_error("missing notification record"))
+        self.load(&item_key(account, seq)).await?.ok_or_else(|| {
+            module_error("missing_notification_record", "missing notification record")
+        })
     }
 
     // ---- the identity seam ----------------------------------------------------
@@ -318,10 +331,16 @@ impl Inbox {
         let reply = ctx
             .query(&self.identity, &identity_encode_query(query))
             .await?;
-        match identity_decode_reply(&reply).map_err(Error::Module)? {
+        match identity_decode_reply(&reply).map_err(|sentence| Error::Module {
+            reason: "codec".into(),
+            sentence,
+        })? {
             IdentityReply::Account(account) => Ok(account),
             IdentityReply::Accounts(_) | IdentityReply::Resolved(_) | IdentityReply::Gen(_) => {
-                Err(module_error("inbox: unexpected identity reply"))
+                Err(module_error(
+                    "unexpected_identity_reply",
+                    "inbox: unexpected identity reply",
+                ))
             }
         }
     }
@@ -352,37 +371,51 @@ impl Inbox {
             Origin::External(key) if !key.is_empty() => key.clone(),
             Origin::External(_) => {
                 return Err(module_error(
+                    "invalid_external_origin",
                     "external origin must carry a non-empty submitter key",
                 ));
             }
             Origin::Program(program) => {
-                return Err(module_error(format!(
-                    "a program account holds no human inbox: {program}"
-                )));
+                return Err(module_error(
+                    "program_inbox",
+                    format!("a program account holds no human inbox: {program}"),
+                ));
             }
             Origin::Module(id) => {
-                return Err(module_error(format!("a module holds no inbox: {id}")));
+                return Err(module_error(
+                    "module_inbox",
+                    format!("a module holds no inbox: {id}"),
+                ));
             }
-            Origin::System => return Err(module_error("the system holds no inbox")),
+            Origin::System => {
+                return Err(module_error("system_inbox", "the system holds no inbox"));
+            }
         };
         let holder = self
             .identity_account(ctx, &IdentityQuery::OfKey { key })
             .await?;
         let Some(holder) = holder else {
-            return Err(module_error("this key belongs to no identity account"));
+            return Err(module_error(
+                "key_account_missing",
+                "this key belongs to no identity account",
+            ));
         };
         let holds_the_account = holder.number == account;
         if !holds_the_account {
-            return Err(module_error(format!(
-                "only the account's own keys may ack its inbox: this key holds account {}, not {account}",
-                holder.number
-            )));
+            return Err(module_error(
+                "inbox_account_authority",
+                format!(
+                    "only the account's own keys may ack its inbox: this key holds account {}, not {account}",
+                    holder.number
+                ),
+            ));
         }
         let is_key_held = matches!(holder.control, Control::Keys);
         if !is_key_held {
-            return Err(module_error(format!(
-                "account {account} is not key-held and holds no human inbox"
-            )));
+            return Err(module_error(
+                "account_control",
+                format!("account {account} is not key-held and holds no human inbox"),
+            ));
         }
         Ok(())
     }
@@ -394,13 +427,22 @@ impl Inbox {
     fn classify(&self, origin: &Origin, payload: &[u8]) -> Result<Input, Error> {
         let from_attribution = *origin == Origin::Module(self.attribution.clone());
         if from_attribution {
-            let AttributionEvent::Changed(change) = decode_event(payload).map_err(Error::Module)?;
+            let AttributionEvent::Changed(change) =
+                decode_event(payload).map_err(|sentence| Error::Module {
+                    reason: "codec".into(),
+                    sentence,
+                })?;
             return Ok(Input::Changed(Box::new(change)));
         }
-        Ok(match decode_msg(payload).map_err(Error::Module)? {
-            InboxMsg::MarkRead { account, up_to_seq } => Input::MarkRead { account, up_to_seq },
-            InboxMsg::Clear { account, up_to_seq } => Input::Clear { account, up_to_seq },
-        })
+        Ok(
+            match decode_msg(payload).map_err(|sentence| Error::Module {
+                reason: "codec".into(),
+                sentence,
+            })? {
+                InboxMsg::MarkRead { account, up_to_seq } => Input::MarkRead { account, up_to_seq },
+                InboxMsg::Clear { account, up_to_seq } => Input::Clear { account, up_to_seq },
+            },
+        )
     }
 
     // ---- the handlers ----------------------------------------------------------
@@ -410,9 +452,10 @@ impl Inbox {
     async fn on_changed(&mut self, ctx: &mut dyn Ctx, change: Change) -> Result<(), Error> {
         let recipient = change.recipient;
         let Some(control) = self.recipient_control(ctx, recipient).await? else {
-            return Err(module_error(format!(
-                "recipient account {recipient} does not exist"
-            )));
+            return Err(module_error(
+                "recipient_account_missing",
+                format!("recipient account {recipient} does not exist"),
+            ));
         };
         let holds_a_human_inbox = matches!(control, Control::Keys);
         if !holds_a_human_inbox {

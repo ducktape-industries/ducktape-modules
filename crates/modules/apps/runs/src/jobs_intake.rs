@@ -16,17 +16,27 @@ impl RunsModule {
         let Some(model) = self
             .active_agent(&*ctx, &agent_id)
             .await
-            .map_err(Error::Module)?
+            .map_err(|sentence| Error::Module {
+                reason: "active_agent".into(),
+                sentence,
+            })?
         else {
-            return Err(Error::Module("job model is not active".into()));
+            return Err(Error::Module {
+                reason: "job_model_is_not_active".into(),
+                sentence: "job model is not active".into(),
+            });
         };
         if ctx.env().origin != sdk::Origin::Program(model.account) {
-            return Err(Error::Module(
-                "job work requires its model's program account".into(),
-            ));
+            return Err(Error::Module {
+                reason: "job_model_authority".into(),
+                sentence: "job work requires its model's program account".into(),
+            });
         }
         let Some(jobs) = &self.jobs else {
-            return Err(Error::Module("jobs module is not configured".into()));
+            return Err(Error::Module {
+                reason: "jobs_module_is_not_configured".into(),
+                sentence: "jobs module is not configured".into(),
+            });
         };
         let bytes = ctx
             .query(
@@ -36,11 +46,22 @@ impl RunsModule {
                 }),
             )
             .await?;
-        let JobsReply::Job(Some(job)) = jobs_decode_reply(&bytes).map_err(Error::Module)? else {
-            return Err(Error::Module("job is unavailable".into()));
+        let JobsReply::Job(Some(job)) =
+            jobs_decode_reply(&bytes).map_err(|sentence| Error::Module {
+                reason: "codec".into(),
+                sentence,
+            })?
+        else {
+            return Err(Error::Module {
+                reason: "job_is_unavailable".into(),
+                sentence: "job is unavailable".into(),
+            });
         };
         if job.kind != format!("agent/{agent_id}") {
-            return Err(Error::Module("job names another model".into()));
+            return Err(Error::Module {
+                reason: "job_names_another_model".into(),
+                sentence: "job names another model".into(),
+            });
         }
         let event = JobsEvent::Submitted {
             job_id,
@@ -123,9 +144,10 @@ impl RunsModule {
             let item = self
                 .staged_next_action_item
                 .unwrap_or(self.next_action_item);
-            let next = item
-                .checked_add(1)
-                .ok_or_else(|| Error::Module("job request counter exhausted".into()))?;
+            let next = item.checked_add(1).ok_or_else(|| Error::Module {
+                reason: "job_request_counter_exhausted".into(),
+                sentence: "job request counter exhausted".into(),
+            })?;
             ctx.emit_msg(Msg {
                 target: self.attribution.clone(),
                 payload: attribution::encode_msg(&attribution::AttributionMsg::Attribute {
@@ -158,7 +180,12 @@ impl RunsModule {
                 }),
             )
             .await?;
-        let JobsReply::Job(Some(job)) = jobs_decode_reply(&bytes).map_err(Error::Module)? else {
+        let JobsReply::Job(Some(job)) =
+            jobs_decode_reply(&bytes).map_err(|sentence| Error::Module {
+                reason: "codec".into(),
+                sentence,
+            })?
+        else {
             return Ok(());
         };
         if job.status != JobStatus::Pending {

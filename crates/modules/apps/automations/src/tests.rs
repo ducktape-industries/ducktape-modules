@@ -163,23 +163,35 @@ impl Ctx for CaptureCtx {
     }
     async fn query(&self, target: &str, req: &[u8]) -> Result<Vec<u8>, Error> {
         if self.fail_query {
-            return Err(Error::Module("query failed".into()));
+            return Err(Error::Module {
+                reason: "query_failed".into(),
+                sentence: "query failed".into(),
+            });
         }
         match target {
             IDENTITY => identity_probe(req),
-            CHAT => match chat_decode_query(req).map_err(Error::Module)? {
+            CHAT => match chat_decode_query(req).map_err(|sentence| Error::Module {
+                reason: "codec".into(),
+                sentence,
+            })? {
                 ChatQuery::MessagesRange {
                     channel_id,
                     from_seq,
                     limit,
                 } => {
                     if self.fail_text_fetch {
-                        return Err(Error::Module("text fetch failed".into()));
+                        return Err(Error::Module {
+                            reason: "text_fetch_failed".into(),
+                            sentence: "text fetch failed".into(),
+                        });
                     }
-                    let transcript = self
-                        .transcripts
-                        .get(&channel_id)
-                        .ok_or_else(|| Error::Module(format!("unknown channel: {channel_id}")))?;
+                    let transcript =
+                        self.transcripts
+                            .get(&channel_id)
+                            .ok_or_else(|| Error::Module {
+                                reason: "unknown_channel".into(),
+                                sentence: format!("unknown channel: {channel_id}"),
+                            })?;
                     let head = transcript.len() as u64;
                     let from = from_seq.max(1);
                     let mut window = Vec::new();
@@ -220,7 +232,10 @@ impl Ctx for CaptureCtx {
             },
             // the board answers the SAME two reads the real module does; the
             // duplicate probe uses the by-id `Get`.
-            TASKS => match tasks::decode_task_query(req).map_err(Error::Module)? {
+            TASKS => match tasks::decode_task_query(req).map_err(|sentence| Error::Module {
+                reason: "codec".into(),
+                sentence,
+            })? {
                 TaskQuery::Get { task_id } => Ok(tasks_encode_reply(&TaskReply::Task(
                     self.tasks.iter().find(|t| t.id == task_id).cloned(),
                 ))),
@@ -453,7 +468,7 @@ fn duplicate_rule_id_is_rejected() {
         &create("dup", post_trigger(None, None), task_action("t", "T")),
     )
     .expect_err("duplicate must reject");
-    assert!(matches!(err, Error::Module(msg) if msg.contains("already exists")));
+    assert!(matches!(err, Error::Module { sentence: msg, .. } if msg.contains("already exists")));
 }
 
 #[test]
@@ -485,7 +500,7 @@ fn per_owner_rule_cap_refuses_the_next_create_for_that_owner_only() {
     )
     .expect_err("this owner is at its per-owner cap");
     assert!(
-        matches!(&refused, Error::Module(msg) if msg.contains("rule owner at cap")),
+        matches!(&refused, Error::Module { sentence: msg, .. } if msg.contains("rule owner at cap")),
         "unexpected error: {refused}"
     );
 
@@ -569,7 +584,7 @@ fn set_enabled_unknown_rule_rejected() {
         }),
     )
     .expect_err("unknown rule");
-    assert!(matches!(err, Error::Module(msg) if msg.contains("unknown rule")));
+    assert!(matches!(err, Error::Module { sentence: msg, .. } if msg.contains("unknown rule")));
 }
 
 #[test]
@@ -663,7 +678,7 @@ fn hook_event_from_non_chat_origin_is_rejected() {
         },
     )
     .expect_err("hook from non-chat origin must reject");
-    assert!(matches!(err, Error::Module(msg) if msg.contains("chat module")));
+    assert!(matches!(err, Error::Module { sentence: msg, .. } if msg.contains("chat module")));
 
     // raw ChatEvent bytes from a non-chat origin fail to decode as an
     // AutomationsMsg — also rejected.
@@ -759,7 +774,7 @@ fn an_ownerless_rule_is_unrepresentable() {
         )
         .expect_err("an unownable origin must be refused");
         assert!(
-            matches!(&err, Error::Module(msg) if msg.contains(refusal)),
+            matches!(&err, Error::Module { sentence: msg, .. } if msg.contains(refusal)),
             "{origin:?} must be refused with {refusal}: {err:?}"
         );
         block_on(m.abort_block()).expect("abort");
@@ -952,7 +967,10 @@ fn post_message_fire_reads_chat_via_testkit_on_query() {
     })
     .on_query(IDENTITY, identity_probe)
     .on_query(CHAT, |req| {
-        match chat_decode_query(req).map_err(Error::Module)? {
+        match chat_decode_query(req).map_err(|sentence| Error::Module {
+            reason: "codec".into(),
+            sentence,
+        })? {
             ChatQuery::Channel { channel_id } => {
                 Ok(chat_encode_reply(&ChatReply::Channel(Some(Channel {
                     id: channel_id.clone(),
@@ -2191,7 +2209,10 @@ fn account_view(number: u64) -> identity::AccountView {
     }
 }
 fn identity_probe(req: &[u8]) -> Result<Vec<u8>, Error> {
-    let number = match identity::decode_query(req).map_err(Error::Module)? {
+    let number = match identity::decode_query(req).map_err(|sentence| Error::Module {
+        reason: "codec".into(),
+        sentence,
+    })? {
         identity::IdentityQuery::OfKey { key } => account_of(&key),
         identity::IdentityQuery::Get { number } => number,
         _ => return Err(Error::QueryUnsupported),

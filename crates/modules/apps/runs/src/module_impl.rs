@@ -33,10 +33,13 @@ impl Ctx for BudgetCtx<'_, '_> {
 
     async fn query(&self, target: &str, req: &[u8]) -> Result<Vec<u8>, Error> {
         if !self.budget.reserve_query(target, req) {
-            return Err(Error::Module(format!(
-                "runs sibling-read budget exceeded ({})",
-                super::MAX_SIBLING_QUERY_READS
-            )));
+            return Err(Error::Module {
+                reason: "runs_sibling_read_budget_exceeded".into(),
+                sentence: format!(
+                    "runs sibling-read budget exceeded ({})",
+                    super::MAX_SIBLING_QUERY_READS
+                ),
+            });
         }
         self.inner.query(target, req).await
     }
@@ -77,11 +80,15 @@ impl RunsModule {
     async fn execute_result(&mut self, ctx: &mut dyn Ctx, payload: &[u8]) -> Result<(), Error> {
         let budget = SiblingReadBudget::default();
         let dispatch::Delivery::Result(event) =
-            dispatch::decode_delivery(payload).map_err(Error::Module)?
+            dispatch::decode_delivery(payload).map_err(|sentence| Error::Module {
+                reason: "codec".into(),
+                sentence,
+            })?
         else {
-            return Err(Error::Module(
-                "runs received a program call completion it did not request".into(),
-            ));
+            return Err(Error::Module {
+                reason: "unexpected_program_completion".into(),
+                sentence: "runs received a program call completion it did not request".into(),
+            });
         };
         let entry = self.pending_entry(&event.dispatch_id).cloned();
         let attempt = entry
@@ -217,9 +224,15 @@ impl Module for RunsModule {
     }
 
     async fn query(&self, req: &[u8]) -> Result<Vec<u8>, Error> {
-        match decode_query(req).map_err(Error::Module)? {
+        match decode_query(req).map_err(|sentence| Error::Module {
+            reason: "codec".into(),
+            sentence,
+        })? {
             RunsQuery::ModelProgram { agent_id } => {
-                crate::validate_agent_id(&agent_id).map_err(Error::Module)?;
+                crate::validate_agent_id(&agent_id).map_err(|sentence| Error::Module {
+                    reason: "codec".into(),
+                    sentence,
+                })?;
                 Ok(encode_reply(&RunsReply::ModelProgram(
                     crate::model_program(&agent_id),
                 )))
@@ -337,7 +350,10 @@ impl Module for RunsModule {
     }
 
     async fn query_with(&self, ctx: &dyn Ctx, req: &[u8]) -> Result<Vec<u8>, Error> {
-        match decode_query(req).map_err(Error::Module)? {
+        match decode_query(req).map_err(|sentence| Error::Module {
+            reason: "codec".into(),
+            sentence,
+        })? {
             RunsQuery::NodeWork {
                 node_key,
                 height,

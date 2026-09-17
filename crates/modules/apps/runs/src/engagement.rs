@@ -34,23 +34,34 @@ impl RunsModule {
         budget: &SiblingReadBudget,
     ) -> Result<(), Error> {
         let Origin::Program(account) = ctx.env().origin else {
-            return Err(Error::Module(
-                "attributed model work requires a program call".into(),
-            ));
+            return Err(Error::Module {
+                reason: "model_work_origin".into(),
+                sentence: "attributed model work requires a program call".into(),
+            });
         };
         let Some(model) = self
             .active_agent(&*ctx, &agent_id)
             .await
-            .map_err(Error::Module)?
+            .map_err(|sentence| Error::Module {
+                reason: "active_agent".into(),
+                sentence,
+            })?
         else {
-            return Err(Error::Module("model is not active".into()));
+            return Err(Error::Module {
+                reason: "model_is_not_active".into(),
+                sentence: "model is not active".into(),
+            });
         };
         if model.account != account {
-            return Err(Error::Module("model belongs to another account".into()));
+            return Err(Error::Module {
+                reason: "model_belongs_to_another_account".into(),
+                sentence: "model belongs to another account".into(),
+            });
         }
-        let after = change_seq
-            .checked_sub(1)
-            .ok_or_else(|| Error::Module("attribution changes start at one".into()))?;
+        let after = change_seq.checked_sub(1).ok_or_else(|| Error::Module {
+            reason: "attribution_changes_start_at_one".into(),
+            sentence: "attribution changes start at one".into(),
+        })?;
         let bytes = ctx
             .query(
                 &self.attribution,
@@ -60,20 +71,30 @@ impl RunsModule {
                 }),
             )
             .await?;
-        let attribution::AttributionReply::Changes(changes) =
-            attribution::decode_reply(&bytes).map_err(Error::Module)?
+        let attribution::AttributionReply::Changes(changes) = attribution::decode_reply(&bytes)
+            .map_err(|sentence| Error::Module {
+                reason: "codec".into(),
+                sentence,
+            })?
         else {
-            return Err(Error::Module("unexpected attribution reply".into()));
+            return Err(Error::Module {
+                reason: "unexpected_attribution_reply".into(),
+                sentence: "unexpected attribution reply".into(),
+            });
         };
         let Some(entry) = changes.first() else {
-            return Err(Error::Module("attribution does not exist".into()));
+            return Err(Error::Module {
+                reason: "attribution_does_not_exist".into(),
+                sentence: "attribution does not exist".into(),
+            });
         };
         let change = &entry.change;
         let addressed = change.seq == change_seq && change.recipient == account;
         if !addressed {
-            return Err(Error::Module(
-                "attribution belongs to another account".into(),
-            ));
+            return Err(Error::Module {
+                reason: "attribution_belongs_to_another_account".into(),
+                sentence: "attribution belongs to another account".into(),
+            });
         }
         let own_request = change.source.module == self.id && change.source.kind == "run_request";
         if !own_request && let Some(conversation) = self.conversation_for_account(account).await? {
@@ -82,16 +103,22 @@ impl RunsModule {
                 .await;
         }
         let run_id = if own_request {
-            match sdk::wire::decode::<RunRequest>(&change.detail).map_err(Error::Module)? {
+            match sdk::wire::decode::<RunRequest>(&change.detail).map_err(|sentence| {
+                Error::Module {
+                    reason: "codec".into(),
+                    sentence,
+                }
+            })? {
                 RunRequest::Conversation {
                     agent_id: requested,
                     conversation_id,
                     turn,
                 } => {
                     if requested != agent_id {
-                        return Err(Error::Module(
-                            "conversation request names another model".into(),
-                        ));
+                        return Err(Error::Module {
+                            reason: "conversation_model_mismatch".into(),
+                            sentence: "conversation request names another model".into(),
+                        });
                     }
                     return self
                         .request_conversation_turn(ctx, conversation_id, turn)
@@ -102,7 +129,10 @@ impl RunsModule {
                     job_id,
                 } => {
                     if requested != agent_id {
-                        return Err(Error::Module("job request names another model".into()));
+                        return Err(Error::Module {
+                            reason: "job_request_names_another_model".into(),
+                            sentence: "job request names another model".into(),
+                        });
                     }
                     return self.request_job_run(ctx, agent_id, job_id).await;
                 }
@@ -113,7 +143,10 @@ impl RunsModule {
                     ..
                 } => {
                     if requested != agent_id {
-                        return Err(Error::Module("run request names another model".into()));
+                        return Err(Error::Module {
+                            reason: "run_request_names_another_model".into(),
+                            sentence: "run request names another model".into(),
+                        });
                     }
                     run_id_for(&channel_id, anchor_seq, &agent_id)
                 }
@@ -124,7 +157,10 @@ impl RunsModule {
         if self
             .turn_taken(&*ctx, &dispatch_id_for(&run_id))
             .await
-            .map_err(Error::Module)?
+            .map_err(|sentence| Error::Module {
+                reason: "dispatch_turn".into(),
+                sentence,
+            })?
         {
             return Ok(());
         }
@@ -140,11 +176,15 @@ impl RunsModule {
                         )
                         .await?;
                     let ChatReply::Message(Some(message)) =
-                        chat_decode_reply(&bytes).map_err(Error::Module)?
+                        chat_decode_reply(&bytes).map_err(|sentence| Error::Module {
+                            reason: "codec".into(),
+                            sentence,
+                        })?
                     else {
-                        return Err(Error::Module(
-                            "attributed chat message is unavailable".into(),
-                        ));
+                        return Err(Error::Module {
+                            reason: "attributed_chat_message_is_unavailable".into(),
+                            sentence: "attributed chat message is unavailable".into(),
+                        });
                     };
                     let channel = message.channel_id.clone();
                     let prepared = self
@@ -158,7 +198,10 @@ impl RunsModule {
                             budget,
                         )
                         .await
-                        .map_err(Error::Module)?;
+                        .map_err(|sentence| Error::Module {
+                            reason: "execution_budget".into(),
+                            sentence,
+                        })?;
                     (
                         channel,
                         message.seq,
@@ -177,7 +220,10 @@ impl RunsModule {
                             budget,
                         )
                         .await
-                        .map_err(Error::Module)?;
+                        .map_err(|sentence| Error::Module {
+                            reason: "execution_budget".into(),
+                            sentence,
+                        })?;
                     (
                         page_block_channel_id(&change.source.object),
                         change.revision,
@@ -195,12 +241,16 @@ impl RunsModule {
                             }),
                         )
                         .await?;
-                    let pages::PageReply::Comment(Some(comment)) =
-                        pages::decode_reply(&bytes).map_err(Error::Module)?
+                    let pages::PageReply::Comment(Some(comment)) = pages::decode_reply(&bytes)
+                        .map_err(|sentence| Error::Module {
+                            reason: "codec".into(),
+                            sentence,
+                        })?
                     else {
-                        return Err(Error::Module(
-                            "attributed page comment is unavailable".into(),
-                        ));
+                        return Err(Error::Module {
+                            reason: "attributed_page_comment_is_unavailable".into(),
+                            sentence: "attributed page comment is unavailable".into(),
+                        });
                     };
                     let bytes = ctx
                         .query(
@@ -210,19 +260,26 @@ impl RunsModule {
                             }),
                         )
                         .await?;
-                    let pages::PageReply::CommentThread(Some(thread)) =
-                        pages::decode_reply(&bytes).map_err(Error::Module)?
+                    let pages::PageReply::CommentThread(Some(thread)) = pages::decode_reply(&bytes)
+                        .map_err(|sentence| Error::Module {
+                            reason: "codec".into(),
+                            sentence,
+                        })?
                     else {
-                        return Err(Error::Module(
-                            "attributed comment thread is unavailable".into(),
-                        ));
+                        return Err(Error::Module {
+                            reason: "attributed_comment_thread_is_unavailable".into(),
+                            sentence: "attributed comment thread is unavailable".into(),
+                        });
                     };
                     let Some(index) = thread
                         .comments
                         .iter()
                         .position(|item| item.id == comment.id)
                     else {
-                        return Err(Error::Module("comment is not in its thread".into()));
+                        return Err(Error::Module {
+                            reason: "comment_thread_mismatch".into(),
+                            sentence: "comment is not in its thread".into(),
+                        });
                     };
                     let ordinal = index as u64 + 1;
                     let prepared = self
@@ -235,7 +292,10 @@ impl RunsModule {
                             budget,
                         )
                         .await
-                        .map_err(Error::Module)?;
+                        .map_err(|sentence| Error::Module {
+                            reason: "execution_budget".into(),
+                            sentence,
+                        })?;
                     (
                         page_channel_id(&comment.thread_id),
                         ordinal,
@@ -252,14 +312,27 @@ impl RunsModule {
                         anchor_seq,
                         demands,
                         skills,
-                    } = sdk::wire::decode(&change.detail).map_err(Error::Module)?
+                    } = sdk::wire::decode(&change.detail).map_err(|sentence| Error::Module {
+                        reason: "codec".into(),
+                        sentence,
+                    })?
                     else {
-                        return Err(Error::Module("unexpected run request detail".into()));
+                        return Err(Error::Module {
+                            reason: "unexpected_run_request_detail".into(),
+                            sentence: "unexpected run request detail".into(),
+                        });
                     };
                     if requested != agent_id {
-                        return Err(Error::Module("run request names another model".into()));
+                        return Err(Error::Module {
+                            reason: "run_request_names_another_model".into(),
+                            sentence: "run request names another model".into(),
+                        });
                     }
-                    let skills = envelope::library_skills(&skills).map_err(Error::Module)?;
+                    let skills =
+                        envelope::library_skills(&skills).map_err(|sentence| Error::Module {
+                            reason: "library_skills".into(),
+                            sentence,
+                        })?;
                     let prepared = self
                         .prepare_dispatch(
                             &*ctx,
@@ -271,13 +344,18 @@ impl RunsModule {
                             budget,
                         )
                         .await
-                        .map_err(Error::Module)?;
+                        .map_err(|sentence| Error::Module {
+                            reason: "execution_budget".into(),
+                            sentence,
+                        })?;
                     (channel_id, anchor_seq, prepared, demands, requester)
                 }
                 _ => {
-                    return Err(Error::Module(
-                        "this model workflow has no composer for the attribution source".into(),
-                    ));
+                    return Err(Error::Module {
+                        reason: "model_workflow_composer".into(),
+                        sentence: "this model workflow has no composer for the attribution source"
+                            .into(),
+                    });
                 }
             };
         self.stage_dispatch_run(

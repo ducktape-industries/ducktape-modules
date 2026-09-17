@@ -275,8 +275,9 @@ async fn roundtrip(
     }
 }
 
-/// submit one REJECTED op to both hosts: reasons carry the same needle, and
-/// both automations roots (and all siblings) are byte-identical to pre-block.
+/// submit one REJECTED op to both hosts: both refuse with the same reason and
+/// sentence, the sentence carries the needle, and both automations roots (and
+/// all siblings) are byte-identical to pre-block.
 async fn reject_roundtrip(
     native: &mut Host,
     wasm: &mut Host,
@@ -294,16 +295,29 @@ async fn reject_roundtrip(
         .submit_at(block(height, origin), m)
         .await
         .expect_err("wasm must reject");
-    let SubmitError::Rejected(Error::Module(n_msg)) = n_err else {
+    let SubmitError::Rejected(Error::Module {
+        reason: n_reason,
+        sentence: n_msg,
+    }) = n_err
+    else {
         panic!("native rejection shape: {n_err:?}");
     };
-    let SubmitError::Rejected(Error::Module(w_msg)) = w_err else {
+    let SubmitError::Rejected(Error::Module {
+        reason: w_reason,
+        sentence: w_msg,
+    }) = w_err
+    else {
         panic!("wasm rejection shape: {w_err:?}");
     };
-    assert!(n_msg.contains(needle), "native reason: {n_msg}");
+    assert!(n_msg.contains(needle), "native reason: {n_reason}: {n_msg}");
     assert!(
         w_msg.contains(needle),
-        "wasm reason must carry the native reason: {w_msg}"
+        "wasm reason must carry the native reason: {w_reason}: {w_msg}"
+    );
+    assert_eq!(
+        (&w_reason, &w_msg),
+        (&n_reason, &n_msg),
+        "wasm refusal must equal the native refusal"
     );
     assert_eq!(root_of(native), n_before, "native root moved on reject");
     assert_eq!(root_of(wasm), w_before, "wasm root moved on reject");

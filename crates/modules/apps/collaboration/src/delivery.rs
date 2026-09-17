@@ -10,10 +10,9 @@ use sdk::{Ctx, Error, Origin, StagedStore};
 
 use crate::bindings::{self, Advanced, live_binding};
 use crate::interface::{
-    BLOB_HEX_LEN, COMMIT_HEX_LEN, Credential, DUCK_SCHEME, DeliverRequest, Delivery,
-    DeliveryState, EventBody, MAX_MAILBOX_QUEUED_BYTES, MAX_MAILBOX_UNDELIVERED,
-    MAX_REFERENCE_BYTES, MAX_REFERENCES, MAX_UNDELIVERED_PER_SENDER, MessageKind, Party,
-    Reference, TaskRef,
+    BLOB_HEX_LEN, COMMIT_HEX_LEN, Credential, DUCK_SCHEME, DeliverRequest, Delivery, DeliveryState,
+    EventBody, MAX_MAILBOX_QUEUED_BYTES, MAX_MAILBOX_UNDELIVERED, MAX_REFERENCE_BYTES,
+    MAX_REFERENCES, MAX_UNDELIVERED_PER_SENDER, MessageKind, Party, Reference, TaskRef,
 };
 use crate::store;
 
@@ -46,17 +45,23 @@ fn check_reference(reference: &Reference) -> Result<(), Error> {
         Reference::Commit { repo, commit } => {
             bindings::check_id("reference repo", repo)?;
             if !lowercase_hex(commit, COMMIT_HEX_LEN) {
-                return Err(Error::Module(format!(
-                    "a commit reference is {COMMIT_HEX_LEN} lowercase hex characters; a branch or tag name moves and is not a reference"
-                )));
+                return Err(Error::Module {
+                    reason: "invalid_commit_reference".into(),
+                    sentence: format!(
+                        "a commit reference is {COMMIT_HEX_LEN} lowercase hex characters; a branch or tag name moves and is not a reference"
+                    ),
+                });
             }
             Ok(())
         }
         Reference::Blob { hash } => {
             if !lowercase_hex(hash, BLOB_HEX_LEN) {
-                return Err(Error::Module(format!(
-                    "a blob reference is {BLOB_HEX_LEN} lowercase hex characters"
-                )));
+                return Err(Error::Module {
+                    reason: "invalid_blob_reference".into(),
+                    sentence: format!(
+                        "a blob reference is {BLOB_HEX_LEN} lowercase hex characters"
+                    ),
+                });
             }
             Ok(())
         }
@@ -66,9 +71,12 @@ fn check_reference(reference: &Reference) -> Result<(), Error> {
                 && url.len() <= MAX_REFERENCE_BYTES
                 && !url.bytes().any(|b| b.is_ascii_whitespace() || b < 0x20);
             if !shaped {
-                return Err(Error::Module(format!(
-                    "a link reference is a {DUCK_SCHEME} url of at most {MAX_REFERENCE_BYTES} bytes with no whitespace"
-                )));
+                return Err(Error::Module {
+                    reason: "invalid_link_reference".into(),
+                    sentence: format!(
+                        "a link reference is a {DUCK_SCHEME} url of at most {MAX_REFERENCE_BYTES} bytes with no whitespace"
+                    ),
+                });
             }
             Ok(())
         }
@@ -89,10 +97,20 @@ fn check_kind(kind: MessageKind, task: Option<&TaskRef>, replies: bool) -> Resul
     if satisfied {
         return Ok(());
     }
-    Err(Error::Module(match kind {
-        MessageKind::TaskUpdate => "a task_update must name its task".into(),
-        _ => "a result must name its task or answer a thread".into(),
-    }))
+    let (reason, sentence) = match kind {
+        MessageKind::TaskUpdate => (
+            "task_update_missing_task",
+            "a task_update must name its task",
+        ),
+        _ => (
+            "result_missing_context",
+            "a result must name its task or answer a thread",
+        ),
+    };
+    Err(Error::Module {
+        reason: reason.into(),
+        sentence: sentence.into(),
+    })
 }
 
 fn check_shape(request: &DeliverRequest) -> Result<(), Error> {
@@ -100,10 +118,13 @@ fn check_shape(request: &DeliverRequest) -> Result<(), Error> {
     bindings::check_id("message_id", &request.message_id)?;
     bindings::check_participant("recipient", &request.recipient)?;
     if request.references.len() > MAX_REFERENCES {
-        return Err(Error::Module(format!(
-            "{} references, over the {MAX_REFERENCES} cap",
-            request.references.len()
-        )));
+        return Err(Error::Module {
+            reason: "references_over_the_cap".into(),
+            sentence: format!(
+                "{} references, over the {MAX_REFERENCES} cap",
+                request.references.len()
+            ),
+        });
     }
     for reference in &request.references {
         check_reference(reference)?;
@@ -126,16 +147,30 @@ async fn check_attempt(
         job_id: task.id.clone(),
     });
     let bytes = ctx.query(tasks_id, &request).await?;
-    let tasks::JobsReply::Job(job) = tasks::decode_job_reply(&bytes).map_err(Error::Module)? else {
-        return Err(Error::Module("unexpected reply to task lookup".into()));
+    let tasks::JobsReply::Job(job) =
+        tasks::decode_job_reply(&bytes).map_err(|sentence| Error::Module {
+            reason: "codec".into(),
+            sentence,
+        })?
+    else {
+        return Err(Error::Module {
+            reason: "unexpected_reply_to_task_lookup".into(),
+            sentence: "unexpected reply to task lookup".into(),
+        });
     };
-    let job = job.ok_or_else(|| Error::Module(format!("no task {}", task.id)))?;
+    let job = job.ok_or_else(|| Error::Module {
+        reason: "no_task".into(),
+        sentence: format!("no task {}", task.id),
+    })?;
     let stale_attempt = job.attempt != task.expected_attempt;
     if stale_attempt {
-        return Err(Error::Module(format!(
-            "{what}: task {} is on attempt {}, not the expected {}",
-            task.id, job.attempt, task.expected_attempt
-        )));
+        return Err(Error::Module {
+            reason: "stale_task_attempt".into(),
+            sentence: format!(
+                "{what}: task {} is on attempt {}, not the expected {}",
+                task.id, job.attempt, task.expected_attempt
+            ),
+        });
     }
     Ok(())
 }
@@ -168,32 +203,48 @@ pub async fn deliver(
     // what its run posted, and nobody delivers somebody else's words.
     let message = crate::chat_message(ctx, chat_id, &request.message_id)
         .await?
-        .ok_or_else(|| Error::Module(format!("no chat message {}", request.message_id)))?;
+        .ok_or_else(|| Error::Module {
+            reason: "no_chat_message".into(),
+            sentence: format!("no chat message {}", request.message_id),
+        })?;
     if message.channel_id != request.channel_id {
-        return Err(Error::Module(format!(
-            "message {} is on channel {}, not {}",
-            request.message_id, message.channel_id, request.channel_id
-        )));
+        return Err(Error::Module {
+            reason: "message_channel_mismatch".into(),
+            sentence: format!(
+                "message {} is on channel {}, not {}",
+                request.message_id, message.channel_id, request.channel_id
+            ),
+        });
     }
     if &message.head.origin != origin {
-        return Err(Error::Module(format!(
-            "message {} was not posted by this origin",
-            request.message_id
-        )));
+        return Err(Error::Module {
+            reason: "message_was_not_posted_by_this_origin".into(),
+            sentence: format!(
+                "message {} was not posted by this origin",
+                request.message_id
+            ),
+        });
     }
     if message.head.deleted {
-        return Err(Error::Module(format!(
-            "message {} is deleted",
-            request.message_id
-        )));
+        return Err(Error::Module {
+            reason: "message_is_deleted".into(),
+            sentence: format!("message {} is deleted", request.message_id),
+        });
     }
     let seq = message.seq;
     let sender = actor.clone();
     bindings::check_participant("sender", &sender)?;
     if sender == request.recipient {
-        return Err(Error::Module("a message is not delivered to its sender".into()));
+        return Err(Error::Module {
+            reason: "message_recipient_mismatch".into(),
+            sentence: "a message is not delivered to its sender".into(),
+        });
     }
-    check_kind(request.kind, request.task.as_ref(), message.head.thread.is_some())?;
+    check_kind(
+        request.kind,
+        request.task.as_ref(),
+        message.head.thread.is_some(),
+    )?;
 
     // an identical repeat answers the existing record and stages nothing; a
     // different one under the same (message, recipient) is refused, never a
@@ -202,10 +253,13 @@ pub async fn deliver(
         store::delivery(staged, &request.channel_id, seq, &request.recipient).await?
     {
         if !same_request(&existing, &request) {
-            return Err(Error::Module(format!(
-                "message {} was already requested for this recipient with different metadata",
-                request.message_id
-            )));
+            return Err(Error::Module {
+                reason: "delivery_request_conflict".into(),
+                sentence: format!(
+                    "message {} was already requested for this recipient with different metadata",
+                    request.message_id
+                ),
+            });
         }
         return Ok(Requested {
             delivery: existing,
@@ -218,25 +272,31 @@ pub async fn deliver(
     // chat, so this module never carries a second copy of the admission rule.
     let access = crate::chat_access(ctx, chat_id, &request.channel_id, &request.recipient).await?;
     if !access.may_read {
-        return Err(Error::Module(format!(
-            "recipient may not read channel {}",
-            request.channel_id
-        )));
+        return Err(Error::Module {
+            reason: "recipient_may_not_read_channel".into(),
+            sentence: format!("recipient may not read channel {}", request.channel_id),
+        });
     }
     if let Some(task) = &request.task {
         check_attempt(ctx, tasks_id, task, "stale task target").await?;
     }
     if request.expires_at <= now {
-        return Err(Error::Module(format!(
-            "expires_at {} is not after the block's agreed time {now}",
-            request.expires_at
-        )));
+        return Err(Error::Module {
+            reason: "delivery_deadline".into(),
+            sentence: format!(
+                "expires_at {} is not after the block's agreed time {now}",
+                request.expires_at
+            ),
+        });
     }
     if request.expires_at - now > max_delivery_ttl {
-        return Err(Error::Module(format!(
-            "expires_at {} is more than {max_delivery_ttl} time units out",
-            request.expires_at
-        )));
+        return Err(Error::Module {
+            reason: "delivery_ttl".into(),
+            sentence: format!(
+                "expires_at {} is more than {max_delivery_ttl} time units out",
+                request.expires_at
+            ),
+        });
     }
 
     let delivery = Delivery {
@@ -263,20 +323,29 @@ pub async fn deliver(
     // disconnected, and replacing a binding does not reset the accounting.
     let mut usage = store::mailbox(staged, &request.recipient).await?;
     if usage.undelivered >= MAX_MAILBOX_UNDELIVERED {
-        return Err(Error::Module(format!(
-            "{QUEUE_FULL}: the recipient holds the {MAX_MAILBOX_UNDELIVERED} undelivered message cap"
-        )));
+        return Err(Error::Module {
+            reason: QUEUE_FULL.into(),
+            sentence: format!(
+                "the recipient holds the {MAX_MAILBOX_UNDELIVERED} undelivered message cap"
+            ),
+        });
     }
     if usage.queued_bytes + queued_bytes > MAX_MAILBOX_QUEUED_BYTES {
-        return Err(Error::Module(format!(
-            "{QUEUE_FULL}: the recipient would exceed the {MAX_MAILBOX_QUEUED_BYTES}-byte queued payload cap"
-        )));
+        return Err(Error::Module {
+            reason: QUEUE_FULL.into(),
+            sentence: format!(
+                "the recipient would exceed the {MAX_MAILBOX_QUEUED_BYTES}-byte queued payload cap"
+            ),
+        });
     }
     let quota = store::sender_quota(staged, &request.recipient, &sender).await?;
     if quota >= MAX_UNDELIVERED_PER_SENDER {
-        return Err(Error::Module(format!(
-            "{QUEUE_FULL}: the recipient already holds {MAX_UNDELIVERED_PER_SENDER} undelivered messages from this sender"
-        )));
+        return Err(Error::Module {
+            reason: QUEUE_FULL.into(),
+            sentence: format!(
+                "the recipient already holds {MAX_UNDELIVERED_PER_SENDER} undelivered messages from this sender"
+            ),
+        });
     }
     usage.undelivered += 1;
     usage.queued_bytes += queued_bytes;
@@ -332,15 +401,20 @@ fn check_reason(reason: Option<&String>) -> Result<(), Error> {
     if shaped {
         return Ok(());
     }
-    Err(Error::Module(format!(
-        "reason must be a snake_case token of at most {MAX_REASON_BYTES} bytes"
-    )))
+    Err(Error::Module {
+        reason: "reason_must_be_a_snake_case_token".into(),
+        sentence: format!("reason must be a snake_case token of at most {MAX_REASON_BYTES} bytes"),
+    })
 }
 
 /// release the recipient's queue accounting once a record reaches a terminal
 /// state. saturating on purpose: an accounting record that somehow lags must
 /// not wedge the block.
-async fn release(staged: &mut StagedStore, delivery: &Delivery, encoded_len: u64) -> Result<(), Error> {
+async fn release(
+    staged: &mut StagedStore,
+    delivery: &Delivery,
+    encoded_len: u64,
+) -> Result<(), Error> {
     let mut usage = store::mailbox(staged, &delivery.recipient).await?;
     usage.undelivered = usage.undelivered.saturating_sub(1);
     usage.queued_bytes = usage.queued_bytes.saturating_sub(encoded_len);
@@ -367,7 +441,10 @@ async fn load_delivery(
 ) -> Result<Delivery, Error> {
     store::delivery(staged, channel_id, seq, recipient)
         .await?
-        .ok_or_else(|| Error::Module(format!("no delivery of {seq} on {channel_id} for this recipient")))
+        .ok_or_else(|| Error::Module {
+            reason: "delivery_missing".into(),
+            sentence: format!("no delivery of {seq} on {channel_id} for this recipient"),
+        })
 }
 
 /// move a record and log the transition as its own committed event, so a
@@ -442,24 +519,31 @@ pub async fn acknowledge(
     // receipts. chat is the roster, so chat is asked.
     let access = crate::chat_access(ctx, chat_id, &channel_id, &recipient).await?;
     if !access.may_read {
-        return Err(Error::Module(format!(
-            "the recipient may no longer read channel {channel_id}"
-        )));
+        return Err(Error::Module {
+            reason: "recipient_channel_access".into(),
+            sentence: format!("the recipient may no longer read channel {channel_id}"),
+        });
     }
 
     let binding = store::binding(staged, &channel_id, &recipient)
         .await?
-        .ok_or_else(|| Error::Module(format!("the recipient has no binding on {channel_id}")))?;
+        .ok_or_else(|| Error::Module {
+            reason: "recipient_binding_missing".into(),
+            sentence: format!("the recipient has no binding on {channel_id}"),
+        })?;
     // ONLY the currently authorized binding advances the record. a stale
     // service may report history for inspection; it cannot overwrite this.
     // the credential names the binding the record is for, not the caller:
     // any authenticated member reports under the live one.
     if binding.detached || binding.credential != binding_credential {
-        return Err(Error::Module(format!(
-            "binding credential {binding_credential} is stale; the current one is {}{}",
-            binding.credential,
-            if binding.detached { " (detached)" } else { "" }
-        )));
+        return Err(Error::Module {
+            reason: "stale_binding_credential".into(),
+            sentence: format!(
+                "binding credential {binding_credential} is stale; the current one is {}{}",
+                binding.credential,
+                if binding.detached { " (detached)" } else { "" }
+            ),
+        });
     }
     // EXPIRY IS THE DEADLINE'S, NOT A REPORTER'S. `expire` is permissionless
     // precisely because it checks the clock — every caller asking gets the same
@@ -472,17 +556,23 @@ pub async fn acknowledge(
     // accept the input said so. The deadline bounds the resource, not the
     // truth — anyone may sweep an unsettled record once it passes.
     if state == DeliveryState::Expired {
-        return Err(Error::Module(format!(
-            "expiry is not reported: {seq} on {channel_id} expires at {} by the deadline alone",
-            delivery.expires_at
-        )));
+        return Err(Error::Module {
+            reason: "expiry_report_forbidden".into(),
+            sentence: format!(
+                "expiry is not reported: {seq} on {channel_id} expires at {} by the deadline alone",
+                delivery.expires_at
+            ),
+        });
     }
     if !delivery.state.may_advance_to(state) {
-        return Err(Error::Module(format!(
-            "delivery cannot move from {} to {}",
-            delivery.state.as_str(),
-            state.as_str()
-        )));
+        return Err(Error::Module {
+            reason: "delivery_transition".into(),
+            sentence: format!(
+                "delivery cannot move from {} to {}",
+                delivery.state.as_str(),
+                state.as_str()
+            ),
+        });
     }
     // a previous attempt cannot publish as the current one after returning:
     // the task's attempt is rechecked HERE, not only at admission.
@@ -503,16 +593,22 @@ pub async fn expire(
 ) -> Result<Advanced, Error> {
     let delivery = load_delivery(staged, &channel_id, seq, &recipient).await?;
     if now < delivery.expires_at {
-        return Err(Error::Module(format!(
-            "delivery of {seq} on {channel_id} expires at {}, not yet at {now}",
-            delivery.expires_at
-        )));
+        return Err(Error::Module {
+            reason: "delivery_expiry".into(),
+            sentence: format!(
+                "delivery of {seq} on {channel_id} expires at {}, not yet at {now}",
+                delivery.expires_at
+            ),
+        });
     }
     if delivery.state.is_terminal() {
-        return Err(Error::Module(format!(
-            "delivery of {seq} on {channel_id} already settled as {}",
-            delivery.state.as_str()
-        )));
+        return Err(Error::Module {
+            reason: "delivery_already_settled".into(),
+            sentence: format!(
+                "delivery of {seq} on {channel_id} already settled as {}",
+                delivery.state.as_str()
+            ),
+        });
     }
     let advanced_by = delivery.advanced_by;
     advance(

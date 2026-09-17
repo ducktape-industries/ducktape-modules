@@ -157,24 +157,29 @@ impl RunsModule {
         id: String,
     ) -> Result<(), Error> {
         let Some(request) = self.action_request(&id).await? else {
-            return Err(Error::Module("unknown action request".into()));
+            return Err(Error::Module {
+                reason: "unknown_action_request".into(),
+                sentence: "unknown action request".into(),
+            });
         };
         let Cause::Chain {
             hop: Hop::Delivery(item),
             ..
         } = &ctx.env().cause
         else {
-            return Err(Error::Module(
-                "action publication requires its source delivery".into(),
-            ));
+            return Err(Error::Module {
+                reason: "action_publication_source".into(),
+                sentence: "action publication requires its source delivery".into(),
+            });
         };
         let authenticated = ctx.env().origin == Origin::Module(self.id.clone())
             && item.source == self.id
             && item.item == request.item;
         if !authenticated {
-            return Err(Error::Module(
-                "action publication is not its source delivery".into(),
-            ));
+            return Err(Error::Module {
+                reason: "action_publication_source".into(),
+                sentence: "action publication is not its source delivery".into(),
+            });
         }
         ctx.emit_msg(Msg {
             target: self.attribution.clone(),
@@ -199,29 +204,44 @@ impl RunsModule {
     async fn request_authority(&self, ctx: &dyn Ctx, request: &ActionRequest) -> Result<(), Error> {
         let generation = self.active_generation(ctx, request.view.account).await?;
         if generation != request.view.generation {
-            return Err(Error::Module(
-                "program authority changed since this run began".into(),
-            ));
+            return Err(Error::Module {
+                reason: "program_authority_changed_since_this_run_began".into(),
+                sentence: "program authority changed since this run began".into(),
+            });
         }
         let Some(model) = self.model(&request.model_id) else {
-            return Err(Error::Module("run model was removed".into()));
+            return Err(Error::Module {
+                reason: "run_model_was_removed".into(),
+                sentence: "run model was removed".into(),
+            });
         };
         if model.account != request.view.account {
-            return Err(Error::Module(
-                "run model no longer serves the account this action was proposed for".into(),
-            ));
+            return Err(Error::Module {
+                reason: "run_model_no_longer_serves_the_account".into(),
+                sentence: "run model no longer serves the account this action was proposed for"
+                    .into(),
+            });
         }
         if model.status != ModelStatus::Active {
-            return Err(Error::Module("run model is paused".into()));
+            return Err(Error::Module {
+                reason: "run_model_is_paused".into(),
+                sentence: "run model is paused".into(),
+            });
         }
         match &request.scope {
             RequestScope::Result => Ok(()),
             RequestScope::Session { lease } => {
                 let Some(session) = self.session(&request.view.run_id) else {
-                    return Err(Error::Module("run session closed".into()));
+                    return Err(Error::Module {
+                        reason: "run_session_closed".into(),
+                        sentence: "run session closed".into(),
+                    });
                 };
                 if &session.lease != lease {
-                    return Err(Error::Module("run execution lease changed".into()));
+                    return Err(Error::Module {
+                        reason: "run_execution_lease_changed".into(),
+                        sentence: "run execution lease changed".into(),
+                    });
                 }
                 self.session_holds_lease(ctx, &request.view.run_id, session)
                     .await
@@ -238,33 +258,37 @@ impl RunsModule {
         };
         let current = crate::operation_view(&request.view.operation).map(|view| view.schema_digest);
         if current.as_deref() != Some(invocation.schema_digest.as_str()) {
-            return Err(Error::Module(
-                "operation schema changed since this action was proposed".into(),
-            ));
+            return Err(Error::Module {
+                reason: "action_schema_changed".into(),
+                sentence: "operation schema changed since this action was proposed".into(),
+            });
         }
         Ok(())
     }
 
     fn request_call(&self, ctx: &dyn Ctx, request: &ActionRequest) -> Result<CallId, Error> {
         let Origin::Program(account) = ctx.env().origin else {
-            return Err(Error::Module(
-                "only the requesting program may decide a tool action".into(),
-            ));
+            return Err(Error::Module {
+                reason: "requesting_program_authority".into(),
+                sentence: "only the requesting program may decide a tool action".into(),
+            });
         };
         let Cause::Chain {
             hop: Hop::Call(call),
             ..
         } = &ctx.env().cause
         else {
-            return Err(Error::Module(
-                "tool decision requires a program call".into(),
-            ));
+            return Err(Error::Module {
+                reason: "tool_decision_requires_a_program_call".into(),
+                sentence: "tool decision requires a program call".into(),
+            });
         };
         let owns_request = account == request.view.account && call.requester == self.agent;
         if !owns_request {
-            return Err(Error::Module(
-                "tool decision belongs to another program".into(),
-            ));
+            return Err(Error::Module {
+                reason: "tool_decision_belongs_to_another_program".into(),
+                sentence: "tool decision belongs to another program".into(),
+            });
         }
         Ok(call.clone())
     }
@@ -276,7 +300,10 @@ impl RunsModule {
         target_step: u64,
     ) -> Result<(), Error> {
         let Some(mut request) = self.action_request(&id).await? else {
-            return Err(Error::Module("unknown action request".into()));
+            return Err(Error::Module {
+                reason: "unknown_action_request".into(),
+                sentence: "unknown action request".into(),
+            });
         };
         let call = self.request_call(ctx, &request)?;
         self.request_authority(ctx, &request).await?;
@@ -295,13 +322,22 @@ impl RunsModule {
                 }),
             )
             .await?;
-        let attribution::AttributionReply::Changes(changes) =
-            attribution::decode_reply(&bytes).map_err(Error::Module)?
+        let attribution::AttributionReply::Changes(changes) = attribution::decode_reply(&bytes)
+            .map_err(|sentence| Error::Module {
+                reason: "codec".into(),
+                sentence,
+            })?
         else {
-            return Err(Error::Module("unexpected action attribution reply".into()));
+            return Err(Error::Module {
+                reason: "unexpected_action_attribution_reply".into(),
+                sentence: "unexpected action attribution reply".into(),
+            });
         };
         let Some(change) = changes.first() else {
-            return Err(Error::Module("action was not attributed".into()));
+            return Err(Error::Module {
+                reason: "action_attribution_missing".into(),
+                sentence: "action was not attributed".into(),
+            });
         };
         let bytes = ctx
             .query(
@@ -313,15 +349,22 @@ impl RunsModule {
             )
             .await?;
         let agent::AgentReply::Invocation(Some(invocation)) =
-            agent::decode_reply(&bytes).map_err(Error::Module)?
+            agent::decode_reply(&bytes).map_err(|sentence| Error::Module {
+                reason: "codec".into(),
+                sentence,
+            })?
         else {
-            return Err(Error::Module("action has no program invocation".into()));
+            return Err(Error::Module {
+                reason: "action_invocation_missing".into(),
+                sentence: "action has no program invocation".into(),
+            });
         };
         let expected_invocation = matches!(invocation.status, agent::Status::Running { awaiting: agent::Outstanding::Call(ref awaiting), .. } if awaiting == &call);
         if !expected_invocation {
-            return Err(Error::Module(
-                "claim is outside this action's attributed invocation".into(),
-            ));
+            return Err(Error::Module {
+                reason: "claim_attribution".into(),
+                sentence: "claim is outside this action's attributed invocation".into(),
+            });
         }
         match &request.view.status {
             ActionStatus::AwaitingProgram => {}
@@ -330,13 +373,17 @@ impl RunsModule {
             ActionStatus::Claimed { .. }
             | ActionStatus::Completed { .. }
             | ActionStatus::Rejected { .. } => {
-                return Err(Error::Module("action request was already decided".into()));
+                return Err(Error::Module {
+                    reason: "action_request_decided".into(),
+                    sentence: "action request was already decided".into(),
+                });
             }
         }
         if target_step <= call.step {
-            return Err(Error::Module(
-                "action target must be a later program step".into(),
-            ));
+            return Err(Error::Module {
+                reason: "action_target_order".into(),
+                sentence: "action target must be a later program step".into(),
+            });
         }
         request.view.status = ActionStatus::Claimed {
             call: CallId {
@@ -361,7 +408,10 @@ impl RunsModule {
         result: agent::CallResult,
     ) -> Result<(), Error> {
         let Some(mut request) = self.action_request(&id).await? else {
-            return Err(Error::Module("unknown action request".into()));
+            return Err(Error::Module {
+                reason: "unknown_action_request".into(),
+                sentence: "unknown action request".into(),
+            });
         };
         let completing = self.request_call(ctx, &request)?;
         if let ActionStatus::Completed {
@@ -378,15 +428,19 @@ impl RunsModule {
             }
         }
         let ActionStatus::Claimed { call: expected } = &request.view.status else {
-            return Err(Error::Module("action request has not been claimed".into()));
+            return Err(Error::Module {
+                reason: "action_request_unclaimed".into(),
+                sentence: "action request has not been claimed".into(),
+            });
         };
         let same_invocation = &call == expected
             && completing.invocation == expected.invocation
             && call.requester == self.agent;
         if !same_invocation {
-            return Err(Error::Module(
-                "completion is outside the claiming invocation".into(),
-            ));
+            return Err(Error::Module {
+                reason: "completion_invocation_mismatch".into(),
+                sentence: "completion is outside the claiming invocation".into(),
+            });
         }
         let bytes = ctx
             .query(
@@ -395,19 +449,29 @@ impl RunsModule {
             )
             .await?;
         let DispatchReply::Call(Some(view)) =
-            dispatch_decode_reply(&bytes).map_err(Error::Module)?
+            dispatch_decode_reply(&bytes).map_err(|sentence| Error::Module {
+                reason: "codec".into(),
+                sentence,
+            })?
         else {
-            return Err(Error::Module("action call does not exist".into()));
+            return Err(Error::Module {
+                reason: "action_call_missing".into(),
+                sentence: "action call does not exist".into(),
+            });
         };
         let matches_request = call_matches_action(&view, &request.view);
         if !matches_request {
-            return Err(Error::Module(
-                "call does not execute this action request".into(),
-            ));
+            return Err(Error::Module {
+                reason: "action_request_call_mismatch".into(),
+                sentence: "call does not execute this action request".into(),
+            });
         }
         let outcome = match view.status {
             dispatch::CallStatus::Queued => {
-                return Err(Error::Module("action call has not completed".into()));
+                return Err(Error::Module {
+                    reason: "action_call_incomplete".into(),
+                    sentence: "action call has not completed".into(),
+                });
             }
             dispatch::CallStatus::Completed { outcome }
             | dispatch::CallStatus::Delivered { outcome, .. } => outcome,
@@ -480,25 +544,30 @@ impl RunsModule {
             return Ok(());
         };
         let dispatch::CallOutcomeSummary::Applied { output_digest, .. } = outcome else {
-            return Err(Error::Module(
-                "a rejected PR action cannot supply an opened PR".into(),
-            ));
+            return Err(Error::Module {
+                reason: "rejected_pr_output".into(),
+                sentence: "a rejected PR action cannot supply an opened PR".into(),
+            });
         };
         let output = canonical_action_payload(output);
         let digest: [u8; 32] = Sha256::digest(sdk::wire::encode(&output)).into();
         let output_matches_digest = &digest == output_digest;
         if !output_matches_digest {
-            return Err(Error::Module(
-                "reported PR output does not match the committed action".into(),
-            ));
+            return Err(Error::Module {
+                reason: "pr_output_mismatch".into(),
+                sentence: "reported PR output does not match the committed action".into(),
+            });
         }
-        let opened: OpenedPr = serde_json::from_value(output)
-            .map_err(|error| Error::Module(format!("invalid committed PR output: {error}")))?;
+        let opened: OpenedPr = serde_json::from_value(output).map_err(|error| Error::Module {
+            reason: "invalid_committed_pr_output".into(),
+            sentence: format!("invalid committed PR output: {error}"),
+        })?;
         let invalid_allocation = opened.repo != repo || opened.number == 0;
         if invalid_allocation {
-            return Err(Error::Module(
-                "committed PR output names another repository or invalid number".into(),
-            ));
+            return Err(Error::Module {
+                reason: "pr_output_source_mismatch".into(),
+                sentence: "committed PR output names another repository or invalid number".into(),
+            });
         }
         let pr = PrRef {
             repo: opened.repo,
@@ -517,13 +586,19 @@ impl RunsModule {
         reason: String,
     ) -> Result<(), Error> {
         let Some(mut request) = self.action_request(&id).await? else {
-            return Err(Error::Module("unknown action request".into()));
+            return Err(Error::Module {
+                reason: "unknown_action_request".into(),
+                sentence: "unknown action request".into(),
+            });
         };
         self.request_call(ctx, &request)?;
         self.request_authority(ctx, &request).await?;
         let decided = !matches!(request.view.status, ActionStatus::AwaitingProgram);
         if decided {
-            return Err(Error::Module("action request was already decided".into()));
+            return Err(Error::Module {
+                reason: "action_request_decided".into(),
+                sentence: "action request was already decided".into(),
+            });
         }
         request.view.status = ActionStatus::Rejected { reason };
         self.stage_action_marker(&request).await?;
@@ -559,9 +634,15 @@ impl RunsModule {
                 )
                 .await?;
             let DispatchReply::Call(queued) =
-                dispatch_decode_reply(&bytes).map_err(Error::Module)?
+                dispatch_decode_reply(&bytes).map_err(|sentence| Error::Module {
+                    reason: "codec".into(),
+                    sentence,
+                })?
             else {
-                return Err(Error::Module("unexpected action call reply".into()));
+                return Err(Error::Module {
+                    reason: "unexpected_action_call_reply".into(),
+                    sentence: "unexpected action call reply".into(),
+                });
             };
             if let Some(queued) = queued {
                 let exact = call_matches_action(&queued, &view);
@@ -607,10 +688,16 @@ impl RunsModule {
         let bytes = ctx
             .query(&self.attribution, &attribution::encode_query(&query))
             .await?;
-        let attribution::AttributionReply::Changes(changes) =
-            attribution::decode_reply(&bytes).map_err(Error::Module)?
+        let attribution::AttributionReply::Changes(changes) = attribution::decode_reply(&bytes)
+            .map_err(|sentence| Error::Module {
+                reason: "codec".into(),
+                sentence,
+            })?
         else {
-            return Err(Error::Module("unexpected action attribution reply".into()));
+            return Err(Error::Module {
+                reason: "unexpected_action_attribution_reply".into(),
+                sentence: "unexpected action attribution reply".into(),
+            });
         };
         let Some(change) = changes.first() else {
             return Ok(Some(view));
@@ -625,9 +712,15 @@ impl RunsModule {
             )
             .await?;
         let agent::AgentReply::Invocation(invocation) =
-            agent::decode_reply(&bytes).map_err(Error::Module)?
+            agent::decode_reply(&bytes).map_err(|sentence| Error::Module {
+                reason: "codec".into(),
+                sentence,
+            })?
         else {
-            return Err(Error::Module("unexpected action invocation reply".into()));
+            return Err(Error::Module {
+                reason: "unexpected_action_invocation_reply".into(),
+                sentence: "unexpected action invocation reply".into(),
+            });
         };
         if invocation.is_none() {
             let bytes = ctx
@@ -640,9 +733,15 @@ impl RunsModule {
                 )
                 .await?;
             let attribution::AttributionReply::Delivery(delivery) =
-                attribution::decode_reply(&bytes).map_err(Error::Module)?
+                attribution::decode_reply(&bytes).map_err(|sentence| Error::Module {
+                    reason: "codec".into(),
+                    sentence,
+                })?
             else {
-                return Err(Error::Module("unexpected program delivery reply".into()));
+                return Err(Error::Module {
+                    reason: "unexpected_program_delivery_reply".into(),
+                    sentence: "unexpected program delivery reply".into(),
+                });
             };
             let no_invocation = delivery.as_ref().is_none_or(|delivery| {
                 matches!(delivery.state, attribution::DeliveryState::Retired(_))

@@ -59,7 +59,10 @@ async fn load<T: DeserializeOwned>(
     };
     sdk::wire::decode(&bytes)
         .map(Some)
-        .map_err(|e| Error::Module(format!("{what} record decode: {e}")))
+        .map_err(|e| Error::Module {
+            reason: "codec".into(),
+            sentence: format!("{what} record decode: {e}"),
+        })
 }
 
 /// refuse a value the store's codec would later panic decoding. every op that
@@ -68,10 +71,13 @@ async fn load<T: DeserializeOwned>(
 /// and its wasm port root-identical (see `tasks::check_record`).
 pub fn check_record(value: &[u8], what: &str) -> Result<(), Error> {
     if value.len() > MAX_RECORD_BYTES {
-        return Err(Error::Module(format!(
-            "{what} is {} bytes, over the {MAX_RECORD_BYTES}-byte store record cap",
-            value.len()
-        )));
+        return Err(Error::Module {
+            reason: "record_too_large".into(),
+            sentence: format!(
+                "{what} is {} bytes, over the {MAX_RECORD_BYTES}-byte store record cap",
+                value.len()
+            ),
+        });
     }
     Ok(())
 }
@@ -98,7 +104,12 @@ pub async fn delivery(
     message_seq: u64,
     recipient: &Party,
 ) -> Result<Option<Delivery>, Error> {
-    load(staged, &delivery_key(cid, message_seq, recipient), "delivery").await
+    load(
+        staged,
+        &delivery_key(cid, message_seq, recipient),
+        "delivery",
+    )
+    .await
 }
 
 pub async fn mailbox(staged: &StagedStore, participant: &Party) -> Result<MailboxUsage, Error> {
@@ -111,9 +122,10 @@ async fn counter(staged: &StagedStore, key: &[u8], what: &str) -> Result<u64, Er
     let Some(bytes) = staged.get(key).await? else {
         return Ok(0);
     };
-    let bytes: [u8; 8] = bytes
-        .try_into()
-        .map_err(|_| Error::Module(format!("invalid {what} counter")))?;
+    let bytes: [u8; 8] = bytes.try_into().map_err(|_| Error::Module {
+        reason: "invalid_counter".into(),
+        sentence: format!("invalid {what} counter"),
+    })?;
     Ok(u64::from_le_bytes(bytes))
 }
 
@@ -159,9 +171,10 @@ pub async fn append_event(
     body: EventBody,
 ) -> Result<u64, Error> {
     let seq = head(staged, cid).await?;
-    let next = seq
-        .checked_add(1)
-        .ok_or_else(|| Error::Module("channel event sequence exhausted".into()))?;
+    let next = seq.checked_add(1).ok_or_else(|| Error::Module {
+        reason: "channel_event_sequence_exhausted".into(),
+        sentence: "channel event sequence exhausted".into(),
+    })?;
     let event = ChannelEvent { seq, at: now, body };
     put(staged, event_key(cid, seq), &event, "event")?;
     put_counter(staged, head_key(cid), next);

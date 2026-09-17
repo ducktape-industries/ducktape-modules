@@ -134,7 +134,10 @@ fn schedule_fire(
     let due =
         matches!(schedule.status, ConversationScheduleStatus::Pending { due_at } if due_at <= now);
     if !due {
-        return Err(Error::Module("conversation schedule is not due".into()));
+        return Err(Error::Module {
+            reason: "conversation_schedule_not_due".into(),
+            sentence: "conversation schedule is not due".into(),
+        });
     }
     schedule.status = ConversationScheduleStatus::Fired { sequence };
     Ok(schedule)
@@ -160,7 +163,10 @@ impl RunsModule {
             let schedule = self
                 .conversation_read(&schedule_key(id, &slot))
                 .await?
-                .ok_or_else(|| Error::Module("missing conversation schedule".into()))?;
+                .ok_or_else(|| Error::Module {
+                    reason: "missing_conversation_schedule".into(),
+                    sentence: "missing conversation schedule".into(),
+                })?;
             schedules.push(schedule);
         }
         Ok(schedules)
@@ -180,12 +186,16 @@ impl RunsModule {
         require_coordinating_source(&state)?;
         let valid_slot = !slot.is_empty() && slot.len() <= MAX_REQUEST_ID_BYTES;
         if !valid_slot {
-            return Err(Error::Module("invalid conversation schedule id".into()));
+            return Err(Error::Module {
+                reason: "invalid_conversation_schedule_id".into(),
+                sentence: "invalid conversation schedule id".into(),
+            });
         }
         if matches!(input, ConversationInput::Chat { .. }) {
-            return Err(Error::Module(
-                "scheduled inputs cannot forge Chat snapshots".into(),
-            ));
+            return Err(Error::Module {
+                reason: "scheduled_input_source".into(),
+                sentence: "scheduled inputs cannot forge Chat snapshots".into(),
+            });
         }
         let payload = sdk::wire::encode(&("schedule", &slot, after_secs, &input));
         if self.operation_seen(&id, &op, &payload).await? {
@@ -202,18 +212,24 @@ impl RunsModule {
         let transition = match after_secs {
             None => ScheduleInput::Cancel { schedule },
             Some(seconds) => {
-                let unit = self.time_unit.ok_or_else(|| {
-                    Error::Module("conversation scheduling requires genesis time_unit".into())
+                let unit = self.time_unit.ok_or_else(|| Error::Module {
+                    reason: "genesis_time_unit".into(),
+                    sentence: "conversation scheduling requires genesis time_unit".into(),
                 })?;
-                let duration = seconds.checked_mul(unit.per_second()).ok_or_else(|| {
-                    Error::Module("conversation schedule duration overflow".into())
-                })?;
+                let duration =
+                    seconds
+                        .checked_mul(unit.per_second())
+                        .ok_or_else(|| Error::Module {
+                            reason: "conversation_schedule_duration_overflow".into(),
+                            sentence: "conversation schedule duration overflow".into(),
+                        })?;
                 let due_at = ctx
                     .env()
                     .consensus_time
                     .checked_add(duration)
-                    .ok_or_else(|| {
-                        Error::Module("conversation schedule deadline overflow".into())
+                    .ok_or_else(|| Error::Module {
+                        reason: "conversation_schedule_deadline_overflow".into(),
+                        sentence: "conversation schedule deadline overflow".into(),
                     })?;
                 ScheduleInput::Set { schedule, due_at }
             }
@@ -225,9 +241,10 @@ impl RunsModule {
             .unwrap_or_default();
         if !slots.contains(&slot) {
             if slots.len() >= 64 {
-                return Err(Error::Module(
-                    "conversation schedule allocation is full".into(),
-                ));
+                return Err(Error::Module {
+                    reason: "conversation_schedule_allocation_is_full".into(),
+                    sentence: "conversation schedule allocation is full".into(),
+                });
             }
             slots.push(slot.clone());
             slots.sort();
@@ -275,9 +292,10 @@ impl RunsModule {
             .iter()
             .all(|(_, bytes)| bytes.len() <= sdk::MAX_STORE_VALUE_BYTES);
         if !fits {
-            return Err(Error::Module(
-                "conversation schedule exceeds store bound".into(),
-            ));
+            return Err(Error::Module {
+                reason: "conversation_schedule_exceeds_store_bound".into(),
+                sentence: "conversation schedule exceeds store bound".into(),
+            });
         }
         for (key, bytes) in records {
             self.receipts.stage(key, bytes)?;
@@ -303,22 +321,29 @@ impl RunsModule {
             let schedule: ConversationSchedule = self
                 .conversation_read(&record_key)
                 .await?
-                .ok_or_else(|| Error::Module("missing scheduled input".into()))?;
+                .ok_or_else(|| Error::Module {
+                    reason: "missing_scheduled_input".into(),
+                    sentence: "missing scheduled input".into(),
+                })?;
             let current = schedule.operation_id == entry.operation_id
                 && schedule.status
                     == ConversationScheduleStatus::Pending {
                         due_at: entry.due_at,
                     };
             if !current {
-                return Err(Error::Module(
-                    "scheduled input index disagrees with its record".into(),
-                ));
+                return Err(Error::Module {
+                    reason: "scheduled_input_index".into(),
+                    sentence: "scheduled input index disagrees with its record".into(),
+                });
             }
             let state = self.require_conversation(&entry.conversation_id).await?;
             let sequence = state
                 .admitted_cursor
                 .checked_add(1)
-                .ok_or_else(|| Error::Module("conversation input cursor exhausted".into()))?;
+                .ok_or_else(|| Error::Module {
+                    reason: "conversation_input_cursor_exhausted".into(),
+                    sentence: "conversation input cursor exhausted".into(),
+                })?;
             let operation_id = format!(
                 "timer/{}",
                 dispatch_id_for(&format!("{}/{}", entry.schedule_id, entry.operation_id))

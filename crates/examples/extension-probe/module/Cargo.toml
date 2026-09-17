@@ -11,8 +11,8 @@ crate-type = ["cdylib", "rlib"]
 replacement = []
 
 [dependencies]
+ducktape-module-sdk = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "ducktape-module-sdk" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-wit-bindgen = "0.57"
 
 [workspace]

@@ -44,10 +44,16 @@ impl Module for WorkerEvents {
     async fn execute(&mut self, ctx: &mut dyn Ctx, msg: &Msg) -> Result<(), Error> {
         let from_attribution = ctx.env().origin == Origin::Module("attribution".into());
         if !from_attribution {
-            return Err(Error::Module("unauthenticated attribution delivery".into()));
+            return Err(Error::Module {
+                reason: "unauthenticated_attribution_delivery".into(),
+                sentence: "unauthenticated attribution delivery".into(),
+            });
         }
         let attribution::AttributionEvent::Changed(change) =
-            attribution::decode_event(&msg.payload).map_err(Error::Module)?;
+            attribution::decode_event(&msg.payload).map_err(|sentence| Error::Module {
+                reason: "codec".into(),
+                sentence,
+            })?;
         self.staged.push(change);
         Ok(())
     }

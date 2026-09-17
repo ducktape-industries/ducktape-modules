@@ -93,7 +93,8 @@ fn a_program_account_reads_as_the_participant_it_is() {
             mut module, chat, ..
         } = scene("c1");
         let agent = Party::Account(42);
-        chat.borrow_mut().channel("c1", std::slice::from_ref(&agent));
+        chat.borrow_mut()
+            .channel("c1", std::slice::from_ref(&agent));
         let ctx = as_program(&chat, 1, 42);
         assert!(matches!(
             read(&module, &ctx, &agent, None, events("c1")).await,
@@ -107,7 +108,8 @@ fn a_program_account_reads_as_the_participant_it_is() {
         );
         // a program principal bound to a KEY participant reads that channel.
         let holder = party(1);
-        chat.borrow_mut().channel("c1", std::slice::from_ref(&holder));
+        chat.borrow_mut()
+            .channel("c1", std::slice::from_ref(&holder));
         let mut ctx = at(&chat, 1, Origin::External(key(1)));
         ok(
             &mut module,
@@ -132,7 +134,8 @@ fn a_service_key_reads_its_one_channel_through_via_and_nothing_else() {
             alice,
             bob,
         } = scene("c1");
-        chat.borrow_mut().channel("c2", &[alice.clone(), bob.clone()]);
+        chat.borrow_mut()
+            .channel("c2", &[alice.clone(), bob.clone()]);
         let mut ctx = at(&chat, 1, Origin::External(key(1)));
         ok(&mut module, &mut ctx, bind("c1", &alice, key(0x5e), 0)).await;
 
@@ -166,7 +169,14 @@ fn a_service_key_reads_its_one_channel_through_via_and_nothing_else() {
             CollaborationReply::Denied(DenyReason::NotPermitted)
         );
         assert_eq!(
-            read(&module, &service, &alice, Some("c1"), ProtectedRead::Mailbox).await,
+            read(
+                &module,
+                &service,
+                &alice,
+                Some("c1"),
+                ProtectedRead::Mailbox
+            )
+            .await,
             CollaborationReply::Denied(DenyReason::NotReader)
         );
         // naming c2 as via with a key bound on c1 is not a reader.
@@ -297,7 +307,10 @@ fn an_unresolvable_origin_denies_rather_than_erroring() {
         .on_query(CHAT, move |req| {
             let _ = req;
             let _ = &chat_for_ctx;
-            Err(sdk::Error::Module("unreachable".into()))
+            Err(sdk::Error::Module {
+                reason: "unreachable".into(),
+                sentence: "unreachable".into(),
+            })
         });
         assert_eq!(
             read(&module, &ctx, &alice, None, ProtectedRead::Mailbox).await,

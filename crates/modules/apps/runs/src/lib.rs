@@ -7,11 +7,10 @@
 // they live in `runs-wire` now — the messages, the records, the action catalog,
 // the programs and the id derivations — so a view or the daemon can link the
 // format without linking this module.
-pub use runs_wire::*;
 pub use runs_wire::catalog;
+pub use runs_wire::*;
 
 mod model_config;
-
 
 mod conversations;
 // the derived-tier run journal: the PURE decision core (fold + view over
@@ -130,7 +129,6 @@ impl SiblingReadBudget {
     }
 }
 
-
 /// Internal pending-state coordinates for Pages sources. The `runs:`
 /// chat namespace is reserved to this module, and Runs never mints chat
 /// channels below this sub-prefix, so the existing snapshot shape can carry
@@ -239,9 +237,9 @@ mod action_storage;
 mod deployment;
 mod dispatch_flow;
 mod engagement;
+mod facets;
 mod module_updates;
 mod receipts;
-mod facets;
 use facets::WireSink;
 // the forge compose lane (M1): forge:<repo>:<n> channel detection, committed
 // tracker/refs mirrors, and the item-session workspace/sink composition.
@@ -744,7 +742,10 @@ impl RunsModule {
 
     fn validate_non_empty(field: &str, value: &str) -> Result<(), Error> {
         if value.is_empty() {
-            return Err(Error::Module(format!("{field} must not be empty")));
+            return Err(Error::Module {
+                reason: "empty_field".into(),
+                sentence: format!("{field} must not be empty"),
+            });
         }
         Ok(())
     }
@@ -754,12 +755,14 @@ impl RunsModule {
     /// any genesis path could wear) cannot administer model work.
     fn admin_origin(origin: &Origin) -> Result<RunOrigin, Error> {
         match origin {
-            Origin::External(key) if key.is_empty() => Err(Error::Module(
-                "runs admin ops require a non-empty submitter id".into(),
-            )),
-            Origin::System => Err(Error::Module(
-                "runs admin ops require an external or module origin".into(),
-            )),
+            Origin::External(key) if key.is_empty() => Err(Error::Module {
+                reason: "admin_origin".into(),
+                sentence: "runs admin ops require a non-empty submitter id".into(),
+            }),
+            Origin::System => Err(Error::Module {
+                reason: "admin_origin".into(),
+                sentence: "runs admin ops require an external or module origin".into(),
+            }),
             other => canonical_origin(other),
         }
     }
@@ -806,7 +809,10 @@ impl RunsModule {
     /// half-applied may shadow it.
     pub fn install(&mut self, bytes: &[u8], expected: StateRoot) -> Result<(), Error> {
         let (action_requests, next_action_item, pending, sessions, delegations, models) =
-            decode_committed(bytes).map_err(Error::Module)?;
+            decode_committed(bytes).map_err(|sentence| Error::Module {
+                reason: "codec".into(),
+                sentence,
+            })?;
         sdk::verify_snapshot_root(
             committed_root(
                 &action_requests,
@@ -863,13 +869,19 @@ impl RunsModule {
     /// records are dropped — like [`RunsModule::install`], a persisted ring
     /// describes a dispatch boundary and nothing half-applied may shadow it.
     pub fn install_history(&mut self, bytes: &[u8]) -> Result<(), Error> {
-        let history: VecDeque<RunRecord> = serde_json::from_slice(bytes)
-            .map_err(|e| Error::Module(format!("run history decode: {e}")))?;
+        let history: VecDeque<RunRecord> =
+            serde_json::from_slice(bytes).map_err(|e| Error::Module {
+                reason: "codec".into(),
+                sentence: format!("run history decode: {e}"),
+            })?;
         if history.len() > RUN_HISTORY_CAP {
-            return Err(Error::Module(format!(
-                "run history carries {} records; the cap is {RUN_HISTORY_CAP}",
-                history.len()
-            )));
+            return Err(Error::Module {
+                reason: "run_history_cap".into(),
+                sentence: format!(
+                    "run history carries {} records; the cap is {RUN_HISTORY_CAP}",
+                    history.len()
+                ),
+            });
         }
         self.history = history;
         self.pending_history.clear();

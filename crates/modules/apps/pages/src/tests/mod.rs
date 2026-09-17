@@ -54,7 +54,7 @@ async fn apply_expect_err(p: &mut Pages, m: &PageMsg, needle: &str) {
         .await
         .expect_err("op must be rejected");
     assert!(
-        matches!(err, Error::Module(ref s) if s.contains(needle)),
+        matches!(err, Error::Module { sentence: ref s, .. } if s.contains(needle)),
         "unexpected error: {err:?}"
     );
     p.abort_block().await.unwrap();
@@ -120,16 +120,17 @@ async fn apply_commit_as(p: &mut Pages, m: &PageMsg, origin: sdk::Origin) {
     p.execute(&mut ctx_as(origin), &msg(m)).await.unwrap();
     p.commit_block().await.unwrap();
 }
-async fn apply_err_as(p: &mut Pages, m: &PageMsg, origin: sdk::Origin, needle: &str) {
+async fn apply_err_as(p: &mut Pages, m: &PageMsg, origin: sdk::Origin, needle: &str) -> Error {
     let err = p
         .execute(&mut ctx_as(origin), &msg(m))
         .await
         .expect_err("op must be rejected");
     assert!(
-        matches!(err, Error::Module(ref s) if s.contains(needle)),
+        matches!(err, Error::Module { sentence: ref s, .. } if s.contains(needle)),
         "unexpected error: {err:?}"
     );
     p.abort_block().await.unwrap();
+    err
 }
 /// the [`PageQuery::TargetThreadCount`] cap probe — the kept dispatch read
 /// over the per-target thread index (thread ENUMERATION is index-tier now).

@@ -69,9 +69,10 @@ impl Receipts {
 
     pub fn stage(&mut self, key: String, value: Vec<u8>) -> Result<(), Error> {
         if value.len() > sdk::MAX_STORE_VALUE_BYTES {
-            return Err(Error::Module(
-                "action receipt record exceeds the store value bound".into(),
-            ));
+            return Err(Error::Module {
+                reason: "action_receipt_size".into(),
+                sentence: "action receipt record exceeds the store value bound".into(),
+            });
         }
         self.pending.insert(key, value);
         Ok(())
@@ -112,9 +113,10 @@ impl Receipts {
             #[cfg(any(test, all(feature = "guest", target_arch = "wasm32")))]
             Backing::Host(_) => {
                 if !records.is_empty() {
-                    return Err(Error::Module(
-                        "hosted receipts must be restored through host state".into(),
-                    ));
+                    return Err(Error::Module {
+                        reason: "hosted_receipts_must_be_restored_through_host".into(),
+                        sentence: "hosted receipts must be restored through host state".into(),
+                    });
                 }
             }
         }

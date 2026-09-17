@@ -275,7 +275,10 @@ fn conversation_administration_tracks_current_identity_controller() {
             })
             .on_query("identity", move |bytes| {
                 let (number, control) =
-                    match identity::decode_query(bytes).map_err(Error::Module)? {
+                    match identity::decode_query(bytes).map_err(|sentence| Error::Module {
+                        reason: "codec".into(),
+                        sentence,
+                    })? {
                         identity::IdentityQuery::Get { number } => (
                             number,
                             identity::Control::Program {

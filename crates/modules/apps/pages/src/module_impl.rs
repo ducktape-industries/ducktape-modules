@@ -65,7 +65,11 @@ fn authored_relations(author: &Party) -> Vec<Relation> {
 fn source_relations(kind: &str, value: Option<&[u8]>) -> Result<Vec<Relation>, Error> {
     let relations = match (kind, value) {
         ("comment", Some(bytes)) => {
-            let comment: super::Comment = sdk::wire::decode(bytes).map_err(Error::Module)?;
+            let comment: super::Comment =
+                sdk::wire::decode(bytes).map_err(|sentence| Error::Module {
+                    reason: "codec".into(),
+                    sentence,
+                })?;
             if comment.deleted {
                 Vec::new()
             } else {
@@ -80,7 +84,11 @@ fn source_relations(kind: &str, value: Option<&[u8]>) -> Result<Vec<Relation>, E
             }
         }
         ("block", Some(bytes)) => {
-            let block: super::Block = sdk::wire::decode(bytes).map_err(Error::Module)?;
+            let block: super::Block =
+                sdk::wire::decode(bytes).map_err(|sentence| Error::Module {
+                    reason: "codec".into(),
+                    sentence,
+                })?;
             let mut relations = authored_relations(&block.author);
             let mentions: BTreeSet<_> = block
                 .marks
@@ -112,12 +120,17 @@ fn source_relations(kind: &str, value: Option<&[u8]>) -> Result<Vec<Relation>, E
 }
 
 fn source_object(key: &[u8]) -> Result<(&str, &str), Error> {
-    let key =
-        std::str::from_utf8(key).map_err(|_| Error::Module("pages: corrupt logical key".into()))?;
+    let key = std::str::from_utf8(key).map_err(|_| Error::Module {
+        reason: "pages_corrupt_logical_key".into(),
+        sentence: "pages: corrupt logical key".into(),
+    })?;
     match key.strip_prefix("\0cc:") {
         Some(id) => Ok(("comment", id)),
         None if !key.starts_with('\0') => Ok(("block", key)),
-        None => Err(Error::Module("pages: not an attribution source".into())),
+        None => Err(Error::Module {
+            reason: "pages_not_an_attribution_source".into(),
+            sentence: "pages: not an attribution source".into(),
+        }),
     }
 }
 
@@ -133,7 +146,7 @@ fn top_level_page<'a>(
             None => break,
         }
     }
-    Err(Error::Module(super::PageError::Corrupt.to_string()))
+    Err(super::page_refusal(super::PageError::Corrupt))
 }
 
 fn attribution_batch(target: &str, updates: Vec<AttributionUpdate>) -> Msg {
@@ -157,9 +170,10 @@ fn push_attribution_batch(
         + report.payload.len();
     let total_exceeded = total_bytes > ATTRIBUTION_REPORT_BYTES;
     if too_large || total_exceeded {
-        return Err(Error::Module(
-            "pages: attribution report envelope too large".into(),
-        ));
+        return Err(Error::Module {
+            reason: "pages_attribution_report_envelope_too_large".into(),
+            sentence: "pages: attribution report envelope too large".into(),
+        });
     }
     reports.push(report);
     Ok(())
@@ -182,9 +196,10 @@ impl Pages {
         let source_bytes = sdk::wire::encode(&source).len();
         let oversized = source_bytes > ATTRIBUTION_BATCH_BYTES;
         if oversized {
-            return Err(Error::Module(
-                "pages: attribution source envelope too large".into(),
-            ));
+            return Err(Error::Module {
+                reason: "pages_attribution_source_envelope_too_large".into(),
+                sentence: "pages: attribution source envelope too large".into(),
+            });
         }
         Ok(())
     }
@@ -221,9 +236,15 @@ impl Pages {
         };
         let bytes = ctx.query(identity, &identity::encode_query(&query)).await?;
         let identity::IdentityReply::Account(account) =
-            identity::decode_reply(&bytes).map_err(Error::Module)?
+            identity::decode_reply(&bytes).map_err(|sentence| Error::Module {
+                reason: "codec".into(),
+                sentence,
+            })?
         else {
-            return Err(Error::Module("pages: unexpected identity reply".into()));
+            return Err(Error::Module {
+                reason: "unexpected_identity_reply".into(),
+                sentence: "pages: unexpected identity reply".into(),
+            });
         };
         Ok(account.map(|account| account.number))
     }
@@ -232,10 +253,10 @@ impl Pages {
         match &ctx.env().origin {
             Origin::External(key) => {
                 if key.is_empty() {
-                    return Err(Error::Module(super::PageError::EmptyOrigin.to_string()));
+                    return Err(super::page_refusal(super::PageError::EmptyOrigin));
                 }
                 if key.len() > super::MAX_COMMENT_AUTHOR_BYTES {
-                    return Err(Error::Module(super::PageError::AuthorTooLarge.to_string()));
+                    return Err(super::page_refusal(super::PageError::AuthorTooLarge));
                 }
                 let account = self
                     .identity_account(ctx, identity::IdentityQuery::OfKey { key: key.clone() })
@@ -248,7 +269,7 @@ impl Pages {
             Origin::Program(account) => Ok(Party::Account(*account)),
             Origin::Module(module) => {
                 if module.len() > super::MAX_COMMENT_AUTHOR_BYTES {
-                    return Err(Error::Module(super::PageError::AuthorTooLarge.to_string()));
+                    return Err(super::page_refusal(super::PageError::AuthorTooLarge));
                 }
                 Ok(Party::Module(module.clone()))
             }
@@ -316,26 +337,34 @@ impl Pages {
                             }),
                         )
                         .await?;
-                    let identity::IdentityReply::Resolved(numbers) =
-                        identity::decode_reply(&bytes).map_err(Error::Module)?
+                    let identity::IdentityReply::Resolved(numbers) = identity::decode_reply(&bytes)
+                        .map_err(|sentence| Error::Module {
+                            reason: "codec".into(),
+                            sentence,
+                        })?
                     else {
-                        return Err(Error::Module("pages: unexpected identity reply".into()));
+                        return Err(Error::Module {
+                            reason: "unexpected_identity_reply".into(),
+                            sentence: "pages: unexpected identity reply".into(),
+                        });
                     };
                     numbers
                 }
                 None => vec![None; chunk.len()],
             };
             if numbers.len() != chunk.len() {
-                return Err(Error::Module(
-                    "pages: identity resolution count mismatch".into(),
-                ));
+                return Err(Error::Module {
+                    reason: "pages_identity_resolution_count_mismatch".into(),
+                    sentence: "pages: identity resolution count mismatch".into(),
+                });
             }
             for (number, resolved) in chunk.iter().zip(numbers) {
                 let exists = *number != 0 && resolved == Some(*number);
                 if !exists {
-                    return Err(Error::Module(format!(
-                        "pages: mention names no account: {number}"
-                    )));
+                    return Err(Error::Module {
+                        reason: "pages_mention_names_no_account".into(),
+                        sentence: format!("pages: mention names no account: {number}"),
+                    });
                 }
             }
         }
@@ -350,9 +379,10 @@ impl Pages {
         work.extend(keys.iter().cloned());
         let exceeds_budget = work.len() > super::MAX_TRAVERSAL_WORK;
         if exceeds_budget {
-            return Err(Error::Module(
-                "pages: attribution source work exceeded".into(),
-            ));
+            return Err(Error::Module {
+                reason: "pages_attribution_source_work_exceeded".into(),
+                sentence: "pages: attribution source work exceeded".into(),
+            });
         }
         self.staged.prefetch(&keys).await
     }
@@ -374,7 +404,11 @@ impl Pages {
             let ("comment", Some(bytes)) = (kind, value) else {
                 continue;
             };
-            let comment: super::Comment = sdk::wire::decode(bytes).map_err(Error::Module)?;
+            let comment: super::Comment =
+                sdk::wire::decode(bytes).map_err(|sentence| Error::Module {
+                    reason: "codec".into(),
+                    sentence,
+                })?;
             if !comment.deleted {
                 comments.insert(key, comment);
             }
@@ -400,8 +434,8 @@ impl Pages {
             let thread = self
                 .load_thread(&id)
                 .await
-                .map_err(|error| Error::Module(error.to_string()))?
-                .ok_or_else(|| Error::Module(super::PageError::Corrupt.to_string()))?;
+                .map_err(super::page_refusal)?
+                .ok_or_else(|| super::page_refusal(super::PageError::Corrupt))?;
             threads.insert(id, thread);
         }
         let targets: BTreeSet<_> = threads.values().map(|thread| &thread.target).collect();
@@ -413,7 +447,7 @@ impl Pages {
             let block = self
                 .require_block(target, super::PageError::Corrupt)
                 .await
-                .map_err(|error| Error::Module(error.to_string()))?;
+                .map_err(super::page_refusal)?;
             roots.insert(
                 target,
                 (top_level_page(&index, &block.page)?.to_owned(), block.page),
@@ -430,7 +464,7 @@ impl Pages {
             let collection = self
                 .record_collection(root)
                 .await
-                .map_err(|error| Error::Module(error.to_string()))?;
+                .map_err(super::page_refusal)?;
             if let Some(super::RecordCollection {
                 writer: Party::Account(writer),
                 ..
@@ -467,9 +501,10 @@ impl Pages {
             };
             let exceeds_bound = detail.len() > super::MAX_MANAGED_DISCUSSION_BYTES;
             if exceeds_bound {
-                return Err(Error::Module(
-                    "pages: managed discussion snapshot too large".into(),
-                ));
+                return Err(Error::Module {
+                    reason: "pages_managed_discussion_snapshot_too_large".into(),
+                    sentence: "pages: managed discussion snapshot too large".into(),
+                });
             }
             relations
                 .get_mut(key)
@@ -535,12 +570,19 @@ impl Pages {
             // a fabricated comment or a new comment authored by its mover.
             for (key, next) in changed_threads {
                 let Some(next) = next else { continue };
-                let next: super::Thread = sdk::wire::decode(&next).map_err(Error::Module)?;
+                let next: super::Thread =
+                    sdk::wire::decode(&next).map_err(|sentence| Error::Module {
+                        reason: "codec".into(),
+                        sentence,
+                    })?;
                 let Some(previous) = self.staged.get(&key).await? else {
                     continue;
                 };
                 let previous: super::Thread =
-                    sdk::wire::decode(&previous).map_err(Error::Module)?;
+                    sdk::wire::decode(&previous).map_err(|sentence| Error::Module {
+                        reason: "codec".into(),
+                        sentence,
+                    })?;
                 let retargeted = previous.target != next.target;
                 if !retargeted {
                     continue;
@@ -579,10 +621,16 @@ impl Pages {
             .await?
             .map(|bytes| sdk::wire::decode::<u64>(&bytes))
             .transpose()
-            .map_err(Error::Module)?
+            .map_err(|sentence| Error::Module {
+                reason: "codec".into(),
+                sentence,
+            })?
             .unwrap_or(0)
             .checked_add(1)
-            .ok_or_else(|| Error::Module("pages: attribution revision exhausted".into()))?;
+            .ok_or_else(|| Error::Module {
+                reason: "pages_attribution_revision_exhausted".into(),
+                sentence: "pages: attribution revision exhausted".into(),
+            })?;
         for (key, relations) in current {
             let prior = previous
                 .remove(&key)
@@ -663,12 +711,15 @@ impl Module for Pages {
     /// Resolve the authenticated actor and mention accounts, then apply the
     /// source operation and relation reports to one reversible staged unit.
     async fn execute(&mut self, ctx: &mut dyn Ctx, msg: &Msg) -> Result<(), Error> {
-        let m = decode_msg(&msg.payload).map_err(Error::Module)?;
+        let m = decode_msg(&msg.payload).map_err(|sentence| Error::Module {
+            reason: "codec".into(),
+            sentence,
+        })?;
         let actor = self.party_of_origin(ctx).await?;
         let replay = self
             .replay_record_request(&m, &actor, &msg.payload)
             .await
-            .map_err(|error| Error::Module(error.to_string()))?;
+            .map_err(super::page_refusal)?;
         if let Some(receipt) = replay {
             ctx.set_assigned(super::encode_assigned(&super::PageAssigned { actor }));
             ctx.set_output(sdk::wire::encode(&receipt));
@@ -691,13 +742,13 @@ impl Module for Pages {
                     let (receipt, retention) = self
                         .apply_record_op(&m, &actor, &msg.payload)
                         .await
-                        .map_err(|error| Error::Module(error.to_string()))?;
+                        .map_err(super::page_refusal)?;
                     (sdk::wire::encode(&receipt), retention)
                 }
                 _ => {
                     self.apply(m, &actor, now)
                         .await
-                        .map_err(|error| Error::Module(error.to_string()))?;
+                        .map_err(super::page_refusal)?;
                     (output, Vec::new())
                 }
             };
@@ -728,12 +779,15 @@ impl Module for Pages {
     /// the overlay, so reads within a block observe this block's writes. the
     /// reserved sentinel reads as absence (it is not a block).
     async fn query(&self, req: &[u8]) -> Result<Vec<u8>, Error> {
-        match decode_query(req).map_err(Error::Module)? {
+        match decode_query(req).map_err(|sentence| Error::Module {
+            reason: "codec".into(),
+            sentence,
+        })? {
             PageQuery::RecordCollection { page_id } => {
                 let value = self
                     .record_collection(&page_id)
                     .await
-                    .map_err(|error| Error::Module(error.to_string()))?;
+                    .map_err(super::page_refusal)?;
                 Ok(encode_reply(&PageReply::RecordCollection(value)))
             }
             PageQuery::Records {
@@ -744,21 +798,21 @@ impl Module for Pages {
                 let value = self
                     .records(&page_id, after, limit)
                     .await
-                    .map_err(|error| Error::Module(error.to_string()))?;
+                    .map_err(super::page_refusal)?;
                 Ok(encode_reply(&PageReply::Records(value)))
             }
             PageQuery::Record { page_id, record_id } => {
                 let value = self
                     .record(&page_id, &record_id)
                     .await
-                    .map_err(|error| Error::Module(error.to_string()))?;
+                    .map_err(super::page_refusal)?;
                 Ok(encode_reply(&PageReply::Record(value)))
             }
             PageQuery::RecordState { page_id, key } => {
                 let value = self
                     .record_state(&page_id, &key)
                     .await
-                    .map_err(|error| Error::Module(error.to_string()))?;
+                    .map_err(super::page_refusal)?;
                 Ok(encode_reply(&PageReply::RecordState(value)))
             }
             PageQuery::RecordReceipt {
@@ -768,7 +822,7 @@ impl Module for Pages {
                 let value = self
                     .record_receipt(&page_id, &request_id)
                     .await
-                    .map_err(|error| Error::Module(error.to_string()))?;
+                    .map_err(super::page_refusal)?;
                 Ok(encode_reply(&PageReply::RecordReceipt(value)))
             }
             PageQuery::GetPage {
@@ -795,7 +849,7 @@ impl Module for Pages {
                 let head = self
                     .load_thread(&thread_id)
                     .await
-                    .map_err(|error| Error::Module(error.to_string()))?
+                    .map_err(super::page_refusal)?
                     .map(|thread| super::CommentThreadHead {
                         target: thread.target,
                         comment_count: thread.comment_ids.len() as u64,
@@ -806,30 +860,27 @@ impl Module for Pages {
                 let view = self
                     .thread_view(&thread_id)
                     .await
-                    .map_err(|error| Error::Module(error.to_string()))?;
+                    .map_err(super::page_refusal)?;
                 Ok(encode_reply(&PageReply::CommentThread(view)))
             }
             PageQuery::GetComment { comment_id } => {
                 let comment = self
                     .load_comment(&comment_id)
                     .await
-                    .map_err(|e| Error::Module(e.to_string()))?;
+                    .map_err(super::page_refusal)?;
                 Ok(encode_reply(&PageReply::Comment(comment)))
             }
             PageQuery::TargetThreadCount { target } => {
                 let ids = self
                     .load_target_index(&target)
                     .await
-                    .map_err(|e| Error::Module(e.to_string()))?;
+                    .map_err(super::page_refusal)?;
                 Ok(encode_reply(
                     &PageReply::TargetThreadCount(ids.len() as u64),
                 ))
             }
             PageQuery::PageCount => {
-                let index = self
-                    .load_index()
-                    .await
-                    .map_err(|e| Error::Module(e.to_string()))?;
+                let index = self.load_index().await?;
                 Ok(encode_reply(&PageReply::PageCount(index.len() as u64)))
             }
         }

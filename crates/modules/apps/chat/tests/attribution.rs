@@ -27,8 +27,12 @@ impl Module for Executor {
         StateRoot::ZERO
     }
     async fn execute(&mut self, ctx: &mut dyn Ctx, msg: &Msg) -> Result<(), Error> {
-        identity::authenticate_event(&ctx.env().origin, "identity", &msg.payload)
-            .map_err(Error::Module)?;
+        identity::authenticate_event(&ctx.env().origin, "identity", &msg.payload).map_err(
+            |sentence| Error::Module {
+                reason: "authentication".into(),
+                sentence,
+            },
+        )?;
         Ok(())
     }
 }

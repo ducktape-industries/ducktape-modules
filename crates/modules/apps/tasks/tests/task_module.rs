@@ -242,7 +242,7 @@ fn failed_write_rolls_back_task_state() {
         assert!(
             matches!(
                 err,
-                host::SubmitError::Rejected(Error::Module(ref message))
+                host::SubmitError::Rejected(Error::Module { sentence: ref message, .. })
                     if message.contains("task not found")
             ),
             "unexpected error: {err:?}"
@@ -391,7 +391,7 @@ fn oversized_task_record_is_refused_before_staging() {
             .await
             .expect_err("an over-cap task record must be refused");
         assert!(
-            matches!(err, Error::Module(ref m) if m.contains("store record cap")),
+            matches!(err, Error::Module { sentence: ref m, .. } if m.contains("store record cap")),
             "unexpected error: {err:?}"
         );
 
@@ -422,7 +422,7 @@ fn oversized_task_id_cannot_brick_the_board() {
                 .await
                 .expect_err("an over-cap task_id must be refused");
             assert!(
-                matches!(err, Error::Module(ref m) if m.contains("task_id is")),
+                matches!(err, Error::Module { sentence: ref m, .. } if m.contains("task_id is")),
                 "unexpected error: {err:?}"
             );
         }
@@ -513,7 +513,7 @@ fn delete_frees_a_slot_at_the_cap_and_a_per_owner_cap_admits_another_owner() {
             .await
             .expect_err("alice is at her per-owner cap");
         assert!(
-            matches!(refused, Error::Module(ref m) if m.contains("task owner at cap")),
+            matches!(refused, Error::Module { sentence: ref m, .. } if m.contains("task owner at cap")),
             "unexpected error: {refused:?}"
         );
 

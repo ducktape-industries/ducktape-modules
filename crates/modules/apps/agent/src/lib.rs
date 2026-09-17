@@ -159,7 +159,10 @@ fn validate_provision_request_id(request_id: &str) -> Result<(), Error> {
         && request_id.len() <= MAX_PROVISION_REQUEST_ID_BYTES
         && !request_id.contains(SEP);
     if !valid {
-        return Err(module_error("invalid provision request_id"));
+        return Err(module_error(
+            "invalid_provision_request_id",
+            "invalid provision request_id",
+        ));
     }
     Ok(())
 }
@@ -240,12 +243,15 @@ struct PendingProvision {
     program: Program,
 }
 
-fn module_error(text: impl Into<String>) -> Error {
-    Error::Module(text.into())
+fn module_error(reason: &'static str, text: impl Into<String>) -> Error {
+    Error::Module {
+        reason: reason.into(),
+        sentence: text.into(),
+    }
 }
 
 fn decode_record<T: BorshDeserialize>(bytes: &[u8]) -> Result<T, Error> {
-    borsh::from_slice(bytes).map_err(|e| module_error(e.to_string()))
+    borsh::from_slice(bytes).map_err(|e| module_error("codec", e.to_string()))
 }
 
 fn encode_record<T: BorshSerialize>(value: &T) -> Vec<u8> {
@@ -253,9 +259,10 @@ fn encode_record<T: BorshSerialize>(value: &T) -> Vec<u8> {
 }
 
 fn exhausted(numbering: &str) -> Error {
-    module_error(format!(
-        "the agent {numbering} is exhausted; this op cannot be recorded"
-    ))
+    module_error(
+        "agent_capacity",
+        format!("the agent {numbering} is exhausted; this op cannot be recorded"),
+    )
 }
 
 // ---- plans -------------------------------------------------------------------------
@@ -276,10 +283,13 @@ impl Plan {
     fn put(&mut self, key: Vec<u8>, value: Vec<u8>) -> Result<(), Error> {
         let fits_the_store = value.len() <= MAX_STORE_VALUE_BYTES;
         if !fits_the_store {
-            return Err(module_error(format!(
-                "a record of {} bytes exceeds the store's value bound of {MAX_STORE_VALUE_BYTES}",
-                value.len()
-            )));
+            return Err(module_error(
+                "record_too_large",
+                format!(
+                    "a record of {} bytes exceeds the store's value bound of {MAX_STORE_VALUE_BYTES}",
+                    value.len()
+                ),
+            ));
         }
         self.writes.push((key, Some(value)));
         Ok(())
@@ -628,10 +638,13 @@ fn decide_progress(
         let reserve = encode_record(&frame_too_large(&record, u64::MAX, u64::MAX));
         let reserve_fits = reserve.len() <= MAX_STORE_VALUE_BYTES;
         if !reserve_fits {
-            return Err(module_error(format!(
-                "the invocation's fixed record of {} bytes exceeds the store's value bound of {MAX_STORE_VALUE_BYTES}",
-                reserve.len()
-            )));
+            return Err(module_error(
+                "invocation_record_size",
+                format!(
+                    "the invocation's fixed record of {} bytes exceeds the store's value bound of {MAX_STORE_VALUE_BYTES}",
+                    reserve.len()
+                ),
+            ));
         }
         let at = count
             .checked_add(1)
@@ -711,16 +724,19 @@ fn delivered_item(cause: &Cause, source: &ModuleId) -> Result<ItemRef, Error> {
         ..
     } = cause
     else {
-        return Err(module_error(format!(
-            "items of {source} reach the agent only through the host's delivery lane, not under {cause:?}"
-        )));
+        return Err(module_error(
+            "agent_item_source",
+            format!(
+                "items of {source} reach the agent only through the host's delivery lane, not under {cause:?}"
+            ),
+        ));
     };
     let from_source = &item.source == source;
     if !from_source {
-        return Err(module_error(format!(
-            "a delivery of {} carried an item of {source}",
-            item.source
-        )));
+        return Err(module_error(
+            "delivery_source_mismatch",
+            format!("a delivery of {} carried an item of {source}", item.source),
+        ));
     }
     Ok(item.clone())
 }
@@ -732,15 +748,19 @@ fn require_completion_of(cause: &Cause, id: &CallId) -> Result<(), Error> {
         ..
     } = cause
     else {
-        return Err(module_error(format!(
-            "call completions reach the agent only through the host's completion lane, not under {cause:?}"
-        )));
+        return Err(module_error(
+            "call_completion_source",
+            format!(
+                "call completions reach the agent only through the host's completion lane, not under {cause:?}"
+            ),
+        ));
     };
     let is_this_call = completed == id;
     if !is_this_call {
-        return Err(module_error(format!(
-            "a completion of {completed:?} carried the outcome of {id:?}"
-        )));
+        return Err(module_error(
+            "completion_invocation_mismatch",
+            format!("a completion of {completed:?} carried the outcome of {id:?}"),
+        ));
     }
     Ok(())
 }
@@ -840,11 +860,18 @@ impl AgentModule {
         let seq: u64 = self
             .record(&invocation_entry_key(account, at))
             .await?
-            .ok_or_else(|| module_error("agent invocation index entry is missing"))?;
-        let record = self
-            .invocation(account, seq)
-            .await?
-            .ok_or_else(|| module_error(format!("agent index names missing invocation {seq}")))?;
+            .ok_or_else(|| {
+                module_error(
+                    "invocation_index_missing",
+                    "agent invocation index entry is missing",
+                )
+            })?;
+        let record = self.invocation(account, seq).await?.ok_or_else(|| {
+            module_error(
+                "agent_index_corrupt",
+                format!("agent index names missing invocation {seq}"),
+            )
+        })?;
         Ok((seq, record))
     }
 
@@ -870,11 +897,15 @@ impl AgentModule {
         let bytes = reads
             .read(&self.siblings.identity, &identity::encode_query(query))
             .await?;
-        match identity::decode_reply(&bytes).map_err(Error::Module)? {
+        match identity::decode_reply(&bytes).map_err(|sentence| Error::Module {
+            reason: "codec".into(),
+            sentence,
+        })? {
             IdentityReply::Account(view) => Ok(view),
-            other => Err(module_error(format!(
-                "identity answered {query:?} with {other:?}"
-            ))),
+            other => Err(module_error(
+                "identity_reply",
+                format!("identity answered {query:?} with {other:?}"),
+            )),
         }
     }
 
@@ -890,11 +921,15 @@ impl AgentModule {
             Principal::Key(key) => {
                 let query = IdentityQuery::OfKey { key: key.clone() };
                 let Some(view) = self.account_view(reads, &query).await? else {
-                    return Err(module_error("the submitting key belongs to no account"));
+                    return Err(module_error(
+                        "submitter_account_missing",
+                        "the submitting key belongs to no account",
+                    ));
                 };
                 match view.control {
                     Control::Keys => Ok(view.number),
                     Control::Program { .. } | Control::Revoked { .. } => Err(module_error(
+                        "identity_key_binding",
                         format!("identity resolved a key to keyless account {}", view.number),
                     )),
                 }
@@ -902,11 +937,14 @@ impl AgentModule {
             Principal::Program(account) => {
                 let is_no_account = *account == 0;
                 if is_no_account {
-                    return Err(module_error("account 0 acts for nobody"));
+                    return Err(module_error("zero_account", "account 0 acts for nobody"));
                 }
                 let query = IdentityQuery::Get { number: *account };
                 let Some(view) = self.account_view(reads, &query).await? else {
-                    return Err(module_error(format!("account {account} does not exist")));
+                    return Err(module_error(
+                        "account_missing",
+                        format!("account {account} does not exist"),
+                    ));
                 };
                 match view.control {
                     Control::Program {
@@ -916,13 +954,18 @@ impl AgentModule {
                     Control::Program {
                         standing: ProgramStanding::Suspended,
                         ..
-                    } => Err(module_error(format!("program {account} is suspended"))),
-                    Control::Revoked { .. } => {
-                        Err(module_error(format!("program {account} is revoked")))
-                    }
-                    Control::Keys => Err(module_error(format!(
-                        "account {account} is key-held, not a program"
-                    ))),
+                    } => Err(module_error(
+                        "program_suspended",
+                        format!("program {account} is suspended"),
+                    )),
+                    Control::Revoked { .. } => Err(module_error(
+                        "program_revoked",
+                        format!("program {account} is revoked"),
+                    )),
+                    Control::Keys => Err(module_error(
+                        "account_control",
+                        format!("account {account} is key-held, not a program"),
+                    )),
                 }
             }
         }
@@ -936,12 +979,16 @@ impl AgentModule {
     ) -> Result<Executed, Error> {
         let query = IdentityQuery::Get { number: account };
         let Some(view) = self.account_view(reads, &query).await? else {
-            return Err(module_error(format!("account {account} does not exist")));
+            return Err(module_error(
+                "account_missing",
+                format!("account {account} does not exist"),
+            ));
         };
         match view.control {
-            Control::Keys => Err(module_error(format!(
-                "account {account} is key-held, not a program"
-            ))),
+            Control::Keys => Err(module_error(
+                "account_control",
+                format!("account {account} is key-held, not a program"),
+            )),
             Control::Program {
                 controller,
                 executor,
@@ -950,10 +997,13 @@ impl AgentModule {
             } => {
                 let executed_here = executor == self.id;
                 if !executed_here {
-                    return Err(module_error(format!(
-                        "program {account} is executed by {executor}, not by {}",
-                        self.id
-                    )));
+                    return Err(module_error(
+                        "program_executor",
+                        format!(
+                            "program {account} is executed by {executor}, not by {}",
+                            self.id
+                        ),
+                    ));
                 }
                 Ok(Executed::Live {
                     controller,
@@ -1091,7 +1141,12 @@ impl AgentModule {
             .into_iter()
             .find(|(id, _)| id.as_str() == module)
             .map(|(_, source)| source)
-            .ok_or_else(|| module_error(format!("module {module} has no surface here")))
+            .ok_or_else(|| {
+                module_error(
+                    "module_surface",
+                    format!("module {module} has no surface here"),
+                )
+            })
     }
 
     fn source_of(&self, origin: &Origin) -> Result<Source, Error> {
@@ -1100,12 +1155,18 @@ impl AgentModule {
             Origin::External(key) => {
                 let unauthenticated = key.is_empty();
                 if unauthenticated {
-                    return Err(module_error("agent ops require a non-empty submitter id"));
+                    return Err(module_error(
+                        "submitter_id",
+                        "agent ops require a non-empty submitter id",
+                    ));
                 }
                 Ok(Source::Principal(Principal::Key(key.clone())))
             }
             Origin::Program(account) => Ok(Source::Principal(Principal::Program(*account))),
-            Origin::System => Err(module_error("the system submits nothing to the agent")),
+            Origin::System => Err(module_error(
+                "system_submitter",
+                "the system submits nothing to the agent",
+            )),
         }
     }
 
@@ -1115,7 +1176,10 @@ impl AgentModule {
         let input = match self.source_of(origin)? {
             Source::Identity => {
                 let event = identity::authenticate_event(origin, &self.siblings.identity, payload)
-                    .map_err(Error::Module)?;
+                    .map_err(|sentence| Error::Module {
+                        reason: "authentication".into(),
+                        sentence,
+                    })?;
                 match event {
                     IdentityEvent::ProgramCreated {
                         request,
@@ -1129,42 +1193,55 @@ impl AgentModule {
                 }
             }
             Source::Attribution => {
-                match attribution::decode_event(payload).map_err(Error::Module)? {
+                match attribution::decode_event(payload).map_err(|sentence| Error::Module {
+                    reason: "codec".into(),
+                    sentence,
+                })? {
                     AttributionEvent::Changed(change) => AgentInput::Changed {
                         change: Box::new(change),
                     },
                 }
             }
-            Source::Dispatch => match dispatch::decode_delivery(payload).map_err(Error::Module)? {
-                Delivery::Result(result) => AgentInput::Result { result },
-                Delivery::CallCompleted(completed) => AgentInput::CallCompleted { completed },
-            },
-            Source::Principal(by) => match decode_msg(payload).map_err(Error::Module)? {
-                AgentMsg::Provision {
-                    request_id,
-                    name,
-                    program,
-                } => AgentInput::Provision {
-                    by,
-                    request_id,
-                    name,
-                    program,
-                },
-                AgentMsg::Initialize {
-                    account,
-                    request_id,
-                } => AgentInput::Initialize {
-                    by,
-                    account,
-                    request_id,
-                },
-                AgentMsg::Replace { account, program } => AgentInput::Replace {
-                    by,
-                    account,
-                    program,
-                },
-                AgentMsg::Unbind { account } => AgentInput::Unbind { by, account },
-            },
+            Source::Dispatch => {
+                match dispatch::decode_delivery(payload).map_err(|sentence| Error::Module {
+                    reason: "codec".into(),
+                    sentence,
+                })? {
+                    Delivery::Result(result) => AgentInput::Result { result },
+                    Delivery::CallCompleted(completed) => AgentInput::CallCompleted { completed },
+                }
+            }
+            Source::Principal(by) => {
+                match decode_msg(payload).map_err(|sentence| Error::Module {
+                    reason: "codec".into(),
+                    sentence,
+                })? {
+                    AgentMsg::Provision {
+                        request_id,
+                        name,
+                        program,
+                    } => AgentInput::Provision {
+                        by,
+                        request_id,
+                        name,
+                        program,
+                    },
+                    AgentMsg::Initialize {
+                        account,
+                        request_id,
+                    } => AgentInput::Initialize {
+                        by,
+                        account,
+                        request_id,
+                    },
+                    AgentMsg::Replace { account, program } => AgentInput::Replace {
+                        by,
+                        account,
+                        program,
+                    },
+                    AgentMsg::Unbind { account } => AgentInput::Unbind { by, account },
+                }
+            }
         };
         Ok(input)
     }
@@ -1191,6 +1268,7 @@ impl AgentModule {
             let same_request = receipt.request_digest == request_digest;
             if !same_request {
                 return Err(module_error(
+                    "provision_request_conflict",
                     "provision request_id was used with different content",
                 ));
             }
@@ -1231,16 +1309,20 @@ impl AgentModule {
         controller: AccountNumber,
     ) -> Result<(), Error> {
         let Some(pending) = self.pending_provision(request).await? else {
-            return Err(module_error(format!(
-                "no provision request {request} is pending"
-            )));
+            return Err(module_error(
+                "provision_request_missing",
+                format!("no provision request {request} is pending"),
+            ));
         };
         let same_controller = pending.controller == controller;
         if !same_controller {
-            return Err(module_error(format!(
-                "provision request {request} was made for {}, not {controller}",
-                pending.controller
-            )));
+            return Err(module_error(
+                "provision_request_program",
+                format!(
+                    "provision request {request} was made for {}, not {controller}",
+                    pending.controller
+                ),
+            ));
         }
         let control = self.executed_account(&CtxReads(&*ctx), account).await?;
         let is_a_fresh_program_of_the_controller = matches!(
@@ -1252,14 +1334,20 @@ impl AgentModule {
             } if recorded == controller
         );
         if !is_a_fresh_program_of_the_controller {
-            return Err(module_error(format!(
-                "account {account} is not a fresh, active program of {controller} executed by {}",
-                self.id
-            )));
+            return Err(module_error(
+                "program_status",
+                format!(
+                    "account {account} is not a fresh, active program of {controller} executed by {}",
+                    self.id
+                ),
+            ));
         }
         let already_bound = self.binding(account).await?.is_some();
         if already_bound {
-            return Err(module_error(format!("account {account} is already bound")));
+            return Err(module_error(
+                "account_already_bound",
+                format!("account {account} is already bound"),
+            ));
         }
         let plan = decide_bind(request, account, pending)?;
         self.stage_plan(plan);
@@ -1285,11 +1373,15 @@ impl AgentModule {
             ..
         } = self.executed_account(&reads, account).await?
         else {
-            return Err(module_error("a revoked program cannot be initialized"));
+            return Err(module_error(
+                "revoked_program_initialization",
+                "a revoked program cannot be initialized",
+            ));
         };
         let is_controller = acting == controller;
         if !is_controller {
             return Err(module_error(
+                "program_controller",
                 "only the current controller initializes a program",
             ));
         }
@@ -1305,10 +1397,16 @@ impl AgentModule {
         }
         let is_active = standing == ProgramStanding::Active;
         if !is_active {
-            return Err(module_error("a suspended program cannot be initialized"));
+            return Err(module_error(
+                "suspended_program_initialization",
+                "a suspended program cannot be initialized",
+            ));
         }
         let Some(binding) = self.binding(account).await? else {
-            return Err(module_error("an unbound program cannot be initialized"));
+            return Err(module_error(
+                "unbound_program_initialization",
+                "an unbound program cannot be initialized",
+            ));
         };
         let receipt = InitializationReceipt {
             account,
@@ -1340,19 +1438,24 @@ impl AgentModule {
         let reads = CtxReads(&*ctx);
         let acting = self.acting_account(&reads, &by).await?;
         let Some(binding) = self.binding(account).await? else {
-            return Err(module_error(format!("account {account} is not bound")));
+            return Err(module_error(
+                "account_unbound",
+                format!("account {account} is not bound"),
+            ));
         };
         let Executed::Live { controller, .. } = self.executed_account(&reads, account).await?
         else {
-            return Err(module_error(format!(
-                "program {account} is revoked; it can only be unbound"
-            )));
+            return Err(module_error(
+                "program_revoked",
+                format!("program {account} is revoked; it can only be unbound"),
+            ));
         };
         let acting_is_controller = controller == acting;
         if !acting_is_controller {
-            return Err(module_error(format!(
-                "program {account} is controlled by {controller}, not by {acting}"
-            )));
+            return Err(module_error(
+                "program_controller",
+                format!("program {account} is controlled by {controller}, not by {acting}"),
+            ));
         }
         let plan = decide_replace(account, program, binding.revision)?;
         self.stage_plan(plan);
@@ -1379,7 +1482,10 @@ impl AgentModule {
         let acting = self.acting_account(&reads, &by).await?;
         let is_bound = self.binding(account).await?.is_some();
         if !is_bound {
-            return Err(module_error(format!("account {account} is not bound")));
+            return Err(module_error(
+                "account_unbound",
+                format!("account {account} is not bound"),
+            ));
         }
         let control = self.executed_account(&reads, account).await?;
         let controller = match &control {
@@ -1387,9 +1493,10 @@ impl AgentModule {
         };
         let acting_is_controller = controller == acting;
         if !acting_is_controller {
-            return Err(module_error(format!(
-                "program {account} is controlled by {controller}, not by {acting}"
-            )));
+            return Err(module_error(
+                "program_controller",
+                format!("program {account} is controlled by {controller}, not by {acting}"),
+            ));
         }
         self.stage_plan(decide_unbind(account));
         match control {
@@ -1472,20 +1579,23 @@ impl AgentModule {
     ) -> Result<(InvocationRecord, u64), Error> {
         let Correlation { account, seq } = *correlation;
         let Some(record) = self.invocation(account, seq).await? else {
-            return Err(module_error(format!(
-                "correlation names missing invocation {account}/{seq}"
-            )));
+            return Err(module_error(
+                "correlation_invocation_missing",
+                format!("correlation names missing invocation {account}/{seq}"),
+            ));
         };
         let Progress::Running { step, awaiting } = &record.progress else {
-            return Err(module_error(format!(
-                "invocation {account}/{seq} is not waiting on {expected:?}"
-            )));
+            return Err(module_error(
+                "invocation_wait_state",
+                format!("invocation {account}/{seq} is not waiting on {expected:?}"),
+            ));
         };
         let is_the_awaited = awaiting == expected;
         if !is_the_awaited {
-            return Err(module_error(format!(
-                "invocation {account}/{seq} waits on {awaiting:?}, not {expected:?}"
-            )));
+            return Err(module_error(
+                "invocation_wait_target",
+                format!("invocation {account}/{seq} waits on {awaiting:?}, not {expected:?}"),
+            ));
         }
         let step = *step;
         Ok((record, step))
@@ -1560,26 +1670,35 @@ impl AgentModule {
         require_completion_of(&ctx.env().cause, &completed.id)?;
         let queued_here = completed.id.requester == self.id;
         if !queued_here {
-            return Err(module_error(format!(
-                "call {:?} was queued by {}, not by {}",
-                completed.id, completed.id.requester, self.id
-            )));
+            return Err(module_error(
+                "call_origin_mismatch",
+                format!(
+                    "call {:?} was queued by {}, not by {}",
+                    completed.id, completed.id.requester, self.id
+                ),
+            ));
         }
         let Some(correlation) = self
             .correlation(&call_correlation_key(&completed.id.invocation))
             .await?
         else {
-            return Err(module_error(format!(
-                "no invocation of {} queued call {:?}",
-                self.id, completed.id
-            )));
+            return Err(module_error(
+                "queued_call_invocation_missing",
+                format!(
+                    "no invocation of {} queued call {:?}",
+                    self.id, completed.id
+                ),
+            ));
         };
         let same_account = correlation.account == completed.account;
         if !same_account {
-            return Err(module_error(format!(
-                "call {:?} belongs to account {}, not {}",
-                completed.id, correlation.account, completed.account
-            )));
+            return Err(module_error(
+                "call_account_mismatch",
+                format!(
+                    "call {:?} belongs to account {}, not {}",
+                    completed.id, correlation.account, completed.account
+                ),
+            ));
         }
         let (record, step) = self
             .waiting_on(&correlation, &Outstanding::Call(completed.id.clone()))
@@ -1602,10 +1721,13 @@ impl AgentModule {
             .correlation(&dispatch_correlation_key(&result.dispatch_id))
             .await?
         else {
-            return Err(module_error(format!(
-                "no invocation of {} ran dispatch {}",
-                self.id, result.dispatch_id
-            )));
+            return Err(module_error(
+                "dispatch_invocation_missing",
+                format!(
+                    "no invocation of {} ran dispatch {}",
+                    self.id, result.dispatch_id
+                ),
+            ));
         };
         let awaited = Outstanding::Dispatch {
             dispatch_id: result.dispatch_id.clone(),
@@ -1678,7 +1800,10 @@ impl AgentModule {
         let mut bindings = BTreeMap::new();
         for (name, fact) in &record.facts {
             let json = program::fact_json(fact).map_err(|fault| {
-                module_error(format!("stored fact {name} does not decode: {fault:?}"))
+                module_error(
+                    "codec",
+                    format!("stored fact {name} does not decode: {fault:?}"),
+                )
             })?;
             bindings.insert(name.clone(), json);
         }
@@ -1755,7 +1880,10 @@ impl Module for AgentModule {
     }
 
     async fn query(&self, req: &[u8]) -> Result<Vec<u8>, Error> {
-        let reply = match decode_query(req).map_err(Error::Module)? {
+        let reply = match decode_query(req).map_err(|sentence| Error::Module {
+            reason: "codec".into(),
+            sentence,
+        })? {
             AgentQuery::Initialization {
                 account,
                 request_id,
@@ -1973,7 +2101,10 @@ mod tests {
             })
             .on_query(IDENTITY, move |req| {
                 let reply =
-                    match identity::decode_query(req).map_err(Error::Module)? {
+                    match identity::decode_query(req).map_err(|sentence| Error::Module {
+                        reason: "codec".into(),
+                        sentence,
+                    })? {
                         IdentityQuery::Get { number } => IdentityReply::Account(
                             directory.borrow().accounts.get(&number).cloned(),
                         ),
@@ -1982,25 +2113,39 @@ mod tests {
                                 |number| directory.borrow().accounts.get(number).cloned(),
                             ))
                         }
-                        other => return Err(Error::Module(format!("unscripted {other:?}"))),
+                        other => {
+                            return Err(Error::Module {
+                                reason: "unscripted".into(),
+                                sentence: format!("unscripted {other:?}"),
+                            });
+                        }
                     };
                 Ok(identity::encode_reply(&reply))
             })
             .on_query(ATTRIBUTION, move |req| {
-                let reply = match attribution::decode_query(req).map_err(Error::Module)? {
-                    AttributionQuery::Changes { after, limit } => AttributionReply::Changes(
-                        changes
-                            .borrow()
-                            .range(after + 1..)
-                            .take(limit as usize)
-                            .map(|(seq, change)| ChangeEntry {
-                                at: *seq,
-                                change: change.clone(),
-                            })
-                            .collect(),
-                    ),
-                    other => return Err(Error::Module(format!("unscripted {other:?}"))),
-                };
+                let reply =
+                    match attribution::decode_query(req).map_err(|sentence| Error::Module {
+                        reason: "codec".into(),
+                        sentence,
+                    })? {
+                        AttributionQuery::Changes { after, limit } => AttributionReply::Changes(
+                            changes
+                                .borrow()
+                                .range(after + 1..)
+                                .take(limit as usize)
+                                .map(|(seq, change)| ChangeEntry {
+                                    at: *seq,
+                                    change: change.clone(),
+                                })
+                                .collect(),
+                        ),
+                        other => {
+                            return Err(Error::Module {
+                                reason: "unscripted".into(),
+                                sentence: format!("unscripted {other:?}"),
+                            });
+                        }
+                    };
                 Ok(attribution::encode_reply(&reply))
             })
             .on_query("chat", move |_| Ok(chat_reply.borrow().clone()))

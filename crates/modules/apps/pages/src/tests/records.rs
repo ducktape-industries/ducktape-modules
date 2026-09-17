@@ -63,7 +63,7 @@ async fn query(p: &Pages, query: PageQuery) -> PageReply {
     decode_reply(&p.query(&encode_query(&query)).await.unwrap()).unwrap()
 }
 
-async fn rejected(p: &mut Pages, message: &PageMsg, actor: Origin, needle: &str) {
+async fn rejected(p: &mut Pages, message: &PageMsg, actor: Origin, needle: &str) -> Error {
     let root = p.root();
     let before = p.staged.checkpoint();
     let error = p
@@ -80,6 +80,7 @@ async fn rejected(p: &mut Pages, message: &PageMsg, actor: Origin, needle: &str)
         "rejection must restore even uncommitted prior writes"
     );
     assert_eq!(p.root(), root);
+    error
 }
 
 #[test]
@@ -318,14 +319,14 @@ fn cas_and_late_batch_failure_preserve_prior_staged_records_and_all_metadata() {
         )
         .await
         .unwrap();
-        rejected(
+        let conflict = rejected(
             &mut p,
             &commit("stale", 0, vec![upsert("a", "stale")]),
             owner(),
             "revision conflict",
         )
         .await;
-        rejected(
+        let missing = rejected(
             &mut p,
             &commit(
                 "late-failure",
@@ -341,6 +342,16 @@ fn cas_and_late_batch_failure_preserve_prior_staged_records_and_all_metadata() {
             "record not found",
         )
         .await;
+        // a stale CAS and a missing record are distinct classes a caller can
+        // branch on, not one token for every record-write refusal.
+        assert!(
+            matches!(&conflict, Error::Module { reason, .. } if reason == "record_revision_conflict"),
+            "{conflict:?}"
+        );
+        assert!(
+            matches!(&missing, Error::Module { reason, .. } if reason == "record_not_found"),
+            "{missing:?}"
+        );
         assert_eq!(get_block(&p, "a-body").await.unwrap().text, "staged");
         assert_eq!(
             p.record_collection("board")

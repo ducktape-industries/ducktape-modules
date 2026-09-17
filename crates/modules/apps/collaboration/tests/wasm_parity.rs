@@ -77,7 +77,10 @@ impl Module for Stub {
         StateRoot::ZERO
     }
     async fn execute(&mut self, _ctx: &mut dyn Ctx, _msg: &Msg) -> Result<(), Error> {
-        Err(Error::Module("this stub only answers reads".into()))
+        Err(Error::Module {
+            reason: "read_only_stub".into(),
+            sentence: "this stub only answers reads".into(),
+        })
     }
     async fn query(&self, _req: &[u8]) -> Result<Vec<u8>, Error> {
         Ok(self.reply.clone())
@@ -123,7 +126,10 @@ impl Module for ChatStub {
         Ok(())
     }
     async fn query(&self, req: &[u8]) -> Result<Vec<u8>, Error> {
-        let reply = match chat::decode_query(req).map_err(Error::Module)? {
+        let reply = match chat::decode_query(req).map_err(|sentence| Error::Module {
+            reason: "codec".into(),
+            sentence,
+        })? {
             chat::ChatQuery::Access { channel_id, .. } => {
                 let open = channel_id == "c1";
                 chat::ChatReply::Access(chat::ChannelAccess {
@@ -159,7 +165,12 @@ impl Module for ChatStub {
                     },
                 }))
             }
-            other => return Err(Error::Module(format!("unserved {other:?}"))),
+            other => {
+                return Err(Error::Module {
+                    reason: "unserved".into(),
+                    sentence: format!("unserved {other:?}"),
+                });
+            }
         };
         Ok(chat::encode_reply(&reply))
     }
@@ -616,16 +627,29 @@ fn the_same_refusals_reject_identically_and_leave_no_trace() {
                 .submit_at(block(signer, height), op)
                 .await
                 .expect_err("wasm must reject");
-            let SubmitError::Rejected(Error::Module(n_msg)) = n_err else {
+            let SubmitError::Rejected(Error::Module {
+                reason: n_reason,
+                sentence: n_msg,
+            }) = n_err
+            else {
                 panic!("native rejection shape: {n_err:?}");
             };
-            let SubmitError::Rejected(Error::Module(w_msg)) = w_err else {
+            let SubmitError::Rejected(Error::Module {
+                reason: w_reason,
+                sentence: w_msg,
+            }) = w_err
+            else {
                 panic!("wasm rejection shape: {w_err:?}");
             };
-            assert!(n_msg.contains(needle), "native reason: {n_msg}");
+            assert!(n_msg.contains(needle), "native reason: {n_reason}: {n_msg}");
             assert!(
                 w_msg.contains(needle),
-                "wasm reason must carry the native reason: {w_msg}"
+                "wasm reason must carry the native reason: {w_reason}: {w_msg}"
+            );
+            assert_eq!(
+                (&w_reason, &w_msg),
+                (&n_reason, &n_msg),
+                "wasm refusal must equal the native refusal"
             );
             assert_eq!(native.root(), n_before, "native root moved on reject");
             assert_eq!(wasm.root(), w_before, "wasm root moved on reject");

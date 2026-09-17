@@ -43,7 +43,10 @@ impl Module for Target {
         self.staged = Some(count);
         let reject_after_staging = msg.payload == b"\"fail\"";
         if reject_after_staging {
-            return Err(Error::Module("scripted target failure".into()));
+            return Err(Error::Module {
+                reason: "scripted_failure".into(),
+                sentence: "scripted target failure".into(),
+            });
         }
         ctx.set_output(count.to_string().into_bytes());
         Ok(())
