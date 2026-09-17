@@ -37,6 +37,12 @@ attribution = { workspace = true }
 async-trait = { workspace = true }
 
 [dev-dependencies]
+# the NATIVE identity and attribution modules (the `identity`/`attribution`
+# names above are their wire crates): a test composes the real registry the
+# way a host does. They live in the platform repo, so they are named here
+# rather than through the workspace table.
+identity-module = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "identity" }
+attribution-module = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "attribution" }
 # the host-side qmdb store handle the chat test fixtures inject.
 statesync = { workspace = true }
 # the shared programmable `TestCtx` (dev-only) — serves the live chat probe.

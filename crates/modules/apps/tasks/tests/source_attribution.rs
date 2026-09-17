@@ -1,3 +1,8 @@
+// the NATIVE modules under their module names — the `identity`/`attribution`
+// crates in [dependencies] are the wire surfaces these re-export.
+use attribution_module as attribution;
+use identity_module as identity;
+
 use attribution::{AttributionMsg, AttributionQuery, AttributionReply, Reason, Source};
 use futures::executor::block_on;
 use host::{BlockContext, Host};

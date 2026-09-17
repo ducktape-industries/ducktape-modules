@@ -1,6 +1,15 @@
 #![allow(dead_code)]
 //! Real host regression: mentions reach a keyless model program, and external
 //! session credentials propose work whose actual target runs as that account.
+// the NATIVE modules under their module names — the same names in
+// [dependencies] are the wire surfaces these re-export.
+use agent_module as agent;
+use attribution_module as attribution;
+use capability_module as capability;
+use dispatch_module as dispatch;
+use identity_module as identity;
+use valset_module as valset;
+
 use host::{BlockContext, Host};
 use sdk::{Msg, Origin};
 use sdk_testkit::MemStore;

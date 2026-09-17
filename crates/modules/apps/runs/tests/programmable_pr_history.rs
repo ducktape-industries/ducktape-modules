@@ -1,5 +1,12 @@
 mod support;
 
+// the NATIVE modules under their module names — the same names in
+// [dependencies] are the wire surfaces these re-export.
+use agent_module as agent;
+use dispatch_module as dispatch;
+use governance_module as governance;
+use modules_module as modules;
+
 use futures::executor::block_on;
 use support::*;
 

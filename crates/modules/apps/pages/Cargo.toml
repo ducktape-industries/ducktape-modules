@@ -46,6 +46,10 @@ sha2 = { workspace = true }
 # native implementation the pages tests run against. It lives in the platform
 # repo, so it is named here rather than through the workspace table.
 files-module = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "files", features = ["native"] }
+# likewise the NATIVE identity and attribution modules (the `identity` /
+# `attribution` names in [dependencies] are their wire crates).
+identity-module = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "identity" }
+attribution-module = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "attribution" }
 host = { workspace = true }
 sdk-testkit = { workspace = true }
 tempfile = "3"

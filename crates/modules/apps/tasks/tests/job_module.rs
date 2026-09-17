@@ -10,8 +10,13 @@
 //! the injected store. these tests inject an in-memory store and assert
 //! BEHAVIOR; the cross-node round trip over the REAL store is `sync_round_trip`.
 
+// the NATIVE identity and attribution modules under their module names: the
+// crates `identity`/`attribution` name in [dependencies] are the wire surfaces,
+// and these re-export them, so one alias serves both the module and its wire.
+use attribution_module as attribution;
 use futures::executor::block_on;
 use host::{BlockContext, Host, SubmitError};
+use identity_module as identity;
 use sdk::{Ctx, Env, Error, MerkleStore as _, Module, ModuleId, Msg, Origin, StateRoot};
 use sdk_testkit::{MemStore, TestCtx};
 use tasks::{

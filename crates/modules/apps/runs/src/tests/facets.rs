@@ -1,4 +1,7 @@
 use super::*;
+// the NATIVE dispatch module — the `dispatch` crate in [dependencies] is the
+// wire surface it re-exports.
+use dispatch_module as dispatch;
 
 // ---- faceted delivery -------------------------------------------------------
 

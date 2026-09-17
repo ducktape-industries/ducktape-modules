@@ -1,4 +1,10 @@
 use super::*;
+// the NATIVE modules under their module names — the `identity`/`attribution`/
+// `files` crates in [dependencies] are the wire surfaces these re-export.
+use attribution_module as attribution;
+use files_module as files;
+use identity_module as identity;
+
 use commonware_runtime::Supervisor as _;
 use sdk::Origin;
 

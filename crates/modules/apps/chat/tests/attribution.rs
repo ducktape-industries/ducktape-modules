@@ -1,4 +1,9 @@
 //! Real source → attribution transactions, with stable identity and rollback.
+// the NATIVE modules under their module names — the `identity`/`attribution`
+// crates in [dependencies] are the wire surfaces these re-export.
+use attribution_module as attribution;
+use identity_module as identity;
+
 use attribution::{
     Actor, AttributionModule, AttributionMsg, AttributionQuery, AttributionReply, ObjectRef,
     ObjectRelations, Reason, Source,

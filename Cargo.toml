@@ -106,9 +106,10 @@ tasks-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", bran
 # ---------------------------------------------------------------------------
 host = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "host" }
 statesync = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "statesync" }
-# the run envelope's magic + headless composer, and the node-side work spec.
-run-envelope = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "run-envelope" }
-node-work = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "node-work" }
+# the run envelope's magic + headless composer, and the node-side work spec —
+# both leaf libraries in ducktape-sdk, not the platform.
+run-envelope = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "run-envelope" }
+node-work = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "node-work" }
 
 # ---------------------------------------------------------------------------
 # internal — the reference modules in this repo
