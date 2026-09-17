@@ -89,10 +89,10 @@ async fn owner_count(staged: &StagedStore, owner: &Party) -> Result<u64, Error> 
     let Some(bytes) = staged.get(&owner_count_key(owner)).await? else {
         return Ok(0);
     };
-    let raw: [u8; 8] = bytes
-        .as_slice()
-        .try_into()
-        .map_err(|_| Error::Module("owner task census record is not a u64".into()))?;
+    let raw: [u8; 8] = bytes.as_slice().try_into().map_err(|_| Error::Module {
+        reason: "owner_task_census_codec".into(),
+        sentence: "owner task census record is not a u64".into(),
+    })?;
     Ok(u64::from_le_bytes(raw))
 }
 
@@ -113,7 +113,10 @@ pub(crate) async fn load(staged: &StagedStore, task_id: &str) -> Result<Option<T
     };
     sdk::wire::decode(&bytes)
         .map(Some)
-        .map_err(|e| Error::Module(format!("task record decode: {e}")))
+        .map_err(|e| Error::Module {
+            reason: "codec".into(),
+            sentence: format!("task record decode: {e}"),
+        })
 }
 
 /// read the enumeration index through the staged overlay. absent reads as the
@@ -123,7 +126,10 @@ async fn load_index(staged: &StagedStore) -> Result<BTreeSet<String>, Error> {
     let Some(bytes) = staged.get(INDEX_KEY).await? else {
         return Ok(BTreeSet::new());
     };
-    sdk::wire::decode(&bytes).map_err(|e| Error::Module(format!("task index decode: {e}")))
+    sdk::wire::decode(&bytes).map_err(|e| Error::Module {
+        reason: "codec".into(),
+        sentence: format!("task index decode: {e}"),
+    })
 }
 
 /// the task's owner: the named account when one is given, else the actor.
@@ -134,7 +140,10 @@ fn resolve_owner(actor: &Party, override_owner: Option<u64>) -> Result<Party, Er
         return Ok(actor.clone());
     };
     if account == 0 {
-        return Err(Error::Module("task owner account must be nonzero".into()));
+        return Err(Error::Module {
+            reason: "task_owner_account".into(),
+            sentence: "task owner account must be nonzero".into(),
+        });
     }
     Ok(Party::Account(account))
 }
@@ -150,21 +159,26 @@ async fn create(
     sdk::validate_id("task_id", &task_id, MAX_TASK_ID)?;
     require_non_empty("title", &title)?;
     if load(staged, &task_id).await?.is_some() {
-        return Err(Error::Module(format!("task already exists: {task_id}")));
+        return Err(Error::Module {
+            reason: "task_already_exists".into(),
+            sentence: format!("task already exists: {task_id}"),
+        });
     }
 
     let mut index = load_index(staged).await?;
     if index.len() >= MAX_TASKS {
-        return Err(Error::Module(format!(
-            "task board full: {MAX_TASKS} live tasks"
-        )));
+        return Err(Error::Module {
+            reason: "board_full".into(),
+            sentence: format!("task board full: {MAX_TASKS} live tasks"),
+        });
     }
     let owner = resolve_owner(actor, owner_override)?;
     let owner_live = owner_count(staged, &owner).await?;
     if owner_live >= MAX_OPEN_TASKS_PER_OWNER as u64 {
-        return Err(Error::Module(format!(
-            "task owner at cap: {MAX_OPEN_TASKS_PER_OWNER} open tasks"
-        )));
+        return Err(Error::Module {
+            reason: "owner_cap_reached".into(),
+            sentence: format!("task owner at cap: {MAX_OPEN_TASKS_PER_OWNER} open tasks"),
+        });
     }
 
     let task = Task {
@@ -199,9 +213,10 @@ async fn update_status(
     consensus_time: u64,
 ) -> Result<(), Error> {
     sdk::validate_id("task_id", &task_id, MAX_TASK_ID)?;
-    let mut task = load(staged, &task_id)
-        .await?
-        .ok_or_else(|| Error::Module(format!("task not found: {task_id}")))?;
+    let mut task = load(staged, &task_id).await?.ok_or_else(|| Error::Module {
+        reason: "task_not_found".into(),
+        sentence: format!("task not found: {task_id}"),
+    })?;
     // an accepted no-op: it stages NOTHING, so the block's root holds.
     if task.status == status {
         return Ok(());
@@ -222,14 +237,16 @@ async fn update_status(
 /// `prune` shape; the slot freed is the record owner's, whoever deletes.
 async fn delete(staged: &mut StagedStore, task_id: String) -> Result<(), Error> {
     sdk::validate_id("task_id", &task_id, MAX_TASK_ID)?;
-    let task = load(staged, &task_id)
-        .await?
-        .ok_or_else(|| Error::Module(format!("task not found: {task_id}")))?;
+    let task = load(staged, &task_id).await?.ok_or_else(|| Error::Module {
+        reason: "task_not_found".into(),
+        sentence: format!("task not found: {task_id}"),
+    })?;
 
     let owner_live = owner_count(staged, &task.owner).await?;
-    let remaining = owner_live
-        .checked_sub(1)
-        .ok_or_else(|| Error::Module("task census underflow".into()))?;
+    let remaining = owner_live.checked_sub(1).ok_or_else(|| Error::Module {
+        reason: "task_census_underflow".into(),
+        sentence: "task census underflow".into(),
+    })?;
     let mut index = load_index(staged).await?;
     index.remove(&task_id);
     if index.is_empty() {
@@ -296,9 +313,10 @@ async fn list(staged: &StagedStore, limit: u64, after: Option<String>) -> Result
     };
     let mut tasks = Vec::with_capacity(limit);
     for task_id in index.range::<str, _>((start, Bound::Unbounded)).take(limit) {
-        let task = load(staged, task_id)
-            .await?
-            .ok_or_else(|| Error::Module(format!("task index names a missing task: {task_id}")))?;
+        let task = load(staged, task_id).await?.ok_or_else(|| Error::Module {
+            reason: "task_index_names_a_missing_task".into(),
+            sentence: format!("task index names a missing task: {task_id}"),
+        })?;
         tasks.push(task);
     }
     Ok(TaskReply::Tasks(tasks))
@@ -345,10 +363,8 @@ mod tests {
             let refused = create_as(&mut staged, &alice(), "one-more", "over")
                 .await
                 .expect_err("a full board refuses");
-            assert!(
-                refused.to_string().contains("task board full"),
-                "the refusal names the cap: {refused}"
-            );
+            assert!(matches!(refused, Error::Module { reason, sentence }
+                if reason == "board_full" && sentence.contains("task board full")));
             // the refusal staged NOTHING: the would-be record is absent.
             assert!(load(&staged, "one-more").await.unwrap().is_none());
         });
@@ -471,10 +487,8 @@ mod tests {
             let refused = create_as(&mut staged, &alice(), "a-over", "one too many")
                 .await
                 .expect_err("alice is at her per-owner cap");
-            assert!(
-                refused.to_string().contains("task owner at cap"),
-                "unexpected error: {refused}"
-            );
+            assert!(matches!(refused, Error::Module { reason, sentence }
+                if reason == "owner_cap_reached" && sentence.contains("task owner at cap")));
 
             // a different owner is unaffected.
             create_as(&mut staged, &mallory(), "m1", "not alice's problem")

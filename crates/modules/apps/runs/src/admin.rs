@@ -20,8 +20,14 @@ impl RunsModule {
         }
         match self.turn_taken(ctx, &dispatch_id).await {
             Ok(true) => Ok(None),
-            Ok(false) => Err(Error::Module(format!("unknown run: {run_id}"))),
-            Err(reason) => Err(Error::Module(reason)),
+            Ok(false) => Err(Error::Module {
+                reason: "unknown_run".into(),
+                sentence: format!("unknown run: {run_id}"),
+            }),
+            Err(sentence) => Err(Error::Module {
+                reason: "dispatch_turn".into(),
+                sentence,
+            }),
         }
     }
 
@@ -31,7 +37,10 @@ impl RunsModule {
         msg: &Msg,
         budget: &SiblingReadBudget,
     ) -> Result<(), Error> {
-        match decode_msg(&msg.payload).map_err(Error::Module)? {
+        match decode_msg(&msg.payload).map_err(|sentence| Error::Module {
+            reason: "codec".into(),
+            sentence,
+        })? {
             RunsMsg::ConfigureConversation {
                 conversation_id,
                 agent_id,
@@ -202,10 +211,10 @@ impl RunsModule {
             }
             RunsMsg::EnableJobWorker { enabled } => {
                 Self::admin_origin(&ctx.env().origin)?;
-                let jobs = self
-                    .jobs
-                    .clone()
-                    .ok_or_else(|| Error::Module("no jobs module is configured".into()))?;
+                let jobs = self.jobs.clone().ok_or_else(|| Error::Module {
+                    reason: "no_jobs_module_is_configured".into(),
+                    sentence: "no jobs module is configured".into(),
+                })?;
                 let payload = if enabled {
                     jobs_encode_msg(&JobsMsg::RegisterWorker {})
                 } else {
@@ -229,9 +238,10 @@ impl RunsModule {
                 // no-ops.
                 let requester = match &ctx.env().origin {
                     Origin::External(key) if key.is_empty() => {
-                        return Err(Error::Module(
-                            "run requests require a non-empty submitter id".into(),
-                        ));
+                        return Err(Error::Module {
+                            reason: "run_submitter".into(),
+                            sentence: "run requests require a non-empty submitter id".into(),
+                        });
                     }
                     other => canonical_origin(other)?,
                 };
@@ -241,19 +251,32 @@ impl RunsModule {
                     .await?
                     .is_some_and(|state| state.agent_id == agent_id);
                 if resident {
-                    return Err(Error::Module(
-                        "resident channels use conversation intake, not one-shot RequestRun".into(),
-                    ));
+                    return Err(Error::Module {
+                        reason: "resident_channel_intake".into(),
+                        sentence:
+                            "resident channels use conversation intake, not one-shot RequestRun"
+                                .into(),
+                    });
                 }
                 // the requester's per-run skills, confined to the library by
                 // construction (names, not paths) — see `library_skills`.
-                let extra = envelope::library_skills(&skills).map_err(Error::Module)?;
-                let Some(agent) = self
-                    .agent_record(&*ctx, &agent_id)
-                    .await
-                    .map_err(Error::Module)?
+                let extra =
+                    envelope::library_skills(&skills).map_err(|sentence| Error::Module {
+                        reason: "library_skills".into(),
+                        sentence,
+                    })?;
+                let Some(agent) =
+                    self.agent_record(&*ctx, &agent_id)
+                        .await
+                        .map_err(|sentence| Error::Module {
+                            reason: "library_skills".into(),
+                            sentence,
+                        })?
                 else {
-                    return Err(Error::Module(format!("unknown agent: {agent_id}")));
+                    return Err(Error::Module {
+                        reason: "unknown_agent".into(),
+                        sentence: format!("unknown agent: {agent_id}"),
+                    });
                 };
                 let program_is_requesting_its_model =
                     ctx.env().origin == Origin::Program(agent.account);
@@ -261,9 +284,10 @@ impl RunsModule {
                     let item = self
                         .staged_next_action_item
                         .unwrap_or(self.next_action_item);
-                    let next = item
-                        .checked_add(1)
-                        .ok_or_else(|| Error::Module("run request counter exhausted".into()))?;
+                    let next = item.checked_add(1).ok_or_else(|| Error::Module {
+                        reason: "run_request_counter_exhausted".into(),
+                        sentence: "run request counter exhausted".into(),
+                    })?;
                     let actor = match &ctx.env().origin {
                         Origin::Program(account) => super::Actor::Account(*account),
                         Origin::External(key) => {
@@ -275,7 +299,12 @@ impl RunsModule {
                                     }),
                                 )
                                 .await?;
-                            match identity::decode_reply(&bytes).map_err(Error::Module)? {
+                            match identity::decode_reply(&bytes).map_err(|sentence| {
+                                Error::Module {
+                                    reason: "codec".into(),
+                                    sentence,
+                                }
+                            })? {
                                 identity::IdentityReply::Account(Some(account)) => {
                                     super::Actor::Account(account.number)
                                 }
@@ -283,9 +312,10 @@ impl RunsModule {
                                     super::Actor::Key(key.clone())
                                 }
                                 _ => {
-                                    return Err(Error::Module(
-                                        "unexpected requesting identity reply".into(),
-                                    ));
+                                    return Err(Error::Module {
+                                        reason: "unexpected_identity_reply".into(),
+                                        sentence: "unexpected requesting identity reply".into(),
+                                    });
                                 }
                             }
                         }
@@ -323,12 +353,18 @@ impl RunsModule {
                 if self
                     .turn_taken(&*ctx, &dispatch_id_for(&run_id))
                     .await
-                    .map_err(Error::Module)?
+                    .map_err(|sentence| Error::Module {
+                        reason: "dispatch_turn".into(),
+                        sentence,
+                    })?
                 {
                     return Ok(());
                 }
                 if agent.status != ModelStatus::Active {
-                    return Err(Error::Module(format!("agent is paused: {agent_id}")));
+                    return Err(Error::Module {
+                        reason: "agent_is_paused".into(),
+                        sentence: format!("agent is paused: {agent_id}"),
+                    });
                 }
                 // unlike the engagement intake, an explicit request REJECTS
                 // on a failed preparation: this is the root op of its own
@@ -344,7 +380,10 @@ impl RunsModule {
                         budget,
                     )
                     .await
-                    .map_err(Error::Module)?;
+                    .map_err(|sentence| Error::Module {
+                        reason: "execution_budget".into(),
+                        sentence,
+                    })?;
                 self.stage_dispatch_run(
                     ctx, &run_id, agent_id, channel_id, anchor_seq, requester, prepared, demands,
                 );

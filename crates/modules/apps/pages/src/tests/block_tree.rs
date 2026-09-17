@@ -363,7 +363,7 @@ fn page_cursor_preserves_preorder_and_stops_at_nested_pages() {
             }))
             .await
             .unwrap_err();
-        assert!(matches!(err, Error::Module(message) if message == "invalid page cursor"));
+        assert!(matches!(err, Error::Module { sentence: message, .. } if message == "invalid page cursor"));
         let reserved = p
             .query(&encode_query(&PageQuery::GetPage {
                 page_id: "p1".into(),
@@ -372,7 +372,7 @@ fn page_cursor_preserves_preorder_and_stops_at_nested_pages() {
             }))
             .await
             .unwrap_err();
-        assert!(matches!(reserved, Error::Module(message) if message == "invalid page cursor"));
+        assert!(matches!(reserved, Error::Module { sentence: message, .. } if message == "invalid page cursor"));
     });
 }
 

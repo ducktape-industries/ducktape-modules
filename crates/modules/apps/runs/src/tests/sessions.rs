@@ -303,7 +303,7 @@ fn call_ids_are_idempotent_and_completed_calls_release_the_root_slot() {
     )
     .unwrap_err();
     assert!(
-        matches!(err, Error::Module(ref reason) if reason.contains("concurrency limit")),
+        matches!(err, Error::Module { sentence: ref reason, .. } if reason.contains("concurrency limit")),
         "{err:?}"
     );
 
@@ -448,7 +448,7 @@ fn the_lease_holder_binds_a_session_and_a_stranger_cannot() {
         let mut ctx = session_ctx(&registry, &run_id, origin);
         let err = exec(&mut m, &mut ctx, &open(&run_id, &SESSION_KEY)).unwrap_err();
         assert!(
-            matches!(&err, Error::Module(reason) if reason.contains("lease") || reason.contains("executing a run")),
+            matches!(&err, Error::Module { sentence: reason, .. } if reason.contains("lease") || reason.contains("executing a run")),
             "{what} must not open a session: {err:?}"
         );
         assert!(sessions(&m).is_empty(), "{what} staged nothing");
@@ -491,7 +491,7 @@ fn opening_is_refused_when_the_run_has_no_dispatch_record() {
     let mut ctx = leaseless_ctx(&registry, Origin::External(ASSIGNEE.to_vec()));
     let err = exec(&mut m, &mut ctx, &open(&run_id, &SESSION_KEY)).unwrap_err();
     assert!(
-        matches!(&err, Error::Module(reason) if reason.contains("dispatch record")),
+        matches!(&err, Error::Module { sentence: reason, .. } if reason.contains("dispatch record")),
         "a run with no dispatch record cannot open a session: {err:?}"
     );
     assert!(sessions(&m).is_empty(), "a refused open stages nothing");
@@ -505,7 +505,7 @@ fn opening_is_refused_when_the_dispatch_is_already_delivered() {
         .with_taken_dispatch(&dispatch_id_for(&run_id));
     let err = exec(&mut m, &mut ctx, &open(&run_id, &SESSION_KEY)).unwrap_err();
     assert!(
-        matches!(&err, Error::Module(reason) if reason.contains("lease")),
+        matches!(&err, Error::Module { sentence: reason, .. } if reason.contains("lease")),
         "a delivered run holds no execution lease: {err:?}"
     );
     assert!(sessions(&m).is_empty(), "a refused open stages nothing");
@@ -520,7 +520,7 @@ fn opening_is_refused_when_the_saga_holds_no_lease() {
         .with_awaiting_but_no_lease(&run_id);
     let err = exec(&mut m, &mut ctx, &open(&run_id, &SESSION_KEY)).unwrap_err();
     assert!(
-        matches!(&err, Error::Module(reason) if reason.contains("lease")),
+        matches!(&err, Error::Module { sentence: reason, .. } if reason.contains("lease")),
         "an unassigned saga holds no execution lease: {err:?}"
     );
     assert!(sessions(&m).is_empty(), "a refused open stages nothing");
@@ -533,7 +533,7 @@ fn a_session_key_of_the_wrong_length_is_refused() {
         let mut ctx = session_ctx(&registry, &run_id, Origin::External(ASSIGNEE.to_vec()));
         let err = exec(&mut m, &mut ctx, &open(&run_id, &key)).unwrap_err();
         assert!(
-            matches!(&err, Error::Module(reason) if reason.contains("32 bytes")),
+            matches!(&err, Error::Module { sentence: reason, .. } if reason.contains("32 bytes")),
             "a {}-byte key must be refused: {err:?}",
             key.len()
         );
@@ -561,7 +561,7 @@ fn opening_on_a_settled_or_unknown_run_is_refused() {
         let mut ctx = session_ctx(&registry, target, Origin::External(ASSIGNEE.to_vec()));
         let err = exec(&mut m, &mut ctx, &open(target, &SESSION_KEY)).unwrap_err();
         assert!(
-            matches!(&err, Error::Module(reason) if reason.contains("not in flight")),
+            matches!(&err, Error::Module { sentence: reason, .. } if reason.contains("not in flight")),
             "{what} must be refused: {err:?}"
         );
         assert!(sessions(&m).is_empty());
@@ -577,7 +577,7 @@ fn a_second_open_cannot_replace_a_live_session() {
     let mut ctx = session_ctx(&registry, &run_id, Origin::External(ASSIGNEE.to_vec()));
     let err = exec(&mut m, &mut ctx, &open(&run_id, &[0xee; 32])).unwrap_err();
     assert!(
-        matches!(&err, Error::Module(reason) if reason.contains("already has an open agent session")),
+        matches!(&err, Error::Module { sentence: reason, .. } if reason.contains("already has an open agent session")),
         "{err:?}"
     );
     assert_eq!(
@@ -605,7 +605,7 @@ fn only_the_bound_session_key_may_act() {
         let mut ctx = session_ctx(&registry, &run_id, origin);
         let err = exec(&mut m, &mut ctx, &act(&run_id, comment("b-p"))).unwrap_err();
         assert!(
-            matches!(&err, Error::Module(reason) if reason.contains("session key")),
+            matches!(&err, Error::Module { sentence: reason, .. } if reason.contains("session key")),
             "{what} must not act through the session: {err:?}"
         );
         assert!(ctx.page_msgs().is_empty(), "{what} emitted nothing");
@@ -701,7 +701,7 @@ fn the_action_budget_bounds_a_session() {
     let mut ctx = session_ctx(&registry, &run_id, Origin::External(SESSION_KEY.to_vec()));
     let err = exec(&mut m, &mut ctx, &act(&run_id, comment("b-p"))).unwrap_err();
     assert!(
-        matches!(&err, Error::Module(reason) if reason.contains("spent its budget")),
+        matches!(&err, Error::Module { sentence: reason, .. } if reason.contains("spent its budget")),
         "{err:?}"
     );
     assert!(ctx.page_msgs().is_empty());
@@ -816,7 +816,7 @@ fn post_message_probes_everything_chat_would_reject() {
         let mut ctx = session_ctx(&registry, &run_id, Origin::External(SESSION_KEY.to_vec()));
         let err = exec(&mut m, &mut ctx, &act(&run_id, action)).unwrap_err();
         assert!(
-            matches!(&err, Error::Module(reason) if reason.contains(needle)),
+            matches!(&err, Error::Module { sentence: reason, .. } if reason.contains(needle)),
             "expected {needle:?}, got {err:?}"
         );
         assert!(ctx.chat_msgs().is_empty(), "nothing is emitted");
@@ -840,7 +840,7 @@ fn post_message_probes_everything_chat_would_reject() {
         );
     let err = exec(&mut m, &mut ctx, &act(&run_id, post("general", "hi", None))).unwrap_err();
     assert!(
-        matches!(&err, Error::Module(reason) if reason.contains("already taken")),
+        matches!(&err, Error::Module { sentence: reason, .. } if reason.contains("already taken")),
         "{err:?}"
     );
     assert!(ctx.chat_msgs().is_empty());
@@ -879,7 +879,7 @@ fn the_session_prunes_on_every_settle_path() {
         let mut ctx = session_ctx(&registry, &run_id, Origin::External(SESSION_KEY.to_vec()));
         let err = exec(&mut m, &mut ctx, &act(&run_id, comment("b-p"))).unwrap_err();
         assert!(
-            matches!(&err, Error::Module(reason) if reason.contains("run is not in flight")),
+            matches!(&err, Error::Module { sentence: reason, .. } if reason.contains("run is not in flight")),
             "{what}: a settled run's key must not act: {err:?}"
         );
     }
@@ -957,7 +957,7 @@ fn a_forged_snapshot_session_is_rejected_by_the_decoder() {
     );
     let err = module().install(&orphaned, StateRoot::ZERO).unwrap_err();
     assert!(
-        matches!(&err, Error::Module(reason) if reason.contains("names no in-flight run")),
+        matches!(&err, Error::Module { sentence: reason, .. } if reason.contains("names no in-flight run")),
         "{err:?}"
     );
 
@@ -983,7 +983,7 @@ fn a_forged_snapshot_session_is_rejected_by_the_decoder() {
     );
     let err = module().install(&forged, StateRoot::ZERO).unwrap_err();
     assert!(
-        matches!(&err, Error::Module(reason) if reason.contains("32-byte ed25519 key")),
+        matches!(&err, Error::Module { sentence: reason, .. } if reason.contains("32-byte ed25519 key")),
         "{err:?}"
     );
 }
@@ -1011,7 +1011,7 @@ fn a_moved_lease_strands_the_old_session_and_lets_the_new_holder_open_one() {
     let mut ctx = reassigned(Origin::External(SESSION_KEY.to_vec()));
     let err = exec(&mut m, &mut ctx, &act(&run_id, post.clone())).unwrap_err();
     assert!(
-        matches!(&err, Error::Module(reason) if reason.contains("lease has moved")),
+        matches!(&err, Error::Module { sentence: reason, .. } if reason.contains("lease has moved")),
         "{err:?}"
     );
     assert!(ctx.chat_msgs().is_empty(), "{:?}", ctx.chat_msgs());
@@ -1045,7 +1045,7 @@ fn a_moved_lease_stops_the_old_session_from_delegating() {
     )
     .unwrap_err();
     assert!(
-        matches!(&err, Error::Module(reason) if reason.contains("lease has moved")),
+        matches!(&err, Error::Module { sentence: reason, .. } if reason.contains("lease has moved")),
         "{err:?}"
     );
     assert!(ctx.dispatch_msgs().is_empty());
@@ -1140,7 +1140,7 @@ fn a_reaction_needs_a_chat_source_and_a_bounded_emoji() {
         let mut ctx = session_ctx(&registry, &run, Origin::External(SESSION_KEY.to_vec()));
         let error = exec(&mut m, &mut ctx, &act(&run, react(emoji))).unwrap_err();
         assert!(
-            matches!(error, Error::Module(ref reason) if reason.contains(expected)),
+            matches!(error, Error::Module { sentence: ref reason, .. } if reason.contains(expected)),
             "{error:?}"
         );
         assert_eq!(sessions(&m)[0].actions, 0);
@@ -1153,7 +1153,7 @@ fn a_reaction_needs_a_chat_source_and_a_bounded_emoji() {
         let mut ctx = session_ctx(&registry, &run, Origin::External(SESSION_KEY.to_vec()));
         let error = exec(&mut m, &mut ctx, &act(&run, react("👀"))).unwrap_err();
         assert!(
-            matches!(error, Error::Module(ref reason) if reason.contains("no reply destination")),
+            matches!(error, Error::Module { sentence: ref reason, .. } if reason.contains("no reply destination")),
             "{error:?}"
         );
     }
@@ -1166,7 +1166,7 @@ fn live_reply_requires_a_nonempty_chat_response() {
         let mut ctx = session_ctx(&registry, &run, Origin::External(SESSION_KEY.to_vec()));
         let error = exec(&mut m, &mut ctx, &act(&run, reply("  "))).unwrap_err();
         assert!(
-            matches!(error, Error::Module(ref reason) if reason.contains("non-empty text")),
+            matches!(error, Error::Module { sentence: ref reason, .. } if reason.contains("non-empty text")),
             "{error:?}"
         );
         assert_eq!(sessions(&m)[0].actions, 0);
@@ -1179,7 +1179,7 @@ fn live_reply_requires_a_nonempty_chat_response() {
         let mut ctx = session_ctx(&registry, &run, Origin::External(SESSION_KEY.to_vec()));
         let error = exec(&mut m, &mut ctx, &act(&run, reply("hello"))).unwrap_err();
         assert!(
-            matches!(error, Error::Module(ref reason) if reason.contains("no reply destination")),
+            matches!(error, Error::Module { sentence: ref reason, .. } if reason.contains("no reply destination")),
             "{error:?}"
         );
     }
@@ -1228,7 +1228,7 @@ fn same_node_retries_rotate_keys_and_preserve_the_run_budget_and_snapshot() {
     let mut ctx = retried(Origin::External(CHILD_SESSION_KEY.to_vec()));
     let error = exec(&mut joiner, &mut ctx, &act(&run, comment("b-p"))).unwrap_err();
     assert!(
-        matches!(error, Error::Module(ref reason) if reason.contains("spent its budget")),
+        matches!(error, Error::Module { sentence: ref reason, .. } if reason.contains("spent its budget")),
         "{error:?}"
     );
     assert_eq!(sessions(&joiner)[0].actions, MAX_ACTIONS_PER_SESSION);
@@ -1260,7 +1260,7 @@ fn terminal_saga_fences_the_key_before_dispatch_records_completion() {
         );
     let error = exec(&mut m, &mut ctx, &act(&run, reply("too late"))).unwrap_err();
     assert!(
-        matches!(error, Error::Module(ref reason) if reason.contains("no execution lease")),
+        matches!(error, Error::Module { sentence: ref reason, .. } if reason.contains("no execution lease")),
         "{error:?}"
     );
     ctx.env.origin = Origin::External(ASSIGNEE.to_vec());

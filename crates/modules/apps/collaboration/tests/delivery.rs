@@ -706,7 +706,7 @@ fn one_sender_cannot_fill_another_mailbox_past_its_quota() {
         .await
         .unwrap_err();
         assert!(
-            format!("{refusal:?}").contains(collaboration::QUEUE_FULL),
+            matches!(&refusal, sdk::Error::Module { reason, .. } if reason == collaboration::QUEUE_FULL),
             "{refusal:?}"
         );
     });

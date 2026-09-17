@@ -215,9 +215,10 @@ pub(super) fn contains_run_separator(value: &str) -> bool {
 
 pub(super) fn reject_run_separator(field: &str, value: &str) -> Result<(), Error> {
     if contains_run_separator(value) {
-        return Err(Error::Module(format!(
-            "{field} must not contain the reserved unit separator"
-        )));
+        return Err(Error::Module {
+            reason: "reserved_separator".into(),
+            sentence: format!("{field} must not contain the reserved unit separator"),
+        });
     }
     Ok(())
 }

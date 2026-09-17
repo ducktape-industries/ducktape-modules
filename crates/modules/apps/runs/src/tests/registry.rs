@@ -105,7 +105,7 @@ fn the_model_recipe_update_may_error_to_abort_the_registration_block() {
             },
         )
         .unwrap_err();
-    assert!(matches!(err, Error::Module(reason) if reason.contains("recipe id")));
+    assert!(matches!(err, Error::Module { sentence: reason, .. } if reason.contains("recipe id")));
 
     // malformed bytes from the registry origin error the same way — the
     // registry is genesis-trusted code, so this is a bug, not traffic.
@@ -119,5 +119,5 @@ fn the_model_recipe_update_may_error_to_abort_the_registration_block() {
         },
     )
     .unwrap_err();
-    assert!(matches!(err, Error::Module(_)));
+    assert!(matches!(err, Error::Module { .. }));
 }

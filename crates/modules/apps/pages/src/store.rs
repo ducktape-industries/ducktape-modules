@@ -47,9 +47,12 @@ impl Pages {
     /// overlay. a decode failure is corruption, surfaced as an error.
     pub(super) async fn load_block(&self, block_id: &str) -> Result<Option<Block>, Error> {
         match self.get(block_id.as_bytes()).await {
-            Some(b) => Ok(Some(
-                serde_json::from_slice(&b).map_err(|e| Error::Module(e.to_string()))?,
-            )),
+            Some(b) => Ok(Some(serde_json::from_slice(&b).map_err(|e| {
+                Error::Module {
+                    reason: "codec".into(),
+                    sentence: e.to_string(),
+                }
+            })?)),
             None => Ok(None),
         }
     }
@@ -188,7 +191,10 @@ impl Pages {
     /// bytes are canonical and every validator commits the same index root.
     pub(super) async fn load_index(&self) -> Result<BTreeMap<String, Option<String>>, Error> {
         match self.get(PAGE_INDEX_KEY.as_bytes()).await {
-            Some(b) => serde_json::from_slice(&b).map_err(|e| Error::Module(e.to_string())),
+            Some(b) => serde_json::from_slice(&b).map_err(|e| Error::Module {
+                reason: "codec".into(),
+                sentence: e.to_string(),
+            }),
             None => Ok(BTreeMap::new()),
         }
     }
@@ -537,15 +543,15 @@ fn page_query_limit(limit: u16) -> usize {
 }
 
 fn invalid_page_cursor() -> Error {
-    Error::Module(PageError::InvalidPageCursor.to_string())
+    super::page_refusal(PageError::InvalidPageCursor)
 }
 
 fn corrupt() -> Error {
-    Error::Module(PageError::Corrupt.to_string())
+    super::page_refusal(PageError::Corrupt)
 }
 
 fn page_traversal_too_deep() -> Error {
-    Error::Module(PageError::PageTraversalTooDeep.to_string())
+    super::page_refusal(PageError::PageTraversalTooDeep)
 }
 
 fn encoded_len<T: serde::Serialize>(value: &T) -> usize {

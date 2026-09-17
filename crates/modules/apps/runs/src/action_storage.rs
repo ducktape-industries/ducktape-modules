@@ -57,9 +57,10 @@ fn marker_bytes(marker: &Marker, capacity: usize) -> Result<Vec<u8>, Error> {
         .checked_add(8)
         .is_some_and(|size| size <= capacity);
     if !fits {
-        return Err(Error::Module(
-            "action completion exceeds its reserved marker".into(),
-        ));
+        return Err(Error::Module {
+            reason: "action_completion_size".into(),
+            sentence: "action completion exceeds its reserved marker".into(),
+        });
     }
     let mut bytes = vec![0; capacity];
     bytes[..8].copy_from_slice(&(encoded.len() as u64).to_le_bytes());
@@ -70,22 +71,35 @@ fn marker_bytes(marker: &Marker, capacity: usize) -> Result<Vec<u8>, Error> {
 fn decode_marker(bytes: &[u8]) -> Result<Marker, Error> {
     let prefix: [u8; 8] = bytes
         .get(..8)
-        .ok_or_else(|| Error::Module("truncated action marker".into()))?
+        .ok_or_else(|| Error::Module {
+            reason: "truncated_action_marker".into(),
+            sentence: "truncated action marker".into(),
+        })?
         .try_into()
         .expect("eight bytes");
-    let length = usize::try_from(u64::from_le_bytes(prefix))
-        .map_err(|_| Error::Module("action marker length overflow".into()))?;
-    let end = length
-        .checked_add(8)
-        .ok_or_else(|| Error::Module("action marker length overflow".into()))?;
-    let encoded = bytes
-        .get(8..end)
-        .ok_or_else(|| Error::Module("truncated action marker body".into()))?;
+    let length = usize::try_from(u64::from_le_bytes(prefix)).map_err(|_| Error::Module {
+        reason: "action_marker_length_overflow".into(),
+        sentence: "action marker length overflow".into(),
+    })?;
+    let end = length.checked_add(8).ok_or_else(|| Error::Module {
+        reason: "action_marker_length_overflow".into(),
+        sentence: "action marker length overflow".into(),
+    })?;
+    let encoded = bytes.get(8..end).ok_or_else(|| Error::Module {
+        reason: "truncated_action_marker_body".into(),
+        sentence: "truncated action marker body".into(),
+    })?;
     let canonical_padding = bytes[end..].iter().all(|byte| *byte == 0);
     if !canonical_padding {
-        return Err(Error::Module("invalid action marker padding".into()));
+        return Err(Error::Module {
+            reason: "invalid_action_marker_padding".into(),
+            sentence: "invalid action marker padding".into(),
+        });
     }
-    sdk::wire::decode(encoded).map_err(Error::Module)
+    sdk::wire::decode(encoded).map_err(|sentence| Error::Module {
+        reason: "codec".into(),
+        sentence,
+    })
 }
 
 impl RunsModule {
@@ -93,12 +107,19 @@ impl RunsModule {
         let Some(bytes) = self.receipts.get(&body_key(id)).await? else {
             return Ok(None);
         };
-        let mut request: ActionRequest = sdk::wire::decode(&bytes).map_err(Error::Module)?;
+        let mut request: ActionRequest =
+            sdk::wire::decode(&bytes).map_err(|sentence| Error::Module {
+                reason: "codec".into(),
+                sentence,
+            })?;
         let bytes = self
             .receipts
             .get(&marker_key(id))
             .await?
-            .ok_or_else(|| Error::Module("action has no reserved completion marker".into()))?;
+            .ok_or_else(|| Error::Module {
+                reason: "completion_marker_missing".into(),
+                sentence: "action has no reserved completion marker".into(),
+            })?;
         let marker = decode_marker(&bytes)?;
         request.publication = marker.publication;
         request.view.status = match marker.decision {
@@ -111,7 +132,12 @@ impl RunsModule {
                     .receipts
                     .get(&reason_key(id))
                     .await?
-                    .map(|bytes| sdk::wire::decode(&bytes).map_err(Error::Module))
+                    .map(|bytes| {
+                        sdk::wire::decode(&bytes).map_err(|sentence| Error::Module {
+                            reason: "codec".into(),
+                            sentence,
+                        })
+                    })
                     .transpose()?
                     .unwrap_or_else(|| {
                         "action rejected; its diagnostic exceeded the receipt bound".into()
@@ -125,7 +151,12 @@ impl RunsModule {
     async fn action_queue(&self, view: View) -> Result<Queue, Error> {
         let bytes = self.receipts.read(QUEUE_KEY, view).await?;
         bytes
-            .map(|bytes| sdk::wire::decode(&bytes).map_err(Error::Module))
+            .map(|bytes| {
+                sdk::wire::decode(&bytes).map_err(|sentence| Error::Module {
+                    reason: "codec".into(),
+                    sentence,
+                })
+            })
             .transpose()
             .map(Option::unwrap_or_default)
     }
@@ -133,10 +164,14 @@ impl RunsModule {
     async fn action_queue_item(&self, item: u64, view: View) -> Result<QueueItem, Error> {
         let key = item_key(item);
         let bytes = self.receipts.read(&key, view).await?;
-        sdk::wire::decode(
-            &bytes.ok_or_else(|| Error::Module("missing action publication queue item".into()))?,
-        )
-        .map_err(Error::Module)
+        sdk::wire::decode(&bytes.ok_or_else(|| Error::Module {
+            reason: "missing_action_publication_queue_item".into(),
+            sentence: "missing action publication queue item".into(),
+        })?)
+        .map_err(|sentence| Error::Module {
+            reason: "codec".into(),
+            sentence,
+        })
     }
 
     pub(super) async fn stage_action_marker(
@@ -148,7 +183,10 @@ impl RunsModule {
             .receipts
             .get(&marker_key(id))
             .await?
-            .ok_or_else(|| Error::Module("action has no reserved marker".into()))?;
+            .ok_or_else(|| Error::Module {
+                reason: "action_marker_missing".into(),
+                sentence: "action has no reserved marker".into(),
+            })?;
         let decision = match &request.view.status {
             ActionStatus::AwaitingProgram => Decision::Awaiting,
             ActionStatus::Claimed { call } => Decision::Claimed { call: call.clone() },
@@ -182,7 +220,12 @@ impl RunsModule {
             RequestScope::Result => LaneKind::Final,
         };
         let payload =
-            canonical_action_payload(sdk::wire::decode(&message.payload).map_err(Error::Module)?);
+            canonical_action_payload(sdk::wire::decode(&message.payload).map_err(|sentence| {
+                Error::Module {
+                    reason: "codec".into(),
+                    sentence,
+                }
+            })?);
         let view = ActionRequestView {
             request_id: id.clone(),
             account: entry.account,
@@ -195,18 +238,22 @@ impl RunsModule {
             status: ActionStatus::AwaitingProgram,
         };
         if self.action_request(&id).await?.is_some() {
-            return Err(Error::Module(
-                "action request id is already bound to earlier work".into(),
-            ));
+            return Err(Error::Module {
+                reason: "action_request_conflict".into(),
+                sentence: "action request id is already bound to earlier work".into(),
+            });
         }
         let item = self
             .staged_next_action_item
             .unwrap_or(self.next_action_item);
-        let next = item
-            .checked_add(1)
-            .ok_or_else(|| Error::Module("action delivery counter exhausted".into()))?;
-        self.model(&entry.agent_id)
-            .ok_or_else(|| Error::Module("run model no longer exists".into()))?;
+        let next = item.checked_add(1).ok_or_else(|| Error::Module {
+            reason: "action_delivery_counter_exhausted".into(),
+            sentence: "action delivery counter exhausted".into(),
+        })?;
+        self.model(&entry.agent_id).ok_or_else(|| Error::Module {
+            reason: "run_model_no_longer_exists".into(),
+            sentence: "run model no longer exists".into(),
+        })?;
         let record = ActionRequest {
             view,
             item,
@@ -285,8 +332,15 @@ impl RunsModule {
                 .receipts
                 .committed(&body_key(&queued.request_id))
                 .await?
-                .ok_or_else(|| Error::Module("queued action has no body".into()))?;
-            let request: ActionRequest = sdk::wire::decode(&bytes).map_err(Error::Module)?;
+                .ok_or_else(|| Error::Module {
+                    reason: "queued_action_has_no_body".into(),
+                    sentence: "queued action has no body".into(),
+                })?;
+            let request: ActionRequest =
+                sdk::wire::decode(&bytes).map_err(|sentence| Error::Module {
+                    reason: "codec".into(),
+                    sentence,
+                })?;
             let reference = sdk::ItemRef {
                 source: self.id.clone(),
                 item,
@@ -314,29 +368,35 @@ impl RunsModule {
     ) -> Result<(), Error> {
         let authentic = ctx.env().origin == Origin::System && ack.target == self.id;
         if !authentic {
-            return Err(Error::Module(
-                "action acknowledgment requires the host finalizer".into(),
-            ));
+            return Err(Error::Module {
+                reason: "action_ack_authority".into(),
+                sentence: "action acknowledgment requires the host finalizer".into(),
+            });
         }
         let queued = self.action_queue_item(ack.item, View::Live).await?;
         let mut request = self
             .action_request(&queued.request_id)
             .await?
-            .ok_or_else(|| Error::Module("unknown action delivery".into()))?;
+            .ok_or_else(|| Error::Module {
+                reason: "unknown_action_delivery".into(),
+                sentence: "unknown action delivery".into(),
+            })?;
         let digest: [u8; 32] = Sha256::digest(sdk::wire::encode(&ack.outcome)).into();
         if let Publication::Delivered { digest: previous } = request.publication {
             if previous == digest {
                 return Ok(());
             }
-            return Err(Error::Module(
-                "conflicting action delivery acknowledgment".into(),
-            ));
+            return Err(Error::Module {
+                reason: "conflicting_action_delivery_acknowledgment".into(),
+                sentence: "conflicting action delivery acknowledgment".into(),
+            });
         }
         let mut queue = self.action_queue(View::Live).await?;
         if queue.head != Some(ack.item) {
-            return Err(Error::Module(
-                "action acknowledgment is not the queue head".into(),
-            ));
+            return Err(Error::Module {
+                reason: "action_ack_order".into(),
+                sentence: "action acknowledgment is not the queue head".into(),
+            });
         }
         queue.head = queued.next;
         if queue.head.is_none() {

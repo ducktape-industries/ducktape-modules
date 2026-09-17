@@ -817,13 +817,17 @@ fn add_comment_on_a_nonexistent_target_is_refused() {
     // can never purge it.
     deterministic::Runner::default().start(|context| async move {
         let mut p = pages_on!(context, "pages");
-        apply_err_as(
+        let refusal = apply_err_as(
             &mut p,
             &add("t1", "m1", "ghost", "squat"),
             user("mallory"),
             "block not found",
         )
         .await;
+        assert!(
+            matches!(&refusal, Error::Module { reason, .. } if reason == "block_not_found"),
+            "{refusal:?}"
+        );
         assert!(p.staged.is_empty(), "a rejected comment op stages nothing");
     });
 }

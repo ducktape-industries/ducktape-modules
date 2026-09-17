@@ -29,7 +29,10 @@ use statesync::qmdb::QmdbStore;
 /// on a [`TestCtx`] via `.on_query("identity", ...)`.
 fn identity_stub(accounts: Vec<(Vec<u8>, u64)>) -> impl FnMut(&[u8]) -> Result<Vec<u8>, Error> {
     move |req| {
-        let query = identity_decode_query(req).map_err(Error::Module)?;
+        let query = identity_decode_query(req).map_err(|sentence| Error::Module {
+            reason: "codec".into(),
+            sentence,
+        })?;
         if let IdentityQuery::Resolve { references } = query {
             let numbers = references
                 .iter()
@@ -323,7 +326,7 @@ fn thread_replies_take_channel_sequences_and_update_the_root_summary() {
             )
             .await
             .unwrap_err();
-        assert!(matches!(err, Error::Module(_)));
+        assert!(matches!(err, Error::Module { .. }));
         module.abort_block().await.unwrap();
     });
 }
@@ -430,7 +433,7 @@ fn delete_tombstones_the_head_but_preserves_thread_integrity() {
             )
             .await
             .unwrap_err();
-        assert!(matches!(err, Error::Module(_)));
+        assert!(matches!(err, Error::Module { .. }));
         module.abort_block().await.unwrap();
         let err = module
             .execute(
@@ -444,7 +447,7 @@ fn delete_tombstones_the_head_but_preserves_thread_integrity() {
             )
             .await
             .unwrap_err();
-        assert!(matches!(err, Error::Module(_)));
+        assert!(matches!(err, Error::Module { .. }));
         module.abort_block().await.unwrap();
     });
 }
@@ -531,7 +534,7 @@ fn authorship_derives_from_origin_and_cannot_be_spoofed() {
             )
             .await
             .unwrap_err();
-        assert!(matches!(err, Error::Module(_)));
+        assert!(matches!(err, Error::Module { .. }));
         module.abort_block().await.unwrap();
         assert_eq!(module.root(), root0);
 
@@ -755,7 +758,7 @@ fn reactions_are_idempotent_sets_per_emoji_and_author() {
             )
             .await
             .unwrap_err();
-        assert!(matches!(err, Error::Module(_)));
+        assert!(matches!(err, Error::Module { .. }));
         module.abort_block().await.unwrap();
     });
 }
@@ -823,7 +826,7 @@ fn oversized_writes_are_rejected_before_staging_anything() {
             )
             .await
             .unwrap_err();
-        assert!(matches!(err, Error::Module(_)));
+        assert!(matches!(err, Error::Module { .. }));
         module.abort_block().await.unwrap();
         assert_eq!(module.root(), root, "a rejected write leaves no trace");
 
@@ -877,7 +880,7 @@ fn members_only_channels_gate_external_posts_and_reactions() {
             )
             .await
             .unwrap_err();
-        assert!(matches!(err, Error::Module(_)));
+        assert!(matches!(err, Error::Module { .. }));
         module.abort_block().await.unwrap();
 
         // ...a module author always may (genesis-fixed trusted code)...
@@ -966,7 +969,7 @@ fn members_only_channels_gate_external_posts_and_reactions() {
             )
             .await
             .unwrap_err();
-        assert!(matches!(err, Error::Module(_)));
+        assert!(matches!(err, Error::Module { .. }));
         module.abort_block().await.unwrap();
     });
 }
@@ -997,7 +1000,7 @@ fn hooks_are_validated_capped_and_emit_one_notification_per_post() {
             )
             .await
             .unwrap_err();
-        assert!(matches!(err, Error::Module(_)));
+        assert!(matches!(err, Error::Module { .. }));
         module.abort_block().await.unwrap();
         let err = module
             .execute(
@@ -1009,7 +1012,7 @@ fn hooks_are_validated_capped_and_emit_one_notification_per_post() {
             )
             .await
             .unwrap_err();
-        assert!(matches!(err, Error::Module(_)));
+        assert!(matches!(err, Error::Module { .. }));
         module.abort_block().await.unwrap();
 
         module
@@ -1082,7 +1085,7 @@ fn hooks_are_validated_capped_and_emit_one_notification_per_post() {
             )
             .await
             .unwrap_err();
-        assert!(matches!(err, Error::Module(_)));
+        assert!(matches!(err, Error::Module { .. }));
         module.abort_block().await.unwrap();
 
         // unregistering stops the notifications.
@@ -1135,7 +1138,7 @@ fn duplicate_message_ids_are_rejected_globally() {
             )
             .await
             .unwrap_err();
-        assert!(matches!(err, Error::Module(_)));
+        assert!(matches!(err, Error::Module { .. }));
         module.abort_block().await.unwrap();
 
         // and the global msgid index resolves to the original.
@@ -1253,7 +1256,7 @@ fn rejects_posts_to_missing_channels_and_aborts_cleanly() {
             )
             .await
             .unwrap_err();
-        assert!(matches!(err, Error::Module(_)));
+        assert!(matches!(err, Error::Module { .. }));
         module.abort_block().await.unwrap();
         assert_eq!(
             module.root(),
@@ -1312,7 +1315,7 @@ fn a_voice_room_is_an_open_channel_marked_voice() {
             )
             .await
             .unwrap_err();
-        assert!(matches!(err, Error::Module(_)), "the id is taken");
+        assert!(matches!(err, Error::Module { .. }), "the id is taken");
         module.abort_block().await.unwrap();
     });
 }
@@ -2068,7 +2071,7 @@ fn rename_stamps_the_creator_as_owner_and_any_member_renames() {
             )
             .await
             .unwrap_err();
-        assert!(matches!(err, Error::Module(_)));
+        assert!(matches!(err, Error::Module { .. }));
         module.abort_block().await.unwrap();
 
         // and the owner renames like anyone.

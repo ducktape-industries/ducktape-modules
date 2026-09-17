@@ -73,7 +73,10 @@ fn a_connector_is_re_routed_whole_and_a_card_has_no_run_to_re_route() {
     assert_eq!(moved.revision, board.revision + 1);
     // a card is a box, not a run: naming one here is a mistake, not a no-op
     let refused = moved.changed(&route("card", vec![[0, 0], [10, 10]], None));
-    assert_eq!(refused, Err("Only a connector carries a run.".into()));
+    assert_eq!(
+        refused.unwrap_err().sentence,
+        "Only a connector carries a run."
+    );
     // and a re-route still answers to every rule a path is held to
     let empty = moved.changed(&route("edge", vec![[0, 0]], None));
     assert!(empty.is_err());
@@ -118,7 +121,7 @@ fn stacking_names_what_rises_and_naming_everything_states_the_whole_stack() {
 }
 
 #[test]
-fn concurrent_fields_compose_and_same_field_follows_consensus_order() {
+fn text_uses_the_current_record_revision_and_preserves_other_fields() {
     let initial = blank().changed(&create("a")).unwrap();
     let edits = [
         Change::Move {
@@ -129,16 +132,30 @@ fn concurrent_fields_compose_and_same_field_follows_consensus_order() {
         Change::Text {
             id: "a".into(),
             text: "한글 아이디어 🦆".into(),
+            base_revision: initial.shapes["a"].revision,
         },
     ];
-    let a = edits
-        .iter()
-        .try_fold(initial.clone(), |b, c| b.changed(c))
+    let a = initial
+        .changed(&edits[1])
+        .unwrap()
+        .changed(&edits[0])
         .unwrap();
-    let b = edits
-        .iter()
-        .rev()
-        .try_fold(initial, |b, c| b.changed(c))
+    // a Move re-stamps the card's record revision, so a Text still holding
+    // the pre-move revision is stale and names the card's unchanged text.
+    assert_eq!(
+        initial.changed_many(&edits),
+        Err(Refused {
+            reason: "stale_text",
+            sentence: String::new(),
+        })
+    );
+    let moved = initial.changed(&edits[0]).unwrap();
+    let b = moved
+        .changed(&Change::Text {
+            id: "a".into(),
+            text: "한글 아이디어 🦆".into(),
+            base_revision: moved.shapes["a"].revision,
+        })
         .unwrap();
     assert_eq!(a.shapes["a"].shape, b.shapes["a"].shape);
     assert_eq!(a.shapes["a"].shape.text, "한글 아이디어 🦆");
@@ -173,17 +190,17 @@ fn deleting_a_card_removes_connections_and_late_edits_do_not_resurrect_it() {
             shape: arrow,
         })
         .unwrap();
+    let held_revision = board.shapes["a"].revision;
     board = board.changed(&Change::Delete { id: "a".into() }).unwrap();
     assert_eq!(board.shapes.len(), 1);
-    assert_eq!(
-        board
-            .changed(&Change::Text {
-                id: "a".into(),
-                text: "late".into()
-            })
-            .unwrap(),
-        board
-    );
+    let refused = board
+        .changed(&Change::Text {
+            id: "a".into(),
+            text: "late".into(),
+            base_revision: held_revision,
+        })
+        .unwrap_err();
+    assert_eq!(refused.reason, "text_target_gone");
 }
 #[test]
 fn invalid_geometry_content_and_edges_leave_state_untouched() {
@@ -400,6 +417,147 @@ fn real_module_stages_commits_aborts_and_rejects_unauthenticated_writes() {
         assert_eq!(module.root(), committed);
     });
 }
+
+#[test]
+fn text_compare_and_set_refuses_stale_and_deleted_cards_without_leaking_batch_writes() {
+    futures::executor::block_on(async {
+        let mut module = Boards::new(Box::new(MemStore::new()));
+        let mut env = TestCtx::at_height(1).env().clone();
+        env.origin = Origin::External(vec![7; 32]);
+        let mut ctx = TestCtx::with_env(env);
+        let op = |operation| Msg {
+            target: "boards".into(),
+            payload: serde_json::to_vec(&operation).unwrap(),
+        };
+        let edit = |change| Operation::Edit {
+            board: "room".into(),
+            change,
+        };
+        module
+            .execute(
+                &mut ctx,
+                &op(Operation::Create {
+                    id: "room".into(),
+                    title: "Planning".into(),
+                }),
+            )
+            .await
+            .unwrap();
+        module
+            .execute(&mut ctx, &op(edit(create("card"))))
+            .await
+            .unwrap();
+        module.commit_block().await.unwrap();
+        let original_root = module.root();
+        let baseline = opened(&module, "room").await.unwrap();
+        let revision = baseline.shapes["card"].revision;
+        let text = |value: &str| Change::Text {
+            id: "card".into(),
+            text: value.into(),
+            base_revision: revision,
+        };
+
+        module
+            .execute(&mut ctx, &op(edit(text("first"))))
+            .await
+            .unwrap();
+        let first = opened(&module, "room").await.unwrap();
+        assert_eq!(first.shapes["card"].shape.text, "first");
+        assert!(first.shapes["card"].revision > revision);
+        assert_eq!(module.root(), original_root);
+        let stale = module
+            .execute(&mut ctx, &op(edit(text("second"))))
+            .await
+            .unwrap_err();
+        match stale {
+            sdk::Error::Module { reason, sentence } => {
+                assert_eq!(reason, "stale_text");
+                assert_eq!(sentence, "first");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+        let batch = Operation::Batch {
+            board: "room".into(),
+            changes: vec![create("leak"), text("second")],
+        };
+        let refused = module.execute(&mut ctx, &op(batch)).await.unwrap_err();
+        assert!(
+            matches!(refused, sdk::Error::Module { reason, sentence } if reason == "stale_text" && sentence == "first")
+        );
+        assert_eq!(opened(&module, "room").await.unwrap(), first);
+        module.commit_block().await.unwrap();
+        assert_eq!(opened(&module, "room").await.unwrap(), first);
+
+        let move_card = Change::Move {
+            id: "card".into(),
+            x: 30,
+            y: 40,
+        };
+        let moved = first.changed(&move_card).unwrap();
+        assert!(moved.shapes["card"].revision > first.shapes["card"].revision);
+        let ordered = Operation::Batch {
+            board: "room".into(),
+            changes: vec![
+                move_card,
+                Change::Text {
+                    id: "card".into(),
+                    text: "after move".into(),
+                    base_revision: moved.shapes["card"].revision,
+                },
+            ],
+        };
+        module.execute(&mut ctx, &op(ordered)).await.unwrap();
+        assert_eq!(
+            opened(&module, "room").await.unwrap().shapes["card"]
+                .shape
+                .text,
+            "after move"
+        );
+        module.abort_block().await.unwrap();
+        assert_eq!(opened(&module, "room").await.unwrap(), first);
+
+        let deleted_batch = Operation::Batch {
+            board: "room".into(),
+            changes: vec![Change::Delete { id: "card".into() }, text("late")],
+        };
+        let gone = module
+            .execute(&mut ctx, &op(deleted_batch))
+            .await
+            .unwrap_err();
+        assert!(matches!(gone, sdk::Error::Module { reason, .. } if reason == "text_target_gone"));
+        assert_eq!(opened(&module, "room").await.unwrap(), first);
+
+        module
+            .execute(&mut ctx, &op(edit(Change::Delete { id: "card".into() })))
+            .await
+            .unwrap();
+        let deleted = opened(&module, "room").await.unwrap();
+        let gone = module
+            .execute(&mut ctx, &op(edit(text("late"))))
+            .await
+            .unwrap_err();
+        assert!(matches!(gone, sdk::Error::Module { reason, .. } if reason == "text_target_gone"));
+        assert_eq!(opened(&module, "room").await.unwrap(), deleted);
+        module.commit_block().await.unwrap();
+        let gone = module
+            .execute(&mut ctx, &op(edit(text("later"))))
+            .await
+            .unwrap_err();
+        assert!(matches!(gone, sdk::Error::Module { reason, .. } if reason == "text_target_gone"));
+
+        let mut missing_revision = serde_json::to_value(edit(text("old"))).unwrap();
+        missing_revision["edit"]["change"]["text"]
+            .as_object_mut()
+            .unwrap()
+            .remove("base_revision");
+        let malformed = Msg {
+            target: "boards".into(),
+            payload: serde_json::to_vec(&missing_revision).unwrap(),
+        };
+        let refused = module.execute(&mut ctx, &malformed).await.unwrap_err();
+        assert!(matches!(refused, sdk::Error::Module { reason, .. } if reason == "codec"));
+    });
+}
 use sdk::Ctx;
 
 #[test]
@@ -455,6 +613,7 @@ fn batch_is_atomic_and_editing_does_not_change_stacking_order() {
         .changed(&Change::Text {
             id: "z".into(),
             text: "Edited".into(),
+            base_revision: board.shapes["z"].revision,
         })
         .unwrap();
     assert_eq!(
@@ -474,6 +633,7 @@ fn batch_is_atomic_and_editing_does_not_change_stacking_order() {
         Change::Text {
             id: "a".into(),
             text: "x".repeat(boards::MAX_TEXT + 1),
+            base_revision: board.shapes["a"].revision,
         },
     ]);
     assert!(failed.is_err());
@@ -504,11 +664,17 @@ fn how_the_words_sit_and_how_big_they_are_are_fields_like_any_other() {
         Change::Text {
             id: "a".into(),
             text: "flush right".into(),
+            base_revision: board.shapes["a"].revision,
         },
     ];
-    let forwards = edits
-        .iter()
-        .try_fold(board.clone(), |b, c| b.changed(c))
+    let aligned = board.changed(&edits[0]).unwrap();
+    let sized = aligned.changed(&edits[1]).unwrap();
+    let forwards = sized
+        .changed(&Change::Text {
+            id: "a".into(),
+            text: "flush right".into(),
+            base_revision: sized.shapes["a"].revision,
+        })
         .unwrap();
     let backwards = edits
         .iter()

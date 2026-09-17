@@ -111,14 +111,17 @@ impl Collaboration {
     /// empty `Request::network` would collapse every network into one.
     fn check_network(&self, network: &str) -> Result<(), Error> {
         if self.network.is_empty() {
-            return Err(Error::Module(
-                "this module was composed with a blank chain_id, which binds no network".into(),
-            ));
+            return Err(Error::Module {
+                reason: "missing_chain_id".into(),
+                sentence: "this module was composed with a blank chain_id, which binds no network"
+                    .into(),
+            });
         }
         if network != self.network {
-            return Err(Error::Module(format!(
-                "op is bound to network {network:?}, not this network"
-            )));
+            return Err(Error::Module {
+                reason: "network_mismatch".into(),
+                sentence: format!("op is bound to network {network:?}, not this network"),
+            });
         }
         Ok(())
     }
@@ -138,7 +141,10 @@ pub(crate) async fn actor_from_origin(ctx: &dyn Ctx, identity: &str) -> Result<P
             )
             .await?;
             let identity::IdentityReply::Account(Some(account)) = reply else {
-                return Err(Error::Module("program account does not exist".into()));
+                return Err(Error::Module {
+                    reason: "program_account_does_not_exist".into(),
+                    sentence: "program account does not exist".into(),
+                });
             };
             let is_active_program = matches!(
                 account.control,
@@ -148,15 +154,19 @@ pub(crate) async fn actor_from_origin(ctx: &dyn Ctx, identity: &str) -> Result<P
                 }
             );
             if !is_active_program {
-                return Err(Error::Module("program account is not active".into()));
+                return Err(Error::Module {
+                    reason: "program_account_is_not_active".into(),
+                    sentence: "program account is not active".into(),
+                });
             }
             Ok(Party::Account(account.number))
         }
         Origin::External(key) => {
             if key.is_empty() {
-                return Err(Error::Module(
-                    "external origin must carry a non-empty submitter id".into(),
-                ));
+                return Err(Error::Module {
+                    reason: "invalid_external_origin".into(),
+                    sentence: "external origin must carry a non-empty submitter id".into(),
+                });
             }
             let reply = identity_reply(
                 ctx,
@@ -165,9 +175,10 @@ pub(crate) async fn actor_from_origin(ctx: &dyn Ctx, identity: &str) -> Result<P
             )
             .await?;
             let identity::IdentityReply::Account(account) = reply else {
-                return Err(Error::Module(
-                    "identity returned an unexpected reply".into(),
-                ));
+                return Err(Error::Module {
+                    reason: "unexpected_identity_reply".into(),
+                    sentence: "identity returned an unexpected reply".into(),
+                });
             };
             Ok(account.map_or_else(
                 || Party::Key(key.clone()),
@@ -185,7 +196,10 @@ async fn identity_reply(
     query: identity::IdentityQuery,
 ) -> Result<identity::IdentityReply, Error> {
     let bytes = ctx.query(identity, &identity::encode_query(&query)).await?;
-    identity::decode_reply(&bytes).map_err(Error::Module)
+    identity::decode_reply(&bytes).map_err(|sentence| Error::Module {
+        reason: "codec".into(),
+        sentence,
+    })
 }
 
 /// one party's standing in one channel, by chat's own gate. an unknown
@@ -201,8 +215,16 @@ pub(crate) async fn chat_access(
         party: party.clone(),
     };
     let bytes = ctx.query(chat, &chat::encode_query(&query)).await?;
-    let chat::ChatReply::Access(access) = chat::decode_reply(&bytes).map_err(Error::Module)? else {
-        return Err(Error::Module("chat returned an unexpected reply".into()));
+    let chat::ChatReply::Access(access) =
+        chat::decode_reply(&bytes).map_err(|sentence| Error::Module {
+            reason: "codec".into(),
+            sentence,
+        })?
+    else {
+        return Err(Error::Module {
+            reason: "chat_returned_an_unexpected_reply".into(),
+            sentence: "chat returned an unexpected reply".into(),
+        });
     };
     Ok(access)
 }
@@ -217,8 +239,16 @@ pub(crate) async fn chat_message(
         message_id: message_id.to_string(),
     };
     let bytes = ctx.query(chat, &chat::encode_query(&query)).await?;
-    let chat::ChatReply::Message(view) = chat::decode_reply(&bytes).map_err(Error::Module)? else {
-        return Err(Error::Module("chat returned an unexpected reply".into()));
+    let chat::ChatReply::Message(view) =
+        chat::decode_reply(&bytes).map_err(|sentence| Error::Module {
+            reason: "codec".into(),
+            sentence,
+        })?
+    else {
+        return Err(Error::Module {
+            reason: "chat_returned_an_unexpected_reply".into(),
+            sentence: "chat returned an unexpected reply".into(),
+        });
     };
     Ok(view)
 }
@@ -376,7 +406,10 @@ impl Module for Collaboration {
     }
 
     async fn execute(&mut self, ctx: &mut dyn Ctx, msg: &Msg) -> Result<(), Error> {
-        let request = decode_msg(&msg.payload).map_err(Error::Module)?;
+        let request = decode_msg(&msg.payload).map_err(|sentence| Error::Module {
+            reason: "codec".into(),
+            sentence,
+        })?;
         // the network binding is checked BEFORE anything is read or staged: a
         // foreign-network op is not a refused write, it is not this network's
         // op at all.
@@ -396,7 +429,10 @@ impl Module for Collaboration {
             participant,
             via,
             read,
-        } = decode_query(req).map_err(Error::Module)?;
+        } = decode_query(req).map_err(|sentence| Error::Module {
+            reason: "codec".into(),
+            sentence,
+        })?;
         let reply = read::serve(
             &self.staged,
             ctx,

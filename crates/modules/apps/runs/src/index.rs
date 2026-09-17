@@ -58,7 +58,6 @@ const FAIL_ROW_DECODE: i32 = 3;
 /// [`Fail`] code: a view request this mapper does not speak.
 const FAIL_BAD_REQUEST: i32 = 4;
 
-
 /// the place a run was called from, read off its dispatch fact. A delegated
 /// run has none: its caller is a run, and the journal keys that edge by its
 /// delegation id rather than a place.
@@ -275,7 +274,6 @@ fn pr_place(pr: &PrRef) -> RunPlace {
         number: pr.number,
     }
 }
-
 
 fn run_key(dispatch_id: &str) -> String {
     format!("run/{dispatch_id}")

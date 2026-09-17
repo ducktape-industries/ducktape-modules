@@ -95,11 +95,17 @@ impl MerkleStore for SharedStore {
     }
 
     async fn sync_target(&self) -> Result<sdk::ResolverSyncTarget, Error> {
-        Err(Error::Module("a test double has no resolver lane".into()))
+        Err(Error::Module {
+            reason: "resolver_sync_unsupported".into(),
+            sentence: "a test double has no resolver lane".into(),
+        })
     }
 
     async fn serve_sync(&self, _req: &[u8]) -> Result<Vec<u8>, Error> {
-        Err(Error::Module("a test double has no sync wire".into()))
+        Err(Error::Module {
+            reason: "sync_unsupported".into(),
+            sentence: "a test double has no sync wire".into(),
+        })
     }
 }
 
@@ -967,14 +973,23 @@ impl Pair {
             .submit_at(block(self.height, origin), message)
             .await
             .unwrap_err();
-        let SubmitError::Rejected(Error::Module(n)) = n else {
+        let SubmitError::Rejected(Error::Module {
+            reason: n_reason,
+            sentence: n,
+        }) = n
+        else {
             panic!("{n:?}");
         };
-        let SubmitError::Rejected(Error::Module(w)) = w else {
+        let SubmitError::Rejected(Error::Module {
+            reason: w_reason,
+            sentence: w,
+        }) = w
+        else {
             panic!("{w:?}");
         };
-        assert!(n.contains(needle), "{n}");
-        assert!(w.contains(needle), "{w}");
+        assert!(n.contains(needle), "{n_reason}: {n}");
+        assert!(w.contains(needle), "{w_reason}: {w}");
+        assert_eq!((&w_reason, &w), (&n_reason, &n));
         assert_eq!(before, (root_of(&self.native), root_of(&self.wasm)));
         self.parity().await;
     }

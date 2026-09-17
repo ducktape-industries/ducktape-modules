@@ -1,9 +1,7 @@
 //! A separately built application policy. The first network account manages
 //! this example's membership; that rule belongs to this guest, never the host.
+use ducktape_module_sdk::{Guest, host, rejected};
 use serde::{Deserialize, Serialize};
-
-wit_bindgen::generate!({ world: "module", path: "../../../module-sdk/wit" });
-use ducktape::module::host;
 
 #[derive(Default, Serialize, Deserialize)]
 struct State {
@@ -26,13 +24,9 @@ enum Query {
     State,
 }
 
-fn refused(reason: impl ToString) -> host::Error {
-    host::Error::Rejected(reason.to_string())
-}
-
 fn load() -> Result<State, host::Error> {
     host::state_get(b"state")
-        .map(|bytes| serde_json::from_slice(&bytes).map_err(refused))
+        .map(|bytes| serde_json::from_slice(&bytes).map_err(|e| rejected("codec", e.to_string())))
         .unwrap_or_else(|| Ok(State::default()))
 }
 
@@ -48,15 +42,19 @@ fn authorized(state: &State, account: u64, text: &str) -> bool {
 
 fn caller() -> Result<u64, host::Error> {
     let host::Origin::External(key) = host::get_env().origin else {
-        return Err(refused("a user signature is required"));
+        return Err(rejected(
+            "signature_required",
+            "a user signature is required",
+        ));
     };
-    let query =
-        serde_json::to_vec(&serde_json::json!({"of_key": {"key": key}})).map_err(refused)?;
+    let query = serde_json::to_vec(&serde_json::json!({"of_key": {"key": key}}))
+        .map_err(|e| rejected("codec", e.to_string()))?;
     let answer = host::query_module("identity", &query)?;
-    let answer: serde_json::Value = serde_json::from_slice(&answer).map_err(refused)?;
+    let answer: serde_json::Value =
+        serde_json::from_slice(&answer).map_err(|e| rejected("codec", e.to_string()))?;
     answer["account"]["number"]
         .as_u64()
-        .ok_or_else(|| refused("caller has no account"))
+        .ok_or_else(|| rejected("caller_account_missing", "caller has no account"))
 }
 
 fn decide(state: State, account: u64, operation: Operation) -> Result<State, host::Error> {
@@ -71,7 +69,10 @@ fn configure(mut state: State, account: u64, members: Vec<u64>) -> Result<State,
     let valid = members.len() <= 16 && members.iter().all(|member| *member > 0);
     let permitted = manages_example && valid;
     if !permitted {
-        return Err(refused("membership configuration refused"));
+        return Err(rejected(
+            "membership_configuration",
+            "membership configuration refused",
+        ));
     }
     state.members = members;
     Ok(state)
@@ -80,12 +81,12 @@ fn configure(mut state: State, account: u64, members: Vec<u64>) -> Result<State,
 fn record(mut state: State, account: u64, text: String) -> Result<State, host::Error> {
     let permitted = authorized(&state, account, &text);
     if !permitted {
-        return Err(refused("application policy refused"));
+        return Err(rejected("application_policy", "application policy refused"));
     }
     state.count = state
         .count
         .checked_add(1)
-        .ok_or_else(|| refused("counter full"))?;
+        .ok_or_else(|| rejected("counter_exhausted", "counter full"))?;
     state.last = text;
     Ok(state)
 }
@@ -114,31 +115,39 @@ impl Guest for Component {
     }
 
     fn acknowledge(_ack: host::Ack) -> Result<(), host::Error> {
-        Err(refused("no pending work"))
+        Err(rejected("no_pending_work", "no pending work"))
     }
 
     fn execute(payload: Vec<u8>) -> Result<(), host::Error> {
-        let operation: Operation = serde_json::from_slice(&payload).map_err(refused)?;
+        let operation: Operation =
+            serde_json::from_slice(&payload).map_err(|e| rejected("codec", e.to_string()))?;
         let account = caller()?;
         let state = decide(load()?, account, operation)?;
-        host::state_set(b"state", &serde_json::to_vec(&state).map_err(refused)?);
+        host::state_set(
+            b"state",
+            &serde_json::to_vec(&state).map_err(|e| rejected("codec", e.to_string()))?,
+        );
         host::emit_event("changed", &[]);
         Ok(())
     }
 
     fn query(request: Vec<u8>) -> Result<Vec<u8>, host::Error> {
-        let query: Query = serde_json::from_slice(&request).map_err(refused)?;
+        let query: Query =
+            serde_json::from_slice(&request).map_err(|e| rejected("codec", e.to_string()))?;
         let state = load()?;
         match query {
             Query::Authorize { account, text } => {
-                serde_json::to_vec(&authorized(&state, account, &text)).map_err(refused)
+                serde_json::to_vec(&authorized(&state, account, &text))
+                    .map_err(|e| rejected("codec", e.to_string()))
             }
-            Query::State => serde_json::to_vec(&state).map_err(refused),
+            Query::State => {
+                serde_json::to_vec(&state).map_err(|e| rejected("codec", e.to_string()))
+            }
         }
     }
 }
 
-export!(Component);
+ducktape_module_sdk::export_module!(Component);
 
 #[cfg(test)]
 mod tests {

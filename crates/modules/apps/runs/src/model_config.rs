@@ -32,10 +32,13 @@ impl RunsModule {
     /// a recipe hash is empty (unset) or exactly [`RECIPE_HASH_LEN`] bytes.
     fn validate_recipe_hash(recipe_hash: &[u8]) -> Result<(), Error> {
         if !recipe_hash.is_empty() && recipe_hash.len() != RECIPE_HASH_LEN {
-            return Err(Error::Module(format!(
-                "recipe_hash must be empty or {RECIPE_HASH_LEN} bytes, got {}",
-                recipe_hash.len()
-            )));
+            return Err(Error::Module {
+                reason: "recipe_hash_length".into(),
+                sentence: format!(
+                    "recipe_hash must be empty or {RECIPE_HASH_LEN} bytes, got {}",
+                    recipe_hash.len()
+                ),
+            });
         }
         Ok(())
     }
@@ -55,48 +58,58 @@ impl RunsModule {
     /// record.
     fn validate_skills(skills: &[SkillRef]) -> Result<(), Error> {
         if skills.len() > MAX_SKILLS_PER_AGENT {
-            return Err(Error::Module(format!(
-                "an agent may curate at most {MAX_SKILLS_PER_AGENT} skills, got {}; leave the \
+            return Err(Error::Module {
+                reason: "skill_count".into(),
+                sentence: format!(
+                    "an agent may curate at most {MAX_SKILLS_PER_AGENT} skills, got {}; leave the \
                  rest in the shared skill library",
-                skills.len()
-            )));
+                    skills.len()
+                ),
+            });
         }
         let mut names = BTreeSet::new();
         let mut prefixes = BTreeSet::new();
         for skill in skills {
             if !is_skill_mount_name(&skill.name) {
-                return Err(Error::Module(format!(
-                    "skill name {:?} is not a safe mount directory name (want \
+                return Err(Error::Module {
+                    reason: "skill_name".into(),
+                    sentence: format!(
+                        "skill name {:?} is not a safe mount directory name (want \
                      [a-zA-Z0-9._-]+, at most {MAX_SKILL_NAME_BYTES} bytes, not \".\" or \"..\")",
-                    skill.name
-                )));
+                        skill.name
+                    ),
+                });
             }
             if !names.insert(skill.name.as_str()) {
-                return Err(Error::Module(format!(
-                    "duplicate skill name {:?}",
-                    skill.name
-                )));
+                return Err(Error::Module {
+                    reason: "duplicate_skill_name".into(),
+                    sentence: format!("duplicate skill name {:?}", skill.name),
+                });
             }
             if !is_scoped_duckfs_prefix(&skill.source_prefix) {
-                return Err(Error::Module(format!(
-                    "skill source_prefix {:?} is not a scoped duckfs subtree \
+                return Err(Error::Module {
+                    reason: "skill_source_prefix".into(),
+                    sentence: format!(
+                        "skill source_prefix {:?} is not a scoped duckfs subtree \
                      (want an absolute path at least 3 segments deep, e.g. \
                      /shared/skills/<name>)",
-                    skill.source_prefix
-                )));
+                        skill.source_prefix
+                    ),
+                });
             }
             if !prefixes.insert(skill.source_prefix.as_str()) {
-                return Err(Error::Module(format!(
-                    "duplicate skill source_prefix {:?}",
-                    skill.source_prefix
-                )));
+                return Err(Error::Module {
+                    reason: "duplicate_skill_source_prefix".into(),
+                    sentence: format!("duplicate skill source_prefix {:?}", skill.source_prefix),
+                });
             }
             if let Some(snapshot) = &skill.source_snapshot
                 && snapshot.is_empty()
             {
-                return Err(Error::Module(
-                    "skill source_snapshot must not be empty when set".into(),
-                ));
+                return Err(Error::Module {
+                    reason: "skill_snapshot".into(),
+                    sentence: "skill source_snapshot must not be empty when set".into(),
+                });
             }
         }
         Ok(())
@@ -128,9 +141,15 @@ impl RunsModule {
             )
             .await?;
         let identity::IdentityReply::Account(Some(view)) =
-            identity::decode_reply(&bytes).map_err(Error::Module)?
+            identity::decode_reply(&bytes).map_err(|sentence| Error::Module {
+                reason: "codec".into(),
+                sentence,
+            })?
         else {
-            return Err(Error::Module("model account does not exist".into()));
+            return Err(Error::Module {
+                reason: "model_account_does_not_exist".into(),
+                sentence: "model account does not exist".into(),
+            });
         };
         Ok(view.control)
     }
@@ -147,10 +166,16 @@ impl RunsModule {
             ..
         } = self.account_control(ctx, account).await?
         else {
-            return Err(Error::Module("program authority is not active".into()));
+            return Err(Error::Module {
+                reason: "program_authority_is_not_active".into(),
+                sentence: "program authority is not active".into(),
+            });
         };
         if executor != self.agent {
-            return Err(Error::Module("program executor does not match".into()));
+            return Err(Error::Module {
+                reason: "program_executor_does_not_match".into(),
+                sentence: "program executor does not match".into(),
+            });
         }
         Ok(generation)
     }
@@ -165,12 +190,16 @@ impl RunsModule {
         let identity::Control::Program { executor, .. } =
             self.account_control(ctx, account).await?
         else {
-            return Err(Error::Module(
-                "model requires a live program account".into(),
-            ));
+            return Err(Error::Module {
+                reason: "model_requires_a_live_program_account".into(),
+                sentence: "model requires a live program account".into(),
+            });
         };
         if executor != self.agent {
-            return Err(Error::Module("program executor does not match".into()));
+            return Err(Error::Module {
+                reason: "program_executor_does_not_match".into(),
+                sentence: "program executor does not match".into(),
+            });
         }
         Ok(())
     }
@@ -178,9 +207,10 @@ impl RunsModule {
     fn stage_model(&mut self, record: ModelRecord) -> Result<(), Error> {
         let bytes = sdk::wire::encode(&record);
         if bytes.len() > MAX_AGENT_RECORD_BYTES {
-            return Err(Error::Module(format!(
-                "model record exceeds {MAX_AGENT_RECORD_BYTES} bytes"
-            )));
+            return Err(Error::Module {
+                reason: "model_record_exceeds_bytes".into(),
+                sentence: format!("model record exceeds {MAX_AGENT_RECORD_BYTES} bytes"),
+            });
         }
         self.pending_models
             .insert(record.agent_id.clone(), Some(record));
@@ -188,9 +218,10 @@ impl RunsModule {
     }
 
     fn registered_model(&self, id: &str) -> Result<ModelRecord, Error> {
-        self.model(id)
-            .cloned()
-            .ok_or_else(|| Error::Module(format!("unknown model: {id}")))
+        self.model(id).cloned().ok_or_else(|| Error::Module {
+            reason: "unknown_model".into(),
+            sentence: format!("unknown model: {id}"),
+        })
     }
 
     pub(super) async fn configure_model(
@@ -208,15 +239,27 @@ impl RunsModule {
                 skills,
             } => {
                 self.program_model(ctx, account).await?;
-                validate_agent_id(&agent_id).map_err(Error::Module)?;
+                validate_agent_id(&agent_id).map_err(|sentence| Error::Module {
+                    reason: "agent_id".into(),
+                    sentence,
+                })?;
                 Self::validate_non_empty("display_name", &display_name)?;
-                validate_tag(&capability).map_err(Error::Module)?;
+                validate_tag(&capability).map_err(|sentence| Error::Module {
+                    reason: "agent_id".into(),
+                    sentence,
+                })?;
                 if self.model(&agent_id).is_some() {
-                    return Err(Error::Module(format!("model already exists: {agent_id}")));
+                    return Err(Error::Module {
+                        reason: "model_already_exists".into(),
+                        sentence: format!("model already exists: {agent_id}"),
+                    });
                 }
                 let records = self.model_records();
                 if records.len() >= MAX_REGISTERED_AGENTS {
-                    return Err(Error::Module("model registry is full".into()));
+                    return Err(Error::Module {
+                        reason: "model_registry_is_full".into(),
+                        sentence: "model registry is full".into(),
+                    });
                 }
                 let owner = canonical_origin(&ctx.env().origin)?;
                 let owned = records
@@ -224,7 +267,10 @@ impl RunsModule {
                     .filter(|record| record.owner == owner)
                     .count();
                 if owned >= MAX_AGENTS_PER_OWNER {
-                    return Err(Error::Module("model owner allocation is full".into()));
+                    return Err(Error::Module {
+                        reason: "model_owner_allocation_is_full".into(),
+                        sentence: "model owner allocation is full".into(),
+                    });
                 }
                 let recipe_hash = recipe_hash.unwrap_or_default();
                 Self::validate_recipe_hash(&recipe_hash)?;
@@ -265,7 +311,10 @@ impl RunsModule {
                     record.display_name = name;
                 }
                 if let Some(capability) = capability {
-                    validate_tag(&capability).map_err(Error::Module)?;
+                    validate_tag(&capability).map_err(|sentence| Error::Module {
+                        reason: "capability_tag".into(),
+                        sentence,
+                    })?;
                     if capability != record.capability {
                         self.apply_model_change(
                             ctx,

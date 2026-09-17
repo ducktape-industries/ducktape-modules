@@ -66,11 +66,15 @@ async fn identity_account(
     query: identity::IdentityQuery,
 ) -> Result<identity::AccountView, Error> {
     let bytes = ctx.query(identity, &identity::encode_query(&query)).await?;
-    let reply = identity::decode_reply(&bytes).map_err(Error::Module)?;
+    let reply = identity::decode_reply(&bytes).map_err(|sentence| Error::Module {
+        reason: "codec".into(),
+        sentence,
+    })?;
     let identity::IdentityReply::Account(Some(account)) = reply else {
-        return Err(Error::Module(
-            "automation rules require an identity account".into(),
-        ));
+        return Err(Error::Module {
+            reason: "rule_account".into(),
+            sentence: "automation rules require an identity account".into(),
+        });
     };
     Ok(account)
 }
@@ -82,26 +86,29 @@ async fn submitting_account(ctx: &dyn Ctx, identity: &str) -> Result<AccountNumb
     let query = match &ctx.env().origin {
         Origin::External(key) => {
             if key.is_empty() {
-                return Err(Error::Module(
-                    "external origin must carry a non-empty submitter id".into(),
-                ));
+                return Err(Error::Module {
+                    reason: "invalid_external_origin".into(),
+                    sentence: "external origin must carry a non-empty submitter id".into(),
+                });
             }
             identity::IdentityQuery::OfKey { key: key.clone() }
         }
         Origin::Program(number) => identity::IdentityQuery::Get { number: *number },
         Origin::Module(_) | Origin::System => {
-            return Err(Error::Module(
-                "automation rules require an account origin".into(),
-            ));
+            return Err(Error::Module {
+                reason: "rule_origin".into(),
+                sentence: "automation rules require an account origin".into(),
+            });
         }
     };
     let account = identity_account(ctx, identity, query).await?;
     let names_non_program = matches!(ctx.env().origin, Origin::Program(_))
         && !matches!(account.control, identity::Control::Program { .. });
     if names_non_program {
-        return Err(Error::Module(
-            "program origin requires a program account".into(),
-        ));
+        return Err(Error::Module {
+            reason: "program_origin_requires_a_program_account".into(),
+            sentence: "program origin requires a program account".into(),
+        });
     }
     Ok(account.number)
 }
@@ -210,9 +217,12 @@ impl Automations {
         T: BorshDeserialize,
     {
         match self.staged.get(key).await? {
-            Some(bytes) => Ok(Some(
-                borsh::from_slice(&bytes).map_err(|e| Error::Module(e.to_string()))?,
-            )),
+            Some(bytes) => Ok(Some(borsh::from_slice(&bytes).map_err(|e| {
+                Error::Module {
+                    reason: "codec".into(),
+                    sentence: e.to_string(),
+                }
+            })?)),
             None => Ok(None),
         }
     }
@@ -244,10 +254,10 @@ impl Automations {
     {
         let bytes = borsh::to_vec(value).expect("automations value is serializable");
         if bytes.len() > cap {
-            return Err(Error::Module(format!(
-                "{what} record too large: {} > {cap} bytes",
-                bytes.len()
-            )));
+            return Err(Error::Module {
+                reason: "record_too_large".into(),
+                sentence: format!("{what} record too large: {} > {cap} bytes", bytes.len()),
+            });
         }
         self.staged.stage(key, bytes);
         Ok(())
@@ -271,10 +281,10 @@ impl Automations {
         let Some(bytes) = self.staged.get(&owner_rule_count_key(owner)).await? else {
             return Ok(0);
         };
-        let raw: [u8; 8] = bytes
-            .as_slice()
-            .try_into()
-            .map_err(|_| Error::Module("owner rule census record is not a u64".into()))?;
+        let raw: [u8; 8] = bytes.as_slice().try_into().map_err(|_| Error::Module {
+            reason: "owner_rule_census_codec".into(),
+            sentence: "owner rule census record is not a u64".into(),
+        })?;
         Ok(u64::from_le_bytes(raw))
     }
 
@@ -298,7 +308,10 @@ impl Automations {
         let mut rules = Vec::new();
         for rule_id in self.roster().await? {
             let Some(rule) = self.rule(&rule_id).await? else {
-                return Err(Error::Module(format!("missing rule record: {rule_id}")));
+                return Err(Error::Module {
+                    reason: "missing_rule_record".into(),
+                    sentence: format!("missing rule record: {rule_id}"),
+                });
             };
             rules.push(rule);
         }
@@ -309,10 +322,10 @@ impl Automations {
 
     fn validate_len(field: &str, value: &str, max: usize) -> Result<(), Error> {
         if value.len() > max {
-            return Err(Error::Module(format!(
-                "{field} exceeds {max} bytes ({} given)",
-                value.len()
-            )));
+            return Err(Error::Module {
+                reason: "field_length".into(),
+                sentence: format!("{field} exceeds {max} bytes ({} given)", value.len()),
+            });
         }
         Ok(())
     }
@@ -379,18 +392,25 @@ impl Automations {
         let mut roster = self.roster().await?;
         let position = match roster.binary_search(&rule_id) {
             Ok(_) => {
-                return Err(Error::Module(format!("rule already exists: {rule_id}")));
+                return Err(Error::Module {
+                    reason: "rule_already_exists".into(),
+                    sentence: format!("rule already exists: {rule_id}"),
+                });
             }
             Err(position) => position,
         };
         if roster.len() >= MAX_RULES {
-            return Err(Error::Module(format!("rule cap reached ({MAX_RULES})")));
+            return Err(Error::Module {
+                reason: "rule_cap_reached".into(),
+                sentence: format!("rule cap reached ({MAX_RULES})"),
+            });
         }
         let owner_rules = self.owner_rule_count(&owner).await?;
         if owner_rules >= MAX_RULES_PER_OWNER as u64 {
-            return Err(Error::Module(format!(
-                "rule owner at cap: {MAX_RULES_PER_OWNER} rules"
-            )));
+            return Err(Error::Module {
+                reason: "owner_cap_reached".into(),
+                sentence: format!("rule owner at cap: {MAX_RULES_PER_OWNER} rules"),
+            });
         }
         roster.insert(position, rule_id.clone());
         // the roster's byte gate first: a refusal must stage NOTHING.
@@ -419,7 +439,10 @@ impl Automations {
     async fn stage_set_enabled(&mut self, rule_id: String, enabled: bool) -> Result<(), Error> {
         require_non_empty("rule_id", &rule_id)?;
         let Some(mut rule) = self.rule(&rule_id).await? else {
-            return Err(Error::Module(format!("unknown rule: {rule_id}")));
+            return Err(Error::Module {
+                reason: "unknown_rule".into(),
+                sentence: format!("unknown rule: {rule_id}"),
+            });
         };
         let unchanged = rule.enabled == enabled;
         if unchanged {
@@ -436,13 +459,19 @@ impl Automations {
         require_non_empty("rule_id", &rule_id)?;
         let mut roster = self.roster().await?;
         let Ok(position) = roster.binary_search(&rule_id) else {
-            return Err(Error::Module(format!("unknown rule: {rule_id}")));
+            return Err(Error::Module {
+                reason: "unknown_rule".into(),
+                sentence: format!("unknown rule: {rule_id}"),
+            });
         };
         // the roster is the existence authority; the RECORD carries the
         // creator whose quota the delete frees. a rostered id without a record
         // is a store bug — loud, as everywhere.
         let Some(rule) = self.rule(&rule_id).await? else {
-            return Err(Error::Module(format!("missing rule record: {rule_id}")));
+            return Err(Error::Module {
+                reason: "missing_rule_record".into(),
+                sentence: format!("missing rule record: {rule_id}"),
+            });
         };
         let owner_rules = self.owner_rule_count(&rule.owner).await?;
         roster.remove(position);
@@ -508,7 +537,10 @@ impl Automations {
         cursor
             .next
             .checked_add(candidates.len() as u64)
-            .ok_or_else(|| Error::Module("run history sequence exhausted".into()))?;
+            .ok_or_else(|| Error::Module {
+                reason: "run_history_sequence_exhausted".into(),
+                sentence: "run history sequence exhausted".into(),
+            })?;
         let mut budget = 0usize;
         let mut fired: Vec<Rule> = Vec::new();
         let mut records: Vec<RunRecord> = Vec::new();
@@ -764,8 +796,11 @@ impl Automations {
                             // this event's own creates have not reached: an
                             // owner one task under cap would otherwise admit
                             // every rule that fires on this post.
-                            let reserved =
-                                prepared.tasks_per_owner.get(&rule.owner).copied().unwrap_or(0);
+                            let reserved = prepared
+                                .tasks_per_owner
+                                .get(&rule.owner)
+                                .copied()
+                                .unwrap_or(0);
                             if count + reserved >= tasks::MAX_OPEN_TASKS_PER_OWNER as u64 {
                                 return Err(format!(
                                     "rule owner at task cap: {} open tasks",
@@ -1014,7 +1049,10 @@ impl Module for Automations {
         // before the payload is decoded: a create records it as the rule's
         // creator and keys the per-account quota on it.
         let submitter = submitting_account(ctx, &self.identity).await?;
-        match decode_msg(&msg.payload).map_err(Error::Module)? {
+        match decode_msg(&msg.payload).map_err(|sentence| Error::Module {
+            reason: "codec".into(),
+            sentence,
+        })? {
             AutomationsMsg::CreateRule {
                 rule_id,
                 trigger,
@@ -1028,14 +1066,18 @@ impl Module for Automations {
                 self.stage_set_enabled(rule_id, enabled).await
             }
             AutomationsMsg::DeleteRule { rule_id } => self.stage_delete_rule(rule_id).await,
-            AutomationsMsg::HookEvent(_) => Err(Error::Module(
-                "hook events must originate from the chat module".into(),
-            )),
+            AutomationsMsg::HookEvent(_) => Err(Error::Module {
+                reason: "hook_origin".into(),
+                sentence: "hook events must originate from the chat module".into(),
+            }),
         }
     }
 
     async fn query(&self, req: &[u8]) -> Result<Vec<u8>, Error> {
-        match decode_query(req).map_err(Error::Module)? {
+        match decode_query(req).map_err(|sentence| Error::Module {
+            reason: "codec".into(),
+            sentence,
+        })? {
             AutomationsQuery::ListRules => Ok(encode_reply(&AutomationsReply::Rules(
                 self.all_rules().await?,
             ))),
@@ -1053,7 +1095,10 @@ impl Module for Automations {
                 let mut matched: Vec<RunRecord> = Vec::new();
                 for seq in cursor.head..cursor.next {
                     let Some(record) = self.load::<RunRecord>(&run_key(seq)).await? else {
-                        return Err(Error::Module(format!("missing run record: {seq}")));
+                        return Err(Error::Module {
+                            reason: "missing_run_record".into(),
+                            sentence: format!("missing run record: {seq}"),
+                        });
                     };
                     if record.rule_id == rule_id {
                         matched.push(record);

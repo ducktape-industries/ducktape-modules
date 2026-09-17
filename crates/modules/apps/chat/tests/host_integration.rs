@@ -90,7 +90,10 @@ impl Module for Recorder {
 
     async fn execute(&mut self, _ctx: &mut dyn Ctx, msg: &Msg) -> Result<(), Error> {
         // fail loud on garbage: a hook payload must be a chat event.
-        decode_event(&msg.payload).map_err(Error::Module)?;
+        decode_event(&msg.payload).map_err(|sentence| Error::Module {
+            reason: "codec".into(),
+            sentence,
+        })?;
         self.staged.push(msg.payload.clone());
         Ok(())
     }
@@ -120,7 +123,10 @@ impl Module for Boom {
         StateRoot::ZERO
     }
     async fn execute(&mut self, _ctx: &mut dyn Ctx, _msg: &Msg) -> Result<(), Error> {
-        Err(Error::Module("boom".into()))
+        Err(Error::Module {
+            reason: "boom".into(),
+            sentence: "boom".into(),
+        })
     }
 }
 
@@ -197,7 +203,10 @@ fn host_rolls_back_failed_chat_blocks() {
             )
             .await
             .unwrap_err();
-        assert!(matches!(err, host::SubmitError::Rejected(Error::Module(_))));
+        assert!(matches!(
+            err,
+            host::SubmitError::Rejected(Error::Module { .. })
+        ));
         assert_eq!(host.module_root("chat").unwrap(), root0);
         assert_eq!(host.root_hash(), app0);
     });
@@ -220,7 +229,10 @@ fn default_empty_external_origin_is_rejected() {
             }))
             .await
             .unwrap_err();
-        assert!(matches!(err, host::SubmitError::Rejected(Error::Module(_))));
+        assert!(matches!(
+            err,
+            host::SubmitError::Rejected(Error::Module { .. })
+        ));
         assert_eq!(host.root_hash(), app0);
     });
 }
@@ -308,7 +320,10 @@ fn hook_notifications_commit_atomically_with_the_post() {
             )
             .await
             .unwrap_err();
-        assert!(matches!(err, host::SubmitError::Rejected(Error::Module(_))));
+        assert!(matches!(
+            err,
+            host::SubmitError::Rejected(Error::Module { .. })
+        ));
         assert_eq!(host.module_root("chat").unwrap(), chat_root);
         assert_eq!(host.module_root("recorder").unwrap(), recorder_root);
         assert_eq!(host.root_hash(), root_hash);

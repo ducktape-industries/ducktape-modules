@@ -88,7 +88,10 @@ fn on_stage(view: &ModuleUpdateView) -> Result<Option<Directive>, Error> {
             repo: request.source.repo.clone(),
             commit: request.source.commit.clone(),
             path: request.update.artifact.clone(),
-            hash: request.update.digest().map_err(Error::Module)?,
+            hash: request.update.digest().map_err(|sentence| Error::Module {
+                reason: "artifact_digest".into(),
+                sentence,
+            })?,
         },
         on_ready: Submission {
             target: "runs".into(),
@@ -164,13 +167,17 @@ impl RunsModule {
         sequence: u64,
     ) -> Result<(), Error> {
         let Origin::External(node) = &ctx.env().origin else {
-            return Err(Error::Module(
-                "artifact residency must be reported by its node key".into(),
-            ));
+            return Err(Error::Module {
+                reason: "artifact_reporter".into(),
+                sentence: "artifact residency must be reported by its node key".into(),
+            });
         };
         let members = valset::members(ctx, "valset").await?;
         if !members.contains(node) {
-            return Err(Error::Module("artifact reporter is not a validator".into()));
+            return Err(Error::Module {
+                reason: "artifact_reporter_is_not_a_validator".into(),
+                sentence: "artifact reporter is not a validator".into(),
+            });
         }
         let Some(view) = self.next_module_update().await? else {
             return Ok(());
@@ -200,17 +207,30 @@ impl RunsModule {
             return Ok(None);
         }
         let sequence = view.request.sequence;
-        let hash = view.request.update.digest().map_err(Error::Module)?;
+        let hash = view
+            .request
+            .update
+            .digest()
+            .map_err(|sentence| Error::Module {
+                reason: "artifact_digest".into(),
+                sentence,
+            })?;
         let bytes = ctx
             .query(
                 "modules",
                 &modules::encode_query(&modules::ModulesQuery::ModuleStatus),
             )
             .await?;
-        let modules::ModulesReply::ModuleStatus { modules } =
-            modules::decode_reply(&bytes).map_err(Error::Module)?
+        let modules::ModulesReply::ModuleStatus { modules } = modules::decode_reply(&bytes)
+            .map_err(|sentence| Error::Module {
+                reason: "codec".into(),
+                sentence,
+            })?
         else {
-            return Err(Error::Module("unexpected module registry reply".into()));
+            return Err(Error::Module {
+                reason: "unexpected_module_registry_reply".into(),
+                sentence: "unexpected module registry reply".into(),
+            });
         };
         let Some(module) = modules
             .iter()
@@ -240,9 +260,15 @@ impl RunsModule {
             )
             .await?;
         let GovReply::Proposal(proposal) =
-            governance::decode_reply(&bytes).map_err(Error::Module)?
+            governance::decode_reply(&bytes).map_err(|sentence| Error::Module {
+                reason: "codec".into(),
+                sentence,
+            })?
         else {
-            return Err(Error::Module("unexpected deployment proposal reply".into()));
+            return Err(Error::Module {
+                reason: "unexpected_deployment_proposal_reply".into(),
+                sentence: "unexpected deployment proposal reply".into(),
+            });
         };
         let staged = self
             .receipts
@@ -254,9 +280,15 @@ impl RunsModule {
                 .query("governance", &governance::encode_query(&GovQuery::Shares))
                 .await?;
             let GovReply::Shares(shares) =
-                governance::decode_reply(&bytes).map_err(Error::Module)?
+                governance::decode_reply(&bytes).map_err(|sentence| Error::Module {
+                    reason: "codec".into(),
+                    sentence,
+                })?
             else {
-                return Err(Error::Module("unexpected governance shares reply".into()));
+                return Err(Error::Module {
+                    reason: "unexpected_governance_shares_reply".into(),
+                    sentence: "unexpected governance shares reply".into(),
+                });
             };
             if shares.active {
                 return decide(Event::Refuse {

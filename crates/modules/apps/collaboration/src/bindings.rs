@@ -15,19 +15,23 @@ use crate::store;
 pub fn check_id(what: &str, id: &str) -> Result<(), Error> {
     let shaped = !id.is_empty() && id.len() <= MAX_ID_BYTES;
     if !shaped {
-        return Err(Error::Module(format!(
-            "{what} must be 1..={MAX_ID_BYTES} bytes"
-        )));
+        return Err(Error::Module {
+            reason: "id_length".into(),
+            sentence: format!("{what} must be 1..={MAX_ID_BYTES} bytes"),
+        });
     }
     Ok(())
 }
 
 pub fn check_label(what: &str, label: &str) -> Result<(), Error> {
     if label.len() > MAX_LABEL_BYTES {
-        return Err(Error::Module(format!(
-            "{what} is {} bytes, over the {MAX_LABEL_BYTES}-byte cap",
-            label.len()
-        )));
+        return Err(Error::Module {
+            reason: "label_length".into(),
+            sentence: format!(
+                "{what} is {} bytes, over the {MAX_LABEL_BYTES}-byte cap",
+                label.len()
+            ),
+        });
     }
     Ok(())
 }
@@ -41,9 +45,10 @@ pub fn check_participant(what: &str, party: &Party) -> Result<(), Error> {
         Party::Module(_) | Party::System => false,
     };
     if !shaped {
-        return Err(Error::Module(format!(
-            "{what} must be an account or a non-empty key"
-        )));
+        return Err(Error::Module {
+            reason: "participant".into(),
+            sentence: format!("{what} must be an account or a non-empty key"),
+        });
     }
     Ok(())
 }
@@ -58,9 +63,10 @@ pub fn check_principal(principal: &BoundPrincipal) -> Result<(), Error> {
     };
     let shaped = !key.is_empty() && key.len() <= MAX_SERVICE_KEY_BYTES;
     if !shaped {
-        return Err(Error::Module(format!(
-            "a bound service key must be 1..={MAX_SERVICE_KEY_BYTES} bytes"
-        )));
+        return Err(Error::Module {
+            reason: "service_key_length".into(),
+            sentence: format!("a bound service key must be 1..={MAX_SERVICE_KEY_BYTES} bytes"),
+        });
     }
     Ok(())
 }
@@ -143,20 +149,27 @@ pub async fn bind(
     // binding per participant per channel.
     let access = crate::chat_access(ctx, chat, &channel_id, &participant).await?;
     if !access.may_read {
-        return Err(Error::Module(format!(
-            "participant may not read channel {channel_id}"
-        )));
+        return Err(Error::Module {
+            reason: "participant_may_not_read_channel".into(),
+            sentence: format!("participant may not read channel {channel_id}"),
+        });
     }
     let current = store::binding(staged, &channel_id, &participant).await?;
     let current_credential = current.as_ref().map_or(0, |binding| binding.credential);
     if expected_credential != current_credential {
-        return Err(Error::Module(format!(
-            "binding credential is {current_credential}, not the expected {expected_credential}"
-        )));
+        return Err(Error::Module {
+            reason: "stale_binding_credential".into(),
+            sentence: format!(
+                "binding credential is {current_credential}, not the expected {expected_credential}"
+            ),
+        });
     }
     let credential = current_credential
         .checked_add(1)
-        .ok_or_else(|| Error::Module("binding credentials exhausted".into()))?;
+        .ok_or_else(|| Error::Module {
+            reason: "binding_credentials_exhausted".into(),
+            sentence: "binding credentials exhausted".into(),
+        })?;
 
     let binding = Binding {
         channel_id: channel_id.clone(),
@@ -204,18 +217,25 @@ pub async fn unbind(
     // any authenticated member releases any binding, naming the credential it
     // releases.
     let Some(mut binding) = store::binding(staged, &channel_id, &participant).await? else {
-        return Err(Error::Module(format!(
-            "participant has no binding on {channel_id}"
-        )));
+        return Err(Error::Module {
+            reason: "binding_missing".into(),
+            sentence: format!("participant has no binding on {channel_id}"),
+        });
     };
     if expected_credential != binding.credential {
-        return Err(Error::Module(format!(
-            "binding credential is {}, not the expected {expected_credential}",
-            binding.credential
-        )));
+        return Err(Error::Module {
+            reason: "stale_binding_credential".into(),
+            sentence: format!(
+                "binding credential is {}, not the expected {expected_credential}",
+                binding.credential
+            ),
+        });
     }
     if binding.detached {
-        return Err(Error::Module("binding is already detached".into()));
+        return Err(Error::Module {
+            reason: "binding_is_already_detached".into(),
+            sentence: "binding is already detached".into(),
+        });
     }
     binding.detached = true;
     let seq = store::append_event(

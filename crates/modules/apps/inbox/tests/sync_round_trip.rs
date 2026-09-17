@@ -45,15 +45,19 @@ fn identity_stub(req: &[u8]) -> Result<Vec<u8>, Error> {
         updated_at: 0,
     };
     let accounts = [account(ALICE, ALICE_KEY), account(BOB, BOB_KEY)];
-    let found = match identity_decode_query(req).map_err(Error::Module)? {
+    let found = match identity_decode_query(req).map_err(|sentence| Error::Module {
+        reason: "codec".into(),
+        sentence,
+    })? {
         IdentityQuery::Get { number } => accounts.into_iter().find(|a| a.number == number),
         IdentityQuery::OfKey { key } => accounts
             .into_iter()
             .find(|a| a.keys.iter().any(|k| k.pubkey == key)),
         other => {
-            return Err(Error::Module(format!(
-                "unexpected identity query {other:?}"
-            )));
+            return Err(Error::Module {
+                reason: "unexpected_identity_query".into(),
+                sentence: format!("unexpected identity query {other:?}"),
+            });
         }
     };
     Ok(identity_encode_reply(&IdentityReply::Account(found)))

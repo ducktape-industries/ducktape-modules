@@ -103,18 +103,25 @@ pub(crate) trait Reads {
 
 // ---- validation (pure) ------------------------------------------------------------
 
-fn module_error(text: impl Into<String>) -> Error {
-    Error::Module(text.into())
+fn module_error(reason: &'static str, text: impl Into<String>) -> Error {
+    Error::Module {
+        reason: reason.into(),
+        sentence: text.into(),
+    }
 }
 
 fn validate_ident(field: &str, value: &str) -> Result<(), Error> {
     if value.is_empty() {
-        return Err(module_error(format!("{field} must be non-empty")));
+        return Err(module_error(
+            "empty_field",
+            format!("{field} must be non-empty"),
+        ));
     }
     if value.contains(SEP) {
-        return Err(module_error(format!(
-            "{field} must not contain the reserved separator"
-        )));
+        return Err(module_error(
+            "reserved_separator",
+            format!("{field} must not contain the reserved separator"),
+        ));
     }
     Ok(())
 }
@@ -133,9 +140,10 @@ fn validate_value(step: u64, value: &Value, bound: &BTreeSet<&str>) -> Result<()
         Value::Null | Value::Bool(_) | Value::Text(_) | Value::Bytes(_) => Ok(()),
         Value::Number(number) => match number_renders(*number) {
             true => Ok(()),
-            false => Err(module_error(format!(
-                "step {step}: number {number} is outside the JSON integer range"
-            ))),
+            false => Err(module_error(
+                "step_number_range",
+                format!("step {step}: number {number} is outside the JSON integer range"),
+            )),
         },
         Value::List(items) => items
             .iter()
@@ -145,17 +153,21 @@ fn validate_value(step: u64, value: &Value, bound: &BTreeSet<&str>) -> Result<()
             .try_for_each(|entry| validate_value(step, entry, bound)),
         Value::Ref(path) => {
             let Some(root) = path.first() else {
-                return Err(module_error(format!(
-                    "step {step}: a reference has an empty path"
-                )));
+                return Err(module_error(
+                    "empty_reference_path",
+                    format!("step {step}: a reference has an empty path"),
+                ));
             };
             let is_frame_root = RESERVED_ROOTS.contains(&root.as_str());
             let is_bound_earlier = bound.contains(root.as_str());
             let resolvable = is_frame_root || is_bound_earlier;
             if !resolvable {
-                return Err(module_error(format!(
-                    "step {step}: reference {root:?} names neither a frame root nor a name bound by an earlier step"
-                )));
+                return Err(module_error(
+                    "step_reference",
+                    format!(
+                        "step {step}: reference {root:?} names neither a frame root nor a name bound by an earlier step"
+                    ),
+                ));
             }
             Ok(())
         }
@@ -186,9 +198,12 @@ fn validate_target(step: u64, target: u64, len: u64) -> Result<(), Error> {
     let within_program = target <= len;
     let valid = moves_forward && within_program;
     if !valid {
-        return Err(module_error(format!(
-            "step {step} targets step {target}; a target is a later step, or {len} for the end"
-        )));
+        return Err(module_error(
+            "step_target",
+            format!(
+                "step {step} targets step {target}; a target is a later step, or {len} for the end"
+            ),
+        ));
     }
     Ok(())
 }
@@ -204,9 +219,10 @@ fn validate_bind(step: u64, bind: &str) -> Result<(), Error> {
     validate_ident(&format!("step {step}: bind"), bind)?;
     let shadows_a_root = RESERVED_ROOTS.contains(&bind);
     if shadows_a_root {
-        return Err(module_error(format!(
-            "step {step}: bind {bind:?} is a frame root"
-        )));
+        return Err(module_error(
+            "step_binding",
+            format!("step {step}: bind {bind:?} is a frame root"),
+        ));
     }
     Ok(())
 }
@@ -242,9 +258,10 @@ pub(crate) fn validate_program(program: &Program, executor: &str) -> Result<(), 
                 validate_ident(&format!("step {at}: module"), module)?;
                 let queries_the_executor = module == executor;
                 if queries_the_executor {
-                    return Err(module_error(format!(
-                        "step {at}: a program cannot query {executor}, its own executor"
-                    )));
+                    return Err(module_error(
+                        "self_program_query",
+                        format!("step {at}: a program cannot query {executor}, its own executor"),
+                    ));
                 }
                 validate_value(at, query, &bound)?;
                 validate_bind(at, bind)?;
@@ -683,9 +700,10 @@ fn waiting_call(program: &Program, step: u64) -> Result<Waiting<'_>, Error> {
             decode: *decode,
             on_failure,
         }),
-        _ => Err(module_error(format!(
-            "invocation waits at step {step}, which is not a call of its program"
-        ))),
+        _ => Err(module_error(
+            "invocation_step_mismatch",
+            format!("invocation waits at step {step}, which is not a call of its program"),
+        )),
     }
 }
 
@@ -701,9 +719,10 @@ fn waiting_dispatch(program: &Program, step: u64) -> Result<Waiting<'_>, Error> 
             decode: *decode,
             on_failure,
         }),
-        _ => Err(module_error(format!(
-            "invocation waits at step {step}, which is not a dispatch of its program"
-        ))),
+        _ => Err(module_error(
+            "invocation_step_mismatch",
+            format!("invocation waits at step {step}, which is not a dispatch of its program"),
+        )),
     }
 }
 
@@ -1617,7 +1636,13 @@ mod tests {
                 bind: "c".into(),
             }],
         };
-        let refusing = Siblings::answering("chat", Err(Error::Module("closed".into())));
+        let refusing = Siblings::answering(
+            "chat",
+            Err(Error::Module {
+                reason: "closed".into(),
+                sentence: "closed".into(),
+            }),
+        );
         let run = block_on(super::run(&refusing, &erroring, &mut self::frame(), 0));
         assert!(matches!(
             run.end,

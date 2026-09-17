@@ -9,6 +9,12 @@ use std::collections::BTreeMap;
 pub struct Boards {
     staged: StagedStore,
 }
+fn refused(refused: Refused) -> Error {
+    Error::Module {
+        reason: refused.reason.into(),
+        sentence: refused.sentence,
+    }
+}
 impl Boards {
     pub fn new(store: Box<dyn MerkleStore>) -> Self {
         Self {
@@ -19,31 +25,48 @@ impl Boards {
         self.staged
             .get(key)
             .await?
-            .map(|bytes| serde_json::from_slice(&bytes).map_err(|e| Error::Module(e.to_string())))
+            .map(|bytes| {
+                serde_json::from_slice(&bytes).map_err(|e| Error::Module {
+                    reason: "corrupt_state".into(),
+                    sentence: e.to_string(),
+                })
+            })
             .transpose()
     }
     async fn create(&mut self, id: String, title: String, owner: String) -> Result<(), Error> {
         if !valid_id(&id) {
-            return Err(Error::Module("Invalid board id.".into()));
+            return Err(Error::Module {
+                reason: "board_id".into(),
+                sentence: "Invalid board id.".into(),
+            });
         }
         let mut catalog: BTreeMap<String, String> =
             self.read(b"catalog").await?.unwrap_or_default();
         if catalog.contains_key(&id) {
-            let existing: Board = self
-                .read(&board_key(&id))
-                .await?
-                .ok_or_else(|| Error::Module("Board catalog is inconsistent.".into()))?;
+            let existing: Board =
+                self.read(&board_key(&id))
+                    .await?
+                    .ok_or_else(|| Error::Module {
+                        reason: "board_catalog".into(),
+                        sentence: "Board catalog is inconsistent.".into(),
+                    })?;
             let same_create = existing.owner == owner && existing.title == title;
             return if same_create {
                 Ok(())
             } else {
-                Err(Error::Module("Board id is already in use.".into()))
+                Err(Error::Module {
+                    reason: "board_id_in_use".into(),
+                    sentence: "Board id is already in use.".into(),
+                })
             };
         }
         if catalog.len() >= MAX_BOARDS {
-            return Err(Error::Module("Board limit reached.".into()));
+            return Err(Error::Module {
+                reason: "board_limit".into(),
+                sentence: "Board limit reached.".into(),
+            });
         }
-        let board = Board::new(title.clone(), owner).map_err(Error::Module)?;
+        let board = Board::new(title.clone(), owner).map_err(refused)?;
         catalog.insert(id.clone(), title);
         let writes = [
             (board_key(&id), sdk::wire::encode(&board)),
@@ -54,7 +77,7 @@ impl Boards {
     }
     async fn rename(&mut self, id: String, title: String) -> Result<(), Error> {
         let current = self.board(&id).await?;
-        let next = current.renamed(title.clone()).map_err(Error::Module)?;
+        let next = current.renamed(title.clone()).map_err(refused)?;
         let mut catalog: BTreeMap<String, String> =
             self.read(b"catalog").await?.unwrap_or_default();
         // The catalogue is what the picker lists, so a rename that reached only
@@ -74,7 +97,10 @@ impl Boards {
         // and needs no say in who may ask. A board with shapes on it does, and
         // this module has no rule for whose they are.
         if !current.shapes.is_empty() {
-            return Err(Error::Module("Clear the board before removing it.".into()));
+            return Err(Error::Module {
+                reason: "board_not_empty".into(),
+                sentence: "Clear the board before removing it.".into(),
+            });
         }
         let mut catalog: BTreeMap<String, String> =
             self.read(b"catalog").await?.unwrap_or_default();
@@ -87,15 +113,21 @@ impl Boards {
     /// gives for one that is not there.
     async fn board(&self, id: &str) -> Result<Board, Error> {
         if !valid_id(id) {
-            return Err(Error::Module("Invalid board id.".into()));
+            return Err(Error::Module {
+                reason: "board_id".into(),
+                sentence: "Invalid board id.".into(),
+            });
         }
         self.read(&board_key(id))
             .await?
-            .ok_or_else(|| Error::Module("Board no longer exists.".into()))
+            .ok_or_else(|| Error::Module {
+                reason: "board_gone".into(),
+                sentence: "Board no longer exists.".into(),
+            })
     }
     async fn edit(&mut self, board: String, changes: Vec<Change>) -> Result<(), Error> {
         let current = self.board(&board).await?;
-        let next = current.changed_many(&changes).map_err(Error::Module)?;
+        let next = current.changed_many(&changes).map_err(refused)?;
         self.write([(board_key(&board), sdk::wire::encode(&next))]);
         Ok(())
     }
@@ -113,14 +145,18 @@ fn actor(origin: &Origin) -> Result<String, Error> {
         Origin::External(key) => {
             let supported_key = matches!(key.len(), 32 | 33);
             if !supported_key {
-                return Err(Error::Module("A signing key is required.".into()));
+                return Err(Error::Module {
+                    reason: "signing_key".into(),
+                    sentence: "A signing key is required.".into(),
+                });
             }
             Ok(origin.actor_string())
         }
         Origin::Program(_) => Ok(origin.actor_string()),
-        Origin::Module(_) | Origin::System => Err(Error::Module(
-            "Boards require an authenticated user or program account.".into(),
-        )),
+        Origin::Module(_) | Origin::System => Err(Error::Module {
+            reason: "actor_origin".into(),
+            sentence: "Boards require an authenticated user or program account.".into(),
+        }),
     }
 }
 #[async_trait::async_trait(?Send)]
@@ -142,7 +178,11 @@ impl Module for Boards {
     }
     async fn execute(&mut self, ctx: &mut dyn Ctx, msg: &Msg) -> Result<(), Error> {
         let owner = actor(&ctx.env().origin)?;
-        let operation: Operation = sdk::wire::decode(&msg.payload).map_err(Error::Module)?;
+        let operation: Operation =
+            sdk::wire::decode(&msg.payload).map_err(|sentence| Error::Module {
+                reason: "codec".into(),
+                sentence,
+            })?;
         match operation {
             Operation::Create { id, title } => self.create(id, title, owner).await,
             Operation::Rename { board, title } => self.rename(board, title).await,
@@ -152,7 +192,10 @@ impl Module for Boards {
         }
     }
     async fn query(&self, req: &[u8]) -> Result<Vec<u8>, Error> {
-        let query: Query = sdk::wire::decode(req).map_err(Error::Module)?;
+        let query: Query = sdk::wire::decode(req).map_err(|sentence| Error::Module {
+            reason: "codec".into(),
+            sentence,
+        })?;
         let reply = match query {
             Query::List => Reply::List(self.read(b"catalog").await?.unwrap_or_default()),
             Query::Get { id } => Reply::Board(self.read(&board_key(&id)).await?),
