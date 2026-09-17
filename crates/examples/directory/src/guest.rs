@@ -9,7 +9,7 @@
 //! encoding are BYTE-IDENTICAL to the native module's.
 
 use crate::{DirMsg, DirQuery, DirReply, decode_msg, decode_query, encode_reply};
-use ducktape_module_sdk::{Guest, host};
+use ducktape_module_sdk::{Guest, host, rejected};
 
 struct Component;
 
@@ -19,7 +19,7 @@ impl Guest for Component {
     }
 
     fn acknowledge(_ack: host::Ack) -> Result<(), host::Error> {
-        Err(host::Error::Rejected("directory has no queued work".into()))
+        Err(rejected("no_pending_work", "directory has no queued work"))
     }
 
     fn initialize(_params: Vec<u8>) -> Result<(), host::Error> {
@@ -36,7 +36,7 @@ impl Guest for Component {
     }
 
     fn execute(payload: Vec<u8>) -> Result<(), host::Error> {
-        match decode_msg(&payload).map_err(host::Error::Rejected)? {
+        match decode_msg(&payload).map_err(|sentence| rejected("codec", sentence))? {
             // a staged write: the host publishes it at the block boundary,
             // exactly like the native module's `stage`/`commit_block` pair.
             DirMsg::Set { key, value } => {
@@ -47,13 +47,13 @@ impl Guest for Component {
     }
 
     fn query(req: Vec<u8>) -> Result<Vec<u8>, host::Error> {
-        match decode_query(&req).map_err(host::Error::Rejected)? {
+        match decode_query(&req).map_err(|sentence| rejected("codec", sentence))? {
             DirQuery::Get { key } => {
                 let value = match host::state_get(key.as_bytes()) {
                     Some(bytes) => Some(String::from_utf8(bytes).map_err(|_| {
                         // unreachable through the write path (DirMsg carries
                         // Strings); fail loud rather than lie about state.
-                        host::Error::Rejected("stored value is not utf-8".into())
+                        rejected("codec", "stored value is not utf-8")
                     })?),
                     None => None,
                 };

@@ -42,8 +42,10 @@ impl Module for Greeter {
 
     async fn execute(&mut self, ctx: &mut dyn Ctx, msg: &Msg) -> Result<(), Error> {
         // the payload is the directory key to greet.
-        let key =
-            String::from_utf8(msg.payload.clone()).map_err(|e| Error::Module(e.to_string()))?;
+        let key = String::from_utf8(msg.payload.clone()).map_err(|e| Error::Module {
+            reason: "codec".into(),
+            sentence: e.to_string(),
+        })?;
 
         // typed cross-module READ (sync, host-routed) of the directory module.
         let reply = ctx
@@ -52,7 +54,10 @@ impl Module for Greeter {
                 &encode_query(&DirQuery::Get { key: key.clone() }),
             )
             .await?;
-        let name = match decode_reply(&reply).map_err(Error::Module)? {
+        let name = match decode_reply(&reply).map_err(|sentence| Error::Module {
+            reason: "codec".into(),
+            sentence,
+        })? {
             DirReply::Value(Some(v)) => v,
             DirReply::Value(None) => return Ok(()), // nothing to greet — no-op
         };

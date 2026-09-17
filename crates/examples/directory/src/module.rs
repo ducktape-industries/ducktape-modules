@@ -106,7 +106,10 @@ impl Directory {
         // an entry costs at least its two 8-byte length prefixes, so a count the
         // remaining buffer cannot possibly hold is rejected before the loop.
         if count > ((bytes.len() - off) / 16) as u64 {
-            return Err(Error::Module("snapshot truncated".into()));
+            return Err(Error::Module {
+                reason: "snapshot_truncated".into(),
+                sentence: "snapshot truncated".into(),
+            });
         }
         let mut entries: BTreeMap<String, String> = BTreeMap::new();
         for _ in 0..count {
@@ -116,15 +119,24 @@ impl Directory {
                 .last_key_value()
                 .is_some_and(|(last, _)| *last >= key)
             {
-                return Err(Error::Module("snapshot keys not strictly ascending".into()));
+                return Err(Error::Module {
+                    reason: "snapshot_key_order".into(),
+                    sentence: "snapshot keys not strictly ascending".into(),
+                });
             }
             entries.insert(key, value);
         }
         if off != bytes.len() {
-            return Err(Error::Module("snapshot has trailing bytes".into()));
+            return Err(Error::Module {
+                reason: "snapshot_trailing_bytes".into(),
+                sentence: "snapshot has trailing bytes".into(),
+            });
         }
         if Self::root_of(&entries) != expected {
-            return Err(Error::Module("snapshot root mismatch".into()));
+            return Err(Error::Module {
+                reason: "snapshot_root_mismatch".into(),
+                sentence: "snapshot root mismatch".into(),
+            });
         }
         self.entries = entries;
         self.pending.clear();
@@ -138,7 +150,10 @@ fn read_u64(bytes: &[u8], off: &mut usize) -> Result<u64, Error> {
     let end = off
         .checked_add(8)
         .filter(|&end| end <= bytes.len())
-        .ok_or_else(|| Error::Module("snapshot truncated".into()))?;
+        .ok_or_else(|| Error::Module {
+            reason: "snapshot_truncated".into(),
+            sentence: "snapshot truncated".into(),
+        })?;
     let mut buf = [0u8; 8];
     buf.copy_from_slice(&bytes[*off..end]);
     *off = end;
@@ -150,12 +165,20 @@ fn read_u64(bytes: &[u8], off: &mut usize) -> Result<u64, Error> {
 /// length can neither oversize-allocate nor read out of bounds.
 fn read_string(bytes: &[u8], off: &mut usize) -> Result<String, Error> {
     let len = read_u64(bytes, off)?;
-    let len = usize::try_from(len).map_err(|_| Error::Module("snapshot truncated".into()))?;
+    let len = usize::try_from(len).map_err(|_| Error::Module {
+        reason: "snapshot_truncated".into(),
+        sentence: "snapshot truncated".into(),
+    })?;
     if len > bytes.len() - *off {
-        return Err(Error::Module("snapshot truncated".into()));
+        return Err(Error::Module {
+            reason: "snapshot_truncated".into(),
+            sentence: "snapshot truncated".into(),
+        });
     }
-    let s = std::str::from_utf8(&bytes[*off..*off + len])
-        .map_err(|_| Error::Module("snapshot string is not utf-8".into()))?;
+    let s = std::str::from_utf8(&bytes[*off..*off + len]).map_err(|_| Error::Module {
+        reason: "codec".into(),
+        sentence: "snapshot string is not utf-8".into(),
+    })?;
     *off += len;
     Ok(s.to_owned())
 }
@@ -177,7 +200,10 @@ impl Module for Directory {
     }
 
     async fn execute(&mut self, _ctx: &mut dyn Ctx, msg: &Msg) -> Result<(), Error> {
-        match decode_msg(&msg.payload).map_err(Error::Module)? {
+        match decode_msg(&msg.payload).map_err(|sentence| Error::Module {
+            reason: "codec".into(),
+            sentence,
+        })? {
             DirMsg::Set { key, value } => self.stage(key, value),
         }
         Ok(())
@@ -186,7 +212,10 @@ impl Module for Directory {
     /// read projection — serves other modules' `ctx.query` + external reads.
     /// async per the trait, though the in-memory body has nothing to await.
     async fn query(&self, req: &[u8]) -> Result<Vec<u8>, Error> {
-        match decode_query(req).map_err(Error::Module)? {
+        match decode_query(req).map_err(|sentence| Error::Module {
+            reason: "codec".into(),
+            sentence,
+        })? {
             DirQuery::Get { key } => Ok(encode_reply(&DirReply::Value(self.get(&key).cloned()))),
         }
     }
