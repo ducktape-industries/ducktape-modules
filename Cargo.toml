@@ -66,6 +66,7 @@ ducktape-module-sdk = { git = "https://github.com/ducktape-industries/ducktape-s
 # dev-only shared test doubles for the sdk boundary traits (TestCtx +
 # in-memory MerkleStore). MAY ONLY appear in `[dev-dependencies]`.
 sdk-testkit = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "sdk-testkit" }
+wasm-host = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "wasm-host" }
 # the closed signature-scheme set + ONE verifier.
 keyscheme = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "keyscheme" }
 # keyed with the underscore ON PURPOSE: module crates declare a feature named

@@ -35,6 +35,7 @@ async-trait = { workspace = true }
 ducktape-module-sdk = { workspace = true, optional = true }
 
 [dev-dependencies]
+wasm-host = { workspace = true }
 # the NATIVE identity and attribution modules (the `identity`/`attribution`
 # names in [dependencies] are their wire crates): a test composes the real
 # registry the way a host does. They live in the platform repo.

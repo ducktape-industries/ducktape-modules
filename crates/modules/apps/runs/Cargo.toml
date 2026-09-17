@@ -74,6 +74,7 @@ async-trait = { workspace = true }
 index_guest = { workspace = true }
 
 [dev-dependencies]
+wasm-host = { workspace = true }
 files = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "files", features = ["native"] }
 tempfile = { workspace = true }
 syn = { version = "2", features = ["full"] }
