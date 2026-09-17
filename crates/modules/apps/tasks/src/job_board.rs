@@ -57,8 +57,8 @@ use crate::{
     WorkerHistory, WorkerReport, WorkerReportKind, controls, encode_job_event, stage_record,
 };
 
-/// max bytes of a `job_id` (non-empty).
-pub const MAX_JOB_ID: usize = 256;
+pub use tasks_wire::MAX_JOB_ID;
+
 /// max bytes of a `kind` (non-empty).
 pub const MAX_KIND: usize = 64;
 /// max bytes of a job `spec`.
@@ -93,9 +93,9 @@ pub const MAX_WORKERS: usize = 16;
 pub const MAX_WORKER_MODULE_ID: usize = 256;
 /// Bounds are admission limits, never automatic archive deletion.
 pub const MAX_JOB_CONTROLS: usize = 32;
-pub const MAX_CONTROL_ACKNOWLEDGEMENTS: usize = 64;
+pub use tasks_wire::MAX_CONTROL_ACKNOWLEDGEMENTS;
 pub const MAX_WORKER_REPORTS: usize = 32;
-pub const MAX_WORKER_TEXT_BYTES: usize = 4096;
+pub use tasks_wire::MAX_WORKER_TEXT_BYTES;
 pub const MAX_WORKER_EXECUTIONS: usize = 64;
 /// Native run keys are opaque and may contain Runs' internal separators.
 pub const MAX_NATIVE_RUN_ID_BYTES: usize = 1024;

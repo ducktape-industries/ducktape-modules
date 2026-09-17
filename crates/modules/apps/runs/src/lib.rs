@@ -69,9 +69,7 @@ pub(crate) const CONTEXT_WINDOW: u64 = 64;
 /// bounds a malicious/chatty holder and leaves multi-hour work ample room.
 pub const RUN_DEADLINE_VIEWS: u64 = 6 * 60 * 60;
 
-/// one renewable agent-attempt lease. Saga's 64-view default is sized for
-/// short workers; the host heartbeats this wider window while the CLI lives.
-pub const RUN_LEASE_VIEWS: u64 = 1024;
+pub use runs_wire::RUN_LEASE_VIEWS;
 
 /// oracle attempts per run: one retry after an explicit provider failure.
 pub const RUN_MAX_ATTEMPTS: u32 = 2;
