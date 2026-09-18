@@ -13,11 +13,10 @@
 mod common;
 
 use collaboration::{
-    Collaboration, CollaborationMsg, CollaborationReply, DeliveryState, ProtectedRead,
-    encode_msg,
+    Collaboration, CollaborationMsg, CollaborationReply, DeliveryState, ProtectedRead, encode_msg,
 };
-use commonware_runtime::{Runner as _, Supervisor as _, deterministic};
 use common::*;
+use commonware_runtime::{Runner as _, Supervisor as _, deterministic};
 use sdk::{MerkleStore as _, Module, Msg, Origin, StateRoot, StateSyncHandle};
 use statesync::qmdb::QmdbStore;
 
@@ -25,7 +24,13 @@ fn ext(byte: u8) -> Origin {
     Origin::External(key(byte))
 }
 
-async fn drive(module: &mut Collaboration, chat: &Chat, height: u64, origin: Origin, payload: CollaborationMsg) {
+async fn drive(
+    module: &mut Collaboration,
+    chat: &Chat,
+    height: u64,
+    origin: Origin,
+    payload: CollaborationMsg,
+) {
     let mut ctx = at(chat, height, origin);
     ok(module, &mut ctx, payload).await;
 }
