@@ -627,7 +627,11 @@ fn expiry_is_permissionless_agreed_time_and_never_reported_by_a_service() {
         let refusal = apply(&mut bound.scene.module, &mut ctx, expire.clone())
             .await
             .unwrap_err();
-        assert!(format!("{refusal:?}").contains("not yet"), "{refusal:?}");
+        assert!(
+            matches!(&refusal, sdk::Error::Module { reason, sentence } if reason == sdk::refusal::NOT_YET
+                && sentence.contains("expires at consensus time 100, not yet at 99")),
+            "{refusal:?}"
+        );
 
         // at the deadline eligibility ends, and a stranger may sweep it.
         assert!(matches!(

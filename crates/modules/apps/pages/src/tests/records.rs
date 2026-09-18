@@ -310,6 +310,11 @@ fn exact_byte_replays_precede_cas_and_never_rewind_a_newer_document() {
             .await
             .unwrap_err();
         assert!(error.to_string().contains("different payload"));
+        // an id reused with different work: retrying that id never succeeds.
+        assert!(
+            matches!(&error, Error::Module { reason, .. } if reason == sdk::refusal::ALREADY_EXISTS),
+            "{error:?}"
+        );
         assert_eq!(p.root(), root);
     });
 }

@@ -701,8 +701,10 @@ impl RunsModule {
         };
         if previous != payload {
             return Err(Error::Module {
-                reason: refusal::STALE.into(),
-                sentence: "conversation operation id reused with different input".into(),
+                reason: refusal::ALREADY_EXISTS.into(),
+                sentence: format!(
+                    "operation {op} of conversation {id} already names different work"
+                ),
             });
         }
         Ok(true)

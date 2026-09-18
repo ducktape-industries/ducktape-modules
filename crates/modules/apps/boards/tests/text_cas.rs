@@ -9,14 +9,11 @@ use sdk::{Ctx, Module, Msg, Origin, StateRoot};
 use sdk_testkit::{MemStore, TestCtx};
 use std::collections::BTreeMap;
 
-// Refusal tokens, in one place: modules is moving its tokens onto the sdk
-// b6a5f8a taxonomy (stale_text → "stale", text_target_gone → "target_gone",
-// board_gone → its canonical class), and that migration changes these lines,
-// not the tests.
-const STALE: &str = "stale_text";
-const TARGET_GONE: &str = "text_target_gone";
-const BOARD_GONE: &str = "board_gone";
-const CODEC: &str = "codec";
+// Refusal tokens, in one place: the sdk refusal classes, plus the one class a
+// board adds (`TARGET_GONE`, from boards-wire through the glob import).
+const STALE: &str = sdk::refusal::STALE;
+const BOARD_GONE: &str = sdk::refusal::NOT_FOUND;
+const CODEC: &str = sdk::refusal::INVALID_INPUT;
 
 /// The real module over an in-memory store, holding board `room` with one
 /// card, `card`, committed.

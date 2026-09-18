@@ -850,6 +850,7 @@ mod tests {
                     prev_oid: None,
                     new_oid: Some(vec![0xab; 20]),
                 }],
+                tags: Vec::new(),
                 pack_digest: Some(vec![7u8; 32]),
                 cert: None,
             });

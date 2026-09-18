@@ -1274,8 +1274,8 @@ impl AgentModule {
             let same_request = receipt.request_digest == request_digest;
             if !same_request {
                 return Err(module_error(
-                    refusal::STALE,
-                    "provision request_id was used with different content",
+                    refusal::ALREADY_EXISTS,
+                    format!("provision request {request_id} already names different work"),
                 ));
             }
             ctx.set_assigned(encode_assigned(&AgentAssigned::Provisioned {

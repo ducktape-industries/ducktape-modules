@@ -174,9 +174,9 @@ impl RunsModule {
                 && previous.request.update == update;
             if !exact {
                 return Err(Error::Module {
-                    reason: refusal::STALE.into(),
+                    reason: refusal::ALREADY_EXISTS.into(),
                     sentence: format!(
-                        "module update request {request_id} was already used for different work"
+                        "module update request {request_id} already names different work"
                     ),
                 });
             }

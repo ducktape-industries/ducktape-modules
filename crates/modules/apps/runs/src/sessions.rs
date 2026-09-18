@@ -206,8 +206,8 @@ impl RunsModule {
                 .is_some_and(|invocation| invocation.envelope_digest == envelope_digest);
             if !same_bytes {
                 return Err(Error::Module {
-                    reason: refusal::STALE.into(),
-                    sentence: "request_id was already used for a different action".into(),
+                    reason: refusal::ALREADY_EXISTS.into(),
+                    sentence: format!("action request {request_id} already names different work"),
                 });
             }
             ctx.set_output(sdk::wire::encode(&serde_json::json!({"receipt_id": id})));
@@ -422,8 +422,10 @@ impl RunsModule {
                 Ok(())
             } else {
                 Err(Error::Module {
-                    reason: refusal::STALE.into(),
-                    sentence: "request_id was already used for a different agent call".into(),
+                    reason: refusal::ALREADY_EXISTS.into(),
+                    sentence: format!(
+                        "agent call request {request_id} already names different work"
+                    ),
                 })
             };
         }

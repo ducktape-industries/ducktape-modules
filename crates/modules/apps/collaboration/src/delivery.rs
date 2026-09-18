@@ -592,9 +592,9 @@ pub async fn expire(
     let delivery = load_delivery(staged, &channel_id, seq, &recipient).await?;
     if now < delivery.expires_at {
         return Err(Error::Module {
-            reason: refusal::WRONG_STATE.into(),
+            reason: refusal::NOT_YET.into(),
             sentence: format!(
-                "delivery of {seq} on {channel_id} expires at {}, not yet at {now}",
+                "delivery of {seq} on {channel_id} expires at consensus time {}, not yet at {now}",
                 delivery.expires_at
             ),
         });

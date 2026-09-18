@@ -614,9 +614,9 @@ async fn continue_worker(
             execution.continuation_operation_id.as_deref() == Some(operation_id.as_str());
         if reused_operation {
             return Err(Error::Module {
-                reason: refusal::STALE.into(),
+                reason: refusal::ALREADY_EXISTS.into(),
                 sentence: format!(
-                    "operation {operation_id} already continued conversation {}",
+                    "operation {operation_id} already names different work in conversation {}",
                     previous.conversation_id
                 ),
             });
@@ -696,9 +696,9 @@ async fn control(
             return Ok(());
         }
         return Err(Error::Module {
-            reason: refusal::STALE.into(),
+            reason: refusal::ALREADY_EXISTS.into(),
             sentence: format!(
-                "job {} already has a different control {operation_id}",
+                "control operation {operation_id} on job {} already names different work",
                 job.job_id
             ),
         });
@@ -725,9 +725,9 @@ async fn control(
         .any(|report| report.operation_id == operation_id);
     if report_id {
         return Err(Error::Module {
-            reason: refusal::STALE.into(),
+            reason: refusal::ALREADY_EXISTS.into(),
             sentence: format!(
-                "operation {operation_id} is already a report on job {}",
+                "operation {operation_id} on job {} already names different work: a report",
                 job.job_id
             ),
         });
@@ -969,9 +969,9 @@ async fn checkpoint(
             return Ok(());
         }
         return Err(Error::Module {
-            reason: refusal::STALE.into(),
+            reason: refusal::ALREADY_EXISTS.into(),
             sentence: format!(
-                "job {} already has a different report {operation_id}",
+                "report operation {operation_id} on job {} already names different work",
                 job.job_id
             ),
         });
@@ -982,9 +982,9 @@ async fn checkpoint(
         .any(|control| control.operation_id == operation_id);
     if control_id {
         return Err(Error::Module {
-            reason: refusal::STALE.into(),
+            reason: refusal::ALREADY_EXISTS.into(),
             sentence: format!(
-                "operation {operation_id} is already a control on job {}",
+                "operation {operation_id} on job {} already names different work: a control",
                 job.job_id
             ),
         });
@@ -1192,9 +1192,9 @@ async fn reclaim(staged: &mut StagedStore, job_id: String, height: u64) -> Resul
     let deadline = claim.claimed_at_height.saturating_add(claim.lease_views);
     if height <= deadline {
         return Err(Error::Module {
-            reason: refusal::WRONG_STATE.into(),
+            reason: refusal::NOT_YET.into(),
             sentence: format!(
-                "lease not expired (height {height} <= deadline {deadline}): {job_id}"
+                "the lease on job {job_id} runs through height {deadline} (now {height})"
             ),
         });
     }

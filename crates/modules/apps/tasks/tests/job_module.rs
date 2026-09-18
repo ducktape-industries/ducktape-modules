@@ -483,7 +483,9 @@ fn premature_reclaim_rejected() {
             .await
             .expect_err("reclaim at the deadline is premature");
         assert!(
-            matches!(err, Error::Module { sentence: m, .. } if m.contains("lease not expired"))
+            matches!(&err, Error::Module { reason, sentence } if reason == sdk::refusal::NOT_YET
+                && sentence.contains("lease on job j1 runs through height 15")),
+            "{err:?}"
         );
 
         // and well before it.
@@ -491,7 +493,9 @@ fn premature_reclaim_rejected() {
             .await
             .expect_err("early reclaim rejected");
         assert!(
-            matches!(err, Error::Module { sentence: m, .. } if m.contains("lease not expired"))
+            matches!(&err, Error::Module { reason, sentence } if reason == sdk::refusal::NOT_YET
+                && sentence.contains("lease on job j1 runs through height 15")),
+            "{err:?}"
         );
     });
 }

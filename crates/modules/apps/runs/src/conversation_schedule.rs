@@ -132,13 +132,20 @@ fn schedule_fire(
     sequence: u64,
     now: u64,
 ) -> Result<ConversationSchedule, Error> {
-    let due =
-        matches!(schedule.status, ConversationScheduleStatus::Pending { due_at } if due_at <= now);
-    if !due {
+    let ConversationScheduleStatus::Pending { due_at } = schedule.status else {
         return Err(Error::Module {
             reason: refusal::WRONG_STATE.into(),
             sentence: format!(
-                "schedule {} of conversation {} is not due yet",
+                "schedule {} of conversation {} is not pending",
+                schedule.schedule_id, schedule.conversation_id
+            ),
+        });
+    };
+    if now < due_at {
+        return Err(Error::Module {
+            reason: refusal::NOT_YET.into(),
+            sentence: format!(
+                "schedule {} of conversation {} is due at consensus time {due_at}, not yet at {now}",
                 schedule.schedule_id, schedule.conversation_id
             ),
         });

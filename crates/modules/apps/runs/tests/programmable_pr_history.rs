@@ -30,6 +30,7 @@ fn push(branch: &str, previous: Option<u8>, next: Option<u8>) -> forge::ForgeMsg
             prev_oid: previous.map(|byte| vec![byte; 20]),
             new_oid: next.map(|byte| vec![byte; 20]),
         }],
+        tags: Vec::new(),
         pack_digest: next.map(|_| vec![9; 32]),
         cert: None,
     }

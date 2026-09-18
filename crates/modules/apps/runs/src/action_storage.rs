@@ -240,8 +240,8 @@ impl RunsModule {
         };
         if self.action_request(&id).await?.is_some() {
             return Err(Error::Module {
-                reason: refusal::STALE.into(),
-                sentence: "action request id is already bound to earlier work".into(),
+                reason: refusal::ALREADY_EXISTS.into(),
+                sentence: format!("action request {id} already names different work"),
             });
         }
         let item = self

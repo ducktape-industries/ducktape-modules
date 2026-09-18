@@ -299,8 +299,10 @@ impl RunsModule {
                 return Ok(());
             }
             return Err(Error::Module {
-                reason: refusal::STALE.into(),
-                sentence: "worker report operation id conflicts with its receipt".into(),
+                reason: refusal::ALREADY_EXISTS.into(),
+                sentence: format!(
+                    "worker report operation {operation_id} already names different work"
+                ),
             });
         }
         let session = self
@@ -340,10 +342,8 @@ impl RunsModule {
                 return Ok(());
             }
             return Err(Error::Module {
-                reason: refusal::STALE.into(),
-                sentence: format!(
-                    "run {run_id} already settled its cancellation with a different operation"
-                ),
+                reason: refusal::ALREADY_EXISTS.into(),
+                sentence: format!("the cancellation of run {run_id} already names different work"),
             });
         }
         let job = self
