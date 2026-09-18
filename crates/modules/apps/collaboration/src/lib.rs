@@ -143,7 +143,7 @@ pub(crate) async fn actor_from_origin(ctx: &dyn Ctx, identity: &str) -> Result<P
             let identity::IdentityReply::Account(Some(account)) = reply else {
                 return Err(Error::Module {
                     reason: "program_account_does_not_exist".into(),
-                    sentence: "program account does not exist".into(),
+                    sentence: format!("program account {account} does not exist"),
                 });
             };
             let is_active_program = matches!(
@@ -156,7 +156,7 @@ pub(crate) async fn actor_from_origin(ctx: &dyn Ctx, identity: &str) -> Result<P
             if !is_active_program {
                 return Err(Error::Module {
                     reason: "program_account_is_not_active".into(),
-                    sentence: "program account is not active".into(),
+                    sentence: format!("program account {} is not active", account.number),
                 });
             }
             Ok(Party::Account(account.number))
@@ -223,7 +223,7 @@ pub(crate) async fn chat_access(
     else {
         return Err(Error::Module {
             reason: "chat_returned_an_unexpected_reply".into(),
-            sentence: "chat returned an unexpected reply".into(),
+            sentence: "chat answered an access lookup with something other than access".into(),
         });
     };
     Ok(access)
@@ -247,7 +247,9 @@ pub(crate) async fn chat_message(
     else {
         return Err(Error::Module {
             reason: "chat_returned_an_unexpected_reply".into(),
-            sentence: "chat returned an unexpected reply".into(),
+            sentence: format!(
+                "chat answered the lookup for message {message_id} with something other than a message"
+            ),
         });
     };
     Ok(view)

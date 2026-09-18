@@ -148,7 +148,7 @@ impl RunsModule {
         else {
             return Err(Error::Module {
                 reason: "model_account_does_not_exist".into(),
-                sentence: "model account does not exist".into(),
+                sentence: format!("account {account} does not exist"),
             });
         };
         Ok(view.control)
@@ -168,13 +168,16 @@ impl RunsModule {
         else {
             return Err(Error::Module {
                 reason: "program_authority_is_not_active".into(),
-                sentence: "program authority is not active".into(),
+                sentence: format!("account {account} is not an active program"),
             });
         };
         if executor != self.agent {
             return Err(Error::Module {
                 reason: "program_executor_does_not_match".into(),
-                sentence: "program executor does not match".into(),
+                sentence: format!(
+                    "program {account} is executed by {executor}, not by {}",
+                    self.agent
+                ),
             });
         }
         Ok(generation)
@@ -192,13 +195,16 @@ impl RunsModule {
         else {
             return Err(Error::Module {
                 reason: "model_requires_a_live_program_account".into(),
-                sentence: "model requires a live program account".into(),
+                sentence: format!("account {account} is not a program account"),
             });
         };
         if executor != self.agent {
             return Err(Error::Module {
                 reason: "program_executor_does_not_match".into(),
-                sentence: "program executor does not match".into(),
+                sentence: format!(
+                    "program {account} is executed by {executor}, not by {}",
+                    self.agent
+                ),
             });
         }
         Ok(())
@@ -258,7 +264,9 @@ impl RunsModule {
                 if records.len() >= MAX_REGISTERED_AGENTS {
                     return Err(Error::Module {
                         reason: "model_registry_is_full".into(),
-                        sentence: "model registry is full".into(),
+                        sentence: format!(
+                            "the model registry already holds {MAX_REGISTERED_AGENTS} models, its limit"
+                        ),
                     });
                 }
                 let owner = canonical_origin(&ctx.env().origin)?;
@@ -269,7 +277,9 @@ impl RunsModule {
                 if owned >= MAX_AGENTS_PER_OWNER {
                     return Err(Error::Module {
                         reason: "model_owner_allocation_is_full".into(),
-                        sentence: "model owner allocation is full".into(),
+                        sentence: format!(
+                            "this owner already has {MAX_AGENTS_PER_OWNER} models, the most one owner may register"
+                        ),
                     });
                 }
                 let recipe_hash = recipe_hash.unwrap_or_default();

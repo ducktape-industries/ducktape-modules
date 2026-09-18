@@ -173,7 +173,7 @@ pub async fn append_event(
     let seq = head(staged, cid).await?;
     let next = seq.checked_add(1).ok_or_else(|| Error::Module {
         reason: "channel_event_sequence_exhausted".into(),
-        sentence: "channel event sequence exhausted".into(),
+        sentence: format!("channel {cid} has no event sequence numbers left"),
     })?;
     let event = ChannelEvent { seq, at: now, body };
     put(staged, event_key(cid, seq), &event, "event")?;

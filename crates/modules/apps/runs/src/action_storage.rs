@@ -73,27 +73,27 @@ fn decode_marker(bytes: &[u8]) -> Result<Marker, Error> {
         .get(..8)
         .ok_or_else(|| Error::Module {
             reason: "truncated_action_marker".into(),
-            sentence: "truncated action marker".into(),
+            sentence: "a stored action marker is shorter than its 8-byte length prefix".into(),
         })?
         .try_into()
         .expect("eight bytes");
     let length = usize::try_from(u64::from_le_bytes(prefix)).map_err(|_| Error::Module {
         reason: "action_marker_length_overflow".into(),
-        sentence: "action marker length overflow".into(),
+        sentence: "a stored action marker declares a length this platform cannot address".into(),
     })?;
     let end = length.checked_add(8).ok_or_else(|| Error::Module {
         reason: "action_marker_length_overflow".into(),
-        sentence: "action marker length overflow".into(),
+        sentence: "a stored action marker declares a length this platform cannot address".into(),
     })?;
     let encoded = bytes.get(8..end).ok_or_else(|| Error::Module {
         reason: "truncated_action_marker_body".into(),
-        sentence: "truncated action marker body".into(),
+        sentence: "a stored action marker ends before the length it declares".into(),
     })?;
     let canonical_padding = bytes[end..].iter().all(|byte| *byte == 0);
     if !canonical_padding {
         return Err(Error::Module {
             reason: "invalid_action_marker_padding".into(),
-            sentence: "invalid action marker padding".into(),
+            sentence: "a stored action marker has nonzero bytes after its body".into(),
         });
     }
     sdk::wire::decode(encoded).map_err(|sentence| Error::Module {
@@ -166,7 +166,7 @@ impl RunsModule {
         let bytes = self.receipts.read(&key, view).await?;
         sdk::wire::decode(&bytes.ok_or_else(|| Error::Module {
             reason: "missing_action_publication_queue_item".into(),
-            sentence: "missing action publication queue item".into(),
+            sentence: format!("action publication queue item {item} has no record"),
         })?)
         .map_err(|sentence| Error::Module {
             reason: "codec".into(),
@@ -248,11 +248,11 @@ impl RunsModule {
             .unwrap_or(self.next_action_item);
         let next = item.checked_add(1).ok_or_else(|| Error::Module {
             reason: "action_delivery_counter_exhausted".into(),
-            sentence: "action delivery counter exhausted".into(),
+            sentence: "no action item numbers are left for this action".into(),
         })?;
         self.model(&entry.agent_id).ok_or_else(|| Error::Module {
             reason: "run_model_no_longer_exists".into(),
-            sentence: "run model no longer exists".into(),
+            sentence: format!("model {} no longer exists", entry.agent_id),
         })?;
         let record = ActionRequest {
             view,
@@ -334,7 +334,7 @@ impl RunsModule {
                 .await?
                 .ok_or_else(|| Error::Module {
                     reason: "queued_action_has_no_body".into(),
-                    sentence: "queued action has no body".into(),
+                    sentence: format!("queued action {} has no stored request", queued.request_id),
                 })?;
             let request: ActionRequest =
                 sdk::wire::decode(&bytes).map_err(|sentence| Error::Module {
@@ -379,7 +379,10 @@ impl RunsModule {
             .await?
             .ok_or_else(|| Error::Module {
                 reason: "unknown_action_delivery".into(),
-                sentence: "unknown action delivery".into(),
+                sentence: format!(
+                    "delivered item {} names action {}, which does not exist",
+                    ack.item, queued.request_id
+                ),
             })?;
         let digest: [u8; 32] = Sha256::digest(sdk::wire::encode(&ack.outcome)).into();
         if let Publication::Delivered { digest: previous } = request.publication {
@@ -388,7 +391,10 @@ impl RunsModule {
             }
             return Err(Error::Module {
                 reason: "conflicting_action_delivery_acknowledgment".into(),
-                sentence: "conflicting action delivery acknowledgment".into(),
+                sentence: format!(
+                    "action item {} was already acknowledged with a different outcome",
+                    ack.item
+                ),
             });
         }
         let mut queue = self.action_queue(View::Live).await?;

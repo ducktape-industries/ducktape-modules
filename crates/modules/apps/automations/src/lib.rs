@@ -107,7 +107,10 @@ async fn submitting_account(ctx: &dyn Ctx, identity: &str) -> Result<AccountNumb
     if names_non_program {
         return Err(Error::Module {
             reason: "program_origin_requires_a_program_account".into(),
-            sentence: "program origin requires a program account".into(),
+            sentence: format!(
+                "the op comes from a program, but account {} is not a program account",
+                account.number
+            ),
         });
     }
     Ok(account.number)
@@ -539,7 +542,7 @@ impl Automations {
             .checked_add(candidates.len() as u64)
             .ok_or_else(|| Error::Module {
                 reason: "run_history_sequence_exhausted".into(),
-                sentence: "run history sequence exhausted".into(),
+                sentence: "no run history sequence numbers are left for these rule runs".into(),
             })?;
         let mut budget = 0usize;
         let mut fired: Vec<Rule> = Vec::new();

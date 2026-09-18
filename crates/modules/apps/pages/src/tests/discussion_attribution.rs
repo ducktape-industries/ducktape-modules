@@ -334,9 +334,7 @@ fn full_json_source_envelope_is_bounded_and_large_valid_snapshots_reach_attribut
             .await
             .unwrap_err();
         assert!(
-            error
-                .to_string()
-                .contains("attribution source envelope too large"),
+            error.to_string().contains("an attribution source is"),
             "{error}"
         );
         assert_eq!(host.module_root("pages"), root);

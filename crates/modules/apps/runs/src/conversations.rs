@@ -103,12 +103,18 @@ fn append(state: &ConversationView, event: ConversationEvent) -> Result<Vec<Comm
         .checked_add(1)
         .ok_or_else(|| Error::Module {
             reason: "conversation_cursor_exhausted".into(),
-            sentence: "conversation cursor exhausted".into(),
+            sentence: format!(
+                "conversation {} has no event sequence numbers left",
+                state.conversation_id
+            ),
         })?;
     if event.sequence != expected {
         return Err(Error::Module {
             reason: "conversation_event_cursor_mismatch".into(),
-            sentence: "conversation event cursor mismatch".into(),
+            sentence: format!(
+                "event {} is not the next event {expected} of conversation {}",
+                event.sequence, state.conversation_id
+            ),
         });
     }
     let mut next = state.clone();
@@ -144,7 +150,10 @@ fn queue(state: &ConversationView) -> Result<Vec<Command>, Error> {
         .checked_add(1)
         .ok_or_else(|| Error::Module {
             reason: "conversation_cursor_exhausted".into(),
-            sentence: "conversation cursor exhausted".into(),
+            sentence: format!(
+                "conversation {} has no event sequence numbers left",
+                state.conversation_id
+            ),
         })?;
     let turn = ConversationTurn {
         turn: state.next_turn,
@@ -163,7 +172,10 @@ fn queue(state: &ConversationView) -> Result<Vec<Command>, Error> {
     };
     next.next_turn = next.next_turn.checked_add(1).ok_or_else(|| Error::Module {
         reason: "conversation_turn_counter_exhausted".into(),
-        sentence: "conversation turn counter exhausted".into(),
+        sentence: format!(
+            "conversation {} has no turn numbers left",
+            state.conversation_id
+        ),
     })?;
     next.active_turn = Some(turn.clone());
     Ok(vec![Command::Turn(turn), Command::State(Box::new(next))])
@@ -206,7 +218,10 @@ fn job_started(
     if state.active_turn.is_some() {
         return Err(Error::Module {
             reason: "worker_conversation_still_owns_an_execution".into(),
-            sentence: "worker conversation still owns an execution".into(),
+            sentence: format!(
+                "worker conversation {} is still running a turn",
+                state.conversation_id
+            ),
         });
     }
     let mut next = state.clone();
@@ -215,12 +230,18 @@ fn job_started(
         .checked_add(1)
         .ok_or_else(|| Error::Module {
             reason: "worker_input_cursor_exhausted".into(),
-            sentence: "worker input cursor exhausted".into(),
+            sentence: format!(
+                "conversation {} has no input sequence numbers left",
+                state.conversation_id
+            ),
         })?;
     if event.sequence != next.admitted_cursor {
         return Err(Error::Module {
             reason: "worker_input_cursor_mismatch".into(),
-            sentence: "worker input cursor mismatch".into(),
+            sentence: format!(
+                "event {} is not the next input {} of conversation {}",
+                event.sequence, next.admitted_cursor, state.conversation_id
+            ),
         });
     }
     let turn = ConversationTurn {
@@ -236,7 +257,10 @@ fn job_started(
     };
     next.next_turn = next.next_turn.checked_add(1).ok_or_else(|| Error::Module {
         reason: "worker_turn_counter_exhausted".into(),
-        sentence: "worker turn counter exhausted".into(),
+        sentence: format!(
+            "conversation {} has no turn numbers left",
+            state.conversation_id
+        ),
     })?;
     next.active_turn = Some(turn.clone());
     Ok(vec![
@@ -265,12 +289,18 @@ fn checkpoint(
         .unwrap_or(0);
     let next_revision = prior_revision.checked_add(1).ok_or_else(|| Error::Module {
         reason: "history_revision_exhausted".into(),
-        sentence: "history revision exhausted".into(),
+        sentence: format!(
+            "conversation {} has no history revision numbers left",
+            state.conversation_id
+        ),
     })?;
     if checkpoint.history.revision != next_revision {
         return Err(Error::Module {
             reason: "history_checkpoint_revision_mismatch".into(),
-            sentence: "history checkpoint revision mismatch".into(),
+            sentence: format!(
+                "checkpoint revision {} is not the next history revision {next_revision}",
+                checkpoint.history.revision
+            ),
         });
     }
     checkpoint.delivery |= turn
@@ -292,7 +322,10 @@ fn action(state: &ConversationView, id: String) -> Result<Vec<Command>, Error> {
     if !accepts_actions {
         return Err(Error::Module {
             reason: "conversation_turn_is_fenced".into(),
-            sentence: "conversation turn is fenced".into(),
+            sentence: format!(
+                "turn {} of conversation {} accepts no more actions",
+                turn.turn, state.conversation_id
+            ),
         });
     }
     turn.actions.push(id);
@@ -323,7 +356,10 @@ fn actions_drained(state: &ConversationView, count: u64) -> Result<Vec<Command>,
     if !valid {
         return Err(Error::Module {
             reason: "invalid_conversation_receipt_cursor".into(),
-            sentence: "invalid conversation receipt cursor".into(),
+            sentence: format!(
+                "conversation {} cannot mark {count} of its turn's actions drained",
+                state.conversation_id
+            ),
         });
     }
     turn.drained_actions = count;
@@ -336,7 +372,10 @@ fn drained(state: &ConversationView, attempt: Option<u32>) -> Result<Vec<Command
     if !ready {
         return Err(Error::Module {
             reason: "conversation_is_not_drained".into(),
-            sentence: "conversation is not drained".into(),
+            sentence: format!(
+                "conversation {} still has actions to drain",
+                state.conversation_id
+            ),
         });
     }
     let Some(checkpoint) = &turn.checkpoint else {
@@ -407,7 +446,10 @@ fn retry(state: &ConversationView) -> Result<Vec<Command>, Error> {
             };
             next.next_turn = next.next_turn.checked_add(1).ok_or_else(|| Error::Module {
                 reason: "conversation_turn_counter_exhausted".into(),
-                sentence: "conversation turn counter exhausted".into(),
+                sentence: format!(
+                    "conversation {} has no turn numbers left",
+                    state.conversation_id
+                ),
             })?;
             next.active_turn = Some(turn.clone());
             vec![
@@ -487,7 +529,7 @@ impl RunsModule {
                 .await?
                 .ok_or_else(|| Error::Module {
                     reason: "conversation_event_is_missing".into(),
-                    sentence: "conversation event is missing".into(),
+                    sentence: format!("conversation {id} has no event {n}"),
                 })?;
             events.push(event);
         }
@@ -529,7 +571,7 @@ impl RunsModule {
             .unwrap_or(self.next_action_item);
         let next = item.checked_add(1).ok_or_else(|| Error::Module {
             reason: "conversation_wake_counter_exhausted".into(),
-            sentence: "conversation wake counter exhausted".into(),
+            sentence: "no action item numbers are left for a conversation wake".into(),
         })?;
         let wake = Wake {
             conversation_id: id.into(),
@@ -585,7 +627,7 @@ impl RunsModule {
     async fn require_conversation(&self, id: &str) -> Result<ConversationView, Error> {
         self.conversation(id).await?.ok_or_else(|| Error::Module {
             reason: "unknown_conversation".into(),
-            sentence: "unknown conversation".into(),
+            sentence: format!("no conversation {id}"),
         })
     }
     async fn conversation_controller(
@@ -650,7 +692,7 @@ impl RunsModule {
         if !valid {
             return Err(Error::Module {
                 reason: "invalid_conversation_operation_id".into(),
-                sentence: "invalid conversation operation id".into(),
+                sentence: format!("an operation id is 1 to {MAX_REQUEST_ID_BYTES} bytes"),
             });
         }
         let Some(previous) = self.receipts.get(&op_key(id, op)).await? else {
@@ -687,7 +729,7 @@ impl RunsModule {
         if !valid_id {
             return Err(Error::Module {
                 reason: "invalid_conversation_id".into(),
-                sentence: "invalid conversation id".into(),
+                sentence: "a conversation id is 1 to 256 bytes".into(),
             });
         }
         let model = self
@@ -695,7 +737,7 @@ impl RunsModule {
             .cloned()
             .ok_or_else(|| Error::Module {
                 reason: "unknown_conversation_model".into(),
-                sentence: "unknown conversation model".into(),
+                sentence: format!("no model {agent_id}"),
             })?;
         run_envelope::NativeConversation {
             conversation_id: id.clone(),
@@ -751,7 +793,7 @@ impl RunsModule {
         if self.conversation_for_channel(&channel_id).await?.is_some() {
             return Err(Error::Module {
                 reason: "channel_already_has_a_resident_conversation".into(),
-                sentence: "channel already has a resident conversation".into(),
+                sentence: format!("channel {channel_id} already has a resident conversation"),
             });
         }
         if self
@@ -780,13 +822,13 @@ impl RunsModule {
         else {
             return Err(Error::Module {
                 reason: "conversation_channel_is_missing".into(),
-                sentence: "conversation channel is missing".into(),
+                sentence: format!("no channel {channel_id}"),
             });
         };
         if channel.archived {
             return Err(Error::Module {
                 reason: "conversation_channel_is_archived".into(),
-                sentence: "conversation channel is archived".into(),
+                sentence: format!("channel {channel_id} is archived"),
             });
         }
         let mut state = state;
@@ -820,7 +862,9 @@ impl RunsModule {
         }
         let files = self.files.clone().ok_or_else(|| Error::Module {
             reason: "package_retention_requires_files".into(),
-            sentence: "package retention requires Files".into(),
+            sentence:
+                "retaining conversation packages needs a Files module, and none is configured"
+                    .into(),
         })?;
         for package in &state.packages {
             ctx.emit_msg(Msg {
@@ -899,7 +943,10 @@ impl RunsModule {
             .checked_add(1)
             .ok_or_else(|| Error::Module {
                 reason: "conversation_cursor_exhausted".into(),
-                sentence: "conversation cursor exhausted".into(),
+                sentence: format!(
+                    "conversation {} has no event sequence numbers left",
+                    state.conversation_id
+                ),
             })?;
         let event = ConversationEvent {
             sequence,
@@ -967,7 +1014,9 @@ impl RunsModule {
         else {
             return Err(Error::Module {
                 reason: "unexpected_channel_reply".into(),
-                sentence: "unexpected channel reply".into(),
+                sentence: format!(
+                    "chat answered the lookup for channel {channel_id} with something other than a channel"
+                ),
             });
         };
         let Some(channel) = channel else {
@@ -1001,7 +1050,9 @@ impl RunsModule {
         else {
             return Err(Error::Module {
                 reason: "unexpected_source_messages_reply".into(),
-                sentence: "unexpected source messages reply".into(),
+                sentence: format!(
+                    "chat answered the message lookup for channel {channel_id} with something other than messages"
+                ),
             });
         };
         if messages.is_empty() {
@@ -1017,13 +1068,19 @@ impl RunsModule {
                 .checked_add(1)
                 .ok_or_else(|| Error::Module {
                     reason: "source_cursor_exhausted".into(),
-                    sentence: "source cursor exhausted".into(),
+                    sentence: format!(
+                        "conversation {} has no source sequence numbers left",
+                        state.conversation_id
+                    ),
                 })?;
             let contiguous = &message.channel_id == channel_id && message.seq == expected;
             if !contiguous {
                 return Err(Error::Module {
                     reason: "conversation_source_gap".into(),
-                    sentence: "conversation source gap".into(),
+                    sentence: format!(
+                        "message {}/{} is not the next source message {channel_id}/{expected}",
+                        message.channel_id, message.seq
+                    ),
                 });
             }
             let human = matches!(message.head.content_origin, Origin::External(_));

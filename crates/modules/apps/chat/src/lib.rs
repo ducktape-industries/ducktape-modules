@@ -533,7 +533,8 @@ impl Chat {
             IdentityReply::Accounts(_) | IdentityReply::Resolved(_) | IdentityReply::Gen(_) => {
                 Err(Error::Module {
                     reason: "unexpected_identity_reply".into(),
-                    sentence: "chat: unexpected identity reply".into(),
+                    sentence: "identity answered a key lookup with something other than an account"
+                        .into(),
                 })
             }
         }
@@ -623,7 +624,7 @@ impl Chat {
                 else {
                     return Err(Error::Module {
                         reason: "unexpected_identity_reply".into(),
-                        sentence: "chat: unexpected identity reply".into(),
+                        sentence: "identity answered a mention lookup with something other than resolved accounts".into(),
                     });
                 };
                 numbers
@@ -633,7 +634,11 @@ impl Chat {
         if numbers.len() != mentions.len() {
             return Err(Error::Module {
                 reason: "chat_identity_resolution_count_mismatch".into(),
-                sentence: "chat: identity resolution count mismatch".into(),
+                sentence: format!(
+                    "identity returned {} accounts for {} mentions",
+                    numbers.len(),
+                    mentions.len()
+                ),
             });
         }
         mentions
@@ -644,15 +649,15 @@ impl Chat {
                     let (reason, sentence) = match mention {
                         Party::Account(account) => (
                             "mention_account_missing",
-                            format!("chat: a mention names no account: {account}"),
+                            format!("a mention names no account: {account}"),
                         ),
                         Party::Key(_) => (
                             "mention_key_unbound",
-                            "chat: a mentioned key belongs to no account".into(),
+                            "a mentioned key belongs to no account".into(),
                         ),
                         Party::Module(_) | Party::System => (
                             "mention_origin",
-                            "chat: a mention names an account, never a module or the system".into(),
+                            "a mention names an account, never a module or the system".into(),
                         ),
                     };
                     Error::Module {
@@ -694,8 +699,7 @@ impl Chat {
             if end != chunk.len() {
                 return Err(Error::Module {
                     reason: "mention_origin".into(),
-                    sentence: "chat: a mention names an account, never a module or the system"
-                        .into(),
+                    sentence: "a mention names an account, never a module or the system".into(),
                 });
             }
         }
@@ -729,28 +733,25 @@ impl Chat {
                 if !self.account_exists(ctx, *account).await? {
                     return Err(Error::Module {
                         reason: "chat_membership_names_no_account".into(),
-                        sentence: format!("chat: membership names no account: {account}"),
+                        sentence: format!("membership names no account: {account}"),
                     });
                 }
                 Ok(())
             }
             Party::Key(key) if key.is_empty() => Err(Error::Module {
                 reason: "member_key".into(),
-                sentence: "chat: a member key must not be empty".into(),
+                sentence: "a member key must not be empty".into(),
             }),
             Party::Key(key) => match self.account_of_key(ctx, key).await? {
                 Some(account) => Err(Error::Module {
                     reason: "key_account_mismatch".into(),
-                    sentence: format!(
-                        "chat: this key belongs to account {account}; name the account"
-                    ),
+                    sentence: format!("this key belongs to account {account}; name the account"),
                 }),
                 None => Ok(()),
             },
             Party::Module(_) | Party::System => Err(Error::Module {
                 reason: "chat_origin".into(),
-                sentence: "chat: modules and the system are never members; they always may post"
-                    .into(),
+                sentence: "modules and the system are never members; they always may post".into(),
             }),
         }
     }
@@ -847,9 +848,7 @@ impl Chat {
         if count as usize >= MAX_CHANNELS_PER_CREATOR {
             return Err(Error::Module {
                 reason: "channel_cap".into(),
-                sentence: format!(
-                    "chat: you already have {MAX_CHANNELS_PER_CREATOR} channels open"
-                ),
+                sentence: format!("you already have {MAX_CHANNELS_PER_CREATOR} channels open"),
             });
         }
         Ok(())
@@ -920,8 +919,7 @@ impl Chat {
         if chat_wire::client::is_derived_dm_channel(&channel_id) {
             return Err(Error::Module {
                 reason: "dm_channel_id_reserved".into(),
-                sentence: "chat: dm- channel ids are reserved; open a DM with CreateDmChannel"
-                    .into(),
+                sentence: "dm- channel ids are reserved; open a DM with CreateDmChannel".into(),
             });
         }
         if self.channel(&channel_id).await?.is_some() {
@@ -956,13 +954,13 @@ impl Chat {
             Party::Key(_) => {
                 return Err(Error::Module {
                     reason: "key_account_missing".into(),
-                    sentence: "chat: this key belongs to no identity account".into(),
+                    sentence: "this key belongs to no identity account".into(),
                 });
             }
             Party::Module(_) | Party::System => {
                 return Err(Error::Module {
                     reason: "dm_channel_open".into(),
-                    sentence: "chat: a DM channel must be opened by an account".into(),
+                    sentence: "a DM channel must be opened by an account".into(),
                 });
             }
         };
@@ -970,13 +968,13 @@ impl Chat {
         if creator == counterpart {
             return Err(Error::Module {
                 reason: "dm_membership".into(),
-                sentence: "chat: a DM's two accounts must differ".into(),
+                sentence: "a DM's two accounts must differ".into(),
             });
         }
         if !self.account_exists(ctx, counterpart).await? {
             return Err(Error::Module {
                 reason: "dm_account_missing".into(),
-                sentence: format!("chat: a DM names no account: {counterpart}"),
+                sentence: format!("a DM names no account: {counterpart}"),
             });
         }
         let channel_id =
@@ -1010,7 +1008,7 @@ impl Chat {
             .checked_add(1)
             .ok_or_else(|| Error::Module {
                 reason: "channel_revision_exhausted".into(),
-                sentence: "channel revision exhausted".into(),
+                sentence: format!("channel {} has no revision numbers left", channel.id),
             })?;
         self.store_channel(&channel)?;
         Ok(Report {
@@ -1206,7 +1204,7 @@ impl Chat {
             rev,
             revision: head.revision.checked_add(1).ok_or_else(|| Error::Module {
                 reason: "message_revision_exhausted".into(),
-                sentence: "message revision exhausted".into(),
+                sentence: format!("message {channel_id}/{seq} has no revision numbers left"),
             })?,
             edited_at: Some(now),
             base_rev,
@@ -1253,7 +1251,7 @@ impl Chat {
             deleted: true,
             revision: head.revision.checked_add(1).ok_or_else(|| Error::Module {
                 reason: "message_revision_exhausted".into(),
-                sentence: "message revision exhausted".into(),
+                sentence: format!("message {channel_id}/{seq} has no revision numbers left"),
             })?,
             ..head
         };
@@ -1499,7 +1497,9 @@ impl Chat {
         if !keyscheme::KeyScheme::Ed25519.verify(&node, namespace, &preimage, &node_proof) {
             return Err(Error::Module {
                 reason: "huddle_node_proof_invalid".into(),
-                sentence: "huddle_node_proof_invalid".into(),
+                sentence: format!(
+                    "the node key's proof for joining huddle {channel_id} does not verify"
+                ),
             });
         }
         let mut channel = self.require_channel(channel_id).await?;
@@ -1847,7 +1847,7 @@ impl Chat {
                 if module_id == self.id {
                     return Err(Error::Module {
                         reason: "chat_cannot_hook_itself".into(),
-                        sentence: "chat cannot hook itself".into(),
+                        sentence: "a hook must target a module other than chat".into(),
                     });
                 }
                 if ctx.module_root(&module_id).is_none() {

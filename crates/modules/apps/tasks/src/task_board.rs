@@ -245,7 +245,7 @@ async fn delete(staged: &mut StagedStore, task_id: String) -> Result<(), Error> 
     let owner_live = owner_count(staged, &task.owner).await?;
     let remaining = owner_live.checked_sub(1).ok_or_else(|| Error::Module {
         reason: "task_census_underflow".into(),
-        sentence: "task census underflow".into(),
+        sentence: format!("the owner of task {task_id} has no live tasks on record"),
     })?;
     let mut index = load_index(staged).await?;
     index.remove(&task_id);

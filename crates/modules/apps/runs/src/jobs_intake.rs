@@ -23,7 +23,7 @@ impl RunsModule {
         else {
             return Err(Error::Module {
                 reason: "job_model_is_not_active".into(),
-                sentence: "job model is not active".into(),
+                sentence: format!("model {agent_id} is not active"),
             });
         };
         if ctx.env().origin != sdk::Origin::Program(model.account) {
@@ -35,7 +35,7 @@ impl RunsModule {
         let Some(jobs) = &self.jobs else {
             return Err(Error::Module {
                 reason: "jobs_module_is_not_configured".into(),
-                sentence: "jobs module is not configured".into(),
+                sentence: "job runs need a Jobs module, and none is configured".into(),
             });
         };
         let bytes = ctx
@@ -54,13 +54,13 @@ impl RunsModule {
         else {
             return Err(Error::Module {
                 reason: "job_is_unavailable".into(),
-                sentence: "job is unavailable".into(),
+                sentence: format!("Jobs has no job {job_id}"),
             });
         };
         if job.kind != format!("agent/{agent_id}") {
             return Err(Error::Module {
                 reason: "job_names_another_model".into(),
-                sentence: "job names another model".into(),
+                sentence: format!("job kind {} does not name model {agent_id}", job.kind),
             });
         }
         let event = JobsEvent::Submitted {
@@ -146,7 +146,7 @@ impl RunsModule {
                 .unwrap_or(self.next_action_item);
             let next = item.checked_add(1).ok_or_else(|| Error::Module {
                 reason: "job_request_counter_exhausted".into(),
-                sentence: "job request counter exhausted".into(),
+                sentence: "no action item numbers are left for a job request".into(),
             })?;
             ctx.emit_msg(Msg {
                 target: self.attribution.clone(),

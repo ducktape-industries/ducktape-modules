@@ -122,14 +122,15 @@ fn source_relations(kind: &str, value: Option<&[u8]>) -> Result<Vec<Relation>, E
 fn source_object(key: &[u8]) -> Result<(&str, &str), Error> {
     let key = std::str::from_utf8(key).map_err(|_| Error::Module {
         reason: "pages_corrupt_logical_key".into(),
-        sentence: "pages: corrupt logical key".into(),
+        sentence: "a stored logical key is not UTF-8".into(),
     })?;
     match key.strip_prefix("\0cc:") {
         Some(id) => Ok(("comment", id)),
         None if !key.starts_with('\0') => Ok(("block", key)),
         None => Err(Error::Module {
             reason: "pages_not_an_attribution_source".into(),
-            sentence: "pages: not an attribution source".into(),
+            sentence: "a logical key that names neither a block nor a comment has no attribution"
+                .into(),
         }),
     }
 }
@@ -172,7 +173,7 @@ fn push_attribution_batch(
     if too_large || total_exceeded {
         return Err(Error::Module {
             reason: "pages_attribution_report_envelope_too_large".into(),
-            sentence: "pages: attribution report envelope too large".into(),
+            sentence: format!("the attribution report exceeds {ATTRIBUTION_REPORT_BYTES} bytes"),
         });
     }
     reports.push(report);
@@ -198,7 +199,9 @@ impl Pages {
         if oversized {
             return Err(Error::Module {
                 reason: "pages_attribution_source_envelope_too_large".into(),
-                sentence: "pages: attribution source envelope too large".into(),
+                sentence: format!(
+                    "an attribution source is {source_bytes} bytes, over the {ATTRIBUTION_BATCH_BYTES}-byte cap"
+                ),
             });
         }
         Ok(())
@@ -243,7 +246,9 @@ impl Pages {
         else {
             return Err(Error::Module {
                 reason: "unexpected_identity_reply".into(),
-                sentence: "pages: unexpected identity reply".into(),
+                sentence:
+                    "identity answered an account lookup with something other than an account"
+                        .into(),
             });
         };
         Ok(account.map(|account| account.number))
@@ -345,7 +350,7 @@ impl Pages {
                     else {
                         return Err(Error::Module {
                             reason: "unexpected_identity_reply".into(),
-                            sentence: "pages: unexpected identity reply".into(),
+                            sentence: "identity answered a mention lookup with something other than resolved accounts".into(),
                         });
                     };
                     numbers
@@ -355,7 +360,11 @@ impl Pages {
             if numbers.len() != chunk.len() {
                 return Err(Error::Module {
                     reason: "pages_identity_resolution_count_mismatch".into(),
-                    sentence: "pages: identity resolution count mismatch".into(),
+                    sentence: format!(
+                        "identity returned {} accounts for {} mentions",
+                        numbers.len(),
+                        chunk.len()
+                    ),
                 });
             }
             for (number, resolved) in chunk.iter().zip(numbers) {
@@ -363,7 +372,7 @@ impl Pages {
                 if !exists {
                     return Err(Error::Module {
                         reason: "pages_mention_names_no_account".into(),
-                        sentence: format!("pages: mention names no account: {number}"),
+                        sentence: format!("a mention names no account: {number}"),
                     });
                 }
             }
@@ -381,7 +390,10 @@ impl Pages {
         if exceeds_budget {
             return Err(Error::Module {
                 reason: "pages_attribution_source_work_exceeded".into(),
-                sentence: "pages: attribution source work exceeded".into(),
+                sentence: format!(
+                    "attribution sources touch more than {} keys",
+                    super::MAX_TRAVERSAL_WORK
+                ),
             });
         }
         self.staged.prefetch(&keys).await
@@ -503,7 +515,11 @@ impl Pages {
             if exceeds_bound {
                 return Err(Error::Module {
                     reason: "pages_managed_discussion_snapshot_too_large".into(),
-                    sentence: "pages: managed discussion snapshot too large".into(),
+                    sentence: format!(
+                        "a managed discussion snapshot is {} bytes, over the {}-byte cap",
+                        detail.len(),
+                        super::MAX_MANAGED_DISCUSSION_BYTES
+                    ),
                 });
             }
             relations
@@ -629,7 +645,7 @@ impl Pages {
             .checked_add(1)
             .ok_or_else(|| Error::Module {
                 reason: "pages_attribution_revision_exhausted".into(),
-                sentence: "pages: attribution revision exhausted".into(),
+                sentence: "no attribution source revision numbers are left".into(),
             })?;
         for (key, relations) in current {
             let prior = previous

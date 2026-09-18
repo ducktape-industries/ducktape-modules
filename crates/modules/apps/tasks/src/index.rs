@@ -168,7 +168,7 @@ fn job_key(id: &str) -> String {
 
 /// the job status partition segment — exhaustive, so a new JobStatus variant
 /// breaks THIS crate at compile time instead of silently mis-filing.
-fn job_status_key(status: &JobStatus) -> &'static str {
+pub(crate) fn job_status_key(status: &JobStatus) -> &'static str {
     match status {
         JobStatus::Pending => "pending",
         JobStatus::Processing => "processing",

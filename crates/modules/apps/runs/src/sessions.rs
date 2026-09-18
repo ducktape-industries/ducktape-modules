@@ -193,7 +193,7 @@ impl RunsModule {
         if generation != entry.generation {
             return Err(Error::Module {
                 reason: "run_program_authority_changed".into(),
-                sentence: "run program authority changed".into(),
+                sentence: format!("the program behind run {run_id} changed after the run began"),
             });
         }
         let id = crate::action_request_id(&run_id, &request_id);
@@ -270,7 +270,7 @@ impl RunsModule {
         let [operation]: [Operation; 1] =
             validated.operations.try_into().map_err(|_| Error::Module {
                 reason: "one_action_validates_as_one_operation".into(),
-                sentence: "one action validates as one operation".into(),
+                sentence: format!("action {request_id} did not validate to exactly one operation"),
             })?;
         let slot = lane.slot(0);
         // `posts` starts empty: this op emits exactly one follow-up, and a
@@ -376,12 +376,12 @@ impl RunsModule {
             .cloned()
             .ok_or_else(|| Error::Module {
                 reason: "run_session_closed".into(),
-                sentence: "run session closed".into(),
+                sentence: format!("run {run_id} has no live session"),
             })?;
         let Some(owner) = self.pending_entry(&dispatch_id_for(&run_id)) else {
             return Err(Error::Module {
                 reason: "run_is_not_in_flight".into(),
-                sentence: "run is not in flight".into(),
+                sentence: format!("run is not in flight: {run_id}"),
             });
         };
         if ctx.env().origin != Origin::Program(owner.account) {
@@ -394,7 +394,7 @@ impl RunsModule {
         if generation != owner.generation {
             return Err(Error::Module {
                 reason: "run_program_authority_changed".into(),
-                sentence: "run program authority changed".into(),
+                sentence: format!("the program behind run {run_id} changed after the run began"),
             });
         }
         self.session_holds_lease(&*ctx, &run_id, &session).await?;
@@ -479,14 +479,16 @@ impl RunsModule {
                 .map(|state| state.view.root_run_id.clone())
                 .ok_or_else(|| Error::Module {
                     reason: "caller_run_has_no_delegation_edge".into(),
-                    sentence: "caller run has no delegation edge".into(),
+                    sentence: format!(
+                        "caller run {run_id} names delegation {id}, which does not exist"
+                    ),
                 })?,
             None => run_id.clone(),
         };
         self.pending_entry(&dispatch_id_for(&root_run_id))
             .ok_or_else(|| Error::Module {
                 reason: "delegation_root_is_no_longer_in_flight".into(),
-                sentence: "delegation root is no longer in flight".into(),
+                sentence: format!("delegation root run {root_run_id} is no longer in flight"),
             })?;
         let spent = self
             .delegation_ids()
@@ -531,7 +533,10 @@ impl RunsModule {
             })?
             .ok_or_else(|| Error::Module {
                 reason: "call_workspace_agent_is_not_registered".into(),
-                sentence: "call workspace agent is not registered".into(),
+                sentence: format!(
+                    "workspace agent {} is not registered",
+                    entry.workspace_agent_id
+                ),
             })?;
         let callee_run_id = delegated_run_id_for(&delegation_id, &callee.agent_id);
         if self

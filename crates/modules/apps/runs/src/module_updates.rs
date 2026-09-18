@@ -28,7 +28,7 @@ impl RunsModule {
             .map(|bytes| {
                 sdk::wire::decode(&bytes).map_err(|sentence| Error::Module {
                     reason: "corrupt_state".into(),
-                    sentence,
+                    sentence: format!("module update cursor {key} does not decode: {sentence}"),
                 })
             })
             .transpose()
@@ -44,7 +44,7 @@ impl RunsModule {
         };
         let request = sdk::wire::decode(&bytes).map_err(|sentence| Error::Module {
             reason: "corrupt_state".into(),
-            sentence,
+            sentence: format!("module update {sequence} does not decode: {sentence}"),
         })?;
         let status = self
             .receipts
@@ -52,11 +52,11 @@ impl RunsModule {
             .await?
             .ok_or_else(|| Error::Module {
                 reason: "module_update_status_is_missing".into(),
-                sentence: "module update status is missing".into(),
+                sentence: format!("module update {sequence} has no status record"),
             })?;
         let status = sdk::wire::decode(&status).map_err(|sentence| Error::Module {
             reason: "corrupt_state".into(),
-            sentence,
+            sentence: format!("the status of module update {sequence} does not decode: {sentence}"),
         })?;
         Ok(Some(ModuleUpdateView { request, status }))
     }
@@ -135,7 +135,7 @@ impl RunsModule {
         let Origin::Program(account) = ctx.env().origin else {
             return Err(Error::Module {
                 reason: "module_updates_are_requested_by_a_program".into(),
-                sentence: "module updates are requested by a program account".into(),
+                sentence: "only a program account may request a module update".into(),
             });
         };
         self.active_generation(ctx, account).await?;
@@ -150,20 +150,22 @@ impl RunsModule {
         if !valid_source {
             return Err(Error::Module {
                 reason: "module_update_requires_an_exact_forge_commit".into(),
-                sentence: "module update requires an exact forge commit".into(),
+                sentence: "a module update names a relative repository path, a branch, and a 40-digit hex commit".into(),
             });
         }
         if let Some(bytes) = self.receipts.get(&request_key(&request_id)).await? {
             let sequence = sdk::wire::decode(&bytes).map_err(|sentence| Error::Module {
                 reason: "corrupt_state".into(),
-                sentence,
+                sentence: format!("module update request {request_id} does not decode: {sentence}"),
             })?;
             let previous = self
                 .module_update(sequence)
                 .await?
                 .ok_or_else(|| Error::Module {
                     reason: "module_update_receipt_is_missing".into(),
-                    sentence: "module update receipt is missing".into(),
+                    sentence: format!(
+                        "module update {sequence} of request {request_id} has no record"
+                    ),
                 })?;
             let exact = previous.request.account == account
                 && previous.request.run_id == run_id
@@ -172,7 +174,9 @@ impl RunsModule {
             if !exact {
                 return Err(Error::Module {
                     reason: "module_update_id_already_names_different_work".into(),
-                    sentence: "module update id already names different work".into(),
+                    sentence: format!(
+                        "module update request {request_id} was already used for different work"
+                    ),
                 });
             }
             ctx.set_output(sdk::wire::encode(&previous));
@@ -181,7 +185,7 @@ impl RunsModule {
         let sequence = self.update_cursor(TAIL).await?;
         let next = sequence.checked_add(1).ok_or_else(|| Error::Module {
             reason: "module_update_sequence_exhausted".into(),
-            sentence: "module update sequence exhausted".into(),
+            sentence: "no module update sequence numbers are left".into(),
         })?;
         let view = ModuleUpdateView {
             request: ModuleUpdateRequest {
@@ -228,7 +232,9 @@ impl RunsModule {
         else {
             return Err(Error::Module {
                 reason: "unexpected_module_update_proposal_reply".into(),
-                sentence: "unexpected module update proposal reply".into(),
+                sentence: format!(
+                    "governance answered the proposal lookup for module update {sequence} with something other than a proposal"
+                ),
             });
         };
         Ok(proposal)
@@ -268,7 +274,7 @@ impl RunsModule {
         else {
             return Err(Error::Module {
                 reason: "unexpected_module_registry_reply".into(),
-                sentence: "unexpected module registry reply".into(),
+                sentence: "the module registry answered the status lookup with something other than module status".into(),
             });
         };
         let digest = view
@@ -356,7 +362,9 @@ impl RunsModule {
         if !members.contains(key) {
             return Err(Error::Module {
                 reason: "deployment_failure_reporter_is_not_a_validator".into(),
-                sentence: "deployment failure reporter is not a validator".into(),
+                sentence:
+                    "this key is not a current validator, so it cannot report a deployment failure"
+                        .into(),
             });
         }
         let Some(mut view) = self.next_module_update().await? else {

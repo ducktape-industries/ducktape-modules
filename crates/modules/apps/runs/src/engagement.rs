@@ -49,18 +49,21 @@ impl RunsModule {
         else {
             return Err(Error::Module {
                 reason: "model_is_not_active".into(),
-                sentence: "model is not active".into(),
+                sentence: format!("model {agent_id} is not active"),
             });
         };
         if model.account != account {
             return Err(Error::Module {
                 reason: "model_belongs_to_another_account".into(),
-                sentence: "model belongs to another account".into(),
+                sentence: format!(
+                    "model {agent_id} belongs to account {}, not {account}",
+                    model.account
+                ),
             });
         }
         let after = change_seq.checked_sub(1).ok_or_else(|| Error::Module {
             reason: "attribution_changes_start_at_one".into(),
-            sentence: "attribution changes start at one".into(),
+            sentence: "attribution changes are numbered from 1, so change 0 does not exist".into(),
         })?;
         let bytes = ctx
             .query(
@@ -79,13 +82,15 @@ impl RunsModule {
         else {
             return Err(Error::Module {
                 reason: "unexpected_attribution_reply".into(),
-                sentence: "unexpected attribution reply".into(),
+                sentence:
+                    "attribution answered the change lookup with something other than changes"
+                        .into(),
             });
         };
         let Some(entry) = changes.first() else {
             return Err(Error::Module {
                 reason: "attribution_does_not_exist".into(),
-                sentence: "attribution does not exist".into(),
+                sentence: format!("no attribution change {change_seq}"),
             });
         };
         let change = &entry.change;
@@ -93,7 +98,9 @@ impl RunsModule {
         if !addressed {
             return Err(Error::Module {
                 reason: "attribution_belongs_to_another_account".into(),
-                sentence: "attribution belongs to another account".into(),
+                sentence: format!(
+                    "attribution change {change_seq} is not addressed to account {account}"
+                ),
             });
         }
         let own_request = change.source.module == self.id && change.source.kind == "run_request";
@@ -117,7 +124,9 @@ impl RunsModule {
                     if requested != agent_id {
                         return Err(Error::Module {
                             reason: "conversation_model_mismatch".into(),
-                            sentence: "conversation request names another model".into(),
+                            sentence: format!(
+                                "conversation request names model {requested}, not {agent_id}"
+                            ),
                         });
                     }
                     return self
@@ -131,7 +140,9 @@ impl RunsModule {
                     if requested != agent_id {
                         return Err(Error::Module {
                             reason: "job_request_names_another_model".into(),
-                            sentence: "job request names another model".into(),
+                            sentence: format!(
+                                "job request names model {requested}, not {agent_id}"
+                            ),
                         });
                     }
                     return self.request_job_run(ctx, agent_id, job_id).await;
@@ -145,7 +156,9 @@ impl RunsModule {
                     if requested != agent_id {
                         return Err(Error::Module {
                             reason: "run_request_names_another_model".into(),
-                            sentence: "run request names another model".into(),
+                            sentence: format!(
+                                "run request names model {requested}, not {agent_id}"
+                            ),
                         });
                     }
                     run_id_for(&channel_id, anchor_seq, &agent_id)
@@ -183,7 +196,10 @@ impl RunsModule {
                     else {
                         return Err(Error::Module {
                             reason: "attributed_chat_message_is_unavailable".into(),
-                            sentence: "attributed chat message is unavailable".into(),
+                            sentence: format!(
+                                "attributed chat message {} is unavailable",
+                                change.source.object
+                            ),
                         });
                     };
                     let channel = message.channel_id.clone();
@@ -249,7 +265,10 @@ impl RunsModule {
                     else {
                         return Err(Error::Module {
                             reason: "attributed_page_comment_is_unavailable".into(),
-                            sentence: "attributed page comment is unavailable".into(),
+                            sentence: format!(
+                                "attributed page comment {} is unavailable",
+                                change.source.object
+                            ),
                         });
                     };
                     let bytes = ctx
@@ -268,7 +287,10 @@ impl RunsModule {
                     else {
                         return Err(Error::Module {
                             reason: "attributed_comment_thread_is_unavailable".into(),
-                            sentence: "attributed comment thread is unavailable".into(),
+                            sentence: format!(
+                                "comment thread {} is unavailable",
+                                comment.thread_id
+                            ),
                         });
                     };
                     let Some(index) = thread
@@ -319,13 +341,16 @@ impl RunsModule {
                     else {
                         return Err(Error::Module {
                             reason: "unexpected_run_request_detail".into(),
-                            sentence: "unexpected run request detail".into(),
+                            sentence: "this run request's detail is not a manual run request"
+                                .into(),
                         });
                     };
                     if requested != agent_id {
                         return Err(Error::Module {
                             reason: "run_request_names_another_model".into(),
-                            sentence: "run request names another model".into(),
+                            sentence: format!(
+                                "run request names model {requested}, not {agent_id}"
+                            ),
                         });
                     }
                     let skills =

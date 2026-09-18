@@ -411,7 +411,7 @@ fn a_delivery_naming_a_superseded_attempt_is_refused_as_stale() {
             .await
             .unwrap_err();
         assert!(
-            format!("{refusal:?}").contains("stale task target"),
+            format!("{refusal:?}").contains("of this delivery is on attempt"),
             "{refusal:?}"
         );
         let mut ctx = with_job(
@@ -438,7 +438,7 @@ fn a_delivery_naming_a_superseded_attempt_is_refused_as_stale() {
         .await
         .unwrap_err();
         assert!(
-            format!("{refusal:?}").contains("stale attempt acknowledgement"),
+            format!("{refusal:?}").contains("of this acknowledgement is on attempt"),
             "{refusal:?}"
         );
     });

@@ -51,6 +51,7 @@ use std::collections::BTreeSet;
 use sdk::{Ctx, Error, ModuleId, Msg, Origin, StagedStore};
 use sha2::{Digest, Sha256};
 
+use crate::index::job_status_key;
 use crate::{
     Claim, ControlAcknowledgement, Job, JobComment, JobControl, JobControlInput, JobExecution,
     JobResult, JobStatus, JobsEvent, JobsMsg, JobsQuery, JobsReply, NativeHistoryHead, Party,
@@ -125,7 +126,7 @@ async fn retained(staged: &StagedStore, job_id: &str) -> Result<Option<Job>, Err
     let Some(bytes) = staged.get(&key).await? else {
         return Err(Error::Module {
             reason: "retained_execution_missing".into(),
-            sentence: "retained execution missing".into(),
+            sentence: format!("job {job_id} points at a retained execution with no record"),
         });
     };
     decode_job(&bytes).map(Some)
@@ -135,7 +136,7 @@ async fn conversation(staged: &StagedStore, id: &str) -> Result<Conversation, Er
     let Some(bytes) = staged.get(&conversation_key(id)).await? else {
         return Err(Error::Module {
             reason: "worker_conversation_missing".into(),
-            sentence: "worker conversation missing".into(),
+            sentence: format!("no worker conversation {id}"),
         });
     };
     sdk::wire::decode(&bytes).map_err(|sentence| Error::Module {
@@ -200,7 +201,7 @@ async fn read_census(staged: &StagedStore, key: &[u8]) -> Result<u64, Error> {
     };
     let raw: [u8; 8] = bytes.as_slice().try_into().map_err(|_| Error::Module {
         reason: "job_census_record_is_not_a_u64".into(),
-        sentence: "job census record is not a u64".into(),
+        sentence: "the job census record is not an 8-byte count".into(),
     })?;
     Ok(u64::from_le_bytes(raw))
 }
@@ -287,7 +288,7 @@ fn worker_module_from_origin(origin: &Origin, module_id: &ModuleId) -> Result<Mo
     if worker.is_empty() {
         return Err(Error::Module {
             reason: "worker_module_id_must_not_be_empty".into(),
-            sentence: "worker module_id must not be empty".into(),
+            sentence: "a module with an empty id cannot register as a worker".into(),
         });
     }
     if worker.len() > MAX_WORKER_MODULE_ID {
@@ -318,7 +319,9 @@ async fn register_worker(
     if workers.len() >= MAX_WORKERS {
         return Err(Error::Module {
             reason: "worker_cap_reached".into(),
-            sentence: "worker cap reached".into(),
+            sentence: format!(
+                "the job board already has {MAX_WORKERS} registered workers, its limit"
+            ),
         });
     }
     workers.insert(worker);
@@ -375,7 +378,10 @@ async fn create_execution(
                 if at_capacity {
                     return Err(Error::Module {
                         reason: "worker_conversation_execution_cap_reached".into(),
-                        sentence: "worker conversation execution cap reached".into(),
+                        sentence: format!(
+                            "worker conversation {} already has {MAX_WORKER_EXECUTIONS} executions, its limit",
+                            previous.conversation_id
+                        ),
                     });
                 }
                 (
@@ -394,7 +400,7 @@ async fn create_execution(
     if job_id.is_empty() {
         return Err(Error::Module {
             reason: "job_id_must_not_be_empty".into(),
-            sentence: "job_id must not be empty".into(),
+            sentence: "a job needs a non-empty job_id".into(),
         });
     }
     if job_id.len() > MAX_JOB_ID {
@@ -406,7 +412,7 @@ async fn create_execution(
     if kind.is_empty() {
         return Err(Error::Module {
             reason: "kind_must_not_be_empty".into(),
-            sentence: "kind must not be empty".into(),
+            sentence: "a job needs a non-empty kind".into(),
         });
     }
     if kind.len() > MAX_KIND {
@@ -540,14 +546,14 @@ async fn continue_worker(
     else {
         return Err(Error::Module {
             reason: "expected_continuation".into(),
-            sentence: "expected continuation".into(),
+            sentence: "this handler takes only a Continue message".into(),
         });
     };
     sdk::validate_id("operation_id", &operation_id, MAX_JOB_ID)?;
     let Some(previous) = retained(staged, &previous_job_id).await? else {
         return Err(Error::Module {
             reason: "previous_execution_not_found".into(),
-            sentence: "previous execution not found".into(),
+            sentence: format!("no retained execution of job {previous_job_id}"),
         });
     };
     let is_conversation = previous.execution == JobExecution::Conversation;
@@ -584,14 +590,14 @@ async fn continue_worker(
         }
         return Err(Error::Module {
             reason: "continue_conflicts_with_an_existing_continuation".into(),
-            sentence: "continue conflicts with an existing continuation".into(),
+            sentence: format!("job {job_id} already exists as a different continuation"),
         });
     }
     let reused_id = retained(staged, &job_id).await?.is_some();
     if reused_id {
         return Err(Error::Module {
             reason: "continuation_requires_a_fresh_job_id".into(),
-            sentence: "continuation requires a fresh job_id".into(),
+            sentence: format!("job id {job_id} is already taken; a continuation needs a fresh one"),
         });
     }
     // Operation IDs are unique within a conversation, not just one predecessor.
@@ -599,7 +605,7 @@ async fn continue_worker(
         let Some(bytes) = staged.get(&archive_key(id, *revision)).await? else {
             return Err(Error::Module {
                 reason: "retained_execution_missing".into(),
-                sentence: "retained execution missing".into(),
+                sentence: format!("execution {id}/{revision} is listed but has no record"),
             });
         };
         let execution = decode_job(&bytes)?;
@@ -608,7 +614,10 @@ async fn continue_worker(
         if reused_operation {
             return Err(Error::Module {
                 reason: "continuation_operation_id_already_exists".into(),
-                sentence: "continuation operation_id already exists".into(),
+                sentence: format!(
+                    "operation {operation_id} already continued conversation {}",
+                    previous.conversation_id
+                ),
             });
         }
     }
@@ -643,7 +652,10 @@ fn require_claim_attempt(
     if !current_claim {
         return Err(Error::Module {
             reason: "operation_requires_the_current_claimant_and_attempt".into(),
-            sentence: "operation requires the current claimant and attempt".into(),
+            sentence: format!(
+                "job {} is not claimed by this worker on attempt {attempt}",
+                job.job_id
+            ),
         });
     }
     Ok(())
@@ -684,7 +696,10 @@ async fn control(
         }
         return Err(Error::Module {
             reason: "control_operation_id_already_exists".into(),
-            sentence: "control operation_id already exists".into(),
+            sentence: format!(
+                "job {} already has a different control {operation_id}",
+                job.job_id
+            ),
         });
     }
     if job.status.is_terminal() {
@@ -697,7 +712,10 @@ async fn control(
     if at_capacity {
         return Err(Error::Module {
             reason: "job_control_cap_reached".into(),
-            sentence: "job control cap reached".into(),
+            sentence: format!(
+                "job {} already has {MAX_JOB_CONTROLS} controls, its limit",
+                job.job_id
+            ),
         });
     }
     let report_id = job
@@ -707,7 +725,10 @@ async fn control(
     if report_id {
         return Err(Error::Module {
             reason: "operation_id_already_used_by_a_report".into(),
-            sentence: "operation_id already used by a report".into(),
+            sentence: format!(
+                "operation {operation_id} is already a report on job {}",
+                job.job_id
+            ),
         });
     }
     job.controls.push(JobControl {
@@ -738,7 +759,7 @@ async fn acknowledge_control(
     else {
         return Err(Error::Module {
             reason: "control_not_found".into(),
-            sentence: "control not found".into(),
+            sentence: format!("job {job_id} has no control {operation_id}"),
         });
     };
     let already_acknowledged = control
@@ -752,7 +773,9 @@ async fn acknowledge_control(
     if at_capacity {
         return Err(Error::Module {
             reason: "control_acknowledgement_cap_reached".into(),
-            sentence: "control acknowledgement cap reached".into(),
+            sentence: format!(
+                "control {operation_id} of job {job_id} already has {MAX_CONTROL_ACKNOWLEDGEMENTS} acknowledgements, its limit"
+            ),
         });
     }
     control.acknowledgements.push(ControlAcknowledgement {
@@ -833,7 +856,7 @@ async fn checkpoint_native_history(
     else {
         return Err(Error::Module {
             reason: "expected_native_history_checkpoint".into(),
-            sentence: "expected native history checkpoint".into(),
+            sentence: "this handler takes only a CheckpointNativeHistory message".into(),
         });
     };
     let valid_run_id = !run_id.is_empty() && run_id.len() <= MAX_NATIVE_RUN_ID_BYTES;
@@ -850,7 +873,8 @@ async fn checkpoint_native_history(
     if !positive_revision {
         return Err(Error::Module {
             reason: "native_history_revision_must_be_positive".into(),
-            sentence: "native history revision must be positive".into(),
+            sentence: "native history revisions are numbered from 1, so revision 0 is invalid"
+                .into(),
         });
     }
     let mut job = require(staged, &job_id).await?;
@@ -871,7 +895,10 @@ async fn checkpoint_native_history(
         if !newer_revision {
             return Err(Error::Module {
                 reason: "native_history_revision_is_stale_or_conflicting".into(),
-                sentence: "native history revision is stale or conflicting".into(),
+                sentence: format!(
+                    "revision {revision} is not newer than the recorded native history revision {}",
+                    head.revision
+                ),
             });
         }
         let changed_run_in_claim = same_claim && !same_run;
@@ -885,7 +912,10 @@ async fn checkpoint_native_history(
         if stale_execution {
             return Err(Error::Module {
                 reason: "native_history_execution_attempt_is_stale".into(),
-                sentence: "native history execution attempt is stale".into(),
+                sentence: format!(
+                    "execution attempt {execution_attempt} is older than the recorded attempt {}",
+                    head.execution_attempt
+                ),
             });
         }
     }
@@ -918,7 +948,7 @@ async fn checkpoint(
     else {
         return Err(Error::Module {
             reason: "expected_checkpoint".into(),
-            sentence: "expected checkpoint".into(),
+            sentence: "this handler takes only a Checkpoint message".into(),
         });
     };
     sdk::validate_id("operation_id", &operation_id, MAX_JOB_ID)?;
@@ -939,7 +969,10 @@ async fn checkpoint(
         }
         return Err(Error::Module {
             reason: "report_operation_id_already_exists".into(),
-            sentence: "report operation_id already exists".into(),
+            sentence: format!(
+                "job {} already has a different report {operation_id}",
+                job.job_id
+            ),
         });
     }
     let control_id = job
@@ -949,14 +982,20 @@ async fn checkpoint(
     if control_id {
         return Err(Error::Module {
             reason: "operation_id_already_used_by_a_control".into(),
-            sentence: "operation_id already used by a control".into(),
+            sentence: format!(
+                "operation {operation_id} is already a control on job {}",
+                job.job_id
+            ),
         });
     }
     let at_capacity = job.reports.len() >= MAX_WORKER_REPORTS;
     if at_capacity {
         return Err(Error::Module {
             reason: "worker_report_cap_reached".into(),
-            sentence: "worker report cap reached".into(),
+            sentence: format!(
+                "job {} already has {MAX_WORKER_REPORTS} reports, its limit",
+                job.job_id
+            ),
         });
     }
     job.reports.push(WorkerReport {
@@ -984,7 +1023,10 @@ async fn claim(
         // race and fails deterministically on every node.
         return Err(Error::Module {
             reason: "job_not_claimable_status".into(),
-            sentence: format!("job not claimable (status {:?}): {job_id}", job.status),
+            sentence: format!(
+                "job not claimable (status {}): {job_id}",
+                job_status_key(&job.status)
+            ),
         });
     }
     let worker = actor.clone();
@@ -1028,14 +1070,14 @@ async fn comment(
     if full {
         return Err(Error::Module {
             reason: "job_discussion_is_full".into(),
-            sentence: "job discussion is full".into(),
+            sentence: format!("job {job_id} already has {MAX_JOB_COMMENTS} comments, its limit"),
         });
     }
     let duplicate = job.comments.iter().any(|comment| comment.id == comment_id);
     if duplicate {
         return Err(Error::Module {
             reason: "job_comment_id_already_exists".into(),
-            sentence: "job comment id already exists".into(),
+            sentence: format!("job {job_id} already has a comment {comment_id}"),
         });
     }
     job.comments.push(JobComment {
@@ -1063,7 +1105,10 @@ async fn finalize(
     if job.status != JobStatus::Processing {
         return Err(Error::Module {
             reason: "job_not_in_processing_status".into(),
-            sentence: format!("job not in processing (status {:?}): {job_id}", job.status),
+            sentence: format!(
+                "job not in processing (status {}): {job_id}",
+                job_status_key(&job.status)
+            ),
         });
     }
     let is_claimant = job
@@ -1103,7 +1148,10 @@ async fn release(
     if job.status != JobStatus::Processing {
         return Err(Error::Module {
             reason: "job_not_in_processing_status".into(),
-            sentence: format!("job not in processing (status {:?}): {job_id}", job.status),
+            sentence: format!(
+                "job not in processing (status {}): {job_id}",
+                job_status_key(&job.status)
+            ),
         });
     }
     let is_claimant = job
@@ -1131,8 +1179,8 @@ async fn reclaim(staged: &mut StagedStore, job_id: String, height: u64) -> Resul
         return Err(Error::Module {
             reason: "reclaim_status".into(),
             sentence: format!(
-                "reclaim only applies to processing jobs (status {:?}): {job_id}",
-                job.status
+                "reclaim only applies to processing jobs (status {}): {job_id}",
+                job_status_key(&job.status)
             ),
         });
     }
@@ -1175,8 +1223,8 @@ async fn cancel(staged: &mut StagedStore, job_id: String, height: u64) -> Result
         return Err(Error::Module {
             reason: "cancel_status".into(),
             sentence: format!(
-                "cancel only applies to pending jobs (status {:?}): {job_id}",
-                job.status
+                "cancel only applies to pending jobs (status {}): {job_id}",
+                job_status_key(&job.status)
             ),
         });
     }
@@ -1193,8 +1241,8 @@ async fn prune(staged: &mut StagedStore, job_id: String) -> Result<(), Error> {
         return Err(Error::Module {
             reason: "prune_status".into(),
             sentence: format!(
-                "prune only applies to terminal jobs (status {:?}): {job_id}",
-                job.status
+                "prune only applies to terminal jobs (status {}): {job_id}",
+                job_status_key(&job.status)
             ),
         });
     }
@@ -1326,7 +1374,7 @@ async fn get_worker(staged: &StagedStore, conversation_id: String) -> Result<Job
         else {
             return Err(Error::Module {
                 reason: "retained_execution_missing".into(),
-                sentence: "retained execution missing".into(),
+                sentence: format!("execution {job_id}/{revision} is listed but has no record"),
             });
         };
         executions.push(decode_job(&bytes)?);
@@ -1344,7 +1392,7 @@ async fn get_controls(staged: &StagedStore, job_id: &str) -> Result<JobsReply, E
     let Some(bytes) = staged.get_committed(&key).await? else {
         return Err(Error::Module {
             reason: "retained_execution_missing".into(),
-            sentence: "retained execution missing".into(),
+            sentence: format!("job {job_id} points at a retained execution with no record"),
         });
     };
     Ok(JobsReply::Controls(decode_job(&bytes)?.controls))
