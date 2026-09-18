@@ -108,7 +108,7 @@ dependencies = [
 [[package]]
 name = "ducktape-module-sdk"
 version = "0.0.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#16c8e4fcae7d2f998b01825af6eebf0fffb4c848"
+source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#736865710dcfa7c56f9834747287881c1c25d45d"
 dependencies = [
  "async-trait",
  "sdk",
@@ -264,12 +264,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "refusal-class"
+version = "0.1.0"
+source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#736865710dcfa7c56f9834747287881c1c25d45d"
+
+[[package]]
 name = "sdk"
 version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#16c8e4fcae7d2f998b01825af6eebf0fffb4c848"
+source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#736865710dcfa7c56f9834747287881c1c25d45d"
 dependencies = [
  "async-trait",
  "borsh",
+ "refusal-class",
  "serde",
  "serde_json",
  "sha2",
