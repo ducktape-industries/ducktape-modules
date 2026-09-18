@@ -168,7 +168,9 @@ pub async fn bind(
         .checked_add(1)
         .ok_or_else(|| Error::Module {
             reason: "binding_credentials_exhausted".into(),
-            sentence: "binding credentials exhausted".into(),
+            sentence: format!(
+                "the participant's binding on {channel_id} has no credential numbers left"
+            ),
         })?;
 
     let binding = Binding {
@@ -234,7 +236,7 @@ pub async fn unbind(
     if binding.detached {
         return Err(Error::Module {
             reason: "binding_is_already_detached".into(),
-            sentence: "binding is already detached".into(),
+            sentence: format!("the participant's binding on {channel_id} is already detached"),
         });
     }
     binding.detached = true;

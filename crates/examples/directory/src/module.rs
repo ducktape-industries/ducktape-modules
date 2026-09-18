@@ -108,7 +108,7 @@ impl Directory {
         if count > ((bytes.len() - off) / 16) as u64 {
             return Err(Error::Module {
                 reason: "snapshot_truncated".into(),
-                sentence: "snapshot truncated".into(),
+                sentence: "the snapshot declares more entries than its bytes can hold".into(),
             });
         }
         let mut entries: BTreeMap<String, String> = BTreeMap::new();
@@ -135,7 +135,7 @@ impl Directory {
         if Self::root_of(&entries) != expected {
             return Err(Error::Module {
                 reason: "snapshot_root_mismatch".into(),
-                sentence: "snapshot root mismatch".into(),
+                sentence: "the snapshot does not hash to the expected state root".into(),
             });
         }
         self.entries = entries;
@@ -152,7 +152,7 @@ fn read_u64(bytes: &[u8], off: &mut usize) -> Result<u64, Error> {
         .filter(|&end| end <= bytes.len())
         .ok_or_else(|| Error::Module {
             reason: "snapshot_truncated".into(),
-            sentence: "snapshot truncated".into(),
+            sentence: "the snapshot ends inside a length prefix".into(),
         })?;
     let mut buf = [0u8; 8];
     buf.copy_from_slice(&bytes[*off..end]);
@@ -167,12 +167,12 @@ fn read_string(bytes: &[u8], off: &mut usize) -> Result<String, Error> {
     let len = read_u64(bytes, off)?;
     let len = usize::try_from(len).map_err(|_| Error::Module {
         reason: "snapshot_truncated".into(),
-        sentence: "snapshot truncated".into(),
+        sentence: "a snapshot string length does not fit in memory".into(),
     })?;
     if len > bytes.len() - *off {
         return Err(Error::Module {
             reason: "snapshot_truncated".into(),
-            sentence: "snapshot truncated".into(),
+            sentence: "a snapshot string runs past the end of the snapshot".into(),
         });
     }
     let s = std::str::from_utf8(&bytes[*off..*off + len]).map_err(|_| Error::Module {

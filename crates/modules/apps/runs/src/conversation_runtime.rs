@@ -80,7 +80,7 @@ impl RunsModule {
                 if native_run {
                     return Err(Error::Module {
                         reason: "native_worker_execution_binding_is_missing".into(),
-                        sentence: "native worker execution binding is missing".into(),
+                        sentence: format!("native worker run {run_id} has no execution binding"),
                     });
                 }
                 job_id.clone()
@@ -88,7 +88,7 @@ impl RunsModule {
         };
         let jobs = self.jobs.as_ref().ok_or_else(|| Error::Module {
             reason: "worker_run_has_no_jobs_module".into(),
-            sentence: "worker run has no Jobs module".into(),
+            sentence: "worker runs need a Jobs module, and none is configured".into(),
         })?;
         let bytes = ctx
             .query(
@@ -104,7 +104,7 @@ impl RunsModule {
         else {
             return Err(Error::Module {
                 reason: "unexpected_worker_job_reply".into(),
-                sentence: "unexpected worker job reply".into(),
+                sentence: "Jobs answered a job lookup with something other than a job".into(),
             });
         };
         let Some(binding) = binding else {
@@ -131,7 +131,7 @@ impl RunsModule {
         else {
             return Err(Error::Module {
                 reason: "unexpected_retained_worker_reply".into(),
-                sentence: "unexpected retained worker reply".into(),
+                sentence: "Jobs answered a worker lookup with something other than a worker".into(),
             });
         };
         Ok(history
@@ -168,7 +168,7 @@ impl RunsModule {
     ) -> Result<(), Error> {
         let session = self.session(run_id).ok_or_else(|| Error::Module {
             reason: "worker_boundary_requires_a_live_session".into(),
-            sentence: "worker boundary requires a live session".into(),
+            sentence: format!("run {run_id} has no live session"),
         })?;
         let signer = ctx.env().origin == Origin::External(session.session_key.clone())
             || ctx.env().origin == Origin::External(session.lease.holder.clone());
@@ -176,7 +176,7 @@ impl RunsModule {
         if !current {
             return Err(Error::Module {
                 reason: "worker_boundary_attempt_is_stale".into(),
-                sentence: "worker boundary attempt is stale".into(),
+                sentence: format!("attempt {attempt} of run {run_id} is not held by this signer"),
             });
         }
         self.session_holds_lease(ctx, run_id, session).await
@@ -194,13 +194,13 @@ impl RunsModule {
             .await?
             .ok_or_else(|| Error::Module {
                 reason: "worker_job_is_unavailable".into(),
-                sentence: "worker job is unavailable".into(),
+                sentence: format!("run {run_id} is bound to no available job"),
             })?;
         let entry = self
             .pending_entry(&dispatch_id_for(run_id))
             .ok_or_else(|| Error::Module {
                 reason: "worker_run_is_unavailable".into(),
-                sentence: "worker run is unavailable".into(),
+                sentence: format!("run {run_id} is not in flight"),
             })?;
         let owned = job.status == tasks::JobStatus::Processing
             && job.claim.as_ref().is_some_and(|claim| {
@@ -210,7 +210,7 @@ impl RunsModule {
         if !owned {
             return Err(Error::Module {
                 reason: "worker_job_claim_has_moved".into(),
-                sentence: "worker job claim has moved".into(),
+                sentence: format!("run {run_id} no longer holds its job's claim"),
             });
         }
         Ok(job)
@@ -250,7 +250,10 @@ impl RunsModule {
         if !valid_text {
             return Err(Error::Module {
                 reason: "worker_report_requires_bounded_nonempty_text".into(),
-                sentence: "worker report requires bounded nonempty text".into(),
+                sentence: format!(
+                    "a worker report needs non-empty text of at most {} bytes",
+                    tasks::MAX_WORKER_TEXT_BYTES
+                ),
             });
         }
         let job = self
@@ -273,7 +276,7 @@ impl RunsModule {
         if generation != entry.generation {
             return Err(Error::Module {
                 reason: "run_program_authority_changed".into(),
-                sentence: "run program authority changed".into(),
+                sentence: format!("the program behind run {run_id} changed after the run began"),
             });
         }
         let message = tasks::JobsMsg::Checkpoint {
@@ -337,7 +340,9 @@ impl RunsModule {
             }
             return Err(Error::Module {
                 reason: "worker_cancellation_settlement_conflicts_with_its_receipt".into(),
-                sentence: "worker cancellation settlement conflicts with its receipt".into(),
+                sentence: format!(
+                    "run {run_id} already settled its cancellation with a different operation"
+                ),
             });
         }
         let job = self
@@ -448,7 +453,7 @@ impl RunsModule {
         if !worker_source {
             return Err(Error::Module {
                 reason: "worker_history_belongs_to_another_source_kind".into(),
-                sentence: "worker history belongs to another source kind".into(),
+                sentence: format!("conversation {id} is not a job worker conversation"),
             });
         }
         if let Some(turn) = &state.active_turn {
@@ -487,7 +492,10 @@ impl RunsModule {
             .checked_add(1)
             .ok_or_else(|| Error::Module {
                 reason: "worker_input_cursor_exhausted".into(),
-                sentence: "worker input cursor exhausted".into(),
+                sentence: format!(
+                    "conversation {} has no input sequence numbers left",
+                    state.conversation_id
+                ),
             })?;
         let event = ConversationEvent {
             sequence,
@@ -619,7 +627,10 @@ impl RunsModule {
             else {
                 return Err(Error::Module {
                     reason: "unexpected_job_attribution_source".into(),
-                    sentence: "unexpected job attribution source".into(),
+                    sentence: format!(
+                        "Jobs answered the lookup for attributed job {} with something other than a job",
+                        change.source.object
+                    ),
                 });
             };
             content["source"] = serde_json::to_value(job).map_err(|error| Error::Module {
@@ -701,7 +712,7 @@ impl RunsModule {
             .unwrap_or(self.next_action_item);
         let next = item.checked_add(1).ok_or_else(|| Error::Module {
             reason: "worker_request_counter_exhausted".into(),
-            sentence: "worker request counter exhausted".into(),
+            sentence: "no action item numbers are left for a worker request".into(),
         })?;
         ctx.emit_msg(Msg {
             target: self.attribution.clone(),
@@ -743,7 +754,7 @@ impl RunsModule {
             .unwrap_or(self.next_action_item);
         let next = item.checked_add(1).ok_or_else(|| Error::Module {
             reason: "conversation_request_counter_exhausted".into(),
-            sentence: "conversation request counter exhausted".into(),
+            sentence: "no action item numbers are left for a conversation request".into(),
         })?;
         self.apply_conversation(ctx, state, Input::Requested)
             .await?;
@@ -795,7 +806,10 @@ impl RunsModule {
         if number != turn.turn {
             return Err(Error::Module {
                 reason: "conversation_turn_mismatch".into(),
-                sentence: "conversation turn mismatch".into(),
+                sentence: format!(
+                    "turn {number} is not the current turn {} of conversation {id}",
+                    turn.turn
+                ),
             });
         }
         let dispatched = matches!(
@@ -808,7 +822,7 @@ impl RunsModule {
         if state.status != ConversationStatus::Active {
             return Err(Error::Module {
                 reason: "conversation_intake_is_paused".into(),
-                sentence: "conversation intake is paused".into(),
+                sentence: format!("conversation {id} is paused and takes no new turns"),
             });
         }
         let agent = self
@@ -820,12 +834,18 @@ impl RunsModule {
             })?
             .ok_or_else(|| Error::Module {
                 reason: "conversation_model_is_not_active".into(),
-                sentence: "conversation model is not active".into(),
+                sentence: format!(
+                    "model {} of conversation {id} is not active",
+                    state.agent_id
+                ),
             })?;
         if agent.account != state.account {
             return Err(Error::Module {
                 reason: "conversation_account_binding_changed".into(),
-                sentence: "conversation account binding changed".into(),
+                sentence: format!(
+                    "model {} no longer runs as the account of conversation {id}",
+                    state.agent_id
+                ),
             });
         }
         let portable = self
@@ -897,7 +917,7 @@ impl RunsModule {
             .session(&checkpoint.run_id)
             .ok_or_else(|| Error::Module {
                 reason: "conversation_checkpoint_has_no_live_session".into(),
-                sentence: "conversation checkpoint has no live session".into(),
+                sentence: format!("run {} has no live session", checkpoint.run_id),
             })?;
         let signer = ctx.env().origin == Origin::External(session.session_key.clone())
             || ctx.env().origin == Origin::External(session.lease.holder.clone());
@@ -905,7 +925,10 @@ impl RunsModule {
         if !current {
             return Err(Error::Module {
                 reason: "conversation_checkpoint_attempt_is_stale".into(),
-                sentence: "conversation checkpoint attempt is stale".into(),
+                sentence: format!(
+                    "attempt {} of run {} is not held by this signer",
+                    checkpoint.attempt, checkpoint.run_id
+                ),
             });
         }
         self.session_holds_lease(ctx, &checkpoint.run_id, session)
@@ -921,12 +944,12 @@ impl RunsModule {
         if !valid_snapshot {
             return Err(Error::Module {
                 reason: "invalid_native_history_snapshot".into(),
-                sentence: "invalid native history snapshot".into(),
+                sentence: "a native history snapshot id is 1 to 256 bytes".into(),
             });
         }
         let files = self.files.as_ref().ok_or_else(|| Error::Module {
             reason: "native_history_requires_files".into(),
-            sentence: "native history requires Files".into(),
+            sentence: "native history needs a Files module, and none is configured".into(),
         })?;
         let bytes = ctx
             .query(
@@ -951,7 +974,10 @@ impl RunsModule {
         if entry.kind != files::EntryKindWire::File {
             return Err(Error::Module {
                 reason: "native_history_is_not_a_file".into(),
-                sentence: "native history is not a file".into(),
+                sentence: format!(
+                    "native history {}/{} is not a file",
+                    state.history_prefix, state.session_path
+                ),
             });
         }
         let files_id = files.clone();
@@ -1017,13 +1043,13 @@ impl RunsModule {
         let Some(turn) = &state.active_turn else {
             return Err(Error::Module {
                 reason: "conversation_action_arrived_after_settlement".into(),
-                sentence: "conversation action arrived after settlement".into(),
+                sentence: format!("conversation {id} settled its turn before this action arrived"),
             });
         };
         if turn.run_id != run {
             return Err(Error::Module {
                 reason: "conversation_action_belongs_to_a_stale_turn".into(),
-                sentence: "conversation action belongs to a stale turn".into(),
+                sentence: format!("run {run} is not the current turn of conversation {id}"),
             });
         }
         // No wake is emitted by Action: model completion opens the drain.
@@ -1068,7 +1094,7 @@ impl RunsModule {
         if conflicting {
             return Err(Error::Module {
                 reason: "conflicting_conversation_ending_attempt".into(),
-                sentence: "conflicting conversation ending attempt".into(),
+                sentence: format!("run {run} already ended under a different attempt"),
             });
         }
         self.receipts
@@ -1099,7 +1125,10 @@ impl RunsModule {
             let Some(view) = self.action_view(ctx, id).await? else {
                 return Err(Error::Module {
                     reason: "conversation_action_receipt_is_missing".into(),
-                    sentence: "conversation action receipt is missing".into(),
+                    sentence: format!(
+                        "conversation {} has no receipt for action {id}",
+                        state.conversation_id
+                    ),
                 });
             };
             let terminal = matches!(
@@ -1126,7 +1155,10 @@ impl RunsModule {
             .await?
             .ok_or_else(|| Error::Module {
                 reason: "draining_conversation_has_no_ending_attempt_fence".into(),
-                sentence: "draining conversation has no ending-attempt fence".into(),
+                sentence: format!(
+                    "conversation {} is draining, but run {} recorded no ending attempt",
+                    state.conversation_id, turn.run_id
+                ),
             })?;
         self.apply_conversation(ctx, &current, Input::Drained(attempt))
             .await?;
@@ -1154,7 +1186,8 @@ impl RunsModule {
         }
         let files = self.files.clone().ok_or_else(|| Error::Module {
             reason: "native_history_retention_requires_files".into(),
-            sentence: "native history retention requires Files".into(),
+            sentence: "retaining native history needs a Files module, and none is configured"
+                .into(),
         })?;
         self.receipts
             .stage(reference_key, sdk::wire::encode(&replacement))?;
@@ -1195,7 +1228,7 @@ impl RunsModule {
                 .await?
                 .ok_or_else(|| Error::Module {
                     reason: "conversation_wake_record_missing".into(),
-                    sentence: "conversation wake record missing".into(),
+                    sentence: format!("wake item {item} is queued but has no record"),
                 })?;
             let wake: Wake = sdk::wire::decode(&bytes).map_err(|sentence| Error::Module {
                 reason: "codec".into(),
@@ -1242,7 +1275,10 @@ impl RunsModule {
             }
             return Err(Error::Module {
                 reason: "conflicting_conversation_acknowledgment".into(),
-                sentence: "conflicting conversation acknowledgment".into(),
+                sentence: format!(
+                    "wake item {} was already acknowledged with a different outcome",
+                    ack.item
+                ),
             });
         }
         let mut queue: BTreeMap<u64, String> = self
@@ -1294,7 +1330,10 @@ impl RunsModule {
         if wake.conversation_id != id {
             return Err(Error::Module {
                 reason: "conversation_wake_identity_mismatch".into(),
-                sentence: "conversation wake identity mismatch".into(),
+                sentence: format!(
+                    "wake item {} belongs to conversation {}, not {id}",
+                    item.item, wake.conversation_id
+                ),
             });
         }
         // Detach this exact wake before deciding. A new chunk/turn may enqueue

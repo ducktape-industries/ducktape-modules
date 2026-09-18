@@ -115,7 +115,7 @@ impl Receipts {
                 if !records.is_empty() {
                     return Err(Error::Module {
                         reason: "hosted_receipts_must_be_restored_through_host".into(),
-                        sentence: "hosted receipts must be restored through host state".into(),
+                        sentence: "a host-backed receipt store restores from host state, not from snapshot records".into(),
                     });
                 }
             }

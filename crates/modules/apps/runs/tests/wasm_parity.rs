@@ -1238,7 +1238,7 @@ fn rejections_match_and_leave_no_trace() {
                     request_id: "unknown".into(),
                     target_step: 1,
                 }),
-                "unknown action request",
+                "no action request unknown",
             ),
             (
                 alice(),

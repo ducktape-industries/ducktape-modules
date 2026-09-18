@@ -165,7 +165,10 @@ async fn actor_from_origin(ctx: &dyn Ctx, identity: &str) -> Result<Party, Error
             if !is_active_program {
                 return Err(Error::Module {
                     reason: "program_account_is_not_active".into(),
-                    sentence: "program account is not active".into(),
+                    sentence: format!(
+                        "account {} is not an active program account",
+                        account.number
+                    ),
                 });
             }
             Ok(Party::Account(account.number))
@@ -228,7 +231,7 @@ async fn require_account(
     let identity::IdentityReply::Account(Some(account)) = reply else {
         return Err(Error::Module {
             reason: "task_owner_account_does_not_exist".into(),
-            sentence: "task owner account does not exist".into(),
+            sentence: format!("task owner account {number} does not exist"),
         });
     };
     Ok(account)
@@ -244,13 +247,15 @@ async fn next_revision(
     let revision = match staged.get(&key).await? {
         Some(bytes) => u64::from_le_bytes(bytes.try_into().map_err(|_| Error::Module {
             reason: "invalid_attribution_revision".into(),
-            sentence: "invalid attribution revision".into(),
+            sentence: format!(
+                "the stored attribution revision of {kind} {object} is not an 8-byte count"
+            ),
         })?),
         None => 0,
     };
     let next = revision.checked_add(1).ok_or_else(|| Error::Module {
         reason: "attribution_revision_exhausted".into(),
-        sentence: "attribution revision exhausted".into(),
+        sentence: format!("{kind} {object} has no attribution revision numbers left"),
     })?;
     Ok((key, next))
 }

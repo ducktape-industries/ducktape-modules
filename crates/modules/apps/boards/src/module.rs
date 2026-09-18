@@ -28,7 +28,10 @@ impl Boards {
             .map(|bytes| {
                 serde_json::from_slice(&bytes).map_err(|e| Error::Module {
                     reason: "corrupt_state".into(),
-                    sentence: e.to_string(),
+                    sentence: format!(
+                        "Stored record {} is unreadable: {e}",
+                        String::from_utf8_lossy(key)
+                    ),
                 })
             })
             .transpose()
@@ -37,7 +40,8 @@ impl Boards {
         if !valid_id(&id) {
             return Err(Error::Module {
                 reason: "board_id".into(),
-                sentence: "Invalid board id.".into(),
+                sentence: "A board id is 1 to 96 letters, digits, dashes, underscores or colons."
+                    .into(),
             });
         }
         let mut catalog: BTreeMap<String, String> =
@@ -63,7 +67,7 @@ impl Boards {
         if catalog.len() >= MAX_BOARDS {
             return Err(Error::Module {
                 reason: "board_limit".into(),
-                sentence: "Board limit reached.".into(),
+                sentence: format!("There are already {MAX_BOARDS} boards, the most allowed."),
             });
         }
         let board = Board::new(title.clone(), owner).map_err(refused)?;
@@ -115,7 +119,8 @@ impl Boards {
         if !valid_id(id) {
             return Err(Error::Module {
                 reason: "board_id".into(),
-                sentence: "Invalid board id.".into(),
+                sentence: "A board id is 1 to 96 letters, digits, dashes, underscores or colons."
+                    .into(),
             });
         }
         self.read(&board_key(id))

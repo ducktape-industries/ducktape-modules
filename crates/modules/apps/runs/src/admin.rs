@@ -213,7 +213,8 @@ impl RunsModule {
                 Self::admin_origin(&ctx.env().origin)?;
                 let jobs = self.jobs.clone().ok_or_else(|| Error::Module {
                     reason: "no_jobs_module_is_configured".into(),
-                    sentence: "no jobs module is configured".into(),
+                    sentence: "enabling the job worker needs a Jobs module, and none is configured"
+                        .into(),
                 })?;
                 let payload = if enabled {
                     jobs_encode_msg(&JobsMsg::RegisterWorker {})
@@ -286,7 +287,7 @@ impl RunsModule {
                         .unwrap_or(self.next_action_item);
                     let next = item.checked_add(1).ok_or_else(|| Error::Module {
                         reason: "run_request_counter_exhausted".into(),
-                        sentence: "run request counter exhausted".into(),
+                        sentence: "no action item numbers are left for a run request".into(),
                     })?;
                     let actor = match &ctx.env().origin {
                         Origin::Program(account) => super::Actor::Account(*account),

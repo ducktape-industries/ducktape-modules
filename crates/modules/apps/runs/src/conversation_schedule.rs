@@ -136,7 +136,10 @@ fn schedule_fire(
     if !due {
         return Err(Error::Module {
             reason: "conversation_schedule_not_due".into(),
-            sentence: "conversation schedule is not due".into(),
+            sentence: format!(
+                "schedule {} of conversation {} is not due yet",
+                schedule.schedule_id, schedule.conversation_id
+            ),
         });
     }
     schedule.status = ConversationScheduleStatus::Fired { sequence };
@@ -165,7 +168,9 @@ impl RunsModule {
                 .await?
                 .ok_or_else(|| Error::Module {
                     reason: "missing_conversation_schedule".into(),
-                    sentence: "missing conversation schedule".into(),
+                    sentence: format!(
+                        "conversation {id} lists schedule {slot} but has no record of it"
+                    ),
                 })?;
             schedules.push(schedule);
         }
@@ -188,7 +193,7 @@ impl RunsModule {
         if !valid_slot {
             return Err(Error::Module {
                 reason: "invalid_conversation_schedule_id".into(),
-                sentence: "invalid conversation schedule id".into(),
+                sentence: format!("a schedule id is 1 to {MAX_REQUEST_ID_BYTES} bytes"),
             });
         }
         if matches!(input, ConversationInput::Chat { .. }) {
@@ -221,7 +226,9 @@ impl RunsModule {
                         .checked_mul(unit.per_second())
                         .ok_or_else(|| Error::Module {
                             reason: "conversation_schedule_duration_overflow".into(),
-                            sentence: "conversation schedule duration overflow".into(),
+                            sentence: format!(
+                                "a delay of {seconds} seconds is too long to schedule"
+                            ),
                         })?;
                 let due_at = ctx
                     .env()
@@ -229,7 +236,9 @@ impl RunsModule {
                     .checked_add(duration)
                     .ok_or_else(|| Error::Module {
                         reason: "conversation_schedule_deadline_overflow".into(),
-                        sentence: "conversation schedule deadline overflow".into(),
+                        sentence: format!(
+                            "{seconds} seconds from now is past the last representable time"
+                        ),
                     })?;
                 ScheduleInput::Set { schedule, due_at }
             }
@@ -243,7 +252,7 @@ impl RunsModule {
             if slots.len() >= 64 {
                 return Err(Error::Module {
                     reason: "conversation_schedule_allocation_is_full".into(),
-                    sentence: "conversation schedule allocation is full".into(),
+                    sentence: format!("conversation {id} already has 64 schedules, its limit"),
                 });
             }
             slots.push(slot.clone());
@@ -294,7 +303,10 @@ impl RunsModule {
         if !fits {
             return Err(Error::Module {
                 reason: "conversation_schedule_exceeds_store_bound".into(),
-                sentence: "conversation schedule exceeds store bound".into(),
+                sentence: format!(
+                    "a conversation schedule record exceeds the {}-byte store value bound",
+                    sdk::MAX_STORE_VALUE_BYTES
+                ),
             });
         }
         for (key, bytes) in records {
@@ -323,7 +335,10 @@ impl RunsModule {
                 .await?
                 .ok_or_else(|| Error::Module {
                     reason: "missing_scheduled_input".into(),
-                    sentence: "missing scheduled input".into(),
+                    sentence: format!(
+                        "schedule {} of conversation {} is queued but has no record",
+                        entry.schedule_id, entry.conversation_id
+                    ),
                 })?;
             let current = schedule.operation_id == entry.operation_id
                 && schedule.status
@@ -342,7 +357,10 @@ impl RunsModule {
                 .checked_add(1)
                 .ok_or_else(|| Error::Module {
                     reason: "conversation_input_cursor_exhausted".into(),
-                    sentence: "conversation input cursor exhausted".into(),
+                    sentence: format!(
+                        "conversation {} has no input sequence numbers left",
+                        entry.conversation_id
+                    ),
                 })?;
             let operation_id = format!(
                 "timer/{}",

@@ -155,7 +155,10 @@ async fn check_attempt(
     else {
         return Err(Error::Module {
             reason: "unexpected_reply_to_task_lookup".into(),
-            sentence: "unexpected reply to task lookup".into(),
+            sentence: format!(
+                "tasks answered the lookup for task {} with something other than a job",
+                task.id
+            ),
         });
     };
     let job = job.ok_or_else(|| Error::Module {
@@ -167,7 +170,7 @@ async fn check_attempt(
         return Err(Error::Module {
             reason: "stale_task_attempt".into(),
             sentence: format!(
-                "{what}: task {} is on attempt {}, not the expected {}",
+                "task {} of {what} is on attempt {}, not the expected {}",
                 task.id, job.attempt, task.expected_attempt
             ),
         });
@@ -278,7 +281,7 @@ pub async fn deliver(
         });
     }
     if let Some(task) = &request.task {
-        check_attempt(ctx, tasks_id, task, "stale task target").await?;
+        check_attempt(ctx, tasks_id, task, "this delivery").await?;
     }
     if request.expires_at <= now {
         return Err(Error::Module {
@@ -577,7 +580,7 @@ pub async fn acknowledge(
     // a previous attempt cannot publish as the current one after returning:
     // the task's attempt is rechecked HERE, not only at admission.
     if let Some(task) = &delivery.task {
-        check_attempt(ctx, tasks_id, task, "stale attempt acknowledgement").await?;
+        check_attempt(ctx, tasks_id, task, "this acknowledgement").await?;
     }
     advance(staged, delivery, now, state, reason, binding_credential).await
 }

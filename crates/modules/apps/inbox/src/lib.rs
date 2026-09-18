@@ -317,7 +317,10 @@ impl Inbox {
     #[cfg(feature = "testkit")]
     async fn item(&self, account: AccountNumber, seq: u64) -> Result<Notification, Error> {
         self.load(&item_key(account, seq)).await?.ok_or_else(|| {
-            module_error("missing_notification_record", "missing notification record")
+            module_error(
+                "missing_notification_record",
+                format!("the inbox of account {account} lists item {seq} with no record"),
+            )
         })
     }
 
@@ -339,7 +342,7 @@ impl Inbox {
             IdentityReply::Accounts(_) | IdentityReply::Resolved(_) | IdentityReply::Gen(_) => {
                 Err(module_error(
                     "unexpected_identity_reply",
-                    "inbox: unexpected identity reply",
+                    "identity answered an account lookup with something other than an account",
                 ))
             }
         }

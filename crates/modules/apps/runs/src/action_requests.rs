@@ -159,7 +159,7 @@ impl RunsModule {
         let Some(request) = self.action_request(&id).await? else {
             return Err(Error::Module {
                 reason: "unknown_action_request".into(),
-                sentence: "unknown action request".into(),
+                sentence: format!("no action request {id}"),
             });
         };
         let Cause::Chain {
@@ -206,13 +206,16 @@ impl RunsModule {
         if generation != request.view.generation {
             return Err(Error::Module {
                 reason: "program_authority_changed_since_this_run_began".into(),
-                sentence: "program authority changed since this run began".into(),
+                sentence: format!(
+                    "the program behind run {} changed after the run began",
+                    request.view.run_id
+                ),
             });
         }
         let Some(model) = self.model(&request.model_id) else {
             return Err(Error::Module {
                 reason: "run_model_was_removed".into(),
-                sentence: "run model was removed".into(),
+                sentence: format!("model {} was removed", request.model_id),
             });
         };
         if model.account != request.view.account {
@@ -225,7 +228,7 @@ impl RunsModule {
         if model.status != ModelStatus::Active {
             return Err(Error::Module {
                 reason: "run_model_is_paused".into(),
-                sentence: "run model is paused".into(),
+                sentence: format!("model {} is paused", request.model_id),
             });
         }
         match &request.scope {
@@ -234,13 +237,16 @@ impl RunsModule {
                 let Some(session) = self.session(&request.view.run_id) else {
                     return Err(Error::Module {
                         reason: "run_session_closed".into(),
-                        sentence: "run session closed".into(),
+                        sentence: format!("run {} has no live session", request.view.run_id),
                     });
                 };
                 if &session.lease != lease {
                     return Err(Error::Module {
                         reason: "run_execution_lease_changed".into(),
-                        sentence: "run execution lease changed".into(),
+                        sentence: format!(
+                            "run {} moved to another execution lease",
+                            request.view.run_id
+                        ),
                     });
                 }
                 self.session_holds_lease(ctx, &request.view.run_id, session)
@@ -280,14 +286,17 @@ impl RunsModule {
         else {
             return Err(Error::Module {
                 reason: "tool_decision_requires_a_program_call".into(),
-                sentence: "tool decision requires a program call".into(),
+                sentence: "a tool decision arrives only through a program call".into(),
             });
         };
         let owns_request = account == request.view.account && call.requester == self.agent;
         if !owns_request {
             return Err(Error::Module {
                 reason: "tool_decision_belongs_to_another_program".into(),
-                sentence: "tool decision belongs to another program".into(),
+                sentence: format!(
+                    "this tool decision is for program {}, not {account}",
+                    request.view.account
+                ),
             });
         }
         Ok(call.clone())
@@ -302,7 +311,7 @@ impl RunsModule {
         let Some(mut request) = self.action_request(&id).await? else {
             return Err(Error::Module {
                 reason: "unknown_action_request".into(),
-                sentence: "unknown action request".into(),
+                sentence: format!("no action request {id}"),
             });
         };
         let call = self.request_call(ctx, &request)?;
@@ -330,7 +339,9 @@ impl RunsModule {
         else {
             return Err(Error::Module {
                 reason: "unexpected_action_attribution_reply".into(),
-                sentence: "unexpected action attribution reply".into(),
+                sentence:
+                    "attribution answered the action lookup with something other than changes"
+                        .into(),
             });
         };
         let Some(change) = changes.first() else {
@@ -410,7 +421,7 @@ impl RunsModule {
         let Some(mut request) = self.action_request(&id).await? else {
             return Err(Error::Module {
                 reason: "unknown_action_request".into(),
-                sentence: "unknown action request".into(),
+                sentence: format!("no action request {id}"),
             });
         };
         let completing = self.request_call(ctx, &request)?;
@@ -588,7 +599,7 @@ impl RunsModule {
         let Some(mut request) = self.action_request(&id).await? else {
             return Err(Error::Module {
                 reason: "unknown_action_request".into(),
-                sentence: "unknown action request".into(),
+                sentence: format!("no action request {id}"),
             });
         };
         self.request_call(ctx, &request)?;
@@ -641,7 +652,8 @@ impl RunsModule {
             else {
                 return Err(Error::Module {
                     reason: "unexpected_action_call_reply".into(),
-                    sentence: "unexpected action call reply".into(),
+                    sentence: "dispatch answered the call lookup with something other than a call"
+                        .into(),
                 });
             };
             if let Some(queued) = queued {
@@ -696,7 +708,9 @@ impl RunsModule {
         else {
             return Err(Error::Module {
                 reason: "unexpected_action_attribution_reply".into(),
-                sentence: "unexpected action attribution reply".into(),
+                sentence:
+                    "attribution answered the action lookup with something other than changes"
+                        .into(),
             });
         };
         let Some(change) = changes.first() else {
@@ -719,7 +733,7 @@ impl RunsModule {
         else {
             return Err(Error::Module {
                 reason: "unexpected_action_invocation_reply".into(),
-                sentence: "unexpected action invocation reply".into(),
+                sentence: "the agent answered the invocation lookup with something other than an invocation".into(),
             });
         };
         if invocation.is_none() {
@@ -740,7 +754,7 @@ impl RunsModule {
             else {
                 return Err(Error::Module {
                     reason: "unexpected_program_delivery_reply".into(),
-                    sentence: "unexpected program delivery reply".into(),
+                    sentence: "attribution answered the delivery lookup with something other than a delivery".into(),
                 });
             };
             let no_invocation = delivery.as_ref().is_none_or(|delivery| {

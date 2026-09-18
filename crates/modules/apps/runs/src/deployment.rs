@@ -176,7 +176,9 @@ impl RunsModule {
         if !members.contains(node) {
             return Err(Error::Module {
                 reason: "artifact_reporter_is_not_a_validator".into(),
-                sentence: "artifact reporter is not a validator".into(),
+                sentence:
+                    "this key is not a current validator, so it cannot report artifact residency"
+                        .into(),
             });
         }
         let Some(view) = self.next_module_update().await? else {
@@ -229,7 +231,7 @@ impl RunsModule {
         else {
             return Err(Error::Module {
                 reason: "unexpected_module_registry_reply".into(),
-                sentence: "unexpected module registry reply".into(),
+                sentence: "the module registry answered the status lookup with something other than module status".into(),
             });
         };
         let Some(module) = modules
@@ -267,7 +269,9 @@ impl RunsModule {
         else {
             return Err(Error::Module {
                 reason: "unexpected_deployment_proposal_reply".into(),
-                sentence: "unexpected deployment proposal reply".into(),
+                sentence: format!(
+                    "governance answered the proposal lookup for module update {sequence} with something other than a proposal"
+                ),
             });
         };
         let staged = self
@@ -287,7 +291,9 @@ impl RunsModule {
             else {
                 return Err(Error::Module {
                     reason: "unexpected_governance_shares_reply".into(),
-                    sentence: "unexpected governance shares reply".into(),
+                    sentence:
+                        "governance answered the shares lookup with something other than shares"
+                            .into(),
                 });
             };
             if shares.active {

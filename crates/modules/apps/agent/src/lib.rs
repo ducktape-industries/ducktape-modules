@@ -161,7 +161,9 @@ fn validate_provision_request_id(request_id: &str) -> Result<(), Error> {
     if !valid {
         return Err(module_error(
             "invalid_provision_request_id",
-            "invalid provision request_id",
+            format!(
+                "a provision request_id is 1 to {MAX_PROVISION_REQUEST_ID_BYTES} bytes and has no reserved separator"
+            ),
         ));
     }
     Ok(())
@@ -759,7 +761,10 @@ fn require_completion_of(cause: &Cause, id: &CallId) -> Result<(), Error> {
     if !is_this_call {
         return Err(module_error(
             "completion_invocation_mismatch",
-            format!("a completion of {completed:?} carried the outcome of {id:?}"),
+            format!(
+                "a completion of call {}/{} carried the outcome of call {}/{}",
+                completed.invocation, completed.step, id.invocation, id.step
+            ),
         ));
     }
     Ok(())
@@ -1673,8 +1678,8 @@ impl AgentModule {
             return Err(module_error(
                 "call_origin_mismatch",
                 format!(
-                    "call {:?} was queued by {}, not by {}",
-                    completed.id, completed.id.requester, self.id
+                    "call {}/{} was queued by {}, not by {}",
+                    completed.id.invocation, completed.id.step, completed.id.requester, self.id
                 ),
             ));
         }
@@ -1685,8 +1690,8 @@ impl AgentModule {
             return Err(module_error(
                 "queued_call_invocation_missing",
                 format!(
-                    "no invocation of {} queued call {:?}",
-                    self.id, completed.id
+                    "no invocation of {} queued call {}/{}",
+                    self.id, completed.id.invocation, completed.id.step
                 ),
             ));
         };
@@ -1695,8 +1700,11 @@ impl AgentModule {
             return Err(module_error(
                 "call_account_mismatch",
                 format!(
-                    "call {:?} belongs to account {}, not {}",
-                    completed.id, correlation.account, completed.account
+                    "call {}/{} belongs to account {}, not {}",
+                    completed.id.invocation,
+                    completed.id.step,
+                    correlation.account,
+                    completed.account
                 ),
             ));
         }

@@ -373,7 +373,7 @@ fn register_worker_gating_idempotence_unregister_and_cap() {
         .await
         .expect_err("worker cap enforced");
         assert!(
-            matches!(err, Error::Module { sentence: m, .. } if m.contains("worker cap reached"))
+            matches!(err, Error::Module { sentence: m, .. } if m.contains(&format!("already has {MAX_WORKERS} registered workers")))
         );
     });
 }
@@ -610,9 +610,9 @@ fn caps_rejection_table() {
         let max_spec = "s".repeat(MAX_SPEC);
 
         let cases: Vec<(Msg, &str)> = vec![
-            (submit("", "k", ""), "job_id must not be empty"),
+            (submit("", "k", ""), "needs a non-empty job_id"),
             (submit(&too_long_id, "k", ""), "job_id exceeds"),
-            (submit("ok", "", ""), "kind must not be empty"),
+            (submit("ok", "", ""), "needs a non-empty kind"),
             (submit("ok", &too_long_kind, ""), "kind exceeds"),
             (submit("ok", "k", &over_spec), "spec exceeds"),
         ];
@@ -1643,7 +1643,7 @@ fn a_job_comment_cannot_be_overwritten_by_another_actor() {
         )
         .await
         .unwrap_err();
-        assert!(format!("{error}").contains("already exists"));
+        assert!(format!("{error}").contains("job j already has a comment c"));
         jobs.commit_block().await.unwrap();
         assert_eq!(jobs.root(), before);
         let job = get(&jobs, "j").await.unwrap();
