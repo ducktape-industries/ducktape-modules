@@ -17,6 +17,7 @@ use super::{
     Ctx, DispatchMsg, Error, Msg, OutputContract, RUN_DEADLINE_VIEWS, RUN_LEASE_VIEWS,
     RUN_MAX_ATTEMPTS, Routing, RunsModule, dispatch_encode_msg, recipe_id_for,
 };
+use sdk::refusal;
 
 impl RunsModule {
     /// Model configuration and the matching dispatch recipe share one unit.
@@ -34,7 +35,7 @@ impl RunsModule {
                 // or the recipe registration below could never land.
                 if recipe_id_for(&agent_id).len() > dispatch::MAX_ID_BYTES {
                     return Err(Error::Module {
-                        reason: "agent_id_length".into(),
+                        reason: refusal::CAPACITY.into(),
                         sentence: format!(
                             "agent_id is too long for its dispatch recipe id (cap {})",
                             dispatch::MAX_ID_BYTES - recipe_id_for("").len()

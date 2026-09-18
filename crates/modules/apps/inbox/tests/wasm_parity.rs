@@ -8,6 +8,7 @@ use identity::{
     decode_query as identity_decode_query, encode_reply as identity_encode_reply,
 };
 use inbox::{AccountNumber, Inbox, InboxAssigned, InboxMsg, decode_assigned, encode_msg};
+use sdk::refusal;
 use sdk::{Cause, Env, Error, Hop, ItemRef, Module, Msg, Origin, Root};
 use sdk_testkit::{MemStore, TestCtx};
 
@@ -70,7 +71,7 @@ fn directory() -> Vec<AccountView> {
 fn identity_stub(req: &[u8]) -> Result<Vec<u8>, Error> {
     let accounts = directory();
     let found = match identity_decode_query(req).map_err(|sentence| Error::Module {
-        reason: "codec".into(),
+        reason: refusal::INVALID_INPUT.into(),
         sentence,
     })? {
         IdentityQuery::Get { number } => accounts.into_iter().find(|a| a.number == number),
@@ -79,7 +80,7 @@ fn identity_stub(req: &[u8]) -> Result<Vec<u8>, Error> {
             .find(|a| a.keys.iter().any(|k| k.pubkey == key)),
         other => {
             return Err(Error::Module {
-                reason: "unexpected_identity_query".into(),
+                reason: refusal::UNSUPPORTED.into(),
                 sentence: format!("unexpected identity query {other:?}"),
             });
         }

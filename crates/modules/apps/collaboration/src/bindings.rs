@@ -2,6 +2,7 @@
 //! channel. everything here is gated on the AUTHENTICATED origin, never on a
 //! name carried in the payload, and the roster it consults is chat's.
 
+use sdk::refusal;
 use sdk::{Ctx, Error, Origin, StagedStore};
 
 use crate::interface::{
@@ -16,7 +17,7 @@ pub fn check_id(what: &str, id: &str) -> Result<(), Error> {
     let shaped = !id.is_empty() && id.len() <= MAX_ID_BYTES;
     if !shaped {
         return Err(Error::Module {
-            reason: "id_length".into(),
+            reason: refusal::INVALID_INPUT.into(),
             sentence: format!("{what} must be 1..={MAX_ID_BYTES} bytes"),
         });
     }
@@ -26,7 +27,7 @@ pub fn check_id(what: &str, id: &str) -> Result<(), Error> {
 pub fn check_label(what: &str, label: &str) -> Result<(), Error> {
     if label.len() > MAX_LABEL_BYTES {
         return Err(Error::Module {
-            reason: "label_length".into(),
+            reason: refusal::CAPACITY.into(),
             sentence: format!(
                 "{what} is {} bytes, over the {MAX_LABEL_BYTES}-byte cap",
                 label.len()
@@ -46,7 +47,7 @@ pub fn check_participant(what: &str, party: &Party) -> Result<(), Error> {
     };
     if !shaped {
         return Err(Error::Module {
-            reason: "participant".into(),
+            reason: refusal::INVALID_INPUT.into(),
             sentence: format!("{what} must be an account or a non-empty key"),
         });
     }
@@ -64,7 +65,7 @@ pub fn check_principal(principal: &BoundPrincipal) -> Result<(), Error> {
     let shaped = !key.is_empty() && key.len() <= MAX_SERVICE_KEY_BYTES;
     if !shaped {
         return Err(Error::Module {
-            reason: "service_key_length".into(),
+            reason: refusal::INVALID_INPUT.into(),
             sentence: format!("a bound service key must be 1..={MAX_SERVICE_KEY_BYTES} bytes"),
         });
     }
@@ -150,7 +151,7 @@ pub async fn bind(
     let access = crate::chat_access(ctx, chat, &channel_id, &participant).await?;
     if !access.may_read {
         return Err(Error::Module {
-            reason: "participant_may_not_read_channel".into(),
+            reason: refusal::UNAUTHORIZED.into(),
             sentence: format!("participant may not read channel {channel_id}"),
         });
     }
@@ -158,7 +159,7 @@ pub async fn bind(
     let current_credential = current.as_ref().map_or(0, |binding| binding.credential);
     if expected_credential != current_credential {
         return Err(Error::Module {
-            reason: "stale_binding_credential".into(),
+            reason: refusal::STALE.into(),
             sentence: format!(
                 "binding credential is {current_credential}, not the expected {expected_credential}"
             ),
@@ -167,7 +168,7 @@ pub async fn bind(
     let credential = current_credential
         .checked_add(1)
         .ok_or_else(|| Error::Module {
-            reason: "binding_credentials_exhausted".into(),
+            reason: refusal::EXHAUSTED.into(),
             sentence: format!(
                 "the participant's binding on {channel_id} has no credential numbers left"
             ),
@@ -220,13 +221,13 @@ pub async fn unbind(
     // releases.
     let Some(mut binding) = store::binding(staged, &channel_id, &participant).await? else {
         return Err(Error::Module {
-            reason: "binding_missing".into(),
+            reason: refusal::NOT_FOUND.into(),
             sentence: format!("participant has no binding on {channel_id}"),
         });
     };
     if expected_credential != binding.credential {
         return Err(Error::Module {
-            reason: "stale_binding_credential".into(),
+            reason: refusal::STALE.into(),
             sentence: format!(
                 "binding credential is {}, not the expected {expected_credential}",
                 binding.credential
@@ -235,7 +236,7 @@ pub async fn unbind(
     }
     if binding.detached {
         return Err(Error::Module {
-            reason: "binding_is_already_detached".into(),
+            reason: refusal::WRONG_STATE.into(),
             sentence: format!("the participant's binding on {channel_id} is already detached"),
         });
     }

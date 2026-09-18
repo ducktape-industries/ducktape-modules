@@ -2,6 +2,7 @@
 // crates in [dependencies] are the wire surfaces these re-export.
 use attribution_module as attribution;
 use identity_module as identity;
+use sdk::refusal;
 
 use attribution::{AttributionMsg, AttributionQuery, AttributionReply, Reason, Source};
 use futures::executor::block_on;
@@ -45,13 +46,13 @@ impl Module for WorkerEvents {
         let from_attribution = ctx.env().origin == Origin::Module("attribution".into());
         if !from_attribution {
             return Err(Error::Module {
-                reason: "unauthenticated_attribution_delivery".into(),
+                reason: refusal::UNAUTHORIZED.into(),
                 sentence: "unauthenticated attribution delivery".into(),
             });
         }
         let attribution::AttributionEvent::Changed(change) =
             attribution::decode_event(&msg.payload).map_err(|sentence| Error::Module {
-                reason: "codec".into(),
+                reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence,
             })?;
         self.staged.push(change);

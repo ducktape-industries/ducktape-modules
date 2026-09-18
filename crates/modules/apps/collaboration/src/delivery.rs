@@ -6,6 +6,7 @@
 //! [`acknowledge`] moves that recipient's SEPARATE delivery record, and neither
 //! claims a task or asserts that a model read anything.
 
+use sdk::refusal;
 use sdk::{Ctx, Error, Origin, StagedStore};
 
 use crate::bindings::{self, Advanced, live_binding};
@@ -46,7 +47,7 @@ fn check_reference(reference: &Reference) -> Result<(), Error> {
             bindings::check_id("reference repo", repo)?;
             if !lowercase_hex(commit, COMMIT_HEX_LEN) {
                 return Err(Error::Module {
-                    reason: "invalid_commit_reference".into(),
+                    reason: refusal::INVALID_INPUT.into(),
                     sentence: format!(
                         "a commit reference is {COMMIT_HEX_LEN} lowercase hex characters; a branch or tag name moves and is not a reference"
                     ),
@@ -57,7 +58,7 @@ fn check_reference(reference: &Reference) -> Result<(), Error> {
         Reference::Blob { hash } => {
             if !lowercase_hex(hash, BLOB_HEX_LEN) {
                 return Err(Error::Module {
-                    reason: "invalid_blob_reference".into(),
+                    reason: refusal::INVALID_INPUT.into(),
                     sentence: format!(
                         "a blob reference is {BLOB_HEX_LEN} lowercase hex characters"
                     ),
@@ -72,7 +73,7 @@ fn check_reference(reference: &Reference) -> Result<(), Error> {
                 && !url.bytes().any(|b| b.is_ascii_whitespace() || b < 0x20);
             if !shaped {
                 return Err(Error::Module {
-                    reason: "invalid_link_reference".into(),
+                    reason: refusal::INVALID_INPUT.into(),
                     sentence: format!(
                         "a link reference is a {DUCK_SCHEME} url of at most {MAX_REFERENCE_BYTES} bytes with no whitespace"
                     ),
@@ -97,18 +98,12 @@ fn check_kind(kind: MessageKind, task: Option<&TaskRef>, replies: bool) -> Resul
     if satisfied {
         return Ok(());
     }
-    let (reason, sentence) = match kind {
-        MessageKind::TaskUpdate => (
-            "task_update_missing_task",
-            "a task_update must name its task",
-        ),
-        _ => (
-            "result_missing_context",
-            "a result must name its task or answer a thread",
-        ),
+    let sentence = match kind {
+        MessageKind::TaskUpdate => "a task_update must name its task",
+        _ => "a result must name its task or answer a thread",
     };
     Err(Error::Module {
-        reason: reason.into(),
+        reason: refusal::INVALID_INPUT.into(),
         sentence: sentence.into(),
     })
 }
@@ -119,7 +114,7 @@ fn check_shape(request: &DeliverRequest) -> Result<(), Error> {
     bindings::check_participant("recipient", &request.recipient)?;
     if request.references.len() > MAX_REFERENCES {
         return Err(Error::Module {
-            reason: "references_over_the_cap".into(),
+            reason: refusal::CAPACITY.into(),
             sentence: format!(
                 "{} references, over the {MAX_REFERENCES} cap",
                 request.references.len()
@@ -149,12 +144,12 @@ async fn check_attempt(
     let bytes = ctx.query(tasks_id, &request).await?;
     let tasks::JobsReply::Job(job) =
         tasks::decode_job_reply(&bytes).map_err(|sentence| Error::Module {
-            reason: "codec".into(),
+            reason: refusal::UNEXPECTED_REPLY.into(),
             sentence,
         })?
     else {
         return Err(Error::Module {
-            reason: "unexpected_reply_to_task_lookup".into(),
+            reason: refusal::UNEXPECTED_REPLY.into(),
             sentence: format!(
                 "tasks answered the lookup for task {} with something other than a job",
                 task.id
@@ -162,13 +157,13 @@ async fn check_attempt(
         });
     };
     let job = job.ok_or_else(|| Error::Module {
-        reason: "no_task".into(),
+        reason: refusal::NOT_FOUND.into(),
         sentence: format!("no task {}", task.id),
     })?;
     let stale_attempt = job.attempt != task.expected_attempt;
     if stale_attempt {
         return Err(Error::Module {
-            reason: "stale_task_attempt".into(),
+            reason: refusal::STALE.into(),
             sentence: format!(
                 "task {} of {what} is on attempt {}, not the expected {}",
                 task.id, job.attempt, task.expected_attempt
@@ -207,12 +202,12 @@ pub async fn deliver(
     let message = crate::chat_message(ctx, chat_id, &request.message_id)
         .await?
         .ok_or_else(|| Error::Module {
-            reason: "no_chat_message".into(),
+            reason: refusal::NOT_FOUND.into(),
             sentence: format!("no chat message {}", request.message_id),
         })?;
     if message.channel_id != request.channel_id {
         return Err(Error::Module {
-            reason: "message_channel_mismatch".into(),
+            reason: refusal::INVALID_INPUT.into(),
             sentence: format!(
                 "message {} is on channel {}, not {}",
                 request.message_id, message.channel_id, request.channel_id
@@ -221,7 +216,7 @@ pub async fn deliver(
     }
     if &message.head.origin != origin {
         return Err(Error::Module {
-            reason: "message_was_not_posted_by_this_origin".into(),
+            reason: refusal::UNAUTHORIZED.into(),
             sentence: format!(
                 "message {} was not posted by this origin",
                 request.message_id
@@ -230,7 +225,7 @@ pub async fn deliver(
     }
     if message.head.deleted {
         return Err(Error::Module {
-            reason: "message_is_deleted".into(),
+            reason: refusal::WRONG_STATE.into(),
             sentence: format!("message {} is deleted", request.message_id),
         });
     }
@@ -239,7 +234,7 @@ pub async fn deliver(
     bindings::check_participant("sender", &sender)?;
     if sender == request.recipient {
         return Err(Error::Module {
-            reason: "message_recipient_mismatch".into(),
+            reason: refusal::INVALID_INPUT.into(),
             sentence: "a message is not delivered to its sender".into(),
         });
     }
@@ -257,7 +252,7 @@ pub async fn deliver(
     {
         if !same_request(&existing, &request) {
             return Err(Error::Module {
-                reason: "delivery_request_conflict".into(),
+                reason: refusal::ALREADY_EXISTS.into(),
                 sentence: format!(
                     "message {} was already requested for this recipient with different metadata",
                     request.message_id
@@ -276,7 +271,7 @@ pub async fn deliver(
     let access = crate::chat_access(ctx, chat_id, &request.channel_id, &request.recipient).await?;
     if !access.may_read {
         return Err(Error::Module {
-            reason: "recipient_may_not_read_channel".into(),
+            reason: refusal::UNAUTHORIZED.into(),
             sentence: format!("recipient may not read channel {}", request.channel_id),
         });
     }
@@ -285,7 +280,7 @@ pub async fn deliver(
     }
     if request.expires_at <= now {
         return Err(Error::Module {
-            reason: "delivery_deadline".into(),
+            reason: refusal::INVALID_INPUT.into(),
             sentence: format!(
                 "expires_at {} is not after the block's agreed time {now}",
                 request.expires_at
@@ -294,7 +289,7 @@ pub async fn deliver(
     }
     if request.expires_at - now > max_delivery_ttl {
         return Err(Error::Module {
-            reason: "delivery_ttl".into(),
+            reason: refusal::INVALID_INPUT.into(),
             sentence: format!(
                 "expires_at {} is more than {max_delivery_ttl} time units out",
                 request.expires_at
@@ -405,7 +400,7 @@ fn check_reason(reason: Option<&String>) -> Result<(), Error> {
         return Ok(());
     }
     Err(Error::Module {
-        reason: "reason_must_be_a_snake_case_token".into(),
+        reason: refusal::INVALID_INPUT.into(),
         sentence: format!("reason must be a snake_case token of at most {MAX_REASON_BYTES} bytes"),
     })
 }
@@ -445,7 +440,7 @@ async fn load_delivery(
     store::delivery(staged, channel_id, seq, recipient)
         .await?
         .ok_or_else(|| Error::Module {
-            reason: "delivery_missing".into(),
+            reason: refusal::NOT_FOUND.into(),
             sentence: format!("no delivery of {seq} on {channel_id} for this recipient"),
         })
 }
@@ -523,7 +518,7 @@ pub async fn acknowledge(
     let access = crate::chat_access(ctx, chat_id, &channel_id, &recipient).await?;
     if !access.may_read {
         return Err(Error::Module {
-            reason: "recipient_channel_access".into(),
+            reason: refusal::UNAUTHORIZED.into(),
             sentence: format!("the recipient may no longer read channel {channel_id}"),
         });
     }
@@ -531,7 +526,7 @@ pub async fn acknowledge(
     let binding = store::binding(staged, &channel_id, &recipient)
         .await?
         .ok_or_else(|| Error::Module {
-            reason: "recipient_binding_missing".into(),
+            reason: refusal::NOT_FOUND.into(),
             sentence: format!("the recipient has no binding on {channel_id}"),
         })?;
     // ONLY the currently authorized binding advances the record. a stale
@@ -540,7 +535,7 @@ pub async fn acknowledge(
     // any authenticated member reports under the live one.
     if binding.detached || binding.credential != binding_credential {
         return Err(Error::Module {
-            reason: "stale_binding_credential".into(),
+            reason: refusal::STALE.into(),
             sentence: format!(
                 "binding credential {binding_credential} is stale; the current one is {}{}",
                 binding.credential,
@@ -560,7 +555,7 @@ pub async fn acknowledge(
     // truth — anyone may sweep an unsettled record once it passes.
     if state == DeliveryState::Expired {
         return Err(Error::Module {
-            reason: "expiry_report_forbidden".into(),
+            reason: refusal::INVALID_INPUT.into(),
             sentence: format!(
                 "expiry is not reported: {seq} on {channel_id} expires at {} by the deadline alone",
                 delivery.expires_at
@@ -569,7 +564,7 @@ pub async fn acknowledge(
     }
     if !delivery.state.may_advance_to(state) {
         return Err(Error::Module {
-            reason: "delivery_transition".into(),
+            reason: refusal::WRONG_STATE.into(),
             sentence: format!(
                 "delivery cannot move from {} to {}",
                 delivery.state.as_str(),
@@ -597,7 +592,7 @@ pub async fn expire(
     let delivery = load_delivery(staged, &channel_id, seq, &recipient).await?;
     if now < delivery.expires_at {
         return Err(Error::Module {
-            reason: "delivery_expiry".into(),
+            reason: refusal::WRONG_STATE.into(),
             sentence: format!(
                 "delivery of {seq} on {channel_id} expires at {}, not yet at {now}",
                 delivery.expires_at
@@ -606,7 +601,7 @@ pub async fn expire(
     }
     if delivery.state.is_terminal() {
         return Err(Error::Module {
-            reason: "delivery_already_settled".into(),
+            reason: refusal::WRONG_STATE.into(),
             sentence: format!(
                 "delivery of {seq} on {channel_id} already settled as {}",
                 delivery.state.as_str()

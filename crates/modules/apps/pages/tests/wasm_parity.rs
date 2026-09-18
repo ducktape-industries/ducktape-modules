@@ -11,6 +11,7 @@
 use attribution_module as attribution;
 use dispatch_module as dispatch;
 use identity_module as identity;
+use sdk::refusal;
 
 use attribution::AttributionModule;
 use commonware_cryptography::{Signer as _, ed25519::PrivateKey};
@@ -307,7 +308,7 @@ impl Module for ResolutionExecutor {
             Origin::Module(source) if source == "identity" => {
                 identity::authenticate_event(&ctx.env().origin, "identity", &msg.payload).map_err(
                     |sentence| Error::Module {
-                        reason: "authentication".into(),
+                        reason: refusal::UNEXPECTED_REPLY.into(),
                         sentence,
                     },
                 )?;
@@ -315,7 +316,7 @@ impl Module for ResolutionExecutor {
             }
             Origin::Module(source) if source == "dispatch" => Ok(()),
             _ => Err(Error::Module {
-                reason: "unexpected_executor_input".into(),
+                reason: refusal::UNAUTHORIZED.into(),
                 sentence: "unexpected executor input".into(),
             }),
         }
@@ -1007,7 +1008,7 @@ fn rejections_match_and_leave_no_trace() {
                     after: None,
                     block: nb("bx", BlockKind::Paragraph, "orphan"),
                 },
-                "parent block not found",
+                "Parent block ghost does not exist.",
             ),
             (
                 alice.clone(),
@@ -1016,7 +1017,7 @@ fn rejections_match_and_leave_no_trace() {
                     after: None,
                     block: nb("b1", BlockKind::Paragraph, "duplicate id"),
                 },
-                "duplicate block id",
+                "Block b1 already exists.",
             ),
             (
                 alice.clone(),
@@ -1024,7 +1025,7 @@ fn rejections_match_and_leave_no_trace() {
                     block_id: "b1".into(),
                     kind: BlockKind::Page,
                 },
-                "page blocks cannot",
+                "A block cannot be converted to or from a page.",
             ),
             (
                 alice.clone(),
@@ -1042,7 +1043,7 @@ fn rejections_match_and_leave_no_trace() {
                     parent: None,
                     after: None,
                 },
-                "only page blocks",
+                "Only page blocks may move to the top level.",
             ),
             (
                 alice.clone(),
@@ -1051,7 +1052,7 @@ fn rejections_match_and_leave_no_trace() {
                     text: "x".into(),
                     mentions: vec![],
                 },
-                "comment not found",
+                "Comment nope does not exist.",
             ),
             // the pre-consensus empty external origin never passes as a real
             // user here, exactly as on the four sibling comment ops. It reads

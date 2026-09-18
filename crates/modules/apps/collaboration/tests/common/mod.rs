@@ -11,6 +11,7 @@
 
 #![allow(dead_code)]
 
+use sdk::refusal;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
@@ -138,7 +139,7 @@ impl FakeChat {
 
     fn answer(&self, req: &[u8]) -> Result<Vec<u8>, Error> {
         let reply = match chat::decode_query(req).map_err(|sentence| Error::Module {
-            reason: "codec".into(),
+            reason: refusal::INVALID_INPUT.into(),
             sentence,
         })? {
             chat::ChatQuery::Access { channel_id, party } => {
@@ -156,7 +157,7 @@ impl FakeChat {
             }
             other => {
                 return Err(Error::Module {
-                    reason: "the_fake_chat_does_not_serve".into(),
+                    reason: refusal::UNSUPPORTED.into(),
                     sentence: format!("the fake chat does not serve {other:?}"),
                 });
             }

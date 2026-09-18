@@ -31,6 +31,7 @@ use dispatch::DispatchStatus;
 use saga::{
     SagaQuery, SagaReply, decode_reply as saga_decode_reply, encode_query as saga_encode_query,
 };
+use sdk::refusal;
 
 /// The same authoritative allowance pays for tool actions and semantic worker
 /// reports. Decide the next value here; its writer shares the target's transaction.
@@ -38,7 +39,7 @@ pub(super) fn reserve_session_action(session: &AgentSession) -> Result<AgentSess
     let at_capacity = session.actions >= MAX_ACTIONS_PER_SESSION;
     if at_capacity {
         return Err(Error::Module {
-            reason: "session_budget".into(),
+            reason: refusal::CAPACITY.into(),
             sentence: format!(
                 "session for run {} has spent its budget of {MAX_ACTIONS_PER_SESSION} actions",
                 session.run_id
@@ -62,7 +63,7 @@ impl RunsModule {
     ) -> Result<(), Error> {
         if session_key.len() != SESSION_KEY_LEN {
             return Err(Error::Module {
-                reason: "invalid_session_key".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence: format!(
                     "a session key must be {SESSION_KEY_LEN} bytes, not {}",
                     session_key.len()
@@ -73,7 +74,7 @@ impl RunsModule {
         // system origin executes nothing.
         let Origin::External(submitter) = &ctx.env().origin else {
             return Err(Error::Module {
-                reason: "run_executor_authority".into(),
+                reason: refusal::UNAUTHORIZED.into(),
                 sentence: "only the node executing a run may open its agent session".into(),
             });
         };
@@ -84,7 +85,7 @@ impl RunsModule {
         let dispatch_id = dispatch_id_for(&run_id);
         let Some(entry) = self.pending_entry(&dispatch_id).cloned() else {
             return Err(Error::Module {
-                reason: "run_is_not_in_flight".into(),
+                reason: refusal::WRONG_STATE.into(),
                 sentence: format!("run is not in flight: {run_id}"),
             });
         };
@@ -92,7 +93,7 @@ impl RunsModule {
             .execution_lease(&*ctx, &dispatch_id)
             .await
             .map_err(|sentence| Error::Module {
-                reason: "execution_lease".into(),
+                reason: refusal::WRONG_STATE.into(),
                 sentence,
             })?;
         let requested = crate::ExecutionLease {
@@ -101,7 +102,7 @@ impl RunsModule {
         };
         if requested != lease {
             return Err(Error::Module {
-                reason: "run_lease_authority".into(),
+                reason: refusal::UNAUTHORIZED.into(),
                 sentence: format!(
                     "only the node holding the run's current execution lease and attempt may open its agent session: {run_id}"
                 ),
@@ -115,7 +116,7 @@ impl RunsModule {
                 return Ok(());
             }
             return Err(Error::Module {
-                reason: "run_already_has_an_open_agent_session".into(),
+                reason: refusal::ALREADY_EXISTS.into(),
                 sentence: format!("run already has an open agent session: {run_id}"),
             });
         }
@@ -155,12 +156,12 @@ impl RunsModule {
         envelope: ActionEnvelope,
     ) -> Result<(), Error> {
         crate::validate_request_id(&request_id).map_err(|sentence| Error::Module {
-            reason: "request_id".into(),
+            reason: refusal::INVALID_INPUT.into(),
             sentence,
         })?;
         let Origin::External(submitter) = &ctx.env().origin else {
             return Err(Error::Module {
-                reason: "agent_action_signer".into(),
+                reason: refusal::UNAUTHORIZED.into(),
                 sentence: "an agent action must be signed by the run's session key".into(),
             });
         };
@@ -168,13 +169,13 @@ impl RunsModule {
         // could legitimately write; the session map is pruned with it.
         let Some(entry) = self.pending_entry(&dispatch_id_for(&run_id)).cloned() else {
             return Err(Error::Module {
-                reason: "run_is_not_in_flight".into(),
+                reason: refusal::WRONG_STATE.into(),
                 sentence: format!("run is not in flight: {run_id}"),
             });
         };
         let Some(session) = self.session(&run_id).cloned() else {
             return Err(Error::Module {
-                reason: "run_has_no_open_agent_session".into(),
+                reason: refusal::WRONG_STATE.into(),
                 sentence: format!("run has no open agent session: {run_id}"),
             });
         };
@@ -184,7 +185,7 @@ impl RunsModule {
         // themselves, never as their agent.
         if *submitter != session.session_key {
             return Err(Error::Module {
-                reason: "session_key_authority".into(),
+                reason: refusal::UNAUTHORIZED.into(),
                 sentence: format!("only the bound session key may act for run {run_id}"),
             });
         }
@@ -192,7 +193,7 @@ impl RunsModule {
         let generation = self.active_generation(&*ctx, entry.account).await?;
         if generation != entry.generation {
             return Err(Error::Module {
-                reason: "run_program_authority_changed".into(),
+                reason: refusal::STALE.into(),
                 sentence: format!("the program behind run {run_id} changed after the run began"),
             });
         }
@@ -205,7 +206,7 @@ impl RunsModule {
                 .is_some_and(|invocation| invocation.envelope_digest == envelope_digest);
             if !same_bytes {
                 return Err(Error::Module {
-                    reason: "request_id_conflict".into(),
+                    reason: refusal::STALE.into(),
                     sentence: "request_id was already used for a different action".into(),
                 });
             }
@@ -264,12 +265,12 @@ impl RunsModule {
             )
             .await
             .map_err(|sentence| Error::Module {
-                reason: "response_validation".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence,
             })?;
         let [operation]: [Operation; 1] =
             validated.operations.try_into().map_err(|_| Error::Module {
-                reason: "one_action_validates_as_one_operation".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence: format!("action {request_id} did not validate to exactly one operation"),
             })?;
         let slot = lane.slot(0);
@@ -315,7 +316,7 @@ impl RunsModule {
             )),
         };
         let mut prepared = prepared.map_err(|sentence| Error::Module {
-            reason: "session_preparation".into(),
+            reason: refusal::INVALID_INPUT.into(),
             sentence,
         })?;
         // the proposal is pinned to the operation's catalog schema and to the
@@ -375,25 +376,25 @@ impl RunsModule {
             .session(&run_id)
             .cloned()
             .ok_or_else(|| Error::Module {
-                reason: "run_session_closed".into(),
+                reason: refusal::WRONG_STATE.into(),
                 sentence: format!("run {run_id} has no live session"),
             })?;
         let Some(owner) = self.pending_entry(&dispatch_id_for(&run_id)) else {
             return Err(Error::Module {
-                reason: "run_is_not_in_flight".into(),
+                reason: refusal::WRONG_STATE.into(),
                 sentence: format!("run is not in flight: {run_id}"),
             });
         };
         if ctx.env().origin != Origin::Program(owner.account) {
             return Err(Error::Module {
-                reason: "run_delegation_authority".into(),
+                reason: refusal::UNAUTHORIZED.into(),
                 sentence: "only the run's program may delegate work".into(),
             });
         }
         let generation = self.active_generation(&*ctx, owner.account).await?;
         if generation != owner.generation {
             return Err(Error::Module {
-                reason: "run_program_authority_changed".into(),
+                reason: refusal::STALE.into(),
                 sentence: format!("the program behind run {run_id} changed after the run began"),
             });
         }
@@ -402,17 +403,17 @@ impl RunsModule {
             .pending_entry(&dispatch_id_for(&run_id))
             .cloned()
             .ok_or_else(|| Error::Module {
-                reason: "run_is_not_in_flight".into(),
+                reason: refusal::WRONG_STATE.into(),
                 sentence: format!("run is not in flight: {run_id}"),
             })?;
         if entry.job_id.is_some() || page_source(&entry.channel_id).is_some() {
             return Err(Error::Module {
-                reason: "agent_call_source".into(),
+                reason: refusal::UNSUPPORTED.into(),
                 sentence: "agent calls currently require a chat or Forge run".into(),
             });
         }
         crate::validate_request_id(&request_id).map_err(|sentence| Error::Module {
-            reason: "request_id".into(),
+            reason: refusal::INVALID_INPUT.into(),
             sentence,
         })?;
         let delegation_id = delegation_id_for(&run_id, &request_id);
@@ -421,7 +422,7 @@ impl RunsModule {
                 Ok(())
             } else {
                 Err(Error::Module {
-                    reason: "request_id_conflict".into(),
+                    reason: refusal::STALE.into(),
                     sentence: "request_id was already used for a different agent call".into(),
                 })
             };
@@ -429,7 +430,7 @@ impl RunsModule {
 
         if request.agent_id == entry.agent_id {
             return Err(Error::Module {
-                reason: "self_agent_call".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence: "an agent cannot call itself".into(),
             });
         }
@@ -437,7 +438,7 @@ impl RunsModule {
         let instruction = request.instruction.trim();
         if instruction.is_empty() || request.instruction.len() > MAX_DELEGATION_INSTRUCTION_BYTES {
             return Err(Error::Module {
-                reason: "instruction_length".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence: format!(
                     "instruction must be non-empty and at most {MAX_DELEGATION_INSTRUCTION_BYTES} bytes"
                 ),
@@ -449,7 +450,7 @@ impl RunsModule {
             > MAX_DELEGATIONS_BYTES
         {
             return Err(Error::Module {
-                reason: "agent_call_exceeds_the_byte_request_cap".into(),
+                reason: refusal::CAPACITY.into(),
                 sentence: format!(
                     "agent call exceeds the {MAX_DELEGATIONS_BYTES}-byte request cap"
                 ),
@@ -460,16 +461,16 @@ impl RunsModule {
             .agent_record(&*ctx, &entry.agent_id)
             .await
             .map_err(|sentence| Error::Module {
-                reason: "agent_record".into(),
+                reason: refusal::CORRUPT.into(),
                 sentence,
             })?
             .ok_or_else(|| Error::Module {
-                reason: "caller_agent_is_not_registered".into(),
+                reason: refusal::NOT_FOUND.into(),
                 sentence: format!("caller agent is not registered: {}", entry.agent_id),
             })?;
         if caller.status != ModelStatus::Active {
             return Err(Error::Module {
-                reason: "caller_agent_is_paused".into(),
+                reason: refusal::WRONG_STATE.into(),
                 sentence: format!("caller agent is paused: {}", caller.agent_id),
             });
         }
@@ -478,7 +479,7 @@ impl RunsModule {
                 .delegation(id)
                 .map(|state| state.view.root_run_id.clone())
                 .ok_or_else(|| Error::Module {
-                    reason: "caller_run_has_no_delegation_edge".into(),
+                    reason: refusal::CORRUPT.into(),
                     sentence: format!(
                         "caller run {run_id} names delegation {id}, which does not exist"
                     ),
@@ -487,7 +488,7 @@ impl RunsModule {
         };
         self.pending_entry(&dispatch_id_for(&root_run_id))
             .ok_or_else(|| Error::Module {
-                reason: "delegation_root_is_no_longer_in_flight".into(),
+                reason: refusal::WRONG_STATE.into(),
                 sentence: format!("delegation root run {root_run_id} is no longer in flight"),
             })?;
         let spent = self
@@ -501,7 +502,7 @@ impl RunsModule {
             .count();
         if spent >= MAX_DELEGATIONS_PER_RUN {
             return Err(Error::Module {
-                reason: "delegation_concurrency_cap".into(),
+                reason: refusal::CAPACITY.into(),
                 sentence: format!(
                     "delegation tree has reached its concurrency limit of {MAX_DELEGATIONS_PER_RUN} calls"
                 ),
@@ -512,27 +513,27 @@ impl RunsModule {
             .active_agent(&*ctx, &request.agent_id)
             .await
             .map_err(|sentence| Error::Module {
-                reason: "active_agent".into(),
+                reason: refusal::CORRUPT.into(),
                 sentence,
             })?
             .ok_or_else(|| Error::Module {
-                reason: "callee_agent_is_unavailable".into(),
+                reason: refusal::NOT_FOUND.into(),
                 sentence: format!("callee agent is unavailable: {}", request.agent_id),
             })?;
         let extra =
             crate::envelope::library_skills(&request.skills).map_err(|sentence| Error::Module {
-                reason: "library_skills".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence,
             })?;
         let workspace_agent = self
             .agent_record(&*ctx, &entry.workspace_agent_id)
             .await
             .map_err(|sentence| Error::Module {
-                reason: "library_skills".into(),
+                reason: refusal::CORRUPT.into(),
                 sentence,
             })?
             .ok_or_else(|| Error::Module {
-                reason: "call_workspace_agent_is_not_registered".into(),
+                reason: refusal::NOT_FOUND.into(),
                 sentence: format!(
                     "workspace agent {} is not registered",
                     entry.workspace_agent_id
@@ -543,12 +544,12 @@ impl RunsModule {
             .turn_taken(&*ctx, &dispatch_id_for(&callee_run_id))
             .await
             .map_err(|sentence| Error::Module {
-                reason: "library_skills".into(),
+                reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence,
             })?
         {
             return Err(Error::Module {
-                reason: "delegated_run_is_already_taken".into(),
+                reason: refusal::ALREADY_EXISTS.into(),
                 sentence: format!("delegated run is already taken: {callee_run_id}"),
             });
         }
@@ -569,7 +570,7 @@ impl RunsModule {
             )
             .await
             .map_err(|sentence| Error::Module {
-                reason: "execution_budget".into(),
+                reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence,
             })?;
         let now = ctx.env().consensus_time;
@@ -625,12 +626,12 @@ impl RunsModule {
             .execution_lease(ctx, &dispatch_id_for(run_id))
             .await
             .map_err(|sentence| Error::Module {
-                reason: "execution_lease".into(),
+                reason: refusal::WRONG_STATE.into(),
                 sentence,
             })?;
         if lease != session.lease {
             return Err(Error::Module {
-                reason: "execution_lease_changed".into(),
+                reason: refusal::STALE.into(),
                 sentence: format!(
                     "the run's execution lease has moved; its agent session is no longer authoritative: {run_id}"
                 ),

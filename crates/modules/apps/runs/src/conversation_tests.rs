@@ -1,5 +1,6 @@
 use super::*;
 use futures::executor::block_on;
+use sdk::refusal;
 use sdk_testkit::TestCtx;
 
 fn state() -> ConversationView {
@@ -276,7 +277,7 @@ fn conversation_administration_tracks_current_identity_controller() {
             .on_query("identity", move |bytes| {
                 let (number, control) =
                     match identity::decode_query(bytes).map_err(|sentence| Error::Module {
-                        reason: "codec".into(),
+                        reason: refusal::INVALID_INPUT.into(),
                         sentence,
                     })? {
                         identity::IdentityQuery::Get { number } => (

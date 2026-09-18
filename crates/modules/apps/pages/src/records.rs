@@ -279,10 +279,10 @@ impl Pages {
     ) -> Result<u64, PageError> {
         let collection_exists = self.record_collection(page_id).await?.is_some();
         if collection_exists {
-            return Err(PageError::RecordCollectionExists);
+            return Err(PageError::RecordCollectionExists(page_id.to_string()));
         }
         let root = self
-            .require_block(page_id, PageError::BlockNotFound)
+            .require_block(page_id, PageError::BlockNotFound(page_id.to_string()))
             .await?;
         let authorized_author = &root.author == actor;
         if !authorized_author {
@@ -347,7 +347,7 @@ impl Pages {
         let mut state = self
             .load_record_state::<StoredCollection>(&collection_key(page_id))
             .await?
-            .ok_or(PageError::RecordCollectionNotFound)?;
+            .ok_or_else(|| PageError::RecordCollectionNotFound(page_id.to_string()))?;
         let authorized_writer = &state.header.writer == actor;
         if !authorized_writer {
             return Err(PageError::RecordUnauthorized);
@@ -455,7 +455,7 @@ impl Pages {
                 RecordStateChange::Delete { key } => {
                     let exists = state.state_keys.remove(key);
                     if !exists {
-                        return Err(PageError::RecordStateNotFound);
+                        return Err(PageError::RecordStateNotFound(key.clone()));
                     }
                     self.staged
                         .delete(record_state_key(page_id, key).into_bytes());
@@ -555,7 +555,7 @@ impl Pages {
             RecordChange::Delete { record_id } => {
                 let record_exists = ids.remove(record_id);
                 if !record_exists {
-                    return Err(PageError::RecordNotFound);
+                    return Err(PageError::RecordNotFound(record_id.clone()));
                 }
                 let block = self.require_block(record_id, PageError::Corrupt).await?;
                 self.preflight_removal_with_budget(block, work).await?;

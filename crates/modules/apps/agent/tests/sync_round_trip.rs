@@ -12,6 +12,7 @@
 //! operation-log ordered. only a real sync that ships the ACTUAL proven op
 //! range lands on the same root.
 
+use sdk::refusal;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -105,7 +106,7 @@ impl Scripted {
         })
         .on_query("identity", move |req| {
             let reply = match identity::decode_query(req).map_err(|sentence| Error::Module {
-                reason: "codec".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence,
             })? {
                 IdentityQuery::Get { number } => {
@@ -120,7 +121,7 @@ impl Scripted {
                 ),
                 other => {
                     return Err(Error::Module {
-                        reason: "unscripted".into(),
+                        reason: refusal::UNSUPPORTED.into(),
                         sentence: format!("unscripted {other:?}"),
                     });
                 }
@@ -129,7 +130,7 @@ impl Scripted {
         })
         .on_query("attribution", move |req| {
             let reply = match attribution::decode_query(req).map_err(|sentence| Error::Module {
-                reason: "codec".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence,
             })? {
                 attribution::AttributionQuery::Changes { after, limit } => {
@@ -147,7 +148,7 @@ impl Scripted {
                 }
                 other => {
                     return Err(Error::Module {
-                        reason: "unscripted".into(),
+                        reason: refusal::UNSUPPORTED.into(),
                         sentence: format!("unscripted {other:?}"),
                     });
                 }

@@ -141,7 +141,7 @@ fn inline_marks_persist_and_rebase_in_utf16() {
                 kind: InlineMark::Bold,
                 active: true,
             },
-            "invalid text range",
+            "The text range is empty, outside the text, or splits a character.",
         )
         .await;
         apply_commit(
@@ -305,7 +305,7 @@ fn insert_boundary_is_fully_queryable_and_one_deeper_is_rejected() {
                 after: None,
                 block: para("too-deep", "rejected"),
             },
-            "page nesting is too deep",
+            "The block would sit below the page nesting limit.",
         )
         .await;
         assert!(get_block(&p, "too-deep").await.is_none());
@@ -363,7 +363,7 @@ fn page_cursor_preserves_preorder_and_stops_at_nested_pages() {
             }))
             .await
             .unwrap_err();
-        assert!(matches!(err, Error::Module { sentence: message, .. } if message == "invalid page cursor"));
+        assert!(matches!(err, Error::Module { sentence: message, .. } if message == "The page cursor names no block in this page."));
         let reserved = p
             .query(&encode_query(&PageQuery::GetPage {
                 page_id: "p1".into(),
@@ -372,7 +372,7 @@ fn page_cursor_preserves_preorder_and_stops_at_nested_pages() {
             }))
             .await
             .unwrap_err();
-        assert!(matches!(reserved, Error::Module { sentence: message, .. } if message == "invalid page cursor"));
+        assert!(matches!(reserved, Error::Module { sentence: message, .. } if message == "The page cursor names no block in this page."));
     });
 }
 
@@ -470,7 +470,7 @@ fn block_ids_are_globally_unique_across_pages() {
                 after: None,
                 block: para("b1", "dup"),
             },
-            "duplicate block id",
+            "Block b1 already exists.",
         )
         .await;
         // a page id is a block id too: reusing one as a block id fails …
@@ -481,7 +481,7 @@ fn block_ids_are_globally_unique_across_pages() {
                 after: None,
                 block: para("p1", "dup"),
             },
-            "duplicate block id",
+            "Block p1 already exists.",
         )
         .await;
         // … and creating a page over an existing NON-page block fails.
@@ -492,7 +492,7 @@ fn block_ids_are_globally_unique_across_pages() {
                 title: "steal".into(),
                 blocks: Vec::new(),
             },
-            "duplicate block id",
+            "Block b1 already exists.",
         )
         .await;
     });
@@ -575,7 +575,7 @@ fn set_kind_and_checked_enforce_their_domains() {
                 block_id: "b2".into(),
                 kind: BlockKind::Page,
             },
-            "page blocks",
+            "A block cannot be converted to or from a page.",
         )
         .await;
         // Nor can it convert a Page block away from Page.
@@ -585,7 +585,7 @@ fn set_kind_and_checked_enforce_their_domains() {
                 block_id: "p1".into(),
                 kind: BlockKind::Paragraph,
             },
-            "page blocks",
+            "A block cannot be converted to or from a page.",
         )
         .await;
     });
@@ -732,7 +732,7 @@ fn move_subtree_accepts_the_depth_boundary_and_rejects_overflow() {
                 parent: Some(overflow_parent),
                 after: None,
             },
-            "page nesting is too deep",
+            "The block would sit below the page nesting limit.",
         )
         .await;
         assert_eq!(
@@ -1070,7 +1070,7 @@ fn illegal_moves_are_rejected() {
                 parent: Some("p2".into()),
                 after: None,
             },
-            "cross-page",
+            "A block cannot move to another page.",
         )
         .await;
         // Page blocks may become subpages under any content block.
@@ -1095,7 +1095,7 @@ fn illegal_moves_are_rejected() {
                 parent: Some("p1".into()),
                 after: Some("ghost".into()),
             },
-            "after-anchor",
+            "Block ghost is not a child of the named parent.",
         )
         .await;
     });

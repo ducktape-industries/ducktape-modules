@@ -15,6 +15,7 @@
 //! | `("q", participant)` | [`MailboxUsage`] |
 //! | `("s", recipient, sender)` | that sender's undelivered count in that mailbox |
 
+use sdk::refusal;
 use sdk::{Error, StagedStore};
 use serde::{Serialize, de::DeserializeOwned};
 
@@ -60,7 +61,7 @@ async fn load<T: DeserializeOwned>(
     sdk::wire::decode(&bytes)
         .map(Some)
         .map_err(|e| Error::Module {
-            reason: "codec".into(),
+            reason: refusal::CORRUPT.into(),
             sentence: format!("{what} record decode: {e}"),
         })
 }
@@ -72,7 +73,7 @@ async fn load<T: DeserializeOwned>(
 pub fn check_record(value: &[u8], what: &str) -> Result<(), Error> {
     if value.len() > MAX_RECORD_BYTES {
         return Err(Error::Module {
-            reason: "record_too_large".into(),
+            reason: refusal::CAPACITY.into(),
             sentence: format!(
                 "{what} is {} bytes, over the {MAX_RECORD_BYTES}-byte store record cap",
                 value.len()
@@ -123,7 +124,7 @@ async fn counter(staged: &StagedStore, key: &[u8], what: &str) -> Result<u64, Er
         return Ok(0);
     };
     let bytes: [u8; 8] = bytes.try_into().map_err(|_| Error::Module {
-        reason: "invalid_counter".into(),
+        reason: refusal::CORRUPT.into(),
         sentence: format!("invalid {what} counter"),
     })?;
     Ok(u64::from_le_bytes(bytes))
@@ -172,7 +173,7 @@ pub async fn append_event(
 ) -> Result<u64, Error> {
     let seq = head(staged, cid).await?;
     let next = seq.checked_add(1).ok_or_else(|| Error::Module {
-        reason: "channel_event_sequence_exhausted".into(),
+        reason: refusal::EXHAUSTED.into(),
         sentence: format!("channel {cid} has no event sequence numbers left"),
     })?;
     let event = ChannelEvent { seq, at: now, body };

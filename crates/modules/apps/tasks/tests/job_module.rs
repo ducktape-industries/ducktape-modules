@@ -17,6 +17,7 @@ use attribution_module as attribution;
 use futures::executor::block_on;
 use host::{BlockContext, Host, SubmitError};
 use identity_module as identity;
+use sdk::refusal;
 use sdk::{Ctx, Env, Error, MerkleStore as _, Module, ModuleId, Msg, Origin, StateRoot};
 use sdk_testkit::{MemStore, TestCtx};
 use tasks::{
@@ -1366,7 +1367,7 @@ impl Module for ClaimingWorker {
     async fn execute(&mut self, ctx: &mut dyn Ctx, msg: &Msg) -> Result<(), Error> {
         let JobsEvent::Submitted { job_id, .. } =
             decode_jobs_event(&msg.payload).map_err(|sentence| Error::Module {
-                reason: "codec".into(),
+                reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence,
             })?;
         ctx.emit_msg(claim(&job_id, 100));

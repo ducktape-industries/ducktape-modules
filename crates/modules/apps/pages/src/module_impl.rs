@@ -4,6 +4,7 @@ use super::{
 };
 use attribution::{Actor, AttributionMsg, AttributionUpdate, ObjectRef, Reason, Relation};
 use sdk::Origin;
+use sdk::refusal;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// A module-wide clock gives every changed source a newer revision, including
@@ -67,7 +68,7 @@ fn source_relations(kind: &str, value: Option<&[u8]>) -> Result<Vec<Relation>, E
         ("comment", Some(bytes)) => {
             let comment: super::Comment =
                 sdk::wire::decode(bytes).map_err(|sentence| Error::Module {
-                    reason: "codec".into(),
+                    reason: refusal::CORRUPT.into(),
                     sentence,
                 })?;
             if comment.deleted {
@@ -86,7 +87,7 @@ fn source_relations(kind: &str, value: Option<&[u8]>) -> Result<Vec<Relation>, E
         ("block", Some(bytes)) => {
             let block: super::Block =
                 sdk::wire::decode(bytes).map_err(|sentence| Error::Module {
-                    reason: "codec".into(),
+                    reason: refusal::CORRUPT.into(),
                     sentence,
                 })?;
             let mut relations = authored_relations(&block.author);
@@ -121,14 +122,14 @@ fn source_relations(kind: &str, value: Option<&[u8]>) -> Result<Vec<Relation>, E
 
 fn source_object(key: &[u8]) -> Result<(&str, &str), Error> {
     let key = std::str::from_utf8(key).map_err(|_| Error::Module {
-        reason: "pages_corrupt_logical_key".into(),
+        reason: refusal::CORRUPT.into(),
         sentence: "a stored logical key is not UTF-8".into(),
     })?;
     match key.strip_prefix("\0cc:") {
         Some(id) => Ok(("comment", id)),
         None if !key.starts_with('\0') => Ok(("block", key)),
         None => Err(Error::Module {
-            reason: "pages_not_an_attribution_source".into(),
+            reason: refusal::CORRUPT.into(),
             sentence: "a logical key that names neither a block nor a comment has no attribution"
                 .into(),
         }),
@@ -172,7 +173,7 @@ fn push_attribution_batch(
     let total_exceeded = total_bytes > ATTRIBUTION_REPORT_BYTES;
     if too_large || total_exceeded {
         return Err(Error::Module {
-            reason: "pages_attribution_report_envelope_too_large".into(),
+            reason: refusal::CAPACITY.into(),
             sentence: format!("the attribution report exceeds {ATTRIBUTION_REPORT_BYTES} bytes"),
         });
     }
@@ -198,7 +199,7 @@ impl Pages {
         let oversized = source_bytes > ATTRIBUTION_BATCH_BYTES;
         if oversized {
             return Err(Error::Module {
-                reason: "pages_attribution_source_envelope_too_large".into(),
+                reason: refusal::CAPACITY.into(),
                 sentence: format!(
                     "an attribution source is {source_bytes} bytes, over the {ATTRIBUTION_BATCH_BYTES}-byte cap"
                 ),
@@ -240,12 +241,12 @@ impl Pages {
         let bytes = ctx.query(identity, &identity::encode_query(&query)).await?;
         let identity::IdentityReply::Account(account) =
             identity::decode_reply(&bytes).map_err(|sentence| Error::Module {
-                reason: "codec".into(),
+                reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence,
             })?
         else {
             return Err(Error::Module {
-                reason: "unexpected_identity_reply".into(),
+                reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence:
                     "identity answered an account lookup with something other than an account"
                         .into(),
@@ -344,12 +345,12 @@ impl Pages {
                         .await?;
                     let identity::IdentityReply::Resolved(numbers) = identity::decode_reply(&bytes)
                         .map_err(|sentence| Error::Module {
-                            reason: "codec".into(),
+                            reason: refusal::UNEXPECTED_REPLY.into(),
                             sentence,
                         })?
                     else {
                         return Err(Error::Module {
-                            reason: "unexpected_identity_reply".into(),
+                            reason: refusal::UNEXPECTED_REPLY.into(),
                             sentence: "identity answered a mention lookup with something other than resolved accounts".into(),
                         });
                     };
@@ -359,7 +360,7 @@ impl Pages {
             };
             if numbers.len() != chunk.len() {
                 return Err(Error::Module {
-                    reason: "pages_identity_resolution_count_mismatch".into(),
+                    reason: refusal::UNEXPECTED_REPLY.into(),
                     sentence: format!(
                         "identity returned {} accounts for {} mentions",
                         numbers.len(),
@@ -371,7 +372,7 @@ impl Pages {
                 let exists = *number != 0 && resolved == Some(*number);
                 if !exists {
                     return Err(Error::Module {
-                        reason: "pages_mention_names_no_account".into(),
+                        reason: refusal::NOT_FOUND.into(),
                         sentence: format!("a mention names no account: {number}"),
                     });
                 }
@@ -389,7 +390,7 @@ impl Pages {
         let exceeds_budget = work.len() > super::MAX_TRAVERSAL_WORK;
         if exceeds_budget {
             return Err(Error::Module {
-                reason: "pages_attribution_source_work_exceeded".into(),
+                reason: refusal::CAPACITY.into(),
                 sentence: format!(
                     "attribution sources touch more than {} keys",
                     super::MAX_TRAVERSAL_WORK
@@ -418,7 +419,7 @@ impl Pages {
             };
             let comment: super::Comment =
                 sdk::wire::decode(bytes).map_err(|sentence| Error::Module {
-                    reason: "codec".into(),
+                    reason: refusal::CORRUPT.into(),
                     sentence,
                 })?;
             if !comment.deleted {
@@ -514,7 +515,7 @@ impl Pages {
             let exceeds_bound = detail.len() > super::MAX_MANAGED_DISCUSSION_BYTES;
             if exceeds_bound {
                 return Err(Error::Module {
-                    reason: "pages_managed_discussion_snapshot_too_large".into(),
+                    reason: refusal::CAPACITY.into(),
                     sentence: format!(
                         "a managed discussion snapshot is {} bytes, over the {}-byte cap",
                         detail.len(),
@@ -588,7 +589,7 @@ impl Pages {
                 let Some(next) = next else { continue };
                 let next: super::Thread =
                     sdk::wire::decode(&next).map_err(|sentence| Error::Module {
-                        reason: "codec".into(),
+                        reason: refusal::CORRUPT.into(),
                         sentence,
                     })?;
                 let Some(previous) = self.staged.get(&key).await? else {
@@ -596,7 +597,7 @@ impl Pages {
                 };
                 let previous: super::Thread =
                     sdk::wire::decode(&previous).map_err(|sentence| Error::Module {
-                        reason: "codec".into(),
+                        reason: refusal::CORRUPT.into(),
                         sentence,
                     })?;
                 let retargeted = previous.target != next.target;
@@ -638,13 +639,13 @@ impl Pages {
             .map(|bytes| sdk::wire::decode::<u64>(&bytes))
             .transpose()
             .map_err(|sentence| Error::Module {
-                reason: "codec".into(),
+                reason: refusal::CORRUPT.into(),
                 sentence,
             })?
             .unwrap_or(0)
             .checked_add(1)
             .ok_or_else(|| Error::Module {
-                reason: "pages_attribution_revision_exhausted".into(),
+                reason: refusal::EXHAUSTED.into(),
                 sentence: "no attribution source revision numbers are left".into(),
             })?;
         for (key, relations) in current {
@@ -728,7 +729,7 @@ impl Module for Pages {
     /// source operation and relation reports to one reversible staged unit.
     async fn execute(&mut self, ctx: &mut dyn Ctx, msg: &Msg) -> Result<(), Error> {
         let m = decode_msg(&msg.payload).map_err(|sentence| Error::Module {
-            reason: "codec".into(),
+            reason: refusal::INVALID_INPUT.into(),
             sentence,
         })?;
         let actor = self.party_of_origin(ctx).await?;
@@ -796,7 +797,7 @@ impl Module for Pages {
     /// reserved sentinel reads as absence (it is not a block).
     async fn query(&self, req: &[u8]) -> Result<Vec<u8>, Error> {
         match decode_query(req).map_err(|sentence| Error::Module {
-            reason: "codec".into(),
+            reason: refusal::INVALID_INPUT.into(),
             sentence,
         })? {
             PageQuery::RecordCollection { page_id } => {

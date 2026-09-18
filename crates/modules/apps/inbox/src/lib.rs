@@ -87,6 +87,7 @@ pub mod index;
 #[cfg(feature = "index-guest")]
 mod index_guest;
 
+use sdk::refusal;
 use std::cmp::Ordering;
 
 use attribution::{AttributionEvent, Change, decode_event};
@@ -197,7 +198,7 @@ fn decide_delivery(
         Ordering::Equal => return Ok(Ingest::Duplicate),
         Ordering::Less => {
             return Err(module_error(
-                "inbox_change_order",
+                refusal::STALE,
                 format!(
                     "change {} reached account {account}'s inbox after change {}: deliveries arrive in change order",
                     change.seq, meta.last_change
@@ -212,7 +213,7 @@ fn decide_delivery(
     let seq = meta.next_seq;
     meta.next_seq = seq.checked_add(1).ok_or_else(|| {
         module_error(
-            "inbox_sequence",
+            refusal::EXHAUSTED,
             format!("inbox seq space exhausted for account {account}"),
         )
     })?;
@@ -227,7 +228,7 @@ fn decide_delivery(
         .checked_add(evicted.len() as u64)
         .ok_or_else(|| {
             module_error(
-                "inbox_eviction_counter",
+                refusal::EXHAUSTED,
                 format!("inbox eviction count exhausted for account {account}"),
             )
         })?;
@@ -241,7 +242,7 @@ fn decide_delivery(
     let fits_the_store = record.len() <= MAX_STORE_VALUE_BYTES;
     if !fits_the_store {
         return Err(module_error(
-            "notification_size",
+            refusal::CAPACITY,
             format!(
                 "a notification of {} bytes exceeds the store's value bound of {MAX_STORE_VALUE_BYTES}",
                 record.len()
@@ -292,9 +293,11 @@ impl Inbox {
         T: BorshDeserialize,
     {
         match self.staged.get(key).await? {
-            Some(bytes) => Ok(Some(
-                borsh::from_slice(&bytes).map_err(|e| module_error("codec", e.to_string()))?,
-            )),
+            Some(bytes) => {
+                Ok(Some(borsh::from_slice(&bytes).map_err(|e| {
+                    module_error(refusal::CORRUPT, e.to_string())
+                })?))
+            }
             None => Ok(None),
         }
     }
@@ -318,7 +321,7 @@ impl Inbox {
     async fn item(&self, account: AccountNumber, seq: u64) -> Result<Notification, Error> {
         self.load(&item_key(account, seq)).await?.ok_or_else(|| {
             module_error(
-                "missing_notification_record",
+                refusal::CORRUPT,
                 format!("the inbox of account {account} lists item {seq} with no record"),
             )
         })
@@ -335,13 +338,13 @@ impl Inbox {
             .query(&self.identity, &identity_encode_query(query))
             .await?;
         match identity_decode_reply(&reply).map_err(|sentence| Error::Module {
-            reason: "codec".into(),
+            reason: refusal::UNEXPECTED_REPLY.into(),
             sentence,
         })? {
             IdentityReply::Account(account) => Ok(account),
             IdentityReply::Accounts(_) | IdentityReply::Resolved(_) | IdentityReply::Gen(_) => {
                 Err(module_error(
-                    "unexpected_identity_reply",
+                    refusal::UNEXPECTED_REPLY,
                     "identity answered an account lookup with something other than an account",
                 ))
             }
@@ -374,24 +377,27 @@ impl Inbox {
             Origin::External(key) if !key.is_empty() => key.clone(),
             Origin::External(_) => {
                 return Err(module_error(
-                    "invalid_external_origin",
+                    refusal::INVALID_INPUT,
                     "external origin must carry a non-empty submitter key",
                 ));
             }
             Origin::Program(program) => {
                 return Err(module_error(
-                    "program_inbox",
+                    refusal::UNAUTHORIZED,
                     format!("a program account holds no human inbox: {program}"),
                 ));
             }
             Origin::Module(id) => {
                 return Err(module_error(
-                    "module_inbox",
+                    refusal::UNAUTHORIZED,
                     format!("a module holds no inbox: {id}"),
                 ));
             }
             Origin::System => {
-                return Err(module_error("system_inbox", "the system holds no inbox"));
+                return Err(module_error(
+                    refusal::UNAUTHORIZED,
+                    "the system holds no inbox",
+                ));
             }
         };
         let holder = self
@@ -399,14 +405,14 @@ impl Inbox {
             .await?;
         let Some(holder) = holder else {
             return Err(module_error(
-                "key_account_missing",
+                refusal::NOT_FOUND,
                 "this key belongs to no identity account",
             ));
         };
         let holds_the_account = holder.number == account;
         if !holds_the_account {
             return Err(module_error(
-                "inbox_account_authority",
+                refusal::UNAUTHORIZED,
                 format!(
                     "only the account's own keys may ack its inbox: this key holds account {}, not {account}",
                     holder.number
@@ -416,7 +422,7 @@ impl Inbox {
         let is_key_held = matches!(holder.control, Control::Keys);
         if !is_key_held {
             return Err(module_error(
-                "account_control",
+                refusal::INVALID_INPUT,
                 format!("account {account} is not key-held and holds no human inbox"),
             ));
         }
@@ -432,14 +438,14 @@ impl Inbox {
         if from_attribution {
             let AttributionEvent::Changed(change) =
                 decode_event(payload).map_err(|sentence| Error::Module {
-                    reason: "codec".into(),
+                    reason: refusal::UNEXPECTED_REPLY.into(),
                     sentence,
                 })?;
             return Ok(Input::Changed(Box::new(change)));
         }
         Ok(
             match decode_msg(payload).map_err(|sentence| Error::Module {
-                reason: "codec".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence,
             })? {
                 InboxMsg::MarkRead { account, up_to_seq } => Input::MarkRead { account, up_to_seq },
@@ -456,7 +462,7 @@ impl Inbox {
         let recipient = change.recipient;
         let Some(control) = self.recipient_control(ctx, recipient).await? else {
             return Err(module_error(
-                "recipient_account_missing",
+                refusal::NOT_FOUND,
                 format!("recipient account {recipient} does not exist"),
             ));
         };

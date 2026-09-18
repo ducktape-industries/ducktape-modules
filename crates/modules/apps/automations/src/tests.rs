@@ -3,6 +3,7 @@
 //! store-backed staging/root semantics.
 
 use super::*;
+use sdk::refusal;
 
 #[test]
 fn retired_tagged_trigger_shape_rejects_loudly() {
@@ -164,14 +165,14 @@ impl Ctx for CaptureCtx {
     async fn query(&self, target: &str, req: &[u8]) -> Result<Vec<u8>, Error> {
         if self.fail_query {
             return Err(Error::Module {
-                reason: "query_failed".into(),
+                reason: refusal::UNSUPPORTED.into(),
                 sentence: "query failed".into(),
             });
         }
         match target {
             IDENTITY => identity_probe(req),
             CHAT => match chat_decode_query(req).map_err(|sentence| Error::Module {
-                reason: "codec".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence,
             })? {
                 ChatQuery::MessagesRange {
@@ -181,7 +182,7 @@ impl Ctx for CaptureCtx {
                 } => {
                     if self.fail_text_fetch {
                         return Err(Error::Module {
-                            reason: "text_fetch_failed".into(),
+                            reason: refusal::UNSUPPORTED.into(),
                             sentence: "text fetch failed".into(),
                         });
                     }
@@ -189,7 +190,7 @@ impl Ctx for CaptureCtx {
                         self.transcripts
                             .get(&channel_id)
                             .ok_or_else(|| Error::Module {
-                                reason: "unknown_channel".into(),
+                                reason: refusal::NOT_FOUND.into(),
                                 sentence: format!("unknown channel: {channel_id}"),
                             })?;
                     let head = transcript.len() as u64;
@@ -233,7 +234,7 @@ impl Ctx for CaptureCtx {
             // the board answers the SAME two reads the real module does; the
             // duplicate probe uses the by-id `Get`.
             TASKS => match tasks::decode_task_query(req).map_err(|sentence| Error::Module {
-                reason: "codec".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence,
             })? {
                 TaskQuery::Get { task_id } => Ok(tasks_encode_reply(&TaskReply::Task(
@@ -968,7 +969,7 @@ fn post_message_fire_reads_chat_via_testkit_on_query() {
     .on_query(IDENTITY, identity_probe)
     .on_query(CHAT, |req| {
         match chat_decode_query(req).map_err(|sentence| Error::Module {
-            reason: "codec".into(),
+            reason: refusal::INVALID_INPUT.into(),
             sentence,
         })? {
             ChatQuery::Channel { channel_id } => {
@@ -2210,7 +2211,7 @@ fn account_view(number: u64) -> identity::AccountView {
 }
 fn identity_probe(req: &[u8]) -> Result<Vec<u8>, Error> {
     let number = match identity::decode_query(req).map_err(|sentence| Error::Module {
-        reason: "codec".into(),
+        reason: refusal::INVALID_INPUT.into(),
         sentence,
     })? {
         identity::IdentityQuery::OfKey { key } => account_of(&key),

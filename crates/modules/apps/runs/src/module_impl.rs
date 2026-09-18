@@ -3,6 +3,7 @@ use super::{
     SiblingReadBudget, StateRoot, StateSyncHandle, committed_root, decode_query, dispatch_id_for,
     encode_reply,
 };
+use sdk::refusal;
 
 #[derive(Clone, Copy)]
 enum ExecuteKind {
@@ -34,7 +35,7 @@ impl Ctx for BudgetCtx<'_, '_> {
     async fn query(&self, target: &str, req: &[u8]) -> Result<Vec<u8>, Error> {
         if !self.budget.reserve_query(target, req) {
             return Err(Error::Module {
-                reason: "runs_sibling_read_budget_exceeded".into(),
+                reason: refusal::CAPACITY.into(),
                 sentence: format!(
                     "runs sibling-read budget exceeded ({})",
                     super::MAX_SIBLING_QUERY_READS
@@ -81,12 +82,12 @@ impl RunsModule {
         let budget = SiblingReadBudget::default();
         let dispatch::Delivery::Result(event) =
             dispatch::decode_delivery(payload).map_err(|sentence| Error::Module {
-                reason: "codec".into(),
+                reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence,
             })?
         else {
             return Err(Error::Module {
-                reason: "unexpected_program_completion".into(),
+                reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence: "runs received a program call completion it did not request".into(),
             });
         };
@@ -225,12 +226,12 @@ impl Module for RunsModule {
 
     async fn query(&self, req: &[u8]) -> Result<Vec<u8>, Error> {
         match decode_query(req).map_err(|sentence| Error::Module {
-            reason: "codec".into(),
+            reason: refusal::INVALID_INPUT.into(),
             sentence,
         })? {
             RunsQuery::ModelProgram { agent_id } => {
                 crate::validate_agent_id(&agent_id).map_err(|sentence| Error::Module {
-                    reason: "codec".into(),
+                    reason: refusal::INVALID_INPUT.into(),
                     sentence,
                 })?;
                 Ok(encode_reply(&RunsReply::ModelProgram(
@@ -351,7 +352,7 @@ impl Module for RunsModule {
 
     async fn query_with(&self, ctx: &dyn Ctx, req: &[u8]) -> Result<Vec<u8>, Error> {
         match decode_query(req).map_err(|sentence| Error::Module {
-            reason: "codec".into(),
+            reason: refusal::INVALID_INPUT.into(),
             sentence,
         })? {
             RunsQuery::NodeWork {

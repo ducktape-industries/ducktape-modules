@@ -20,6 +20,7 @@ use identity::{
     AccountView, IdentityQuery, IdentityReply, decode_query as identity_decode_query,
     encode_reply as identity_encode_reply,
 };
+use sdk::refusal;
 use sdk::{Error, Module, Msg, Origin, StateRoot};
 use sdk_testkit::TestCtx;
 use statesync::qmdb::QmdbStore;
@@ -30,7 +31,7 @@ use statesync::qmdb::QmdbStore;
 fn identity_stub(accounts: Vec<(Vec<u8>, u64)>) -> impl FnMut(&[u8]) -> Result<Vec<u8>, Error> {
     move |req| {
         let query = identity_decode_query(req).map_err(|sentence| Error::Module {
-            reason: "codec".into(),
+            reason: refusal::INVALID_INPUT.into(),
             sentence,
         })?;
         if let IdentityQuery::Resolve { references } = query {
@@ -1555,7 +1556,8 @@ fn huddle_join_refuses_a_node_proof_from_the_wrong_signer() {
             .await
             .unwrap_err();
         assert!(
-            format!("{err:?}").contains("huddle_node_proof_invalid"),
+            matches!(&err, Error::Module { reason, sentence }
+                if reason == refusal::INVALID_INPUT && sentence.ends_with("does not verify")),
             "{err:?}"
         );
 
@@ -1585,7 +1587,8 @@ fn huddle_join_refuses_a_node_proof_from_the_wrong_signer() {
             .await
             .unwrap_err();
         assert!(
-            format!("{err:?}").contains("huddle_node_proof_invalid"),
+            matches!(&err, Error::Module { reason, sentence }
+                if reason == refusal::INVALID_INPUT && sentence.ends_with("does not verify")),
             "{err:?}"
         );
         module

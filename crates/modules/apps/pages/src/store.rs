@@ -5,6 +5,7 @@ use super::{
     to_page_err,
 };
 use crate::comment_ops::{comment_key, target_index_key, thread_key};
+use sdk::refusal;
 
 impl Pages {
     /// wrap the host-constructed store under module identity `id`. sync — the
@@ -49,7 +50,7 @@ impl Pages {
         match self.get(block_id.as_bytes()).await {
             Some(b) => Ok(Some(serde_json::from_slice(&b).map_err(|e| {
                 Error::Module {
-                    reason: "codec".into(),
+                    reason: refusal::CORRUPT.into(),
                     sentence: e.to_string(),
                 }
             })?)),
@@ -192,7 +193,7 @@ impl Pages {
     pub(super) async fn load_index(&self) -> Result<BTreeMap<String, Option<String>>, Error> {
         match self.get(PAGE_INDEX_KEY.as_bytes()).await {
             Some(b) => serde_json::from_slice(&b).map_err(|e| Error::Module {
-                reason: "codec".into(),
+                reason: refusal::CORRUPT.into(),
                 sentence: e.to_string(),
             }),
             None => Ok(BTreeMap::new()),

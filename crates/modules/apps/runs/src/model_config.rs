@@ -3,6 +3,7 @@
 //! there is nothing a configuration could escalate.
 use super::*;
 use capability::validate_tag;
+use sdk::refusal;
 
 /// a skill's `source_prefix` must be a SCOPED duckfs subtree, never a
 /// namespace root: `resolve_skills` copies it verbatim into a run's
@@ -33,7 +34,7 @@ impl RunsModule {
     fn validate_recipe_hash(recipe_hash: &[u8]) -> Result<(), Error> {
         if !recipe_hash.is_empty() && recipe_hash.len() != RECIPE_HASH_LEN {
             return Err(Error::Module {
-                reason: "recipe_hash_length".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence: format!(
                     "recipe_hash must be empty or {RECIPE_HASH_LEN} bytes, got {}",
                     recipe_hash.len()
@@ -59,7 +60,7 @@ impl RunsModule {
     fn validate_skills(skills: &[SkillRef]) -> Result<(), Error> {
         if skills.len() > MAX_SKILLS_PER_AGENT {
             return Err(Error::Module {
-                reason: "skill_count".into(),
+                reason: refusal::CAPACITY.into(),
                 sentence: format!(
                     "an agent may curate at most {MAX_SKILLS_PER_AGENT} skills, got {}; leave the \
                  rest in the shared skill library",
@@ -72,7 +73,7 @@ impl RunsModule {
         for skill in skills {
             if !is_skill_mount_name(&skill.name) {
                 return Err(Error::Module {
-                    reason: "skill_name".into(),
+                    reason: refusal::INVALID_INPUT.into(),
                     sentence: format!(
                         "skill name {:?} is not a safe mount directory name (want \
                      [a-zA-Z0-9._-]+, at most {MAX_SKILL_NAME_BYTES} bytes, not \".\" or \"..\")",
@@ -82,13 +83,13 @@ impl RunsModule {
             }
             if !names.insert(skill.name.as_str()) {
                 return Err(Error::Module {
-                    reason: "duplicate_skill_name".into(),
+                    reason: refusal::INVALID_INPUT.into(),
                     sentence: format!("duplicate skill name {:?}", skill.name),
                 });
             }
             if !is_scoped_duckfs_prefix(&skill.source_prefix) {
                 return Err(Error::Module {
-                    reason: "skill_source_prefix".into(),
+                    reason: refusal::INVALID_INPUT.into(),
                     sentence: format!(
                         "skill source_prefix {:?} is not a scoped duckfs subtree \
                      (want an absolute path at least 3 segments deep, e.g. \
@@ -99,7 +100,7 @@ impl RunsModule {
             }
             if !prefixes.insert(skill.source_prefix.as_str()) {
                 return Err(Error::Module {
-                    reason: "duplicate_skill_source_prefix".into(),
+                    reason: refusal::INVALID_INPUT.into(),
                     sentence: format!("duplicate skill source_prefix {:?}", skill.source_prefix),
                 });
             }
@@ -107,7 +108,7 @@ impl RunsModule {
                 && snapshot.is_empty()
             {
                 return Err(Error::Module {
-                    reason: "skill_snapshot".into(),
+                    reason: refusal::INVALID_INPUT.into(),
                     sentence: "skill source_snapshot must not be empty when set".into(),
                 });
             }
@@ -142,12 +143,12 @@ impl RunsModule {
             .await?;
         let identity::IdentityReply::Account(Some(view)) =
             identity::decode_reply(&bytes).map_err(|sentence| Error::Module {
-                reason: "codec".into(),
+                reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence,
             })?
         else {
             return Err(Error::Module {
-                reason: "model_account_does_not_exist".into(),
+                reason: refusal::NOT_FOUND.into(),
                 sentence: format!("account {account} does not exist"),
             });
         };
@@ -167,13 +168,13 @@ impl RunsModule {
         } = self.account_control(ctx, account).await?
         else {
             return Err(Error::Module {
-                reason: "program_authority_is_not_active".into(),
+                reason: refusal::WRONG_STATE.into(),
                 sentence: format!("account {account} is not an active program"),
             });
         };
         if executor != self.agent {
             return Err(Error::Module {
-                reason: "program_executor_does_not_match".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence: format!(
                     "program {account} is executed by {executor}, not by {}",
                     self.agent
@@ -194,13 +195,13 @@ impl RunsModule {
             self.account_control(ctx, account).await?
         else {
             return Err(Error::Module {
-                reason: "model_requires_a_live_program_account".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence: format!("account {account} is not a program account"),
             });
         };
         if executor != self.agent {
             return Err(Error::Module {
-                reason: "program_executor_does_not_match".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence: format!(
                     "program {account} is executed by {executor}, not by {}",
                     self.agent
@@ -214,7 +215,7 @@ impl RunsModule {
         let bytes = sdk::wire::encode(&record);
         if bytes.len() > MAX_AGENT_RECORD_BYTES {
             return Err(Error::Module {
-                reason: "model_record_exceeds_bytes".into(),
+                reason: refusal::CAPACITY.into(),
                 sentence: format!("model record exceeds {MAX_AGENT_RECORD_BYTES} bytes"),
             });
         }
@@ -225,7 +226,7 @@ impl RunsModule {
 
     fn registered_model(&self, id: &str) -> Result<ModelRecord, Error> {
         self.model(id).cloned().ok_or_else(|| Error::Module {
-            reason: "unknown_model".into(),
+            reason: refusal::NOT_FOUND.into(),
             sentence: format!("unknown model: {id}"),
         })
     }
@@ -246,24 +247,24 @@ impl RunsModule {
             } => {
                 self.program_model(ctx, account).await?;
                 validate_agent_id(&agent_id).map_err(|sentence| Error::Module {
-                    reason: "agent_id".into(),
+                    reason: refusal::INVALID_INPUT.into(),
                     sentence,
                 })?;
                 Self::validate_non_empty("display_name", &display_name)?;
                 validate_tag(&capability).map_err(|sentence| Error::Module {
-                    reason: "agent_id".into(),
+                    reason: refusal::INVALID_INPUT.into(),
                     sentence,
                 })?;
                 if self.model(&agent_id).is_some() {
                     return Err(Error::Module {
-                        reason: "model_already_exists".into(),
+                        reason: refusal::ALREADY_EXISTS.into(),
                         sentence: format!("model already exists: {agent_id}"),
                     });
                 }
                 let records = self.model_records();
                 if records.len() >= MAX_REGISTERED_AGENTS {
                     return Err(Error::Module {
-                        reason: "model_registry_is_full".into(),
+                        reason: refusal::CAPACITY.into(),
                         sentence: format!(
                             "the model registry already holds {MAX_REGISTERED_AGENTS} models, its limit"
                         ),
@@ -276,7 +277,7 @@ impl RunsModule {
                     .count();
                 if owned >= MAX_AGENTS_PER_OWNER {
                     return Err(Error::Module {
-                        reason: "model_owner_allocation_is_full".into(),
+                        reason: refusal::CAPACITY.into(),
                         sentence: format!(
                             "this owner already has {MAX_AGENTS_PER_OWNER} models, the most one owner may register"
                         ),
@@ -322,7 +323,7 @@ impl RunsModule {
                 }
                 if let Some(capability) = capability {
                     validate_tag(&capability).map_err(|sentence| Error::Module {
-                        reason: "capability_tag".into(),
+                        reason: refusal::INVALID_INPUT.into(),
                         sentence,
                     })?;
                     if capability != record.capability {

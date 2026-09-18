@@ -56,6 +56,7 @@ mod store;
 pub use delivery::{MAX_REASON_BYTES, QUEUE_FULL};
 pub use store::MAX_RECORD_BYTES;
 
+use sdk::refusal;
 use sdk::{
     Ctx, Error, MerkleStore, Module, ModuleId, Msg, Origin, ResolverSyncTarget, StagedStore,
     StateRoot, StateSyncHandle,
@@ -112,14 +113,14 @@ impl Collaboration {
     fn check_network(&self, network: &str) -> Result<(), Error> {
         if self.network.is_empty() {
             return Err(Error::Module {
-                reason: "missing_chain_id".into(),
+                reason: refusal::UNSUPPORTED.into(),
                 sentence: "this module was composed with a blank chain_id, which binds no network"
                     .into(),
             });
         }
         if network != self.network {
             return Err(Error::Module {
-                reason: "network_mismatch".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence: format!("op is bound to network {network:?}, not this network"),
             });
         }
@@ -142,7 +143,7 @@ pub(crate) async fn actor_from_origin(ctx: &dyn Ctx, identity: &str) -> Result<P
             .await?;
             let identity::IdentityReply::Account(Some(account)) = reply else {
                 return Err(Error::Module {
-                    reason: "program_account_does_not_exist".into(),
+                    reason: refusal::NOT_FOUND.into(),
                     sentence: format!("program account {account} does not exist"),
                 });
             };
@@ -155,7 +156,7 @@ pub(crate) async fn actor_from_origin(ctx: &dyn Ctx, identity: &str) -> Result<P
             );
             if !is_active_program {
                 return Err(Error::Module {
-                    reason: "program_account_is_not_active".into(),
+                    reason: refusal::WRONG_STATE.into(),
                     sentence: format!("program account {} is not active", account.number),
                 });
             }
@@ -164,7 +165,7 @@ pub(crate) async fn actor_from_origin(ctx: &dyn Ctx, identity: &str) -> Result<P
         Origin::External(key) => {
             if key.is_empty() {
                 return Err(Error::Module {
-                    reason: "invalid_external_origin".into(),
+                    reason: refusal::INVALID_INPUT.into(),
                     sentence: "external origin must carry a non-empty submitter id".into(),
                 });
             }
@@ -176,7 +177,7 @@ pub(crate) async fn actor_from_origin(ctx: &dyn Ctx, identity: &str) -> Result<P
             .await?;
             let identity::IdentityReply::Account(account) = reply else {
                 return Err(Error::Module {
-                    reason: "unexpected_identity_reply".into(),
+                    reason: refusal::UNEXPECTED_REPLY.into(),
                     sentence: "identity returned an unexpected reply".into(),
                 });
             };
@@ -197,7 +198,7 @@ async fn identity_reply(
 ) -> Result<identity::IdentityReply, Error> {
     let bytes = ctx.query(identity, &identity::encode_query(&query)).await?;
     identity::decode_reply(&bytes).map_err(|sentence| Error::Module {
-        reason: "codec".into(),
+        reason: refusal::UNEXPECTED_REPLY.into(),
         sentence,
     })
 }
@@ -217,12 +218,12 @@ pub(crate) async fn chat_access(
     let bytes = ctx.query(chat, &chat::encode_query(&query)).await?;
     let chat::ChatReply::Access(access) =
         chat::decode_reply(&bytes).map_err(|sentence| Error::Module {
-            reason: "codec".into(),
+            reason: refusal::UNEXPECTED_REPLY.into(),
             sentence,
         })?
     else {
         return Err(Error::Module {
-            reason: "chat_returned_an_unexpected_reply".into(),
+            reason: refusal::UNEXPECTED_REPLY.into(),
             sentence: "chat answered an access lookup with something other than access".into(),
         });
     };
@@ -241,12 +242,12 @@ pub(crate) async fn chat_message(
     let bytes = ctx.query(chat, &chat::encode_query(&query)).await?;
     let chat::ChatReply::Message(view) =
         chat::decode_reply(&bytes).map_err(|sentence| Error::Module {
-            reason: "codec".into(),
+            reason: refusal::UNEXPECTED_REPLY.into(),
             sentence,
         })?
     else {
         return Err(Error::Module {
-            reason: "chat_returned_an_unexpected_reply".into(),
+            reason: refusal::UNEXPECTED_REPLY.into(),
             sentence: format!(
                 "chat answered the lookup for message {message_id} with something other than a message"
             ),
@@ -409,7 +410,7 @@ impl Module for Collaboration {
 
     async fn execute(&mut self, ctx: &mut dyn Ctx, msg: &Msg) -> Result<(), Error> {
         let request = decode_msg(&msg.payload).map_err(|sentence| Error::Module {
-            reason: "codec".into(),
+            reason: refusal::INVALID_INPUT.into(),
             sentence,
         })?;
         // the network binding is checked BEFORE anything is read or staged: a
@@ -432,7 +433,7 @@ impl Module for Collaboration {
             via,
             read,
         } = decode_query(req).map_err(|sentence| Error::Module {
-            reason: "codec".into(),
+            reason: refusal::INVALID_INPUT.into(),
             sentence,
         })?;
         let reply = read::serve(

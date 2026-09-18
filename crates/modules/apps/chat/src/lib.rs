@@ -49,6 +49,7 @@
 // the wire surface: this module's shared types, flattened at the crate root.
 use chat_wire::client::validate_channel_namespace;
 pub use chat_wire::*;
+use sdk::refusal;
 
 // the wasm-guest port: the dispatch shell that adapts this module to the
 // ducktape:module world. compiled only by the guest-builder's synthesized
@@ -187,7 +188,7 @@ fn validate_object_id(field: &str, value: &str) -> Result<(), Error> {
     require_non_empty(field, value)?;
     if value.contains(KEY_SEP) {
         return Err(Error::Module {
-            reason: "reserved_separator".into(),
+            reason: refusal::INVALID_INPUT.into(),
             sentence: format!("{field} must not contain the reserved separator"),
         });
     }
@@ -397,7 +398,7 @@ impl Chat {
         match self.get_raw(key).await? {
             Some(bytes) => Ok(Some(serde_json::from_slice(&bytes).map_err(|e| {
                 Error::Module {
-                    reason: "codec".into(),
+                    reason: refusal::CORRUPT.into(),
                     sentence: e.to_string(),
                 }
             })?)),
@@ -430,7 +431,7 @@ impl Chat {
         let bytes = serde_json::to_vec(value).expect("chat value is serializable");
         if bytes.len() > cap {
             return Err(Error::Module {
-                reason: "record_too_large".into(),
+                reason: refusal::CAPACITY.into(),
                 sentence: format!("{what} record too large: {} > {cap} bytes", bytes.len()),
             });
         }
@@ -450,7 +451,7 @@ impl Chat {
         self.channel(channel_id)
             .await?
             .ok_or_else(|| Error::Module {
-                reason: "unknown_channel".into(),
+                reason: refusal::NOT_FOUND.into(),
                 sentence: format!("unknown channel: {channel_id}"),
             })
     }
@@ -472,7 +473,7 @@ impl Chat {
         self.head(channel_id, seq)
             .await?
             .ok_or_else(|| Error::Module {
-                reason: "unknown_message".into(),
+                reason: refusal::NOT_FOUND.into(),
                 sentence: format!("unknown message: {channel_id}/{seq}"),
             })
     }
@@ -526,13 +527,13 @@ impl Chat {
     ) -> Result<Option<AccountNumber>, Error> {
         let reply = ctx.query(identity, &identity_encode_query(query)).await?;
         match identity_decode_reply(&reply).map_err(|sentence| Error::Module {
-            reason: "codec".into(),
+            reason: refusal::UNEXPECTED_REPLY.into(),
             sentence,
         })? {
             IdentityReply::Account(account) => Ok(account.map(|view| view.number)),
             IdentityReply::Accounts(_) | IdentityReply::Resolved(_) | IdentityReply::Gen(_) => {
                 Err(Error::Module {
-                    reason: "unexpected_identity_reply".into(),
+                    reason: refusal::UNEXPECTED_REPLY.into(),
                     sentence: "identity answered a key lookup with something other than an account"
                         .into(),
                 })
@@ -577,7 +578,7 @@ impl Chat {
     async fn party_of_origin(&self, ctx: &dyn Ctx, origin: &Origin) -> Result<Party, Error> {
         match origin {
             Origin::External(key) if key.is_empty() => Err(Error::Module {
-                reason: "invalid_external_origin".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence: "external origin must carry a non-empty submitter id".into(),
             }),
             Origin::External(key) => Ok(match self.account_of_key(ctx, key).await? {
@@ -618,12 +619,12 @@ impl Chat {
                     .await?;
                 let IdentityReply::Resolved(numbers) =
                     identity_decode_reply(&bytes).map_err(|sentence| Error::Module {
-                        reason: "codec".into(),
+                        reason: refusal::UNEXPECTED_REPLY.into(),
                         sentence,
                     })?
                 else {
                     return Err(Error::Module {
-                        reason: "unexpected_identity_reply".into(),
+                        reason: refusal::UNEXPECTED_REPLY.into(),
                         sentence: "identity answered a mention lookup with something other than resolved accounts".into(),
                     });
                 };
@@ -633,7 +634,7 @@ impl Chat {
         };
         if numbers.len() != mentions.len() {
             return Err(Error::Module {
-                reason: "chat_identity_resolution_count_mismatch".into(),
+                reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence: format!(
                     "identity returned {} accounts for {} mentions",
                     numbers.len(),
@@ -648,15 +649,15 @@ impl Chat {
                 number.ok_or_else(|| {
                     let (reason, sentence) = match mention {
                         Party::Account(account) => (
-                            "mention_account_missing",
+                            refusal::NOT_FOUND,
                             format!("a mention names no account: {account}"),
                         ),
                         Party::Key(_) => (
-                            "mention_key_unbound",
+                            refusal::NOT_FOUND,
                             "a mentioned key belongs to no account".into(),
                         ),
                         Party::Module(_) | Party::System => (
-                            "mention_origin",
+                            refusal::INVALID_INPUT,
                             "a mention names an account, never a module or the system".into(),
                         ),
                     };
@@ -698,7 +699,7 @@ impl Chat {
             }
             if end != chunk.len() {
                 return Err(Error::Module {
-                    reason: "mention_origin".into(),
+                    reason: refusal::INVALID_INPUT.into(),
                     sentence: "a mention names an account, never a module or the system".into(),
                 });
             }
@@ -732,25 +733,25 @@ impl Chat {
             Party::Account(account) => {
                 if !self.account_exists(ctx, *account).await? {
                     return Err(Error::Module {
-                        reason: "chat_membership_names_no_account".into(),
+                        reason: refusal::NOT_FOUND.into(),
                         sentence: format!("membership names no account: {account}"),
                     });
                 }
                 Ok(())
             }
             Party::Key(key) if key.is_empty() => Err(Error::Module {
-                reason: "member_key".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence: "a member key must not be empty".into(),
             }),
             Party::Key(key) => match self.account_of_key(ctx, key).await? {
                 Some(account) => Err(Error::Module {
-                    reason: "key_account_mismatch".into(),
+                    reason: refusal::INVALID_INPUT.into(),
                     sentence: format!("this key belongs to account {account}; name the account"),
                 }),
                 None => Ok(()),
             },
             Party::Module(_) | Party::System => Err(Error::Module {
-                reason: "chat_origin".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence: "modules and the system are never members; they always may post".into(),
             }),
         }
@@ -769,14 +770,14 @@ impl Chat {
         // membership, rename, or unarchive.
         if channel.archived {
             return Err(Error::Module {
-                reason: "channel_is_archived".into(),
+                reason: refusal::WRONG_STATE.into(),
                 sentence: format!("channel {} is archived", channel.id),
             });
         }
         let gated_by_roster = channel.post_policy == PostPolicy::MembersOnly && party.is_person();
         if gated_by_roster && !self.is_member(&channel.id, party).await? {
             return Err(Error::Module {
-                reason: "channel_membership".into(),
+                reason: refusal::UNAUTHORIZED.into(),
                 sentence: format!(
                     "channel {} is members-only and the author is not a member",
                     channel.id
@@ -847,7 +848,7 @@ impl Chat {
         let count: u64 = self.load(&creator_count_key(party)).await?.unwrap_or(0);
         if count as usize >= MAX_CHANNELS_PER_CREATOR {
             return Err(Error::Module {
-                reason: "channel_cap".into(),
+                reason: refusal::CAPACITY.into(),
                 sentence: format!("you already have {MAX_CHANNELS_PER_CREATOR} channels open"),
             });
         }
@@ -918,13 +919,13 @@ impl Chat {
         // closes (see the module doc on `CreateDmChannel`).
         if chat_wire::client::is_derived_dm_channel(&channel_id) {
             return Err(Error::Module {
-                reason: "dm_channel_id_reserved".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence: "dm- channel ids are reserved; open a DM with CreateDmChannel".into(),
             });
         }
         if self.channel(&channel_id).await?.is_some() {
             return Err(Error::Module {
-                reason: "channel_already_exists".into(),
+                reason: refusal::ALREADY_EXISTS.into(),
                 sentence: format!("channel already exists: {channel_id}"),
             });
         }
@@ -953,13 +954,13 @@ impl Chat {
             Party::Account(account) => *account,
             Party::Key(_) => {
                 return Err(Error::Module {
-                    reason: "key_account_missing".into(),
+                    reason: refusal::NOT_FOUND.into(),
                     sentence: "this key belongs to no identity account".into(),
                 });
             }
             Party::Module(_) | Party::System => {
                 return Err(Error::Module {
-                    reason: "dm_channel_open".into(),
+                    reason: refusal::UNAUTHORIZED.into(),
                     sentence: "a DM channel must be opened by an account".into(),
                 });
             }
@@ -967,13 +968,13 @@ impl Chat {
         require_non_empty("name", &name)?;
         if creator == counterpart {
             return Err(Error::Module {
-                reason: "dm_membership".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence: "a DM's two accounts must differ".into(),
             });
         }
         if !self.account_exists(ctx, counterpart).await? {
             return Err(Error::Module {
-                reason: "dm_account_missing".into(),
+                reason: refusal::NOT_FOUND.into(),
                 sentence: format!("a DM names no account: {counterpart}"),
             });
         }
@@ -981,7 +982,7 @@ impl Chat {
             chat_wire::client::dm_channel_id(&creator.to_string(), &counterpart.to_string());
         if self.channel(&channel_id).await?.is_some() {
             return Err(Error::Module {
-                reason: "channel_already_exists".into(),
+                reason: refusal::ALREADY_EXISTS.into(),
                 sentence: format!("channel already exists: {channel_id}"),
             });
         }
@@ -1007,7 +1008,7 @@ impl Chat {
             .revision
             .checked_add(1)
             .ok_or_else(|| Error::Module {
-                reason: "channel_revision_exhausted".into(),
+                reason: refusal::EXHAUSTED.into(),
                 sentence: format!("channel {} has no revision numbers left", channel.id),
             })?;
         self.store_channel(&channel)?;
@@ -1083,7 +1084,7 @@ impl Chat {
         validate_object_id("message_id", &message_id)?;
         if blocks.is_empty() {
             return Err(Error::Module {
-                reason: "empty_blocks".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence: "blocks must not be empty".into(),
             });
         }
@@ -1091,7 +1092,7 @@ impl Chat {
         self.check_authorized_post(&channel, authority).await?;
         if self.get_raw(&msgid_key(&message_id)).await?.is_some() {
             return Err(Error::Module {
-                reason: "message_already_exists".into(),
+                reason: refusal::ALREADY_EXISTS.into(),
                 sentence: format!("message already exists: {message_id}"),
             });
         }
@@ -1111,7 +1112,7 @@ impl Chat {
             let mut root = self.require_head(channel_id, root_seq).await?;
             if root.thread.is_some() {
                 return Err(Error::Module {
-                    reason: "thread_replies_cannot_start_subthreads".into(),
+                    reason: refusal::INVALID_INPUT.into(),
                     sentence: format!(
                         "thread replies cannot start subthreads: {channel_id}/{root_seq}"
                     ),
@@ -1119,7 +1120,7 @@ impl Chat {
             }
             if root.reply_count >= MAX_THREAD_REPLIES as u64 {
                 return Err(Error::Module {
-                    reason: "thread_reply_cap_reached".into(),
+                    reason: refusal::CAPACITY.into(),
                     sentence: format!("thread reply cap reached: {channel_id}/{root_seq}"),
                 });
             }
@@ -1174,20 +1175,20 @@ impl Chat {
         require_non_empty("channel_id", channel_id)?;
         if blocks.is_empty() {
             return Err(Error::Module {
-                reason: "empty_blocks".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence: "blocks must not be empty".into(),
             });
         }
         let head = self.require_head(channel_id, seq).await?;
         if head.deleted {
             return Err(Error::Module {
-                reason: "cannot_edit_a_deleted_message".into(),
+                reason: refusal::WRONG_STATE.into(),
                 sentence: format!("cannot edit a deleted message: {channel_id}/{seq}"),
             });
         }
         if head.rev >= MAX_REVISIONS - 1 {
             return Err(Error::Module {
-                reason: "revision_cap_reached".into(),
+                reason: refusal::CAPACITY.into(),
                 sentence: format!("revision cap reached: {channel_id}/{seq}"),
             });
         }
@@ -1203,7 +1204,7 @@ impl Chat {
             blocks,
             rev,
             revision: head.revision.checked_add(1).ok_or_else(|| Error::Module {
-                reason: "message_revision_exhausted".into(),
+                reason: refusal::EXHAUSTED.into(),
                 sentence: format!("message {channel_id}/{seq} has no revision numbers left"),
             })?,
             edited_at: Some(now),
@@ -1227,7 +1228,7 @@ impl Chat {
         let head = self.require_head(channel_id, seq).await?;
         if head.deleted {
             return Err(Error::Module {
-                reason: "message_already_deleted".into(),
+                reason: refusal::WRONG_STATE.into(),
                 sentence: format!("message already deleted: {channel_id}/{seq}"),
             });
         }
@@ -1250,7 +1251,7 @@ impl Chat {
             blocks: Vec::new(),
             deleted: true,
             revision: head.revision.checked_add(1).ok_or_else(|| Error::Module {
-                reason: "message_revision_exhausted".into(),
+                reason: refusal::EXHAUSTED.into(),
                 sentence: format!("message {channel_id}/{seq} has no revision numbers left"),
             })?,
             ..head
@@ -1275,7 +1276,7 @@ impl Chat {
         require_non_empty("emoji", emoji)?;
         if emoji.len() > MAX_EMOJI_BYTES {
             return Err(Error::Module {
-                reason: "emoji_too_long".into(),
+                reason: refusal::CAPACITY.into(),
                 sentence: format!("emoji too long: {} > {MAX_EMOJI_BYTES} bytes", emoji.len()),
             });
         }
@@ -1284,7 +1285,7 @@ impl Chat {
         let head = self.require_head(channel_id, seq).await?;
         if head.deleted {
             return Err(Error::Module {
-                reason: "cannot_react_to_a_deleted_message".into(),
+                reason: refusal::WRONG_STATE.into(),
                 sentence: format!("cannot react to a deleted message: {channel_id}/{seq}"),
             });
         }
@@ -1316,7 +1317,7 @@ impl Chat {
             .unwrap_or_default();
         if reactors.is_empty() && !emojis.contains(emoji) && emojis.len() >= MAX_REACTION_EMOJIS {
             return Err(Error::Module {
-                reason: "distinct_emoji_cap_reached".into(),
+                reason: refusal::CAPACITY.into(),
                 sentence: format!("distinct emoji cap reached: {channel_id}/{seq}"),
             });
         }
@@ -1393,7 +1394,7 @@ impl Chat {
         }
         if channel.hooks.len() >= MAX_HOOKS_PER_CHANNEL {
             return Err(Error::Module {
-                reason: "hook_cap_reached".into(),
+                reason: refusal::CAPACITY.into(),
                 sentence: format!("hook cap reached: {channel_id}"),
             });
         }
@@ -1468,13 +1469,13 @@ impl Chat {
         require_non_empty("channel_id", channel_id)?;
         if !party.is_person() {
             return Err(Error::Module {
-                reason: "huddle_join_origin".into(),
+                reason: refusal::UNAUTHORIZED.into(),
                 sentence: "only people may join a huddle".into(),
             });
         }
         if node.len() != HUDDLE_NODE_KEY_BYTES {
             return Err(Error::Module {
-                reason: "huddle_node_key".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence: format!(
                     "huddle node key must be {HUDDLE_NODE_KEY_BYTES} bytes, got {}",
                     node.len()
@@ -1489,14 +1490,14 @@ impl Chat {
             ),
             Origin::Module(_) | Origin::System => {
                 return Err(Error::Module {
-                    reason: "huddle_join_origin".into(),
+                    reason: refusal::UNAUTHORIZED.into(),
                     sentence: "only people may join a huddle".into(),
                 });
             }
         };
         if !keyscheme::KeyScheme::Ed25519.verify(&node, namespace, &preimage, &node_proof) {
             return Err(Error::Module {
-                reason: "huddle_node_proof_invalid".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence: format!(
                     "the node key's proof for joining huddle {channel_id} does not verify"
                 ),
@@ -1513,7 +1514,7 @@ impl Chat {
         } else {
             if channel.huddle.len() >= MAX_HUDDLE_MEMBERS {
                 return Err(Error::Module {
-                    reason: "huddle_is_full".into(),
+                    reason: refusal::CAPACITY.into(),
                     sentence: format!("huddle is full: {channel_id}"),
                 });
             }
@@ -1538,7 +1539,7 @@ impl Chat {
         require_non_empty("channel_id", channel_id)?;
         if !party.is_person() {
             return Err(Error::Module {
-                reason: "huddle_leave_origin".into(),
+                reason: refusal::UNAUTHORIZED.into(),
                 sentence: "only people may leave a huddle".into(),
             });
         }
@@ -1570,7 +1571,7 @@ impl Chat {
         require_non_empty("channel_id", channel_id)?;
         if !party.is_person() {
             return Err(Error::Module {
-                reason: "huddle_sweep_origin".into(),
+                reason: refusal::UNAUTHORIZED.into(),
                 sentence: "only people may sweep a huddle".into(),
             });
         }
@@ -1623,7 +1624,7 @@ impl Chat {
                 .require_head(channel_id, seq)
                 .await
                 .map_err(|_| Error::Module {
-                    reason: "missing_message_record".into(),
+                    reason: refusal::CORRUPT.into(),
                     sentence: format!("missing message record: {channel_id}/{seq}"),
                 })?;
             views.push(MessageView {
@@ -1680,7 +1681,7 @@ impl Chat {
             actor: party.clone(),
         }));
         match decode_msg(&msg.payload).map_err(|sentence| Error::Module {
-            reason: "codec".into(),
+            reason: refusal::INVALID_INPUT.into(),
             sentence,
         })? {
             ChatMsg::CreateChannel {
@@ -1846,13 +1847,13 @@ impl Chat {
                 // authenticated party may attach it.
                 if module_id == self.id {
                     return Err(Error::Module {
-                        reason: "chat_cannot_hook_itself".into(),
+                        reason: refusal::INVALID_INPUT.into(),
                         sentence: "a hook must target a module other than chat".into(),
                     });
                 }
                 if ctx.module_root(&module_id).is_none() {
                     return Err(Error::Module {
-                        reason: "unknown_hook_module".into(),
+                        reason: refusal::NOT_FOUND.into(),
                         sentence: format!("unknown hook module: {module_id}"),
                     });
                 }
@@ -1949,7 +1950,7 @@ impl Module for Chat {
 
     async fn query(&self, req: &[u8]) -> Result<Vec<u8>, Error> {
         match decode_query(req).map_err(|sentence| Error::Module {
-            reason: "codec".into(),
+            reason: refusal::INVALID_INPUT.into(),
             sentence,
         })? {
             ChatQuery::Channel { channel_id } => Ok(encode_reply(&ChatReply::Channel(

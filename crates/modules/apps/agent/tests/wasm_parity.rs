@@ -9,6 +9,7 @@ use commonware_cryptography::{Signer as _, ed25519::PrivateKey};
 use futures::executor::block_on;
 use host::{BlockContext, Host};
 use identity::{IdentityMsg, KeyScheme, ProgramStanding};
+use sdk::refusal;
 use sdk::{Ctx, Error, MerkleStore as _, Module, ModuleId, Msg, Origin, StateRoot};
 use sdk_testkit::MemStore;
 use wasm_host::WasmModule;
@@ -44,7 +45,7 @@ impl Module for Target {
         let reject_after_staging = msg.payload == b"\"fail\"";
         if reject_after_staging {
             return Err(Error::Module {
-                reason: "scripted_failure".into(),
+                reason: refusal::WRONG_STATE.into(),
                 sentence: "scripted target failure".into(),
             });
         }

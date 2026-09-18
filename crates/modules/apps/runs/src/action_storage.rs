@@ -4,6 +4,7 @@ use super::action_requests::{
 };
 use super::receipts::View;
 use super::*;
+use sdk::refusal;
 use sdk::{Ack, CallId, Cause, DeliveryOutcome, Hop, PendingItem};
 
 #[derive(Serialize, Deserialize)]
@@ -58,7 +59,7 @@ fn marker_bytes(marker: &Marker, capacity: usize) -> Result<Vec<u8>, Error> {
         .is_some_and(|size| size <= capacity);
     if !fits {
         return Err(Error::Module {
-            reason: "action_completion_size".into(),
+            reason: refusal::CAPACITY.into(),
             sentence: "action completion exceeds its reserved marker".into(),
         });
     }
@@ -72,32 +73,32 @@ fn decode_marker(bytes: &[u8]) -> Result<Marker, Error> {
     let prefix: [u8; 8] = bytes
         .get(..8)
         .ok_or_else(|| Error::Module {
-            reason: "truncated_action_marker".into(),
+            reason: refusal::CORRUPT.into(),
             sentence: "a stored action marker is shorter than its 8-byte length prefix".into(),
         })?
         .try_into()
         .expect("eight bytes");
     let length = usize::try_from(u64::from_le_bytes(prefix)).map_err(|_| Error::Module {
-        reason: "action_marker_length_overflow".into(),
+        reason: refusal::CORRUPT.into(),
         sentence: "a stored action marker declares a length this platform cannot address".into(),
     })?;
     let end = length.checked_add(8).ok_or_else(|| Error::Module {
-        reason: "action_marker_length_overflow".into(),
+        reason: refusal::CORRUPT.into(),
         sentence: "a stored action marker declares a length this platform cannot address".into(),
     })?;
     let encoded = bytes.get(8..end).ok_or_else(|| Error::Module {
-        reason: "truncated_action_marker_body".into(),
+        reason: refusal::CORRUPT.into(),
         sentence: "a stored action marker ends before the length it declares".into(),
     })?;
     let canonical_padding = bytes[end..].iter().all(|byte| *byte == 0);
     if !canonical_padding {
         return Err(Error::Module {
-            reason: "invalid_action_marker_padding".into(),
+            reason: refusal::CORRUPT.into(),
             sentence: "a stored action marker has nonzero bytes after its body".into(),
         });
     }
     sdk::wire::decode(encoded).map_err(|sentence| Error::Module {
-        reason: "codec".into(),
+        reason: refusal::CORRUPT.into(),
         sentence,
     })
 }
@@ -109,7 +110,7 @@ impl RunsModule {
         };
         let mut request: ActionRequest =
             sdk::wire::decode(&bytes).map_err(|sentence| Error::Module {
-                reason: "codec".into(),
+                reason: refusal::CORRUPT.into(),
                 sentence,
             })?;
         let bytes = self
@@ -117,7 +118,7 @@ impl RunsModule {
             .get(&marker_key(id))
             .await?
             .ok_or_else(|| Error::Module {
-                reason: "completion_marker_missing".into(),
+                reason: refusal::CORRUPT.into(),
                 sentence: "action has no reserved completion marker".into(),
             })?;
         let marker = decode_marker(&bytes)?;
@@ -134,7 +135,7 @@ impl RunsModule {
                     .await?
                     .map(|bytes| {
                         sdk::wire::decode(&bytes).map_err(|sentence| Error::Module {
-                            reason: "codec".into(),
+                            reason: refusal::CORRUPT.into(),
                             sentence,
                         })
                     })
@@ -153,7 +154,7 @@ impl RunsModule {
         bytes
             .map(|bytes| {
                 sdk::wire::decode(&bytes).map_err(|sentence| Error::Module {
-                    reason: "codec".into(),
+                    reason: refusal::CORRUPT.into(),
                     sentence,
                 })
             })
@@ -165,11 +166,11 @@ impl RunsModule {
         let key = item_key(item);
         let bytes = self.receipts.read(&key, view).await?;
         sdk::wire::decode(&bytes.ok_or_else(|| Error::Module {
-            reason: "missing_action_publication_queue_item".into(),
+            reason: refusal::CORRUPT.into(),
             sentence: format!("action publication queue item {item} has no record"),
         })?)
         .map_err(|sentence| Error::Module {
-            reason: "codec".into(),
+            reason: refusal::CORRUPT.into(),
             sentence,
         })
     }
@@ -184,7 +185,7 @@ impl RunsModule {
             .get(&marker_key(id))
             .await?
             .ok_or_else(|| Error::Module {
-                reason: "action_marker_missing".into(),
+                reason: refusal::CORRUPT.into(),
                 sentence: "action has no reserved marker".into(),
             })?;
         let decision = match &request.view.status {
@@ -222,7 +223,7 @@ impl RunsModule {
         let payload =
             canonical_action_payload(sdk::wire::decode(&message.payload).map_err(|sentence| {
                 Error::Module {
-                    reason: "codec".into(),
+                    reason: refusal::CORRUPT.into(),
                     sentence,
                 }
             })?);
@@ -239,7 +240,7 @@ impl RunsModule {
         };
         if self.action_request(&id).await?.is_some() {
             return Err(Error::Module {
-                reason: "action_request_conflict".into(),
+                reason: refusal::STALE.into(),
                 sentence: "action request id is already bound to earlier work".into(),
             });
         }
@@ -247,11 +248,11 @@ impl RunsModule {
             .staged_next_action_item
             .unwrap_or(self.next_action_item);
         let next = item.checked_add(1).ok_or_else(|| Error::Module {
-            reason: "action_delivery_counter_exhausted".into(),
+            reason: refusal::EXHAUSTED.into(),
             sentence: "no action item numbers are left for this action".into(),
         })?;
         self.model(&entry.agent_id).ok_or_else(|| Error::Module {
-            reason: "run_model_no_longer_exists".into(),
+            reason: refusal::NOT_FOUND.into(),
             sentence: format!("model {} no longer exists", entry.agent_id),
         })?;
         let record = ActionRequest {
@@ -333,12 +334,12 @@ impl RunsModule {
                 .committed(&body_key(&queued.request_id))
                 .await?
                 .ok_or_else(|| Error::Module {
-                    reason: "queued_action_has_no_body".into(),
+                    reason: refusal::CORRUPT.into(),
                     sentence: format!("queued action {} has no stored request", queued.request_id),
                 })?;
             let request: ActionRequest =
                 sdk::wire::decode(&bytes).map_err(|sentence| Error::Module {
-                    reason: "codec".into(),
+                    reason: refusal::CORRUPT.into(),
                     sentence,
                 })?;
             let reference = sdk::ItemRef {
@@ -369,7 +370,7 @@ impl RunsModule {
         let authentic = ctx.env().origin == Origin::System && ack.target == self.id;
         if !authentic {
             return Err(Error::Module {
-                reason: "action_ack_authority".into(),
+                reason: refusal::UNAUTHORIZED.into(),
                 sentence: "action acknowledgment requires the host finalizer".into(),
             });
         }
@@ -378,7 +379,7 @@ impl RunsModule {
             .action_request(&queued.request_id)
             .await?
             .ok_or_else(|| Error::Module {
-                reason: "unknown_action_delivery".into(),
+                reason: refusal::CORRUPT.into(),
                 sentence: format!(
                     "delivered item {} names action {}, which does not exist",
                     ack.item, queued.request_id
@@ -390,7 +391,7 @@ impl RunsModule {
                 return Ok(());
             }
             return Err(Error::Module {
-                reason: "conflicting_action_delivery_acknowledgment".into(),
+                reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence: format!(
                     "action item {} was already acknowledged with a different outcome",
                     ack.item
@@ -400,7 +401,7 @@ impl RunsModule {
         let mut queue = self.action_queue(View::Live).await?;
         if queue.head != Some(ack.item) {
             return Err(Error::Module {
-                reason: "action_ack_order".into(),
+                reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence: "action acknowledgment is not the queue head".into(),
             });
         }

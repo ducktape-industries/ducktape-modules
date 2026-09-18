@@ -5,6 +5,7 @@ use super::{
     job_run_id_for, job_spec_hash, jobs_decode_event, jobs_decode_reply, jobs_encode_msg,
     jobs_encode_query, recipe_id_for,
 };
+use sdk::refusal;
 
 impl RunsModule {
     pub(super) async fn request_job_run(
@@ -17,24 +18,24 @@ impl RunsModule {
             .active_agent(&*ctx, &agent_id)
             .await
             .map_err(|sentence| Error::Module {
-                reason: "active_agent".into(),
+                reason: refusal::CORRUPT.into(),
                 sentence,
             })?
         else {
             return Err(Error::Module {
-                reason: "job_model_is_not_active".into(),
+                reason: refusal::WRONG_STATE.into(),
                 sentence: format!("model {agent_id} is not active"),
             });
         };
         if ctx.env().origin != sdk::Origin::Program(model.account) {
             return Err(Error::Module {
-                reason: "job_model_authority".into(),
+                reason: refusal::UNAUTHORIZED.into(),
                 sentence: "job work requires its model's program account".into(),
             });
         }
         let Some(jobs) = &self.jobs else {
             return Err(Error::Module {
-                reason: "jobs_module_is_not_configured".into(),
+                reason: refusal::UNSUPPORTED.into(),
                 sentence: "job runs need a Jobs module, and none is configured".into(),
             });
         };
@@ -48,18 +49,18 @@ impl RunsModule {
             .await?;
         let JobsReply::Job(Some(job)) =
             jobs_decode_reply(&bytes).map_err(|sentence| Error::Module {
-                reason: "codec".into(),
+                reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence,
             })?
         else {
             return Err(Error::Module {
-                reason: "job_is_unavailable".into(),
+                reason: refusal::NOT_FOUND.into(),
                 sentence: format!("Jobs has no job {job_id}"),
             });
         };
         if job.kind != format!("agent/{agent_id}") {
             return Err(Error::Module {
-                reason: "job_names_another_model".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence: format!("job kind {} does not name model {agent_id}", job.kind),
             });
         }
@@ -145,7 +146,7 @@ impl RunsModule {
                 .staged_next_action_item
                 .unwrap_or(self.next_action_item);
             let next = item.checked_add(1).ok_or_else(|| Error::Module {
-                reason: "job_request_counter_exhausted".into(),
+                reason: refusal::EXHAUSTED.into(),
                 sentence: "no action item numbers are left for a job request".into(),
             })?;
             ctx.emit_msg(Msg {
@@ -182,7 +183,7 @@ impl RunsModule {
             .await?;
         let JobsReply::Job(Some(job)) =
             jobs_decode_reply(&bytes).map_err(|sentence| Error::Module {
-                reason: "codec".into(),
+                reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence,
             })?
         else {

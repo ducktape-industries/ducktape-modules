@@ -3,6 +3,7 @@
 use super::*;
 use governance::{GovAction, GovMsg, GovQuery, GovReply, ProposalStatus, ProposalView, VotingRule};
 use node_work::{Directive, ForgeBlob, Submission};
+use sdk::refusal;
 
 /// The same voting horizon the operator ceremony uses, in consensus-time units.
 const VOTING_PERIOD: u64 = 1_000_000;
@@ -89,7 +90,7 @@ fn on_stage(view: &ModuleUpdateView) -> Result<Option<Directive>, Error> {
             commit: request.source.commit.clone(),
             path: request.update.artifact.clone(),
             hash: request.update.digest().map_err(|sentence| Error::Module {
-                reason: "artifact_digest".into(),
+                reason: refusal::CORRUPT.into(),
                 sentence,
             })?,
         },
@@ -168,14 +169,14 @@ impl RunsModule {
     ) -> Result<(), Error> {
         let Origin::External(node) = &ctx.env().origin else {
             return Err(Error::Module {
-                reason: "artifact_reporter".into(),
+                reason: refusal::UNAUTHORIZED.into(),
                 sentence: "artifact residency must be reported by its node key".into(),
             });
         };
         let members = valset::members(ctx, "valset").await?;
         if !members.contains(node) {
             return Err(Error::Module {
-                reason: "artifact_reporter_is_not_a_validator".into(),
+                reason: refusal::UNAUTHORIZED.into(),
                 sentence:
                     "this key is not a current validator, so it cannot report artifact residency"
                         .into(),
@@ -214,7 +215,7 @@ impl RunsModule {
             .update
             .digest()
             .map_err(|sentence| Error::Module {
-                reason: "artifact_digest".into(),
+                reason: refusal::CORRUPT.into(),
                 sentence,
             })?;
         let bytes = ctx
@@ -225,12 +226,12 @@ impl RunsModule {
             .await?;
         let modules::ModulesReply::ModuleStatus { modules } = modules::decode_reply(&bytes)
             .map_err(|sentence| Error::Module {
-                reason: "codec".into(),
+                reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence,
             })?
         else {
             return Err(Error::Module {
-                reason: "unexpected_module_registry_reply".into(),
+                reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence: "the module registry answered the status lookup with something other than module status".into(),
             });
         };
@@ -263,12 +264,12 @@ impl RunsModule {
             .await?;
         let GovReply::Proposal(proposal) =
             governance::decode_reply(&bytes).map_err(|sentence| Error::Module {
-                reason: "codec".into(),
+                reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence,
             })?
         else {
             return Err(Error::Module {
-                reason: "unexpected_deployment_proposal_reply".into(),
+                reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence: format!(
                     "governance answered the proposal lookup for module update {sequence} with something other than a proposal"
                 ),
@@ -285,12 +286,12 @@ impl RunsModule {
                 .await?;
             let GovReply::Shares(shares) =
                 governance::decode_reply(&bytes).map_err(|sentence| Error::Module {
-                    reason: "codec".into(),
+                    reason: refusal::UNEXPECTED_REPLY.into(),
                     sentence,
                 })?
             else {
                 return Err(Error::Module {
-                    reason: "unexpected_governance_shares_reply".into(),
+                    reason: refusal::UNEXPECTED_REPLY.into(),
                     sentence:
                         "governance answered the shares lookup with something other than shares"
                             .into(),

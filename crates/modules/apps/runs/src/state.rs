@@ -5,6 +5,7 @@ use super::{
     dispatch_id_for,
 };
 use sdk::codec;
+use sdk::refusal;
 
 // ---- canonical encoding -------------------------------------------------------
 // u64-le counts, sorted keys, every field in declaration order: u64-le length
@@ -216,7 +217,7 @@ pub(super) fn contains_run_separator(value: &str) -> bool {
 pub(super) fn reject_run_separator(field: &str, value: &str) -> Result<(), Error> {
     if contains_run_separator(value) {
         return Err(Error::Module {
-            reason: "reserved_separator".into(),
+            reason: refusal::INVALID_INPUT.into(),
             sentence: format!("{field} must not contain the reserved unit separator"),
         });
     }

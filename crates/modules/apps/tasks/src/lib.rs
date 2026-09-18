@@ -65,6 +65,7 @@ pub mod index;
 #[cfg(feature = "index-guest")]
 mod index_guest;
 
+use sdk::refusal;
 use sha2::{Digest, Sha256};
 
 use sdk::{
@@ -127,7 +128,7 @@ impl Tasks {
 pub(crate) fn check_record(value: &[u8], what: &str) -> Result<(), Error> {
     if value.len() > MAX_RECORD_BYTES {
         return Err(Error::Module {
-            reason: "record_too_large".into(),
+            reason: refusal::CAPACITY.into(),
             sentence: format!(
                 "{what} is {} bytes, over the {MAX_RECORD_BYTES}-byte store record cap",
                 value.len()
@@ -164,7 +165,7 @@ async fn actor_from_origin(ctx: &dyn Ctx, identity: &str) -> Result<Party, Error
             );
             if !is_active_program {
                 return Err(Error::Module {
-                    reason: "program_account_is_not_active".into(),
+                    reason: refusal::WRONG_STATE.into(),
                     sentence: format!(
                         "account {} is not an active program account",
                         account.number
@@ -176,7 +177,7 @@ async fn actor_from_origin(ctx: &dyn Ctx, identity: &str) -> Result<Party, Error
         Origin::External(key) => {
             if key.is_empty() {
                 return Err(Error::Module {
-                    reason: "invalid_external_origin".into(),
+                    reason: refusal::INVALID_INPUT.into(),
                     sentence: "external origin must carry a non-empty submitter id".into(),
                 });
             }
@@ -184,7 +185,7 @@ async fn actor_from_origin(ctx: &dyn Ctx, identity: &str) -> Result<Party, Error
             let reply = identity_reply(ctx, identity, query).await?;
             let identity::IdentityReply::Account(account) = reply else {
                 return Err(Error::Module {
-                    reason: "unexpected_identity_reply".into(),
+                    reason: refusal::UNEXPECTED_REPLY.into(),
                     sentence: "identity returned an unexpected reply".into(),
                 });
             };
@@ -217,7 +218,7 @@ async fn identity_reply(
 ) -> Result<identity::IdentityReply, Error> {
     let bytes = ctx.query(identity, &identity::encode_query(&query)).await?;
     identity::decode_reply(&bytes).map_err(|sentence| Error::Module {
-        reason: "codec".into(),
+        reason: refusal::UNEXPECTED_REPLY.into(),
         sentence,
     })
 }
@@ -230,7 +231,7 @@ async fn require_account(
     let reply = identity_reply(ctx, identity, identity::IdentityQuery::Get { number }).await?;
     let identity::IdentityReply::Account(Some(account)) = reply else {
         return Err(Error::Module {
-            reason: "task_owner_account_does_not_exist".into(),
+            reason: refusal::NOT_FOUND.into(),
             sentence: format!("task owner account {number} does not exist"),
         });
     };
@@ -246,7 +247,7 @@ async fn next_revision(
     let key = sdk::wire::encode(&("attribution_revision", kind, object));
     let revision = match staged.get(&key).await? {
         Some(bytes) => u64::from_le_bytes(bytes.try_into().map_err(|_| Error::Module {
-            reason: "invalid_attribution_revision".into(),
+            reason: refusal::CORRUPT.into(),
             sentence: format!(
                 "the stored attribution revision of {kind} {object} is not an 8-byte count"
             ),
@@ -254,7 +255,7 @@ async fn next_revision(
         None => 0,
     };
     let next = revision.checked_add(1).ok_or_else(|| Error::Module {
-        reason: "attribution_revision_exhausted".into(),
+        reason: refusal::EXHAUSTED.into(),
         sentence: format!("{kind} {object} has no attribution revision numbers left"),
     })?;
     Ok((key, next))
@@ -582,7 +583,7 @@ impl Module for Tasks {
 
     async fn execute(&mut self, ctx: &mut dyn Ctx, msg: &Msg) -> Result<(), Error> {
         match decode_work_msg(&msg.payload).map_err(|sentence| Error::Module {
-            reason: "codec".into(),
+            reason: refusal::INVALID_INPUT.into(),
             sentence,
         })? {
             WorkMsg::Task(msg) => self.on_task(ctx, msg).await,
@@ -592,7 +593,7 @@ impl Module for Tasks {
 
     async fn query(&self, req: &[u8]) -> Result<Vec<u8>, Error> {
         match decode_work_query(req).map_err(|sentence| Error::Module {
-            reason: "codec".into(),
+            reason: refusal::INVALID_INPUT.into(),
             sentence,
         })? {
             WorkQuery::Task(task_query) => Ok(encode_work_reply(&WorkReply::Task(

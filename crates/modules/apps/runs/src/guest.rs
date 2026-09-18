@@ -12,6 +12,7 @@ use ducktape_module_sdk::{
     Guest, ROOT_KEY, STATE_KEY, WitCtx, block_on, error_to_wit, host, load_store_state, rejected,
     save_store_state,
 };
+use sdk::refusal;
 use sdk::{Module as _, Msg, StateRoot};
 
 /// the genesis-constant id this module registers under (the native twin's id:
@@ -93,7 +94,7 @@ fn loaded_module() -> Result<RunsModule, host::Error> {
     if let Some((bytes, root)) = load_store_state() {
         module
             .install(&bytes, StateRoot(root))
-            .map_err(|e| rejected("runs_state_reload", format!("runs state reload: {e}")))?;
+            .map_err(|e| rejected(refusal::CORRUPT, format!("runs state reload: {e}")))?;
     }
     // AFTER install (which clears the in-memory ring): adopt the persisted
     // recent-run ring. absent means the module never persisted — the
@@ -101,7 +102,7 @@ fn loaded_module() -> Result<RunsModule, host::Error> {
     if let Some(bytes) = host::state_get(&sdk::store_key(HISTORY_KEY)) {
         module
             .install_history(&bytes)
-            .map_err(|e| rejected("runs_history_reload", format!("runs history reload: {e}")))?;
+            .map_err(|e| rejected(refusal::CORRUPT, format!("runs history reload: {e}")))?;
     }
     Ok(module)
 }
