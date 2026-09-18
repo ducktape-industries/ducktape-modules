@@ -1874,7 +1874,7 @@ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 [[package]]
 name = "forge"
 version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape?branch=dev#d91dbe32c9d6275383f4ae742acf7a3b94beac5b"
+source = "git+https://github.com/ducktape-industries/ducktape?branch=feat-2443-forge-tags#8ad3f634cd758420199abb0b098a229f4bebdf59"
 dependencies = [
  "async-trait",
  "attribution-wire",
