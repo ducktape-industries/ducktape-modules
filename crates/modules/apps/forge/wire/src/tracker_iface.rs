@@ -47,6 +47,9 @@ pub const MAX_OPEN_ITEMS_PER_ACTOR: usize = 256;
 /// branches one repo may hold at once. deletes are always allowed, so this is
 /// a ceiling on live branches, not on a repo's history.
 pub const MAX_BRANCHES_PER_REPO: usize = 1024;
+/// tags one repo may hold. a tag is created once and never moves or goes
+/// away, so this is a ceiling on a repo's whole tag history.
+pub const MAX_TAGS_PER_REPO: usize = 1024;
 
 /// an item's lifecycle state. `Merged` is PR-only and terminal.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -161,6 +164,30 @@ pub struct RefHead {
     pub head: String,
 }
 
+/// one tag in a [`crate::ForgeReply::Tags`] listing.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct TagRef {
+    /// the tag SHORT name ("v1.0").
+    pub name: String,
+    /// the oid the tag names as 40-char sha1 hex: the commit for a lightweight
+    /// tag, the tag object for an annotated one.
+    pub oid: String,
+}
+
+/// one tag an atomic [`crate::ForgeMsg::PushRefs`] creates. A tag is created
+/// once and never moves or goes away, so it has no previous oid to compare and
+/// no delete to say: the shape cannot spell either.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct TagCreate {
+    /// the tag SHORT name ("v1.0") — never a full refname.
+    pub name: String,
+    /// raw 20-byte sha1: the commit for a lightweight tag, the tag object for
+    /// an annotated one.
+    pub oid: Vec<u8>,
+}
+
 /// one ref command inside an atomic [`crate::ForgeMsg::PushRefs`]: a per-ref
 /// compare-and-swap. `new_oid: None` deletes the branch (never "main");
 /// `prev_oid: None` requires the branch to be unborn. raw 20-byte sha1 oids.
@@ -267,6 +294,11 @@ mod tests {
         assert!(
             serde_json::from_value::<RefHead>(head).is_err(),
             "a refs listing row is strict"
+        );
+        let tag = json!({ "name": "v1", "oid": "a".repeat(40), "junk": 1 });
+        assert!(
+            serde_json::from_value::<TagRef>(tag).is_err(),
+            "a tags listing row is strict"
         );
     }
 }
