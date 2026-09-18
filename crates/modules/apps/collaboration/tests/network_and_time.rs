@@ -131,9 +131,6 @@ fn a_millis_lane_admits_the_deadline_a_height_lane_calls_too_far_out() {
         )
         .await
         .unwrap_err();
-        assert!(
-            format!("{refusal:?}").contains("more than"),
-            "{refusal:?}"
-        );
+        assert!(format!("{refusal:?}").contains("more than"), "{refusal:?}");
     });
 }
