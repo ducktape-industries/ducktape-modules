@@ -213,7 +213,7 @@ impl RunsModule {
                 ),
             });
         }
-        let Some(model) = self.model(&request.model_id) else {
+        let Some(model) = self.model(&request.model_id).await? else {
             return Err(Error::Module {
                 reason: refusal::NOT_FOUND.into(),
                 sentence: format!("model {} was removed", request.model_id),

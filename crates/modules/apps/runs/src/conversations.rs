@@ -940,13 +940,10 @@ impl RunsModule {
                 sentence: "a conversation id is 1 to 256 bytes".into(),
             });
         }
-        let model = self
-            .model(&agent_id)
-            .cloned()
-            .ok_or_else(|| Error::Module {
-                reason: refusal::NOT_FOUND.into(),
-                sentence: format!("no model {agent_id}"),
-            })?;
+        let model = self.model(&agent_id).await?.ok_or_else(|| Error::Module {
+            reason: refusal::NOT_FOUND.into(),
+            sentence: format!("no model {agent_id}"),
+        })?;
         run_envelope::NativeConversation {
             conversation_id: id.clone(),
             turn_id: crate::conversation_turn_id(0, 0),

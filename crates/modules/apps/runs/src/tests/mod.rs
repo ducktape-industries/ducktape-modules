@@ -974,7 +974,7 @@ fn jobs_event(job_id: &str, kind: &str, spec: &str) -> Msg {
 fn exec(m: &mut RunsModule, ctx: &mut CaptureCtx, op: &Msg) -> Result<(), Error> {
     // These unit probes exercise composition and validation with configured
     // models. The real host suite owns queue timing and program authority.
-    m.models = ctx.agents.clone();
+    m.seed_test_models(&ctx.agents)?;
     let previous: BTreeSet<_> = m
         .receipts
         .staged()
@@ -1184,7 +1184,7 @@ fn page_with_block_count(total: usize, text: &str) -> Vec<pages::Block> {
 /// A module whose current model configuration matches the query fixture.
 fn configured(registry: &Registry) -> RunsModule {
     let mut module = module();
-    module.models = registry.clone();
+    module.seed_test_models(registry).unwrap();
     module
 }
 
