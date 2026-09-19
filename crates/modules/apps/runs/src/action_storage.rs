@@ -251,10 +251,12 @@ impl RunsModule {
             reason: refusal::EXHAUSTED.into(),
             sentence: "no action item numbers are left for this action".into(),
         })?;
-        self.model(&entry.agent_id).ok_or_else(|| Error::Module {
-            reason: refusal::NOT_FOUND.into(),
-            sentence: format!("model {} no longer exists", entry.agent_id),
-        })?;
+        self.model(&entry.agent_id)
+            .await?
+            .ok_or_else(|| Error::Module {
+                reason: refusal::NOT_FOUND.into(),
+                sentence: format!("model {} no longer exists", entry.agent_id),
+            })?;
         let record = ActionRequest {
             view,
             item,

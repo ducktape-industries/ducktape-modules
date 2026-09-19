@@ -38,7 +38,7 @@ fn commit_sink(m: &mut RunsModule, run_id: &str, sink: WireSink) {
 /// (#1835) so a test's echoed `forge_wrapper`/inline PR sink is accepted.
 fn awaiting_run_with_forge(registry: &Registry) -> (RunsModule, String) {
     let mut m = module().with_sink_forge("forge");
-    m.models = registry.clone();
+    m.seed_test_models(registry).unwrap();
     commit(&mut m);
     request_post(&mut m, registry, 2, &[]);
     commit(&mut m);
@@ -1258,7 +1258,7 @@ fn workspace_receipt_mirror_decodes_the_forge_fields() {
 fn chat_run_with_forge_push() -> (RunsModule, Registry, String) {
     let registry = registry(&["bot"]);
     let mut m = module().with_sink_forge("forge");
-    m.models = registry.clone();
+    m.seed_test_models(&registry).unwrap();
     commit(&mut m);
     request_post(&mut m, &registry, 2, &[]);
     commit(&mut m);

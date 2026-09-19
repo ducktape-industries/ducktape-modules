@@ -1605,7 +1605,7 @@ fn safe_boundary_control_and_native_cancellation_require_canonical_job_settlemen
     next_model.account = 3;
     let mut next_registry = registry.clone();
     next_registry.insert("different".into(), next_model.clone());
-    module.models.insert("different".into(), next_model);
+    module.seed_test_models(&next_registry).unwrap();
     let mut next_job = boundary.jobs["worker"].clone();
     next_job.job_id = "worker-next".into();
     next_job.conversation_id = "worker:1".into();

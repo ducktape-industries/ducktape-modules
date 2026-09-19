@@ -944,16 +944,16 @@ fn a_forged_snapshot_session_is_rejected_by_the_decoder() {
     // a session may never outlive its run, and its key is a fixed-width ed25519
     // key — so a snapshot violating either is not one any honest node could have
     // produced. the decoder refuses it before the root check even runs.
-    let (m, ..) = with_open_session();
+    let (m, registry, ..) = with_open_session();
 
     // an orphaned session: the same session, but the pending section is empty.
-    let orphaned = crate::state::encode_committed(
+    let orphaned = crate::state::encode_legacy_committed(
         &m.receipts.snapshot(),
         m.next_action_item,
         &BTreeMap::new(),
         &m.sessions,
         &m.delegations,
-        &m.models,
+        &registry,
     );
     let err = module().install(&orphaned, StateRoot::ZERO).unwrap_err();
     assert!(
@@ -973,13 +973,13 @@ fn a_forged_snapshot_session_is_rejected_by_the_decoder() {
             (run_id.clone(), s)
         })
         .collect();
-    let forged = crate::state::encode_committed(
+    let forged = crate::state::encode_legacy_committed(
         &m.receipts.snapshot(),
         m.next_action_item,
         &m.pending,
         &stunted,
         &m.delegations,
-        &m.models,
+        &registry,
     );
     let err = module().install(&forged, StateRoot::ZERO).unwrap_err();
     assert!(
