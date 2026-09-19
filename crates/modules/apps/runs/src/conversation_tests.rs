@@ -518,3 +518,347 @@ fn dispatch_is_one_match_with_one_handler_per_variant() {
     assert_dispatch_shape(include_str!("conversations.rs"), "step");
     assert_dispatch_shape(include_str!("conversation_schedule.rs"), "schedule_step");
 }
+
+/// Conversations holding an open wake or a pending timer while ONE more is
+/// written, acked, delivered or cranked. Large enough that a queue read whole
+/// would dwarf the fixed cost of a point-addressed one.
+const CROWD: u64 = 2000;
+
+fn counted() -> (RunsModule, crate::tests::receipts::Backing) {
+    let backing = crate::tests::receipts::Backing::default();
+    let module = RunsModule::new(
+        "runs",
+        "chat",
+        "saga",
+        "attribution",
+        "dispatch",
+        "agent",
+        None,
+        None,
+    )
+    .with_time_unit(sdk::genesis_config::TimeUnit::Height)
+    .with_receipt_store(Box::new(backing.clone()));
+    (module, backing)
+}
+
+/// Point reads and the bytes they decoded. The count alone would not catch a
+/// whole-record queue: reading one map is one read however many entries it
+/// holds. The bytes are what grew with the network.
+fn cost(backing: &crate::tests::receipts::Backing) -> (usize, usize) {
+    (backing.reads(), backing.read_bytes())
+}
+fn since(before: (usize, usize), backing: &crate::tests::receipts::Backing) -> (usize, usize) {
+    let (reads, bytes) = cost(backing);
+    (reads - before.0, bytes - before.1)
+}
+
+/// The same point reads either way, and byte drift only from the width of a
+/// varint item id or due time — never from the number of conversations. An
+/// unconverted queue would drift by tens of kilobytes here.
+fn independent_of_n<const N: usize>(small: [(usize, usize); N], large: [(usize, usize); N]) {
+    assert_eq!(
+        small.map(|(reads, _)| reads),
+        large.map(|(reads, _)| reads),
+        "read count grew with the network: {small:?} then {large:?}"
+    );
+    for ((_, small), (_, large)) in small.into_iter().zip(large) {
+        assert!(
+            large <= small + 64,
+            "bytes read grew with the network: {small} then {large}"
+        );
+    }
+}
+
+fn program_ctx(height: u64) -> TestCtx {
+    TestCtx::with_env(sdk::Env {
+        height,
+        consensus_time: height,
+        origin: Origin::Program(7),
+        me: "runs".into(),
+        cause: sdk::Cause::Direct,
+    })
+}
+
+/// R5/R6: a wake write, the per-block delivery round and an ack each cost the
+/// same whether one conversation is waiting or two thousand are.
+#[test]
+fn wake_writes_deliveries_and_acks_read_past_every_other_conversation() {
+    block_on(async {
+        let mut counts = Vec::new();
+        for crowd in [1, CROWD] {
+            let (mut module, backing) = counted();
+            module.write_conversation_state(&state()).unwrap();
+            module
+                .write_conversation_state(&ConversationView {
+                    conversation_id: "crowd-0".into(),
+                    ..state()
+                })
+                .unwrap();
+            let ctx = program_ctx(1);
+            for n in 0..crowd {
+                module
+                    .write_conversation_wake(&ctx, &format!("crowd-{n}"))
+                    .await
+                    .unwrap();
+            }
+            module.commit_block().await.unwrap();
+            let before = cost(&backing);
+            module.write_conversation_wake(&ctx, "room").await.unwrap();
+            let write = since(before, &backing);
+            module.commit_block().await.unwrap();
+            // The wake is already open: the duplicate check is a point read,
+            // never a walk of everyone else's.
+            let before = cost(&backing);
+            module.write_conversation_wake(&ctx, "room").await.unwrap();
+            let duplicate = since(before, &backing);
+            module.commit_block().await.unwrap();
+            let before = cost(&backing);
+            let pending = module.conversation_deliveries(2).await.unwrap();
+            let round = since(before, &backing);
+            assert_eq!(pending.len(), 2, "the queue head is not being served");
+            // Head of the queue either way, so the ack detaches from the same
+            // place in both networks.
+            let item = pending[0].item;
+            let system = TestCtx::with_env(sdk::Env {
+                height: 2,
+                consensus_time: 2,
+                origin: Origin::System,
+                me: "runs".into(),
+                cause: sdk::Cause::Direct,
+            });
+            let before = cost(&backing);
+            assert!(
+                module
+                    .acknowledge_conversation(
+                        &system,
+                        &sdk::Ack {
+                            item,
+                            target: "runs".into(),
+                            outcome: sdk::DeliveryOutcome::Applied,
+                        },
+                    )
+                    .await
+                    .unwrap()
+            );
+            counts.push([write, duplicate, round, since(before, &backing)]);
+        }
+        independent_of_n(counts[0], counts[1]);
+    });
+}
+
+/// R7/R8: one insert and one crank round, against a network holding two
+/// thousand pending timers.
+#[test]
+fn timer_inserts_and_cranks_read_past_every_other_pending_timer() {
+    block_on(async {
+        let mut counts = Vec::new();
+        for crowd in [1, CROWD] {
+            let (mut module, backing) = counted();
+            module.write_conversation_state(&state()).unwrap();
+            let ctx = program_ctx(100);
+            for n in 0..crowd {
+                module
+                    .seed_conversation_timer(&format!("crowd-{n}"), "wait", 10_000 + n)
+                    .await
+                    .unwrap();
+            }
+            module.commit_block().await.unwrap();
+            let before = cost(&backing);
+            module
+                .schedule_conversation_input(
+                    &ctx,
+                    "room".into(),
+                    "schedule".into(),
+                    "checkin".into(),
+                    Some(10),
+                    ConversationInput::Event {
+                        kind: "checkin".into(),
+                        content: serde_json::json!({}),
+                    },
+                )
+                .await
+                .unwrap();
+            let insert = since(before, &backing);
+            module.commit_block().await.unwrap();
+            assert_eq!(
+                module.next_conversation_input_due().await.unwrap(),
+                Some(110)
+            );
+            let before = cost(&backing);
+            module
+                .crank_conversation_inputs(&program_ctx(110))
+                .await
+                .unwrap();
+            let crank = since(before, &backing);
+            assert_eq!(
+                module
+                    .require_conversation("room")
+                    .await
+                    .unwrap()
+                    .admitted_cursor,
+                1
+            );
+            counts.push([insert, crank]);
+        }
+        independent_of_n(counts[0], counts[1]);
+    });
+}
+
+/// The whole-map wake queue a running network already holds is delivered as
+/// it stands, carried over by the next write, and then gone.
+#[test]
+fn a_wake_queue_from_before_the_carry_over_is_delivered_then_converted() {
+    block_on(async {
+        let (mut module, _) = counted();
+        let queued = BTreeMap::from([(4u64, "old-a".to_string()), (9, "old-b".to_string())]);
+        for (item, id) in &queued {
+            module
+                .receipts
+                .stage(
+                    wake_key(*item),
+                    sdk::wire::encode(&Wake {
+                        conversation_id: id.clone(),
+                        cause: sdk::Cause::Direct,
+                        acknowledged: None,
+                    }),
+                )
+                .unwrap();
+        }
+        module
+            .receipts
+            .stage(LEGACY_WAKE_QUEUE.into(), sdk::wire::encode(&queued))
+            .unwrap();
+        module.commit_block().await.unwrap();
+        let served: Vec<_> = module
+            .conversation_deliveries(8)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|item| item.item)
+            .collect();
+        assert_eq!(
+            served,
+            [4, 9],
+            "a queue written before the carry-over stalls"
+        );
+        module.next_action_item = 12;
+        module
+            .write_conversation_wake(&program_ctx(1), "fresh")
+            .await
+            .unwrap();
+        module.commit_block().await.unwrap();
+        assert!(
+            module
+                .receipts
+                .get(LEGACY_WAKE_QUEUE)
+                .await
+                .unwrap()
+                .is_none(),
+            "the old whole-map key outlived its carry-over"
+        );
+        let served: Vec<_> = module
+            .conversation_deliveries(8)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|item| item.item)
+            .collect();
+        assert_eq!(served, [4, 9, 12], "the carry-over lost a queued wake");
+    });
+}
+
+/// The same for the whole-Vec timer queue: it fires in its old order, and the
+/// timers still pending outlive the conversion.
+#[test]
+fn a_timer_queue_from_before_the_carry_over_still_fires_in_order() {
+    block_on(async {
+        let (mut module, _) = counted();
+        module.write_conversation_state(&state()).unwrap();
+        let timers = [("room", "now", 110u64), ("room", "later", 200)];
+        for (id, slot, due_at) in timers {
+            module
+                .receipts
+                .stage(
+                    schedule::schedule_key(id, slot),
+                    sdk::wire::encode(&ConversationSchedule {
+                        conversation_id: id.into(),
+                        schedule_id: slot.into(),
+                        operation_id: schedule::timer_operation_id(id, slot),
+                        actor: Origin::Program(7),
+                        input: ConversationInput::Event {
+                            kind: slot.into(),
+                            content: serde_json::json!({}),
+                        },
+                        status: ConversationScheduleStatus::Pending { due_at },
+                    }),
+                )
+                .unwrap();
+        }
+        module
+            .receipts
+            .stage(
+                schedule::schedule_index("room"),
+                sdk::wire::encode(&["later", "now"]),
+            )
+            .unwrap();
+        module
+            .receipts
+            .stage(
+                schedule::LEGACY_SCHEDULE_QUEUE.into(),
+                schedule::legacy_timer_queue(&timers),
+            )
+            .unwrap();
+        module
+            .receipts
+            .stage(
+                schedule::NEXT_SCHEDULE_DUE.into(),
+                sdk::wire::encode(&Some(110u64)),
+            )
+            .unwrap();
+        module.commit_block().await.unwrap();
+        assert_eq!(
+            module.next_conversation_input_due().await.unwrap(),
+            Some(110)
+        );
+        module
+            .crank_conversation_inputs(&program_ctx(110))
+            .await
+            .unwrap();
+        module.commit_block().await.unwrap();
+        assert!(
+            module
+                .receipts
+                .get(schedule::LEGACY_SCHEDULE_QUEUE)
+                .await
+                .unwrap()
+                .is_none(),
+            "the old whole-queue key outlived its carry-over"
+        );
+        assert_eq!(
+            module
+                .require_conversation("room")
+                .await
+                .unwrap()
+                .admitted_cursor,
+            1
+        );
+        // The timer that was not due survived the conversion and is the head.
+        assert_eq!(
+            module.next_conversation_input_due().await.unwrap(),
+            Some(200)
+        );
+        module
+            .crank_conversation_inputs(&program_ctx(200))
+            .await
+            .unwrap();
+        assert_eq!(
+            module
+                .require_conversation("room")
+                .await
+                .unwrap()
+                .admitted_cursor,
+            2
+        );
+        assert_eq!(module.next_conversation_input_due().await.unwrap(), None);
+    });
+}

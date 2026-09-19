@@ -1,6 +1,7 @@
 //! Durable intake, turn ownership, and native history. Effects are written only by
 //! the executor below; source hooks never run a model in the source write cascade.
 use super::*;
+use crate::receipts::View;
 use sdk::refusal;
 use serde::de::DeserializeOwned;
 #[path = "conversation_runtime.rs"]
@@ -23,7 +24,24 @@ fn numbered(kind: &str, id: &str, n: u64) -> String {
 fn op_key(id: &str, op: &str) -> String {
     format!("{}/{}", key("operation", id), dispatch_id_for(op))
 }
-const WAKE_QUEUE: &str = "conversation/wakes";
+/// The pre-point-address whole-map queue. Read once on the first touch of the
+/// new layout, carried over, then deleted; the fallback goes in a later round.
+const LEGACY_WAKE_QUEUE: &str = "conversation/wakes";
+/// head/tail of the wake FIFO — two `Option<u64>`, fixed width forever.
+const WAKE_QUEUE: &str = "conversation/wake_queue";
+fn wake_key(item: u64) -> String {
+    format!("conversation/wake/{item}")
+}
+/// The queue links of one queued item. Written when the item joins the FIFO
+/// and deleted when it leaves, so the record exists only while it is queued —
+/// unlike `wake_key`, which outlives the queue to answer a repeated ack.
+fn wake_link_key(item: u64) -> String {
+    format!("conversation/wake_link/{item}")
+}
+/// The open wake of one conversation. Its presence IS the duplicate check.
+fn wake_of_key(id: &str) -> String {
+    format!("conversation/wake_of/{}", dispatch_id_for(id))
+}
 
 fn require_coordinating_source(state: &ConversationView) -> Result<(), Error> {
     let job_backed = matches!(state.source, ConversationSource::Job { .. });
@@ -42,6 +60,24 @@ struct Wake {
     conversation_id: String,
     cause: sdk::Cause,
     acknowledged: Option<[u8; 32]>,
+}
+
+/// The FIFO ends. Both are `None` exactly when no wake is queued.
+#[derive(Clone, Copy, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WakeQueue {
+    head: Option<u64>,
+    tail: Option<u64>,
+}
+
+/// One queued item's neighbours. Doubly linked because a wake is detached
+/// where it is delivered, not where it sits: `begin_conversation_wake` and a
+/// late ack both unlink from the middle, and neither may walk the queue.
+#[derive(Clone, Copy, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WakeLink {
+    prev: Option<u64>,
+    next: Option<u64>,
 }
 
 /// Every state-machine input is visible here. Authentication and sibling reads
@@ -477,6 +513,20 @@ impl RunsModule {
             })
             .transpose()
     }
+    /// The same point read against the previous block boundary. `pending_items`
+    /// runs before the block's writes are committed and must not see them.
+    async fn committed_record<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>, Error> {
+        self.receipts
+            .committed(key)
+            .await?
+            .map(|b| {
+                sdk::wire::decode(&b).map_err(|sentence| Error::Module {
+                    reason: refusal::CORRUPT.into(),
+                    sentence,
+                })
+            })
+            .transpose()
+    }
     pub(super) async fn conversation(&self, id: &str) -> Result<Option<ConversationView>, Error> {
         self.conversation_read(&key("state", id)).await
     }
@@ -558,12 +608,69 @@ impl RunsModule {
         self.receipts
             .stage(key("run", &turn.run_id), sdk::wire::encode(&id))
     }
-    async fn write_conversation_wake(&mut self, ctx: &dyn Ctx, id: &str) -> Result<(), Error> {
-        let mut queue: BTreeMap<u64, String> = self
+    /// The whole-map queue, if this module has not carried it over yet.
+    async fn legacy_wake_queue(&self, view: View) -> Result<BTreeMap<u64, String>, Error> {
+        let Some(bytes) = self.receipts.read(LEGACY_WAKE_QUEUE, view).await? else {
+            return Ok(BTreeMap::new());
+        };
+        sdk::wire::decode(&bytes).map_err(|sentence| Error::Module {
+            reason: refusal::CORRUPT.into(),
+            sentence,
+        })
+    }
+    /// Carry the whole-map queue into the linked layout, once. O(the old
+    /// record) — bounded by the store value cap that made it a problem — and
+    /// then the old key is gone and every wake path is point-addressed.
+    async fn carry_over_wake_queue(&mut self) -> Result<(), Error> {
+        let legacy = self.legacy_wake_queue(View::Live).await?;
+        self.receipts.remove(LEGACY_WAKE_QUEUE.into());
+        let mut queue: WakeQueue = self
             .conversation_read(WAKE_QUEUE)
             .await?
             .unwrap_or_default();
-        let already_queued = queue.values().any(|queued| queued == id);
+        // Ascending item order is the delivery order the map was read in.
+        for (item, id) in legacy {
+            let already = self
+                .conversation_read::<u64>(&wake_of_key(&id))
+                .await?
+                .is_some();
+            if already {
+                continue;
+            }
+            self.link_wake(&mut queue, item, &id).await?;
+        }
+        self.receipts
+            .stage(WAKE_QUEUE.into(), sdk::wire::encode(&queue))
+    }
+    /// Append `item` to the FIFO tail and claim the conversation's open slot.
+    async fn link_wake(&mut self, queue: &mut WakeQueue, item: u64, id: &str) -> Result<(), Error> {
+        let link = WakeLink {
+            prev: queue.tail,
+            next: None,
+        };
+        if let Some(tail) = queue.tail {
+            let mut previous: WakeLink = self
+                .conversation_read(&wake_link_key(tail))
+                .await?
+                .unwrap_or_default();
+            previous.next = Some(item);
+            self.receipts
+                .stage(wake_link_key(tail), sdk::wire::encode(&previous))?;
+        } else {
+            queue.head = Some(item);
+        }
+        queue.tail = Some(item);
+        self.receipts
+            .stage(wake_link_key(item), sdk::wire::encode(&link))?;
+        self.receipts
+            .stage(wake_of_key(id), sdk::wire::encode(&item))
+    }
+    async fn write_conversation_wake(&mut self, ctx: &dyn Ctx, id: &str) -> Result<(), Error> {
+        self.carry_over_wake_queue().await?;
+        let already_queued = self
+            .conversation_read::<u64>(&wake_of_key(id))
+            .await?
+            .is_some();
         if already_queued {
             return Ok(());
         }
@@ -579,15 +686,60 @@ impl RunsModule {
             cause: ctx.env().cause.clone(),
             acknowledged: None,
         };
-        self.receipts.stage(
-            format!("conversation/wake/{item}"),
-            sdk::wire::encode(&wake),
-        )?;
-        queue.insert(item, id.into());
+        self.receipts
+            .stage(wake_key(item), sdk::wire::encode(&wake))?;
+        let mut queue: WakeQueue = self
+            .conversation_read(WAKE_QUEUE)
+            .await?
+            .unwrap_or_default();
+        self.link_wake(&mut queue, item, id).await?;
         self.receipts
             .stage(WAKE_QUEUE.into(), sdk::wire::encode(&queue))?;
         self.staged_next_action_item = Some(next);
         Ok(())
+    }
+    /// Unlink one item wherever it sits. Reads its two neighbours and the
+    /// ends, never the queue between them.
+    async fn detach_conversation_wake(&mut self, item: u64, id: &str) -> Result<(), Error> {
+        self.carry_over_wake_queue().await?;
+        let Some(link) = self
+            .conversation_read::<WakeLink>(&wake_link_key(item))
+            .await?
+        else {
+            return Ok(());
+        };
+        let mut queue: WakeQueue = self
+            .conversation_read(WAKE_QUEUE)
+            .await?
+            .unwrap_or_default();
+        match link.prev {
+            Some(prev) => {
+                let mut previous: WakeLink = self
+                    .conversation_read(&wake_link_key(prev))
+                    .await?
+                    .unwrap_or_default();
+                previous.next = link.next;
+                self.receipts
+                    .stage(wake_link_key(prev), sdk::wire::encode(&previous))?;
+            }
+            None => queue.head = link.next,
+        }
+        match link.next {
+            Some(next) => {
+                let mut following: WakeLink = self
+                    .conversation_read(&wake_link_key(next))
+                    .await?
+                    .unwrap_or_default();
+                following.prev = link.prev;
+                self.receipts
+                    .stage(wake_link_key(next), sdk::wire::encode(&following))?;
+            }
+            None => queue.tail = link.prev,
+        }
+        self.receipts.remove(wake_link_key(item));
+        self.receipts.remove(wake_of_key(id));
+        self.receipts
+            .stage(WAKE_QUEUE.into(), sdk::wire::encode(&queue))
     }
     async fn apply_conversation(
         &mut self,

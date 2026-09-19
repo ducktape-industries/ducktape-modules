@@ -2,21 +2,36 @@ use super::*;
 use std::rc::Rc;
 
 #[derive(Default)]
-struct Stored {
+pub(crate) struct Stored {
     records: BTreeMap<[u8; 32], Vec<u8>>,
-    reads: usize,
+    pub(crate) reads: usize,
+    read_bytes: usize,
     writes: Vec<[u8; 32]>,
 }
 
 #[derive(Clone, Default)]
-struct Backing(Rc<RefCell<Stored>>);
+pub(crate) struct Backing(pub(crate) Rc<RefCell<Stored>>);
+
+impl Backing {
+    /// Every point read the module has made through this store.
+    pub(crate) fn reads(&self) -> usize {
+        self.0.borrow().reads
+    }
+    /// What those reads decoded. A whole-record queue keeps the read count flat
+    /// while this grows with the network, so a bound test has to watch both.
+    pub(crate) fn read_bytes(&self) -> usize {
+        self.0.borrow().read_bytes
+    }
+}
 
 #[async_trait::async_trait(?Send)]
 impl sdk::MerkleStore for Backing {
     async fn get(&self, key: &[u8; 32]) -> Result<Option<Vec<u8>>, Error> {
         let mut stored = self.0.borrow_mut();
         stored.reads += 1;
-        Ok(stored.records.get(key).cloned())
+        let value = stored.records.get(key).cloned();
+        stored.read_bytes += value.as_ref().map_or(0, Vec::len);
+        Ok(value)
     }
     async fn commit_batch(
         &mut self,
