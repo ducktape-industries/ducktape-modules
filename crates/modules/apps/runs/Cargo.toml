@@ -90,7 +90,7 @@ commonware-runtime = { workspace = true }
 # forge::decode_msg. keeping forge dev-only keeps vendored libgit2/git2 out of
 # runs' production build + clippy graph. The NATIVE module (it re-exports its
 # wire), because the tests drive a real `forge::Forge`.
-forge = { git = "https://github.com/ducktape-industries/ducktape", branch = "feat-2443-forge-tags", package = "forge" }
+forge = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "forge" }
 # the other NATIVE modules a programmable-run test composes. The same names in
 # [dependencies] are the WIRE crates, so these carry a `-module` suffix and the
 # test module aliases them back (`use dispatch_module as dispatch;`).
