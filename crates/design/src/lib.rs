@@ -75,6 +75,33 @@ pub mod radius {
     pub const PILL: f64 = 999.;
 }
 
+/// Gaps and insets, in pixels. One ladder: every gap the kit's builders open
+/// and every edge they pad is a step on it, so a view names the step instead
+/// of the number.
+pub mod spacing {
+    /// the tightest gap: a row's own inset, two lines that belong together
+    pub const XXS: f64 = 4.;
+    /// a label over the thing it names: a field, a stacked key/value
+    pub const XS: f64 = 6.;
+    /// the default gap between siblings in a row or a column
+    pub const SM: f64 = 8.;
+    /// a gap that separates without opening a section
+    pub const MD: f64 = 10.;
+    /// a card's inset, and the gap between a label and its value
+    pub const LG: f64 = 12.;
+    /// a section inset: what an empty state or a centred block sits in
+    pub const XL: f64 = 24.;
+}
+
+/// The heights a view fixes, in pixels, so rows line up across views and a
+/// list can be reserved or virtualized without measuring text.
+pub mod height {
+    /// a list row: a chat name, a file, a forge item
+    pub const ROW: f64 = 26.;
+    /// a control on one line: a toolbar button, a picker, an input beside one
+    pub const CONTROL: f64 = 28.;
+}
+
 /// One sRGB color as the wire carries it: `[r, g, b, a]` in `0.0..=1.0`.
 pub type Color = [f32; 4];
 
@@ -372,6 +399,19 @@ mod tests {
                 "{asset} is not a TrueType/OpenType file"
             );
         }
+    }
+
+    #[test]
+    fn the_scales_ascend() {
+        let scale = [
+            spacing::XXS,
+            spacing::XS,
+            spacing::SM,
+            spacing::MD,
+            spacing::LG,
+            spacing::XL,
+        ];
+        assert!(scale.windows(2).all(|pair| pair[0] < pair[1]));
     }
 
     #[test]
