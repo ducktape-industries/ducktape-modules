@@ -7,8 +7,10 @@ pub(crate) struct Stored {
     pub(crate) reads: usize,
     read_bytes: usize,
     read_sizes: Vec<usize>,
+    read_keys: Vec<[u8; 32]>,
     distinct: std::collections::BTreeSet<[u8; 32]>,
     writes: Vec<[u8; 32]>,
+    write_entries: Vec<([u8; 32], Option<usize>)>,
     write_bytes: usize,
     largest_write: usize,
 }
@@ -44,10 +46,27 @@ impl Backing {
         stored.reads = 0;
         stored.read_bytes = 0;
         stored.read_sizes.clear();
+        stored.read_keys.clear();
         stored.distinct.clear();
+    }
+    pub(crate) fn forget_writes(&self) {
+        let mut stored = self.0.borrow_mut();
+        stored.writes.clear();
+        stored.write_entries.clear();
+        stored.write_bytes = 0;
+        stored.largest_write = 0;
     }
     pub(crate) fn read_sizes(&self) -> Vec<usize> {
         self.0.borrow().read_sizes.clone()
+    }
+    pub(crate) fn read_key_count(&self, key: &str) -> usize {
+        let key = sdk::store_key(key.as_bytes());
+        self.0
+            .borrow()
+            .read_keys
+            .iter()
+            .filter(|read| **read == key)
+            .count()
     }
     /// Bytes supplied to committed-store writes since construction.
     pub(crate) fn write_bytes(&self) -> usize {
@@ -59,6 +78,24 @@ impl Backing {
     }
     pub(crate) fn largest_write(&self) -> usize {
         self.0.borrow().largest_write
+    }
+    pub(crate) fn write_key_count(&self, key: &str) -> usize {
+        let key = sdk::store_key(key.as_bytes());
+        self.0
+            .borrow()
+            .write_entries
+            .iter()
+            .filter(|(written, _)| *written == key)
+            .count()
+    }
+    pub(crate) fn delete_key_count(&self, key: &str) -> usize {
+        let key = sdk::store_key(key.as_bytes());
+        self.0
+            .borrow()
+            .write_entries
+            .iter()
+            .filter(|(written, value)| *written == key && value.is_none())
+            .count()
     }
     /// The committed value size at a logical receipt key.
     pub(crate) fn value_len(&self, key: &str) -> Option<usize> {
@@ -76,6 +113,7 @@ impl sdk::MerkleStore for Backing {
         let mut stored = self.0.borrow_mut();
         stored.reads += 1;
         stored.distinct.insert(*key);
+        stored.read_keys.push(*key);
         let value = stored.records.get(key).cloned();
         let size = value.as_ref().map_or(0, Vec::len);
         stored.read_bytes += size;
@@ -89,6 +127,9 @@ impl sdk::MerkleStore for Backing {
         let mut stored = self.0.borrow_mut();
         for (key, value) in writes {
             stored.writes.push(key);
+            stored
+                .write_entries
+                .push((key, value.as_ref().map(Vec::len)));
             match value {
                 Some(value) => {
                     stored.write_bytes += value.len();
@@ -127,8 +168,11 @@ fn hosted() -> (RunsModule, Backing, PendingState) {
         stored.reads = 0;
         stored.read_bytes = 0;
         stored.distinct.clear();
+        stored.read_keys.clear();
         stored.writes.clear();
+        stored.write_entries.clear();
         stored.write_bytes = 0;
+        stored.largest_write = 0;
     }
     (module, backing, entry)
 }

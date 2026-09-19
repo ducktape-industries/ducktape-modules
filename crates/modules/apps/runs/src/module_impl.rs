@@ -210,7 +210,10 @@ impl Module for RunsModule {
                 self.legacy_sessions.as_ref().unwrap(),
                 &self.delegations,
             ),
-            Some(super::state::StateVersion::V2) | None => {
+            Some(super::state::StateVersion::V2) => {
+                super::state::post_b_root(&records, self.next_action_item, &self.delegations)
+            }
+            Some(super::state::StateVersion::V3) | None => {
                 committed_root(&records, self.next_action_item, &self.delegations)
             }
         }
@@ -333,13 +336,7 @@ impl Module for RunsModule {
                 Ok(encode_reply(&RunsReply::AgentSessions(sessions)))
             }
             RunsQuery::Delegations { caller_run_id } => {
-                let delegations = self
-                    .delegation_ids()
-                    .into_iter()
-                    .filter_map(|id| self.delegation(&id))
-                    .filter(|state| state.view.caller_run_id == caller_run_id)
-                    .map(|state| state.view.clone())
-                    .collect();
+                let delegations = self.delegations_for_caller(&caller_run_id).await?;
                 Ok(encode_reply(&RunsReply::Delegations(delegations)))
             }
         }
@@ -395,21 +392,12 @@ impl Module for RunsModule {
             self.legacy_models = None;
             self.legacy_pending = None;
             self.legacy_sessions = None;
+            self.delegations.clear();
             self.legacy_state_version = None;
             self.legacy_migration_staged = false;
         }
         if let Some(next) = self.staged_next_action_item.take() {
             self.next_action_item = next;
-        }
-        for (id, staged) in std::mem::take(&mut self.pending_delegations) {
-            match staged {
-                Some(delegation) => {
-                    self.delegations.insert(id, delegation);
-                }
-                None => {
-                    self.delegations.remove(&id);
-                }
-            }
         }
         for record in std::mem::take(&mut self.pending_history) {
             self.history.push_back(record);
@@ -447,7 +435,6 @@ impl Module for RunsModule {
         self.receipts.abort();
         self.legacy_migration_staged = false;
         self.staged_next_action_item = None;
-        self.pending_delegations.clear();
         self.pending_history.clear();
         self.pending_pr_links.clear();
         self.pending_action_rejections.clear();

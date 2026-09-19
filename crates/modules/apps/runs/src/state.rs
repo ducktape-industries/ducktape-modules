@@ -1,7 +1,9 @@
 use super::{
-    AgentSession, BTreeMap, DelegationState, DelegationStatus, Digest, Error,
-    MAX_ACTIONS_PER_SESSION, MAX_DELEGATIONS_PER_RUN, MAX_REQUEST_ID_BYTES, PendingState,
-    RUN_KEY_SEPARATOR, RunOrigin, SESSION_KEY_LEN, Sha256, StateRoot, WireSink, delegation_id_for,
+    AgentSession, BTreeMap, DelegationHeader, DelegationRequest, DelegationResult, DelegationState,
+    DelegationStatus, Digest, Error, MAX_ACTIONS_PER_SESSION, MAX_DELEGATION_EDGES_PER_RUN,
+    MAX_DELEGATION_INSTRUCTION_BYTES, MAX_DELEGATIONS_BYTES, MAX_DELEGATIONS_PER_RUN,
+    MAX_REPLY_BLOCKS_BYTES, MAX_REQUEST_ID_BYTES, PendingState, RUN_KEY_SEPARATOR, RunOrigin,
+    SESSION_KEY_LEN, Sha256, StateRoot, WireSink, delegated_run_id_for, delegation_id_for,
     dispatch_id_for,
 };
 use sdk::codec;
@@ -20,6 +22,7 @@ use std::collections::BTreeSet;
 const POST_A_MAGIC: u64 = u64::MAX - 1;
 const POST_A_VERSION: u8 = 1;
 const POST_B_VERSION: u8 = 2;
+const POST_C_VERSION: u8 = 3;
 
 pub(super) const RUN_META_KEY: &str = "run/meta";
 
@@ -44,6 +47,187 @@ pub(super) fn pending_key(dispatch_id: &str) -> String {
 
 pub(super) fn session_key(run_id: &str) -> String {
     format!("session/{run_id}")
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct DelegationTree {
+    pub(super) ids: Vec<String>,
+    pub(super) pending: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct DelegationRunIndex {
+    pub(super) run_id: String,
+    pub(super) delegation_id: String,
+    pub(super) root_run_id: String,
+}
+
+pub(super) fn delegation_tree_key(root_run_id: &str) -> String {
+    format!("dlg/tree/{root_run_id}")
+}
+
+pub(super) fn delegation_key(delegation_id: &str) -> String {
+    format!("dlg/{delegation_id}")
+}
+
+pub(super) fn delegation_run_key(run_id: &str) -> String {
+    format!("dlg/run/{}", dispatch_id_for(run_id))
+}
+
+pub(super) fn delegation_request_key(delegation_id: &str) -> String {
+    format!("dlg/req/{delegation_id}")
+}
+
+pub(super) fn delegation_reply_key(delegation_id: &str) -> String {
+    format!("dlg/reply/{delegation_id}")
+}
+
+pub(super) fn encode_delegation_tree(root_run_id: &str, tree: &DelegationTree) -> Vec<u8> {
+    debug_assert!(tree.ids.len() <= MAX_DELEGATION_EDGES_PER_RUN);
+    serde_json::to_vec(&(root_run_id, tree)).expect("delegation tree serializes")
+}
+
+pub(super) fn decode_delegation_tree(
+    root_run_id: &str,
+    bytes: &[u8],
+) -> Result<DelegationTree, String> {
+    let (stored_root, tree): (String, DelegationTree) = serde_json::from_slice(bytes)
+        .map_err(|error| format!("delegation tree failed to decode: {error}"))?;
+    if stored_root != root_run_id {
+        return Err("delegation tree key does not match its root".into());
+    }
+    if tree.ids.is_empty()
+        || tree.ids.len() > MAX_DELEGATION_EDGES_PER_RUN
+        || tree.pending > tree.ids.len() as u64
+        || tree.pending > MAX_DELEGATIONS_PER_RUN as u64
+        || !tree.ids.windows(2).all(|ids| ids[0] < ids[1])
+        || tree.ids.iter().any(|id| !valid_delegation_id(id))
+    {
+        return Err("delegation tree has invalid ids or counts".into());
+    }
+    Ok(tree)
+}
+
+pub(super) fn encode_delegation_header(header: &DelegationHeader) -> Vec<u8> {
+    serde_json::to_vec(header).expect("delegation header serializes")
+}
+
+pub(super) fn decode_delegation_header(
+    delegation_id: &str,
+    bytes: &[u8],
+) -> Result<DelegationHeader, String> {
+    let header: DelegationHeader = serde_json::from_slice(bytes)
+        .map_err(|error| format!("delegation header failed to decode: {error}"))?;
+    if header.delegation_id != delegation_id {
+        return Err("delegation header key does not match its id".into());
+    }
+    validate_delegation_header(&header)?;
+    Ok(header)
+}
+
+pub(super) fn encode_delegation_run_index(index: &DelegationRunIndex) -> Vec<u8> {
+    serde_json::to_vec(index).expect("delegation run index serializes")
+}
+
+pub(super) fn decode_delegation_run_index(
+    dispatch_id: &str,
+    bytes: &[u8],
+) -> Result<DelegationRunIndex, String> {
+    let index: DelegationRunIndex = serde_json::from_slice(bytes)
+        .map_err(|error| format!("delegation run index failed to decode: {error}"))?;
+    if index.run_id.is_empty()
+        || dispatch_id_for(&index.run_id) != dispatch_id
+        || !valid_delegation_id(&index.delegation_id)
+        || index.root_run_id.is_empty()
+    {
+        return Err("delegation run index has invalid identity fields".into());
+    }
+    Ok(index)
+}
+
+pub(super) fn encode_delegation_request(request: &DelegationRequest) -> Result<Vec<u8>, Error> {
+    let bytes = serde_json::to_vec(request).expect("delegation request serializes");
+    if bytes.len() > MAX_DELEGATIONS_BYTES {
+        return Err(Error::Module {
+            reason: refusal::CAPACITY.into(),
+            sentence: "delegation request exceeds its protocol cap".into(),
+        });
+    }
+    Ok(bytes)
+}
+
+pub(super) fn encode_delegation_result(
+    delegation_id: &str,
+    result: &DelegationResult,
+) -> Result<Vec<u8>, Error> {
+    let bytes = serde_json::to_vec(result).expect("delegation result serializes");
+    if bytes.len() > MAX_REPLY_BLOCKS_BYTES + 4096 {
+        return Err(Error::Module {
+            reason: refusal::CAPACITY.into(),
+            sentence: format!("delegation result for {delegation_id} exceeds its protocol cap"),
+        });
+    }
+    Ok(bytes)
+}
+
+pub(super) fn decode_delegation_result(
+    delegation_id: &str,
+    bytes: &[u8],
+) -> Result<DelegationResult, String> {
+    if bytes.len() > MAX_REPLY_BLOCKS_BYTES + 4096 {
+        return Err(format!(
+            "delegation result for {delegation_id} exceeds its protocol cap"
+        ));
+    }
+    let result: DelegationResult = serde_json::from_slice(bytes)
+        .map_err(|error| format!("delegation result failed to decode: {error}"))?;
+    if serde_json::to_vec(&result)
+        .map_err(|error| format!("delegation result failed to encode: {error}"))?
+        .len()
+        > MAX_REPLY_BLOCKS_BYTES + 4096
+    {
+        return Err(format!(
+            "delegation result for {delegation_id} exceeds its protocol cap"
+        ));
+    }
+    Ok(result)
+}
+
+fn valid_delegation_id(id: &str) -> bool {
+    id.len() == 64
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+}
+
+pub(super) fn validate_delegation_header(header: &DelegationHeader) -> Result<(), String> {
+    if !valid_delegation_id(&header.delegation_id)
+        || header.delegation_id != delegation_id_for(&header.caller_run_id, &header.request_id)
+        || header.request_id.is_empty()
+        || header.request_id.len() > MAX_REQUEST_ID_BYTES
+        || contains_run_separator(&header.request_id)
+        || header.caller_run_id.is_empty()
+        || header.root_run_id.is_empty()
+        || header.callee_run_id.is_empty()
+        || header.callee_agent_id.is_empty()
+    {
+        return Err("delegation header has invalid identity fields".into());
+    }
+    if crate::validate_agent_id(&header.callee_agent_id).is_err()
+        || header.callee_run_id
+            != delegated_run_id_for(&header.delegation_id, &header.callee_agent_id)
+    {
+        return Err("delegation header has a non-canonical callee".into());
+    }
+    if header.status == DelegationStatus::Pending && header.completed_at.is_some() {
+        return Err("pending delegation header has a completion timestamp".into());
+    }
+    if header.status != DelegationStatus::Pending && header.completed_at.is_none() {
+        return Err("terminal delegation header has no completion timestamp".into());
+    }
+    Ok(())
 }
 
 pub(super) fn encode_pending_meta(head: Option<&str>, count: u64) -> Vec<u8> {
@@ -236,14 +420,13 @@ fn encode_body(
 pub(super) fn encode_committed(
     receipts: &crate::receipts::Records,
     next_action_item: u64,
-    delegations: &BTreeMap<String, DelegationState>,
+    _legacy_delegations: &BTreeMap<String, DelegationState>,
 ) -> Vec<u8> {
     let mut out = Vec::new();
     out.extend_from_slice(&POST_A_MAGIC.to_le_bytes());
-    out.push(POST_B_VERSION);
+    out.push(POST_C_VERSION);
     codec::push_bytes(&mut out, &sdk::wire::encode(receipts));
     out.extend_from_slice(&next_action_item.to_le_bytes());
-    encode_delegations(&mut out, delegations);
     out
 }
 
@@ -256,6 +439,20 @@ fn encode_delegations(out: &mut Vec<u8>, delegations: &BTreeMap<String, Delegati
             &serde_json::to_vec(delegation).expect("delegation state serializes"),
         );
     }
+}
+
+pub(super) fn encode_post_b_committed(
+    action_requests: &crate::receipts::Records,
+    next_action_item: u64,
+    delegations: &BTreeMap<String, DelegationState>,
+) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(&POST_A_MAGIC.to_le_bytes());
+    out.push(POST_B_VERSION);
+    codec::push_bytes(&mut out, &sdk::wire::encode(action_requests));
+    out.extend_from_slice(&next_action_item.to_le_bytes());
+    encode_delegations(&mut out, delegations);
+    out
 }
 
 pub(super) fn encode_post_a_committed(
@@ -322,6 +519,21 @@ pub(super) fn post_a_root(
             next_action_item,
             pending,
             sessions,
+            delegations,
+        ))
+        .into(),
+    )
+}
+
+pub(super) fn post_b_root(
+    action_requests: &crate::receipts::Records,
+    next_action_item: u64,
+    delegations: &BTreeMap<String, DelegationState>,
+) -> StateRoot {
+    StateRoot(
+        Sha256::digest(encode_post_b_committed(
+            action_requests,
+            next_action_item,
             delegations,
         ))
         .into(),
@@ -478,6 +690,9 @@ fn validate_post_b_records(
     let mut pending = BTreeMap::new();
     let mut links = BTreeMap::new();
     for (key, bytes) in records {
+        if bytes.len() > sdk::MAX_STORE_VALUE_BYTES {
+            return Err("receipt record exceeds the store value bound".into());
+        }
         if key == RUN_META_KEY {
             continue;
         }
@@ -564,6 +779,8 @@ fn validate_decoded_delegations(
     delegations: &BTreeMap<String, DelegationState>,
 ) -> Result<(), String> {
     let mut roots = BTreeMap::<&str, usize>::new();
+    let mut totals = BTreeMap::<&str, usize>::new();
+    let mut graphs = BTreeMap::<&str, Vec<(&str, &str)>>::new();
     for (id, state) in delegations {
         let view = &state.view;
         if id != &view.delegation_id
@@ -580,16 +797,53 @@ fn validate_decoded_delegations(
         if view.callee_agent_id != state.request.agent_id {
             return Err("snapshot delegation callee does not match its request".into());
         }
-        if !pending.contains_key(&dispatch_id_for(&view.root_run_id)) {
-            return Err("snapshot delegation root is not in flight".into());
+        validate_delegation_header(&DelegationHeader::from_state(state))?;
+        if (view.status == DelegationStatus::Pending) != view.result.is_none() {
+            return Err("snapshot delegation status does not match its result".into());
+        }
+        if state.request.instruction.trim().is_empty()
+            || state.request.instruction.len() > MAX_DELEGATION_INSTRUCTION_BYTES
+            || serde_json::to_vec(&state.request)
+                .map_err(|error| format!("snapshot delegation request failed to encode: {error}"))?
+                .len()
+                > MAX_DELEGATIONS_BYTES
+        {
+            return Err("snapshot delegation request exceeds its protocol bounds".into());
+        }
+        if let Some(result) = &view.result
+            && serde_json::to_vec(result)
+                .map_err(|error| format!("snapshot delegation result failed to encode: {error}"))?
+                .len()
+                > MAX_REPLY_BLOCKS_BYTES + 4096
+        {
+            return Err("snapshot delegation result exceeds its protocol bounds".into());
+        }
+        let root = pending
+            .get(&dispatch_id_for(&view.root_run_id))
+            .ok_or_else(|| "snapshot delegation root is not in flight".to_string())?;
+        if root.delegation_id.is_some() {
+            return Err("snapshot delegation tree root is itself delegated".into());
         }
         if view.status == DelegationStatus::Pending {
             let child = pending
                 .get(&dispatch_id_for(&view.callee_run_id))
                 .ok_or_else(|| "snapshot pending delegation has no callee run".to_string())?;
-            if child.delegation_id.as_deref() != Some(id.as_str()) {
+            if child.delegation_id.as_deref() != Some(id.as_str())
+                || child.agent_id != view.callee_agent_id
+            {
                 return Err("snapshot callee run points at a different delegation".into());
             }
+        } else if pending.contains_key(&dispatch_id_for(&view.callee_run_id)) {
+            return Err("snapshot terminal delegation still has a pending callee".into());
+        }
+        graphs
+            .entry(&view.root_run_id)
+            .or_default()
+            .push((&view.caller_run_id, &view.callee_run_id));
+        let total = totals.entry(&view.root_run_id).or_default();
+        *total += 1;
+        if *total > MAX_DELEGATION_EDGES_PER_RUN {
+            return Err("snapshot delegation tree exceeds its lifetime limit".into());
         }
         if view.status == DelegationStatus::Pending {
             *roots.entry(&view.root_run_id).or_default() += 1;
@@ -597,6 +851,9 @@ fn validate_decoded_delegations(
     }
     if roots.values().any(|count| *count > MAX_DELEGATIONS_PER_RUN) {
         return Err("snapshot delegation tree exceeds its concurrency limit".into());
+    }
+    for (root, edges) in graphs {
+        validate_delegation_graph(root, edges)?;
     }
     for pending_run in pending.values() {
         let Some(id) = pending_run.delegation_id.as_deref() else {
@@ -609,6 +866,184 @@ fn validate_decoded_delegations(
             || edge.view.callee_run_id != pending_run.run_id
         {
             return Err("snapshot delegated run does not match its pending call edge".into());
+        }
+    }
+    Ok(())
+}
+
+fn validate_delegation_graph<'a>(
+    root: &str,
+    edges: impl IntoIterator<Item = (&'a str, &'a str)>,
+) -> Result<(), String> {
+    let mut reachable = BTreeSet::from([root.to_owned()]);
+    let mut remaining: Vec<_> = edges
+        .into_iter()
+        .map(|(caller, callee)| (caller.to_owned(), callee.to_owned()))
+        .collect();
+    while !remaining.is_empty() {
+        let mut progressed = false;
+        remaining.retain(|(caller, callee)| {
+            if reachable.contains(caller) {
+                reachable.insert(callee.clone());
+                progressed = true;
+                false
+            } else {
+                true
+            }
+        });
+        if !progressed {
+            return Err("delegation caller is disconnected from its root".into());
+        }
+    }
+    Ok(())
+}
+
+fn validate_post_c_delegations(
+    records: &crate::receipts::Records,
+    pending: &BTreeMap<String, PendingState>,
+) -> Result<(), String> {
+    let mut trees = BTreeMap::<String, DelegationTree>::new();
+    let mut headers = BTreeMap::<String, DelegationHeader>::new();
+    let mut indexes = BTreeMap::<String, DelegationRunIndex>::new();
+    let mut replies = BTreeSet::new();
+    let mut memberships = BTreeMap::<String, String>::new();
+
+    for (key, bytes) in records {
+        if let Some(root) = key.strip_prefix("dlg/tree/") {
+            if root.is_empty() {
+                return Err("delegation tree has an empty root".into());
+            }
+            let tree = decode_delegation_tree(root, bytes)?;
+            if trees.insert(root.to_owned(), tree).is_some() {
+                return Err("duplicate delegation tree".into());
+            }
+            continue;
+        }
+        if let Some(id) = key.strip_prefix("dlg/reply/") {
+            if !valid_delegation_id(id) {
+                return Err("delegation reply has an invalid id".into());
+            }
+            decode_delegation_result(id, bytes)?;
+            if !replies.insert(id.to_owned()) {
+                return Err("duplicate delegation reply".into());
+            }
+            continue;
+        }
+        if let Some(dispatch_id) = key.strip_prefix("dlg/run/") {
+            if !valid_delegation_id(dispatch_id) {
+                return Err("delegation run index has an invalid dispatch id".into());
+            }
+            let index = decode_delegation_run_index(dispatch_id, bytes)?;
+            if indexes.insert(index.run_id.clone(), index).is_some() {
+                return Err("duplicate delegation run index".into());
+            }
+            continue;
+        }
+        if key.starts_with("dlg/req/") {
+            return Err("post-C state retains a consumed delegation request".into());
+        }
+        if let Some(id) = key.strip_prefix("dlg/") {
+            if id.is_empty() || id.contains('/') {
+                return Err("delegation header key is not point-addressed".into());
+            }
+            let header = decode_delegation_header(id, bytes)?;
+            if headers.insert(id.to_owned(), header).is_some() {
+                return Err("duplicate delegation header".into());
+            }
+            continue;
+        }
+        if key.starts_with("dlg") {
+            return Err("unknown delegation record namespace".into());
+        }
+    }
+
+    for (root, tree) in &trees {
+        let root_entry = pending
+            .get(&dispatch_id_for(root))
+            .ok_or_else(|| "delegation tree root is not in flight".to_string())?;
+        if root_entry.delegation_id.is_some() {
+            return Err("delegation tree root is itself delegated".into());
+        }
+        let mut pending_count = 0;
+        let mut edges = Vec::with_capacity(tree.ids.len());
+        for id in &tree.ids {
+            if memberships.insert(id.clone(), root.clone()).is_some() {
+                return Err("delegation header belongs to multiple trees".into());
+            }
+            let header = headers
+                .get(id)
+                .ok_or_else(|| "delegation tree names a missing header".to_string())?;
+            if header.root_run_id != *root {
+                return Err("delegation header is in the wrong tree".into());
+            }
+            if header.status == DelegationStatus::Pending {
+                pending_count += 1;
+                let child = pending
+                    .get(&dispatch_id_for(&header.callee_run_id))
+                    .ok_or_else(|| "pending delegation has no callee run".to_string())?;
+                if child.delegation_id.as_deref() != Some(id.as_str())
+                    || child.agent_id != header.callee_agent_id
+                {
+                    return Err("pending callee points at a different delegation".into());
+                }
+            } else {
+                if !replies.contains(id) {
+                    return Err("terminal delegation has no reply record".into());
+                }
+                if pending.contains_key(&dispatch_id_for(&header.callee_run_id)) {
+                    return Err("terminal delegation still has a pending callee".into());
+                }
+            }
+            edges.push((header.caller_run_id.as_str(), header.callee_run_id.as_str()));
+        }
+        if pending_count != tree.pending {
+            return Err("delegation tree pending count does not match headers".into());
+        }
+        if pending_count > MAX_DELEGATIONS_PER_RUN as u64 {
+            return Err("delegation tree exceeds its concurrency limit".into());
+        }
+        validate_delegation_graph(root, edges)?;
+    }
+    for (id, header) in &headers {
+        match memberships.get(id) {
+            Some(root) if root == &header.root_run_id => {}
+            Some(_) => return Err("delegation header is in the wrong tree".into()),
+            None => {
+                return Err("orphan delegation header".into());
+            }
+        }
+    }
+    for header in headers.values() {
+        let index = indexes
+            .get(&header.callee_run_id)
+            .ok_or_else(|| "delegation header has no run index".to_string())?;
+        if index.delegation_id != header.delegation_id || index.root_run_id != header.root_run_id {
+            return Err("delegation run index does not match its header".into());
+        }
+    }
+    if indexes.len() != headers.len() {
+        return Err("orphan delegation run index".into());
+    }
+    for child in pending.values() {
+        let Some(id) = child.delegation_id.as_deref() else {
+            continue;
+        };
+        let header = headers
+            .get(id)
+            .ok_or_else(|| "delegated run names no delegation header".to_string())?;
+        if header.status != DelegationStatus::Pending
+            || header.callee_run_id != child.run_id
+            || header.callee_agent_id != child.agent_id
+        {
+            return Err("delegated run does not match its pending header".into());
+        }
+    }
+    for id in replies {
+        let header = headers
+            .get(&id)
+            .ok_or_else(|| "orphan delegation reply".to_string())?;
+        if header.status == DelegationStatus::Pending {
+            return Err("pending delegation has a reply record".into());
         }
     }
     Ok(())
@@ -649,6 +1084,7 @@ pub(super) enum StateVersion {
     V0,
     V1,
     V2,
+    V3,
 }
 
 pub(super) struct Committed {
@@ -697,6 +1133,25 @@ fn decode_post_b(cur: &mut codec::Cursor) -> Result<Committed, String> {
     })
 }
 
+fn decode_post_c(cur: &mut codec::Cursor) -> Result<Committed, String> {
+    let receipts: crate::receipts::Records = sdk::wire::decode(&take_lp_bytes(cur)?)?;
+    let next_action_item = take_u64(cur)?;
+    if cur.remaining() != 0 {
+        return Err("snapshot has trailing bytes".into());
+    }
+    let pending = validate_post_b_records(&receipts)?;
+    validate_post_c_delegations(&receipts, &pending)?;
+    Ok(Committed {
+        version: StateVersion::V3,
+        receipts,
+        next_action_item,
+        pending: BTreeMap::new(),
+        sessions: BTreeMap::new(),
+        delegations: BTreeMap::new(),
+        legacy_models: None,
+    })
+}
+
 pub(super) fn decode_committed(bytes: &[u8]) -> Result<Committed, String> {
     // Each pending entry includes identity generation, causal provenance,
     // model/workspace coordinates, requester and the committed sink. The
@@ -720,6 +1175,9 @@ pub(super) fn decode_committed(bytes: &[u8]) -> Result<Committed, String> {
     };
     if post_a && version == POST_B_VERSION {
         return decode_post_b(&mut cur);
+    }
+    if post_a && version == POST_C_VERSION {
+        return decode_post_c(&mut cur);
     }
     if post_a && version != POST_A_VERSION {
         return Err(format!("unsupported state version {version}"));

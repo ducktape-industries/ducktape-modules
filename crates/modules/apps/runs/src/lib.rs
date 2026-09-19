@@ -77,6 +77,11 @@ pub const RUN_MAX_ATTEMPTS: u32 = 2;
 /// Maximum number of live dispatch correlation records.
 pub const MAX_PENDING_RUNS: u64 = 4096;
 
+/// Maximum number of distinct delegation edges a root may create over its
+/// lifetime. This is separate from the concurrent-pending call limit carried
+/// by the runs wire contract.
+pub const MAX_DELEGATION_EDGES_PER_RUN: usize = 128;
+
 /// every peer-call callee requests this fixed sandbox profile. One root call
 /// tree runs at most `MAX_DELEGATIONS_PER_RUN` callees concurrently, so the
 /// same bound holds live delegated compute at `2 * MAX_DELEGATIONS_PER_RUN`
@@ -357,6 +362,56 @@ struct DelegationState {
     request: DelegationRequest,
 }
 
+/// The point-addressed part of a delegation. The request body is intentionally
+/// absent: its digest preserves exact idempotent retry behavior after dispatch
+/// consumes the request record, while tree walks need only this header.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DelegationHeader {
+    delegation_id: String,
+    request_id: String,
+    caller_run_id: String,
+    root_run_id: String,
+    callee_run_id: String,
+    callee_agent_id: String,
+    status: DelegationStatus,
+    request_digest: [u8; 32],
+    created_at: u64,
+    completed_at: Option<u64>,
+}
+
+impl DelegationHeader {
+    fn from_state(state: &DelegationState) -> Self {
+        Self {
+            delegation_id: state.view.delegation_id.clone(),
+            request_id: state.view.request_id.clone(),
+            caller_run_id: state.view.caller_run_id.clone(),
+            root_run_id: state.view.root_run_id.clone(),
+            callee_run_id: state.view.callee_run_id.clone(),
+            callee_agent_id: state.view.callee_agent_id.clone(),
+            status: state.view.status,
+            request_digest: Sha256::digest(sdk::wire::encode(&state.request)).into(),
+            created_at: state.view.created_at,
+            completed_at: state.view.completed_at,
+        }
+    }
+
+    fn view(&self, result: Option<DelegationResult>) -> DelegationView {
+        DelegationView {
+            delegation_id: self.delegation_id.clone(),
+            request_id: self.request_id.clone(),
+            caller_run_id: self.caller_run_id.clone(),
+            root_run_id: self.root_run_id.clone(),
+            callee_run_id: self.callee_run_id.clone(),
+            callee_agent_id: self.callee_agent_id.clone(),
+            status: self.status,
+            result,
+            created_at: self.created_at,
+            completed_at: self.completed_at,
+        }
+    }
+}
+
 /// a chat run's read-only dispatch preparation: the pinned context plus the
 /// fully composed payload, gathered before anything is staged.
 #[derive(Debug)]
@@ -430,11 +485,9 @@ pub struct RunsModule {
     receipts: receipts::Receipts,
     next_action_item: u64,
     staged_next_action_item: Option<u64>,
-    /// ephemeral run-scoped call edges and their returned results. They are
-    /// committed because admission, budget and result collection must replay
-    /// identically, but a root run's settlement prunes its whole tree.
+    /// Legacy embedded delegation edges retained only until the first mutable
+    /// operation migrates them into `dlg/*` receipt records.
     delegations: BTreeMap<String, DelegationState>,
-    pending_delegations: BTreeMap<String, Option<DelegationState>>,
     /// the delivered-runs ring (last [`RUN_HISTORY_CAP`], oldest first —
     /// queries serve it reversed). DERIVED state: recorded at delivery,
     /// rebuilt by replay, never in `root()`/snapshot, empty after a
@@ -525,7 +578,6 @@ impl RunsModule {
             next_action_item: 0,
             staged_next_action_item: None,
             delegations: BTreeMap::new(),
-            pending_delegations: BTreeMap::new(),
             history: VecDeque::new(),
             pending_history: Vec::new(),
             pending_pr_links: BTreeMap::new(),
@@ -786,17 +838,253 @@ impl RunsModule {
         Ok(result)
     }
 
-    fn visible_ids<V, W>(
-        committed: &BTreeMap<String, V>,
-        pending: &BTreeMap<String, W>,
-    ) -> Vec<String> {
-        pending
-            .keys()
-            .chain(committed.keys())
-            .cloned()
-            .collect::<BTreeSet<String>>()
-            .into_iter()
-            .collect()
+    fn legacy_delegations_active(&self) -> bool {
+        self.legacy_state_version.is_some() && !self.legacy_migration_staged
+    }
+
+    async fn delegation_header(
+        &self,
+        delegation_id: &str,
+    ) -> Result<Option<DelegationHeader>, Error> {
+        if self.legacy_delegations_active() {
+            return Ok(self
+                .delegations
+                .get(delegation_id)
+                .map(DelegationHeader::from_state));
+        }
+        let Some(bytes) = self
+            .receipts
+            .get(&state::delegation_key(delegation_id))
+            .await?
+        else {
+            return Ok(None);
+        };
+        state::decode_delegation_header(delegation_id, &bytes)
+            .map(Some)
+            .map_err(Self::corrupt_record)
+    }
+
+    async fn delegation_tree(
+        &self,
+        root_run_id: &str,
+    ) -> Result<Option<state::DelegationTree>, Error> {
+        if self.legacy_delegations_active() {
+            let mut ids = self
+                .delegations
+                .iter()
+                .filter(|(_, delegation)| delegation.view.root_run_id == root_run_id)
+                .map(|(id, _)| id.clone())
+                .collect::<Vec<_>>();
+            ids.sort();
+            if ids.is_empty() {
+                return Ok(None);
+            }
+            let pending = ids
+                .iter()
+                .filter(|id| {
+                    self.delegations.get(*id).is_some_and(|delegation| {
+                        delegation.view.status == DelegationStatus::Pending
+                    })
+                })
+                .count() as u64;
+            return Ok(Some(state::DelegationTree { ids, pending }));
+        }
+        let Some(bytes) = self
+            .receipts
+            .get(&state::delegation_tree_key(root_run_id))
+            .await?
+        else {
+            return Ok(None);
+        };
+        state::decode_delegation_tree(root_run_id, &bytes)
+            .map(Some)
+            .map_err(Self::corrupt_record)
+    }
+
+    async fn delegation_run_index(
+        &self,
+        run_id: &str,
+    ) -> Result<Option<state::DelegationRunIndex>, Error> {
+        let Some(bytes) = self
+            .receipts
+            .get(&state::delegation_run_key(run_id))
+            .await?
+        else {
+            return Ok(None);
+        };
+        state::decode_delegation_run_index(&dispatch_id_for(run_id), &bytes)
+            .map(Some)
+            .map_err(Self::corrupt_record)
+    }
+
+    async fn delegation_view(&self, header: &DelegationHeader) -> Result<DelegationView, Error> {
+        if self.legacy_delegations_active() {
+            return self
+                .delegations
+                .get(&header.delegation_id)
+                .map(|state| state.view.clone())
+                .ok_or_else(|| Self::corrupt_record("legacy delegation header disappeared"));
+        }
+        let result = if header.status == DelegationStatus::Pending {
+            None
+        } else {
+            let bytes = self
+                .receipts
+                .get(&state::delegation_reply_key(&header.delegation_id))
+                .await?
+                .ok_or_else(|| Self::corrupt_record("terminal delegation has no reply"))?;
+            Some(
+                state::decode_delegation_result(&header.delegation_id, &bytes)
+                    .map_err(Self::corrupt_record)?,
+            )
+        };
+        Ok(header.view(result))
+    }
+
+    async fn delegations_for_caller(
+        &self,
+        caller_run_id: &str,
+    ) -> Result<Vec<DelegationView>, Error> {
+        if self.legacy_delegations_active() {
+            return Ok(self
+                .delegations
+                .values()
+                .filter(|state| state.view.caller_run_id == caller_run_id)
+                .map(|state| state.view.clone())
+                .collect());
+        }
+        let (root_run_id, locator) =
+            if let Some(caller) = self.pending_entry(&dispatch_id_for(caller_run_id)).await? {
+                match caller.delegation_id.as_deref() {
+                    Some(id) => (
+                        self.delegation_header(id)
+                            .await?
+                            .ok_or_else(|| {
+                                Self::corrupt_record("caller run names no delegation header")
+                            })?
+                            .root_run_id,
+                        None,
+                    ),
+                    None => (caller_run_id.to_string(), None),
+                }
+            } else {
+                let Some(index) = self.delegation_run_index(caller_run_id).await? else {
+                    return Ok(Vec::new());
+                };
+                (index.root_run_id, Some(index.delegation_id))
+            };
+        let Some(tree) = self.delegation_tree(&root_run_id).await? else {
+            return Ok(Vec::new());
+        };
+        let mut result = Vec::new();
+        let mut locator_found = locator.is_none();
+        for id in tree.ids {
+            let Some(header) = self.delegation_header(&id).await? else {
+                return Err(Self::corrupt_record("delegation tree names no header"));
+            };
+            if locator.as_deref() == Some(id.as_str()) {
+                if header.callee_run_id != caller_run_id {
+                    return Err(Self::corrupt_record(
+                        "delegation run index does not match its header",
+                    ));
+                }
+                locator_found = true;
+            }
+            if header.caller_run_id == caller_run_id {
+                result.push(self.delegation_view(&header).await?);
+            }
+        }
+        if !locator_found {
+            return Err(Self::corrupt_record(
+                "delegation run index names no tree header",
+            ));
+        }
+        Ok(result)
+    }
+
+    fn stage_delegation_header(&mut self, header: &DelegationHeader) -> Result<(), Error> {
+        self.receipts.stage(
+            state::delegation_key(&header.delegation_id),
+            state::encode_delegation_header(header),
+        )
+    }
+
+    fn stage_delegation_result(
+        &mut self,
+        delegation_id: &str,
+        result: &DelegationResult,
+    ) -> Result<(), Error> {
+        self.receipts.stage(
+            state::delegation_reply_key(delegation_id),
+            state::encode_delegation_result(delegation_id, result)?,
+        )
+    }
+
+    fn stage_delegation_tree(
+        &mut self,
+        root_run_id: &str,
+        tree: &state::DelegationTree,
+    ) -> Result<(), Error> {
+        self.receipts.stage(
+            state::delegation_tree_key(root_run_id),
+            state::encode_delegation_tree(root_run_id, tree),
+        )
+    }
+
+    async fn stage_delegation(&mut self, state: &DelegationState) -> Result<(), Error> {
+        let header = DelegationHeader::from_state(state);
+        state::validate_delegation_header(&header).map_err(Self::corrupt_record)?;
+        let mut tree = self
+            .delegation_tree(&header.root_run_id)
+            .await?
+            .unwrap_or_default();
+        match tree.ids.binary_search(&header.delegation_id) {
+            Ok(_) => {
+                return Err(Self::corrupt_record(
+                    "delegation tree already contains edge",
+                ));
+            }
+            Err(index) => tree.ids.insert(index, header.delegation_id.clone()),
+        }
+        if tree.ids.len() > MAX_DELEGATION_EDGES_PER_RUN {
+            return Err(Error::Module {
+                reason: refusal::CAPACITY.into(),
+                sentence: format!(
+                    "delegation tree has reached its lifetime limit of {MAX_DELEGATION_EDGES_PER_RUN} edges"
+                ),
+            });
+        }
+        if header.status == DelegationStatus::Pending {
+            tree.pending = tree
+                .pending
+                .checked_add(1)
+                .ok_or_else(|| Self::corrupt_record("delegation tree pending count overflowed"))?;
+        }
+        self.stage_delegation_tree(&header.root_run_id, &tree)?;
+        self.stage_delegation_header(&header)?;
+        self.receipts.stage(
+            state::delegation_run_key(&header.callee_run_id),
+            state::encode_delegation_run_index(&state::DelegationRunIndex {
+                run_id: header.callee_run_id.clone(),
+                delegation_id: header.delegation_id.clone(),
+                root_run_id: header.root_run_id.clone(),
+            }),
+        )?;
+        self.receipts.stage(
+            state::delegation_request_key(&header.delegation_id),
+            state::encode_delegation_request(&state.request)?,
+        )?;
+        Ok(())
+    }
+
+    fn remove_delegation_records(&mut self, delegation_id: &str, callee_run_id: &str) {
+        self.receipts
+            .remove(state::delegation_run_key(callee_run_id));
+        self.receipts.remove(state::delegation_key(delegation_id));
+        self.receipts
+            .remove(state::delegation_request_key(delegation_id));
+        self.receipts
+            .remove(state::delegation_reply_key(delegation_id));
     }
 
     fn stage_legacy_pending_sessions(&mut self) -> Result<(), Error> {
@@ -831,12 +1119,64 @@ impl RunsModule {
         Ok(())
     }
 
+    fn stage_legacy_delegations(&mut self) -> Result<(), Error> {
+        let mut trees = BTreeMap::<String, state::DelegationTree>::new();
+        let delegations = self.delegations.clone();
+        for (id, delegation) in &delegations {
+            let header = DelegationHeader::from_state(delegation);
+            state::validate_delegation_header(&header).map_err(Self::corrupt_record)?;
+            let tree = trees.entry(header.root_run_id.clone()).or_default();
+            let index = match tree.ids.binary_search(id) {
+                Ok(_) => {
+                    return Err(Self::corrupt_record(
+                        "legacy delegation tree contains a duplicate",
+                    ));
+                }
+                Err(index) => index,
+            };
+            tree.ids.insert(index, id.clone());
+            if header.status == DelegationStatus::Pending {
+                tree.pending += 1;
+            }
+            self.stage_delegation_header(&header)?;
+            self.receipts.stage(
+                state::delegation_run_key(&header.callee_run_id),
+                state::encode_delegation_run_index(&state::DelegationRunIndex {
+                    run_id: header.callee_run_id.clone(),
+                    delegation_id: header.delegation_id.clone(),
+                    root_run_id: header.root_run_id.clone(),
+                }),
+            )?;
+            self.receipts.stage(
+                state::delegation_request_key(id),
+                state::encode_delegation_request(&delegation.request)?,
+            )?;
+            // Request bodies are needed only while the callee dispatch is
+            // being admitted. All legacy edges are already admitted.
+            self.receipts.remove(state::delegation_request_key(id));
+            if let Some(result) = &delegation.view.result {
+                self.stage_delegation_result(id, result)?;
+            }
+        }
+        for (root, tree) in trees {
+            if tree.ids.len() > MAX_DELEGATION_EDGES_PER_RUN {
+                return Err(Error::Module {
+                    reason: refusal::CAPACITY.into(),
+                    sentence: "legacy delegation tree exceeds its lifetime capacity".into(),
+                });
+            }
+            self.stage_delegation_tree(&root, &tree)?;
+        }
+        Ok(())
+    }
+
     fn stage_legacy_state(&mut self) -> Result<(), Error> {
         if self.legacy_state_version.is_none() || self.legacy_migration_staged {
             return Ok(());
         }
         self.stage_legacy_models()?;
         self.stage_legacy_pending_sessions()?;
+        self.stage_legacy_delegations()?;
         self.legacy_migration_staged = true;
         Ok(())
     }
@@ -1014,17 +1354,6 @@ impl RunsModule {
         self.receipts.remove(state::session_key(run_id));
     }
 
-    fn delegation(&self, delegation_id: &str) -> Option<&DelegationState> {
-        match self.pending_delegations.get(delegation_id) {
-            Some(staged) => staged.as_ref(),
-            None => self.delegations.get(delegation_id),
-        }
-    }
-
-    fn delegation_ids(&self) -> Vec<String> {
-        Self::visible_ids(&self.delegations, &self.pending_delegations)
-    }
-
     // ---- views ---------------------------------------------------------------
 
     fn pending_view(dispatch_id: &str, p: &PendingState) -> PendingRun {
@@ -1111,7 +1440,10 @@ impl RunsModule {
                 self.legacy_sessions.as_ref().unwrap(),
                 &self.delegations,
             ),
-            Some(StateVersion::V2) | None => {
+            Some(StateVersion::V2) => {
+                state::encode_post_b_committed(&records, self.next_action_item, &self.delegations)
+            }
+            Some(StateVersion::V3) | None => {
                 encode_committed(&records, self.next_action_item, &self.delegations)
             }
         }
@@ -1146,7 +1478,12 @@ impl RunsModule {
                     &decoded.sessions,
                     &decoded.delegations,
                 ),
-                StateVersion::V2 => committed_root(
+                StateVersion::V2 => state::post_b_root(
+                    &decoded.receipts,
+                    decoded.next_action_item,
+                    &decoded.delegations,
+                ),
+                StateVersion::V3 => committed_root(
                     &decoded.receipts,
                     decoded.next_action_item,
                     &decoded.delegations,
@@ -1156,15 +1493,16 @@ impl RunsModule {
         )?;
         self.receipts.install(decoded.receipts)?;
         self.legacy_models = decoded.legacy_models;
-        self.legacy_pending = (decoded.version != StateVersion::V2).then_some(decoded.pending);
-        self.legacy_sessions = (decoded.version != StateVersion::V2).then_some(decoded.sessions);
+        self.legacy_pending = matches!(decoded.version, StateVersion::V0 | StateVersion::V1)
+            .then_some(decoded.pending);
+        self.legacy_sessions = matches!(decoded.version, StateVersion::V0 | StateVersion::V1)
+            .then_some(decoded.sessions);
         self.legacy_state_version =
-            (decoded.version != StateVersion::V2).then_some(decoded.version);
+            (decoded.version != StateVersion::V3).then_some(decoded.version);
         self.legacy_migration_staged = false;
         self.next_action_item = decoded.next_action_item;
         self.staged_next_action_item = None;
         self.delegations = decoded.delegations;
-        self.pending_delegations.clear();
         // the ring is derived per-node state: a snapshot describes a block
         // boundary this node never executed, so its history starts empty.
         self.history.clear();

@@ -206,7 +206,41 @@ fn a_live_session_calls_a_peer_and_collects_its_result_without_a_parent_record()
     assert_eq!(calls[0].callee_agent_id, "worker");
     assert_eq!(calls[0].root_run_id, caller_run);
     let callee_run = calls[0].callee_run_id.clone();
+    let delegation_id = calls[0].delegation_id.clone();
     commit(&mut m);
+    assert!(
+        block_on(
+            m.receipts
+                .committed(&crate::state::delegation_tree_key(&caller_run))
+        )
+        .unwrap()
+        .is_some()
+    );
+    assert!(
+        block_on(
+            m.receipts
+                .committed(&crate::state::delegation_key(&delegation_id))
+        )
+        .unwrap()
+        .is_some()
+    );
+    assert!(
+        block_on(
+            m.receipts
+                .committed(&crate::state::delegation_run_key(&callee_run))
+        )
+        .unwrap()
+        .is_some()
+    );
+    assert!(
+        block_on(
+            m.receipts
+                .committed(&crate::state::delegation_request_key(&delegation_id))
+        )
+        .unwrap()
+        .is_none(),
+        "dispatch consumes the request body"
+    );
 
     let mut joiner = module();
     joiner.install(&m.snapshot(), m.root()).unwrap();
@@ -243,6 +277,15 @@ fn a_live_session_calls_a_peer_and_collects_its_result_without_a_parent_record()
         "Worker result"
     );
     assert!(
+        block_on(
+            m.receipts
+                .committed(&crate::state::delegation_reply_key(&delegation_id))
+        )
+        .unwrap()
+        .is_some(),
+        "completed results remain queryable while the root is live"
+    );
+    assert!(
         get_pending(&m, &caller_run).is_some(),
         "the caller stays live"
     );
@@ -266,6 +309,599 @@ fn a_live_session_calls_a_peer_and_collects_its_result_without_a_parent_record()
         delegations(&m, &caller_run).is_empty(),
         "root settlement removes its ephemeral call tree"
     );
+    for key in [
+        crate::state::delegation_tree_key(&caller_run),
+        crate::state::delegation_key(&delegation_id),
+        crate::state::delegation_run_key(&callee_run),
+        crate::state::delegation_reply_key(&delegation_id),
+    ] {
+        assert!(
+            block_on(m.receipts.committed(&key)).unwrap().is_none(),
+            "{key}"
+        );
+    }
+}
+
+#[test]
+fn delegation_create_completion_cancellation_and_close_are_read_your_writes_and_abortable() {
+    let (mut m, registry, root) = with_open_delegating_session();
+    let mut create = session_ctx(&registry, &root, Origin::External(SESSION_KEY.to_vec()));
+    exec(
+        &mut m,
+        &mut create,
+        &delegate(&root, "same-block", "worker", "work"),
+    )
+    .unwrap();
+    assert_eq!(delegations(&m, &root).len(), 1);
+    assert_eq!(delegations(&m, &root)[0].status, DelegationStatus::Pending);
+    let callee = delegations(&m, &root)[0].callee_run_id.clone();
+    commit(&mut m);
+
+    let mut complete = CaptureCtx::new()
+        .at(8)
+        .with_dispatch_origin()
+        .with_registry(&registry)
+        .with_transcript("general", transcript(2));
+    exec(
+        &mut m,
+        &mut complete,
+        &result_event(
+            &callee,
+            Ok(runner_wrapper("same block", serde_json::json!({}))),
+        ),
+    )
+    .unwrap();
+    assert_eq!(
+        delegations(&m, &root)[0].status,
+        DelegationStatus::Delivered
+    );
+    assert!(get_pending(&m, &callee).is_none());
+    abort(&mut m);
+    assert_eq!(delegations(&m, &root)[0].status, DelegationStatus::Pending);
+    assert!(get_pending(&m, &callee).is_some());
+
+    let mut retry = CaptureCtx::new()
+        .at(8)
+        .with_dispatch_origin()
+        .with_registry(&registry)
+        .with_transcript("general", transcript(2));
+    exec(
+        &mut m,
+        &mut retry,
+        &result_event(
+            &callee,
+            Ok(runner_wrapper("same block", serde_json::json!({}))),
+        ),
+    )
+    .unwrap();
+    commit(&mut m);
+    assert_eq!(
+        delegations(&m, &root)[0].status,
+        DelegationStatus::Delivered
+    );
+
+    let mut parent_call = session_ctx(&registry, &root, Origin::External(SESSION_KEY.to_vec()));
+    exec(
+        &mut m,
+        &mut parent_call,
+        &delegate(&root, "cancel-parent", "worker", "work"),
+    )
+    .unwrap();
+    commit(&mut m);
+    let parent = delegations(&m, &root)
+        .into_iter()
+        .find(|call| call.request_id == "cancel-parent")
+        .unwrap();
+    open_delegated_session(&mut m, &registry, &parent.callee_run_id);
+    let child = admit_delegation(
+        &mut m,
+        &registry,
+        &parent.callee_run_id,
+        "cancel-child",
+        "reviewer",
+        &CHILD_SESSION_KEY,
+    );
+    let mut cancel = CaptureCtx::new()
+        .at(9)
+        .with_dispatch_origin()
+        .with_registry(&registry)
+        .with_transcript("general", transcript(2));
+    exec(
+        &mut m,
+        &mut cancel,
+        &result_event(
+            &parent.callee_run_id,
+            Ok(runner_wrapper("parent done", serde_json::json!({}))),
+        ),
+    )
+    .unwrap();
+    assert_eq!(
+        delegations(&m, &parent.caller_run_id)
+            .into_iter()
+            .find(|call| call.delegation_id == parent.delegation_id)
+            .unwrap()
+            .status,
+        DelegationStatus::Delivered
+    );
+    assert_eq!(
+        delegations(&m, &parent.callee_run_id)
+            .into_iter()
+            .find(|call| call.delegation_id == child.delegation_id)
+            .unwrap()
+            .status,
+        DelegationStatus::Cancelled
+    );
+    assert!(get_pending(&m, &child.callee_run_id).is_none());
+    abort(&mut m);
+    assert_eq!(
+        delegations(&m, &parent.callee_run_id)[0].status,
+        DelegationStatus::Pending
+    );
+    assert!(get_pending(&m, &child.callee_run_id).is_some());
+
+    settle_delegated(&mut m, &registry, &parent.callee_run_id, 9);
+    commit(&mut m);
+    let mut close_call = session_ctx(&registry, &root, Origin::External(SESSION_KEY.to_vec()));
+    exec(
+        &mut m,
+        &mut close_call,
+        &delegate(&root, "close-me", "worker", "work"),
+    )
+    .unwrap();
+    commit(&mut m);
+    let close_edge = delegations(&m, &root)
+        .into_iter()
+        .find(|call| call.request_id == "close-me")
+        .unwrap();
+    let mut close = CaptureCtx::new()
+        .at(10)
+        .with_dispatch_origin()
+        .with_registry(&registry)
+        .with_transcript("general", transcript(2));
+    exec(
+        &mut m,
+        &mut close,
+        &result_event(
+            &root,
+            Ok(runner_wrapper("root done", serde_json::json!({}))),
+        ),
+    )
+    .unwrap();
+    assert!(delegations(&m, &root).is_empty());
+    assert!(get_pending(&m, &close_edge.callee_run_id).is_none());
+    abort(&mut m);
+    assert_eq!(delegations(&m, &root).len(), 3);
+    assert!(get_pending(&m, &close_edge.callee_run_id).is_some());
+}
+
+#[test]
+fn root_close_reads_and_writes_only_the_selected_delegation_tree() {
+    let registry = registry(&["bot", "worker"]);
+    let mut m = configured(&registry);
+    request_post(&mut m, &registry, 2, &[]);
+    request_post(&mut m, &registry, 3, &[]);
+    commit(&mut m);
+    let root1 = run_id_for("general", 2, "bot");
+    let root2 = run_id_for("general", 3, "bot");
+    let entry1 = block_on(m.pending_entry(&dispatch_id_for(&root1)))
+        .unwrap()
+        .unwrap();
+    let entry2 = block_on(m.pending_entry(&dispatch_id_for(&root2)))
+        .unwrap()
+        .unwrap();
+    let backing = receipts::Backing::default();
+    let mut m = m.with_receipt_store(Box::new(backing.clone()));
+    block_on(m.stage_pending_insert(dispatch_id_for(&root1), entry1)).unwrap();
+    block_on(m.stage_pending_insert(dispatch_id_for(&root2), entry2)).unwrap();
+    let mut open1 = session_ctx(&registry, &root1, Origin::External(ASSIGNEE.to_vec()));
+    exec(&mut m, &mut open1, &open(&root1, &SESSION_KEY)).unwrap();
+    let mut open2 = session_ctx(&registry, &root2, Origin::External(ASSIGNEE.to_vec()))
+        .with_transcript("general", transcript(3));
+    exec(&mut m, &mut open2, &open(&root2, &SESSION_KEY)).unwrap();
+    commit(&mut m);
+
+    backing.forget_reads();
+    let mut call1 = session_ctx(&registry, &root1, Origin::External(SESSION_KEY.to_vec()));
+    exec(
+        &mut m,
+        &mut call1,
+        &delegate(&root1, "r1-call", "worker", "work"),
+    )
+    .unwrap();
+    let mut call2 = session_ctx(&registry, &root2, Origin::External(SESSION_KEY.to_vec()))
+        .with_transcript("general", transcript(3));
+    exec(
+        &mut m,
+        &mut call2,
+        &delegate(&root2, "r2-call", "worker", "work"),
+    )
+    .unwrap();
+    commit(&mut m);
+    let r1_edge = delegations(&m, &root1).pop().unwrap();
+    let r2_edge = delegations(&m, &root2).pop().unwrap();
+    for key in [
+        crate::state::delegation_request_key(&r1_edge.delegation_id),
+        crate::state::delegation_reply_key(&r1_edge.delegation_id),
+        crate::state::delegation_request_key(&r2_edge.delegation_id),
+        crate::state::delegation_reply_key(&r2_edge.delegation_id),
+    ] {
+        assert_eq!(backing.read_key_count(&key), 0, "admission read {key}");
+    }
+
+    let mut r1_result = CaptureCtx::new()
+        .at(8)
+        .with_dispatch_origin()
+        .with_registry(&registry)
+        .with_transcript("general", transcript(3));
+    exec(
+        &mut m,
+        &mut r1_result,
+        &result_event(
+            &r1_edge.callee_run_id,
+            Ok(runner_wrapper("r1 done", serde_json::json!({}))),
+        ),
+    )
+    .unwrap();
+    commit(&mut m);
+
+    backing.forget_reads();
+    backing.forget_writes();
+    let mut close = CaptureCtx::new()
+        .at(9)
+        .with_dispatch_origin()
+        .with_registry(&registry)
+        .with_transcript("general", transcript(3));
+    exec(
+        &mut m,
+        &mut close,
+        &result_event(
+            &root1,
+            Ok(runner_wrapper("root done", serde_json::json!({}))),
+        ),
+    )
+    .unwrap();
+    commit(&mut m);
+
+    let r1_keys = [
+        crate::state::delegation_tree_key(&root1),
+        crate::state::delegation_key(&r1_edge.delegation_id),
+        crate::state::delegation_run_key(&r1_edge.callee_run_id),
+        crate::state::delegation_request_key(&r1_edge.delegation_id),
+        crate::state::delegation_reply_key(&r1_edge.delegation_id),
+    ];
+    let r2_keys = [
+        crate::state::delegation_tree_key(&root2),
+        crate::state::delegation_key(&r2_edge.delegation_id),
+        crate::state::delegation_run_key(&r2_edge.callee_run_id),
+        crate::state::delegation_request_key(&r2_edge.delegation_id),
+        crate::state::delegation_reply_key(&r2_edge.delegation_id),
+    ];
+    assert_eq!(backing.read_key_count(&r1_keys[0]), 1);
+    assert_eq!(backing.read_key_count(&r1_keys[1]), 1);
+    for key in &r1_keys[2..] {
+        assert_eq!(
+            backing.read_key_count(key),
+            0,
+            "unexpected body/index read {key}"
+        );
+    }
+    assert_eq!(
+        r1_keys
+            .iter()
+            .map(|key| backing.write_key_count(key))
+            .sum::<usize>(),
+        5
+    );
+    for key in &r1_keys {
+        assert_eq!(backing.delete_key_count(key), 1, "{key}");
+    }
+    for key in &r2_keys {
+        assert_eq!(backing.read_key_count(key), 0, "R2 read {key}");
+        assert_eq!(backing.write_key_count(key), 0, "R2 write {key}");
+        assert_eq!(backing.delete_key_count(key), 0, "R2 delete {key}");
+    }
+    assert!(get_pending(&m, &r2_edge.callee_run_id).is_some());
+}
+
+fn hosted_two_root_sessions() -> (RunsModule, receipts::Backing, Registry, String, String) {
+    let registry = registry(&["bot", "worker", "reviewer"]);
+    let mut m = configured(&registry);
+    request_post(&mut m, &registry, 2, &[]);
+    request_post(&mut m, &registry, 3, &[]);
+    commit(&mut m);
+    let root1 = run_id_for("general", 2, "bot");
+    let root2 = run_id_for("general", 3, "bot");
+    let entry1 = block_on(m.pending_entry(&dispatch_id_for(&root1)))
+        .unwrap()
+        .unwrap();
+    let entry2 = block_on(m.pending_entry(&dispatch_id_for(&root2)))
+        .unwrap()
+        .unwrap();
+    let backing = receipts::Backing::default();
+    let mut m = m.with_receipt_store(Box::new(backing.clone()));
+    block_on(m.stage_pending_insert(dispatch_id_for(&root1), entry1)).unwrap();
+    block_on(m.stage_pending_insert(dispatch_id_for(&root2), entry2)).unwrap();
+    let mut open1 = session_ctx(&registry, &root1, Origin::External(ASSIGNEE.to_vec()));
+    exec(&mut m, &mut open1, &open(&root1, &SESSION_KEY)).unwrap();
+    let mut open2 = session_ctx(&registry, &root2, Origin::External(ASSIGNEE.to_vec()))
+        .with_transcript("general", transcript(3));
+    exec(&mut m, &mut open2, &open(&root2, &SESSION_KEY)).unwrap();
+    commit(&mut m);
+    (m, backing, registry, root1, root2)
+}
+
+fn admit_delegation(
+    m: &mut RunsModule,
+    registry: &Registry,
+    caller_run: &str,
+    request_id: &str,
+    agent_id: &str,
+    session_key: &[u8],
+) -> DelegationView {
+    let mut ctx = session_ctx(registry, caller_run, Origin::External(session_key.to_vec()));
+    if caller_run == run_id_for("general", 3, "bot") {
+        ctx = ctx.with_transcript("general", transcript(3));
+    }
+    exec(
+        m,
+        &mut ctx,
+        &delegate(caller_run, request_id, agent_id, "work"),
+    )
+    .unwrap();
+    commit(m);
+    delegations(m, caller_run)
+        .into_iter()
+        .find(|call| call.request_id == request_id)
+        .unwrap()
+}
+
+fn open_delegated_session(m: &mut RunsModule, registry: &Registry, run_id: &str) {
+    let mut ctx = session_ctx(registry, run_id, Origin::External(ASSIGNEE.to_vec()));
+    exec(m, &mut ctx, &open(run_id, &CHILD_SESSION_KEY)).unwrap();
+    commit(m);
+}
+
+fn settle_delegated(m: &mut RunsModule, registry: &Registry, run_id: &str, at: u64) {
+    let mut ctx = CaptureCtx::new()
+        .at(at)
+        .with_dispatch_origin()
+        .with_registry(registry)
+        .with_transcript("general", transcript(3));
+    exec(
+        m,
+        &mut ctx,
+        &result_event(run_id, Ok(runner_wrapper("done", serde_json::json!({})))),
+    )
+    .unwrap();
+    commit(m);
+}
+
+#[test]
+fn non_root_close_walks_each_header_once_and_never_reads_bodies() {
+    let (mut m, backing, registry, root, unrelated) = hosted_two_root_sessions();
+    let unrelated_edge = admit_delegation(
+        &mut m,
+        &registry,
+        &unrelated,
+        "unrelated",
+        "worker",
+        &SESSION_KEY,
+    );
+    let root_edge = admit_delegation(&mut m, &registry, &root, "root-a", "worker", &SESSION_KEY);
+    let sibling = admit_delegation(&mut m, &registry, &root, "root-b", "worker", &SESSION_KEY);
+    open_delegated_session(&mut m, &registry, &root_edge.callee_run_id);
+    let left = admit_delegation(
+        &mut m,
+        &registry,
+        &root_edge.callee_run_id,
+        "left",
+        "reviewer",
+        &CHILD_SESSION_KEY,
+    );
+    let right = admit_delegation(
+        &mut m,
+        &registry,
+        &root_edge.callee_run_id,
+        "right",
+        "reviewer",
+        &CHILD_SESSION_KEY,
+    );
+    open_delegated_session(&mut m, &registry, &left.callee_run_id);
+    let deep = admit_delegation(
+        &mut m,
+        &registry,
+        &left.callee_run_id,
+        "deep",
+        "worker",
+        &CHILD_SESSION_KEY,
+    );
+    let tree_before = crate::state::decode_delegation_tree(
+        &root,
+        &block_on(
+            m.receipts
+                .committed(&crate::state::delegation_tree_key(&root)),
+        )
+        .unwrap()
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(tree_before.ids.len(), 5);
+    assert!(get_pending(&m, &sibling.callee_run_id).is_some());
+    assert!(get_pending(&m, &right.callee_run_id).is_some());
+    assert!(get_pending(&m, &deep.callee_run_id).is_some());
+
+    backing.forget_reads();
+    backing.forget_writes();
+    settle_delegated(&mut m, &registry, &root_edge.callee_run_id, 12);
+
+    assert_eq!(
+        backing.read_key_count(&crate::state::delegation_tree_key(&root)),
+        1
+    );
+    for id in &tree_before.ids {
+        assert_eq!(
+            backing.read_key_count(&crate::state::delegation_key(id)),
+            1,
+            "header {id} was rescanned"
+        );
+        assert_eq!(
+            backing.read_key_count(&crate::state::delegation_request_key(id)),
+            0
+        );
+        assert_eq!(
+            backing.read_key_count(&crate::state::delegation_reply_key(id)),
+            0
+        );
+    }
+    let changed = [
+        root_edge.delegation_id.clone(),
+        left.delegation_id.clone(),
+        right.delegation_id.clone(),
+        deep.delegation_id.clone(),
+    ];
+    assert_eq!(
+        backing.write_key_count(&crate::state::delegation_tree_key(&root)),
+        1
+    );
+    assert_eq!(
+        changed
+            .iter()
+            .map(|id| {
+                backing.write_key_count(&crate::state::delegation_key(id))
+                    + backing.write_key_count(&crate::state::delegation_reply_key(id))
+            })
+            .sum::<usize>(),
+        8
+    );
+    for key in [
+        crate::state::delegation_tree_key(&unrelated),
+        crate::state::delegation_key(&unrelated_edge.delegation_id),
+        crate::state::delegation_run_key(&unrelated_edge.callee_run_id),
+        crate::state::delegation_request_key(&unrelated_edge.delegation_id),
+        crate::state::delegation_reply_key(&unrelated_edge.delegation_id),
+    ] {
+        assert_eq!(backing.read_key_count(&key), 0, "unrelated read {key}");
+        assert_eq!(backing.write_key_count(&key), 0, "unrelated write {key}");
+        assert_eq!(backing.delete_key_count(&key), 0, "unrelated delete {key}");
+    }
+}
+
+#[test]
+fn non_root_close_at_128_edges_reads_one_tree_and_stages_only_the_subtree() {
+    let (mut m, backing, registry, root, unrelated) = hosted_two_root_sessions();
+    let unrelated_edge = admit_delegation(
+        &mut m,
+        &registry,
+        &unrelated,
+        "unrelated",
+        "worker",
+        &SESSION_KEY,
+    );
+    let mut selected = None;
+    for child_index in 0..MAX_DELEGATION_EDGES_PER_RUN / 8 {
+        let child = admit_delegation(
+            &mut m,
+            &registry,
+            &root,
+            &format!("root-{child_index}"),
+            "worker",
+            &SESSION_KEY,
+        );
+        open_delegated_session(&mut m, &registry, &child.callee_run_id);
+        for grandchild_index in 0..MAX_DELEGATIONS_PER_RUN - 1 {
+            let grandchild = admit_delegation(
+                &mut m,
+                &registry,
+                &child.callee_run_id,
+                &format!("grandchild-{child_index}-{grandchild_index}"),
+                "reviewer",
+                &CHILD_SESSION_KEY,
+            );
+            if child_index < MAX_DELEGATION_EDGES_PER_RUN / 8 - 1 {
+                settle_delegated(&mut m, &registry, &grandchild.callee_run_id, 20);
+            } else {
+                selected = Some((child.clone(), grandchild));
+            }
+        }
+        if child_index < MAX_DELEGATION_EDGES_PER_RUN / 8 - 1 {
+            settle_delegated(&mut m, &registry, &child.callee_run_id, 21);
+        }
+    }
+    let (selected, last_grandchild) = selected.unwrap();
+    let tree_before = crate::state::decode_delegation_tree(
+        &root,
+        &block_on(
+            m.receipts
+                .committed(&crate::state::delegation_tree_key(&root)),
+        )
+        .unwrap()
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(tree_before.ids.len(), MAX_DELEGATION_EDGES_PER_RUN);
+    assert_eq!(tree_before.pending, MAX_DELEGATIONS_PER_RUN as u64);
+    let selected_ids: BTreeSet<_> = std::iter::once(selected.delegation_id.clone())
+        .chain(
+            delegations(&m, &selected.callee_run_id)
+                .into_iter()
+                .map(|call| call.delegation_id),
+        )
+        .collect();
+    assert_eq!(selected_ids.len(), MAX_DELEGATIONS_PER_RUN);
+    assert!(get_pending(&m, &last_grandchild.callee_run_id).is_some());
+
+    backing.forget_reads();
+    backing.forget_writes();
+    settle_delegated(&mut m, &registry, &selected.callee_run_id, 30);
+
+    assert_eq!(
+        backing.read_key_count(&crate::state::delegation_tree_key(&root)),
+        1
+    );
+    assert_eq!(
+        tree_before
+            .ids
+            .iter()
+            .map(|id| backing.read_key_count(&crate::state::delegation_key(id)))
+            .sum::<usize>(),
+        MAX_DELEGATION_EDGES_PER_RUN
+    );
+    for id in &tree_before.ids {
+        assert!(backing.read_key_count(&crate::state::delegation_key(id)) <= 1);
+        assert_eq!(
+            backing.read_key_count(&crate::state::delegation_request_key(id)),
+            0
+        );
+        assert_eq!(
+            backing.read_key_count(&crate::state::delegation_reply_key(id)),
+            0
+        );
+    }
+    assert_eq!(
+        backing.write_key_count(&crate::state::delegation_tree_key(&root)),
+        1
+    );
+    assert_eq!(
+        selected_ids
+            .iter()
+            .map(|id| {
+                backing.write_key_count(&crate::state::delegation_key(id))
+                    + backing.write_key_count(&crate::state::delegation_reply_key(id))
+            })
+            .sum::<usize>(),
+        MAX_DELEGATIONS_PER_RUN * 2
+    );
+    for key in [
+        crate::state::delegation_tree_key(&unrelated),
+        crate::state::delegation_key(&unrelated_edge.delegation_id),
+        crate::state::delegation_run_key(&unrelated_edge.callee_run_id),
+        crate::state::delegation_request_key(&unrelated_edge.delegation_id),
+        crate::state::delegation_reply_key(&unrelated_edge.delegation_id),
+    ] {
+        assert_eq!(backing.read_key_count(&key), 0, "unrelated read {key}");
+        assert_eq!(backing.write_key_count(&key), 0, "unrelated write {key}");
+        assert_eq!(backing.delete_key_count(&key), 0, "unrelated delete {key}");
+    }
 }
 
 #[test]
@@ -420,6 +1056,186 @@ fn call_ids_are_idempotent_and_completed_calls_release_the_root_slot() {
     );
     let mut joiner = module();
     joiner.install(&m.snapshot(), m.root()).unwrap();
+}
+
+#[test]
+fn real_admission_reaches_128_lifetime_edges_without_exceeding_eight_pending() {
+    let registry = registry(&["bot", "worker", "reviewer"]);
+    let mut m = configured(&registry);
+    request_post(&mut m, &registry, 2, &[]);
+    commit(&mut m);
+    let root_run = run_id_for("general", 2, "bot");
+    let mut root_open = session_ctx(&registry, &root_run, Origin::External(ASSIGNEE.to_vec()));
+    exec(&mut m, &mut root_open, &open(&root_run, &SESSION_KEY)).unwrap();
+    commit(&mut m);
+
+    let mut queued_children = Vec::new();
+    let mut max_pending = 0;
+    let mut processed_edges = 0;
+    for child_index in 0..MAX_DELEGATION_EDGES_PER_RUN / 8 {
+        let request_id = format!("root-{child_index}");
+        let mut ctx = session_ctx(&registry, &root_run, Origin::External(SESSION_KEY.to_vec()));
+        exec(
+            &mut m,
+            &mut ctx,
+            &delegate(&root_run, &request_id, "worker", "work"),
+        )
+        .unwrap();
+        commit(&mut m);
+        let child = delegations(&m, &root_run)
+            .into_iter()
+            .find(|call| call.request_id == request_id)
+            .unwrap();
+        queued_children.push(child.callee_run_id);
+
+        if child_index == 0 {
+            let before = m.receipts.snapshot();
+            let mut retry =
+                session_ctx(&registry, &root_run, Origin::External(SESSION_KEY.to_vec()));
+            exec(
+                &mut m,
+                &mut retry,
+                &delegate(&root_run, &request_id, "worker", "work"),
+            )
+            .unwrap();
+            assert!(retry.dispatch_msgs().is_empty());
+            assert_eq!(m.receipts.snapshot(), before, "exact retry staged a change");
+            assert_eq!(sessions(&m)[0].actions, 1);
+        }
+
+        if queued_children.len() == MAX_DELEGATIONS_PER_RUN - 1 {
+            process_one_delegation_subtree(
+                &mut m,
+                &registry,
+                &mut queued_children,
+                &mut max_pending,
+                &mut processed_edges,
+            );
+        }
+    }
+    while !queued_children.is_empty() {
+        process_one_delegation_subtree(
+            &mut m,
+            &registry,
+            &mut queued_children,
+            &mut max_pending,
+            &mut processed_edges,
+        );
+    }
+
+    let tree_bytes = block_on(
+        m.receipts
+            .committed(&crate::state::delegation_tree_key(&root_run)),
+    )
+    .unwrap()
+    .unwrap();
+    let tree = crate::state::decode_delegation_tree(&root_run, &tree_bytes).unwrap();
+    assert_eq!(processed_edges, MAX_DELEGATION_EDGES_PER_RUN);
+    assert_eq!(tree.ids.len(), MAX_DELEGATION_EDGES_PER_RUN);
+    assert_eq!(tree.pending, 0);
+    assert!(max_pending <= MAX_DELEGATIONS_PER_RUN);
+    assert_eq!(max_pending, MAX_DELEGATIONS_PER_RUN);
+
+    let before_records = m.receipts.snapshot();
+    let before_actions = sessions(&m)[0].actions;
+    let mut overflow = session_ctx(&registry, &root_run, Origin::External(SESSION_KEY.to_vec()));
+    let error = exec(
+        &mut m,
+        &mut overflow,
+        &delegate(&root_run, "root-overflow", "worker", "work"),
+    )
+    .unwrap_err();
+    assert!(matches!(error, Error::Module { reason, .. } if reason == refusal::CAPACITY));
+    assert!(
+        m.receipts
+            .staged()
+            .keys()
+            .find(|key| key.starts_with("dlg/"))
+            .is_none()
+    );
+    assert_eq!(m.receipts.snapshot(), before_records);
+    assert_eq!(sessions(&m)[0].actions, before_actions + 1);
+    abort(&mut m);
+    assert_eq!(m.receipts.snapshot(), before_records);
+    assert_eq!(sessions(&m)[0].actions, before_actions);
+}
+
+fn process_one_delegation_subtree(
+    m: &mut RunsModule,
+    registry: &Registry,
+    queued_children: &mut Vec<String>,
+    max_pending: &mut usize,
+    processed_edges: &mut usize,
+) {
+    let child_run = queued_children.remove(0);
+    let mut open_ctx = session_ctx(registry, &child_run, Origin::External(ASSIGNEE.to_vec()));
+    exec(m, &mut open_ctx, &open(&child_run, &CHILD_SESSION_KEY)).unwrap();
+    commit(m);
+    for grandchild_index in 0..MAX_DELEGATIONS_PER_RUN - 1 {
+        let request_id = format!("grandchild-{processed_edges}-{grandchild_index}");
+        let mut call_ctx = session_ctx(
+            registry,
+            &child_run,
+            Origin::External(CHILD_SESSION_KEY.to_vec()),
+        );
+        exec(
+            m,
+            &mut call_ctx,
+            &delegate(&child_run, &request_id, "reviewer", "review"),
+        )
+        .unwrap();
+        commit(m);
+        let pending = crate::state::decode_delegation_tree(
+            &run_id_for("general", 2, "bot"),
+            &block_on(
+                m.receipts
+                    .committed(&crate::state::delegation_tree_key(&run_id_for(
+                        "general", 2, "bot",
+                    ))),
+            )
+            .unwrap()
+            .unwrap(),
+        )
+        .unwrap()
+        .pending as usize;
+        *max_pending = (*max_pending).max(pending);
+        let grandchild = delegations(m, &child_run)
+            .into_iter()
+            .find(|call| call.request_id == request_id)
+            .unwrap();
+        let mut result_ctx = CaptureCtx::new()
+            .at(8)
+            .with_dispatch_origin()
+            .with_registry(registry)
+            .with_transcript("general", transcript(2));
+        exec(
+            m,
+            &mut result_ctx,
+            &result_event(
+                &grandchild.callee_run_id,
+                Ok(runner_wrapper("grandchild done", serde_json::json!({}))),
+            ),
+        )
+        .unwrap();
+        commit(m);
+        *processed_edges += 1;
+    }
+    let mut result_ctx = CaptureCtx::new()
+        .at(9)
+        .with_dispatch_origin()
+        .with_registry(registry)
+        .with_transcript("general", transcript(2));
+    exec(
+        m,
+        &mut result_ctx,
+        &result_event(
+            &child_run,
+            Ok(runner_wrapper("child done", serde_json::json!({}))),
+        ),
+    )
+    .unwrap();
+    commit(m);
+    *processed_edges += 1;
 }
 
 #[test]

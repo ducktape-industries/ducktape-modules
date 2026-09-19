@@ -23,15 +23,17 @@ use super::{
     ActionEnvelope, AgentResponse, AgentSession, BTreeMap, Ctx, DELEGATED_CHILD_CORES,
     DELEGATED_CHILD_MEM_GB, DelegationRequest, DelegationState, DelegationStatus, DelegationView,
     DispatchQuery, DispatchReply, Error, Lane, MAX_ACTIONS_PER_SESSION,
-    MAX_DELEGATION_INSTRUCTION_BYTES, MAX_DELEGATIONS_BYTES, MAX_DELEGATIONS_PER_RUN, ModelStatus,
-    Origin, PendingState, RunsModule, SESSION_KEY_LEN, SiblingReadBudget, delegated_run_id_for,
-    delegation_id_for, dispatch_decode_reply, dispatch_encode_query, dispatch_id_for, page_source,
+    MAX_DELEGATION_EDGES_PER_RUN, MAX_DELEGATION_INSTRUCTION_BYTES, MAX_DELEGATIONS_BYTES,
+    MAX_DELEGATIONS_PER_RUN, ModelStatus, Origin, PendingState, RunsModule, SESSION_KEY_LEN,
+    Sha256, SiblingReadBudget, delegated_run_id_for, delegation_id_for, dispatch_decode_reply,
+    dispatch_encode_query, dispatch_id_for, page_source,
 };
 use dispatch::DispatchStatus;
 use saga::{
     SagaQuery, SagaReply, decode_reply as saga_decode_reply, encode_query as saga_encode_query,
 };
 use sdk::refusal;
+use sha2::Digest;
 
 /// The same authoritative allowance pays for tool actions and semantic worker
 /// reports. Decide the next value here; its writer shares the target's transaction.
@@ -413,8 +415,10 @@ impl RunsModule {
             sentence,
         })?;
         let delegation_id = delegation_id_for(&run_id, &request_id);
-        if let Some(existing) = self.delegation(&delegation_id) {
-            return if existing.view.caller_run_id == run_id && existing.request == request {
+        let request_digest: [u8; 32] = Sha256::digest(sdk::wire::encode(&request)).into();
+        if let Some(existing) = self.delegation_header(&delegation_id).await? {
+            return if existing.caller_run_id == run_id && existing.request_digest == request_digest
+            {
                 Ok(())
             } else {
                 Err(Error::Module {
@@ -474,8 +478,9 @@ impl RunsModule {
         }
         let root_run_id = match entry.delegation_id.as_deref() {
             Some(id) => self
-                .delegation(id)
-                .map(|state| state.view.root_run_id.clone())
+                .delegation_header(id)
+                .await?
+                .map(|header| header.root_run_id)
                 .ok_or_else(|| Error::Module {
                     reason: refusal::CORRUPT.into(),
                     sentence: format!(
@@ -490,16 +495,18 @@ impl RunsModule {
                 reason: refusal::WRONG_STATE.into(),
                 sentence: format!("delegation root run {root_run_id} is no longer in flight"),
             })?;
-        let spent = self
-            .delegation_ids()
-            .into_iter()
-            .filter_map(|id| self.delegation(&id))
-            .filter(|state| {
-                state.view.root_run_id == root_run_id
-                    && state.view.status == DelegationStatus::Pending
-            })
-            .count();
-        if spent >= MAX_DELEGATIONS_PER_RUN {
+        let tree = self.delegation_tree(&root_run_id).await?;
+        let pending = tree.as_ref().map_or(0, |tree| tree.pending as usize);
+        let total = tree.as_ref().map_or(0, |tree| tree.ids.len());
+        if total >= MAX_DELEGATION_EDGES_PER_RUN {
+            return Err(Error::Module {
+                reason: refusal::CAPACITY.into(),
+                sentence: format!(
+                    "delegation tree has reached its lifetime limit of {MAX_DELEGATION_EDGES_PER_RUN} edges"
+                ),
+            });
+        }
+        if pending >= MAX_DELEGATIONS_PER_RUN {
             return Err(Error::Module {
                 reason: refusal::CAPACITY.into(),
                 sentence: format!(
@@ -573,24 +580,22 @@ impl RunsModule {
                 sentence,
             })?;
         let now = ctx.env().consensus_time;
-        self.pending_delegations.insert(
-            delegation_id.clone(),
-            Some(DelegationState {
-                view: DelegationView {
-                    delegation_id: delegation_id.clone(),
-                    request_id,
-                    caller_run_id: run_id.clone(),
-                    root_run_id,
-                    callee_run_id: callee_run_id.clone(),
-                    callee_agent_id: callee.agent_id.clone(),
-                    status: DelegationStatus::Pending,
-                    result: None,
-                    created_at: now,
-                    completed_at: None,
-                },
-                request,
-            }),
-        );
+        let delegation = DelegationState {
+            view: DelegationView {
+                delegation_id: delegation_id.clone(),
+                request_id,
+                caller_run_id: run_id.clone(),
+                root_run_id,
+                callee_run_id: callee_run_id.clone(),
+                callee_agent_id: callee.agent_id.clone(),
+                status: DelegationStatus::Pending,
+                result: None,
+                created_at: now,
+                completed_at: None,
+            },
+            request,
+        };
+        self.stage_delegation(&delegation).await?;
         self.stage_scoped_dispatch_run(
             ctx,
             &callee_run_id,
@@ -607,6 +612,11 @@ impl RunsModule {
             Some(delegation_id),
         )
         .await?;
+        // The callee dispatch has the fully composed instruction in its
+        // payload; no later production path needs the request body.
+        self.receipts.remove(crate::state::delegation_request_key(
+            &delegation.view.delegation_id,
+        ));
         Ok(())
     }
 
