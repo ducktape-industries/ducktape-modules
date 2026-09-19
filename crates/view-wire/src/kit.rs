@@ -8,7 +8,7 @@
 use std::cell::Cell;
 
 use crate as wire;
-use crate::{Axis, ButtonContent, ButtonPreset, Length, Node};
+use crate::{Axis, ButtonContent, ButtonPreset, Length, Node, Role};
 
 pub use design::Palette;
 pub use design::{radius, type_scale};
@@ -66,23 +66,40 @@ pub fn text(key: impl Into<String>, content: impl Into<String>) -> Node {
         font: Default::default(),
         width: None,
         align_x: None,
+        heading: None,
+        live: None,
     }
 }
 
 /// A view's own title row.
 pub fn title(key: impl Into<String>, content: impl Into<String>) -> Node {
-    weighted(
-        text_size(text(key, content), type_scale::TITLE as f32),
-        wire::Weight::Semibold,
+    heading_level(
+        weighted(
+            text_size(text(key, content), type_scale::TITLE as f32),
+            wire::Weight::Semibold,
+        ),
+        1,
     )
 }
 
 /// A section title inside a view.
 pub fn heading(key: impl Into<String>, content: impl Into<String>) -> Node {
-    weighted(
-        text_size(text(key, content), type_scale::SECTION as f32),
-        wire::Weight::Semibold,
+    heading_level(
+        weighted(
+            text_size(text(key, content), type_scale::SECTION as f32),
+            wire::Weight::Semibold,
+        ),
+        2,
     )
+}
+
+/// What a title looks like is not what it IS: assistive technology reads the
+/// level, so the two builders that draw a heading also say so.
+fn heading_level(mut node: Node, level: u8) -> Node {
+    if let Node::Text { heading, .. } = &mut node {
+        *heading = Some(level);
+    }
+    node
 }
 
 /// Body text with emphasis: a row's name, a message author.
@@ -605,7 +622,8 @@ pub fn field(key: impl Into<String>, name: impl Into<String>, control: Node) -> 
     )
 }
 
-/// A row of section switches: the chosen one is checked.
+/// A row of section switches: each is a tab, and the chosen one is checked
+/// (painted) and selected (announced).
 pub fn tabs(
     key: impl Into<String>,
     choices: impl IntoIterator<Item = (String, String, bool, Option<u32>)>,
@@ -613,10 +631,18 @@ pub fn tabs(
     let key = key.into();
     let buttons = choices.into_iter().map(|(id, name, chosen, on_press)| {
         let mut button = button(format!("{key}/{id}"), name, on_press, ButtonPreset::Subtle);
-        let Node::Button { checked, .. } = &mut button else {
+        let Node::Button {
+            role,
+            checked,
+            selected,
+            ..
+        } = &mut button
+        else {
             unreachable!()
         };
+        *role = Some(Role::Tab);
         *checked = Some(chosen);
+        *selected = Some(chosen);
         button
     });
     spaced(row(key.clone(), buttons), 2.)
@@ -694,6 +720,7 @@ fn control(
         checked: None,
         expanded: None,
         selected: None,
+        role: None,
         description: None,
         width: None,
         height: None,
