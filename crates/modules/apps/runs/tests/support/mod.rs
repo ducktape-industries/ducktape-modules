@@ -11,7 +11,7 @@ use identity_module as identity;
 use valset_module as valset;
 
 use host::{BlockContext, Host};
-use sdk::{Msg, Origin};
+use sdk::{Msg, Origin, StateRoot, StateSyncHandle};
 use sdk_testkit::MemStore;
 
 pub fn store() -> Box<dyn sdk::MerkleStore> {
@@ -44,6 +44,48 @@ pub struct Network {
     pub host: Host,
     pub height: u64,
     pub events: Vec<sdk::Event>,
+}
+
+pub fn module() -> runs::RunsModule {
+    runs::RunsModule::new(
+        "runs",
+        "chat",
+        "saga",
+        "attribution",
+        "dispatch",
+        "agent",
+        Some("tasks".into()),
+        Some("tasks".into()),
+    )
+}
+
+pub async fn source() -> (Vec<u8>, StateRoot, Network) {
+    let mut network = Network::new().await;
+    let run = network.provision().await;
+    network
+        .submit(
+            session(),
+            msg(
+                "runs",
+                &runs::RunsMsg::AgentAction {
+                    run_id: run,
+                    request_id: "pending".into(),
+                    action: create_task("pending", "persisted request"),
+                },
+            ),
+        )
+        .await;
+    let (snapshot, _) =
+        network
+            .host
+            .capture_current_snapshot(network.height, host::CapturePayloads::All, || {
+                std::time::Duration::ZERO
+            });
+    let runs = snapshot.module("runs").unwrap();
+    let StateSyncHandle::SnapshotBytes(bytes) = &runs.state_sync else {
+        panic!("runs snapshot bytes");
+    };
+    (bytes.clone(), runs.root, network)
 }
 impl Network {
     pub async fn new() -> Self {
