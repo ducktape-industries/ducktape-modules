@@ -511,6 +511,91 @@ fn queue_overflow_drops_oldest_and_counts_the_eviction() {
     });
 }
 
+/// the live set is the meta's `first_live..next_seq` WINDOW, not a stored
+/// list, so the counters and the item keys must stay in step across a long
+/// life. this walks an inbox to twice its cap, then through a mark-read, a
+/// mid-window clear, three no-op clears and one more delivery, asserting the
+/// window is exactly right at every boundary. a counter that drifts LOW makes
+/// `queue_view` read a seq whose record was dropped (a loud CORRUPT); one that
+/// drifts HIGH drops live items out of the listed range.
+#[test]
+fn a_long_lived_queue_evicts_clears_and_reads_exactly_at_its_boundaries() {
+    block_on(async {
+        let mut inbox = fresh();
+        let cap = MAX_ITEMS_PER_ACCOUNT as u64;
+        let delivered = cap * 2;
+        for seq in 1..=delivered {
+            deliver(&mut inbox, seq, &change(seq, ALICE)).await.unwrap();
+        }
+        inbox.commit_block().await.unwrap();
+
+        // twice the cap delivered: the window holds the LAST `cap` seqs, each
+        // still with its record, and every earlier one was dropped and counted.
+        let (next, items) = queue(&inbox, ALICE).await.unwrap();
+        assert_eq!(next, delivered + 1);
+        assert_eq!(
+            items.iter().map(|n| n.seq).collect::<Vec<_>>(),
+            (delivered - cap + 1..=delivered).collect::<Vec<_>>()
+        );
+        assert_eq!(inbox.evicted_count(ALICE).await.unwrap(), delivered - cap);
+
+        // the watermark clamps to the last seq ASSIGNED, not to the window.
+        inbox
+            .execute(&mut submitter(ALICE_KEY_1, 1), &mark_read(ALICE, u64::MAX))
+            .await
+            .unwrap();
+        inbox.commit_block().await.unwrap();
+        assert_eq!(inbox.read_watermark_view(ALICE).await.unwrap(), delivered);
+
+        // a clear landing INSIDE the window removes exactly that prefix.
+        let cut = delivered - 10;
+        inbox
+            .execute(&mut submitter(ALICE_KEY_2, 2), &clear(ALICE, cut))
+            .await
+            .unwrap();
+        inbox.commit_block().await.unwrap();
+        let cleared = inbox.root();
+        let (next, items) = queue(&inbox, ALICE).await.unwrap();
+        assert_eq!(next, delivered + 1, "next_seq never rewinds");
+        assert_eq!(
+            items.iter().map(|n| n.seq).collect::<Vec<_>>(),
+            (cut + 1..=delivered).collect::<Vec<_>>()
+        );
+
+        // and every clear at or below the new low end — including the whole
+        // long-evicted range — is a byte-identical no-op.
+        for up_to in [cut, delivered - cap, 0] {
+            inbox
+                .execute(&mut submitter(ALICE_KEY_1, 3), &clear(ALICE, up_to))
+                .await
+                .unwrap();
+        }
+        inbox.commit_block().await.unwrap();
+        assert_eq!(inbox.root(), cleared);
+
+        // delivery continues past the clear, and a window back below its cap
+        // evicts nothing.
+        assert_eq!(
+            deliver(&mut inbox, 4, &change(delivered + 1, ALICE))
+                .await
+                .unwrap(),
+            InboxAssigned::Delivered { seq: delivered + 1 }
+        );
+        inbox.commit_block().await.unwrap();
+        let (_, items) = queue(&inbox, ALICE).await.unwrap();
+        assert_eq!(
+            items.iter().map(|n| n.seq).collect::<Vec<_>>(),
+            (cut + 1..=delivered + 1).collect::<Vec<_>>()
+        );
+        assert_eq!(inbox.evicted_count(ALICE).await.unwrap(), delivered - cap);
+        assert!(inbox.is_read(ALICE, delivered).await.unwrap());
+        assert!(
+            !inbox.is_read(ALICE, delivered + 1).await.unwrap(),
+            "the delivery after the ack is unread"
+        );
+    });
+}
+
 #[test]
 fn seq_exhaustion_rejects_deterministically() {
     block_on(async {
