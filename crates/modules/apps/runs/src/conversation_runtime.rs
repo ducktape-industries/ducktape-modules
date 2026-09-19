@@ -68,7 +68,7 @@ impl RunsModule {
         let job_id = match &binding {
             Some(binding) => binding.job_id.clone(),
             None => {
-                let Some(entry) = self.pending_entry(&dispatch_id_for(run_id)) else {
+                let Some(entry) = self.pending_entry(&dispatch_id_for(run_id)).await? else {
                     return Ok(None);
                 };
                 let Some(job_id) = &entry.job_id else {
@@ -167,7 +167,7 @@ impl RunsModule {
         run_id: &str,
         attempt: u32,
     ) -> Result<(), Error> {
-        let session = self.session(run_id).ok_or_else(|| Error::Module {
+        let session = self.session(run_id).await?.ok_or_else(|| Error::Module {
             reason: refusal::WRONG_STATE.into(),
             sentence: format!("run {run_id} has no live session"),
         })?;
@@ -180,7 +180,7 @@ impl RunsModule {
                 sentence: format!("attempt {attempt} of run {run_id} is not held by this signer"),
             });
         }
-        self.session_holds_lease(ctx, run_id, session).await
+        self.session_holds_lease(ctx, run_id, &session).await
     }
     async fn authorize_worker_boundary(
         &self,
@@ -199,6 +199,7 @@ impl RunsModule {
             })?;
         let entry = self
             .pending_entry(&dispatch_id_for(run_id))
+            .await?
             .ok_or_else(|| Error::Module {
                 reason: refusal::WRONG_STATE.into(),
                 sentence: format!("run {run_id} is not in flight"),
@@ -272,6 +273,7 @@ impl RunsModule {
         }
         let entry = self
             .pending_entry(&dispatch_id_for(&run_id))
+            .await?
             .expect("authorized worker is in flight");
         let generation = self.active_generation(ctx, entry.account).await?;
         if generation != entry.generation {
@@ -307,11 +309,12 @@ impl RunsModule {
         }
         let session = self
             .session(&run_id)
+            .await?
             .expect("authorized worker has a session");
-        let next_session = crate::sessions::reserve_session_action(session)?;
+        let next_session = crate::sessions::reserve_session_action(&session)?;
         self.receipts
             .stage(receipt_key, sdk::wire::encode(&digest))?;
-        self.pending_sessions.insert(run_id, Some(next_session));
+        self.stage_session(next_session)?;
         ctx.emit_msg(Msg {
             target: self.jobs.clone().expect("authorized worker has Jobs"),
             payload: bytes,
@@ -460,6 +463,7 @@ impl RunsModule {
         if let Some(turn) = &state.active_turn {
             let already_dispatched = self
                 .pending_entry(&dispatch_id_for(&turn.run_id))
+                .await?
                 .is_some_and(|pending| pending.job_id.as_ref() == Some(&job.job_id));
             if already_dispatched {
                 return Ok(None);
@@ -901,7 +905,8 @@ impl RunsModule {
             Origin::Program(state.account),
             prepared,
             BTreeMap::new(),
-        );
+        )
+        .await?;
         Ok(())
     }
     pub(crate) async fn checkpoint_conversation(
@@ -916,6 +921,7 @@ impl RunsModule {
         // use a durable operation receipt as authority after ownership moves.
         let session = self
             .session(&checkpoint.run_id)
+            .await?
             .ok_or_else(|| Error::Module {
                 reason: refusal::WRONG_STATE.into(),
                 sentence: format!("run {} has no live session", checkpoint.run_id),
@@ -932,7 +938,7 @@ impl RunsModule {
                 ),
             });
         }
-        self.session_holds_lease(ctx, &checkpoint.run_id, session)
+        self.session_holds_lease(ctx, &checkpoint.run_id, &session)
             .await?;
         if self
             .operation_seen(&id, &checkpoint.operation_id, &payload)

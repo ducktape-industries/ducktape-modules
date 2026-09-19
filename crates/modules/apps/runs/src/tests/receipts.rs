@@ -6,9 +6,11 @@ pub(crate) struct Stored {
     records: BTreeMap<[u8; 32], Vec<u8>>,
     pub(crate) reads: usize,
     read_bytes: usize,
+    read_sizes: Vec<usize>,
     distinct: std::collections::BTreeSet<[u8; 32]>,
     writes: Vec<[u8; 32]>,
     write_bytes: usize,
+    largest_write: usize,
 }
 
 #[derive(Clone, Default)]
@@ -41,7 +43,11 @@ impl Backing {
         let mut stored = self.0.borrow_mut();
         stored.reads = 0;
         stored.read_bytes = 0;
+        stored.read_sizes.clear();
         stored.distinct.clear();
+    }
+    pub(crate) fn read_sizes(&self) -> Vec<usize> {
+        self.0.borrow().read_sizes.clone()
     }
     /// Bytes supplied to committed-store writes since construction.
     pub(crate) fn write_bytes(&self) -> usize {
@@ -50,6 +56,9 @@ impl Backing {
     /// Number of committed write-batch entries.
     pub(crate) fn writes(&self) -> usize {
         self.0.borrow().writes.len()
+    }
+    pub(crate) fn largest_write(&self) -> usize {
+        self.0.borrow().largest_write
     }
     /// The committed value size at a logical receipt key.
     pub(crate) fn value_len(&self, key: &str) -> Option<usize> {
@@ -68,7 +77,9 @@ impl sdk::MerkleStore for Backing {
         stored.reads += 1;
         stored.distinct.insert(*key);
         let value = stored.records.get(key).cloned();
-        stored.read_bytes += value.as_ref().map_or(0, Vec::len);
+        let size = value.as_ref().map_or(0, Vec::len);
+        stored.read_bytes += size;
+        stored.read_sizes.push(size);
         Ok(value)
     }
     async fn commit_batch(
@@ -81,6 +92,7 @@ impl sdk::MerkleStore for Backing {
             match value {
                 Some(value) => {
                     stored.write_bytes += value.len();
+                    stored.largest_write = stored.largest_write.max(value.len());
                     stored.records.insert(key, value);
                 }
                 None => {
@@ -103,10 +115,9 @@ impl sdk::MerkleStore for Backing {
 
 fn hosted() -> (RunsModule, Backing, PendingState) {
     let (module, registry, run_id) = awaiting_run();
-    let entry = module
-        .pending_entry(&dispatch_id_for(&run_id))
+    let entry = block_on(module.pending_entry(&dispatch_id_for(&run_id)))
         .unwrap()
-        .clone();
+        .unwrap();
     let backing = Backing::default();
     let mut module = module.with_receipt_store(Box::new(backing.clone()));
     module.seed_test_models(&registry).unwrap();
@@ -143,6 +154,143 @@ fn stage(module: &mut RunsModule, entry: &PendingState, slot: u32) -> String {
     ))
     .unwrap();
     id
+}
+
+fn bounded_pending(entry: &PendingState, index: usize) -> (String, PendingState) {
+    let mut pending = entry.clone();
+    pending.run_id = format!("bounded-{index}");
+    let dispatch_id = dispatch_id_for(&pending.run_id);
+    (dispatch_id, pending)
+}
+
+#[test]
+fn pending_list_is_bounded_point_addressed_and_reclaims_capacity() {
+    let (mut module, backing, entry) = hosted();
+    block_on(module.stage_pending_insert(dispatch_id_for(&entry.run_id), entry.clone())).unwrap();
+    let session = AgentSession {
+        run_id: entry.run_id.clone(),
+        agent_id: entry.agent_id.clone(),
+        session_key: vec![7; SESSION_KEY_LEN],
+        lease: ExecutionLease {
+            holder: vec![8; 32],
+            attempt: 0,
+        },
+        opened_at: 1,
+        actions: 0,
+    };
+    module.stage_session(session).unwrap();
+    commit(&mut module);
+    let session_size = backing
+        .value_len(&crate::state::session_key(&entry.run_id))
+        .unwrap();
+    let one_state_size = module.snapshot().len();
+    let one_pending_items = {
+        backing.forget_reads();
+        block_on(module.pending_items()).unwrap();
+        (backing.distinct_reads(), backing.read_bytes())
+    };
+    let mut ids = vec![dispatch_id_for(&entry.run_id)];
+    for index in 1..MAX_PENDING_RUNS as usize {
+        let (dispatch_id, pending) = bounded_pending(&entry, index);
+        block_on(module.stage_pending_insert(dispatch_id.clone(), pending)).unwrap();
+        commit(&mut module);
+        ids.push(dispatch_id);
+    }
+    assert_eq!(
+        block_on(module.pending_list()).unwrap().len(),
+        MAX_PENDING_RUNS as usize
+    );
+    let max_state_size = module.snapshot().len();
+
+    let (overflow_id, overflow) = bounded_pending(&entry, MAX_PENDING_RUNS as usize);
+    let error = block_on(module.stage_pending_insert(overflow_id, overflow)).unwrap_err();
+    assert!(matches!(error, Error::Module { reason, .. } if reason == refusal::CAPACITY));
+    abort(&mut module);
+    assert_eq!(
+        block_on(module.pending_list()).unwrap().len(),
+        MAX_PENDING_RUNS as usize
+    );
+
+    for dispatch_id in [
+        ids.last().unwrap().clone(),
+        ids[ids.len() / 2].clone(),
+        ids[0].clone(),
+    ] {
+        let run_id = if dispatch_id == ids[0] {
+            entry.run_id.clone()
+        } else {
+            format!(
+                "bounded-{}",
+                ids.iter().position(|id| id == &dispatch_id).unwrap()
+            )
+        };
+        block_on(module.stage_pending_remove(&dispatch_id)).unwrap();
+        module.remove_session(&run_id);
+        commit(&mut module);
+    }
+    assert_eq!(
+        block_on(module.pending_list()).unwrap().len(),
+        MAX_PENDING_RUNS as usize - 3
+    );
+    for index in MAX_PENDING_RUNS as usize..MAX_PENDING_RUNS as usize + 3 {
+        let (dispatch_id, pending) = bounded_pending(&entry, index);
+        block_on(module.stage_pending_insert(dispatch_id, pending)).unwrap();
+        commit(&mut module);
+    }
+    assert_eq!(
+        block_on(module.pending_list()).unwrap().len(),
+        MAX_PENDING_RUNS as usize
+    );
+
+    backing.forget_reads();
+    block_on(module.pending_items()).unwrap();
+    let max_pending_items = (backing.distinct_reads(), backing.read_bytes());
+    eprintln!(
+        "pending_items: one distinct_reads={} read_bytes={}, max distinct_reads={} read_bytes={}",
+        one_pending_items.0, one_pending_items.1, max_pending_items.0, max_pending_items.1
+    );
+    assert_eq!(one_pending_items, max_pending_items);
+    let meta_size = backing.value_len("run/meta").unwrap();
+    let pending_size = backing
+        .value_len(&crate::state::pending_key(&ids[1]))
+        .unwrap();
+    eprintln!(
+        "post-B state: one bytes={}, max bytes={}; records: meta={} pending={} session={}",
+        one_state_size, max_state_size, meta_size, pending_size, session_size
+    );
+    assert_eq!(one_state_size, max_state_size);
+    assert!(meta_size <= sdk::MAX_STORE_VALUE_BYTES);
+    assert!(pending_size <= sdk::MAX_STORE_VALUE_BYTES);
+    assert!(session_size <= sdk::MAX_STORE_VALUE_BYTES);
+    assert!(
+        backing
+            .value_len(&crate::state::session_key(&entry.run_id))
+            .is_none()
+    );
+}
+
+#[test]
+fn pending_insert_refuses_nonzero_count_without_a_head_before_staging() {
+    let (source, _, run_id) = awaiting_run();
+    let dispatch_id = dispatch_id_for(&run_id);
+    let entry = block_on(source.pending_entry(&dispatch_id))
+        .unwrap()
+        .unwrap();
+    let mut module = super::module();
+    module
+        .receipts
+        .stage(
+            crate::state::RUN_META_KEY.into(),
+            crate::state::encode_pending_meta(None, 1),
+        )
+        .unwrap();
+    commit(&mut module);
+    let before = module.snapshot();
+
+    let error = block_on(module.stage_pending_insert(dispatch_id, entry)).unwrap_err();
+    assert!(matches!(error, Error::Module { reason, .. } if reason == refusal::CORRUPT));
+    assert_eq!(module.snapshot(), before);
+    assert!(module.receipts.staged().is_empty());
 }
 
 fn acknowledge(module: &mut RunsModule, item: u64, outcome: sdk::DeliveryOutcome) {

@@ -74,6 +74,9 @@ pub use runs_wire::RUN_LEASE_VIEWS;
 /// oracle attempts per run: one retry after an explicit provider failure.
 pub const RUN_MAX_ATTEMPTS: u32 = 2;
 
+/// Maximum number of live dispatch correlation records.
+pub const MAX_PENDING_RUNS: u64 = 4096;
+
 /// every peer-call callee requests this fixed sandbox profile. One root call
 /// tree runs at most `MAX_DELEGATIONS_PER_RUN` callees concurrently, so the
 /// same bound holds live delegated compute at `2 * MAX_DELEGATIONS_PER_RUN`
@@ -265,15 +268,16 @@ mod state;
 
 use response::canonical_origin;
 use state::{
-    committed_root, contains_run_separator, decode_committed, encode_committed, legacy_root,
-    reject_run_separator,
+    StateVersion, committed_root, contains_run_separator, decode_committed, encode_committed,
+    legacy_root, post_a_root, reject_run_separator,
 };
 
 /// one in-flight dispatch's correlation entry. the dispatch id is the map
 /// key; the run id is derivable from the fields. NOT a lifecycle record: it
 /// exists exactly while the dispatch is outstanding and is pruned when the
 /// result delivers.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct PendingState {
     account: u64,
     generation: u64,
@@ -416,32 +420,20 @@ pub struct RunsModule {
     chain_id: String,
     /// Genesis-bound clock scale; duration scheduling refuses absent wiring.
     time_unit: Option<sdk::genesis_config::TimeUnit>,
-    /// v0 model collection retained only between a legacy install and the
-    /// first committed migration. Post-A state lives in `receipts` records.
+    /// Legacy collections retained only between an old-layout install and the
+    /// first committed migration. Post-B state lives in `receipts` records.
     legacy_models: Option<BTreeMap<String, ModelRecord>>,
+    legacy_pending: Option<BTreeMap<String, PendingState>>,
+    legacy_sessions: Option<BTreeMap<String, AgentSession>>,
+    legacy_state_version: Option<StateVersion>,
     legacy_migration_staged: bool,
     receipts: receipts::Receipts,
     next_action_item: u64,
     staged_next_action_item: Option<u64>,
-    /// in-flight correlation entries keyed by dispatch id — pruned on
-    /// delivery; the dispatch module owns lifecycle and history.
-    pending: BTreeMap<String, PendingState>,
-    /// the LIVE agent sessions keyed by run id — the ephemeral key each
-    /// executing node bound to its run, plus the budget it has spent. committed
-    /// state (in `root()`): the ACL every validator enforces mid-run, so it must
-    /// be the same on all of them. bounded by the pending runs — a session is
-    /// pruned in the same block as its run's entry and can never outlive it.
-    sessions: BTreeMap<String, AgentSession>,
     /// ephemeral run-scoped call edges and their returned results. They are
     /// committed because admission, budget and result collection must replay
     /// identically, but a root run's settlement prunes its whole tree.
     delegations: BTreeMap<String, DelegationState>,
-    /// this block's staged writes, read ahead of committed state
-    /// (read-your-writes) but merged in — and reflected in `root()` — only at
-    /// `commit_block`. a pending
-    /// entry stages `None` for its prune; a session stages `None` for its prune.
-    pending_overlay: BTreeMap<String, Option<PendingState>>,
-    pending_sessions: BTreeMap<String, Option<AgentSession>>,
     pending_delegations: BTreeMap<String, Option<DelegationState>>,
     /// the delivered-runs ring (last [`RUN_HISTORY_CAP`], oldest first —
     /// queries serve it reversed). DERIVED state: recorded at delivery,
@@ -525,15 +517,14 @@ impl RunsModule {
             chain_id: String::new(),
             time_unit: None,
             legacy_models: None,
+            legacy_pending: None,
+            legacy_sessions: None,
+            legacy_state_version: None,
             legacy_migration_staged: false,
             receipts: receipts::Receipts::default(),
             next_action_item: 0,
             staged_next_action_item: None,
-            pending: BTreeMap::new(),
-            sessions: BTreeMap::new(),
             delegations: BTreeMap::new(),
-            pending_overlay: BTreeMap::new(),
-            pending_sessions: BTreeMap::new(),
             pending_delegations: BTreeMap::new(),
             history: VecDeque::new(),
             pending_history: Vec::new(),
@@ -685,18 +676,342 @@ impl RunsModule {
 
     // ---- staged-over-committed reads ---------------------------------------
 
-    fn pending_entry(&self, dispatch_id: &str) -> Option<&PendingState> {
-        match self.pending_overlay.get(dispatch_id) {
-            Some(staged) => staged.as_ref(),
-            None => self.pending.get(dispatch_id),
+    async fn pending_entry(&self, dispatch_id: &str) -> Result<Option<PendingState>, Error> {
+        if let Some(legacy) = self.legacy_pending.as_ref()
+            && !self.legacy_migration_staged
+        {
+            return Ok(legacy.get(dispatch_id).cloned());
         }
+        let Some(bytes) = self.receipts.get(&state::pending_key(dispatch_id)).await? else {
+            return Ok(None);
+        };
+        let (pending, _, _) =
+            state::decode_pending_record(dispatch_id, &bytes).map_err(Self::corrupt_record)?;
+        Ok(Some(pending))
     }
 
-    fn session(&self, run_id: &str) -> Option<&AgentSession> {
-        match self.pending_sessions.get(run_id) {
-            Some(staged) => staged.as_ref(),
-            None => self.sessions.get(run_id),
+    async fn session(&self, run_id: &str) -> Result<Option<AgentSession>, Error> {
+        if let Some(legacy) = self.legacy_sessions.as_ref()
+            && !self.legacy_migration_staged
+        {
+            return Ok(legacy.get(run_id).cloned());
         }
+        let Some(pending) = self.pending_entry(&dispatch_id_for(run_id)).await? else {
+            return Ok(None);
+        };
+        self.session_for_pending(run_id, &pending).await
+    }
+
+    async fn session_for_pending(
+        &self,
+        run_id: &str,
+        pending: &PendingState,
+    ) -> Result<Option<AgentSession>, Error> {
+        if let Some(legacy) = self.legacy_sessions.as_ref()
+            && !self.legacy_migration_staged
+        {
+            return Ok(legacy.get(run_id).cloned());
+        }
+        let Some(bytes) = self.receipts.get(&state::session_key(run_id)).await? else {
+            return Ok(None);
+        };
+        state::decode_session_record(run_id, &bytes, pending)
+            .map(Some)
+            .map_err(Self::corrupt_record)
+    }
+
+    async fn pending_list(&self) -> Result<Vec<(String, PendingState)>, Error> {
+        if let Some(legacy) = self.legacy_pending.as_ref()
+            && !self.legacy_migration_staged
+        {
+            return Ok(legacy
+                .iter()
+                .map(|(id, pending)| (id.clone(), pending.clone()))
+                .collect());
+        }
+        let Some(bytes) = self.receipts.get(state::RUN_META_KEY).await? else {
+            return Ok(Vec::new());
+        };
+        let (head, count) = state::decode_pending_meta(&bytes).map_err(Self::corrupt_record)?;
+        let Some(mut current) = head else {
+            if count == 0 {
+                return Ok(Vec::new());
+            }
+            return Err(Self::corrupt_record("pending metadata has no head"));
+        };
+        let mut result = Vec::with_capacity(count as usize);
+        let mut previous = None;
+        let mut seen = BTreeSet::new();
+        for _ in 0..count {
+            if !seen.insert(current.clone()) {
+                return Err(Self::corrupt_record("pending list contains a cycle"));
+            }
+            let Some(bytes) = self.receipts.get(&state::pending_key(&current)).await? else {
+                return Err(Self::corrupt_record("pending list names a missing record"));
+            };
+            let (pending, prev, next) =
+                state::decode_pending_record(&current, &bytes).map_err(Self::corrupt_record)?;
+            if prev != previous {
+                return Err(Self::corrupt_record(
+                    "pending list has a broken previous link",
+                ));
+            }
+            previous = Some(current.clone());
+            result.push((current.clone(), pending));
+            let Some(next) = next else {
+                if result.len() != count as usize {
+                    return Err(Self::corrupt_record("pending list ended before its count"));
+                }
+                return Ok(result);
+            };
+            current = next;
+        }
+        Err(Self::corrupt_record("pending list exceeds its count"))
+    }
+
+    async fn session_list(&self) -> Result<Vec<AgentSession>, Error> {
+        if let Some(legacy) = self.legacy_sessions.as_ref()
+            && !self.legacy_migration_staged
+        {
+            return Ok(legacy.values().cloned().collect());
+        }
+        let pending = self.pending_list().await?;
+        let mut result = Vec::new();
+        for (_, entry) in pending {
+            if let Some(session) = self.session_for_pending(&entry.run_id, &entry).await? {
+                result.push(session);
+            }
+        }
+        result.sort_by(|left, right| left.run_id.cmp(&right.run_id));
+        Ok(result)
+    }
+
+    fn visible_ids<V, W>(
+        committed: &BTreeMap<String, V>,
+        pending: &BTreeMap<String, W>,
+    ) -> Vec<String> {
+        pending
+            .keys()
+            .chain(committed.keys())
+            .cloned()
+            .collect::<BTreeSet<String>>()
+            .into_iter()
+            .collect()
+    }
+
+    fn stage_legacy_pending_sessions(&mut self) -> Result<(), Error> {
+        let Some(pending) = self.legacy_pending.as_ref() else {
+            return Ok(());
+        };
+        let ids: Vec<String> = pending.keys().cloned().collect();
+        let count = ids.len() as u64;
+        self.receipts.stage(
+            state::RUN_META_KEY.into(),
+            state::encode_pending_meta(ids.first().map(String::as_str), count),
+        )?;
+        for (index, dispatch_id) in ids.iter().enumerate() {
+            let prev = (index > 0).then(|| ids[index - 1].as_str());
+            let next = ids.get(index + 1).map(String::as_str);
+            let entry = pending.get(dispatch_id).ok_or_else(|| {
+                Self::corrupt_record("legacy pending map changed during migration")
+            })?;
+            self.receipts.stage(
+                state::pending_key(dispatch_id),
+                state::encode_pending_record(entry, prev, next),
+            )?;
+        }
+        if let Some(sessions) = self.legacy_sessions.as_ref() {
+            for session in sessions.values() {
+                self.receipts.stage(
+                    state::session_key(&session.run_id),
+                    state::encode_session_record(session),
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    fn stage_legacy_state(&mut self) -> Result<(), Error> {
+        if self.legacy_state_version.is_none() || self.legacy_migration_staged {
+            return Ok(());
+        }
+        self.stage_legacy_models()?;
+        self.stage_legacy_pending_sessions()?;
+        self.legacy_migration_staged = true;
+        Ok(())
+    }
+
+    async fn stage_pending_insert(
+        &mut self,
+        dispatch_id: String,
+        pending: PendingState,
+    ) -> Result<(), Error> {
+        state::validate_decoded_pending(&dispatch_id, &pending).map_err(Self::corrupt_record)?;
+        if self
+            .receipts
+            .get(&state::pending_key(&dispatch_id))
+            .await?
+            .is_some()
+        {
+            return Err(Error::Module {
+                reason: refusal::ALREADY_EXISTS.into(),
+                sentence: format!("pending dispatch already exists: {dispatch_id}"),
+            });
+        }
+        let (head, count) = match self.receipts.get(state::RUN_META_KEY).await? {
+            Some(bytes) => state::decode_pending_meta(&bytes).map_err(Self::corrupt_record)?,
+            None => (None, 0),
+        };
+        if count > 0 && head.is_none() {
+            return Err(Self::corrupt_record("non-empty pending list has no head"));
+        }
+        if count >= MAX_PENDING_RUNS {
+            return Err(Error::Module {
+                reason: refusal::CAPACITY.into(),
+                sentence: format!("the live pending-run cap is {MAX_PENDING_RUNS}"),
+            });
+        }
+        if count == 0 && head.is_some() {
+            return Err(Self::corrupt_record("empty pending list has a head"));
+        }
+        if let Some(old_head) = &head {
+            let bytes = self
+                .receipts
+                .get(&state::pending_key(old_head))
+                .await?
+                .ok_or_else(|| Self::corrupt_record("pending metadata names a missing head"))?;
+            let (old, prev, next) =
+                state::decode_pending_record(old_head, &bytes).map_err(Self::corrupt_record)?;
+            if prev.is_some() {
+                return Err(Self::corrupt_record("pending head has a previous link"));
+            }
+            self.receipts.stage(
+                state::pending_key(old_head),
+                state::encode_pending_record(&old, Some(&dispatch_id), next.as_deref()),
+            )?;
+        }
+        self.receipts.stage(
+            state::pending_key(&dispatch_id),
+            state::encode_pending_record(&pending, None, head.as_deref()),
+        )?;
+        self.receipts.stage(
+            state::RUN_META_KEY.into(),
+            state::encode_pending_meta(Some(&dispatch_id), count + 1),
+        )?;
+        Ok(())
+    }
+
+    async fn stage_pending_remove(&mut self, dispatch_id: &str) -> Result<(), Error> {
+        let bytes = self
+            .receipts
+            .get(&state::pending_key(dispatch_id))
+            .await?
+            .ok_or_else(|| Self::corrupt_record("pending removal names no record"))?;
+        let (_, prev, next) =
+            state::decode_pending_record(dispatch_id, &bytes).map_err(Self::corrupt_record)?;
+        let (head, count) = self
+            .receipts
+            .get(state::RUN_META_KEY)
+            .await?
+            .ok_or_else(|| Self::corrupt_record("pending removal has no metadata"))
+            .and_then(|bytes| state::decode_pending_meta(&bytes).map_err(Self::corrupt_record))?;
+        let Some(head_id) = head.as_deref() else {
+            return Err(Self::corrupt_record("non-empty pending list has no head"));
+        };
+        if count == 0
+            || (prev.is_none() && head_id != dispatch_id)
+            || (prev.is_some() && head_id == dispatch_id)
+        {
+            return Err(Self::corrupt_record(
+                "pending removal disagrees with metadata",
+            ));
+        }
+        if head_id != dispatch_id {
+            let bytes = self
+                .receipts
+                .get(&state::pending_key(head_id))
+                .await?
+                .ok_or_else(|| Self::corrupt_record("pending metadata names a missing head"))?;
+            let (_, head_prev, _) =
+                state::decode_pending_record(head_id, &bytes).map_err(Self::corrupt_record)?;
+            if head_prev.is_some() {
+                return Err(Self::corrupt_record("pending head has a previous link"));
+            }
+        }
+        if let Some(prev_id) = &prev {
+            let bytes = self
+                .receipts
+                .get(&state::pending_key(prev_id))
+                .await?
+                .ok_or_else(|| Self::corrupt_record("pending previous neighbor is missing"))?;
+            let (entry, neighbor_prev, neighbor_next) =
+                state::decode_pending_record(prev_id, &bytes).map_err(Self::corrupt_record)?;
+            if neighbor_next.as_deref() != Some(dispatch_id) {
+                return Err(Self::corrupt_record("pending previous neighbor is broken"));
+            }
+            self.receipts.stage(
+                state::pending_key(prev_id),
+                state::encode_pending_record(&entry, neighbor_prev.as_deref(), next.as_deref()),
+            )?;
+        }
+        if let Some(next_id) = &next {
+            let bytes = self
+                .receipts
+                .get(&state::pending_key(next_id))
+                .await?
+                .ok_or_else(|| Self::corrupt_record("pending next neighbor is missing"))?;
+            let (entry, neighbor_prev, neighbor_next) =
+                state::decode_pending_record(next_id, &bytes).map_err(Self::corrupt_record)?;
+            if neighbor_prev.as_deref() != Some(dispatch_id) {
+                return Err(Self::corrupt_record("pending next neighbor is broken"));
+            }
+            self.receipts.stage(
+                state::pending_key(next_id),
+                state::encode_pending_record(&entry, prev.as_deref(), neighbor_next.as_deref()),
+            )?;
+        }
+        self.receipts.remove(state::pending_key(dispatch_id));
+        let new_head = if prev.is_none() {
+            next.as_deref()
+        } else {
+            Some(head_id)
+        };
+        self.receipts.stage(
+            state::RUN_META_KEY.into(),
+            state::encode_pending_meta(new_head, count - 1),
+        )?;
+        Ok(())
+    }
+
+    #[cfg(test)]
+    async fn stage_pending_update(
+        &mut self,
+        dispatch_id: &str,
+        pending: PendingState,
+    ) -> Result<(), Error> {
+        state::validate_decoded_pending(dispatch_id, &pending).map_err(Self::corrupt_record)?;
+        let bytes = self
+            .receipts
+            .get(&state::pending_key(dispatch_id))
+            .await?
+            .ok_or_else(|| Self::corrupt_record("pending update names no record"))?;
+        let (_, prev, next) =
+            state::decode_pending_record(dispatch_id, &bytes).map_err(Self::corrupt_record)?;
+        self.receipts.stage(
+            state::pending_key(dispatch_id),
+            state::encode_pending_record(&pending, prev.as_deref(), next.as_deref()),
+        )
+    }
+
+    fn stage_session(&mut self, session: AgentSession) -> Result<(), Error> {
+        self.receipts.stage(
+            state::session_key(&session.run_id),
+            state::encode_session_record(&session),
+        )
+    }
+
+    fn remove_session(&mut self, run_id: &str) {
+        self.receipts.remove(state::session_key(run_id));
     }
 
     fn delegation(&self, delegation_id: &str) -> Option<&DelegationState> {
@@ -708,19 +1023,6 @@ impl RunsModule {
 
     fn delegation_ids(&self) -> Vec<String> {
         Self::visible_ids(&self.delegations, &self.pending_delegations)
-    }
-
-    fn visible_ids<'a, V, W>(
-        committed: &'a BTreeMap<String, V>,
-        pending: &'a BTreeMap<String, W>,
-    ) -> Vec<String> {
-        pending
-            .keys()
-            .chain(committed.keys())
-            .cloned()
-            .collect::<BTreeSet<String>>()
-            .into_iter()
-            .collect()
     }
 
     // ---- views ---------------------------------------------------------------
@@ -793,22 +1095,25 @@ impl RunsModule {
 
     pub fn snapshot(&self) -> Vec<u8> {
         let records = self.receipts.snapshot();
-        match &self.legacy_models {
-            Some(models) => state::encode_legacy_committed(
+        match self.legacy_state_version {
+            Some(StateVersion::V0) => state::encode_legacy_committed(
                 &records,
                 self.next_action_item,
-                &self.pending,
-                &self.sessions,
+                self.legacy_pending.as_ref().unwrap(),
+                self.legacy_sessions.as_ref().unwrap(),
                 &self.delegations,
-                models,
+                self.legacy_models.as_ref().unwrap(),
             ),
-            None => encode_committed(
+            Some(StateVersion::V1) => state::encode_post_a_committed(
                 &records,
                 self.next_action_item,
-                &self.pending,
-                &self.sessions,
+                self.legacy_pending.as_ref().unwrap(),
+                self.legacy_sessions.as_ref().unwrap(),
                 &self.delegations,
             ),
+            Some(StateVersion::V2) | None => {
+                encode_committed(&records, self.next_action_item, &self.delegations)
+            }
         }
     }
 
@@ -820,41 +1125,45 @@ impl RunsModule {
     /// dropped — a snapshot describes a block boundary, and nothing
     /// half-applied may shadow it.
     pub fn install(&mut self, bytes: &[u8], expected: StateRoot) -> Result<(), Error> {
-        let (action_requests, next_action_item, pending, sessions, delegations, legacy_models) =
-            decode_committed(bytes).map_err(|sentence| Error::Module {
-                reason: refusal::CORRUPT.into(),
-                sentence,
-            })?;
+        let decoded = decode_committed(bytes).map_err(|sentence| Error::Module {
+            reason: refusal::CORRUPT.into(),
+            sentence,
+        })?;
         sdk::verify_snapshot_root(
-            match &legacy_models {
-                Some(models) => legacy_root(
-                    &action_requests,
-                    next_action_item,
-                    &pending,
-                    &sessions,
-                    &delegations,
-                    models,
+            match decoded.version {
+                StateVersion::V0 => legacy_root(
+                    &decoded.receipts,
+                    decoded.next_action_item,
+                    &decoded.pending,
+                    &decoded.sessions,
+                    &decoded.delegations,
+                    decoded.legacy_models.as_ref().unwrap(),
                 ),
-                None => committed_root(
-                    &action_requests,
-                    next_action_item,
-                    &pending,
-                    &sessions,
-                    &delegations,
+                StateVersion::V1 => post_a_root(
+                    &decoded.receipts,
+                    decoded.next_action_item,
+                    &decoded.pending,
+                    &decoded.sessions,
+                    &decoded.delegations,
+                ),
+                StateVersion::V2 => committed_root(
+                    &decoded.receipts,
+                    decoded.next_action_item,
+                    &decoded.delegations,
                 ),
             },
             expected,
         )?;
-        self.receipts.install(action_requests)?;
-        self.legacy_models = legacy_models;
+        self.receipts.install(decoded.receipts)?;
+        self.legacy_models = decoded.legacy_models;
+        self.legacy_pending = (decoded.version != StateVersion::V2).then_some(decoded.pending);
+        self.legacy_sessions = (decoded.version != StateVersion::V2).then_some(decoded.sessions);
+        self.legacy_state_version =
+            (decoded.version != StateVersion::V2).then_some(decoded.version);
         self.legacy_migration_staged = false;
-        self.next_action_item = next_action_item;
+        self.next_action_item = decoded.next_action_item;
         self.staged_next_action_item = None;
-        self.pending = pending;
-        self.sessions = sessions;
-        self.delegations = delegations;
-        self.pending_overlay.clear();
-        self.pending_sessions.clear();
+        self.delegations = decoded.delegations;
         self.pending_delegations.clear();
         // the ring is derived per-node state: a snapshot describes a block
         // boundary this node never executed, so its history starts empty.

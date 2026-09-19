@@ -386,7 +386,8 @@ impl RunsModule {
             };
         self.stage_dispatch_run(
             ctx, &run_id, agent_id, channel, anchor, requester, prepared, demands,
-        );
+        )
+        .await?;
         ctx.set_output(sdk::wire::encode(&serde_json::json!({"run_id": run_id})));
         Ok(())
     }

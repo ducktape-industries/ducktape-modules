@@ -354,7 +354,7 @@ impl RunsModule {
         ctx: &mut dyn Ctx,
         event: ResultEvent,
     ) -> Result<(), Error> {
-        let Some(entry) = self.pending_entry(&event.dispatch_id).cloned() else {
+        let Some(entry) = self.pending_entry(&event.dispatch_id).await? else {
             self.note(
                 ctx,
                 format!("dropped result for unknown dispatch {}", event.dispatch_id),
@@ -362,21 +362,24 @@ impl RunsModule {
             return Ok(());
         };
         let run_id = entry.run_id();
-        let ending_attempt = self.session(&run_id).map(|session| session.lease.attempt);
+        let ending_attempt = self
+            .session_for_pending(&run_id, &entry)
+            .await?
+            .map(|session| session.lease.attempt);
         let ResultEvent {
             dispatch_id,
             outcome,
             ..
         } = event;
-        self.pending_overlay.insert(dispatch_id, None);
+        self.stage_pending_remove(&dispatch_id).await?;
         // a session may NEVER outlive its run. this is the only place a pending
         // entry prunes — delivery, worker failure, timeout, and cancellation all
         // arrive as the one `ResultEvent` (cancel routes through the dispatch
         // plane, whose Err("cancelled") delivery lands right here) — so pruning
         // the session beside it is the whole close-out. an agent's key stops
         // being an authority in the same block its run stops existing.
-        self.pending_sessions.insert(run_id.clone(), None);
-        self.close_delegations_for_run(ctx, &run_id, &entry);
+        self.remove_session(&run_id);
+        self.close_delegations_for_run(ctx, &run_id, &entry).await?;
 
         match outcome {
             // THE single delivery path: decode the runner result and apply
@@ -401,7 +404,12 @@ impl RunsModule {
     /// Cancel unfinished descendants when their caller exits. A root exit
     /// removes the complete ephemeral result tree; no ModelRecord relation is
     /// left behind.
-    fn close_delegations_for_run(&mut self, ctx: &mut dyn Ctx, run_id: &str, entry: &PendingState) {
+    async fn close_delegations_for_run(
+        &mut self,
+        ctx: &mut dyn Ctx,
+        run_id: &str,
+        entry: &PendingState,
+    ) -> Result<(), Error> {
         let root_exit = entry.delegation_id.is_none();
         let ids = self.delegation_ids();
         let mut scoped = BTreeSet::new();
@@ -443,10 +451,9 @@ impl RunsModule {
                         dispatch_id: dispatch_id_for(&state.view.callee_run_id),
                     }),
                 });
-                self.pending_overlay
-                    .insert(dispatch_id_for(&state.view.callee_run_id), None);
-                self.pending_sessions
-                    .insert(state.view.callee_run_id.clone(), None);
+                self.stage_pending_remove(&dispatch_id_for(&state.view.callee_run_id))
+                    .await?;
+                self.remove_session(&state.view.callee_run_id);
                 state.view.status = DelegationStatus::Cancelled;
                 state.view.completed_at = Some(ctx.env().consensus_time);
                 state.view.result = Some(DelegationResult {
@@ -460,6 +467,7 @@ impl RunsModule {
                 self.pending_delegations.insert(id, None);
             }
         }
+        Ok(())
     }
 
     async fn deliver_delegated_result(
