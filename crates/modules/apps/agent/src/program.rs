@@ -15,6 +15,7 @@
 //! canonically (object keys sorted), so the bytes a call carries are the same
 //! on every build whatever map the JSON library was compiled with.
 
+use sdk::refusal;
 use std::collections::{BTreeMap, BTreeSet};
 
 use attribution::{Actor, AttributionMsg, Change, ObjectRef, Relation};
@@ -113,13 +114,13 @@ fn module_error(reason: &'static str, text: impl Into<String>) -> Error {
 fn validate_ident(field: &str, value: &str) -> Result<(), Error> {
     if value.is_empty() {
         return Err(module_error(
-            "empty_field",
+            refusal::INVALID_INPUT,
             format!("{field} must be non-empty"),
         ));
     }
     if value.contains(SEP) {
         return Err(module_error(
-            "reserved_separator",
+            refusal::INVALID_INPUT,
             format!("{field} must not contain the reserved separator"),
         ));
     }
@@ -141,7 +142,7 @@ fn validate_value(step: u64, value: &Value, bound: &BTreeSet<&str>) -> Result<()
         Value::Number(number) => match number_renders(*number) {
             true => Ok(()),
             false => Err(module_error(
-                "step_number_range",
+                refusal::INVALID_INPUT,
                 format!("step {step}: number {number} is outside the JSON integer range"),
             )),
         },
@@ -154,7 +155,7 @@ fn validate_value(step: u64, value: &Value, bound: &BTreeSet<&str>) -> Result<()
         Value::Ref(path) => {
             let Some(root) = path.first() else {
                 return Err(module_error(
-                    "empty_reference_path",
+                    refusal::INVALID_INPUT,
                     format!("step {step}: a reference has an empty path"),
                 ));
             };
@@ -163,7 +164,7 @@ fn validate_value(step: u64, value: &Value, bound: &BTreeSet<&str>) -> Result<()
             let resolvable = is_frame_root || is_bound_earlier;
             if !resolvable {
                 return Err(module_error(
-                    "step_reference",
+                    refusal::INVALID_INPUT,
                     format!(
                         "step {step}: reference {root:?} names neither a frame root nor a name bound by an earlier step"
                     ),
@@ -199,7 +200,7 @@ fn validate_target(step: u64, target: u64, len: u64) -> Result<(), Error> {
     let valid = moves_forward && within_program;
     if !valid {
         return Err(module_error(
-            "step_target",
+            refusal::INVALID_INPUT,
             format!(
                 "step {step} targets step {target}; a target is a later step, or {len} for the end"
             ),
@@ -220,7 +221,7 @@ fn validate_bind(step: u64, bind: &str) -> Result<(), Error> {
     let shadows_a_root = RESERVED_ROOTS.contains(&bind);
     if shadows_a_root {
         return Err(module_error(
-            "step_binding",
+            refusal::INVALID_INPUT,
             format!("step {step}: bind {bind:?} is a frame root"),
         ));
     }
@@ -259,7 +260,7 @@ pub(crate) fn validate_program(program: &Program, executor: &str) -> Result<(), 
                 let queries_the_executor = module == executor;
                 if queries_the_executor {
                     return Err(module_error(
-                        "self_program_query",
+                        refusal::INVALID_INPUT,
                         format!("step {at}: a program cannot query {executor}, its own executor"),
                     ));
                 }
@@ -701,7 +702,7 @@ fn waiting_call(program: &Program, step: u64) -> Result<Waiting<'_>, Error> {
             on_failure,
         }),
         _ => Err(module_error(
-            "invocation_step_mismatch",
+            refusal::CORRUPT,
             format!("invocation waits at step {step}, which is not a call of its program"),
         )),
     }
@@ -720,7 +721,7 @@ fn waiting_dispatch(program: &Program, step: u64) -> Result<Waiting<'_>, Error> 
             on_failure,
         }),
         _ => Err(module_error(
-            "invocation_step_mismatch",
+            refusal::CORRUPT,
             format!("invocation waits at step {step}, which is not a dispatch of its program"),
         )),
     }
@@ -1639,7 +1640,7 @@ mod tests {
         let refusing = Siblings::answering(
             "chat",
             Err(Error::Module {
-                reason: "closed".into(),
+                reason: refusal::WRONG_STATE.into(),
                 sentence: "closed".into(),
             }),
         );

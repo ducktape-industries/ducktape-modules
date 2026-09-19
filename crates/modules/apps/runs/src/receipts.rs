@@ -3,6 +3,7 @@
 use sdk::Error;
 #[cfg(any(test, all(feature = "guest", target_arch = "wasm32")))]
 use sdk::MerkleStore;
+use sdk::refusal;
 use std::collections::BTreeMap;
 
 pub(super) type Records = BTreeMap<String, Vec<u8>>;
@@ -70,7 +71,7 @@ impl Receipts {
     pub fn stage(&mut self, key: String, value: Vec<u8>) -> Result<(), Error> {
         if value.len() > sdk::MAX_STORE_VALUE_BYTES {
             return Err(Error::Module {
-                reason: "action_receipt_size".into(),
+                reason: refusal::CAPACITY.into(),
                 sentence: "action receipt record exceeds the store value bound".into(),
             });
         }
@@ -114,7 +115,7 @@ impl Receipts {
             Backing::Host(_) => {
                 if !records.is_empty() {
                     return Err(Error::Module {
-                        reason: "hosted_receipts_must_be_restored_through_host".into(),
+                        reason: refusal::UNSUPPORTED.into(),
                         sentence: "a host-backed receipt store restores from host state, not from snapshot records".into(),
                     });
                 }

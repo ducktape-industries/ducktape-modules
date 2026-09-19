@@ -201,12 +201,15 @@ impl Pages {
                 }
                 let author = actor.clone();
                 if self.load_comment(&comment_id).await?.is_some() {
-                    return Err(PageError::DuplicateComment);
+                    return Err(PageError::DuplicateComment(comment_id.clone()));
                 }
                 match self.load_thread(&thread_id).await? {
                     Some(mut thread) => {
                         if thread.target != target {
-                            return Err(PageError::TargetMismatch);
+                            return Err(PageError::TargetMismatch {
+                                thread: thread_id.clone(),
+                                target: thread.target,
+                            });
                         }
                         if thread.comment_ids.len() >= MAX_COMMENTS_PER_THREAD {
                             return Err(PageError::TooManyComments);
@@ -239,7 +242,7 @@ impl Pages {
                             .load_block(&target)
                             .await
                             .map_err(|_| PageError::Corrupt)?
-                            .ok_or(PageError::BlockNotFound)?;
+                            .ok_or_else(|| PageError::BlockNotFound(target.clone()))?;
                         if let Some(anchor) = &anchor
                             && !valid_range(&block.text, anchor.start, anchor.end)
                         {
@@ -292,7 +295,7 @@ impl Pages {
                 let mut thread = self
                     .load_thread(&thread_id)
                     .await?
-                    .ok_or(PageError::ThreadNotFound)?;
+                    .ok_or_else(|| PageError::ThreadNotFound(thread_id.clone()))?;
                 if target.len() > MAX_COMMENT_TARGET_BYTES || !id_is_index_safe(&target) {
                     return Err(PageError::IdTooLarge);
                 }
@@ -300,7 +303,7 @@ impl Pages {
                     .load_block(&target)
                     .await
                     .map_err(|_| PageError::Corrupt)?
-                    .ok_or(PageError::BlockNotFound)?;
+                    .ok_or_else(|| PageError::BlockNotFound(target.clone()))?;
                 if let Some(anchor) = &anchor
                     && !valid_range(&block.text, anchor.start, anchor.end)
                 {
@@ -335,9 +338,9 @@ impl Pages {
                 let mut c = self
                     .load_comment(&comment_id)
                     .await?
-                    .ok_or(PageError::CommentNotFound)?;
+                    .ok_or_else(|| PageError::CommentNotFound(comment_id.clone()))?;
                 if c.deleted {
-                    return Err(PageError::CommentNotFound);
+                    return Err(PageError::CommentNotFound(comment_id.clone()));
                 }
                 c.text = text;
                 c.mentions = mentions;
@@ -348,7 +351,7 @@ impl Pages {
                 let mut c = self
                     .load_comment(&comment_id)
                     .await?
-                    .ok_or(PageError::CommentNotFound)?;
+                    .ok_or_else(|| PageError::CommentNotFound(comment_id.clone()))?;
                 if c.deleted {
                     return Ok(()); // idempotent
                 }
@@ -391,7 +394,7 @@ impl Pages {
                 let mut thread = self
                     .load_thread(&thread_id)
                     .await?
-                    .ok_or(PageError::ThreadNotFound)?;
+                    .ok_or_else(|| PageError::ThreadNotFound(thread_id.clone()))?;
                 thread.resolved = resolved;
                 thread.resolved_by = if resolved { Some(author) } else { None };
                 self.store_thread(&thread)

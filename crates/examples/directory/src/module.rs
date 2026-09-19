@@ -12,6 +12,7 @@
 //! side only in lockstep with the other.
 
 use crate::interface::*;
+use sdk::refusal;
 
 use std::collections::BTreeMap;
 
@@ -107,7 +108,7 @@ impl Directory {
         // remaining buffer cannot possibly hold is rejected before the loop.
         if count > ((bytes.len() - off) / 16) as u64 {
             return Err(Error::Module {
-                reason: "snapshot_truncated".into(),
+                reason: refusal::CORRUPT.into(),
                 sentence: "the snapshot declares more entries than its bytes can hold".into(),
             });
         }
@@ -120,7 +121,7 @@ impl Directory {
                 .is_some_and(|(last, _)| *last >= key)
             {
                 return Err(Error::Module {
-                    reason: "snapshot_key_order".into(),
+                    reason: refusal::CORRUPT.into(),
                     sentence: "snapshot keys not strictly ascending".into(),
                 });
             }
@@ -128,13 +129,13 @@ impl Directory {
         }
         if off != bytes.len() {
             return Err(Error::Module {
-                reason: "snapshot_trailing_bytes".into(),
+                reason: refusal::CORRUPT.into(),
                 sentence: "snapshot has trailing bytes".into(),
             });
         }
         if Self::root_of(&entries) != expected {
             return Err(Error::Module {
-                reason: "snapshot_root_mismatch".into(),
+                reason: refusal::CORRUPT.into(),
                 sentence: "the snapshot does not hash to the expected state root".into(),
             });
         }
@@ -151,7 +152,7 @@ fn read_u64(bytes: &[u8], off: &mut usize) -> Result<u64, Error> {
         .checked_add(8)
         .filter(|&end| end <= bytes.len())
         .ok_or_else(|| Error::Module {
-            reason: "snapshot_truncated".into(),
+            reason: refusal::CORRUPT.into(),
             sentence: "the snapshot ends inside a length prefix".into(),
         })?;
     let mut buf = [0u8; 8];
@@ -166,17 +167,17 @@ fn read_u64(bytes: &[u8], off: &mut usize) -> Result<u64, Error> {
 fn read_string(bytes: &[u8], off: &mut usize) -> Result<String, Error> {
     let len = read_u64(bytes, off)?;
     let len = usize::try_from(len).map_err(|_| Error::Module {
-        reason: "snapshot_truncated".into(),
+        reason: refusal::CORRUPT.into(),
         sentence: "a snapshot string length does not fit in memory".into(),
     })?;
     if len > bytes.len() - *off {
         return Err(Error::Module {
-            reason: "snapshot_truncated".into(),
+            reason: refusal::CORRUPT.into(),
             sentence: "a snapshot string runs past the end of the snapshot".into(),
         });
     }
     let s = std::str::from_utf8(&bytes[*off..*off + len]).map_err(|_| Error::Module {
-        reason: "codec".into(),
+        reason: refusal::CORRUPT.into(),
         sentence: "snapshot string is not utf-8".into(),
     })?;
     *off += len;
@@ -201,7 +202,7 @@ impl Module for Directory {
 
     async fn execute(&mut self, _ctx: &mut dyn Ctx, msg: &Msg) -> Result<(), Error> {
         match decode_msg(&msg.payload).map_err(|sentence| Error::Module {
-            reason: "codec".into(),
+            reason: refusal::INVALID_INPUT.into(),
             sentence,
         })? {
             DirMsg::Set { key, value } => self.stage(key, value),
@@ -213,7 +214,7 @@ impl Module for Directory {
     /// async per the trait, though the in-memory body has nothing to await.
     async fn query(&self, req: &[u8]) -> Result<Vec<u8>, Error> {
         match decode_query(req).map_err(|sentence| Error::Module {
-            reason: "codec".into(),
+            reason: refusal::INVALID_INPUT.into(),
             sentence,
         })? {
             DirQuery::Get { key } => Ok(encode_reply(&DirReply::Value(self.get(&key).cloned()))),

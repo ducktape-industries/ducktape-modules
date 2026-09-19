@@ -8,6 +8,7 @@ use collaboration::{
 };
 use common::*;
 use futures::executor::block_on;
+use sdk::refusal;
 use sdk::{Cause, Env, Module, Origin};
 use sdk_testkit::TestCtx;
 
@@ -308,7 +309,7 @@ fn an_unresolvable_origin_denies_rather_than_erroring() {
             let _ = req;
             let _ = &chat_for_ctx;
             Err(sdk::Error::Module {
-                reason: "unreachable".into(),
+                reason: refusal::UNSUPPORTED.into(),
                 sentence: "unreachable".into(),
             })
         });

@@ -22,6 +22,7 @@
 //! and the message a delivery names) and they must answer identically on both
 //! sides or the comparison would be measuring them.
 
+use sdk::refusal;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -78,7 +79,7 @@ impl Module for Stub {
     }
     async fn execute(&mut self, _ctx: &mut dyn Ctx, _msg: &Msg) -> Result<(), Error> {
         Err(Error::Module {
-            reason: "read_only_stub".into(),
+            reason: refusal::UNSUPPORTED.into(),
             sentence: "this stub only answers reads".into(),
         })
     }
@@ -127,7 +128,7 @@ impl Module for ChatStub {
     }
     async fn query(&self, req: &[u8]) -> Result<Vec<u8>, Error> {
         let reply = match chat::decode_query(req).map_err(|sentence| Error::Module {
-            reason: "codec".into(),
+            reason: refusal::INVALID_INPUT.into(),
             sentence,
         })? {
             chat::ChatQuery::Access { channel_id, .. } => {
@@ -167,7 +168,7 @@ impl Module for ChatStub {
             }
             other => {
                 return Err(Error::Module {
-                    reason: "unserved".into(),
+                    reason: refusal::UNSUPPORTED.into(),
                     sentence: format!("unserved {other:?}"),
                 });
             }

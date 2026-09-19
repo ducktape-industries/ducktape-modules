@@ -2,6 +2,7 @@
 //! failure, and hook notifications committing (or aborting) atomically with
 //! the post that caused them.
 
+use sdk::refusal;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -91,7 +92,7 @@ impl Module for Recorder {
     async fn execute(&mut self, _ctx: &mut dyn Ctx, msg: &Msg) -> Result<(), Error> {
         // fail loud on garbage: a hook payload must be a chat event.
         decode_event(&msg.payload).map_err(|sentence| Error::Module {
-            reason: "codec".into(),
+            reason: refusal::UNEXPECTED_REPLY.into(),
             sentence,
         })?;
         self.staged.push(msg.payload.clone());
@@ -124,7 +125,7 @@ impl Module for Boom {
     }
     async fn execute(&mut self, _ctx: &mut dyn Ctx, _msg: &Msg) -> Result<(), Error> {
         Err(Error::Module {
-            reason: "boom".into(),
+            reason: refusal::WRONG_STATE.into(),
             sentence: "boom".into(),
         })
     }

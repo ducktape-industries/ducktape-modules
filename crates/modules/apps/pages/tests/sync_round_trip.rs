@@ -396,7 +396,11 @@ fn managed_records_documents_and_replay_receipts_survive_authenticated_snapshot_
             )
             .await
             .unwrap_err();
-        assert!(error.to_string().contains("requires commit_records"));
+        assert!(
+            error
+                .to_string()
+                .contains("A managed page changes only through commit_records.")
+        );
     });
 }
 

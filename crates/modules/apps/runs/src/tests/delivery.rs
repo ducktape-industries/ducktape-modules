@@ -1,4 +1,5 @@
 use super::*;
+use sdk::refusal;
 
 // ---- the result intake ----------------------------------------------------------
 
@@ -615,7 +616,7 @@ fn dispatch_view_reads_through_testkit_on_query() {
             receiver,
             dispatch_id,
         } = dispatch::decode_query(req).map_err(|sentence| Error::Module {
-            reason: "codec".into(),
+            reason: refusal::INVALID_INPUT.into(),
             sentence,
         })?
         else {

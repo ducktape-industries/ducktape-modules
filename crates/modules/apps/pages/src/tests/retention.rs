@@ -419,7 +419,7 @@ fn artifact_bounds_and_missing_files_configuration_fail_before_committing() {
                 &mut pages,
                 &with_artifacts(request, artifacts),
                 Origin::Program(42),
-                "invalid or oversized record batch",
+                "The record batch is invalid or too large.",
             )
             .await;
             assert!(

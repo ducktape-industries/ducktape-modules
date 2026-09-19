@@ -3,6 +3,7 @@ use super::{
     SiblingReadBudget, canonical_origin, decode_msg, dispatch_encode_msg, dispatch_id_for,
     envelope, jobs_encode_msg, reject_run_separator, run_id_for,
 };
+use sdk::refusal;
 
 impl RunsModule {
     // ---- admin ops + explicit runs (any other origin) --------------------------------
@@ -21,11 +22,11 @@ impl RunsModule {
         match self.turn_taken(ctx, &dispatch_id).await {
             Ok(true) => Ok(None),
             Ok(false) => Err(Error::Module {
-                reason: "unknown_run".into(),
+                reason: refusal::NOT_FOUND.into(),
                 sentence: format!("unknown run: {run_id}"),
             }),
             Err(sentence) => Err(Error::Module {
-                reason: "dispatch_turn".into(),
+                reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence,
             }),
         }
@@ -38,7 +39,7 @@ impl RunsModule {
         budget: &SiblingReadBudget,
     ) -> Result<(), Error> {
         match decode_msg(&msg.payload).map_err(|sentence| Error::Module {
-            reason: "codec".into(),
+            reason: refusal::INVALID_INPUT.into(),
             sentence,
         })? {
             RunsMsg::ConfigureConversation {
@@ -212,7 +213,7 @@ impl RunsModule {
             RunsMsg::EnableJobWorker { enabled } => {
                 Self::admin_origin(&ctx.env().origin)?;
                 let jobs = self.jobs.clone().ok_or_else(|| Error::Module {
-                    reason: "no_jobs_module_is_configured".into(),
+                    reason: refusal::UNSUPPORTED.into(),
                     sentence: "enabling the job worker needs a Jobs module, and none is configured"
                         .into(),
                 })?;
@@ -240,7 +241,7 @@ impl RunsModule {
                 let requester = match &ctx.env().origin {
                     Origin::External(key) if key.is_empty() => {
                         return Err(Error::Module {
-                            reason: "run_submitter".into(),
+                            reason: refusal::INVALID_INPUT.into(),
                             sentence: "run requests require a non-empty submitter id".into(),
                         });
                     }
@@ -253,7 +254,7 @@ impl RunsModule {
                     .is_some_and(|state| state.agent_id == agent_id);
                 if resident {
                     return Err(Error::Module {
-                        reason: "resident_channel_intake".into(),
+                        reason: refusal::INVALID_INPUT.into(),
                         sentence:
                             "resident channels use conversation intake, not one-shot RequestRun"
                                 .into(),
@@ -263,19 +264,19 @@ impl RunsModule {
                 // construction (names, not paths) — see `library_skills`.
                 let extra =
                     envelope::library_skills(&skills).map_err(|sentence| Error::Module {
-                        reason: "library_skills".into(),
+                        reason: refusal::INVALID_INPUT.into(),
                         sentence,
                     })?;
                 let Some(agent) =
                     self.agent_record(&*ctx, &agent_id)
                         .await
                         .map_err(|sentence| Error::Module {
-                            reason: "library_skills".into(),
+                            reason: refusal::CORRUPT.into(),
                             sentence,
                         })?
                 else {
                     return Err(Error::Module {
-                        reason: "unknown_agent".into(),
+                        reason: refusal::NOT_FOUND.into(),
                         sentence: format!("unknown agent: {agent_id}"),
                     });
                 };
@@ -286,7 +287,7 @@ impl RunsModule {
                         .staged_next_action_item
                         .unwrap_or(self.next_action_item);
                     let next = item.checked_add(1).ok_or_else(|| Error::Module {
-                        reason: "run_request_counter_exhausted".into(),
+                        reason: refusal::EXHAUSTED.into(),
                         sentence: "no action item numbers are left for a run request".into(),
                     })?;
                     let actor = match &ctx.env().origin {
@@ -302,7 +303,7 @@ impl RunsModule {
                                 .await?;
                             match identity::decode_reply(&bytes).map_err(|sentence| {
                                 Error::Module {
-                                    reason: "codec".into(),
+                                    reason: refusal::UNEXPECTED_REPLY.into(),
                                     sentence,
                                 }
                             })? {
@@ -314,7 +315,7 @@ impl RunsModule {
                                 }
                                 _ => {
                                     return Err(Error::Module {
-                                        reason: "unexpected_identity_reply".into(),
+                                        reason: refusal::UNEXPECTED_REPLY.into(),
                                         sentence: "unexpected requesting identity reply".into(),
                                     });
                                 }
@@ -355,7 +356,7 @@ impl RunsModule {
                     .turn_taken(&*ctx, &dispatch_id_for(&run_id))
                     .await
                     .map_err(|sentence| Error::Module {
-                        reason: "dispatch_turn".into(),
+                        reason: refusal::UNEXPECTED_REPLY.into(),
                         sentence,
                     })?
                 {
@@ -363,7 +364,7 @@ impl RunsModule {
                 }
                 if agent.status != ModelStatus::Active {
                     return Err(Error::Module {
-                        reason: "agent_is_paused".into(),
+                        reason: refusal::WRONG_STATE.into(),
                         sentence: format!("agent is paused: {agent_id}"),
                     });
                 }
@@ -382,7 +383,7 @@ impl RunsModule {
                     )
                     .await
                     .map_err(|sentence| Error::Module {
-                        reason: "execution_budget".into(),
+                        reason: refusal::UNEXPECTED_REPLY.into(),
                         sentence,
                     })?;
                 self.stage_dispatch_run(

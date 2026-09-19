@@ -1,4 +1,5 @@
 use crate::*;
+use sdk::refusal;
 use sdk::{
     Ctx, Error, MerkleStore, Module, ModuleId, Msg, Origin, ResolverSyncTarget, StagedStore,
     StateRoot, StateSyncHandle,
@@ -27,7 +28,7 @@ impl Boards {
             .await?
             .map(|bytes| {
                 serde_json::from_slice(&bytes).map_err(|e| Error::Module {
-                    reason: "corrupt_state".into(),
+                    reason: refusal::CORRUPT.into(),
                     sentence: format!(
                         "Stored record {} is unreadable: {e}",
                         String::from_utf8_lossy(key)
@@ -39,7 +40,7 @@ impl Boards {
     async fn create(&mut self, id: String, title: String, owner: String) -> Result<(), Error> {
         if !valid_id(&id) {
             return Err(Error::Module {
-                reason: "board_id".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence: "A board id is 1 to 96 letters, digits, dashes, underscores or colons."
                     .into(),
             });
@@ -51,7 +52,7 @@ impl Boards {
                 self.read(&board_key(&id))
                     .await?
                     .ok_or_else(|| Error::Module {
-                        reason: "board_catalog".into(),
+                        reason: refusal::CORRUPT.into(),
                         sentence: "Board catalog is inconsistent.".into(),
                     })?;
             let same_create = existing.owner == owner && existing.title == title;
@@ -59,14 +60,14 @@ impl Boards {
                 Ok(())
             } else {
                 Err(Error::Module {
-                    reason: "board_id_in_use".into(),
+                    reason: refusal::ALREADY_EXISTS.into(),
                     sentence: "Board id is already in use.".into(),
                 })
             };
         }
         if catalog.len() >= MAX_BOARDS {
             return Err(Error::Module {
-                reason: "board_limit".into(),
+                reason: refusal::CAPACITY.into(),
                 sentence: format!("There are already {MAX_BOARDS} boards, the most allowed."),
             });
         }
@@ -102,7 +103,7 @@ impl Boards {
         // this module has no rule for whose they are.
         if !current.shapes.is_empty() {
             return Err(Error::Module {
-                reason: "board_not_empty".into(),
+                reason: refusal::WRONG_STATE.into(),
                 sentence: "Clear the board before removing it.".into(),
             });
         }
@@ -118,7 +119,7 @@ impl Boards {
     async fn board(&self, id: &str) -> Result<Board, Error> {
         if !valid_id(id) {
             return Err(Error::Module {
-                reason: "board_id".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence: "A board id is 1 to 96 letters, digits, dashes, underscores or colons."
                     .into(),
             });
@@ -126,7 +127,7 @@ impl Boards {
         self.read(&board_key(id))
             .await?
             .ok_or_else(|| Error::Module {
-                reason: "board_gone".into(),
+                reason: refusal::NOT_FOUND.into(),
                 sentence: "Board no longer exists.".into(),
             })
     }
@@ -151,7 +152,7 @@ fn actor(origin: &Origin) -> Result<String, Error> {
             let supported_key = matches!(key.len(), 32 | 33);
             if !supported_key {
                 return Err(Error::Module {
-                    reason: "signing_key".into(),
+                    reason: refusal::INVALID_INPUT.into(),
                     sentence: "A signing key is required.".into(),
                 });
             }
@@ -159,7 +160,7 @@ fn actor(origin: &Origin) -> Result<String, Error> {
         }
         Origin::Program(_) => Ok(origin.actor_string()),
         Origin::Module(_) | Origin::System => Err(Error::Module {
-            reason: "actor_origin".into(),
+            reason: refusal::UNAUTHORIZED.into(),
             sentence: "Boards require an authenticated user or program account.".into(),
         }),
     }
@@ -185,7 +186,7 @@ impl Module for Boards {
         let owner = actor(&ctx.env().origin)?;
         let operation: Operation =
             sdk::wire::decode(&msg.payload).map_err(|sentence| Error::Module {
-                reason: "codec".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence,
             })?;
         match operation {
@@ -198,7 +199,7 @@ impl Module for Boards {
     }
     async fn query(&self, req: &[u8]) -> Result<Vec<u8>, Error> {
         let query: Query = sdk::wire::decode(req).map_err(|sentence| Error::Module {
-            reason: "codec".into(),
+            reason: refusal::INVALID_INPUT.into(),
             sentence,
         })?;
         let reply = match query {

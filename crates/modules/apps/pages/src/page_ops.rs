@@ -25,7 +25,7 @@ impl Pages {
                     Some(b) if b.kind == BlockKind::Page => Ok(()),
                     // the id is already a NON-page block somewhere — page ids
                     // are block ids, so this is a global-uniqueness violation.
-                    Some(_) => Err(PageError::DuplicateBlock),
+                    Some(_) => Err(PageError::DuplicateBlock(page_id.clone())),
                     None => {
                         self.index_add(&page_id, None).await?;
                         let mut page = Block {

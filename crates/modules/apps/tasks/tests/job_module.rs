@@ -17,6 +17,7 @@ use attribution_module as attribution;
 use futures::executor::block_on;
 use host::{BlockContext, Host, SubmitError};
 use identity_module as identity;
+use sdk::refusal;
 use sdk::{Ctx, Env, Error, MerkleStore as _, Module, ModuleId, Msg, Origin, StateRoot};
 use sdk_testkit::{MemStore, TestCtx};
 use tasks::{
@@ -482,7 +483,9 @@ fn premature_reclaim_rejected() {
             .await
             .expect_err("reclaim at the deadline is premature");
         assert!(
-            matches!(err, Error::Module { sentence: m, .. } if m.contains("lease not expired"))
+            matches!(&err, Error::Module { reason, sentence } if reason == sdk::refusal::NOT_YET
+                && sentence.contains("lease on job j1 runs through height 15")),
+            "{err:?}"
         );
 
         // and well before it.
@@ -490,7 +493,9 @@ fn premature_reclaim_rejected() {
             .await
             .expect_err("early reclaim rejected");
         assert!(
-            matches!(err, Error::Module { sentence: m, .. } if m.contains("lease not expired"))
+            matches!(&err, Error::Module { reason, sentence } if reason == sdk::refusal::NOT_YET
+                && sentence.contains("lease on job j1 runs through height 15")),
+            "{err:?}"
         );
     });
 }
@@ -1366,7 +1371,7 @@ impl Module for ClaimingWorker {
     async fn execute(&mut self, ctx: &mut dyn Ctx, msg: &Msg) -> Result<(), Error> {
         let JobsEvent::Submitted { job_id, .. } =
             decode_jobs_event(&msg.payload).map_err(|sentence| Error::Module {
-                reason: "codec".into(),
+                reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence,
             })?;
         ctx.emit_msg(claim(&job_id, 100));

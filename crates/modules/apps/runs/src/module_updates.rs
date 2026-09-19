@@ -4,6 +4,7 @@ use crate::action_requests::Prepared;
 use crate::catalog::Operation;
 use crate::facets::{RunnerResult, WireSink};
 use node_work::relative_path;
+use sdk::refusal;
 
 const HEAD: &str = "module_updates/head";
 const TAIL: &str = "module_updates/tail";
@@ -27,7 +28,7 @@ impl RunsModule {
             .await?
             .map(|bytes| {
                 sdk::wire::decode(&bytes).map_err(|sentence| Error::Module {
-                    reason: "corrupt_state".into(),
+                    reason: refusal::CORRUPT.into(),
                     sentence: format!("module update cursor {key} does not decode: {sentence}"),
                 })
             })
@@ -43,7 +44,7 @@ impl RunsModule {
             return Ok(None);
         };
         let request = sdk::wire::decode(&bytes).map_err(|sentence| Error::Module {
-            reason: "corrupt_state".into(),
+            reason: refusal::CORRUPT.into(),
             sentence: format!("module update {sequence} does not decode: {sentence}"),
         })?;
         let status = self
@@ -51,11 +52,11 @@ impl RunsModule {
             .get(&status_key(sequence))
             .await?
             .ok_or_else(|| Error::Module {
-                reason: "module_update_status_is_missing".into(),
+                reason: refusal::CORRUPT.into(),
                 sentence: format!("module update {sequence} has no status record"),
             })?;
         let status = sdk::wire::decode(&status).map_err(|sentence| Error::Module {
-            reason: "corrupt_state".into(),
+            reason: refusal::CORRUPT.into(),
             sentence: format!("the status of module update {sequence} does not decode: {sentence}"),
         })?;
         Ok(Some(ModuleUpdateView { request, status }))
@@ -134,13 +135,13 @@ impl RunsModule {
     ) -> Result<(), Error> {
         let Origin::Program(account) = ctx.env().origin else {
             return Err(Error::Module {
-                reason: "module_updates_are_requested_by_a_program".into(),
+                reason: refusal::UNAUTHORIZED.into(),
                 sentence: "only a program account may request a module update".into(),
             });
         };
         self.active_generation(ctx, account).await?;
         update.validate().map_err(|sentence| Error::Module {
-            reason: "module_update".into(),
+            reason: refusal::INVALID_INPUT.into(),
             sentence,
         })?;
         let valid_source = relative_path(&source.repo)
@@ -149,20 +150,20 @@ impl RunsModule {
             && source.commit.bytes().all(|byte| byte.is_ascii_hexdigit());
         if !valid_source {
             return Err(Error::Module {
-                reason: "module_update_requires_an_exact_forge_commit".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence: "a module update names a relative repository path, a branch, and a 40-digit hex commit".into(),
             });
         }
         if let Some(bytes) = self.receipts.get(&request_key(&request_id)).await? {
             let sequence = sdk::wire::decode(&bytes).map_err(|sentence| Error::Module {
-                reason: "corrupt_state".into(),
+                reason: refusal::CORRUPT.into(),
                 sentence: format!("module update request {request_id} does not decode: {sentence}"),
             })?;
             let previous = self
                 .module_update(sequence)
                 .await?
                 .ok_or_else(|| Error::Module {
-                    reason: "module_update_receipt_is_missing".into(),
+                    reason: refusal::CORRUPT.into(),
                     sentence: format!(
                         "module update {sequence} of request {request_id} has no record"
                     ),
@@ -173,9 +174,9 @@ impl RunsModule {
                 && previous.request.update == update;
             if !exact {
                 return Err(Error::Module {
-                    reason: "module_update_id_already_names_different_work".into(),
+                    reason: refusal::ALREADY_EXISTS.into(),
                     sentence: format!(
-                        "module update request {request_id} was already used for different work"
+                        "module update request {request_id} already names different work"
                     ),
                 });
             }
@@ -184,7 +185,7 @@ impl RunsModule {
         }
         let sequence = self.update_cursor(TAIL).await?;
         let next = sequence.checked_add(1).ok_or_else(|| Error::Module {
-            reason: "module_update_sequence_exhausted".into(),
+            reason: refusal::EXHAUSTED.into(),
             sentence: "no module update sequence numbers are left".into(),
         })?;
         let view = ModuleUpdateView {
@@ -226,12 +227,12 @@ impl RunsModule {
             .await?;
         let governance::GovReply::Proposal(proposal) =
             governance::decode_reply(&bytes).map_err(|sentence| Error::Module {
-                reason: "codec".into(),
+                reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence,
             })?
         else {
             return Err(Error::Module {
-                reason: "unexpected_module_update_proposal_reply".into(),
+                reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence: format!(
                     "governance answered the proposal lookup for module update {sequence} with something other than a proposal"
                 ),
@@ -268,12 +269,12 @@ impl RunsModule {
             .await?;
         let modules::ModulesReply::ModuleStatus { modules } = modules::decode_reply(&bytes)
             .map_err(|sentence| Error::Module {
-                reason: "codec".into(),
+                reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence,
             })?
         else {
             return Err(Error::Module {
-                reason: "unexpected_module_registry_reply".into(),
+                reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence: "the module registry answered the status lookup with something other than module status".into(),
             });
         };
@@ -282,7 +283,7 @@ impl RunsModule {
             .update
             .digest()
             .map_err(|sentence| Error::Module {
-                reason: "artifact_digest".into(),
+                reason: refusal::CORRUPT.into(),
                 sentence,
             })?;
         let activated = modules.iter().any(|module| {
@@ -354,14 +355,14 @@ impl RunsModule {
     ) -> Result<(), Error> {
         let Origin::External(key) = &ctx.env().origin else {
             return Err(Error::Module {
-                reason: "deployment_reporter".into(),
+                reason: refusal::UNAUTHORIZED.into(),
                 sentence: "only a validator may report a deployment failure".into(),
             });
         };
         let members = valset::members(ctx, "valset").await?;
         if !members.contains(key) {
             return Err(Error::Module {
-                reason: "deployment_failure_reporter_is_not_a_validator".into(),
+                reason: refusal::UNAUTHORIZED.into(),
                 sentence:
                     "this key is not a current validator, so it cannot report a deployment failure"
                         .into(),
@@ -375,7 +376,7 @@ impl RunsModule {
         }
         if self.update_proposal(ctx, sequence).await?.is_some() {
             return Err(Error::Module {
-                reason: "deployment_governance".into(),
+                reason: refusal::WRONG_STATE.into(),
                 sentence: "a proposed deployment settles through governance".into(),
             });
         }

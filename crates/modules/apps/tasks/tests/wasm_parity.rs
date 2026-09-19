@@ -540,7 +540,7 @@ async fn rejections_inner(context: &deterministic::Context) {
             op_job(&JobsMsg::Reclaim {
                 job_id: "build".into(),
             }),
-            "lease not expired",
+            "lease on job build runs through height",
         ),
         (
             ext(&alice),

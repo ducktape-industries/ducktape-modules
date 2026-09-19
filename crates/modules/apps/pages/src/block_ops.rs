@@ -14,7 +14,7 @@ fn idx_after(children: &[String], after: &Option<String>) -> Result<usize, PageE
             .iter()
             .position(|c| c == a)
             .map(|p| p + 1)
-            .ok_or(PageError::AnchorNotFound),
+            .ok_or_else(|| PageError::AnchorNotFound(a.clone())),
     }
 }
 
@@ -42,7 +42,7 @@ impl Pages {
             .map_err(to_page_err)?
             .is_some()
         {
-            return Err(PageError::DuplicateBlock);
+            return Err(PageError::DuplicateBlock(block.id.clone()));
         }
         let marks = validate_marks(&block.text, block.marks)?;
         parent.children.insert(at, block.id.clone());
@@ -80,7 +80,7 @@ impl Pages {
                 block,
             } => {
                 let mut parent_blk = self
-                    .require_block(&parent, PageError::ParentNotFound)
+                    .require_block(&parent, PageError::ParentNotFound(parent.clone()))
                     .await?;
                 let i = idx_after(&parent_blk.children, &after)?;
                 let parent_depth = self.page_depth(&parent_blk).await?;
@@ -98,7 +98,7 @@ impl Pages {
                 // works on any block INCLUDING a Page — that is the rename
                 // path (the title is the Page block's text).
                 let mut blk = self
-                    .require_block(&block_id, PageError::BlockNotFound)
+                    .require_block(&block_id, PageError::BlockNotFound(block_id.clone()))
                     .await?;
                 // Validate the client-supplied atomic replacement before
                 // staging any rebased comment records.
@@ -126,7 +126,7 @@ impl Pages {
                 active,
             } => {
                 let mut blk = self
-                    .require_block(&block_id, PageError::BlockNotFound)
+                    .require_block(&block_id, PageError::BlockNotFound(block_id.clone()))
                     .await?;
                 set_span_mark(&mut blk.marks, &blk.text, start, end, kind, active)?;
                 self.store_block(&blk)
@@ -136,7 +136,7 @@ impl Pages {
                     return Err(PageError::PageKindImmutable);
                 }
                 let mut blk = self
-                    .require_block(&block_id, PageError::BlockNotFound)
+                    .require_block(&block_id, PageError::BlockNotFound(block_id.clone()))
                     .await?;
                 if blk.kind == BlockKind::Page {
                     return Err(PageError::PageKindImmutable);
@@ -146,7 +146,7 @@ impl Pages {
             }
             PageMsg::SetChecked { block_id, checked } => {
                 let mut blk = self
-                    .require_block(&block_id, PageError::BlockNotFound)
+                    .require_block(&block_id, PageError::BlockNotFound(block_id.clone()))
                     .await?;
                 if blk.kind != BlockKind::Todo {
                     return Err(PageError::NotTodo);
@@ -166,7 +166,7 @@ impl Pages {
                     return Ok(());
                 }
                 let mut blk = self
-                    .require_block(&block_id, PageError::BlockNotFound)
+                    .require_block(&block_id, PageError::BlockNotFound(block_id.clone()))
                     .await?;
                 let moves_page = blk.kind == BlockKind::Page;
                 let old_parent_id = blk.parent.clone();
@@ -175,8 +175,8 @@ impl Pages {
                         if !moves_page {
                             return Err(PageError::TopLevelNonPage);
                         }
-                        if after.is_some() {
-                            return Err(PageError::AnchorNotFound);
+                        if let Some(anchor) = after {
+                            return Err(PageError::AnchorNotFound(anchor));
                         }
                         let Some(old_parent_id) = old_parent_id else {
                             return Ok(());
@@ -197,7 +197,7 @@ impl Pages {
                     }
                     Some(parent_id) => {
                         let new_parent = self
-                            .require_block(&parent_id, PageError::ParentNotFound)
+                            .require_block(&parent_id, PageError::ParentNotFound(parent_id.clone()))
                             .await?;
                         if !moves_page && new_parent.page != blk.page {
                             return Err(PageError::CrossPageMove);
@@ -264,7 +264,7 @@ impl Pages {
             }
             PageMsg::RemoveBlock { block_id } => {
                 let blk = self
-                    .require_block(&block_id, PageError::BlockNotFound)
+                    .require_block(&block_id, PageError::BlockNotFound(block_id.clone()))
                     .await?;
                 let invalid_top_level = blk.parent.is_none() && blk.kind != BlockKind::Page;
                 if invalid_top_level {

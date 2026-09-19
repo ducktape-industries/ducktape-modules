@@ -1,6 +1,7 @@
 //! External compute proposes effects; the account's program executes them.
 //! The session signer proves which run proposed work and is never an account key.
 use super::*;
+use sdk::refusal;
 use sdk::{CallId, Cause, Hop};
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -158,7 +159,7 @@ impl RunsModule {
     ) -> Result<(), Error> {
         let Some(request) = self.action_request(&id).await? else {
             return Err(Error::Module {
-                reason: "unknown_action_request".into(),
+                reason: refusal::NOT_FOUND.into(),
                 sentence: format!("no action request {id}"),
             });
         };
@@ -168,7 +169,7 @@ impl RunsModule {
         } = &ctx.env().cause
         else {
             return Err(Error::Module {
-                reason: "action_publication_source".into(),
+                reason: refusal::UNAUTHORIZED.into(),
                 sentence: "action publication requires its source delivery".into(),
             });
         };
@@ -177,7 +178,7 @@ impl RunsModule {
             && item.item == request.item;
         if !authenticated {
             return Err(Error::Module {
-                reason: "action_publication_source".into(),
+                reason: refusal::UNAUTHORIZED.into(),
                 sentence: "action publication is not its source delivery".into(),
             });
         }
@@ -205,7 +206,7 @@ impl RunsModule {
         let generation = self.active_generation(ctx, request.view.account).await?;
         if generation != request.view.generation {
             return Err(Error::Module {
-                reason: "program_authority_changed_since_this_run_began".into(),
+                reason: refusal::STALE.into(),
                 sentence: format!(
                     "the program behind run {} changed after the run began",
                     request.view.run_id
@@ -214,20 +215,20 @@ impl RunsModule {
         }
         let Some(model) = self.model(&request.model_id) else {
             return Err(Error::Module {
-                reason: "run_model_was_removed".into(),
+                reason: refusal::NOT_FOUND.into(),
                 sentence: format!("model {} was removed", request.model_id),
             });
         };
         if model.account != request.view.account {
             return Err(Error::Module {
-                reason: "run_model_no_longer_serves_the_account".into(),
+                reason: refusal::STALE.into(),
                 sentence: "run model no longer serves the account this action was proposed for"
                     .into(),
             });
         }
         if model.status != ModelStatus::Active {
             return Err(Error::Module {
-                reason: "run_model_is_paused".into(),
+                reason: refusal::WRONG_STATE.into(),
                 sentence: format!("model {} is paused", request.model_id),
             });
         }
@@ -236,13 +237,13 @@ impl RunsModule {
             RequestScope::Session { lease } => {
                 let Some(session) = self.session(&request.view.run_id) else {
                     return Err(Error::Module {
-                        reason: "run_session_closed".into(),
+                        reason: refusal::WRONG_STATE.into(),
                         sentence: format!("run {} has no live session", request.view.run_id),
                     });
                 };
                 if &session.lease != lease {
                     return Err(Error::Module {
-                        reason: "run_execution_lease_changed".into(),
+                        reason: refusal::STALE.into(),
                         sentence: format!(
                             "run {} moved to another execution lease",
                             request.view.run_id
@@ -265,7 +266,7 @@ impl RunsModule {
         let current = crate::operation_view(&request.view.operation).map(|view| view.schema_digest);
         if current.as_deref() != Some(invocation.schema_digest.as_str()) {
             return Err(Error::Module {
-                reason: "action_schema_changed".into(),
+                reason: refusal::STALE.into(),
                 sentence: "operation schema changed since this action was proposed".into(),
             });
         }
@@ -275,7 +276,7 @@ impl RunsModule {
     fn request_call(&self, ctx: &dyn Ctx, request: &ActionRequest) -> Result<CallId, Error> {
         let Origin::Program(account) = ctx.env().origin else {
             return Err(Error::Module {
-                reason: "requesting_program_authority".into(),
+                reason: refusal::UNAUTHORIZED.into(),
                 sentence: "only the requesting program may decide a tool action".into(),
             });
         };
@@ -285,14 +286,14 @@ impl RunsModule {
         } = &ctx.env().cause
         else {
             return Err(Error::Module {
-                reason: "tool_decision_requires_a_program_call".into(),
+                reason: refusal::UNAUTHORIZED.into(),
                 sentence: "a tool decision arrives only through a program call".into(),
             });
         };
         let owns_request = account == request.view.account && call.requester == self.agent;
         if !owns_request {
             return Err(Error::Module {
-                reason: "tool_decision_belongs_to_another_program".into(),
+                reason: refusal::UNAUTHORIZED.into(),
                 sentence: format!(
                     "this tool decision is for program {}, not {account}",
                     request.view.account
@@ -310,7 +311,7 @@ impl RunsModule {
     ) -> Result<(), Error> {
         let Some(mut request) = self.action_request(&id).await? else {
             return Err(Error::Module {
-                reason: "unknown_action_request".into(),
+                reason: refusal::NOT_FOUND.into(),
                 sentence: format!("no action request {id}"),
             });
         };
@@ -333,12 +334,12 @@ impl RunsModule {
             .await?;
         let attribution::AttributionReply::Changes(changes) = attribution::decode_reply(&bytes)
             .map_err(|sentence| Error::Module {
-                reason: "codec".into(),
+                reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence,
             })?
         else {
             return Err(Error::Module {
-                reason: "unexpected_action_attribution_reply".into(),
+                reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence:
                     "attribution answered the action lookup with something other than changes"
                         .into(),
@@ -346,7 +347,7 @@ impl RunsModule {
         };
         let Some(change) = changes.first() else {
             return Err(Error::Module {
-                reason: "action_attribution_missing".into(),
+                reason: refusal::NOT_FOUND.into(),
                 sentence: "action was not attributed".into(),
             });
         };
@@ -361,19 +362,19 @@ impl RunsModule {
             .await?;
         let agent::AgentReply::Invocation(Some(invocation)) =
             agent::decode_reply(&bytes).map_err(|sentence| Error::Module {
-                reason: "codec".into(),
+                reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence,
             })?
         else {
             return Err(Error::Module {
-                reason: "action_invocation_missing".into(),
+                reason: refusal::NOT_FOUND.into(),
                 sentence: "action has no program invocation".into(),
             });
         };
         let expected_invocation = matches!(invocation.status, agent::Status::Running { awaiting: agent::Outstanding::Call(ref awaiting), .. } if awaiting == &call);
         if !expected_invocation {
             return Err(Error::Module {
-                reason: "claim_attribution".into(),
+                reason: refusal::UNAUTHORIZED.into(),
                 sentence: "claim is outside this action's attributed invocation".into(),
             });
         }
@@ -385,14 +386,14 @@ impl RunsModule {
             | ActionStatus::Completed { .. }
             | ActionStatus::Rejected { .. } => {
                 return Err(Error::Module {
-                    reason: "action_request_decided".into(),
+                    reason: refusal::WRONG_STATE.into(),
                     sentence: "action request was already decided".into(),
                 });
             }
         }
         if target_step <= call.step {
             return Err(Error::Module {
-                reason: "action_target_order".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence: "action target must be a later program step".into(),
             });
         }
@@ -420,7 +421,7 @@ impl RunsModule {
     ) -> Result<(), Error> {
         let Some(mut request) = self.action_request(&id).await? else {
             return Err(Error::Module {
-                reason: "unknown_action_request".into(),
+                reason: refusal::NOT_FOUND.into(),
                 sentence: format!("no action request {id}"),
             });
         };
@@ -440,7 +441,7 @@ impl RunsModule {
         }
         let ActionStatus::Claimed { call: expected } = &request.view.status else {
             return Err(Error::Module {
-                reason: "action_request_unclaimed".into(),
+                reason: refusal::WRONG_STATE.into(),
                 sentence: "action request has not been claimed".into(),
             });
         };
@@ -449,7 +450,7 @@ impl RunsModule {
             && call.requester == self.agent;
         if !same_invocation {
             return Err(Error::Module {
-                reason: "completion_invocation_mismatch".into(),
+                reason: refusal::UNAUTHORIZED.into(),
                 sentence: "completion is outside the claiming invocation".into(),
             });
         }
@@ -461,26 +462,26 @@ impl RunsModule {
             .await?;
         let DispatchReply::Call(Some(view)) =
             dispatch_decode_reply(&bytes).map_err(|sentence| Error::Module {
-                reason: "codec".into(),
+                reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence,
             })?
         else {
             return Err(Error::Module {
-                reason: "action_call_missing".into(),
+                reason: refusal::NOT_FOUND.into(),
                 sentence: "action call does not exist".into(),
             });
         };
         let matches_request = call_matches_action(&view, &request.view);
         if !matches_request {
             return Err(Error::Module {
-                reason: "action_request_call_mismatch".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence: "call does not execute this action request".into(),
             });
         }
         let outcome = match view.status {
             dispatch::CallStatus::Queued => {
                 return Err(Error::Module {
-                    reason: "action_call_incomplete".into(),
+                    reason: refusal::WRONG_STATE.into(),
                     sentence: "action call has not completed".into(),
                 });
             }
@@ -556,7 +557,7 @@ impl RunsModule {
         };
         let dispatch::CallOutcomeSummary::Applied { output_digest, .. } = outcome else {
             return Err(Error::Module {
-                reason: "rejected_pr_output".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence: "a rejected PR action cannot supply an opened PR".into(),
             });
         };
@@ -565,18 +566,18 @@ impl RunsModule {
         let output_matches_digest = &digest == output_digest;
         if !output_matches_digest {
             return Err(Error::Module {
-                reason: "pr_output_mismatch".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence: "reported PR output does not match the committed action".into(),
             });
         }
         let opened: OpenedPr = serde_json::from_value(output).map_err(|error| Error::Module {
-            reason: "invalid_committed_pr_output".into(),
+            reason: refusal::UNEXPECTED_REPLY.into(),
             sentence: format!("invalid committed PR output: {error}"),
         })?;
         let invalid_allocation = opened.repo != repo || opened.number == 0;
         if invalid_allocation {
             return Err(Error::Module {
-                reason: "pr_output_source_mismatch".into(),
+                reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence: "committed PR output names another repository or invalid number".into(),
             });
         }
@@ -598,7 +599,7 @@ impl RunsModule {
     ) -> Result<(), Error> {
         let Some(mut request) = self.action_request(&id).await? else {
             return Err(Error::Module {
-                reason: "unknown_action_request".into(),
+                reason: refusal::NOT_FOUND.into(),
                 sentence: format!("no action request {id}"),
             });
         };
@@ -607,7 +608,7 @@ impl RunsModule {
         let decided = !matches!(request.view.status, ActionStatus::AwaitingProgram);
         if decided {
             return Err(Error::Module {
-                reason: "action_request_decided".into(),
+                reason: refusal::WRONG_STATE.into(),
                 sentence: "action request was already decided".into(),
             });
         }
@@ -646,12 +647,12 @@ impl RunsModule {
                 .await?;
             let DispatchReply::Call(queued) =
                 dispatch_decode_reply(&bytes).map_err(|sentence| Error::Module {
-                    reason: "codec".into(),
+                    reason: refusal::UNEXPECTED_REPLY.into(),
                     sentence,
                 })?
             else {
                 return Err(Error::Module {
-                    reason: "unexpected_action_call_reply".into(),
+                    reason: refusal::UNEXPECTED_REPLY.into(),
                     sentence: "dispatch answered the call lookup with something other than a call"
                         .into(),
                 });
@@ -702,12 +703,12 @@ impl RunsModule {
             .await?;
         let attribution::AttributionReply::Changes(changes) = attribution::decode_reply(&bytes)
             .map_err(|sentence| Error::Module {
-                reason: "codec".into(),
+                reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence,
             })?
         else {
             return Err(Error::Module {
-                reason: "unexpected_action_attribution_reply".into(),
+                reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence:
                     "attribution answered the action lookup with something other than changes"
                         .into(),
@@ -727,12 +728,12 @@ impl RunsModule {
             .await?;
         let agent::AgentReply::Invocation(invocation) =
             agent::decode_reply(&bytes).map_err(|sentence| Error::Module {
-                reason: "codec".into(),
+                reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence,
             })?
         else {
             return Err(Error::Module {
-                reason: "unexpected_action_invocation_reply".into(),
+                reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence: "the agent answered the invocation lookup with something other than an invocation".into(),
             });
         };
@@ -748,12 +749,12 @@ impl RunsModule {
                 .await?;
             let attribution::AttributionReply::Delivery(delivery) =
                 attribution::decode_reply(&bytes).map_err(|sentence| Error::Module {
-                    reason: "codec".into(),
+                    reason: refusal::UNEXPECTED_REPLY.into(),
                     sentence,
                 })?
             else {
                 return Err(Error::Module {
-                    reason: "unexpected_program_delivery_reply".into(),
+                    reason: refusal::UNEXPECTED_REPLY.into(),
                     sentence: "attribution answered the delivery lookup with something other than a delivery".into(),
                 });
             };

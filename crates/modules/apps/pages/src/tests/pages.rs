@@ -64,7 +64,7 @@ fn create_page_stages_its_body_whole_or_not_at_all() {
                 title: "Partial".into(),
                 blocks: vec![para("fresh", "fine"), para("r1", "taken")],
             },
-            "duplicate block id",
+            "Block r1 already exists.",
         )
         .await;
         assert!(get_page(&p, "partial").await.is_none());
@@ -154,7 +154,7 @@ fn reserved_index_id_is_rejected() {
                 title: "clobber".into(),
                 blocks: Vec::new(),
             },
-            "reserved block id",
+            "The block id is reserved.",
         )
         .await;
         apply_expect_err(
@@ -164,7 +164,7 @@ fn reserved_index_id_is_rejected() {
                 after: None,
                 block: para(PAGE_INDEX_KEY, "clobber"),
             },
-            "reserved block id",
+            "The block id is reserved.",
         )
         .await;
         assert!(p.staged.is_empty(), "a rejected op must stage nothing");
@@ -193,7 +193,7 @@ fn page_block_accepts_any_real_block_parent() {
                 after: None,
                 block: page("x", "x"),
             },
-            "parent block not found",
+            "Parent block ghost does not exist.",
         )
         .await;
         // A subpage can sit under any block, not only another Page block.
@@ -294,7 +294,7 @@ fn moving_page_blocks_renests_and_rejects_cycles() {
                 parent: None,
                 after: None,
             },
-            "only page blocks",
+            "Only page blocks may move to the top level.",
         )
         .await;
         // A page may move under a regular content block.
@@ -503,7 +503,7 @@ fn oversized_page_id_is_rejected_before_staging() {
                 blocks: Vec::new(),
             },
             user("alice"),
-            "id or target too large",
+            "The comment id or target is too large.",
         )
         .await;
         assert!(p.load_index().await.unwrap().is_empty());
@@ -539,7 +539,7 @@ fn the_max_pages_plus_one_th_create_page_is_refused() {
                 blocks: Vec::new(),
             },
             user("alice"),
-            "too many pages",
+            "The page limit is reached.",
         )
         .await;
         assert_eq!(p.load_index().await.unwrap().len(), MAX_PAGES);

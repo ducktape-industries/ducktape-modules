@@ -8,6 +8,7 @@
 //! same request served that way is answered. Both are exercised here against
 //! the real host, not a test double of it.
 
+use sdk::refusal;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -60,7 +61,7 @@ impl Module for Stub {
     }
     async fn execute(&mut self, _ctx: &mut dyn Ctx, _msg: &Msg) -> Result<(), Error> {
         Err(Error::Module {
-            reason: "this_stub_only_answers_reads".into(),
+            reason: refusal::UNSUPPORTED.into(),
             sentence: "this stub only answers reads".into(),
         })
     }
@@ -103,7 +104,7 @@ impl Module for ChatStub {
     }
     async fn query(&self, req: &[u8]) -> Result<Vec<u8>, Error> {
         let reply = match chat::decode_query(req).map_err(|sentence| Error::Module {
-            reason: "codec".into(),
+            reason: refusal::INVALID_INPUT.into(),
             sentence,
         })? {
             chat::ChatQuery::Access { channel_id, party } => {
@@ -137,7 +138,7 @@ impl Module for ChatStub {
             }
             other => {
                 return Err(Error::Module {
-                    reason: "unserved".into(),
+                    reason: refusal::UNSUPPORTED.into(),
                     sentence: format!("unserved {other:?}"),
                 });
             }
@@ -172,7 +173,7 @@ impl Module for Prober {
         self.seen
             .borrow_mut()
             .push(decode_reply(&bytes).map_err(|sentence| Error::Module {
-                reason: "codec".into(),
+                reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence,
             })?);
         Ok(())

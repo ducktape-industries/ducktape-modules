@@ -27,6 +27,7 @@ mod index_guest;
 // dispatch payload composition: the structured run envelope.
 mod envelope;
 
+use sdk::refusal;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -743,7 +744,7 @@ impl RunsModule {
     fn validate_non_empty(field: &str, value: &str) -> Result<(), Error> {
         if value.is_empty() {
             return Err(Error::Module {
-                reason: "empty_field".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence: format!("{field} must not be empty"),
             });
         }
@@ -756,11 +757,11 @@ impl RunsModule {
     fn admin_origin(origin: &Origin) -> Result<RunOrigin, Error> {
         match origin {
             Origin::External(key) if key.is_empty() => Err(Error::Module {
-                reason: "admin_origin".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence: "runs admin ops require a non-empty submitter id".into(),
             }),
             Origin::System => Err(Error::Module {
-                reason: "admin_origin".into(),
+                reason: refusal::UNAUTHORIZED.into(),
                 sentence: "runs admin ops require an external or module origin".into(),
             }),
             other => canonical_origin(other),
@@ -810,7 +811,7 @@ impl RunsModule {
     pub fn install(&mut self, bytes: &[u8], expected: StateRoot) -> Result<(), Error> {
         let (action_requests, next_action_item, pending, sessions, delegations, models) =
             decode_committed(bytes).map_err(|sentence| Error::Module {
-                reason: "codec".into(),
+                reason: refusal::CORRUPT.into(),
                 sentence,
             })?;
         sdk::verify_snapshot_root(
@@ -871,12 +872,12 @@ impl RunsModule {
     pub fn install_history(&mut self, bytes: &[u8]) -> Result<(), Error> {
         let history: VecDeque<RunRecord> =
             serde_json::from_slice(bytes).map_err(|e| Error::Module {
-                reason: "codec".into(),
+                reason: refusal::CORRUPT.into(),
                 sentence: format!("run history decode: {e}"),
             })?;
         if history.len() > RUN_HISTORY_CAP {
             return Err(Error::Module {
-                reason: "run_history_cap".into(),
+                reason: refusal::CORRUPT.into(),
                 sentence: format!(
                     "run history carries {} records; the cap is {RUN_HISTORY_CAP}",
                     history.len()

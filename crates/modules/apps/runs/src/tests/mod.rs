@@ -17,6 +17,7 @@ use files::{
 };
 use futures::executor::block_on;
 use sdk::Env;
+use sdk::refusal;
 use std::cell::{Cell, RefCell};
 use tasks::{
     Claim as JobClaim, Job, Task, decode_task_msg as tasks_decode_msg,
@@ -448,7 +449,7 @@ impl Ctx for CaptureCtx {
             "identity" => {
                 let query: identity::IdentityQuery =
                     identity::decode_query(req).map_err(|sentence| Error::Module {
-                        reason: "codec".into(),
+                        reason: refusal::INVALID_INPUT.into(),
                         sentence,
                     })?;
                 let number = match query {
@@ -474,7 +475,7 @@ impl Ctx for CaptureCtx {
                 )))
             }
             "chat" => match chat::decode_query(req).map_err(|sentence| Error::Module {
-                reason: "codec".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence,
             })? {
                 ChatQuery::MessagesRange {
@@ -486,7 +487,7 @@ impl Ctx for CaptureCtx {
                         self.transcripts
                             .get(&channel_id)
                             .ok_or_else(|| Error::Module {
-                                reason: "unknown_channel".into(),
+                                reason: refusal::NOT_FOUND.into(),
                                 sentence: format!("unknown channel: {channel_id}"),
                             })?;
                     let head = transcript.len() as u64;
@@ -552,7 +553,7 @@ impl Ctx for CaptureCtx {
             // the board answers the SAME two reads the real module does: the
             // by-id `Get` the validator probes with, and a bounded `List` page.
             "tasks" => match tasks::decode_task_query(req).map_err(|sentence| Error::Module {
-                reason: "codec".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence,
             })? {
                 TaskQuery::Get { task_id } => Ok(tasks_encode_reply(&TaskReply::Task(
@@ -578,7 +579,7 @@ impl Ctx for CaptureCtx {
                     return module.query(req).await;
                 }
                 match tasks::decode_job_query(req).map_err(|sentence| Error::Module {
-                    reason: "codec".into(),
+                    reason: refusal::INVALID_INPUT.into(),
                     sentence,
                 })? {
                     JobsQuery::Get { job_id } => Ok(jobs_encode_reply(&JobsReply::Job(
@@ -594,7 +595,7 @@ impl Ctx for CaptureCtx {
                 }
             }
             "dispatch" => match dispatch::decode_query(req).map_err(|sentence| Error::Module {
-                reason: "codec".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence,
             })? {
                 DispatchQuery::Dispatch { dispatch_id, .. } => {
@@ -630,7 +631,7 @@ impl Ctx for CaptureCtx {
                 _ => Err(Error::QueryUnsupported),
             },
             "files" => match files_decode_query(req).map_err(|sentence| Error::Module {
-                reason: "codec".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence,
             })? {
                 FilesQuery::Refs {} => Ok(files_encode_reply(&FilesReply::Refs(files::RefsInfo {
@@ -676,7 +677,7 @@ impl Ctx for CaptureCtx {
                 _ => Err(Error::QueryUnsupported),
             },
             "forge" => match forge::decode_query(req).map_err(|sentence| Error::Module {
-                reason: "codec".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence,
             })? {
                 forge::ForgeQuery::ListRefs { repo } => {
@@ -711,7 +712,7 @@ impl Ctx for CaptureCtx {
                 _ => Err(Error::QueryUnsupported),
             },
             "pages" => match pages::decode_query(req).map_err(|sentence| Error::Module {
-                reason: "codec".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence,
             })? {
                 pages::PageQuery::RecordCollection { .. }
@@ -811,7 +812,7 @@ impl Ctx for CaptureCtx {
                 )),
             },
             "saga" => match saga::decode_query(req).map_err(|sentence| Error::Module {
-                reason: "codec".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence,
             })? {
                 saga::SagaQuery::Get { saga_id } => {

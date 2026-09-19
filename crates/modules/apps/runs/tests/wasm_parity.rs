@@ -34,6 +34,7 @@ use saga::{
     encode_msg as saga_encode_msg, encode_query as saga_encode_query,
 };
 use sdk::MerkleStore;
+use sdk::refusal;
 use sdk::{Error, Event, Msg, Origin, StateRoot};
 use statesync::qmdb::QmdbStore;
 use tasks::{JobsMsg, encode_job_msg as jobs_encode_msg};
@@ -96,14 +97,14 @@ impl MerkleStore for SharedStore {
 
     async fn sync_target(&self) -> Result<sdk::ResolverSyncTarget, Error> {
         Err(Error::Module {
-            reason: "resolver_sync_unsupported".into(),
+            reason: refusal::UNSUPPORTED.into(),
             sentence: "a test double has no resolver lane".into(),
         })
     }
 
     async fn serve_sync(&self, _req: &[u8]) -> Result<Vec<u8>, Error> {
         Err(Error::Module {
-            reason: "sync_unsupported".into(),
+            reason: refusal::UNSUPPORTED.into(),
             sentence: "a test double has no sync wire".into(),
         })
     }

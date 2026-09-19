@@ -3,6 +3,7 @@
 // crates in [dependencies] are the wire surfaces these re-export.
 use attribution_module as attribution;
 use identity_module as identity;
+use sdk::refusal;
 
 use attribution::{
     Actor, AttributionModule, AttributionMsg, AttributionQuery, AttributionReply, ObjectRef,
@@ -29,7 +30,7 @@ impl Module for Executor {
     async fn execute(&mut self, ctx: &mut dyn Ctx, msg: &Msg) -> Result<(), Error> {
         identity::authenticate_event(&ctx.env().origin, "identity", &msg.payload).map_err(
             |sentence| Error::Module {
-                reason: "authentication".into(),
+                reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence,
             },
         )?;

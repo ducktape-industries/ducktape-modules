@@ -123,60 +123,12 @@ const PAGE_INDEX_KEY: &str = "\u{0}page-index";
 /// below the wasm host's 4096 store-read ceiling.
 const MAX_MOVE_SUBTREE_READS: usize = 3_000;
 
-/// the one structural [`PageError`] → refusal mapping: every variant is its own
-/// failure class, whichever call site raised it, and its display text is the
-/// sentence. no wildcard arm, so a new variant must be given a class here.
+/// the one structural [`PageError`] → refusal mapping: the variant's class
+/// ([`PageError::class`]) is the token, whichever call site raised it, and its
+/// display text is the sentence.
 fn page_refusal(error: PageError) -> Error {
-    let reason = match error {
-        PageError::DuplicateBlock => "duplicate_block",
-        PageError::ManagedPage => "managed_page",
-        PageError::RecordUnauthorized => "record_unauthorized",
-        PageError::RecordCollectionExists => "record_collection_exists",
-        PageError::RecordCollectionNotFound => "record_collection_not_found",
-        PageError::InvalidRecordCollection => "invalid_record_collection",
-        PageError::RecordRevisionConflict => "record_revision_conflict",
-        PageError::RecordRequestConflict => "record_request_conflict",
-        PageError::InvalidRecordBatch => "invalid_record_batch",
-        PageError::RecordNotFound => "record_not_found",
-        PageError::RecordStateNotFound => "record_state_not_found",
-        PageError::TooManyRecordStateKeys => "too_many_record_state_keys",
-        PageError::FilesNotConfigured => "files_not_configured",
-        PageError::TooManyRecords => "too_many_records",
-        PageError::BlockNotFound => "block_not_found",
-        PageError::ParentNotFound => "parent_not_found",
-        PageError::AnchorNotFound => "anchor_not_found",
-        PageError::InvalidPageCursor => "invalid_page_cursor",
-        PageError::PageTraversalTooDeep => "page_traversal_too_deep",
-        PageError::PageTooDeep => "page_too_deep",
-        PageError::MoveSubtreeTooLarge => "move_subtree_too_large",
-        PageError::MoveAncestryTooDeep => "move_ancestry_too_deep",
-        PageError::RemoveSubtreeTooLarge => "remove_subtree_too_large",
-        PageError::CycleMove => "cycle_move",
-        PageError::CrossPageMove => "cross_page_move",
-        PageError::PageKindImmutable => "page_kind_immutable",
-        PageError::TopLevelNonPage => "top_level_non_page",
-        PageError::NotTodo => "not_todo",
-        PageError::InvalidTextRange => "invalid_text_range",
-        PageError::TooManySpanMarks => "too_many_span_marks",
-        PageError::BlockTooLarge => "block_too_large",
-        PageError::TitleTooLarge => "title_too_large",
-        PageError::Corrupt => "page_corrupt",
-        PageError::ReservedId => "reserved_id",
-        PageError::EmptyOrigin => "empty_origin",
-        PageError::AuthorTooLarge => "author_too_large",
-        PageError::ThreadNotFound => "thread_not_found",
-        PageError::CommentNotFound => "comment_not_found",
-        PageError::DuplicateComment => "duplicate_comment",
-        PageError::TargetMismatch => "target_mismatch",
-        PageError::TextTooLarge => "text_too_large",
-        PageError::IdTooLarge => "id_too_large",
-        PageError::TooManyComments => "too_many_comments",
-        PageError::TooManyThreads => "too_many_threads",
-        PageError::TooManyPages => "too_many_pages",
-        PageError::TooMuchCommentWork => "too_much_comment_work",
-    };
     Error::Module {
-        reason: reason.into(),
+        reason: error.class().into(),
         sentence: error.to_string(),
     }
 }

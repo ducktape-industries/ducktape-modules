@@ -1,5 +1,6 @@
 //! Named one-shot timers. Crank is driven by committed consensus time, not a host clock.
 use super::*;
+use sdk::refusal;
 const SCHEDULE_QUEUE: &str = "conversation/schedule_queue";
 const NEXT_SCHEDULE_DUE: &str = "conversation/next_schedule_due";
 fn schedule_key(id: &str, slot: &str) -> String {
@@ -131,13 +132,20 @@ fn schedule_fire(
     sequence: u64,
     now: u64,
 ) -> Result<ConversationSchedule, Error> {
-    let due =
-        matches!(schedule.status, ConversationScheduleStatus::Pending { due_at } if due_at <= now);
-    if !due {
+    let ConversationScheduleStatus::Pending { due_at } = schedule.status else {
         return Err(Error::Module {
-            reason: "conversation_schedule_not_due".into(),
+            reason: refusal::WRONG_STATE.into(),
             sentence: format!(
-                "schedule {} of conversation {} is not due yet",
+                "schedule {} of conversation {} is not pending",
+                schedule.schedule_id, schedule.conversation_id
+            ),
+        });
+    };
+    if now < due_at {
+        return Err(Error::Module {
+            reason: refusal::NOT_YET.into(),
+            sentence: format!(
+                "schedule {} of conversation {} is due at consensus time {due_at}, not yet at {now}",
                 schedule.schedule_id, schedule.conversation_id
             ),
         });
@@ -167,7 +175,7 @@ impl RunsModule {
                 .conversation_read(&schedule_key(id, &slot))
                 .await?
                 .ok_or_else(|| Error::Module {
-                    reason: "missing_conversation_schedule".into(),
+                    reason: refusal::CORRUPT.into(),
                     sentence: format!(
                         "conversation {id} lists schedule {slot} but has no record of it"
                     ),
@@ -192,13 +200,13 @@ impl RunsModule {
         let valid_slot = !slot.is_empty() && slot.len() <= MAX_REQUEST_ID_BYTES;
         if !valid_slot {
             return Err(Error::Module {
-                reason: "invalid_conversation_schedule_id".into(),
+                reason: refusal::INVALID_INPUT.into(),
                 sentence: format!("a schedule id is 1 to {MAX_REQUEST_ID_BYTES} bytes"),
             });
         }
         if matches!(input, ConversationInput::Chat { .. }) {
             return Err(Error::Module {
-                reason: "scheduled_input_source".into(),
+                reason: refusal::UNAUTHORIZED.into(),
                 sentence: "scheduled inputs cannot forge Chat snapshots".into(),
             });
         }
@@ -218,14 +226,14 @@ impl RunsModule {
             None => ScheduleInput::Cancel { schedule },
             Some(seconds) => {
                 let unit = self.time_unit.ok_or_else(|| Error::Module {
-                    reason: "genesis_time_unit".into(),
+                    reason: refusal::UNSUPPORTED.into(),
                     sentence: "conversation scheduling requires genesis time_unit".into(),
                 })?;
                 let duration =
                     seconds
                         .checked_mul(unit.per_second())
                         .ok_or_else(|| Error::Module {
-                            reason: "conversation_schedule_duration_overflow".into(),
+                            reason: refusal::INVALID_INPUT.into(),
                             sentence: format!(
                                 "a delay of {seconds} seconds is too long to schedule"
                             ),
@@ -235,7 +243,7 @@ impl RunsModule {
                     .consensus_time
                     .checked_add(duration)
                     .ok_or_else(|| Error::Module {
-                        reason: "conversation_schedule_deadline_overflow".into(),
+                        reason: refusal::INVALID_INPUT.into(),
                         sentence: format!(
                             "{seconds} seconds from now is past the last representable time"
                         ),
@@ -251,7 +259,7 @@ impl RunsModule {
         if !slots.contains(&slot) {
             if slots.len() >= 64 {
                 return Err(Error::Module {
-                    reason: "conversation_schedule_allocation_is_full".into(),
+                    reason: refusal::CAPACITY.into(),
                     sentence: format!("conversation {id} already has 64 schedules, its limit"),
                 });
             }
@@ -302,7 +310,7 @@ impl RunsModule {
             .all(|(_, bytes)| bytes.len() <= sdk::MAX_STORE_VALUE_BYTES);
         if !fits {
             return Err(Error::Module {
-                reason: "conversation_schedule_exceeds_store_bound".into(),
+                reason: refusal::CAPACITY.into(),
                 sentence: format!(
                     "a conversation schedule record exceeds the {}-byte store value bound",
                     sdk::MAX_STORE_VALUE_BYTES
@@ -334,7 +342,7 @@ impl RunsModule {
                 .conversation_read(&record_key)
                 .await?
                 .ok_or_else(|| Error::Module {
-                    reason: "missing_scheduled_input".into(),
+                    reason: refusal::CORRUPT.into(),
                     sentence: format!(
                         "schedule {} of conversation {} is queued but has no record",
                         entry.schedule_id, entry.conversation_id
@@ -347,7 +355,7 @@ impl RunsModule {
                     };
             if !current {
                 return Err(Error::Module {
-                    reason: "scheduled_input_index".into(),
+                    reason: refusal::CORRUPT.into(),
                     sentence: "scheduled input index disagrees with its record".into(),
                 });
             }
@@ -356,7 +364,7 @@ impl RunsModule {
                 .admitted_cursor
                 .checked_add(1)
                 .ok_or_else(|| Error::Module {
-                    reason: "conversation_input_cursor_exhausted".into(),
+                    reason: refusal::EXHAUSTED.into(),
                     sentence: format!(
                         "conversation {} has no input sequence numbers left",
                         entry.conversation_id

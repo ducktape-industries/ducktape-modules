@@ -296,7 +296,13 @@ fn exact_byte_replays_precede_cas_and_never_rewind_a_newer_document() {
             "different payload",
         )
         .await;
-        rejected(&mut p, &first, Origin::Program(7), "not authorized").await;
+        rejected(
+            &mut p,
+            &first,
+            Origin::Program(7),
+            "This writer may not write these records.",
+        )
+        .await;
         let mut different_bytes = msg(&first);
         different_bytes.payload.push(b' '); // same decoded request, different authenticated bytes
         let error = p
@@ -304,6 +310,11 @@ fn exact_byte_replays_precede_cas_and_never_rewind_a_newer_document() {
             .await
             .unwrap_err();
         assert!(error.to_string().contains("different payload"));
+        // an id reused with different work: retrying that id never succeeds.
+        assert!(
+            matches!(&error, Error::Module { reason, .. } if reason == sdk::refusal::ALREADY_EXISTS),
+            "{error:?}"
+        );
         assert_eq!(p.root(), root);
     });
 }
@@ -323,7 +334,7 @@ fn cas_and_late_batch_failure_preserve_prior_staged_records_and_all_metadata() {
             &mut p,
             &commit("stale", 0, vec![upsert("a", "stale")]),
             owner(),
-            "revision conflict",
+            "The record collection has moved past the revision this request read.",
         )
         .await;
         let missing = rejected(
@@ -339,17 +350,17 @@ fn cas_and_late_batch_failure_preserve_prior_staged_records_and_all_metadata() {
                 ],
             ),
             owner(),
-            "record not found",
+            "Record missing does not exist.",
         )
         .await;
         // a stale CAS and a missing record are distinct classes a caller can
         // branch on, not one token for every record-write refusal.
         assert!(
-            matches!(&conflict, Error::Module { reason, .. } if reason == "record_revision_conflict"),
+            matches!(&conflict, Error::Module { reason, .. } if reason == sdk::refusal::STALE),
             "{conflict:?}"
         );
         assert!(
-            matches!(&missing, Error::Module { reason, .. } if reason == "record_not_found"),
+            matches!(&missing, Error::Module { reason, .. } if reason == sdk::refusal::NOT_FOUND),
             "{missing:?}"
         );
         assert_eq!(get_block(&p, "a-body").await.unwrap().text, "staged");
@@ -454,7 +465,13 @@ fn ordinary_block_mutations_cannot_bypass_managed_data_even_for_the_writer() {
                 },
             ];
             for op in ops {
-                rejected(&mut p, &op, owner(), "requires commit_records").await;
+                rejected(
+                    &mut p,
+                    &op,
+                    owner(),
+                    "A managed page changes only through commit_records.",
+                )
+                .await;
             }
         }
         // Ordinary Pages elsewhere remain collaborative.
@@ -472,7 +489,7 @@ fn ordinary_block_mutations_cannot_bypass_managed_data_even_for_the_writer() {
             &mut p,
             &commit("intruder", 1, vec![upsert("a", "forged")]),
             Origin::Program(7),
-            "not authorized",
+            "This writer may not write these records.",
         )
         .await;
         assert_eq!(get_block(&p, "a-body").await.unwrap().text, "protected");
@@ -485,7 +502,7 @@ fn attachment_is_authorized_and_cannot_capture_a_nested_or_foreign_page() {
         let mut p = pages_on!(context, "pages");
         apply_commit_as(&mut p, &PageMsg::CreatePage { page_id: "board".into(), title: "Board".into(), blocks: vec![page("nested", "Nested")] }, owner()).await;
         let create = PageMsg::CreateRecordCollection { page_id: "board".into(), request_id: "create".into() };
-        rejected(&mut p, &create, Origin::Program(7), "not authorized").await;
+        rejected(&mut p, &create, Origin::Program(7), "This writer may not write these records.").await;
         rejected(&mut p, &create, owner(), "top-level page").await;
         rejected(&mut p, &PageMsg::CreateRecordCollection { page_id: "nested".into(), request_id: "create".into() }, owner(), "top-level page").await;
         apply_commit_as(&mut p, &PageMsg::RemoveBlock { block_id: "nested".into() }, owner()).await;
@@ -563,7 +580,13 @@ fn bounded_batches_reject_duplicate_ids_subpages_and_poison_payloads() {
             ),
         ];
         for case in cases {
-            rejected(&mut p, &case, owner(), "invalid or oversized record batch").await;
+            rejected(
+                &mut p,
+                &case,
+                owner(),
+                "The record batch is invalid or too large.",
+            )
+            .await;
         }
         rejected(
             &mut p,
@@ -573,7 +596,7 @@ fn bounded_batches_reject_duplicate_ids_subpages_and_poison_payloads() {
                 vec![upsert("intro", "cannot overwrite ordinary blocks")],
             ),
             owner(),
-            "duplicate block id",
+            "Block intro already exists.",
         )
         .await;
         assert_eq!(
@@ -718,7 +741,7 @@ fn protected_state_and_immutable_receipt_metadata_share_the_document_cas() {
                 None,
             ),
             owner(),
-            "revision conflict",
+            "The record collection has moved past the revision this request read.",
         )
         .await;
         rejected(
@@ -732,7 +755,7 @@ fn protected_state_and_immutable_receipt_metadata_share_the_document_cas() {
                 None,
             ),
             Origin::Program(7),
-            "not authorized",
+            "This writer may not write these records.",
         )
         .await;
         let mut late = state_commit(
@@ -747,7 +770,7 @@ fn protected_state_and_immutable_receipt_metadata_share_the_document_cas() {
             unreachable!()
         };
         changes.push(upsert("ghost", "Must roll back"));
-        rejected(&mut p, &late, owner(), "state key not found").await;
+        rejected(&mut p, &late, owner(), "Record state key").await;
         assert!(get_block(&p, "ghost").await.is_none());
         assert!(p.record_receipt("board", "late").await.unwrap().is_none());
         apply(
@@ -832,7 +855,13 @@ fn state_and_receipt_bounds_reject_atomically_and_do_not_consume_page_slots() {
             ),
         ];
         for case in cases {
-            rejected(&mut p, &case, owner(), "invalid or oversized record batch").await;
+            rejected(
+                &mut p,
+                &case,
+                owner(),
+                "The record batch is invalid or too large.",
+            )
+            .await;
         }
         for revision in 0..(MAX_RECORD_STATE_KEYS / MAX_RECORD_CHANGES) {
             let state_changes = (0..MAX_RECORD_CHANGES)
@@ -976,7 +1005,7 @@ fn a_batch_shares_one_comment_fanout_and_removal_budget() {
             &mut p,
             &commit("fanout", 1, changes),
             owner(),
-            "invalid or oversized record batch",
+            "The record batch is invalid or too large.",
         )
         .await;
         assert_eq!(

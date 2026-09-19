@@ -145,7 +145,7 @@ fn text_uses_the_current_record_revision_and_preserves_other_fields() {
     assert_eq!(
         initial.changed_many(&edits),
         Err(Refused {
-            reason: "stale_text",
+            reason: sdk::refusal::STALE,
             sentence: String::new(),
         })
     );
@@ -200,7 +200,7 @@ fn deleting_a_card_removes_connections_and_late_edits_do_not_resurrect_it() {
             base_revision: held_revision,
         })
         .unwrap_err();
-    assert_eq!(refused.reason, "text_target_gone");
+    assert_eq!(refused.reason, TARGET_GONE);
 }
 #[test]
 fn invalid_geometry_content_and_edges_leave_state_untouched() {
@@ -471,7 +471,7 @@ fn text_compare_and_set_refuses_stale_and_deleted_cards_without_leaking_batch_wr
             .unwrap_err();
         match stale {
             sdk::Error::Module { reason, sentence } => {
-                assert_eq!(reason, "stale_text");
+                assert_eq!(reason, sdk::refusal::STALE);
                 assert_eq!(sentence, "first");
             }
             other => panic!("unexpected error: {other:?}"),
@@ -482,7 +482,7 @@ fn text_compare_and_set_refuses_stale_and_deleted_cards_without_leaking_batch_wr
         };
         let refused = module.execute(&mut ctx, &op(batch)).await.unwrap_err();
         assert!(
-            matches!(refused, sdk::Error::Module { reason, sentence } if reason == "stale_text" && sentence == "first")
+            matches!(refused, sdk::Error::Module { reason, sentence } if reason == sdk::refusal::STALE && sentence == "first")
         );
         assert_eq!(opened(&module, "room").await.unwrap(), first);
         module.commit_block().await.unwrap();
@@ -524,7 +524,7 @@ fn text_compare_and_set_refuses_stale_and_deleted_cards_without_leaking_batch_wr
             .execute(&mut ctx, &op(deleted_batch))
             .await
             .unwrap_err();
-        assert!(matches!(gone, sdk::Error::Module { reason, .. } if reason == "text_target_gone"));
+        assert!(matches!(gone, sdk::Error::Module { reason, .. } if reason == TARGET_GONE));
         assert_eq!(opened(&module, "room").await.unwrap(), first);
 
         module
@@ -536,14 +536,14 @@ fn text_compare_and_set_refuses_stale_and_deleted_cards_without_leaking_batch_wr
             .execute(&mut ctx, &op(edit(text("late"))))
             .await
             .unwrap_err();
-        assert!(matches!(gone, sdk::Error::Module { reason, .. } if reason == "text_target_gone"));
+        assert!(matches!(gone, sdk::Error::Module { reason, .. } if reason == TARGET_GONE));
         assert_eq!(opened(&module, "room").await.unwrap(), deleted);
         module.commit_block().await.unwrap();
         let gone = module
             .execute(&mut ctx, &op(edit(text("later"))))
             .await
             .unwrap_err();
-        assert!(matches!(gone, sdk::Error::Module { reason, .. } if reason == "text_target_gone"));
+        assert!(matches!(gone, sdk::Error::Module { reason, .. } if reason == TARGET_GONE));
 
         let mut missing_revision = serde_json::to_value(edit(text("old"))).unwrap();
         missing_revision["edit"]["change"]["text"]
@@ -555,7 +555,9 @@ fn text_compare_and_set_refuses_stale_and_deleted_cards_without_leaking_batch_wr
             payload: serde_json::to_vec(&missing_revision).unwrap(),
         };
         let refused = module.execute(&mut ctx, &malformed).await.unwrap_err();
-        assert!(matches!(refused, sdk::Error::Module { reason, .. } if reason == "codec"));
+        assert!(
+            matches!(refused, sdk::Error::Module { reason, .. } if reason == sdk::refusal::INVALID_INPUT)
+        );
     });
 }
 use sdk::Ctx;

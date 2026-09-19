@@ -26,7 +26,13 @@ fn exact_comment_anchor_rebases_with_target_text() {
         if let PageMsg::AddComment { anchor, .. } = &mut anchored {
             *anchor = Some(RelativeAnchor { start: 0, end: 99 });
         }
-        apply_err_as(&mut p, &anchored, user("alice"), "invalid text range").await;
+        apply_err_as(
+            &mut p,
+            &anchored,
+            user("alice"),
+            "The text range is empty, outside the text, or splits a character.",
+        )
+        .await;
         if let PageMsg::AddComment { anchor, .. } = &mut anchored {
             *anchor = Some(RelativeAnchor { start: 0, end: 2 });
         }
@@ -77,7 +83,7 @@ fn add_comment_rejects_over_length_ids_before_staging() {
             &mut p,
             &add(&long_thread, "m1", "b1", "hi"),
             user("alice"),
-            "id or target too large",
+            "The comment id or target is too large.",
         )
         .await;
         let long_comment = "m".repeat(MAX_COMMENT_ID_BYTES + 1);
@@ -85,7 +91,7 @@ fn add_comment_rejects_over_length_ids_before_staging() {
             &mut p,
             &add("t1", &long_comment, "b1", "hi"),
             user("alice"),
-            "id or target too large",
+            "The comment id or target is too large.",
         )
         .await;
         let long_target = "b".repeat(MAX_COMMENT_TARGET_BYTES + 1);
@@ -93,7 +99,7 @@ fn add_comment_rejects_over_length_ids_before_staging() {
             &mut p,
             &add("t1", "m1", &long_target, "hi"),
             user("alice"),
-            "id or target too large",
+            "The comment id or target is too large.",
         )
         .await;
         // nothing staged — an id at exactly the cap still lands.
@@ -124,7 +130,7 @@ fn add_comment_rejects_oversized_origins() {
                 &mut p,
                 &add("t1", comment, "b1", "hi"),
                 origin,
-                "comment author is too large",
+                "The author is too large to record.",
             )
             .await;
         }
@@ -149,7 +155,7 @@ fn add_comment_rejects_escaping_char_ids() {
                 &mut p,
                 &add(t, c, tg, "hi"),
                 user("alice"),
-                "id or target too large",
+                "The comment id or target is too large.",
             )
             .await;
         }
@@ -332,14 +338,14 @@ fn comment_append_rejects_target_mismatch_duplicate_and_empty_origin() {
             &mut p,
             &add("t1", "m2", "b2", "y"),
             user("alice"),
-            "target mismatch",
+            "Thread t1 belongs to b1.",
         )
         .await;
         apply_err_as(
             &mut p,
             &add("t1", "m1", "b1", "z"),
             user("alice"),
-            "duplicate comment id",
+            "Comment m1 already exists.",
         )
         .await;
         apply_err_as(
@@ -458,7 +464,7 @@ fn comment_resolve_toggles_and_records_resolver() {
                 resolved: true,
             },
             user("alice"),
-            "thread not found",
+            "Thread ghost does not exist.",
         )
         .await;
     });
@@ -674,7 +680,7 @@ fn comment_caps_and_reserved_ids_reject() {
             &mut p,
             &add("t1", "m1", "b1", &huge),
             user("alice"),
-            "comment text too large",
+            "The comment text is too large.",
         )
         .await;
         assert!(p.staged.is_empty(), "a rejected comment op stages nothing");
@@ -683,7 +689,7 @@ fn comment_caps_and_reserved_ids_reject() {
             &mut p,
             &add("\u{0}evil", "m1", "b1", "x"),
             user("alice"),
-            "reserved block id",
+            "The block id is reserved.",
         )
         .await;
         // the MAX_QUERY_TARGETS cap guards the index tier's grouped read now
@@ -821,11 +827,11 @@ fn add_comment_on_a_nonexistent_target_is_refused() {
             &mut p,
             &add("t1", "m1", "ghost", "squat"),
             user("mallory"),
-            "block not found",
+            "Block ghost does not exist.",
         )
         .await;
         assert!(
-            matches!(&refusal, Error::Module { reason, .. } if reason == "block_not_found"),
+            matches!(&refusal, Error::Module { reason, .. } if reason == sdk::refusal::NOT_FOUND),
             "{refusal:?}"
         );
         assert!(p.staged.is_empty(), "a rejected comment op stages nothing");
