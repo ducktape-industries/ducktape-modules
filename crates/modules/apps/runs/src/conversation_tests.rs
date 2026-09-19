@@ -862,3 +862,343 @@ fn a_timer_queue_from_before_the_carry_over_still_fires_in_order() {
         assert_eq!(module.next_conversation_input_due().await.unwrap(), None);
     });
 }
+
+/// What the old whole-record queues held at the 1 MiB store value bound they
+/// were already up against — the largest legacy record a network can present.
+const TIMER_CLIFF: u64 = 2600;
+const WAKE_CLIFF: u64 = 3900;
+/// The wasm host refuses an op past `MAX_STORE_READS` (4096) distinct store
+/// reads. An op that carries entries over is also doing its own work, so the
+/// carry-over is held well under it rather than merely inside it.
+const READ_BUDGET: usize = 3000;
+
+/// 2600 timers over 100 conversations, every one at its own due time, in the
+/// (due, conversation, schedule) order the old queue kept.
+fn cliff_timers(count: u64) -> Vec<(String, String, u64)> {
+    let conversations = count.min(100);
+    let mut timers: Vec<(String, String, u64)> = (0..count)
+        .map(|n| {
+            let conversation = n % conversations;
+            let slot = n / conversations;
+            (
+                format!("room-{conversation}"),
+                format!("timer-{slot:04}"),
+                1_000 + n,
+            )
+        })
+        .collect();
+    timers.sort_by_key(|(_, _, due_at)| *due_at);
+    timers
+}
+
+/// R7: the carry-over of a legacy queue at its cliff size stays under the
+/// host's read ceiling, drains, and fires every timer it held exactly once in
+/// its old order.
+///
+/// Carrying the whole record over cost one read per entry with no bound but
+/// the record's own: past the ceiling the host refuses the op, and since every
+/// write path carries over first, EVERY write — so the timers wedge with no
+/// way out.
+#[test]
+fn a_timer_queue_at_its_cliff_carries_over_under_the_host_read_ceiling() {
+    block_on(async {
+        // What one op reads is the chunk it takes, not the record it takes it
+        // from: a legacy queue twenty times longer costs under a chunk more,
+        // and that residue is the trie descent over more distinct due times.
+        // Carrying the whole record over instead cost one read per entry.
+        let small = drain_timer_queue(CARRY_OVER_CHUNK as u64 + 8).await;
+        let cliff = drain_timer_queue(TIMER_CLIFF).await;
+        assert!(
+            cliff <= small + CARRY_OVER_CHUNK,
+            "the carry-over's worst op grew with the legacy record: {small} then {cliff}"
+        );
+        assert!(
+            cliff < READ_BUDGET,
+            "one op read {cliff} distinct records, past the {READ_BUDGET} budget"
+        );
+    });
+}
+
+/// Seeds `count` timers under the old whole-queue key, cranks until it has
+/// drained and every one of them has fired, and answers the most distinct
+/// records any single op read on the way.
+async fn drain_timer_queue(count: u64) -> usize {
+    let (mut module, backing) = counted();
+    let timers = cliff_timers(count);
+    for (id, slot, due_at) in &timers {
+        module
+            .write_conversation_state(&ConversationView {
+                conversation_id: id.clone(),
+                ..state()
+            })
+            .unwrap();
+        module
+            .receipts
+            .stage(
+                schedule::schedule_key(id, slot),
+                sdk::wire::encode(&ConversationSchedule {
+                    conversation_id: id.clone(),
+                    schedule_id: slot.clone(),
+                    operation_id: schedule::timer_operation_id(id, slot),
+                    actor: Origin::Program(7),
+                    input: ConversationInput::Event {
+                        kind: slot.clone(),
+                        content: serde_json::json!({}),
+                    },
+                    status: ConversationScheduleStatus::Pending { due_at: *due_at },
+                }),
+            )
+            .unwrap();
+    }
+    for conversation in 0..count.min(100) {
+        let id = format!("room-{conversation}");
+        let mut slots: Vec<&str> = timers
+            .iter()
+            .filter(|(timer, _, _)| *timer == id)
+            .map(|(_, slot, _)| slot.as_str())
+            .collect();
+        slots.sort_unstable();
+        module
+            .receipts
+            .stage(schedule::schedule_index(&id), sdk::wire::encode(&slots))
+            .unwrap();
+    }
+    let borrowed: Vec<(&str, &str, u64)> = timers
+        .iter()
+        .map(|(id, slot, due_at)| (id.as_str(), slot.as_str(), *due_at))
+        .collect();
+    module
+        .receipts
+        .stage(
+            schedule::LEGACY_SCHEDULE_QUEUE.into(),
+            schedule::legacy_timer_queue(&borrowed),
+        )
+        .unwrap();
+    module
+        .receipts
+        .stage(
+            schedule::NEXT_SCHEDULE_DUE.into(),
+            sdk::wire::encode(&Some(timers[0].2)),
+        )
+        .unwrap();
+    module.commit_block().await.unwrap();
+
+    let last_due = timers.last().unwrap().2;
+    let now = program_ctx(last_due + 1);
+    let mut peak = 0;
+    let mut earliest = 0;
+    let mut ops = 0;
+    while let Some(due_at) = module.next_conversation_input_due().await.unwrap() {
+        assert!(
+            due_at >= earliest,
+            "the crank went backwards: {due_at} after {earliest}"
+        );
+        earliest = due_at;
+        backing.forget_distinct();
+        module.crank_conversation_inputs(&now).await.unwrap();
+        peak = peak.max(backing.distinct_reads());
+        module.commit_block().await.unwrap();
+        ops += 1;
+        assert!(ops < 4 * count, "the carry-over stopped draining");
+    }
+    assert!(
+        module
+            .receipts
+            .get(schedule::LEGACY_SCHEDULE_QUEUE)
+            .await
+            .unwrap()
+            .is_none(),
+        "the old whole-queue key outlived its carry-over"
+    );
+    // Every timer fired, once, and within each conversation in due order —
+    // which, since the crank only ever moved forward above, is the old
+    // queue's order.
+    let mut fired = 0;
+    for conversation in 0..count.min(100) {
+        let schedules = module
+            .conversation_schedules(&format!("room-{conversation}"))
+            .await
+            .unwrap();
+        let sequences: Vec<u64> = schedules
+            .iter()
+            .map(|schedule| match schedule.status {
+                ConversationScheduleStatus::Fired { sequence } => sequence,
+                ref other => panic!("{} did not fire: {other:?}", schedule.schedule_id),
+            })
+            .collect();
+        let mut ordered = sequences.clone();
+        ordered.sort_unstable();
+        ordered.dedup();
+        assert_eq!(sequences, ordered, "timers fired out of their due order");
+        fired += sequences.len() as u64;
+    }
+    assert_eq!(fired, count, "the carry-over lost a timer");
+    peak
+}
+
+/// The same for the wake map: a cliff-size legacy queue carries over under the
+/// ceiling, drains, and every wake it held is delivered exactly once, oldest
+/// item first.
+#[test]
+fn a_wake_queue_at_its_cliff_carries_over_under_the_host_read_ceiling() {
+    block_on(async {
+        let small = drain_wake_queue(CARRY_OVER_CHUNK as u64 + 8).await;
+        let cliff = drain_wake_queue(WAKE_CLIFF).await;
+        assert!(
+            cliff <= small + CARRY_OVER_CHUNK,
+            "the carry-over's worst op grew with the legacy record: {small} then {cliff}"
+        );
+        assert!(
+            cliff < READ_BUDGET,
+            "one op read {cliff} distinct records, past the {READ_BUDGET} budget"
+        );
+    });
+}
+
+/// Seeds `count` wakes under the old whole-map key, carries it over until it
+/// has drained, and answers the most distinct records any single op read —
+/// having checked on the way out that every wake is still deliverable, once
+/// and in its old order.
+async fn drain_wake_queue(count: u64) -> usize {
+    let (mut module, backing) = counted();
+    let legacy: BTreeMap<u64, String> = (0..count)
+        .map(|item| (item, format!("room-{item}")))
+        .collect();
+    for (item, id) in &legacy {
+        module
+            .write_conversation_state(&ConversationView {
+                conversation_id: id.clone(),
+                ..state()
+            })
+            .unwrap();
+        module
+            .receipts
+            .stage(
+                wake_key(*item),
+                sdk::wire::encode(&Wake {
+                    conversation_id: id.clone(),
+                    cause: sdk::Cause::Direct,
+                    acknowledged: None,
+                }),
+            )
+            .unwrap();
+    }
+    module
+        .receipts
+        .stage(LEGACY_WAKE_QUEUE.into(), sdk::wire::encode(&legacy))
+        .unwrap();
+    module.commit_block().await.unwrap();
+
+    let ctx = program_ctx(1);
+    let mut peak = 0;
+    let mut ops = 0;
+    // Acked while still sitting in the unconverted remainder: the
+    // carry-over must not queue it again. Counted like every other op —
+    // it carries a chunk over before it looks for the item.
+    let acked = count - 1;
+    backing.forget_distinct();
+    module
+        .detach_conversation_wake(acked, &format!("room-{acked}"))
+        .await
+        .unwrap();
+    peak = peak.max(backing.distinct_reads());
+    module.commit_block().await.unwrap();
+    while module
+        .legacy_wake_queue(View::Live)
+        .await
+        .unwrap()
+        .is_some()
+    {
+        backing.forget_distinct();
+        // `room-0` is in the queue already, so this is a carry-over and
+        // the duplicate check, and it queues nothing of its own.
+        module
+            .write_conversation_wake(&ctx, "room-0")
+            .await
+            .unwrap();
+        peak = peak.max(backing.distinct_reads());
+        module.commit_block().await.unwrap();
+        ops += 1;
+        assert!(ops < count, "the carry-over stopped draining");
+    }
+    let delivered: Vec<u64> = module
+        .conversation_deliveries(count as usize + 8)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|item| item.item)
+        .collect();
+    let expected: Vec<u64> = (0..acked).collect();
+    assert_eq!(
+        delivered, expected,
+        "the carry-over lost, duplicated or reordered a wake"
+    );
+    peak
+}
+
+/// Gap 2, pinned: timers sharing a due time fire newest-inserted first, since
+/// each insert pushes onto that due time's list head. The old whole-Vec queue
+/// fired them in (conversation, schedule) order instead. Deterministic either
+/// way — this is here so a change to it is a deliberate one.
+#[test]
+fn timers_sharing_a_due_time_fire_newest_first() {
+    block_on(async {
+        let (mut module, _) = counted();
+        module.write_conversation_state(&state()).unwrap();
+        for slot in ["a", "b", "c"] {
+            module
+                .receipts
+                .stage(
+                    schedule::schedule_key("room", slot),
+                    sdk::wire::encode(&ConversationSchedule {
+                        conversation_id: "room".into(),
+                        schedule_id: slot.into(),
+                        operation_id: schedule::timer_operation_id("room", slot),
+                        actor: Origin::Program(7),
+                        input: ConversationInput::Event {
+                            kind: slot.into(),
+                            content: serde_json::json!({}),
+                        },
+                        status: ConversationScheduleStatus::Pending { due_at: 500 },
+                    }),
+                )
+                .unwrap();
+            module
+                .seed_conversation_timer("room", slot, 500)
+                .await
+                .unwrap();
+        }
+        module
+            .receipts
+            .stage(
+                schedule::schedule_index("room"),
+                sdk::wire::encode(&["a", "b", "c"]),
+            )
+            .unwrap();
+        module.commit_block().await.unwrap();
+        module
+            .crank_conversation_inputs(&program_ctx(500))
+            .await
+            .unwrap();
+        module.commit_block().await.unwrap();
+        let fired: Vec<(String, u64)> = module
+            .conversation_schedules("room")
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|schedule| match schedule.status {
+                ConversationScheduleStatus::Fired { sequence } => (schedule.schedule_id, sequence),
+                ref other => panic!("{} did not fire: {other:?}", schedule.schedule_id),
+            })
+            .collect();
+        assert_eq!(
+            fired,
+            [
+                ("a".to_string(), 3),
+                ("b".to_string(), 2),
+                ("c".to_string(), 1)
+            ],
+            "same-due timers no longer fire newest-inserted first"
+        );
+    });
+}

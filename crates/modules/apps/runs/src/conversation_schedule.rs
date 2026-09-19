@@ -7,12 +7,12 @@
 //! descending eleven 8-byte records instead of sorting a queue. Insert, cancel
 //! and one crank each touch a fixed number of records whatever the network is
 //! holding; `next_conversation_input_due` stays a single read of the cached
-//! head.
+//! head, plus whatever a carry-over has left to drain.
 use super::*;
 use sdk::refusal;
 /// The pre-point-address whole queue: one sorted Vec of every pending timer.
-/// Read once on the first touch of the new layout, carried over, then deleted;
-/// the fallback goes in a later round.
+/// Carried over a chunk at a time by the writes that touch the new layout,
+/// and deleted once it is drained.
 pub(super) const LEGACY_SCHEDULE_QUEUE: &str = "conversation/schedule_queue";
 pub(super) const NEXT_SCHEDULE_DUE: &str = "conversation/next_schedule_due";
 /// A due time's list head — the entry slot of its first timer.
@@ -66,9 +66,13 @@ pub(super) fn validate_queue(records: &crate::receipts::Records) -> Result<(), S
         Some(bytes) => sdk::wire::decode(bytes)?,
         None => None,
     };
-    if let Some(bytes) = records.get(LEGACY_SCHEDULE_QUEUE) {
-        return validate_legacy_queue(records, head, bytes);
-    }
+    // A chunked carry-over leaves both layouts standing until the remainder
+    // drains, so both are checked and the published head is the earlier of the
+    // two. Before the first carry-over the new layout is simply empty.
+    let remaining = match records.get(LEGACY_SCHEDULE_QUEUE) {
+        Some(bytes) => validate_legacy_queue(records, bytes)?,
+        None => None,
+    };
     let mut queued: BTreeMap<u64, BTreeMap<String, QueuedSchedule>> = BTreeMap::new();
     for (record_key, bytes) in records {
         let Some(rest) = record_key.strip_prefix("conversation/schedule_at/") else {
@@ -147,7 +151,11 @@ pub(super) fn validate_queue(records: &crate::receipts::Records) -> Result<(), S
         }
     }
     validate_trie(records, &queued)?;
-    if head != queued.keys().next().copied() {
+    let earliest = [queued.keys().next().copied(), remaining]
+        .into_iter()
+        .flatten()
+        .min();
+    if head != earliest {
         return Err("conversation timer head mismatch".into());
     }
     Ok(())
@@ -196,17 +204,15 @@ fn validate_trie(
     Ok(())
 }
 
-/// A snapshot taken before the carry-over still carries the whole queue, and
-/// is still the truth until the next write. Goes with the fallback.
+/// A snapshot taken before the carry-over drained still carries what is left
+/// of the whole queue, and those timers are still the truth. Returns the
+/// earliest of them, which the caller folds into the published head.
 fn validate_legacy_queue(
     records: &crate::receipts::Records,
-    head: Option<u64>,
     bytes: &[u8],
-) -> Result<(), String> {
+) -> Result<Option<u64>, String> {
     let queue: Vec<ScheduledRef> = sdk::wire::decode(bytes)?;
-    if head != queue.first().map(|entry| entry.due_at) {
-        return Err("conversation timer head mismatch".into());
-    }
+    let earliest = queue.first().map(|entry| entry.due_at);
     let ordered = queue.windows(2).all(|pair| {
         (
             pair[0].due_at,
@@ -235,7 +241,7 @@ fn validate_legacy_queue(
             return Err("conversation timer queue record mismatch".into());
         }
     }
-    Ok(())
+    Ok(earliest)
 }
 
 pub(super) fn validate_for_conversation(
@@ -418,7 +424,7 @@ impl RunsModule {
             return Ok(());
         }
         self.trie_insert(due).await?;
-        let earliest = self.next_conversation_input_due().await?;
+        let earliest = self.cached_next_due().await?;
         if matches!(earliest, Some(earliest) if earliest <= due) {
             return Ok(());
         }
@@ -426,13 +432,20 @@ impl RunsModule {
             .stage(NEXT_SCHEDULE_DUE.into(), sdk::wire::encode(&Some(due)))
     }
     /// Unlink one timer from its due time's list, reading only its neighbours.
-    async fn unqueue_schedule(&mut self, due: u64, id: &str, slot: &str) -> Result<(), Error> {
-        let slot = entry_slot(id, slot);
+    async fn unqueue_schedule(
+        &mut self,
+        due: u64,
+        id: &str,
+        schedule_id: &str,
+    ) -> Result<(), Error> {
+        let slot = entry_slot(id, schedule_id);
         let Some(queued) = self
             .conversation_read::<QueuedSchedule>(&entry_key(due, &slot))
             .await?
         else {
-            return Ok(());
+            // Either never queued, or cancelled before its chunk was carried
+            // over — in which case the old queue is still holding it.
+            return self.drop_legacy_schedule(id, schedule_id).await;
         };
         self.receipts.remove(entry_key(due, &slot));
         if let Some(next) = &queued.next {
@@ -465,38 +478,92 @@ impl RunsModule {
         }
         self.receipts.remove(due_key(due));
         self.trie_remove(due).await?;
-        if self.next_conversation_input_due().await? != Some(due) {
+        if self.cached_next_due().await? != Some(due) {
             return Ok(());
         }
         let earliest = self.trie_min().await?;
         self.receipts
             .stage(NEXT_SCHEDULE_DUE.into(), sdk::wire::encode(&earliest))
     }
-    /// Carry the whole queue into the point-addressed layout, once. O(the old
-    /// record) — bounded by the store value cap that made it a problem — and
-    /// then the old key is gone and every timer path is point-addressed.
-    async fn carry_over_schedule_queue(&mut self) -> Result<(), Error> {
+    /// What the whole queue still holds, absent once it has drained. Sorted
+    /// ascending, so its first entry is the earliest timer left in it.
+    async fn legacy_schedule_queue(&self) -> Result<Option<Vec<ScheduledRef>>, Error> {
         let Some(bytes) = self.receipts.get(LEGACY_SCHEDULE_QUEUE).await? else {
-            return Ok(());
+            return Ok(None);
         };
-        self.receipts.remove(LEGACY_SCHEDULE_QUEUE.into());
-        let queue: Vec<ScheduledRef> =
-            sdk::wire::decode(&bytes).map_err(|sentence| Error::Module {
+        sdk::wire::decode(&bytes)
+            .map(Some)
+            .map_err(|sentence| Error::Module {
                 reason: refusal::CORRUPT.into(),
                 sentence,
-            })?;
-        // The old queue was sorted ascending and each entry is pushed onto its
-        // list head, so descending carry-over preserves the firing order.
+            })
+    }
+    fn write_legacy_schedule_queue(&mut self, remainder: &[ScheduledRef]) -> Result<(), Error> {
+        if remainder.is_empty() {
+            self.receipts.remove(LEGACY_SCHEDULE_QUEUE.into());
+            return Ok(());
+        }
+        self.receipts
+            .stage(LEGACY_SCHEDULE_QUEUE.into(), sdk::wire::encode(&remainder))
+    }
+    /// Carry [`CARRY_OVER_CHUNK`] of the whole queue into the point-addressed
+    /// layout, earliest due first, and leave the rest under the old key for
+    /// the next write.
+    ///
+    /// Earliest first is what lets every other path ignore the remainder: the
+    /// old queue is sorted, so what is left is always due no sooner than what
+    /// was carried over, and every write path runs this before it reads the
+    /// head. The crank therefore still finds the earliest pending timer in the
+    /// new layout alone.
+    async fn carry_over_schedule_queue(&mut self) -> Result<(), Error> {
+        let Some(mut queue) = self.legacy_schedule_queue().await? else {
+            return Ok(());
+        };
+        let remainder = queue.split_off(queue.len().min(CARRY_OVER_CHUNK));
+        // Each entry is pushed onto its due time's list head, so a descending
+        // carry-over preserves the firing order within the chunk.
         for entry in queue.into_iter().rev() {
             self.queue_schedule(entry).await?;
         }
-        Ok(())
+        self.write_legacy_schedule_queue(&remainder)
     }
-    pub(crate) async fn next_conversation_input_due(&self) -> Result<Option<u64>, Error> {
+    /// Forget one timer the old queue still holds. A cancel or a re-set can
+    /// land on a timer whose chunk has not been carried over yet, and leaving
+    /// it there would have the carry-over queue an entry the timer's own
+    /// record no longer agrees with — which the crank reads as corruption.
+    async fn drop_legacy_schedule(&mut self, id: &str, schedule_id: &str) -> Result<(), Error> {
+        let Some(mut queue) = self.legacy_schedule_queue().await? else {
+            return Ok(());
+        };
+        let before = queue.len();
+        queue.retain(|entry| entry.conversation_id != id || entry.schedule_id != schedule_id);
+        if queue.len() == before {
+            return Ok(());
+        }
+        self.write_legacy_schedule_queue(&queue)
+    }
+    /// The earliest due time the new layout knows about. The writers below
+    /// maintain this record and compare against it alone — folding in the
+    /// carry-over remainder here would have them leave the cache stale once
+    /// the remainder drained.
+    async fn cached_next_due(&self) -> Result<Option<u64>, Error> {
         Ok(self
             .conversation_read::<Option<u64>>(NEXT_SCHEDULE_DUE)
             .await?
             .flatten())
+    }
+    pub(crate) async fn next_conversation_input_due(&self) -> Result<Option<u64>, Error> {
+        let cached = self.cached_next_due().await?;
+        // A carry-over remainder holds timers no head record names yet, and
+        // this answer is what the compute daemon's readiness probe reads — so
+        // it has to see them, or a queue that only ever held pre-carry-over
+        // timers would never be cranked at all. O(the remainder) bytes until
+        // it drains: the cost the old whole-record queue charged every read.
+        let remaining = self
+            .legacy_schedule_queue()
+            .await?
+            .and_then(|queue| queue.first().map(|entry| entry.due_at));
+        Ok([cached, remaining].into_iter().flatten().min())
     }
     pub(crate) async fn conversation_schedules(
         &self,
@@ -654,7 +721,10 @@ impl RunsModule {
     pub(crate) async fn crank_conversation_inputs(&mut self, ctx: &dyn Ctx) -> Result<(), Error> {
         self.carry_over_schedule_queue().await?;
         for _ in 0..32 {
-            let Some(due_at) = self.next_conversation_input_due().await? else {
+            // The carry-over above has already brought the earliest chunk
+            // into the new layout, so the cached head IS the earliest pending
+            // timer — the remainder is due no sooner than what it carried.
+            let Some(due_at) = self.cached_next_due().await? else {
                 return Ok(());
             };
             if due_at > ctx.env().consensus_time {

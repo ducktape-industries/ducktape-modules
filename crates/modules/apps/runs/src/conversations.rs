@@ -24,9 +24,21 @@ fn numbered(kind: &str, id: &str, n: u64) -> String {
 fn op_key(id: &str, op: &str) -> String {
     format!("{}/{}", key("operation", id), dispatch_id_for(op))
 }
-/// The pre-point-address whole-map queue. Read once on the first touch of the
-/// new layout, carried over, then deleted; the fallback goes in a later round.
+/// The pre-point-address whole-map queue. Carried over a chunk at a time by
+/// the writes that touch the new layout, and deleted once it is drained.
 const LEGACY_WAKE_QUEUE: &str = "conversation/wakes";
+/// How many pre-point-address entries one op carries over, for both the wake
+/// map and the timer queue.
+///
+/// Carrying one entry costs about one store read — the record it is about to
+/// claim, absent until this op stages it — and the wasm host refuses an op
+/// past `MAX_STORE_READS` (4096) distinct reads. A legacy record holds
+/// whatever fits under the 1 MiB store value bound, thousands of entries, so
+/// carrying the whole of one was an op the host could refuse EVERY time:
+/// timers and wakes wedged for good, with no write able to unwedge them. A
+/// chunk leaves the budget all but untouched and drains in
+/// `entries / CARRY_OVER_CHUNK` writes.
+pub(super) const CARRY_OVER_CHUNK: usize = 128;
 /// head/tail of the wake FIFO — two `Option<u64>`, fixed width forever.
 const WAKE_QUEUE: &str = "conversation/wake_queue";
 fn wake_key(item: u64) -> String {
@@ -608,27 +620,42 @@ impl RunsModule {
         self.receipts
             .stage(key("run", &turn.run_id), sdk::wire::encode(&id))
     }
-    /// The whole-map queue, if this module has not carried it over yet.
-    async fn legacy_wake_queue(&self, view: View) -> Result<BTreeMap<u64, String>, Error> {
+    /// What the whole-map queue still holds, absent once it has drained.
+    pub(super) async fn legacy_wake_queue(
+        &self,
+        view: View,
+    ) -> Result<Option<BTreeMap<u64, String>>, Error> {
         let Some(bytes) = self.receipts.read(LEGACY_WAKE_QUEUE, view).await? else {
-            return Ok(BTreeMap::new());
+            return Ok(None);
         };
-        sdk::wire::decode(&bytes).map_err(|sentence| Error::Module {
-            reason: refusal::CORRUPT.into(),
-            sentence,
-        })
+        sdk::wire::decode(&bytes)
+            .map(Some)
+            .map_err(|sentence| Error::Module {
+                reason: refusal::CORRUPT.into(),
+                sentence,
+            })
     }
-    /// Carry the whole-map queue into the linked layout, once. O(the old
-    /// record) — bounded by the store value cap that made it a problem — and
-    /// then the old key is gone and every wake path is point-addressed.
+    /// Carry [`CARRY_OVER_CHUNK`] of the whole-map queue into the linked
+    /// layout, oldest item first, and leave the rest under the old key for the
+    /// next write. The FIFO appends, so carrying the OLDEST items first is
+    /// what keeps the map's delivery order: what is left is always younger
+    /// than what is linked, and `conversation_deliveries` serves it last.
     async fn carry_over_wake_queue(&mut self) -> Result<(), Error> {
-        let legacy = self.legacy_wake_queue(View::Live).await?;
-        self.receipts.remove(LEGACY_WAKE_QUEUE.into());
+        let Some(mut legacy) = self.legacy_wake_queue(View::Live).await? else {
+            return Ok(());
+        };
+        let remainder = match legacy.keys().nth(CARRY_OVER_CHUNK).copied() {
+            Some(first_left) => legacy.split_off(&first_left),
+            None => BTreeMap::new(),
+        };
         let mut queue: WakeQueue = self
             .conversation_read(WAKE_QUEUE)
             .await?
             .unwrap_or_default();
-        // Ascending item order is the delivery order the map was read in.
+        // A conversation holds one open wake. While the old key stands a write
+        // can open one for a conversation still sitting in it, so this read is
+        // not just the map's own duplicates: the slot is checked per entry and
+        // the one already linked keeps it.
         for (item, id) in legacy {
             let already = self
                 .conversation_read::<u64>(&wake_of_key(&id))
@@ -639,8 +666,32 @@ impl RunsModule {
             }
             self.link_wake(&mut queue, item, &id).await?;
         }
+        match remainder.is_empty() {
+            true => self.receipts.remove(LEGACY_WAKE_QUEUE.into()),
+            false => self
+                .receipts
+                .stage(LEGACY_WAKE_QUEUE.into(), sdk::wire::encode(&remainder))?,
+        }
         self.receipts
             .stage(WAKE_QUEUE.into(), sdk::wire::encode(&queue))
+    }
+    /// Forget one item the old map still holds. An ack can land on an item
+    /// whose chunk has not been carried over yet, and dropping it from the
+    /// linked layout alone would leave the carry-over to re-queue it.
+    async fn drop_legacy_wake(&mut self, item: u64) -> Result<(), Error> {
+        let Some(mut legacy) = self.legacy_wake_queue(View::Live).await? else {
+            return Ok(());
+        };
+        if legacy.remove(&item).is_none() {
+            return Ok(());
+        }
+        match legacy.is_empty() {
+            true => self.receipts.remove(LEGACY_WAKE_QUEUE.into()),
+            false => self
+                .receipts
+                .stage(LEGACY_WAKE_QUEUE.into(), sdk::wire::encode(&legacy))?,
+        }
+        Ok(())
     }
     /// Append `item` to the FIFO tail and claim the conversation's open slot.
     async fn link_wake(&mut self, queue: &mut WakeQueue, item: u64, id: &str) -> Result<(), Error> {
@@ -706,7 +757,9 @@ impl RunsModule {
             .conversation_read::<WakeLink>(&wake_link_key(item))
             .await?
         else {
-            return Ok(());
+            // Either already detached, or acked before its chunk was carried
+            // over — in which case the old map is still holding it.
+            return self.drop_legacy_wake(item).await;
         };
         let mut queue: WakeQueue = self
             .conversation_read(WAKE_QUEUE)

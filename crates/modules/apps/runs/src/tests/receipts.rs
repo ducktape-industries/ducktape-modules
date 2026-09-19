@@ -6,6 +6,7 @@ pub(crate) struct Stored {
     records: BTreeMap<[u8; 32], Vec<u8>>,
     pub(crate) reads: usize,
     read_bytes: usize,
+    distinct: std::collections::BTreeSet<[u8; 32]>,
     writes: Vec<[u8; 32]>,
 }
 
@@ -22,6 +23,18 @@ impl Backing {
     pub(crate) fn read_bytes(&self) -> usize {
         self.0.borrow().read_bytes
     }
+    /// DISTINCT keys read since the last [`Backing::forget_distinct`] — the
+    /// quantity the wasm host budgets per dispatch (`MAX_STORE_READS`), since
+    /// it memoizes each resolved read and only a first miss replays the guest.
+    /// Reads served from the staged overlay never reach this store at all,
+    /// which is exactly how the host sees them too.
+    pub(crate) fn distinct_reads(&self) -> usize {
+        self.0.borrow().distinct.len()
+    }
+    /// Start counting a fresh op.
+    pub(crate) fn forget_distinct(&self) {
+        self.0.borrow_mut().distinct.clear();
+    }
 }
 
 #[async_trait::async_trait(?Send)]
@@ -29,6 +42,7 @@ impl sdk::MerkleStore for Backing {
     async fn get(&self, key: &[u8; 32]) -> Result<Option<Vec<u8>>, Error> {
         let mut stored = self.0.borrow_mut();
         stored.reads += 1;
+        stored.distinct.insert(*key);
         let value = stored.records.get(key).cloned();
         stored.read_bytes += value.as_ref().map_or(0, Vec::len);
         Ok(value)

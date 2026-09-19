@@ -1210,20 +1210,19 @@ impl RunsModule {
         limit: usize,
     ) -> Result<Vec<sdk::PendingItem>, Error> {
         let queue: WakeQueue = self.committed_record(WAKE_QUEUE).await?.unwrap_or_default();
-        // Until a write carries the queue over, the committed view still holds
-        // the whole map; serve it read-only so no wake is stranded in between.
-        let order: Vec<u64> = match queue.head {
-            Some(head) => Vec::from([head]),
-            None => self
-                .legacy_wake_queue(View::Committed)
-                .await?
-                .into_keys()
-                .take(limit)
-                .collect(),
-        };
-        let linked = queue.head.is_some();
-        let mut queued = order.into_iter();
-        let mut next = queued.next();
+        // Until the carry-over has drained the whole map, the committed view
+        // still holds whatever is left of it; serve it read-only after the
+        // linked queue so no wake is stranded in between. The carry-over takes
+        // the oldest items first, so what is left is the youngest — last is
+        // where the map itself would have served them.
+        let mut left_over = self
+            .legacy_wake_queue(View::Committed)
+            .await?
+            .unwrap_or_default()
+            .into_keys()
+            .take(limit);
+        let mut linked = queue.head;
+        let mut next = linked.or_else(|| left_over.next());
         let mut pending = Vec::new();
         while let Some(item) = next {
             if pending.len() == limit {
@@ -1252,13 +1251,15 @@ impl RunsModule {
                 },
             });
             next = match linked {
-                true => {
-                    self.committed_record::<WakeLink>(&wake_link_key(item))
+                Some(_) => {
+                    linked = self
+                        .committed_record::<WakeLink>(&wake_link_key(item))
                         .await?
                         .unwrap_or_default()
-                        .next
+                        .next;
+                    linked.or_else(|| left_over.next())
                 }
-                false => queued.next(),
+                None => left_over.next(),
             };
         }
         Ok(pending)
