@@ -129,17 +129,21 @@ fn item_key(account: AccountNumber, seq: u64) -> Vec<u8> {
     key
 }
 
-/// one account's queue metadata. `next_seq` is the NEXT seq to assign; it
-/// starts at 1 and never rewinds. `seqs` is the sorted live-seq list, bounded
-/// by construction to [`MAX_ITEMS_PER_ACCOUNT`] entries. `evicted` counts
-/// every item this account has ever lost to the overflow drop. `read_watermark`
-/// is the seq up to which every item is read: `MarkRead` only ever raises it.
-/// `last_change` is the canonical seq of the last change queued here — the
-/// duplicate gate, which never rewinds either.
+/// one account's queue metadata — five counters, a fixed-width record. seqs
+/// are dense and monotonic and BOTH removals (the overflow drop and `Clear`)
+/// only ever take the LOW end, so the live set is exactly the contiguous
+/// window `first_live..next_seq` and needs no stored list.
+///
+/// `next_seq` is the NEXT seq to assign; it starts at 1 and never rewinds.
+/// `first_live` is the LOWEST live seq (equal to `next_seq` when the queue is
+/// empty); it never rewinds either. `evicted` counts every item this account
+/// has ever lost to the overflow drop. `read_watermark` is the seq up to which
+/// every item is read: `MarkRead` only ever raises it. `last_change` is the
+/// canonical seq of the last change queued here — the duplicate gate.
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 struct AccountMeta {
     next_seq: u64,
-    seqs: Vec<u64>,
+    first_live: u64,
     evicted: u64,
     read_watermark: u64,
     last_change: u64,
@@ -149,7 +153,7 @@ impl Default for AccountMeta {
     fn default() -> Self {
         Self {
             next_seq: 1,
-            seqs: Vec::new(),
+            first_live: 1,
             evicted: 0,
             read_watermark: 0,
             last_change: 0,
@@ -180,7 +184,8 @@ enum Ingest {
         meta: AccountMeta,
         seq: u64,
         record: Vec<u8>,
-        evicted: Vec<u64>,
+        /// the one item this delivery pushed out of the window, if any.
+        evicted: Option<u64>,
     },
     Duplicate,
 }
@@ -218,20 +223,24 @@ fn decide_delivery(
         )
     })?;
     meta.last_change = change.seq;
-    meta.seqs.push(seq);
-    // overflow: drop the OLDEST (lowest seq) items. one insert per delivery
-    // means at most one drop, counted so the loss stays visible.
-    let overflow = meta.seqs.len().saturating_sub(MAX_ITEMS_PER_ACCOUNT);
-    let evicted: Vec<u64> = meta.seqs.drain(..overflow).collect();
-    meta.evicted = meta
-        .evicted
-        .checked_add(evicted.len() as u64)
-        .ok_or_else(|| {
+    // overflow: drop the OLDEST (lowest seq) item. one insert per delivery
+    // means at most one drop, counted so the loss stays visible. the live set
+    // is the window `first_live..next_seq`, so the drop is a counter bump —
+    // never a scan of the queue.
+    let live = meta.next_seq.saturating_sub(meta.first_live);
+    let mut evicted = None;
+    if live > MAX_ITEMS_PER_ACCOUNT as u64 {
+        // `first_live < next_seq` here (the window is over-full), so the bump
+        // cannot overflow.
+        evicted = Some(meta.first_live);
+        meta.first_live += 1;
+        meta.evicted = meta.evicted.checked_add(1).ok_or_else(|| {
             module_error(
                 refusal::EXHAUSTED,
                 format!("inbox eviction count exhausted for account {account}"),
             )
         })?;
+    }
     let record = borsh::to_vec(&Notification {
         seq,
         account,
@@ -302,8 +311,8 @@ impl Inbox {
         }
     }
 
-    /// stage a meta record — bounded by construction (at most
-    /// [`MAX_ITEMS_PER_ACCOUNT`] seqs), so no byte gate is needed here.
+    /// stage a meta record — five u64 counters, a fixed-width record, so no
+    /// byte gate is needed here.
     fn store_meta(&mut self, account: AccountNumber, meta: &AccountMeta) {
         self.staged.stage(
             meta_key(account),
@@ -315,8 +324,8 @@ impl Inbox {
         self.load(&meta_key(account)).await
     }
 
-    /// a live item the meta's seq list points at. a listed seq without its
-    /// record is a store bug — loud, never skipped.
+    /// a live item of the meta's `first_live..next_seq` window. a seq inside
+    /// the window without its record is a store bug — loud, never skipped.
     #[cfg(feature = "testkit")]
     async fn item(&self, account: AccountNumber, seq: u64) -> Result<Notification, Error> {
         self.load(&item_key(account, seq)).await?.ok_or_else(|| {
@@ -481,7 +490,7 @@ impl Inbox {
                 record,
                 evicted,
             } => {
-                for oldest in evicted {
+                if let Some(oldest) = evicted {
                     self.staged.delete(item_key(recipient, oldest));
                 }
                 self.staged.stage(item_key(recipient, seq), record);
@@ -529,14 +538,19 @@ impl Inbox {
         let Some(mut meta) = self.meta(account).await? else {
             return Ok(());
         };
-        let keep = meta.seqs.partition_point(|s| *s <= up_to_seq);
-        let nothing_to_clear = keep == 0;
+        // the cleared prefix is `first_live..new_first`, clamped to the live
+        // window so an `up_to_seq` past the end clears exactly the queue and
+        // an `up_to_seq` below `first_live` is a byte-identical no-op. the
+        // deletes are the work here; the bookkeeping is one counter.
+        let new_first = up_to_seq.saturating_add(1).min(meta.next_seq);
+        let nothing_to_clear = new_first <= meta.first_live;
         if nothing_to_clear {
             return Ok(());
         }
-        for seq in meta.seqs.drain(..keep) {
+        for seq in meta.first_live..new_first {
             self.staged.delete(item_key(account, seq));
         }
+        meta.first_live = new_first;
         // next_seq and last_change are left untouched: neither ever rewinds,
         // so a cleared inbox continues its numbering and never re-queues a
         // change it already held.
@@ -624,9 +638,9 @@ impl Inbox {
         let Some(meta) = self.meta(account).await? else {
             return Ok(None);
         };
-        let mut items = Vec::with_capacity(meta.seqs.len());
-        for seq in &meta.seqs {
-            items.push(self.item(account, *seq).await?);
+        let mut items = Vec::new();
+        for seq in meta.first_live..meta.next_seq {
+            items.push(self.item(account, seq).await?);
         }
         Ok(Some((meta.next_seq, items)))
     }
@@ -669,6 +683,9 @@ impl Inbox {
     pub async fn testkit_saturate_seq(&mut self, account: AccountNumber) -> Result<(), Error> {
         let mut meta = self.meta(account).await?.unwrap_or_default();
         meta.next_seq = u64::MAX;
+        // an empty queue at the end of the seq space: the window stays
+        // coherent (`first_live == next_seq`) rather than claiming 2^64 items.
+        meta.first_live = meta.next_seq;
         self.store_meta(account, &meta);
         Ok(())
     }
