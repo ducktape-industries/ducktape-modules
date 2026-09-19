@@ -57,7 +57,7 @@
 //! ## state model
 //!
 //! pure logic over a host-injected [`sdk::MerkleStore`]: one META record per
-//! account (`meta\0{account}` → [`AccountMeta`], borsh) and one record per
+//! account (`meta1\0{account}` → [`AccountMeta`], borsh) and one record per
 //! live notification (`item\0{account}{seq}` → [`Notification`]). the meta
 //! record lives as long as the account: `next_seq` and `last_change` never
 //! rewind, so a cleared inbox continues its numbering and never re-queues a
@@ -65,6 +65,17 @@
 //! surface lives on the index tier). writes are staged during a block and
 //! flushed in one batch at `commit_block`; the module root IS the store's
 //! merkle root, and sync belongs to the store (`QmdbStore::sync_from`).
+//!
+//! the meta record is VERSIONED in its key. the live network keeps module
+//! state across guest swaps, so accounts whose record predates the live-window
+//! rewrite still hold the old layout ([`LegacyAccountMeta`], under `meta\0`),
+//! and a decode failure on a stranger's inbox is unfixable from outside. so
+//! the new layout took a NEW key and the old one is read ONCE, on a miss:
+//! [`Inbox::meta`] converts it for a read, [`Inbox::meta_for_write`] also
+//! stages the converted record under `meta1\0` and retires the old key. that
+//! is state CARRY-OVER, not wire compatibility — bounded to one extra read per
+//! account until its first write lands. the fallback is removed in a later
+//! round, once no old record can remain.
 
 // the wire surface: this module's shared types, flattened at the crate root.
 pub use inbox_wire::*;
@@ -109,8 +120,19 @@ fn module_error(reason: &'static str, text: impl Into<String>) -> Error {
 }
 
 /// per-account META record key: prefix + 0 + the account number. every key
-/// literal here is fixed and none is another followed by a 0 byte.
+/// literal here is fixed and none is another followed by a 0 byte (`meta1`
+/// is `meta` followed by `1`, not by 0, so the two key spaces stay disjoint).
 fn meta_key(account: AccountNumber) -> Vec<u8> {
+    let mut key = Vec::with_capacity(5 + 1 + 8);
+    key.extend_from_slice(b"meta1");
+    key.push(0);
+    key.extend_from_slice(&account.to_le_bytes());
+    key
+}
+
+/// the PRE-VERSIONED meta key ([`LegacyAccountMeta`]). read only on a miss of
+/// [`meta_key`], and never written — see [`Inbox::meta_for_write`].
+fn legacy_meta_key(account: AccountNumber) -> Vec<u8> {
     let mut key = Vec::with_capacity(4 + 1 + 8);
     key.extend_from_slice(b"meta");
     key.push(0);
@@ -157,6 +179,36 @@ impl Default for AccountMeta {
             evicted: 0,
             read_watermark: 0,
             last_change: 0,
+        }
+    }
+}
+
+/// the meta record as it was stored BEFORE the live-window rewrite: the same
+/// four counters plus the explicit live-seq list `first_live` replaced. kept
+/// to DECODE accounts whose record predates the change and nothing else — it
+/// is never written, and it goes away with the fallback in a later round.
+#[derive(BorshDeserialize)]
+struct LegacyAccountMeta {
+    next_seq: u64,
+    seqs: Vec<u64>,
+    evicted: u64,
+    read_watermark: u64,
+    last_change: u64,
+}
+
+impl From<LegacyAccountMeta> for AccountMeta {
+    /// `seqs` was always CONTIGUOUS — pushes are sequential and both removals
+    /// (the overflow drop and `Clear`) drain the low end — so the list is
+    /// exactly the window its first entry opens. an empty list is an empty
+    /// queue, whose window is `next_seq..next_seq`. every counter carries
+    /// over verbatim.
+    fn from(old: LegacyAccountMeta) -> Self {
+        Self {
+            next_seq: old.next_seq,
+            first_live: old.seqs.first().copied().unwrap_or(old.next_seq),
+            evicted: old.evicted,
+            read_watermark: old.read_watermark,
+            last_change: old.last_change,
         }
     }
 }
@@ -320,8 +372,42 @@ impl Inbox {
         );
     }
 
+    /// one account's meta, READ-ONLY: the current record, or — for an account
+    /// whose record predates the live-window rewrite — the pre-versioned one
+    /// converted on the spot. converting here stages NOTHING, so a caller
+    /// that cannot write never silently upgrades a record behind a read.
     async fn meta(&self, account: AccountNumber) -> Result<Option<AccountMeta>, Error> {
-        self.load(&meta_key(account)).await
+        if let Some(meta) = self.load(&meta_key(account)).await? {
+            return Ok(Some(meta));
+        }
+        Ok(self
+            .load::<LegacyAccountMeta>(&legacy_meta_key(account))
+            .await?
+            .map(AccountMeta::from))
+    }
+
+    /// the meta a WRITE path works from: as [`Inbox::meta`], plus the one-time
+    /// CARRY-OVER — a record found under the pre-versioned key is converted,
+    /// staged under the current key and the old key retired, all in the very
+    /// operation that observed the miss. bounded: one extra read per account,
+    /// once, and only until that account's first write lands.
+    async fn meta_for_write(
+        &mut self,
+        account: AccountNumber,
+    ) -> Result<Option<AccountMeta>, Error> {
+        if let Some(meta) = self.load(&meta_key(account)).await? {
+            return Ok(Some(meta));
+        }
+        let Some(legacy) = self
+            .load::<LegacyAccountMeta>(&legacy_meta_key(account))
+            .await?
+        else {
+            return Ok(None);
+        };
+        let meta = AccountMeta::from(legacy);
+        self.store_meta(account, &meta);
+        self.staged.delete(legacy_meta_key(account));
+        Ok(Some(meta))
     }
 
     /// a live item of the meta's `first_live..next_seq` window. a seq inside
@@ -480,7 +566,7 @@ impl Inbox {
             ctx.set_assigned(encode_assigned(&InboxAssigned::Ignored));
             return Ok(());
         }
-        let meta = self.meta(recipient).await?.unwrap_or_default();
+        let meta = self.meta_for_write(recipient).await?.unwrap_or_default();
         let created_at = ctx.env().consensus_time;
         let stamp = match decide_delivery(&meta, recipient, &change, created_at)? {
             Ingest::Duplicate => InboxAssigned::Duplicate,
@@ -512,7 +598,7 @@ impl Inbox {
         up_to_seq: u64,
     ) -> Result<(), Error> {
         self.resolve_admin_account(ctx, account).await?;
-        let Some(mut meta) = self.meta(account).await? else {
+        let Some(mut meta) = self.meta_for_write(account).await? else {
             return Ok(());
         };
         // clamp to the last seq ever ASSIGNED, never the raw `up_to_seq`: an
@@ -535,7 +621,7 @@ impl Inbox {
         up_to_seq: u64,
     ) -> Result<(), Error> {
         self.resolve_admin_account(ctx, account).await?;
-        let Some(mut meta) = self.meta(account).await? else {
+        let Some(mut meta) = self.meta_for_write(account).await? else {
             return Ok(());
         };
         // the cleared prefix is `first_live..new_first`, clamped to the live
@@ -675,6 +761,20 @@ impl Inbox {
             .await?
             .map(|m| m.last_change)
             .unwrap_or(0))
+    }
+
+    /// where `account`'s meta record physically sits: `(under the current
+    /// key, under the pre-versioned one)`. the carry-over's only visible
+    /// effect — every view reads the same meta either way, so nothing else
+    /// can tell a converted record from one still read through the old key.
+    pub async fn meta_records_present(
+        &self,
+        account: AccountNumber,
+    ) -> Result<(bool, bool), Error> {
+        Ok((
+            self.staged.get(&meta_key(account)).await?.is_some(),
+            self.staged.get(&legacy_meta_key(account)).await?.is_some(),
+        ))
     }
 
     /// stage an account whose seq space is one delivery from exhaustion — the
