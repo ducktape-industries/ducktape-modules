@@ -49,6 +49,7 @@
 // the wire surface: this module's shared types, flattened at the crate root.
 use chat_wire::client::validate_channel_namespace;
 pub use chat_wire::*;
+pub mod contract_golden;
 use sdk::refusal;
 
 // the wasm-guest port: the dispatch shell that adapts this module to the
