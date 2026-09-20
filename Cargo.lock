@@ -3202,9 +3202,11 @@ dependencies = [
  "async-trait",
  "attribution",
  "attribution-wire",
+ "borsh",
  "commonware-cryptography",
  "commonware-runtime",
  "dispatch",
+ "duck-address",
  "ducktape-module-sdk",
  "files",
  "files-wire",
@@ -3214,7 +3216,6 @@ dependencies = [
  "identity-wire",
  "index-guest",
  "keyscheme",
- "pages-wire",
  "sdk",
  "sdk-testkit",
  "serde",
@@ -3224,18 +3225,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "wasm-host",
-]
-
-[[package]]
-name = "pages-wire"
-version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#b66f47f1f4b0c869786ce195e382f2e83fd15277"
-dependencies = [
- "duck-address",
- "index-guest",
- "sdk",
- "serde",
- "serde_json",
 ]
 
 [[package]]
