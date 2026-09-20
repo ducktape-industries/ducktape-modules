@@ -1159,10 +1159,12 @@ impl RunsModule {
             }
         }
         for (root, tree) in trees {
-            if tree.ids.len() > MAX_DELEGATION_EDGES_PER_RUN {
+            if tree.ids.len() > state::MAX_LEGACY_DELEGATION_EDGES_PER_RUN {
                 return Err(Error::Module {
                     reason: refusal::CAPACITY.into(),
-                    sentence: "legacy delegation tree exceeds its lifetime capacity".into(),
+                    sentence:
+                        "legacy delegation tree exceeds its historical compatibility capacity"
+                            .into(),
                 });
             }
             self.stage_delegation_tree(&root, &tree)?;

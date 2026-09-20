@@ -1,10 +1,9 @@
 use super::{
     AgentSession, BTreeMap, DelegationHeader, DelegationRequest, DelegationResult, DelegationState,
-    DelegationStatus, Digest, Error, MAX_ACTIONS_PER_SESSION, MAX_DELEGATION_EDGES_PER_RUN,
-    MAX_DELEGATION_INSTRUCTION_BYTES, MAX_DELEGATIONS_BYTES, MAX_DELEGATIONS_PER_RUN,
-    MAX_REPLY_BLOCKS_BYTES, MAX_REQUEST_ID_BYTES, PendingState, RUN_KEY_SEPARATOR, RunOrigin,
-    SESSION_KEY_LEN, Sha256, StateRoot, WireSink, delegated_run_id_for, delegation_id_for,
-    dispatch_id_for,
+    DelegationStatus, Digest, Error, MAX_ACTIONS_PER_SESSION, MAX_DELEGATION_INSTRUCTION_BYTES,
+    MAX_DELEGATIONS_BYTES, MAX_DELEGATIONS_PER_RUN, MAX_REPLY_BLOCKS_BYTES, MAX_REQUEST_ID_BYTES,
+    PendingState, RUN_KEY_SEPARATOR, RunOrigin, SESSION_KEY_LEN, Sha256, StateRoot, WireSink,
+    delegated_run_id_for, delegation_id_for, dispatch_id_for,
 };
 use sdk::codec;
 use sdk::refusal;
@@ -23,6 +22,18 @@ const POST_A_MAGIC: u64 = u64::MAX - 1;
 const POST_A_VERSION: u8 = 1;
 const POST_B_VERSION: u8 = 2;
 const POST_C_VERSION: u8 = 3;
+
+// The old embedded map encoded each entry as an 8-byte length, a 64-byte
+// delegation id, another 8-byte JSON length, and DelegationState JSON. Exact
+// Task B validation permits every status with omitted optional result and
+// completion fields, so use the simple 256-byte floor below rather than a
+// producer-specific terminal minimum. The all-status minimum is 263 bytes;
+// 256 is deliberately looser and leaves the read proof below 4096. This is a
+// size bound only, not a new historical validation rule.
+const LEGACY_JSON_MIN_BYTES: usize = 256;
+const LEGACY_ENTRY_MIN_BYTES: usize = 8 + 64 + 8 + LEGACY_JSON_MIN_BYTES;
+pub(super) const MAX_LEGACY_DELEGATION_EDGES_PER_RUN: usize =
+    sdk::MAX_STORE_VALUE_BYTES / LEGACY_ENTRY_MIN_BYTES;
 
 pub(super) const RUN_META_KEY: &str = "run/meta";
 
@@ -85,7 +96,7 @@ pub(super) fn delegation_reply_key(delegation_id: &str) -> String {
 }
 
 pub(super) fn encode_delegation_tree(root_run_id: &str, tree: &DelegationTree) -> Vec<u8> {
-    debug_assert!(tree.ids.len() <= MAX_DELEGATION_EDGES_PER_RUN);
+    debug_assert!(tree.ids.len() <= MAX_LEGACY_DELEGATION_EDGES_PER_RUN);
     serde_json::to_vec(&(root_run_id, tree)).expect("delegation tree serializes")
 }
 
@@ -99,7 +110,7 @@ pub(super) fn decode_delegation_tree(
         return Err("delegation tree key does not match its root".into());
     }
     if tree.ids.is_empty()
-        || tree.ids.len() > MAX_DELEGATION_EDGES_PER_RUN
+        || tree.ids.len() > MAX_LEGACY_DELEGATION_EDGES_PER_RUN
         || tree.pending > tree.ids.len() as u64
         || tree.pending > MAX_DELEGATIONS_PER_RUN as u64
         || !tree.ids.windows(2).all(|ids| ids[0] < ids[1])
@@ -780,6 +791,7 @@ fn validate_decoded_delegations(
 ) -> Result<(), String> {
     let mut roots = BTreeMap::<&str, usize>::new();
     let mut totals = BTreeMap::<&str, usize>::new();
+    let mut caller_totals = BTreeMap::<&str, usize>::new();
     let mut graphs = BTreeMap::<&str, Vec<(&str, &str)>>::new();
     for (id, state) in delegations {
         let view = &state.view;
@@ -840,10 +852,17 @@ fn validate_decoded_delegations(
             .entry(&view.root_run_id)
             .or_default()
             .push((&view.caller_run_id, &view.callee_run_id));
+        let caller_total = caller_totals.entry(&view.caller_run_id).or_default();
+        *caller_total += 1;
+        if *caller_total > MAX_ACTIONS_PER_SESSION as usize {
+            return Err("snapshot caller exceeds its historical action budget".into());
+        }
         let total = totals.entry(&view.root_run_id).or_default();
         *total += 1;
-        if *total > MAX_DELEGATION_EDGES_PER_RUN {
-            return Err("snapshot delegation tree exceeds its lifetime limit".into());
+        if *total > MAX_LEGACY_DELEGATION_EDGES_PER_RUN {
+            return Err(
+                "snapshot delegation tree exceeds its historical compatibility limit".into(),
+            );
         }
         if view.status == DelegationStatus::Pending {
             *roots.entry(&view.root_run_id).or_default() += 1;
