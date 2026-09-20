@@ -733,6 +733,15 @@ fn comment_thread_paging_counts_tombstones_and_preserves_metadata() {
         assert_eq!(max.next_after.as_deref(), Some("comment-255"));
         assert_eq!(max.thread.comment_ids, comment_ids);
 
+        let default = query_thread_page(&p, "thread", None, 0)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(default.comments, max.comments);
+        assert_eq!(default.next_after, max.next_after);
+        assert_eq!(default.has_more, max.has_more);
+        assert_eq!(default.thread.comment_ids, comment_ids);
+
         let next = query_thread_page(&p, "thread", max.next_after.as_deref(), 2)
             .await
             .unwrap()
