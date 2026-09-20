@@ -1,8 +1,11 @@
+use super::consumer_wire::attribution::{
+    self, Actor, AttributionMsg, AttributionUpdate, ObjectRef, Reason, Relation,
+};
+use super::consumer_wire::identity;
 use super::{
     Ctx, Error, Module, ModuleId, Msg, PageQuery, PageReply, Pages, Party, ResolverSyncTarget,
     StateRoot, StateSyncHandle, decode_msg, decode_query, encode_reply,
 };
-use attribution::{Actor, AttributionMsg, AttributionUpdate, ObjectRef, Reason, Relation};
 use sdk::Origin;
 use sdk::refusal;
 use std::collections::{BTreeMap, BTreeSet};
