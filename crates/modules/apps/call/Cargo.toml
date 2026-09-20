@@ -5,7 +5,7 @@ version.workspace = true
 
 # the call module's media guest: the OFF-consensus real-time media logic a
 # huddle rides — Opus framing + per-speaker jitter buffering + client-side
-# mixing (voice), VP8 frame fragmentation/reassembly (video) and the
+# mixing (voice), video frame fragmentation/reassembly and the
 # `/v1/call/ws` binary framing — as a pure library that builds for
 # wasm32-unknown-unknown with NO host imports. Ported from ducktape
 # `crates/services/media` at dfa41ce12409fe0e3403b7c71d04ae49aa04dd40; the
