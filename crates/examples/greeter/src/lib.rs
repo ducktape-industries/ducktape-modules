@@ -5,8 +5,10 @@
 //! it touches only the `directory` and `kv` wire surfaces (crate-root types +
 //! codecs) — never their module internals. that is the whole isolation thesis in one file.
 
+mod consumer_wire;
+
+use consumer_wire::kv::{KvMsg, encode as kv_encode};
 use directory::{DirMsg, DirQuery, DirReply, decode_reply, encode_msg, encode_query};
-use kv::{KvMsg, encode as kv_encode};
 use sdk::refusal;
 use sdk::{Ctx, Error, Module, ModuleId, Msg, StateRoot, StateSyncHandle};
 

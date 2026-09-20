@@ -26,11 +26,9 @@ ducktape-module-sdk = { workspace = true, optional = true }
 # and its tests. the engine shell rides the `index-guest` feature.
 index_guest = { workspace = true }
 sdk = { workspace = true }
-# the two collaborators' wire surfaces: the attribution plane whose canonical
-# changes this inbox receives (`AttributionEvent`, `ChangeRef`), and identity,
-# the resolver of recipients and admin keys (`AccountNumber`, `Control`).
-attribution = { workspace = true }
-identity = { workspace = true }
+# local contracts for the attribution delivery/change reference and identity
+# lookup seams; these types mirror only the shapes this consumer uses.
+keyscheme = { workspace = true }
 # the store-record codec: compact, canonical, deterministic. wire stays sdk::wire.
 borsh = { workspace = true }
 serde = { workspace = true }
