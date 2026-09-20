@@ -11,8 +11,8 @@ use super::facets::{
     WireSink, WireStatus, decode_run_result, encode_delivery_receipt, output_ref_of,
 };
 use super::{
-    AgentResponse, BTreeSet, Block, ChatMsg, ChatQuery, ChatReply, Ctx, DelegationResult,
-    DelegationState, DelegationStatus, DispatchMsg, EntryInfo, Error, FilesChange, FilesContent,
+    AgentResponse, BTreeSet, Block, ChatMsg, ChatQuery, ChatReply, Ctx, DelegationHeader,
+    DelegationResult, DelegationStatus, DispatchMsg, EntryInfo, Error, FilesChange, FilesContent,
     FilesMsg, FilesQuery, FilesReply, MAX_ACTIONS_BYTES, MAX_ACTIONS_PER_RUN,
     MAX_DELEGATION_INSTRUCTION_BYTES, MAX_DELEGATIONS_BYTES, MAX_REPLY_BLOCKS_BYTES,
     MAX_THREAD_REPLIES, Msg, Origin, PendingState, ReplyBlock, ReplyDestination, ResultEvent,
@@ -379,14 +379,14 @@ impl RunsModule {
         // the session beside it is the whole close-out. an agent's key stops
         // being an authority in the same block its run stops existing.
         self.remove_session(&run_id);
-        self.close_delegations_for_run(ctx, &run_id, &entry).await?;
+        let parent_header = self.close_delegations_for_run(ctx, &run_id, &entry).await?;
 
         match outcome {
             // THE single delivery path: decode the runner result and apply
             // whatever facets it carries. a plain (message-only) result carries
             // none — it delivers exactly the model prose + its parsed actions.
             Ok(bytes) if entry.delegation_id.is_some() => {
-                self.deliver_delegated_result(ctx, &run_id, &entry, &bytes)
+                self.deliver_delegated_result(ctx, &run_id, &entry, &bytes, parent_header.as_ref())
                     .await
             }
             Ok(bytes) => {
@@ -394,7 +394,8 @@ impl RunsModule {
                     .await
             }
             Err(reason) if entry.delegation_id.is_some() => {
-                self.fail_delegated_run(ctx, &run_id, &entry, reason).await
+                self.fail_delegated_run(ctx, &run_id, &entry, reason, parent_header.as_ref())
+                    .await
             }
             Err(reason) => self.fail_run(ctx, &run_id, &entry, reason).await,
         }
@@ -409,65 +410,119 @@ impl RunsModule {
         ctx: &mut dyn Ctx,
         run_id: &str,
         entry: &PendingState,
-    ) -> Result<(), Error> {
+    ) -> Result<Option<DelegationHeader>, Error> {
         let root_exit = entry.delegation_id.is_none();
-        let ids = self.delegation_ids();
-        let mut scoped = BTreeSet::new();
-        if root_exit {
-            for id in &ids {
-                if self
-                    .delegation(id)
-                    .is_some_and(|state| state.view.root_run_id == run_id)
-                {
-                    scoped.insert(id.clone());
-                }
-            }
+        let parent_header = if root_exit {
+            None
         } else {
-            let mut exiting = BTreeSet::from([run_id.to_string()]);
-            loop {
-                let mut changed = false;
-                for id in &ids {
-                    let Some(state) = self.delegation(id) else {
-                        continue;
-                    };
-                    if exiting.contains(&state.view.caller_run_id) && scoped.insert(id.clone()) {
-                        exiting.insert(state.view.callee_run_id.clone());
-                        changed = true;
+            Some(
+                self.delegation_header(entry.delegation_id.as_deref().unwrap())
+                    .await?
+                    .ok_or_else(|| {
+                        Self::corrupt_record("exiting run names no delegation header")
+                    })?,
+            )
+        };
+        let root_run_id = parent_header
+            .as_ref()
+            .map_or_else(|| run_id.to_string(), |header| header.root_run_id.clone());
+        let Some(tree) = self.delegation_tree(&root_run_id).await? else {
+            return Ok(parent_header);
+        };
+        let ids = tree.ids.clone();
+        // One header pass builds the caller→children adjacency in memory. The
+        // old implementation repeated this full scan once per depth; a close
+        // now reads each header once and visits each scoped edge once.
+        let mut headers = BTreeMap::new();
+        let mut children = BTreeMap::<String, Vec<String>>::new();
+        for id in &ids {
+            let header = match parent_header
+                .as_ref()
+                .filter(|header| header.delegation_id == *id)
+            {
+                Some(header) => header.clone(),
+                None => self
+                    .delegation_header(id)
+                    .await?
+                    .ok_or_else(|| Self::corrupt_record("delegation tree names no header"))?,
+            };
+            if header.root_run_id != root_run_id {
+                return Err(Self::corrupt_record(
+                    "delegation header is in the wrong tree",
+                ));
+            }
+            children
+                .entry(header.caller_run_id.clone())
+                .or_default()
+                .push(id.clone());
+            headers.insert(id.clone(), header);
+        }
+
+        let scoped = if root_exit {
+            ids.iter().cloned().collect::<BTreeSet<_>>()
+        } else {
+            let mut scoped = BTreeSet::new();
+            let mut exiting = vec![run_id.to_string()];
+            while let Some(caller) = exiting.pop() {
+                for id in children.remove(&caller).unwrap_or_default() {
+                    if scoped.insert(id.clone()) {
+                        exiting.push(
+                            headers
+                                .get(&id)
+                                .expect("delegation header indexed before close")
+                                .callee_run_id
+                                .clone(),
+                        );
                     }
                 }
-                if !changed {
-                    break;
-                }
             }
-        }
+            scoped
+        };
+        let mut pending = tree.pending;
         for id in scoped {
-            let Some(mut state) = self.delegation(&id).cloned() else {
-                continue;
-            };
-            if state.view.status == DelegationStatus::Pending {
+            let header = headers
+                .get(&id)
+                .cloned()
+                .ok_or_else(|| Self::corrupt_record("scoped delegation has no header"))?;
+            if header.status == DelegationStatus::Pending {
                 ctx.emit_msg(Msg {
                     target: self.dispatch.clone(),
                     payload: dispatch_encode_msg(&DispatchMsg::CancelDispatch {
-                        dispatch_id: dispatch_id_for(&state.view.callee_run_id),
+                        dispatch_id: dispatch_id_for(&header.callee_run_id),
                     }),
                 });
-                self.stage_pending_remove(&dispatch_id_for(&state.view.callee_run_id))
+                self.stage_pending_remove(&dispatch_id_for(&header.callee_run_id))
                     .await?;
-                self.remove_session(&state.view.callee_run_id);
-                state.view.status = DelegationStatus::Cancelled;
-                state.view.completed_at = Some(ctx.env().consensus_time);
-                state.view.result = Some(DelegationResult {
-                    reply_blocks: Vec::new(),
-                    output_ref: None,
-                    error: Some("caller run exited before the callee settled".into()),
-                });
-                self.pending_delegations.insert(id.clone(), Some(state));
+                self.remove_session(&header.callee_run_id);
+                pending = pending.checked_sub(1).ok_or_else(|| {
+                    Self::corrupt_record("delegation tree pending count underflow")
+                })?;
+                if !root_exit {
+                    let mut cancelled = header.clone();
+                    cancelled.status = DelegationStatus::Cancelled;
+                    cancelled.completed_at = Some(ctx.env().consensus_time);
+                    let result = DelegationResult {
+                        reply_blocks: Vec::new(),
+                        output_ref: None,
+                        error: Some("caller run exited before the callee settled".into()),
+                    };
+                    self.stage_delegation_result(&id, &result)?;
+                    self.stage_delegation_header(&cancelled)?;
+                }
             }
             if root_exit {
-                self.pending_delegations.insert(id, None);
+                self.remove_delegation_records(&id, &header.callee_run_id);
             }
         }
-        Ok(())
+        if root_exit {
+            self.receipts
+                .remove(crate::state::delegation_tree_key(&root_run_id));
+        } else {
+            let mut updated_tree = tree;
+            updated_tree.pending = pending;
+            self.stage_delegation_tree(&root_run_id, &updated_tree)?;
+        }
+        Ok(parent_header)
     }
 
     async fn deliver_delegated_result(
@@ -476,10 +531,15 @@ impl RunsModule {
         run_id: &str,
         entry: &PendingState,
         bytes: &[u8],
+        parent_header: Option<&DelegationHeader>,
     ) {
         let result = match decode_run_result(bytes) {
             Ok(result) => result,
-            Err(reason) => return self.fail_delegated_run(ctx, run_id, entry, reason).await,
+            Err(reason) => {
+                return self
+                    .fail_delegated_run(ctx, run_id, entry, reason, parent_header)
+                    .await;
+            }
         };
         let native_terminal = result.native_input_handled || result.native_cancelled;
         if native_terminal {
@@ -489,12 +549,19 @@ impl RunsModule {
                     run_id,
                     entry,
                     "delegation is not a native conversation turn".into(),
+                    parent_header,
                 )
                 .await;
         }
         if result.status == WireStatus::Failed {
             return self
-                .fail_delegated_run(ctx, run_id, entry, "run reported a failed status".into())
+                .fail_delegated_run(
+                    ctx,
+                    run_id,
+                    entry,
+                    "run reported a failed status".into(),
+                    parent_header,
+                )
                 .await;
         }
         let response = agent_response_from_text(&result.response_text);
@@ -506,7 +573,11 @@ impl RunsModule {
             .await
         {
             Ok(validated) => validated,
-            Err(reason) => return self.fail_delegated_run(ctx, run_id, entry, reason).await,
+            Err(reason) => {
+                return self
+                    .fail_delegated_run(ctx, run_id, entry, reason, parent_header)
+                    .await;
+            }
         };
         let reply_blocks = response.reply_blocks;
         let mut posts = ReplyPosts::default();
@@ -533,16 +604,23 @@ impl RunsModule {
         )
         .await;
         let output_ref = output_ref_of(&result.workspace_receipt);
-        self.complete_delegation(
-            entry,
-            DelegationStatus::Delivered,
-            DelegationResult {
-                reply_blocks,
-                output_ref: output_ref.clone(),
-                error: None,
-            },
-            ctx.env().consensus_time,
-        );
+        if let Err(error) = self
+            .complete_delegation(
+                entry,
+                DelegationStatus::Delivered,
+                DelegationResult {
+                    reply_blocks,
+                    output_ref: output_ref.clone(),
+                    error: None,
+                },
+                ctx.env().consensus_time,
+                parent_header,
+            )
+            .await
+        {
+            self.note(ctx, format!("delegation result close-out failed: {error}"));
+            return;
+        }
         let executing_node = self.executing_node(&*ctx, run_id).await;
         self.record_settled(
             RunRecord {
@@ -568,19 +646,27 @@ impl RunsModule {
         run_id: &str,
         entry: &PendingState,
         reason: String,
+        parent_header: Option<&DelegationHeader>,
     ) {
         let reason = failure_excerpt(&reason);
         self.note(ctx, format!("delegated run {run_id} failed: {reason}"));
-        self.complete_delegation(
-            entry,
-            DelegationStatus::Failed,
-            DelegationResult {
-                reply_blocks: Vec::new(),
-                output_ref: None,
-                error: Some(reason.clone()),
-            },
-            ctx.env().consensus_time,
-        );
+        if let Err(error) = self
+            .complete_delegation(
+                entry,
+                DelegationStatus::Failed,
+                DelegationResult {
+                    reply_blocks: Vec::new(),
+                    output_ref: None,
+                    error: Some(reason.clone()),
+                },
+                ctx.env().consensus_time,
+                parent_header,
+            )
+            .await
+        {
+            self.note(ctx, format!("delegation failure close-out failed: {error}"));
+            return;
+        }
         let executing_node = self.executing_node(&*ctx, run_id).await;
         self.record_settled(
             RunRecord {
@@ -600,28 +686,45 @@ impl RunsModule {
         );
     }
 
-    fn complete_delegation(
+    async fn complete_delegation(
         &mut self,
         entry: &PendingState,
         status: DelegationStatus,
         result: DelegationResult,
         completed_at: u64,
-    ) {
+        cached_header: Option<&DelegationHeader>,
+    ) -> Result<(), Error> {
         let Some(id) = entry.delegation_id.as_deref() else {
-            return;
+            return Ok(());
         };
-        let Some(mut state): Option<DelegationState> = self.delegation(id).cloned() else {
-            return;
+        let Some(mut header) = (match cached_header {
+            Some(header) => Some(header.clone()),
+            None => self.delegation_header(id).await?,
+        }) else {
+            return Ok(());
         };
         // A caller-exit cancellation won the race; the late dispatch result may
         // prune its PendingRun but cannot resurrect a result nobody can collect.
-        if state.view.status == DelegationStatus::Cancelled {
-            return;
+        if header.status == DelegationStatus::Cancelled {
+            return Ok(());
         }
-        state.view.status = status;
-        state.view.result = Some(result);
-        state.view.completed_at = Some(completed_at);
-        self.pending_delegations.insert(id.to_string(), Some(state));
+        if header.status != DelegationStatus::Pending {
+            return Ok(());
+        }
+        let mut tree = self
+            .delegation_tree(&header.root_run_id)
+            .await?
+            .ok_or_else(|| Self::corrupt_record("delegation result has no root tree"))?;
+        tree.pending = tree
+            .pending
+            .checked_sub(1)
+            .ok_or_else(|| Self::corrupt_record("delegation tree pending count underflow"))?;
+        self.stage_delegation_result(id, &result)?;
+        header.status = status;
+        header.completed_at = Some(completed_at);
+        self.stage_delegation_header(&header)?;
+        self.stage_delegation_tree(&header.root_run_id, &tree)?;
+        Ok(())
     }
 
     /// the failure triple (breadcrumb note + threaded failure reply + job
