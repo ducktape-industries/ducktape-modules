@@ -1,7 +1,7 @@
 use super::{
     Ctx, DispatchMsg, Error, JobsMsg, ModelStatus, Msg, Origin, RunsModule, RunsMsg,
     SiblingReadBudget, canonical_origin, decode_msg, dispatch_encode_msg, dispatch_id_for,
-    envelope, jobs_encode_msg, reject_run_separator, run_id_for, task_wire,
+    envelope, jobs_encode_msg, reject_run_separator, run_id_for,
 };
 use sdk::refusal;
 
@@ -148,15 +148,8 @@ impl RunsModule {
                 kind,
                 payload,
             } => {
-                self.report_job(
-                    ctx,
-                    run_id,
-                    attempt,
-                    operation_id,
-                    task_wire(kind)?,
-                    payload,
-                )
-                .await
+                self.report_job(ctx, run_id, attempt, operation_id, kind, payload)
+                    .await
             }
             RunsMsg::SettleJobCancellation {
                 run_id,

@@ -73,7 +73,7 @@ use files::{
     encode_query as files_encode_query,
 };
 use sdk::{Ctx, Error, Event, Module, ModuleId, Msg, Origin, StateRoot, StateSyncHandle};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tasks::{
     JobStatus, JobsEvent, JobsMsg, JobsQuery, JobsReply, decode_job_event as jobs_decode_event,
@@ -129,21 +129,6 @@ const RUN_HISTORY_CAP: usize = 100;
 /// it at the module boundary so reference injection degrades before the host
 /// rejects the whole dispatch.
 pub(crate) const MAX_SIBLING_QUERY_READS: usize = 64;
-
-fn task_wire<T, U>(value: T) -> Result<U, Error>
-where
-    T: Serialize,
-    U: DeserializeOwned,
-{
-    let value = serde_json::to_value(value).map_err(|error| Error::Module {
-        reason: refusal::CORRUPT.into(),
-        sentence: format!("tasks wire conversion failed: {error}"),
-    })?;
-    serde_json::from_value(value).map_err(|error| Error::Module {
-        reason: refusal::CORRUPT.into(),
-        sentence: format!("tasks wire conversion failed: {error}"),
-    })
-}
 
 #[derive(Ord, PartialOrd, Eq, PartialEq)]
 enum SiblingRead {
