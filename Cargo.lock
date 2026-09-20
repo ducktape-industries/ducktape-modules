@@ -35,7 +35,6 @@ dependencies = [
 name = "agent"
 version = "0.1.0"
 dependencies = [
- "agent-wire",
  "async-trait",
  "attribution-wire",
  "borsh",
@@ -394,21 +393,10 @@ name = "boards"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "boards-wire",
  "ducktape-module-sdk",
  "futures",
  "sdk",
  "sdk-testkit",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "boards-wire"
-version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#b66f47f1f4b0c869786ce195e382f2e83fd15277"
-dependencies = [
- "refusal-class",
  "serde",
  "serde_json",
 ]
@@ -4412,7 +4400,6 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "statesync",
- "tasks-wire",
  "tempfile",
  "tokio",
  "wasm-host",
