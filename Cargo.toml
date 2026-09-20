@@ -48,6 +48,9 @@ members = [
     # `acl`/`identity`/`gateway`/`saga`/`valset` workspace aliases below still
     # name the wire crates, so nothing links these by alias.
     "crates/modules/system/acl",
+    "crates/modules/system/attribution",
+    "crates/modules/system/capability",
+    "crates/modules/system/dispatch",
     "crates/modules/system/gateway",
     "crates/modules/system/identity",
     "crates/modules/system/saga",
