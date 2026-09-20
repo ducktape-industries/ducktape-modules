@@ -1,3 +1,5 @@
+use crate::contracts::dispatch;
+
 pub(super) enum ModelChange {
     /// a new agent landed; the hook registers its recipe.
     Registered {

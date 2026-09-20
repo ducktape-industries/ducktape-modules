@@ -667,7 +667,6 @@ impl RunsModule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use collaboration::Party as ChatParty;
 
     fn block(kind: &str, text: &str, lang: Option<&str>) -> ReplyBlock {
         ReplyBlock {
@@ -879,7 +878,7 @@ mod tests {
         };
         assert_eq!(
             item.summary.author,
-            ChatParty::Module("runs".into()),
+            serde_json::from_value(serde_json::json!({"module": "runs"})).unwrap(),
             "the PR is authored by the emitting MODULE, not a forged user"
         );
         let _ = std::fs::remove_dir_all(&base);

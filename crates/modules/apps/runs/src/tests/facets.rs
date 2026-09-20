@@ -1222,7 +1222,7 @@ fn saga_id_mirror_matches_the_dispatch_modules_derivation() {
                 recipe_id: "agent/bot".into(),
                 payload: b"in".to_vec(),
                 demands: Default::default(),
-                admission: dispatch::AdmissionPolicy::Queue,
+                admission: crate::contracts::dispatch::AdmissionPolicy::Queue,
             }),
         },
     ))

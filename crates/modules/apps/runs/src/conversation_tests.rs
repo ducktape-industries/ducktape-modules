@@ -292,7 +292,6 @@ fn conversation_administration_tracks_current_identity_controller() {
                         identity::IdentityQuery::OfKey { key } => {
                             (u64::from(key[0]), identity::Control::Keys)
                         }
-                        _ => return Err(Error::QueryUnsupported),
                     };
                 Ok(identity::encode_reply(&identity::IdentityReply::Account(
                     Some(identity::AccountView {

@@ -1131,3 +1131,816 @@ pub mod tasks {
         decode(bytes)
     }
 }
+
+pub mod attribution {
+    use super::*;
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(deny_unknown_fields)]
+    pub struct ObjectRef {
+        pub kind: String,
+        pub object: String,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+    #[serde(deny_unknown_fields)]
+    pub struct Source {
+        pub module: String,
+        pub kind: String,
+        pub object: String,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum Actor {
+        Account(u64),
+        Key(Vec<u8>),
+        Module(String),
+        System,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum Reason {
+        Mention,
+        Authorship,
+        Ownership,
+        Assignment,
+        Credit,
+        Result,
+        Report,
+        Defined(String),
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(deny_unknown_fields)]
+    pub struct Relation {
+        pub recipient: u64,
+        pub reason: Reason,
+        pub detail: Vec<u8>,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum AttributionMsg {
+        Attribute {
+            object: ObjectRef,
+            revision: u64,
+            actor: Actor,
+            relations: Vec<Relation>,
+            transfers: Vec<Transfer>,
+        },
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(deny_unknown_fields)]
+    pub struct Transfer {
+        pub reason: Reason,
+        pub from: u64,
+        pub to: u64,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum ChangeKind {
+        Added,
+        Withdrawn,
+        TransferredIn { from: u64 },
+        TransferredOut { to: u64 },
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(deny_unknown_fields)]
+    pub struct Change {
+        pub seq: u64,
+        pub source: Source,
+        pub revision: u64,
+        pub recipient: u64,
+        pub reason: Reason,
+        pub kind: ChangeKind,
+        pub detail: Vec<u8>,
+        pub actor: Actor,
+        pub cause: sdk::Cause,
+        pub height: u64,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(deny_unknown_fields)]
+    pub struct ChangeEntry {
+        pub at: u64,
+        pub change: Change,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum DeliveryState {
+        Queued,
+        Retired(sdk::DeliveryOutcome),
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(deny_unknown_fields)]
+    pub struct Delivery {
+        pub item: u64,
+        pub subscriber: sdk::ModuleId,
+        pub seq: u64,
+        pub root: sdk::Root,
+        pub state: DeliveryState,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum AttributionQuery {
+        Changes {
+            after: u64,
+            limit: u64,
+        },
+        ChangesOf {
+            source: Source,
+            after: u64,
+            limit: u64,
+        },
+        DeliveryOf {
+            subscriber: sdk::ModuleId,
+            seq: u64,
+        },
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum AttributionReply {
+        Changes(Vec<ChangeEntry>),
+        Delivery(Option<Delivery>),
+    }
+
+    pub fn encode_msg(value: &AttributionMsg) -> Vec<u8> {
+        super::encode(value)
+    }
+    pub fn encode_query(value: &AttributionQuery) -> Vec<u8> {
+        super::encode(value)
+    }
+    pub fn decode_reply(bytes: &[u8]) -> Result<AttributionReply, String> {
+        super::decode(bytes)
+    }
+}
+
+pub mod capability {
+    pub const MAX_TAG_LEN: usize = 64;
+
+    pub fn validate_tag(tag: &str) -> Result<(), String> {
+        if tag.is_empty() {
+            return Err("capability tag must be non-empty".into());
+        }
+        if tag.len() > MAX_TAG_LEN {
+            return Err(format!(
+                "capability tag exceeds {MAX_TAG_LEN} bytes: {} bytes",
+                tag.len()
+            ));
+        }
+        if !tag
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"._-".contains(&b))
+        {
+            return Err(format!(
+                "capability tag has invalid characters (want [a-z0-9._-]): {tag:?}"
+            ));
+        }
+        Ok(())
+    }
+}
+
+pub mod collaboration {
+    use super::*;
+
+    pub type Credential = u64;
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum Party {
+        Account(u64),
+        Key(Vec<u8>),
+        Module(String),
+        System,
+    }
+
+    pub fn party_handle(party: &Party) -> Option<String> {
+        match party {
+            Party::Account(account) => Some(format!("acct:{account}")),
+            Party::Key(key) => Some(format!("key:{}", hex(key))),
+            Party::Module(_) | Party::System => None,
+        }
+    }
+
+    pub fn parse_party_handle(handle: &str) -> Result<Party, String> {
+        match handle.split_once(':') {
+            Some(("acct", number)) => number
+                .parse::<u64>()
+                .map(Party::Account)
+                .map_err(|_| format!("{handle:?} is not acct:<number>")),
+            Some(("key", encoded)) => {
+                if !encoded.len().is_multiple_of(2) {
+                    return Err(format!("{handle:?} is not key:<hex>"));
+                }
+                let bytes = (0..encoded.len())
+                    .step_by(2)
+                    .map(|at| u8::from_str_radix(&encoded[at..at + 2], 16).ok())
+                    .collect::<Option<Vec<_>>>()
+                    .ok_or_else(|| format!("{handle:?} is not key:<hex>"))?;
+                if bytes.is_empty() {
+                    return Err("a key handle names no bytes".into());
+                }
+                Ok(Party::Key(bytes))
+            }
+            _ => Err(format!(
+                "{handle:?} is not a participant handle (acct:<number> or key:<hex>)"
+            )),
+        }
+    }
+
+    fn hex(bytes: &[u8]) -> String {
+        bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum MessageKind {
+        Notice,
+        Question,
+        TaskRequest,
+        TaskUpdate,
+        Result,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(deny_unknown_fields)]
+    pub struct TaskRef {
+        pub id: String,
+        pub expected_attempt: u64,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum Reference {
+        Commit { repo: String, commit: String },
+        Blob { hash: String },
+        Duck { url: String },
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum DeliveryState {
+        Stored,
+        Queued,
+        AdapterAccepted,
+        Held,
+        Refused,
+        Expired,
+        DeliveryUnknown,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(deny_unknown_fields)]
+    pub struct DeliverRequest {
+        pub channel_id: String,
+        pub message_id: String,
+        pub recipient: Party,
+        pub kind: MessageKind,
+        #[serde(default)]
+        pub task: Option<TaskRef>,
+        #[serde(default)]
+        pub references: Vec<Reference>,
+        pub expires_at: u64,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum CollaborationMsg {
+        Deliver(DeliverRequest),
+        Acknowledge {
+            channel_id: String,
+            seq: u64,
+            recipient: Party,
+            binding_credential: Credential,
+            state: DeliveryState,
+            #[serde(default)]
+            reason: Option<String>,
+        },
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(deny_unknown_fields)]
+    pub struct Request {
+        pub network: String,
+        pub op: CollaborationMsg,
+    }
+
+    impl Request {
+        pub fn new(network: impl Into<String>, op: CollaborationMsg) -> Self {
+            Self {
+                network: network.into(),
+                op,
+            }
+        }
+    }
+
+    pub fn encode_msg(value: &Request) -> Vec<u8> {
+        super::encode(value)
+    }
+    pub fn decode_msg(bytes: &[u8]) -> Result<Request, String> {
+        super::decode(bytes)
+    }
+}
+
+pub mod dispatch {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    pub const MAX_PAYLOAD_BYTES: usize = 10 * 1024 * 1024;
+    pub const MAX_ID_BYTES: usize = 128;
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum Routing {
+        Rendezvous,
+        Pinned(Vec<u8>),
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum OutputContract {
+        Text,
+        Json,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum DispatchStatus {
+        AwaitingResult { saga_id: String },
+        AwaitingDelivery,
+        Delivered { delivery: sdk::DeliveryOutcome },
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(deny_unknown_fields)]
+    pub struct DispatchView {
+        pub dispatch_id: String,
+        pub recipe_id: String,
+        pub receiver: String,
+        pub cause: sdk::Cause,
+        pub status: DispatchStatus,
+        pub outcome: Option<Result<Vec<u8>, String>>,
+        pub created_at: u64,
+        pub updated_at: u64,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Default, Clone, Copy, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum AdmissionPolicy {
+        #[default]
+        Queue,
+        FailFast,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(deny_unknown_fields)]
+    pub struct ResultEvent {
+        pub dispatch_id: String,
+        pub recipe_id: String,
+        pub outcome: Result<Vec<u8>, String>,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum Refusal {
+        NotAProgram,
+        Revoked,
+        Suspended,
+        StaleGeneration,
+        WrongExecutor,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum Attempt {
+        Applied,
+        Rejected,
+        Refused,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum CallOutcomeSummary {
+        Applied {
+            output_digest: [u8; 32],
+            assigned: Vec<u8>,
+        },
+        Rejected {
+            reason: String,
+        },
+        Refused(Refusal),
+        Unrepresentable {
+            attempted: Attempt,
+        },
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum CallStatus {
+        Queued,
+        Completed {
+            outcome: CallOutcomeSummary,
+        },
+        Delivered {
+            outcome: CallOutcomeSummary,
+            delivery: sdk::DeliveryOutcome,
+        },
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(deny_unknown_fields)]
+    pub struct CallView {
+        pub enqueued: u64,
+        pub id: sdk::CallId,
+        pub account: u64,
+        pub generation: u64,
+        pub target: sdk::ModuleId,
+        pub payload_digest: [u8; 32],
+        pub cause: sdk::Cause,
+        pub status: CallStatus,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum Delivery {
+        Result(ResultEvent),
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum DispatchMsg {
+        RegisterRecipe {
+            recipe_id: String,
+            description: String,
+            capability: String,
+            routing: Routing,
+            output_contract: OutputContract,
+            max_attempts: u32,
+            deadline_views: Option<u64>,
+            lease_views: Option<u64>,
+        },
+        UpdateRecipe {
+            recipe_id: String,
+            description: Option<String>,
+            capability: Option<String>,
+            routing: Option<Routing>,
+            output_contract: Option<OutputContract>,
+            max_attempts: Option<u32>,
+        },
+        RemoveRecipe {
+            recipe_id: String,
+        },
+        Dispatch {
+            dispatch_id: String,
+            recipe_id: String,
+            payload: Vec<u8>,
+            demands: BTreeMap<String, u64>,
+            #[serde(default, skip_serializing_if = "is_queue")]
+            admission: AdmissionPolicy,
+        },
+        CancelDispatch {
+            dispatch_id: String,
+        },
+        ReassignDispatch {
+            dispatch_id: String,
+            attempt: u32,
+        },
+    }
+
+    fn is_queue(value: &AdmissionPolicy) -> bool {
+        *value == AdmissionPolicy::Queue
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum DispatchQuery {
+        Dispatch {
+            receiver: String,
+            dispatch_id: String,
+        },
+        Call {
+            id: sdk::CallId,
+        },
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum DispatchReply {
+        Dispatch(Option<DispatchView>),
+        Call(Option<CallView>),
+    }
+
+    pub fn encode_msg(value: &DispatchMsg) -> Vec<u8> {
+        super::encode(value)
+    }
+    pub fn decode_msg(bytes: &[u8]) -> Result<DispatchMsg, String> {
+        super::decode(bytes)
+    }
+    pub fn encode_delivery(value: &Delivery) -> Vec<u8> {
+        super::encode(value)
+    }
+    pub fn decode_delivery(bytes: &[u8]) -> Result<Delivery, String> {
+        super::decode(bytes)
+    }
+    pub fn encode_query(value: &DispatchQuery) -> Vec<u8> {
+        super::encode(value)
+    }
+    pub fn decode_query(bytes: &[u8]) -> Result<DispatchQuery, String> {
+        super::decode(bytes)
+    }
+    pub fn encode_reply(value: &DispatchReply) -> Vec<u8> {
+        super::encode(value)
+    }
+    pub fn decode_reply(bytes: &[u8]) -> Result<DispatchReply, String> {
+        super::decode(bytes)
+    }
+}
+
+pub mod governance {
+    use super::*;
+
+    pub const MIN_ACTIVATION_LEAD: u64 = 4;
+    pub const MAX_ACTIVATION_LEAD: u64 = 1_000_000_000;
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum GovAction {
+        Signal {
+            text: String,
+        },
+        UpdateModule {
+            name: String,
+            module_id: String,
+            activation_lead: u64,
+            code_hash: Vec<u8>,
+        },
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum VoterKind {
+        ValidatorNode,
+        Account,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum VotingRule {
+        Threshold { required_yes: u64 },
+        ParticipatingMajority { quorum: u64 },
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum GovMsg {
+        Propose {
+            proposal_id: String,
+            action: GovAction,
+            voting_period: u64,
+        },
+        Vote {
+            proposal_id: String,
+            approve: bool,
+        },
+        Execute {
+            proposal_id: String,
+        },
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum ProposalStatus {
+        Open,
+        Passed,
+        Rejected,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(deny_unknown_fields)]
+    pub struct ProposalView {
+        pub proposal_id: String,
+        pub action: GovAction,
+        pub proposer: Vec<u8>,
+        pub created_at: u64,
+        pub deadline: u64,
+        pub status: ProposalStatus,
+        pub votes: Vec<(Vec<u8>, bool)>,
+        pub voter_kind: VoterKind,
+        pub electorate: Vec<(Vec<u8>, u64)>,
+        pub voting_rule: VotingRule,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(deny_unknown_fields)]
+    pub struct SharesView {
+        pub active: bool,
+        pub allocations: Vec<ShareAllocation>,
+        pub total: u64,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(deny_unknown_fields)]
+    pub struct ShareAllocation {
+        pub account_id: u64,
+        pub shares: u64,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum GovQuery {
+        Proposal { proposal_id: String },
+        Shares,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum GovReply {
+        Proposal(Option<ProposalView>),
+        Shares(SharesView),
+    }
+
+    pub fn encode_msg(value: &GovMsg) -> Vec<u8> {
+        super::encode(value)
+    }
+    pub fn decode_msg(bytes: &[u8]) -> Result<GovMsg, String> {
+        super::decode(bytes)
+    }
+    pub fn encode_query(value: &GovQuery) -> Vec<u8> {
+        super::encode(value)
+    }
+    pub fn decode_reply(bytes: &[u8]) -> Result<GovReply, String> {
+        super::decode(bytes)
+    }
+}
+
+pub mod identity {
+    use super::*;
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(deny_unknown_fields)]
+    pub struct KeyView {
+        pub scheme: serde_json::Value,
+        pub pubkey: Vec<u8>,
+        pub label: Option<String>,
+        pub added_at: u64,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum ProgramStanding {
+        Active,
+        Suspended,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum Control {
+        Keys,
+        Program {
+            controller: u64,
+            executor: sdk::ModuleId,
+            generation: u64,
+            standing: ProgramStanding,
+        },
+        Revoked {
+            controller: u64,
+        },
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(deny_unknown_fields)]
+    pub struct AccountView {
+        pub number: u64,
+        pub name: String,
+        pub control: Control,
+        pub keys: Vec<KeyView>,
+        pub avatar: Option<String>,
+        pub bio: Option<String>,
+        pub updated_at: u64,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum IdentityQuery {
+        Get { number: u64 },
+        OfKey { key: Vec<u8> },
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum IdentityReply {
+        Account(Option<AccountView>),
+    }
+
+    pub fn encode_query(value: &IdentityQuery) -> Vec<u8> {
+        super::encode(value)
+    }
+    pub fn decode_query(bytes: &[u8]) -> Result<IdentityQuery, String> {
+        super::decode(bytes)
+    }
+    pub fn encode_reply(value: &IdentityReply) -> Vec<u8> {
+        super::encode(value)
+    }
+    pub fn decode_reply(bytes: &[u8]) -> Result<IdentityReply, String> {
+        super::decode(bytes)
+    }
+}
+
+pub mod modules {
+    use super::*;
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(deny_unknown_fields)]
+    pub struct ScheduledSwap {
+        pub name: String,
+        pub activation_height: u64,
+        pub code_hash: Vec<u8>,
+        pub readiness: Vec<Vec<u8>>,
+        pub ready_at: Option<u64>,
+    }
+
+    impl ScheduledSwap {
+        pub fn stale_at(&self, height: u64) -> bool {
+            self.activation_height <= height && self.ready_at.is_none()
+        }
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(deny_unknown_fields)]
+    pub struct Activation {
+        pub height: u64,
+        pub code_hash: Vec<u8>,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(deny_unknown_fields)]
+    pub struct ModuleCode {
+        pub module_id: String,
+        pub kind: serde_json::Value,
+        pub active_code_hash: Vec<u8>,
+        pub pending: Option<ScheduledSwap>,
+        pub history: Vec<Activation>,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum ModulesQuery {
+        ModuleStatus,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum ModulesReply {
+        ModuleStatus { modules: Vec<ModuleCode> },
+    }
+
+    pub fn encode_query(value: &ModulesQuery) -> Vec<u8> {
+        super::encode(value)
+    }
+    pub fn decode_reply(bytes: &[u8]) -> Result<ModulesReply, String> {
+        super::decode(bytes)
+    }
+}
+
+pub mod valset {
+    use super::*;
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum ValsetQuery {
+        Validators,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum ValsetReply {
+        Validators(Vec<Vec<u8>>),
+    }
+
+    pub fn encode_query(value: &ValsetQuery) -> Vec<u8> {
+        super::encode(value)
+    }
+    pub fn decode_reply(bytes: &[u8]) -> Result<ValsetReply, String> {
+        super::decode(bytes)
+    }
+
+    pub async fn members(ctx: &dyn sdk::Ctx, valset: &str) -> Result<Vec<Vec<u8>>, sdk::Error> {
+        let reply = ctx
+            .query(valset, &encode_query(&ValsetQuery::Validators))
+            .await?;
+        match decode_reply(&reply)
+            .map_err(|e| sdk::Error::module(sdk::refusal::UNEXPECTED_REPLY, e))?
+        {
+            ValsetReply::Validators(members) => Ok(members),
+        }
+    }
+}

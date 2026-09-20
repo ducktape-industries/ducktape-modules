@@ -1,5 +1,9 @@
 mod support;
+use attribution_module as attribution;
+use capability_module as capability;
+use dispatch_module as dispatch;
 use futures::executor::block_on;
+use identity_module as identity;
 use sdk::Msg;
 use support::*;
 
@@ -49,7 +53,7 @@ fn mention_and_interactive_action_use_the_actual_program_account() {
             matches!(
                 request.status,
                 runs::ActionStatus::Completed {
-                    outcome: dispatch::CallOutcomeSummary::Applied { .. },
+                    outcome: runs::contracts::dispatch::CallOutcomeSummary::Applied { .. },
                     ..
                 }
             ),
@@ -217,7 +221,7 @@ fn an_actual_target_rejection_reaches_the_tool_receipt() {
         assert!(matches!(
             network.action(&request).await.status,
             runs::ActionStatus::Completed {
-                outcome: dispatch::CallOutcomeSummary::Rejected { .. },
+                outcome: runs::contracts::dispatch::CallOutcomeSummary::Rejected { .. },
                 ..
             }
         ));
@@ -306,7 +310,7 @@ fn an_applied_target_stays_applied_when_authority_is_revoked_before_completion()
         assert!(matches!(
             network.action(&request).await.status,
             runs::ActionStatus::Completed {
-                outcome: dispatch::CallOutcomeSummary::Applied { .. },
+                outcome: runs::contracts::dispatch::CallOutcomeSummary::Applied { .. },
                 ..
             }
         ));
@@ -585,7 +589,7 @@ fn a_same_node_retry_fences_queued_work_and_gives_new_actions_distinct_ids() {
             matches!(
                 fresh.status,
                 runs::ActionStatus::Completed {
-                    outcome: dispatch::CallOutcomeSummary::Applied { .. },
+                    outcome: runs::contracts::dispatch::CallOutcomeSummary::Applied { .. },
                     ..
                 }
             ),

@@ -1,3 +1,4 @@
+use crate::contracts::dispatch;
 use crate::{chat, pages};
 use std::collections::BTreeMap;
 

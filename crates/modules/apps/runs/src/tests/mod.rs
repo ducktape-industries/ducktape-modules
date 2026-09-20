@@ -7,7 +7,6 @@ use crate::{OP_CHAT_POST_MESSAGE, OP_TASKS_CREATE, OP_TASKS_UPDATE_STATUS};
 use crate::{decode_reply as runs_decode_reply, encode_msg, encode_query};
 use base64::Engine as _;
 use chat::{Channel, MessageHead, Party, decode_msg as chat_decode_msg};
-use collaboration::Party as CollaborationParty;
 use dispatch::{
     DispatchStatus, DispatchView, decode_msg as dispatch_decode_msg,
     encode_reply as dispatch_encode_reply,
@@ -479,7 +478,6 @@ impl Ctx for CaptureCtx {
                 let number = match query {
                     identity::IdentityQuery::Get { number } => number,
                     identity::IdentityQuery::OfKey { .. } => 1,
-                    _ => return Err(Error::QueryUnsupported),
                 };
                 Ok(identity::encode_reply(&identity::IdentityReply::Account(
                     Some(identity::AccountView {
@@ -1131,7 +1129,7 @@ fn forge_item_detail(
             kind,
             title: title.into(),
             state: forge::ItemState::Open,
-            author: CollaborationParty::Key(vec![1; 32]),
+            author: serde_json::from_value(serde_json::json!({"key": vec![1; 32]})).unwrap(),
             created_at: 0,
             updated_at: 0,
         },

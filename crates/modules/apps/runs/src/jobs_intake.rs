@@ -5,7 +5,7 @@ use super::{
     job_run_id_for, job_spec_hash, jobs_decode_event, jobs_decode_reply, jobs_encode_msg,
     jobs_encode_query, recipe_id_for,
 };
-use crate::tasks;
+use crate::{attribution, contracts::dispatch, tasks};
 use sdk::refusal;
 
 impl RunsModule {

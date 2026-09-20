@@ -345,7 +345,6 @@ impl RunsModule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use collaboration::Party as ChatParty;
 
     // ---- channel parsing ------------------------------------------------------
 
@@ -433,7 +432,7 @@ mod tests {
             kind,
             title: "t".into(),
             state,
-            author: ChatParty::Key(vec![1; 32]),
+            author: serde_json::from_value(serde_json::json!({"key": vec![1; 32]})).unwrap(),
             created_at: 1,
             updated_at: 2,
         };
@@ -460,7 +459,7 @@ mod tests {
                 kind,
                 title: "Fix the flaky gate".into(),
                 state: forge::ItemState::Open,
-                author: ChatParty::Key(vec![1; 32]),
+                author: serde_json::from_value(serde_json::json!({"key": vec![1; 32]})).unwrap(),
                 created_at: 1,
                 updated_at: 2,
             },

@@ -3,7 +3,7 @@ use super::{
     SiblingReadBudget, StateRoot, StateSyncHandle, committed_root, decode_query, dispatch_id_for,
     encode_reply,
 };
-use crate::tasks;
+use crate::{contracts::dispatch, tasks};
 use sdk::refusal;
 
 #[derive(Clone, Copy)]
@@ -85,13 +85,7 @@ impl RunsModule {
             dispatch::decode_delivery(payload).map_err(|sentence| Error::Module {
                 reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence,
-            })?
-        else {
-            return Err(Error::Module {
-                reason: refusal::UNEXPECTED_REPLY.into(),
-                sentence: "runs received a program call completion it did not request".into(),
-            });
-        };
+            })?;
         let entry = self.pending_entry(&event.dispatch_id).await?;
         let attempt = match entry.as_ref() {
             Some(entry) => self

@@ -24,7 +24,6 @@ use crate::pages::{Block, BlockKind, PageQuery, PageReply};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use duck_address::Address;
-use files_wire::FileAddress;
 use sdk::Ctx;
 
 use crate::forge_source::{ForgeItem, ForgeItemKind};
@@ -37,6 +36,25 @@ use crate::{
 /// never fail on size). separate from — and earlier than — the whole-payload
 /// dispatch cap, which stays the final guard.
 pub(crate) const MAX_CONTEXT_BYTES: usize = 16 * 1024;
+
+struct FileAddress {
+    path: Vec<String>,
+}
+
+impl TryFrom<&Address> for FileAddress {
+    type Error = ();
+
+    fn try_from(address: &Address) -> Result<Self, Self::Error> {
+        if address.module != "files" || address.path.is_empty() {
+            return Err(());
+        }
+        let path = format!("/{}", address.path.join("/"));
+        files::paths::canonical(&path).map_err(|_| ())?;
+        Ok(Self {
+            path: address.path.clone(),
+        })
+    }
+}
 
 /// the deterministic truncation marker; the capped render always ends with it.
 const TRUNCATION_MARKER: &str = "\n[item context truncated at 16 KiB]";

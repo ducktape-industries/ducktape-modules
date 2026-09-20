@@ -37,7 +37,10 @@ pub const MAX_PAGE_TITLE_LEN: usize = 512;
 
 pub mod contracts;
 use contracts::agent;
-pub use contracts::{chat, pages, tasks};
+pub use contracts::{
+    attribution, capability, chat, collaboration, dispatch, governance, identity, modules, pages,
+    tasks, valset,
+};
 
 mod model_config;
 

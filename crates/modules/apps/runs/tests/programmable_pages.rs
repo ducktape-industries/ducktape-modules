@@ -1,5 +1,7 @@
 mod support;
 
+use attribution_module as attribution;
+use dispatch_module as dispatch;
 use futures::executor::block_on;
 use runs::contracts::pages;
 use support::*;
@@ -173,7 +175,7 @@ fn page_and_block_mentions_start_model_work_and_reply_under_program_authority() 
                 matches!(
                     receipt.status,
                     runs::ActionStatus::Completed {
-                        outcome: dispatch::CallOutcomeSummary::Applied { .. },
+                        outcome: runs::contracts::dispatch::CallOutcomeSummary::Applied { .. },
                         ..
                     }
                 ),
