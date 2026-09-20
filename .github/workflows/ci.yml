@@ -1,5 +1,6 @@
 # Linux only by owner order; macOS runners are deliberately excluded.
-# wasm-modules-check and ops/wasm-repro-check.sh rebuild wasm guests; defer them to nightly.
+# make wasm-modules, wasm-modules-check, ops/wasm-repro-check.sh, and the
+# extension-probe build/check rebuild guests or views; defer them to nightly.
 name: ci
 
 on:
