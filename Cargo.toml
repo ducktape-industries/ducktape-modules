@@ -45,11 +45,13 @@ members = [
 
     # system modules — implementations that build as independent guests out of
     # this workspace. each links only sdk + the leaf libraries; the legacy
-    # `acl`/`identity`/`gateway` workspace aliases below still name the wire
-    # crates, so nothing links these by alias.
+    # `acl`/`identity`/`gateway`/`saga`/`valset` workspace aliases below still
+    # name the wire crates, so nothing links these by alias.
     "crates/modules/system/acl",
     "crates/modules/system/gateway",
     "crates/modules/system/identity",
+    "crates/modules/system/saga",
+    "crates/modules/system/valset",
 
     # system modules — wire surfaces
     "crates/modules/system/acl/wire",

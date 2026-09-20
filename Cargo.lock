@@ -2543,6 +2543,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
+name = "saga"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "borsh",
+ "ducktape-module-sdk",
+ "futures",
+ "index-guest",
+ "sdk",
+ "sdk-testkit",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+]
+
+[[package]]
 name = "saga-wire"
 version = "0.1.0"
 dependencies = [
@@ -3126,6 +3142,22 @@ checksum = "2ef6dac1e96601b4fb3acccccff2139741fcb757cb9a36089bf5be91cfb285ce"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "valset"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "borsh",
+ "commonware-codec",
+ "commonware-cryptography",
+ "ducktape-module-sdk",
+ "futures",
+ "sdk",
+ "sdk-testkit",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
