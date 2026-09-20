@@ -38,6 +38,7 @@ members = [
     "crates/git-primitives",
     "crates/run-envelope",
     "crates/view-wire",
+    "crates/view-guest",
 
     # the guest componentizer
     "bin/guest-builder",
@@ -189,6 +190,12 @@ run-envelope = { path = "crates/run-envelope" }
 # the host<->wasm-view wire. `manifest` is host-only (it pulls wasmparser to
 # read a built component's custom section); the guests take it bare.
 view-wire = { path = "crates/view-wire" }
+# the runtime a view is written against (`App`, `Driver`, `export_app!`, the
+# host protocol). Views link it under the name `ducktape-view-guest`; the alias
+# keeps their call sites unchanged. Not a module crate: it pins wit-bindgen
+# 0.61 on its own, apart from the module adapter's 0.57.
+view-guest = { path = "crates/view-guest" }
+ducktape-view-guest = { package = "view-guest", path = "crates/view-guest" }
 
 # ---- internal: module wire surfaces
 acl = { package = "acl-wire", path = "crates/modules/system/acl/wire" }

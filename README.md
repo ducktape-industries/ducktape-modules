@@ -28,6 +28,11 @@ depends on it.
   blobstore, node-work}`** and the leaf libraries
   (`duckfs/{core,disk}`, `duckdns`, `git-primitives`, `run-envelope`,
   `view-wire`, `design`) the surfaces above are made of.
+- **`crates/view-guest`** — the runtime a wasm view is written against
+  (`App`, `Driver`, `export_app!`, the host protocol, editor primitives, test
+  helpers). A view links it as `ducktape-view-guest` (`package =
+  "view-guest"`). It pins `wit-bindgen` for the view WIT world on its own,
+  apart from `crates/module-sdk`'s pin for the module world.
 - **`bin/guest-builder`** — the componentizer that turns a module crate into a
   `component.wasm`, with `wit-component` pinned exactly: the same cdylib at
   another version is another hash.
