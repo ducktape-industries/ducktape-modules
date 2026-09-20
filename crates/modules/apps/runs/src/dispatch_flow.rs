@@ -23,7 +23,9 @@ impl RunsModule {
         agent_id: &str,
     ) -> Result<Option<ModelRecord>, String> {
         let _ = ctx;
-        Ok(self.model(agent_id).cloned())
+        self.model(agent_id)
+            .await
+            .map_err(|error| error.to_string())
     }
 
     /// The live registry record of the agent a run executes as.

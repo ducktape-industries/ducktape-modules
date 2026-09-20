@@ -37,7 +37,7 @@ fn pages_triggered_run_replies_in_the_same_comment_thread() {
         .with_registry(&registry)
         .with_page("p1", page_blocks("p1", "Spec"))
         .with_page_thread(page_trigger_thread());
-    m.models = registry.clone();
+    m.seed_test_models(&registry).unwrap();
     let run_id = page_run_id_for("thread-1", 1, "bot");
     let budget = SiblingReadBudget::default();
     let model = registry.get("bot").unwrap();
@@ -98,7 +98,7 @@ fn inline_page_composer_keeps_the_exact_source_when_page_context_is_bounded() {
     let registry = registry(&["bot"]);
     let model = registry.get("bot").unwrap();
     let mut module = module().with_pages_module("pages");
-    module.models = registry.clone();
+    module.seed_test_models(&registry).unwrap();
     let mut blocks = page_with_block_count(1024, &"x".repeat(4096));
     let target = blocks.last_mut().unwrap();
     target.text = "Review this exact final block".into();
@@ -374,7 +374,7 @@ fn a_pathological_channel_still_yields_a_safe_hashed_comment_id() {
     let channel = "c".repeat(400);
     let registry = registry(&["bot"]);
     let mut m = module().with_pages_module("pages");
-    m.models = registry.clone();
+    m.seed_test_models(&registry).unwrap();
     commit(&mut m);
     let mut ctx = CaptureCtx::new()
         .at(2)

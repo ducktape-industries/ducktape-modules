@@ -265,7 +265,7 @@ mod state;
 
 use response::canonical_origin;
 use state::{
-    committed_root, contains_run_separator, decode_committed, encode_committed,
+    committed_root, contains_run_separator, decode_committed, encode_committed, legacy_root,
     reject_run_separator,
 };
 
@@ -416,9 +416,10 @@ pub struct RunsModule {
     chain_id: String,
     /// Genesis-bound clock scale; duration scheduling refuses absent wiring.
     time_unit: Option<sdk::genesis_config::TimeUnit>,
-    /// committed state — what `root()` and the root-hash commit to.
-    models: BTreeMap<String, ModelRecord>,
-    pending_models: BTreeMap<String, Option<ModelRecord>>,
+    /// v0 model collection retained only between a legacy install and the
+    /// first committed migration. Post-A state lives in `receipts` records.
+    legacy_models: Option<BTreeMap<String, ModelRecord>>,
+    legacy_migration_staged: bool,
     receipts: receipts::Receipts,
     next_action_item: u64,
     staged_next_action_item: Option<u64>,
@@ -523,8 +524,8 @@ impl RunsModule {
             collaboration: None,
             chain_id: String::new(),
             time_unit: None,
-            models: BTreeMap::new(),
-            pending_models: BTreeMap::new(),
+            legacy_models: None,
+            legacy_migration_staged: false,
             receipts: receipts::Receipts::default(),
             next_action_item: 0,
             staged_next_action_item: None,
@@ -791,14 +792,24 @@ impl RunsModule {
     }
 
     pub fn snapshot(&self) -> Vec<u8> {
-        encode_committed(
-            &self.receipts.snapshot(),
-            self.next_action_item,
-            &self.pending,
-            &self.sessions,
-            &self.delegations,
-            &self.models,
-        )
+        let records = self.receipts.snapshot();
+        match &self.legacy_models {
+            Some(models) => state::encode_legacy_committed(
+                &records,
+                self.next_action_item,
+                &self.pending,
+                &self.sessions,
+                &self.delegations,
+                models,
+            ),
+            None => encode_committed(
+                &records,
+                self.next_action_item,
+                &self.pending,
+                &self.sessions,
+                &self.delegations,
+            ),
+        }
     }
 
     /// adopt a peer's snapshot as own committed state — but only after the
@@ -809,25 +820,34 @@ impl RunsModule {
     /// dropped — a snapshot describes a block boundary, and nothing
     /// half-applied may shadow it.
     pub fn install(&mut self, bytes: &[u8], expected: StateRoot) -> Result<(), Error> {
-        let (action_requests, next_action_item, pending, sessions, delegations, models) =
+        let (action_requests, next_action_item, pending, sessions, delegations, legacy_models) =
             decode_committed(bytes).map_err(|sentence| Error::Module {
                 reason: refusal::CORRUPT.into(),
                 sentence,
             })?;
         sdk::verify_snapshot_root(
-            committed_root(
-                &action_requests,
-                next_action_item,
-                &pending,
-                &sessions,
-                &delegations,
-                &models,
-            ),
+            match &legacy_models {
+                Some(models) => legacy_root(
+                    &action_requests,
+                    next_action_item,
+                    &pending,
+                    &sessions,
+                    &delegations,
+                    models,
+                ),
+                None => committed_root(
+                    &action_requests,
+                    next_action_item,
+                    &pending,
+                    &sessions,
+                    &delegations,
+                ),
+            },
             expected,
         )?;
         self.receipts.install(action_requests)?;
-        self.models = models;
-        self.pending_models.clear();
+        self.legacy_models = legacy_models;
+        self.legacy_migration_staged = false;
         self.next_action_item = next_action_item;
         self.staged_next_action_item = None;
         self.pending = pending;

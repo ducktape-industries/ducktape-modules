@@ -835,7 +835,7 @@ fn a_forge_engagement_with_the_cap_stages_the_dispatch() {
     // channel, mention-free All engagement, forge workspace composed.
     let registry = bot_registry();
     let mut m = forge_module();
-    m.models = registry.clone();
+    m.seed_test_models(&registry).unwrap();
     commit(&mut m);
 
     let mut ctx = CaptureCtx::new()

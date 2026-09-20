@@ -191,14 +191,24 @@ impl Module for RunsModule {
     /// mid-run ACL and every validator must hold the same one. the preimage IS
     /// the snapshot encoding.
     fn root(&self) -> StateRoot {
-        committed_root(
-            &self.receipts.snapshot(),
-            self.next_action_item,
-            &self.pending,
-            &self.sessions,
-            &self.delegations,
-            &self.models,
-        )
+        let records = self.receipts.snapshot();
+        match &self.legacy_models {
+            Some(models) => super::state::legacy_root(
+                &records,
+                self.next_action_item,
+                &self.pending,
+                &self.sessions,
+                &self.delegations,
+                models,
+            ),
+            None => committed_root(
+                &records,
+                self.next_action_item,
+                &self.pending,
+                &self.sessions,
+                &self.delegations,
+            ),
+        }
     }
 
     fn state_sync_handle(&self) -> Result<StateSyncHandle, Error> {
@@ -206,6 +216,7 @@ impl Module for RunsModule {
     }
 
     async fn execute(&mut self, ctx: &mut dyn Ctx, msg: &Msg) -> Result<(), Error> {
+        self.stage_legacy_models()?;
         // Receipt facts and journal facts live only inside one execute;
         // nothing carries across ops.
         self.prepared_receipts.borrow_mut().clear();
@@ -280,9 +291,11 @@ impl Module for RunsModule {
             ))),
             RunsQuery::Model { query } => {
                 let reply = match query {
-                    crate::ModelQuery::Agents => crate::ModelReply::Agents(self.model_records()),
+                    crate::ModelQuery::Agents => {
+                        crate::ModelReply::Agents(self.model_records().await?)
+                    }
                     crate::ModelQuery::Agent { agent_id } => {
-                        crate::ModelReply::Agent(self.model(&agent_id).cloned())
+                        crate::ModelReply::Agent(self.model(&agent_id).await?)
                     }
                 };
                 Ok(encode_reply(&RunsReply::Model(reply)))
@@ -342,6 +355,7 @@ impl Module for RunsModule {
     }
 
     async fn acknowledge(&mut self, ctx: &mut dyn Ctx, ack: &sdk::Ack) -> Result<(), Error> {
+        self.stage_legacy_models()?;
         self.journal.clear();
         if !self.acknowledge_conversation(ctx, ack).await? {
             self.acknowledge_action(ctx, ack).await?;
@@ -374,17 +388,11 @@ impl Module for RunsModule {
     }
 
     async fn commit_block(&mut self) -> Result<(), Error> {
-        for (id, record) in std::mem::take(&mut self.pending_models) {
-            match record {
-                Some(record) => {
-                    self.models.insert(id, record);
-                }
-                None => {
-                    self.models.remove(&id);
-                }
-            }
-        }
         self.receipts.commit().await?;
+        if self.legacy_migration_staged {
+            self.legacy_models = None;
+            self.legacy_migration_staged = false;
+        }
         if let Some(next) = self.staged_next_action_item.take() {
             self.next_action_item = next;
         }
@@ -451,8 +459,8 @@ impl Module for RunsModule {
     }
 
     async fn abort_block(&mut self) -> Result<(), Error> {
-        self.pending_models.clear();
         self.receipts.abort();
+        self.legacy_migration_staged = false;
         self.staged_next_action_item = None;
         self.pending_overlay.clear();
         self.pending_sessions.clear();

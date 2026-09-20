@@ -12,8 +12,11 @@ use sdk::refusal;
 // prefixes for byte strings, single-byte discriminants for enums, a 0/1 tag
 // byte for options, u64-le integers (via the shared `sdk::codec` writers). this
 // is the exact preimage [`Module::root`] hashes, so a snapshot and the root that
-// must authenticate it cannot drift. no version byte: this decoder accepts only
-// the current encoding.
+// must authenticate it cannot drift. The post-A shape starts with an impossible
+// old length followed by a version; v0 starts directly with the receipts field.
+
+const POST_A_MAGIC: u64 = u64::MAX - 1;
+const POST_A_VERSION: u8 = 1;
 
 fn put_opt_string(out: &mut Vec<u8>, opt: &Option<String>) {
     codec::push_opt_str(out, opt.as_deref());
@@ -53,13 +56,13 @@ fn put_origin(out: &mut Vec<u8>, origin: &RunOrigin) {
     }
 }
 
-pub(super) fn encode_committed(
+fn encode_body(
     action_requests: &crate::receipts::Records,
     next_action_item: u64,
     pending: &BTreeMap<String, PendingState>,
     sessions: &BTreeMap<String, AgentSession>,
     delegations: &BTreeMap<String, DelegationState>,
-    models: &BTreeMap<String, crate::ModelRecord>,
+    models: Option<&BTreeMap<String, crate::ModelRecord>>,
 ) -> Vec<u8> {
     let mut out = Vec::new();
 
@@ -110,8 +113,50 @@ pub(super) fn encode_committed(
         );
     }
 
-    codec::push_bytes(&mut out, &sdk::wire::encode(models));
+    if let Some(models) = models {
+        codec::push_bytes(&mut out, &sdk::wire::encode(models));
+    }
     out
+}
+
+pub(super) fn encode_committed(
+    action_requests: &crate::receipts::Records,
+    next_action_item: u64,
+    pending: &BTreeMap<String, PendingState>,
+    sessions: &BTreeMap<String, AgentSession>,
+    delegations: &BTreeMap<String, DelegationState>,
+) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(&POST_A_MAGIC.to_le_bytes());
+    out.push(POST_A_VERSION);
+    out.extend_from_slice(&encode_body(
+        action_requests,
+        next_action_item,
+        pending,
+        sessions,
+        delegations,
+        None,
+    ));
+    out
+}
+
+/// The exact pre-Task-A six-field encoding, retained for old-state carry-over.
+pub(super) fn encode_legacy_committed(
+    action_requests: &crate::receipts::Records,
+    next_action_item: u64,
+    pending: &BTreeMap<String, PendingState>,
+    sessions: &BTreeMap<String, AgentSession>,
+    delegations: &BTreeMap<String, DelegationState>,
+    models: &BTreeMap<String, crate::ModelRecord>,
+) -> Vec<u8> {
+    encode_body(
+        action_requests,
+        next_action_item,
+        pending,
+        sessions,
+        delegations,
+        Some(models),
+    )
 }
 
 /// the state-based commitment over the committed maps — shared by `root()`
@@ -123,10 +168,29 @@ pub(super) fn committed_root(
     pending: &BTreeMap<String, PendingState>,
     sessions: &BTreeMap<String, AgentSession>,
     delegations: &BTreeMap<String, DelegationState>,
-    models: &BTreeMap<String, crate::ModelRecord>,
 ) -> StateRoot {
     StateRoot(
         Sha256::digest(encode_committed(
+            action_requests,
+            next_action_item,
+            pending,
+            sessions,
+            delegations,
+        ))
+        .into(),
+    )
+}
+
+pub(super) fn legacy_root(
+    action_requests: &crate::receipts::Records,
+    next_action_item: u64,
+    pending: &BTreeMap<String, PendingState>,
+    sessions: &BTreeMap<String, AgentSession>,
+    delegations: &BTreeMap<String, DelegationState>,
+    models: &BTreeMap<String, crate::ModelRecord>,
+) -> StateRoot {
+    StateRoot(
+        Sha256::digest(encode_legacy_committed(
             action_requests,
             next_action_item,
             pending,
@@ -352,7 +416,7 @@ type Committed = (
     BTreeMap<String, PendingState>,
     BTreeMap<String, AgentSession>,
     BTreeMap<String, DelegationState>,
-    BTreeMap<String, crate::ModelRecord>,
+    Option<BTreeMap<String, crate::ModelRecord>>,
 );
 
 pub(super) fn decode_committed(bytes: &[u8]) -> Result<Committed, String> {
@@ -364,7 +428,19 @@ pub(super) fn decode_committed(bytes: &[u8]) -> Result<Committed, String> {
     const MIN_SESSION_BYTES: u64 = 8 + 8 + 8 + 8 + 8 + 8 + 8;
     const MIN_DELEGATION_BYTES: u64 = 8 + 8;
 
+    // Old state is bounded by the store value ceiling, so its first
+    // length-prefixed field cannot equal POST_A_MAGIC. Shape selection is
+    // therefore unambiguous before any untrusted allocation.
+    let post_a = bytes.len() >= 8
+        && u64::from_le_bytes(bytes[..8].try_into().expect("length checked")) == POST_A_MAGIC;
     let mut cur = codec::Cursor::new(bytes);
+    if post_a {
+        let _ = take_u64(&mut cur)?;
+        let version = take_byte(&mut cur, "post-A state version")?;
+        if version != POST_A_VERSION {
+            return Err(format!("unsupported post-A state version {version}"));
+        }
+    }
     let action_requests = sdk::wire::decode(&take_lp_bytes(&mut cur)?)?;
     let next_action_item = take_u64(&mut cur)?;
 
@@ -443,13 +519,37 @@ pub(super) fn decode_committed(bytes: &[u8]) -> Result<Committed, String> {
     validate_decoded_delegations(&pending, &delegations)?;
     super::conversations::validate_records(&action_requests)?;
 
-    let models: BTreeMap<String, crate::ModelRecord> =
-        sdk::wire::decode(&take_lp_bytes(&mut cur)?)?;
-    for (id, record) in &models {
-        if id != &record.agent_id || record.account == 0 {
-            return Err("invalid model record".into());
+    let models = if post_a {
+        None
+    } else {
+        let models: BTreeMap<String, crate::ModelRecord> =
+            sdk::wire::decode(&take_lp_bytes(&mut cur)?)?;
+        let mut owners = BTreeMap::<String, usize>::new();
+        for (id, record) in &models {
+            if id != &record.agent_id
+                || record.account == 0
+                || sdk::wire::encode(record).len() > crate::MAX_AGENT_RECORD_BYTES
+            {
+                return Err("invalid model record".into());
+            }
+            crate::validate_agent_id(id)?;
+            let owner = serde_json::to_vec(&record.owner)
+                .map_err(|error| format!("legacy model owner failed to encode: {error}"))?;
+            *owners
+                .entry(String::from_utf8_lossy(&owner).into_owned())
+                .or_default() += 1;
         }
-    }
+        if models.len() > crate::MAX_REGISTERED_AGENTS {
+            return Err("legacy model registry exceeds its capacity".into());
+        }
+        if owners
+            .values()
+            .any(|count| *count > crate::MAX_AGENTS_PER_OWNER)
+        {
+            return Err("legacy model owner index exceeds its capacity".into());
+        }
+        Some(models)
+    };
     if cur.remaining() != 0 {
         return Err("snapshot has trailing bytes".into());
     }

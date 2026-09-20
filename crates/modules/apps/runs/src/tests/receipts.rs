@@ -8,6 +8,7 @@ pub(crate) struct Stored {
     read_bytes: usize,
     distinct: std::collections::BTreeSet<[u8; 32]>,
     writes: Vec<[u8; 32]>,
+    write_bytes: usize,
 }
 
 #[derive(Clone, Default)]
@@ -35,6 +36,29 @@ impl Backing {
     pub(crate) fn forget_distinct(&self) {
         self.0.borrow_mut().distinct.clear();
     }
+    /// Start a fresh read-counting window.
+    pub(crate) fn forget_reads(&self) {
+        let mut stored = self.0.borrow_mut();
+        stored.reads = 0;
+        stored.read_bytes = 0;
+        stored.distinct.clear();
+    }
+    /// Bytes supplied to committed-store writes since construction.
+    pub(crate) fn write_bytes(&self) -> usize {
+        self.0.borrow().write_bytes
+    }
+    /// Number of committed write-batch entries.
+    pub(crate) fn writes(&self) -> usize {
+        self.0.borrow().writes.len()
+    }
+    /// The committed value size at a logical receipt key.
+    pub(crate) fn value_len(&self, key: &str) -> Option<usize> {
+        self.0
+            .borrow()
+            .records
+            .get(&sdk::store_key(key.as_bytes()))
+            .map(Vec::len)
+    }
 }
 
 #[async_trait::async_trait(?Send)]
@@ -56,6 +80,7 @@ impl sdk::MerkleStore for Backing {
             stored.writes.push(key);
             match value {
                 Some(value) => {
+                    stored.write_bytes += value.len();
                     stored.records.insert(key, value);
                 }
                 None => {
@@ -77,17 +102,24 @@ impl sdk::MerkleStore for Backing {
 }
 
 fn hosted() -> (RunsModule, Backing, PendingState) {
-    let (module, _, run_id) = awaiting_run();
+    let (module, registry, run_id) = awaiting_run();
     let entry = module
         .pending_entry(&dispatch_id_for(&run_id))
         .unwrap()
         .clone();
     let backing = Backing::default();
-    (
-        module.with_receipt_store(Box::new(backing.clone())),
-        backing,
-        entry,
-    )
+    let mut module = module.with_receipt_store(Box::new(backing.clone()));
+    module.seed_test_models(&registry).unwrap();
+    commit(&mut module);
+    {
+        let mut stored = backing.0.borrow_mut();
+        stored.reads = 0;
+        stored.read_bytes = 0;
+        stored.distinct.clear();
+        stored.writes.clear();
+        stored.write_bytes = 0;
+    }
+    (module, backing, entry)
 }
 
 fn stage(module: &mut RunsModule, entry: &PendingState, slot: u32) -> String {
@@ -319,8 +351,8 @@ fn receipt_history_does_not_increase_one_actions_reads_or_writes() {
     commit(&mut module);
     let stored = backing.0.borrow();
     assert_eq!(
-        stored.reads, 3,
-        "one id lookup, empty queue metadata, and the optional retained-conversation binding"
+        stored.reads, 4,
+        "one model, id, queue, and optional retained-conversation lookup"
     );
     assert_eq!(
         stored.writes.len(),
@@ -419,9 +451,10 @@ fn oversized_ack_diagnostic_cannot_strand_the_reserved_marker_or_queue() {
 fn aborted_admission_leaves_no_receipt_or_queue_record() {
     let (mut module, backing, entry) = hosted();
     let before = module.snapshot();
+    let before_records = backing.0.borrow().records.clone();
     let id = stage(&mut module, &entry, 0);
     abort(&mut module);
     assert_eq!(module.snapshot(), before);
-    assert!(backing.0.borrow().records.is_empty());
+    assert_eq!(backing.0.borrow().records, before_records);
     assert!(block_on(module.action_request(&id)).unwrap().is_none());
 }
