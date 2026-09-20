@@ -42,7 +42,15 @@ members = [
     # the guest componentizer
     "bin/guest-builder",
 
-    # system modules — wire surfaces only
+    # system modules — implementations that build as independent guests out of
+    # this workspace. each links only sdk + the leaf libraries; the legacy
+    # `acl`/`identity`/`gateway` workspace aliases below still name the wire
+    # crates, so nothing links these by alias.
+    "crates/modules/system/acl",
+    "crates/modules/system/gateway",
+    "crates/modules/system/identity",
+
+    # system modules — wire surfaces
     "crates/modules/system/acl/wire",
     "crates/modules/system/attribution/wire",
     "crates/modules/system/capability/wire",
