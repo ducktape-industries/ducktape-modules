@@ -194,7 +194,6 @@ dependencies = [
  "async-trait",
  "attribution",
  "attribution-wire",
- "automations-wire",
  "borsh",
  "commonware-cryptography",
  "commonware-runtime",
@@ -209,16 +208,6 @@ dependencies = [
  "serde_json",
  "statesync",
  "wasm-host",
-]
-
-[[package]]
-name = "automations-wire"
-version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#8c764093d5974b4328c0b90de157d72597540020"
-dependencies = [
- "borsh",
- "sdk",
- "serde",
 ]
 
 [[package]]
@@ -674,7 +663,6 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chat-wire",
- "collaboration-wire",
  "commonware-runtime",
  "ducktape-module-sdk",
  "futures",
@@ -2536,7 +2524,6 @@ dependencies = [
  "futures",
  "identity-wire",
  "inbox",
- "inbox-wire",
  "index-guest",
  "sdk",
  "sdk-testkit",
@@ -2545,17 +2532,6 @@ dependencies = [
  "sha2 0.10.9",
  "statesync",
  "wasm-host",
-]
-
-[[package]]
-name = "inbox-wire"
-version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#8c764093d5974b4328c0b90de157d72597540020"
-dependencies = [
- "attribution-wire",
- "borsh",
- "sdk",
- "serde",
 ]
 
 [[package]]

@@ -10,7 +10,6 @@ version.workspace = true
 guest = ["dep:ducktape-module-sdk"]
 
 [dependencies]
-collaboration-wire = { workspace = true }
 sdk = { workspace = true }
 identity = { workspace = true }
 chat = { workspace = true }
