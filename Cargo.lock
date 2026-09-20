@@ -3879,7 +3879,6 @@ dependencies = [
  "node-work",
  "pages",
  "run-envelope",
- "runs-wire",
  "saga",
  "sdk",
  "sdk-testkit",
@@ -3893,27 +3892,6 @@ dependencies = [
  "valset",
  "valset-wire",
  "wasm-host",
-]
-
-[[package]]
-name = "runs-wire"
-version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#b66f47f1f4b0c869786ce195e382f2e83fd15277"
-dependencies = [
- "agent-wire",
- "borsh",
- "chat-wire",
- "collaboration-wire",
- "dispatch-wire",
- "duck-address",
- "governance-wire",
- "node-work",
- "run-envelope",
- "sdk",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tasks-wire",
 ]
 
 [[package]]
