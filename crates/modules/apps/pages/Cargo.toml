@@ -37,14 +37,14 @@ borsh = { workspace = true }
 keyscheme = { workspace = true, features = ["testkit"] }
 futures = { workspace = true }
 commonware-cryptography = { workspace = true }
-dispatch-module = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "dispatch" }
+dispatch-module = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "dispatch" }
 wasm-host = { workspace = true }
 # the native Files implementation the pages tests run against. It lives in the
 # platform repo, so it is named here rather than through the workspace table.
 files-module = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "files", features = ["native"] }
 # native identity and attribution modules used by the integration tests.
-identity-module = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "identity" }
-attribution-module = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "attribution" }
+identity-module = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "identity" }
+attribution-module = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "attribution" }
 host = { workspace = true }
 sdk-testkit = { workspace = true }
 tempfile = "3"

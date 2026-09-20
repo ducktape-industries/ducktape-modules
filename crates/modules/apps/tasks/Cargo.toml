@@ -36,8 +36,8 @@ wasm-host = { workspace = true }
 # the NATIVE identity and attribution modules (the `identity`/`attribution`
 # names in [dependencies] are their wire crates): a test composes the real
 # registry the way a host does. They live in the platform repo.
-identity-module = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "identity" }
-attribution-module = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "attribution" }
+identity-module = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "identity" }
+attribution-module = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "attribution" }
 futures = "0.3"
 host = { workspace = true }
 sdk-testkit = { workspace = true }

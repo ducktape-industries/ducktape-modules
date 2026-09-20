@@ -52,8 +52,8 @@ sha2 = { workspace = true }
 wasm-host = { workspace = true }
 # The pages edge uses its committed guest plus this consumer's local contract;
 # identity/attribution remain the native system modules under test.
-identity-module = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "identity" }
-attribution-module = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "attribution" }
+identity-module = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "identity" }
+attribution-module = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "attribution" }
 futures = { workspace = true }
 host = { workspace = true }
 sdk-testkit = { workspace = true }

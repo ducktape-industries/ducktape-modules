@@ -44,7 +44,7 @@ wasm-host = { workspace = true }
 # against: the fixture registry decodes Runs' emitted bytes with these codecs
 # and answers with theirs, so a mirror that drifts fails the suite.
 files = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "files", features = ["native"] }
-saga = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "saga", default-features = false }
+saga = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "saga", default-features = false }
 tempfile = { workspace = true }
 syn = { version = "2", features = ["full"] }
 # the host-side qmdb store handle the chat test fixtures inject.
@@ -63,10 +63,10 @@ forge = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev
 # the other NATIVE modules a programmable-run test composes. The same names in
 # [dependencies] are the WIRE crates, so these carry a `-module` suffix and the
 # test module aliases them back (`use dispatch_module as dispatch;`).
-attribution-module = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "attribution" }
-capability-module = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "capability" }
-dispatch-module = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "dispatch" }
+attribution-module = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "attribution" }
+capability-module = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "capability" }
+dispatch-module = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "dispatch" }
 governance-module = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "governance" }
-identity-module = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "identity" }
+identity-module = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "identity" }
 modules-module = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "modules" }
-valset-module = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "valset" }
+valset-module = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "valset" }
