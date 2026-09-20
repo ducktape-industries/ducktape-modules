@@ -877,8 +877,8 @@ mod tests {
             panic!("the PR must exist")
         };
         assert_eq!(
-            item.summary.author,
-            chat::Party::Module("runs".into()),
+            serde_json::to_value(&item.summary.author).unwrap(),
+            serde_json::to_value(chat::Party::Module("runs".into())).unwrap(),
             "the PR is authored by the emitting MODULE, not a forged user"
         );
         let _ = std::fs::remove_dir_all(&base);

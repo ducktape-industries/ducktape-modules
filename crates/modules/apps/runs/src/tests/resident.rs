@@ -304,7 +304,10 @@ fn no_mention_human_posts_are_snapshotted_and_self_replies_do_not_recurse() {
     let ConversationInput::Chat { message } = &events[0].input else {
         panic!("source body snapshot");
     };
-    assert_eq!(message.head.blocks, vec![Block::paragraph("first human")]);
+    assert_eq!(
+        serde_json::to_value(&message.head.blocks).unwrap(),
+        serde_json::to_value(vec![Block::paragraph("first human")]).unwrap()
+    );
     let root = module.root();
     let mut restored = super::module().with_files_module("files");
     restored.install(&module.snapshot(), root).unwrap();
