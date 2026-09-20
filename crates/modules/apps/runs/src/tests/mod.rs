@@ -1130,7 +1130,8 @@ fn forge_item_detail(
             kind,
             title: title.into(),
             state: forge::ItemState::Open,
-            author: Party::Key(vec![1; 32]),
+            author: serde_json::from_value(serde_json::to_value(Party::Key(vec![1; 32])).unwrap())
+                .unwrap(),
             created_at: 0,
             updated_at: 0,
         },

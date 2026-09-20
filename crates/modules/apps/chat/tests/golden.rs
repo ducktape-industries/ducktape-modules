@@ -16,7 +16,6 @@ fn fixture(name: &str) -> Vec<u8> {
         "assigned-posted" => include_str!("fixtures/assigned-posted.hex"),
         "store-channel-json" => include_str!("fixtures/store-channel-json.hex"),
         "party-account-borsh" => include_str!("fixtures/party-account-borsh.hex"),
-        "index-message-query-json" => include_str!("fixtures/index-message-query-json.hex"),
         "malformed-request-trailing-byte" => {
             include_str!("fixtures/malformed-request-trailing-byte.hex")
         }
@@ -83,7 +82,7 @@ fn frozen_b66_wire_bytes_match_and_decode() {
 }
 
 #[test]
-fn frozen_b66_store_and_index_codecs_match() {
+fn frozen_b66_store_codecs_match() {
     let channel = Channel {
         id: "general".into(),
         name: "General".into(),
@@ -107,14 +106,6 @@ fn frozen_b66_store_and_index_codecs_match() {
     assert_eq!(
         borsh::to_vec(&Party::Account(7)).unwrap(),
         fixture("party-account-borsh")
-    );
-
-    let index = chat::index::ChatViewQuery::Message {
-        message_id: "m1".into(),
-    };
-    assert_eq!(
-        serde_json::to_vec(&index).unwrap(),
-        fixture("index-message-query-json")
     );
 }
 

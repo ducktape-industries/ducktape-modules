@@ -1293,6 +1293,21 @@ impl RunsModule {
             let seq = message.seq;
             if retain {
                 let actor = message.head.content_origin.clone();
+                // `runs-wire` still names SDK36's chat wire type. Re-encode at
+                // this consumer boundary so serde validates the complete
+                // producer record without coupling the modules together.
+                let message = serde_json::to_value(&message).map_err(|error| Error::Module {
+                    reason: refusal::UNEXPECTED_REPLY.into(),
+                    sentence: format!(
+                        "chat source snapshot cannot cross the runs boundary: {error}"
+                    ),
+                })?;
+                let message = serde_json::from_value(message).map_err(|error| Error::Module {
+                    reason: refusal::UNEXPECTED_REPLY.into(),
+                    sentence: format!(
+                        "chat source snapshot cannot decode at the runs boundary: {error}"
+                    ),
+                })?;
                 self.admit_conversation_input(
                     ctx,
                     &current,
