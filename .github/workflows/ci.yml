@@ -1,0 +1,52 @@
+name: ci
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [dev]
+  workflow_dispatch:
+
+# Linux-only by owner order; macOS runners are deliberately excluded.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_BUILD_JOBS: 3
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: Swatinem/rust-cache@v2
+      # rust-toolchain.toml pins the channel and every target used below.
+      - run: rustup show
+      - run: cargo fmt --all -- --check
+      - run: cargo test --locked --workspace --lib --no-fail-fast
+      - run: cargo clippy --locked --workspace --tests --no-deps -- -D warnings
+      - run: cargo build --locked --release -p guest-builder
+      - run: make view-wasm-check CARGO="cargo --locked"
+      - run: rm -rf target/guest-builder && RUSTUP_TOOLCHAIN="$(rustup show active-toolchain | awk '{print $1}')" make fixture-guests-check GUEST_BUILDER=target/release/guest-builder
+      - name: Capture fixture mismatch evidence
+        if: failure()
+        run: |
+          mkdir -p target/fixture-diagnostics
+          rustc -vV > target/fixture-diagnostics/rustc.txt
+          rustup show active-toolchain > target/fixture-diagnostics/toolchain.txt
+          if [ -x target/release/guest-builder ]; then
+            RUSTUP_TOOLCHAIN="$(rustup show active-toolchain | awk '{print $1}')" target/release/guest-builder --index crates/kernel/index-guest/testmap --out target/fixture-diagnostics/testmap.index.wasm
+            cp target/guest-builder/testmap/Cargo.lock target/fixture-diagnostics/Cargo.lock
+            sha256sum crates/kernel/index-guest/testmap/index.wasm target/fixture-diagnostics/testmap.index.wasm
+          fi
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: fixture-mismatch
+          path: target/fixture-diagnostics/
+          retention-days: 3

@@ -1061,11 +1061,40 @@ fn remap_flags(scratch: &Path, graph: &serde_json::Value) -> Result<String, Stri
     let home = env::var("HOME").unwrap_or_default();
     let tool_home =
         |key: &str, dir: &str| env::var(key).unwrap_or_else(|_| format!("{home}/{dir}"));
+    let rustup_home = tool_home("RUSTUP_HOME", ".rustup");
     let mut mappings = vec![
         (tool_home("CARGO_HOME", ".cargo"), "/cargo".to_string()),
-        (tool_home("RUSTUP_HOME", ".rustup"), "/rustup".to_string()),
+        (rustup_home.clone(), "/rustup".to_string()),
         (scratch.display().to_string(), "/guest-builder".to_string()),
     ];
+    // The precompiled standard library's generic source paths are `/rustc` on
+    // both compilers, but rustup's local source checkout can appear in a
+    // monomorphized panic location. Normalize that local root to the compiler
+    // commit spelling; mapping `/rustc` to the local root reverses the CI
+    // canonical form and leaves local and runner bytes different.
+    let rustc = Command::new("rustc")
+        .arg("-vV")
+        .output()
+        .map_err(|e| format!("reading rustc metadata: {e}"))?;
+    if !rustc.status.success() {
+        return Err(format!(
+            "reading rustc metadata failed: {}",
+            String::from_utf8_lossy(&rustc.stderr).trim()
+        ));
+    }
+    let field = |name: &str| {
+        String::from_utf8_lossy(&rustc.stdout)
+            .lines()
+            .find_map(|line| line.strip_prefix(name).map(str::trim).map(str::to_owned))
+    };
+    if let (Some(commit), Some(release), Some(host)) =
+        (field("commit-hash:"), field("release:"), field("host:"))
+    {
+        mappings.push((
+            format!("{rustup_home}/toolchains/{release}-{host}/lib/rustlib/src/rust"),
+            format!("/rustc/{commit}"),
+        ));
+    }
     mappings.extend(git_checkouts(graph)?);
     let flags: Vec<String> = mappings
         .iter()
@@ -1497,7 +1526,13 @@ dependencies = [
             "--remap-path-prefix=/home/u/.cargo/git/checkouts/ducktape-sdk-5678/9876543=/ducktape-sdk"
         );
         // a registry package is not a checkout: nothing to remap but CARGO_HOME
-        assert_eq!(flags.len(), 5, "{flags:?}");
+        assert_eq!(flags.len(), 6, "{flags:?}");
+        assert!(
+            flags.iter().any(|flag| {
+                flag.contains("/toolchains/") && flag.contains("/lib/rustlib/src/rust=/rustc/")
+            }),
+            "{flags:?}"
+        );
     }
 
     /// the module's own repository, and no repository whose URL merely starts
