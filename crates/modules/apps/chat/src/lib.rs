@@ -46,9 +46,18 @@
 //! and wraps a fresh `Chat` around it — this module only forwards the trait's
 //! serve surface.
 
-// the wire surface: this module's shared types, flattened at the crate root.
-use chat_wire::client::validate_channel_namespace;
-pub use chat_wire::*;
+pub mod client;
+pub mod index;
+mod message;
+mod wire;
+
+pub use message::{inline_spans, parse_message};
+pub use wire::*;
+
+// the owning wire surface is flattened at the crate root for existing module
+// and test callers; it is ordinary internal code, not a shared API crate.
+use client::validate_channel_namespace;
+pub mod contract_golden;
 use sdk::refusal;
 
 // the wasm-guest port: the dispatch shell that adapts this module to the
@@ -61,12 +70,11 @@ mod guest;
 // wasm guest — so the consensus state machine above compiles for wasm32
 // without them. (The call media planes live in the `media-service` crate.)
 //
-// the derived-tier materialized view (`index`: the PURE fold + view over
+// The derived-tier materialized view (`index`: the PURE fold + view over
 // index_guest::StateRead) and the CLIENT view model (`client`: rendered row
-// types, composer parsing, optimistic merges, the op-delta fold) are the
-// wire crate's — every reader of the feed links them without the module.
-// the engine shell that runs the fold inside the module's index database is
-// `index_guest` below.
+// types, composer parsing, optimistic merges, the op-delta fold) are owned
+// by this module beside the consensus records. The engine shell that runs the
+// fold inside the module's index database is `index_guest` below.
 
 // the wasm index-mapper shell: wires the pure core into the fluent31 engine.
 // compiled only by `guest-builder --index`'s synthesized wasm32 workspace
@@ -917,7 +925,7 @@ impl Chat {
         // derives the id from the creator's OWN account — a plain
         // `CreateChannel` naming that shape is exactly the squat this gate
         // closes (see the module doc on `CreateDmChannel`).
-        if chat_wire::client::is_derived_dm_channel(&channel_id) {
+        if client::is_derived_dm_channel(&channel_id) {
             return Err(Error::Module {
                 reason: refusal::INVALID_INPUT.into(),
                 sentence: "dm- channel ids are reserved; open a DM with CreateDmChannel".into(),
@@ -978,8 +986,7 @@ impl Chat {
                 sentence: format!("a DM names no account: {counterpart}"),
             });
         }
-        let channel_id =
-            chat_wire::client::dm_channel_id(&creator.to_string(), &counterpart.to_string());
+        let channel_id = client::dm_channel_id(&creator.to_string(), &counterpart.to_string());
         if self.channel(&channel_id).await?.is_some() {
             return Err(Error::Module {
                 reason: refusal::ALREADY_EXISTS.into(),

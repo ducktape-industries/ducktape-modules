@@ -54,7 +54,7 @@ pub const MAX_TASKS: usize = 4096;
 /// it instead of burning a permanent slot.
 pub const MAX_OPEN_TASKS_PER_OWNER: usize = 128;
 
-pub use tasks_wire::MAX_LIST_LIMIT;
+pub use crate::MAX_LIST_LIMIT;
 
 /// one task record per id.
 const RECORD_PREFIX: &[u8] = b"t/";

@@ -32,8 +32,10 @@
 //! module's single `execute`/`query` decodes the envelope and routes to the
 //! matching board. see `interface` for the wire surface.
 
-// the wire surface: this module's shared types, flattened at the crate root.
-pub use tasks_wire::*;
+// this module owns its wire records and codecs. Keep the public re-export for
+// existing internal/test call sites.
+mod wire;
+pub use wire::*;
 
 // the wasm-guest port: the dispatch shell that adapts this module to the
 // ducktape:module world. compiled only by the guest-builder's synthesized

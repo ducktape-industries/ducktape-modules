@@ -7,7 +7,8 @@ use super::action_requests::Prepared;
 use super::catalog::{ContentPart, Operation, PageAnchor};
 use super::response::ReplyPosts;
 use super::{Ctx, Lane, Msg, PendingState, ReplyDestination, RunsModule};
-use pages::{
+use crate::pages;
+use crate::pages::{
     BlockKind, NewBlock, PageMsg, PageQuery, PageReply, encode_msg as pages_encode_msg,
     encode_query as pages_encode_query,
 };

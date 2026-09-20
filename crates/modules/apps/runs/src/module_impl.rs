@@ -3,6 +3,7 @@ use super::{
     SiblingReadBudget, StateRoot, StateSyncHandle, committed_root, decode_query, dispatch_id_for,
     encode_reply,
 };
+use crate::tasks;
 use sdk::refusal;
 
 #[derive(Clone, Copy)]

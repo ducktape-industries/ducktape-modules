@@ -7,6 +7,7 @@ use crate::{OP_CHAT_POST_MESSAGE, OP_TASKS_CREATE, OP_TASKS_UPDATE_STATUS};
 use crate::{decode_reply as runs_decode_reply, encode_msg, encode_query};
 use base64::Engine as _;
 use chat::{Channel, MessageHead, Party, decode_msg as chat_decode_msg};
+use collaboration::Party as CollaborationParty;
 use dispatch::{
     DispatchStatus, DispatchView, decode_msg as dispatch_decode_msg,
     encode_reply as dispatch_encode_reply,
@@ -66,7 +67,7 @@ struct CaptureCtx {
     /// job_id -> board record served by the jobs arm (finalize guard).
     jobs: BTreeMap<String, Job>,
     /// Real committed Jobs state for lifecycle/retained-proof regressions.
-    jobs_module: Option<tasks::Tasks>,
+    jobs_module: Option<Box<dyn sdk::Module>>,
     /// repo -> born (branch, tip-hex) pairs, served by the "forge"
     /// ListRefs arm (the sink's branch-born probe and the compose lane's
     /// commit pinning).
@@ -1130,7 +1131,7 @@ fn forge_item_detail(
             kind,
             title: title.into(),
             state: forge::ItemState::Open,
-            author: Party::Key(vec![1; 32]),
+            author: CollaborationParty::Key(vec![1; 32]),
             created_at: 0,
             updated_at: 0,
         },

@@ -2,13 +2,42 @@
 //! are consensus state; workers return data or propose session actions. A
 //! user's program chooses each source write and receives its actual dispatch
 //! outcome, under each target module's own rules.
-// the wire surface: this module's shared types, flattened at the crate root so
-// every `runs::`/`crate::` path reads exactly as it did when they lived here.
-// they live in `runs-wire` now — the messages, the records, the action catalog,
-// the programs and the id derivations — so a view or the daemon can link the
-// format without linking this module.
-pub use runs_wire::catalog;
-pub use runs_wire::*;
+// Runs owns its message, record, codec, catalog, workflow and index-view
+// definitions. They remain flattened at the crate root for existing module
+// and test call sites; no sibling API/wire crate carries this behavior.
+pub mod catalog;
+mod conversation_interface;
+mod ids;
+mod interface;
+mod model;
+pub mod view;
+mod workflow;
+
+pub use catalog::*;
+pub use conversation_interface::*;
+pub use duck_address::runs::RunAddress;
+pub use ids::*;
+pub use interface::*;
+pub use model::*;
+pub use view::*;
+pub use workflow::{conversation_program, model_program};
+
+/// Reply-block kinds emitted by the strict-output normalizer and described by
+/// the action catalog.
+pub const REPLY_KIND_PARAGRAPH: &str = "paragraph";
+pub const REPLY_KIND_CODE: &str = "code";
+
+/// Forge limits mirrored by the owned catalog's deterministic input schema.
+pub const FORGE_TITLE_BYTE_CAP: usize = 256;
+pub const FORGE_BODY_BYTE_CAP: usize = 64 * 1024;
+
+/// Pages' title limit published by the catalog without linking the pages
+/// module's native filesystem feature.
+pub const MAX_PAGE_TITLE_LEN: usize = 512;
+
+pub mod contracts;
+use contracts::agent;
+pub use contracts::{chat, pages, tasks};
 
 mod model_config;
 
@@ -31,12 +60,21 @@ use sdk::refusal;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use attribution::{Actor, AttributionMsg, ObjectRef, Reason, Relation};
-use chat::{
+use crate::chat::{
     Block, ChatMsg, ChatQuery, ChatReply, MAX_THREAD_REPLIES, MessageView,
     decode_reply as chat_decode_reply, encode_msg as chat_encode_msg,
     encode_query as chat_encode_query,
 };
+use crate::tasks::{
+    JobStatus, JobsEvent, JobsMsg, JobsQuery, JobsReply, decode_job_event as jobs_decode_event,
+    decode_job_reply as jobs_decode_reply, encode_job_msg as jobs_encode_msg,
+    encode_job_query as jobs_encode_query,
+};
+use crate::tasks::{
+    TaskMsg, TaskQuery, TaskReply, TaskStatus, decode_task_reply as tasks_decode_reply,
+    encode_task_msg as tasks_encode_msg, encode_task_query as tasks_encode_query,
+};
+use attribution::{Actor, AttributionMsg, ObjectRef, Reason, Relation};
 use dispatch::{
     DispatchMsg, DispatchQuery, DispatchReply, MAX_PAYLOAD_BYTES, OutputContract, ResultEvent,
     Routing, decode_reply as dispatch_decode_reply, encode_msg as dispatch_encode_msg,
@@ -50,15 +88,6 @@ use files::{
 use sdk::{Ctx, Error, Event, Module, ModuleId, Msg, Origin, StateRoot, StateSyncHandle};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tasks::{
-    JobStatus, JobsEvent, JobsMsg, JobsQuery, JobsReply, decode_job_event as jobs_decode_event,
-    decode_job_reply as jobs_decode_reply, encode_job_msg as jobs_encode_msg,
-    encode_job_query as jobs_encode_query,
-};
-use tasks::{
-    TaskMsg, TaskQuery, TaskReply, TaskStatus, decode_task_reply as tasks_decode_reply,
-    encode_task_msg as tasks_encode_msg, encode_task_query as tasks_encode_query,
-};
 
 /// how many transcript messages (newest-first, ending at the anchor) one run
 /// embeds into its composed payload — the bounded prompt window (P4).
@@ -69,7 +98,7 @@ pub(crate) const CONTEXT_WINDOW: u64 = 64;
 /// bounds a malicious/chatty holder and leaves multi-hour work ample room.
 pub const RUN_DEADLINE_VIEWS: u64 = 6 * 60 * 60;
 
-pub use runs_wire::RUN_LEASE_VIEWS;
+pub const RUN_LEASE_VIEWS: u64 = 1024;
 
 /// oracle attempts per run: one retry after an explicit provider failure.
 pub const RUN_MAX_ATTEMPTS: u32 = 2;

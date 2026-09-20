@@ -1,6 +1,7 @@
 //! Durable intake, turn ownership, and native history. Effects are written only by
 //! the executor below; source hooks never run a model in the source write cascade.
 use super::*;
+use crate::chat;
 use crate::receipts::View;
 use sdk::refusal;
 use serde::de::DeserializeOwned;
@@ -1298,7 +1299,7 @@ impl RunsModule {
                     &current,
                     format!("chat/{seq}"),
                     ConversationInput::Chat {
-                        message: Box::new(message),
+                        message: Box::new(crate::contracts::as_wire(message)),
                     },
                     actor,
                 )

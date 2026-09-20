@@ -35,7 +35,6 @@ dependencies = [
 name = "agent"
 version = "0.1.0"
 dependencies = [
- "agent-wire",
  "async-trait",
  "attribution-wire",
  "borsh",
@@ -54,20 +53,6 @@ dependencies = [
  "statesync",
  "syn 2.0.119",
  "wasm-host",
-]
-
-[[package]]
-name = "agent-wire"
-version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#8c764093d5974b4328c0b90de157d72597540020"
-dependencies = [
- "attribution-wire",
- "borsh",
- "dispatch-wire",
- "identity-wire",
- "sdk",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -194,9 +179,7 @@ dependencies = [
  "async-trait",
  "attribution",
  "attribution-wire",
- "automations-wire",
  "borsh",
- "chat",
  "commonware-cryptography",
  "commonware-runtime",
  "ducktape-module-sdk",
@@ -204,24 +187,12 @@ dependencies = [
  "host",
  "identity",
  "identity-wire",
- "inbox",
  "sdk",
  "sdk-testkit",
  "serde",
  "serde_json",
  "statesync",
- "tasks",
  "wasm-host",
-]
-
-[[package]]
-name = "automations-wire"
-version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#8c764093d5974b4328c0b90de157d72597540020"
-dependencies = [
- "borsh",
- "sdk",
- "serde",
 ]
 
 [[package]]
@@ -394,21 +365,10 @@ name = "boards"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "boards-wire",
  "ducktape-module-sdk",
  "futures",
  "sdk",
  "sdk-testkit",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "boards-wire"
-version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#8c764093d5974b4328c0b90de157d72597540020"
-dependencies = [
- "refusal-class",
  "serde",
  "serde_json",
 ]
@@ -536,10 +496,9 @@ dependencies = [
  "attribution",
  "attribution-wire",
  "borsh",
- "chat-message",
- "chat-wire",
  "commonware-cryptography",
  "commonware-runtime",
+ "duck-address",
  "ducktape-module-sdk",
  "futures",
  "host",
@@ -547,7 +506,6 @@ dependencies = [
  "identity-wire",
  "index-guest",
  "keyscheme",
- "pages",
  "sdk",
  "sdk-testkit",
  "serde",
@@ -678,7 +636,6 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chat-wire",
- "collaboration-wire",
  "commonware-runtime",
  "ducktape-module-sdk",
  "futures",
@@ -2540,7 +2497,6 @@ dependencies = [
  "futures",
  "identity-wire",
  "inbox",
- "inbox-wire",
  "index-guest",
  "sdk",
  "sdk-testkit",
@@ -2549,17 +2505,6 @@ dependencies = [
  "sha2 0.10.9",
  "statesync",
  "wasm-host",
-]
-
-[[package]]
-name = "inbox-wire"
-version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#8c764093d5974b4328c0b90de157d72597540020"
-dependencies = [
- "attribution-wire",
- "borsh",
- "sdk",
- "serde",
 ]
 
 [[package]]
@@ -3203,9 +3148,11 @@ dependencies = [
  "async-trait",
  "attribution",
  "attribution-wire",
+ "borsh",
  "commonware-cryptography",
  "commonware-runtime",
  "dispatch",
+ "duck-address",
  "ducktape-module-sdk",
  "files",
  "files-wire",
@@ -3215,7 +3162,6 @@ dependencies = [
  "identity-wire",
  "index-guest",
  "keyscheme",
- "pages-wire",
  "sdk",
  "sdk-testkit",
  "serde",
@@ -3225,18 +3171,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "wasm-host",
-]
-
-[[package]]
-name = "pages-wire"
-version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#8c764093d5974b4328c0b90de157d72597540020"
-dependencies = [
- "duck-address",
- "index-guest",
- "sdk",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -3849,8 +3783,6 @@ dependencies = [
 name = "runs"
 version = "0.1.0"
 dependencies = [
- "agent",
- "agent-wire",
  "async-trait",
  "attribution",
  "attribution-wire",
@@ -3858,7 +3790,6 @@ dependencies = [
  "borsh",
  "capability",
  "capability-wire",
- "chat",
  "collaboration-wire",
  "commonware-runtime",
  "dispatch",
@@ -3878,9 +3809,7 @@ dependencies = [
  "modules",
  "modules-wire",
  "node-work",
- "pages",
  "run-envelope",
- "runs-wire",
  "saga",
  "sdk",
  "sdk-testkit",
@@ -3889,32 +3818,10 @@ dependencies = [
  "sha2 0.10.9",
  "statesync",
  "syn 2.0.119",
- "tasks",
  "tempfile",
  "valset",
  "valset-wire",
  "wasm-host",
-]
-
-[[package]]
-name = "runs-wire"
-version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#8c764093d5974b4328c0b90de157d72597540020"
-dependencies = [
- "agent-wire",
- "borsh",
- "chat-wire",
- "collaboration-wire",
- "dispatch-wire",
- "duck-address",
- "governance-wire",
- "node-work",
- "run-envelope",
- "sdk",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tasks-wire",
 ]
 
 [[package]]
@@ -4413,7 +4320,6 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "statesync",
- "tasks-wire",
  "tempfile",
  "tokio",
  "wasm-host",
@@ -4436,7 +4342,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys",

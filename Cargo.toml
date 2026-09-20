@@ -91,20 +91,15 @@ valset = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch =
 # `agent` in runs).
 agent = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "agent-wire" }
 agent-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "agent-wire" }
-automations-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "automations-wire" }
 boards-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "boards-wire" }
 chat = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "chat-wire" }
 chat-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "chat-wire" }
 chat-message = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "chat-message" }
 collaboration = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "collaboration-wire" }
-collaboration-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "collaboration-wire" }
 files = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "files-wire" }
 files-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "files-wire" }
 duck-address = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "duck-address" }
 forge = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "forge-wire" }
-inbox-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "inbox-wire" }
-pages = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "pages-wire" }
-pages-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "pages-wire" }
 runs-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "runs-wire" }
 tasks = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "tasks-wire" }
 tasks-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "tasks-wire" }
