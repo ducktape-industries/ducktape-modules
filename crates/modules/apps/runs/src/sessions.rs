@@ -83,7 +83,7 @@ impl RunsModule {
         // agent working, and nothing a session could legitimately write; an
         // unknown one never had any.
         let dispatch_id = dispatch_id_for(&run_id);
-        let Some(entry) = self.pending_entry(&dispatch_id).cloned() else {
+        let Some(entry) = self.pending_entry(&dispatch_id).await? else {
             return Err(Error::Module {
                 reason: refusal::WRONG_STATE.into(),
                 sentence: format!("run is not in flight: {run_id}"),
@@ -108,10 +108,12 @@ impl RunsModule {
                 ),
             });
         }
-        let previous = self.session(&run_id);
-        let already_bound = previous.is_some_and(|open| open.lease == lease);
+        let previous = self.session_for_pending(&run_id, &entry).await?;
+        let already_bound = previous.as_ref().is_some_and(|open| open.lease == lease);
         if already_bound {
-            let same_key = previous.is_some_and(|open| open.session_key == session_key);
+            let same_key = previous
+                .as_ref()
+                .is_some_and(|open| open.session_key == session_key);
             if same_key {
                 return Ok(());
             }
@@ -130,17 +132,14 @@ impl RunsModule {
         );
         // the agent id comes from the run's COMMITTED entry, never from the
         // payload — identity is never a submitter's to assert.
-        self.pending_sessions.insert(
-            run_id.clone(),
-            Some(AgentSession {
-                run_id,
-                agent_id: entry.agent_id,
-                session_key,
-                lease,
-                opened_at: ctx.env().consensus_time,
-                actions,
-            }),
-        );
+        self.stage_session(AgentSession {
+            run_id,
+            agent_id: entry.agent_id,
+            session_key,
+            lease,
+            opened_at: ctx.env().consensus_time,
+            actions,
+        })?;
         Ok(())
     }
 
@@ -167,13 +166,13 @@ impl RunsModule {
         };
         // a settled run has no lease, no agent working, and nothing a session
         // could legitimately write; the session map is pruned with it.
-        let Some(entry) = self.pending_entry(&dispatch_id_for(&run_id)).cloned() else {
+        let Some(entry) = self.pending_entry(&dispatch_id_for(&run_id)).await? else {
             return Err(Error::Module {
                 reason: refusal::WRONG_STATE.into(),
                 sentence: format!("run is not in flight: {run_id}"),
             });
         };
-        let Some(session) = self.session(&run_id).cloned() else {
+        let Some(session) = self.session_for_pending(&run_id, &entry).await? else {
             return Err(Error::Module {
                 reason: refusal::WRONG_STATE.into(),
                 sentence: format!("run has no open agent session: {run_id}"),
@@ -231,7 +230,7 @@ impl RunsModule {
         // record and the id salt the NEXT action mints from, so it must move on
         // every applied action and on no refused one (a refusal is an `Err`, and
         // the host rolls this op's staging back with it).
-        self.pending_sessions.insert(run_id, Some(next_session));
+        self.stage_session(next_session)?;
         ctx.set_output(sdk::wire::encode(&serde_json::json!({"receipt_id": id})));
         Ok(())
     }
@@ -372,14 +371,11 @@ impl RunsModule {
         request: DelegationRequest,
         budget: &SiblingReadBudget,
     ) -> Result<(), Error> {
-        let session = self
-            .session(&run_id)
-            .cloned()
-            .ok_or_else(|| Error::Module {
-                reason: refusal::WRONG_STATE.into(),
-                sentence: format!("run {run_id} has no live session"),
-            })?;
-        let Some(owner) = self.pending_entry(&dispatch_id_for(&run_id)) else {
+        let session = self.session(&run_id).await?.ok_or_else(|| Error::Module {
+            reason: refusal::WRONG_STATE.into(),
+            sentence: format!("run {run_id} has no live session"),
+        })?;
+        let Some(owner) = self.pending_entry(&dispatch_id_for(&run_id)).await? else {
             return Err(Error::Module {
                 reason: refusal::WRONG_STATE.into(),
                 sentence: format!("run is not in flight: {run_id}"),
@@ -401,7 +397,7 @@ impl RunsModule {
         self.session_holds_lease(&*ctx, &run_id, &session).await?;
         let entry = self
             .pending_entry(&dispatch_id_for(&run_id))
-            .cloned()
+            .await?
             .ok_or_else(|| Error::Module {
                 reason: refusal::WRONG_STATE.into(),
                 sentence: format!("run is not in flight: {run_id}"),
@@ -489,6 +485,7 @@ impl RunsModule {
             None => run_id.clone(),
         };
         self.pending_entry(&dispatch_id_for(&root_run_id))
+            .await?
             .ok_or_else(|| Error::Module {
                 reason: refusal::WRONG_STATE.into(),
                 sentence: format!("delegation root run {root_run_id} is no longer in flight"),
@@ -608,7 +605,8 @@ impl RunsModule {
                 ("mem_gb".into(), DELEGATED_CHILD_MEM_GB),
             ]),
             Some(delegation_id),
-        );
+        )
+        .await?;
         Ok(())
     }
 

@@ -16,7 +16,7 @@ impl RunsModule {
         run_id: &str,
     ) -> Result<Option<String>, Error> {
         let dispatch_id = dispatch_id_for(run_id);
-        if self.pending_entry(&dispatch_id).is_some() {
+        if self.pending_entry(&dispatch_id).await?.is_some() {
             return Ok(Some(dispatch_id));
         }
         match self.turn_taken(ctx, &dispatch_id).await {
@@ -388,7 +388,8 @@ impl RunsModule {
                     })?;
                 self.stage_dispatch_run(
                     ctx, &run_id, agent_id, channel_id, anchor_seq, requester, prepared, demands,
-                );
+                )
+                .await?;
                 Ok(())
             }
             RunsMsg::CancelRun { run_id } => {

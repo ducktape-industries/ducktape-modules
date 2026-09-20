@@ -536,7 +536,10 @@ fn native_checkpoint_retention_cas_uses_staged_head_without_tool_budget_or_pin_g
         count += 1;
     }
     assert_eq!(count, 70);
-    assert_eq!(module.session(&run_id).unwrap().actions, 0);
+    assert_eq!(
+        block_on(module.session(&run_id)).unwrap().unwrap().actions,
+        0
+    );
     assert_eq!(
         state(&module)
             .active_turn
@@ -1435,7 +1438,11 @@ fn native_cancellation_reads_retained_execution_after_real_prune_and_id_reuse() 
             .active_turn
             .is_none()
     );
-    assert!(module.pending_entry(&dispatch_id_for(&run_id)).is_none());
+    assert!(
+        block_on(module.pending_entry(&dispatch_id_for(&run_id)))
+            .unwrap()
+            .is_none()
+    );
     let mut restored = super::module().with_files_module("files");
     restored.install(&module.snapshot(), module.root()).unwrap();
     assert_eq!(

@@ -278,9 +278,9 @@ impl RunsModule {
                 requester: requester.clone(),
             },
         );
-        self.pending_overlay.insert(
+        self.stage_pending_insert(
             dispatch_id,
-            Some(PendingState {
+            PendingState {
                 account: agent.account,
                 generation,
                 cause: ctx.env().cause.clone(),
@@ -296,8 +296,9 @@ impl RunsModule {
                 requester,
                 sink,
                 created_at: now,
-            }),
-        );
+            },
+        )
+        .await?;
         Ok(())
     }
     fn truncate_job_payload(payload: String) -> String {

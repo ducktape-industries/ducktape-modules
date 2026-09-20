@@ -105,6 +105,72 @@ fn with_open_session() -> (RunsModule, Registry, String) {
     (m, registry, run_id)
 }
 
+fn with_open_hosted_session() -> (RunsModule, receipts::Backing, Registry, String) {
+    let (m, registry, run_id) = awaiting_session_run();
+    let entry = block_on(m.pending_entry(&dispatch_id_for(&run_id)))
+        .unwrap()
+        .unwrap();
+    let backing = receipts::Backing::default();
+    let mut m = m.with_receipt_store(Box::new(backing.clone()));
+    block_on(m.stage_pending_insert(dispatch_id_for(&run_id), entry)).unwrap();
+    let mut ctx = session_ctx(&registry, &run_id, Origin::External(ASSIGNEE.to_vec()));
+    exec(&mut m, &mut ctx, &open(&run_id, &SESSION_KEY)).unwrap();
+    commit(&mut m);
+    backing.forget_reads();
+    (m, backing, registry, run_id)
+}
+
+#[test]
+fn agent_action_reads_do_not_scan_unrelated_pending_runs() {
+    let (mut one, one_backing, one_registry, one_run) = with_open_hosted_session();
+    let (mut many, many_backing, many_registry, many_run) = with_open_hosted_session();
+    let template = block_on(many.pending_entry(&dispatch_id_for(&many_run)))
+        .unwrap()
+        .unwrap();
+    for index in 1..MAX_PENDING_RUNS as usize {
+        let mut pending = template.clone();
+        pending.run_id = format!("unrelated-{index}");
+        block_on(many.stage_pending_insert(dispatch_id_for(&pending.run_id), pending)).unwrap();
+        commit(&mut many);
+    }
+    let mut one_ctx = session_ctx(
+        &one_registry,
+        &one_run,
+        Origin::External(SESSION_KEY.to_vec()),
+    );
+    one_backing.forget_reads();
+    exec(
+        &mut one,
+        &mut one_ctx,
+        &act_as(&one_run, "bounded-proof", comment("b-p")),
+    )
+    .unwrap();
+    let one_reads = (one_backing.distinct_reads(), one_backing.read_bytes());
+    let mut many_ctx = session_ctx(
+        &many_registry,
+        &many_run,
+        Origin::External(SESSION_KEY.to_vec()),
+    );
+    many_backing.forget_reads();
+    exec(
+        &mut many,
+        &mut many_ctx,
+        &act_as(&many_run, "bounded-proof", comment("b-p")),
+    )
+    .unwrap();
+    let many_reads = (many_backing.distinct_reads(), many_backing.read_bytes());
+    eprintln!(
+        "agent action: one distinct_reads={} read_bytes={} sizes={:?}, max distinct_reads={} read_bytes={} sizes={:?}",
+        one_reads.0,
+        one_reads.1,
+        one_backing.read_sizes(),
+        many_reads.0,
+        many_reads.1,
+        many_backing.read_sizes()
+    );
+    assert_eq!(one_reads.0, many_reads.0);
+}
+
 fn with_open_delegating_session() -> (RunsModule, Registry, String) {
     let registry = registry(&["bot", "worker", "reviewer"]);
     let mut m = configured(&registry);
@@ -947,11 +1013,17 @@ fn a_forged_snapshot_session_is_rejected_by_the_decoder() {
     let (m, registry, ..) = with_open_session();
 
     // an orphaned session: the same session, but the pending section is empty.
+    let pending: BTreeMap<_, _> = block_on(m.pending_list()).unwrap().into_iter().collect();
+    let sessions: BTreeMap<_, _> = block_on(m.session_list())
+        .unwrap()
+        .into_iter()
+        .map(|session| (session.run_id.clone(), session))
+        .collect();
     let orphaned = crate::state::encode_legacy_committed(
         &m.receipts.snapshot(),
         m.next_action_item,
         &BTreeMap::new(),
-        &m.sessions,
+        &sessions,
         &m.delegations,
         &registry,
     );
@@ -962,8 +1034,7 @@ fn a_forged_snapshot_session_is_rejected_by_the_decoder() {
     );
 
     // a short key: the ACL would compare against something that is not a key.
-    let stunted = m
-        .sessions
+    let stunted = sessions
         .iter()
         .map(|(run_id, s)| {
             let s = AgentSession {
@@ -976,7 +1047,7 @@ fn a_forged_snapshot_session_is_rejected_by_the_decoder() {
     let forged = crate::state::encode_legacy_committed(
         &m.receipts.snapshot(),
         m.next_action_item,
-        &m.pending,
+        &pending,
         &stunted,
         &m.delegations,
         &registry,
@@ -1147,9 +1218,11 @@ fn a_reaction_needs_a_chat_source_and_a_bounded_emoji() {
     }
     {
         let (mut m, registry, run) = with_open_session();
-        let entry = m.pending.get_mut(&dispatch_id_for(&run)).unwrap();
+        let dispatch_id = dispatch_id_for(&run);
+        let mut entry = block_on(m.pending_entry(&dispatch_id)).unwrap().unwrap();
         entry.channel_id.clear();
         entry.anchor_seq = 0;
+        block_on(m.stage_pending_update(&dispatch_id, entry)).unwrap();
         let mut ctx = session_ctx(&registry, &run, Origin::External(SESSION_KEY.to_vec()));
         let error = exec(&mut m, &mut ctx, &act(&run, react("👀"))).unwrap_err();
         assert!(
@@ -1173,9 +1246,11 @@ fn live_reply_requires_a_nonempty_chat_response() {
     }
     {
         let (mut m, registry, run) = with_open_session();
-        let entry = m.pending.get_mut(&dispatch_id_for(&run)).unwrap();
+        let dispatch_id = dispatch_id_for(&run);
+        let mut entry = block_on(m.pending_entry(&dispatch_id)).unwrap().unwrap();
         entry.channel_id.clear();
         entry.anchor_seq = 0;
+        block_on(m.stage_pending_update(&dispatch_id, entry)).unwrap();
         let mut ctx = session_ctx(&registry, &run, Origin::External(SESSION_KEY.to_vec()));
         let error = exec(&mut m, &mut ctx, &act(&run, reply("hello"))).unwrap_err();
         assert!(
@@ -1352,7 +1427,9 @@ fn envelopes_are_decoded_against_the_catalog_in_the_module() {
 #[test]
 fn default_job_replies_require_the_original_claim_but_explicit_posts_choose_the_job() {
     let (m, registry, run) = with_open_session();
-    let mut entry = m.pending_entry(&dispatch_id_for(&run)).unwrap().clone();
+    let mut entry = block_on(m.pending_entry(&dispatch_id_for(&run)))
+        .unwrap()
+        .unwrap();
     entry.job_id = Some("job-1".into());
     entry.job_claim_height = 3;
     for (claim_height, action, accepted) in [
@@ -1382,7 +1459,9 @@ fn a_callee_result_cannot_stage_a_module_update() {
     // final response binds a forge output a module update can pin; a callee's
     // result is refused by name instead of validating an update nobody emits.
     let (m, registry, run) = with_open_session();
-    let entry = m.pending_entry(&dispatch_id_for(&run)).unwrap().clone();
+    let entry = block_on(m.pending_entry(&dispatch_id_for(&run)))
+        .unwrap()
+        .unwrap();
     let update = envelope(
         crate::OP_MODULES_UPDATE,
         None,

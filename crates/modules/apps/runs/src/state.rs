@@ -6,6 +6,8 @@ use super::{
 };
 use sdk::codec;
 use sdk::refusal;
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 // ---- canonical encoding -------------------------------------------------------
 // u64-le counts, sorted keys, every field in declaration order: u64-le length
@@ -17,6 +19,118 @@ use sdk::refusal;
 
 const POST_A_MAGIC: u64 = u64::MAX - 1;
 const POST_A_VERSION: u8 = 1;
+const POST_B_VERSION: u8 = 2;
+
+pub(super) const RUN_META_KEY: &str = "run/meta";
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PendingRecord {
+    pending: PendingState,
+    prev: Option<String>,
+    next: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PendingMeta {
+    head: Option<String>,
+    count: u64,
+}
+
+pub(super) fn pending_key(dispatch_id: &str) -> String {
+    format!("run/{dispatch_id}")
+}
+
+pub(super) fn session_key(run_id: &str) -> String {
+    format!("session/{run_id}")
+}
+
+pub(super) fn encode_pending_meta(head: Option<&str>, count: u64) -> Vec<u8> {
+    serde_json::to_vec(&PendingMeta {
+        head: head.map(str::to_owned),
+        count,
+    })
+    .expect("pending metadata serializes")
+}
+
+pub(super) fn decode_pending_meta(bytes: &[u8]) -> Result<(Option<String>, u64), String> {
+    let meta: PendingMeta = serde_json::from_slice(bytes)
+        .map_err(|error| format!("pending metadata failed to decode: {error}"))?;
+    if meta.count > super::MAX_PENDING_RUNS {
+        return Err("pending metadata exceeds its capacity".into());
+    }
+    if meta.count == 0 && meta.head.is_some() {
+        return Err("empty pending metadata has a head".into());
+    }
+    if let Some(head) = &meta.head {
+        validate_dispatch_key(head)?;
+    }
+    Ok((meta.head, meta.count))
+}
+
+fn validate_dispatch_key(dispatch_id: &str) -> Result<(), String> {
+    if dispatch_id.len() != 64 || !dispatch_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("pending link is not a 64-byte hexadecimal dispatch id".into());
+    }
+    Ok(())
+}
+
+fn validate_link(link: &Option<String>) -> Result<(), String> {
+    if let Some(link) = link {
+        validate_dispatch_key(link)?;
+    }
+    Ok(())
+}
+
+pub(super) fn encode_pending_record(
+    pending: &PendingState,
+    prev: Option<&str>,
+    next: Option<&str>,
+) -> Vec<u8> {
+    serde_json::to_vec(&PendingRecord {
+        pending: pending.clone(),
+        prev: prev.map(str::to_owned),
+        next: next.map(str::to_owned),
+    })
+    .expect("pending record serializes")
+}
+
+pub(super) fn decode_pending_record(
+    dispatch_id: &str,
+    bytes: &[u8],
+) -> Result<(PendingState, Option<String>, Option<String>), String> {
+    validate_dispatch_key(dispatch_id)?;
+    let record: PendingRecord = serde_json::from_slice(bytes)
+        .map_err(|error| format!("pending record failed to decode: {error}"))?;
+    validate_decoded_pending(dispatch_id, &record.pending)?;
+    validate_link(&record.prev)?;
+    validate_link(&record.next)?;
+    if record.prev.as_deref() == Some(dispatch_id) || record.next.as_deref() == Some(dispatch_id) {
+        return Err("pending record links to itself".into());
+    }
+    Ok((record.pending, record.prev, record.next))
+}
+
+pub(super) fn encode_session_record(session: &AgentSession) -> Vec<u8> {
+    serde_json::to_vec(session).expect("session record serializes")
+}
+
+pub(super) fn decode_session_record(
+    run_id: &str,
+    bytes: &[u8],
+    pending: &PendingState,
+) -> Result<AgentSession, String> {
+    let session: AgentSession = serde_json::from_slice(bytes)
+        .map_err(|error| format!("session record failed to decode: {error}"))?;
+    if session.run_id != run_id {
+        return Err("session record key does not match its run id".into());
+    }
+    let mut pending_map = BTreeMap::new();
+    pending_map.insert(dispatch_id_for(&pending.run_id), pending.clone());
+    validate_decoded_session(&pending_map, &session)?;
+    Ok(session)
+}
 
 fn put_opt_string(out: &mut Vec<u8>, opt: &Option<String>) {
     codec::push_opt_str(out, opt.as_deref());
@@ -120,6 +234,31 @@ fn encode_body(
 }
 
 pub(super) fn encode_committed(
+    receipts: &crate::receipts::Records,
+    next_action_item: u64,
+    delegations: &BTreeMap<String, DelegationState>,
+) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(&POST_A_MAGIC.to_le_bytes());
+    out.push(POST_B_VERSION);
+    codec::push_bytes(&mut out, &sdk::wire::encode(receipts));
+    out.extend_from_slice(&next_action_item.to_le_bytes());
+    encode_delegations(&mut out, delegations);
+    out
+}
+
+fn encode_delegations(out: &mut Vec<u8>, delegations: &BTreeMap<String, DelegationState>) {
+    out.extend_from_slice(&(delegations.len() as u64).to_le_bytes());
+    for (delegation_id, delegation) in delegations {
+        codec::push_bytes(out, delegation_id.as_bytes());
+        codec::push_bytes(
+            out,
+            &serde_json::to_vec(delegation).expect("delegation state serializes"),
+        );
+    }
+}
+
+pub(super) fn encode_post_a_committed(
     action_requests: &crate::receipts::Records,
     next_action_item: u64,
     pending: &BTreeMap<String, PendingState>,
@@ -163,6 +302,14 @@ pub(super) fn encode_legacy_committed(
 /// and `install()` so the verification a snapshot must pass is definitionally
 /// the same algorithm the live module answers with.
 pub(super) fn committed_root(
+    receipts: &crate::receipts::Records,
+    next_action_item: u64,
+    delegations: &BTreeMap<String, DelegationState>,
+) -> StateRoot {
+    StateRoot(Sha256::digest(encode_committed(receipts, next_action_item, delegations)).into())
+}
+
+pub(super) fn post_a_root(
     action_requests: &crate::receipts::Records,
     next_action_item: u64,
     pending: &BTreeMap<String, PendingState>,
@@ -170,7 +317,7 @@ pub(super) fn committed_root(
     delegations: &BTreeMap<String, DelegationState>,
 ) -> StateRoot {
     StateRoot(
-        Sha256::digest(encode_committed(
+        Sha256::digest(encode_post_a_committed(
             action_requests,
             next_action_item,
             pending,
@@ -291,7 +438,7 @@ pub(super) fn reject_run_separator(field: &str, value: &str) -> Result<(), Error
 /// a decoded pending entry must derive exactly its own key: the dispatch id
 /// is the hex sha256 of the run id its fields produce, and the field shapes
 /// must match the chat/job keyspace they claim.
-fn validate_decoded_pending(dispatch_id: &str, p: &PendingState) -> Result<(), String> {
+pub(super) fn validate_decoded_pending(dispatch_id: &str, p: &PendingState) -> Result<(), String> {
     if contains_run_separator(&p.agent_id) {
         return Err("snapshot agent_id contains reserved unit separator".into());
     }
@@ -323,6 +470,93 @@ fn validate_decoded_pending(dispatch_id: &str, p: &PendingState) -> Result<(), S
         return Err("snapshot dispatch id does not match its run fields".into());
     }
     Ok(())
+}
+
+fn validate_post_b_records(
+    records: &crate::receipts::Records,
+) -> Result<BTreeMap<String, PendingState>, String> {
+    let mut pending = BTreeMap::new();
+    let mut links = BTreeMap::new();
+    for (key, bytes) in records {
+        if key == RUN_META_KEY {
+            continue;
+        }
+        if let Some(dispatch_id) = key.strip_prefix("run/") {
+            let (entry, prev, next) = decode_pending_record(dispatch_id, bytes)?;
+            pending.insert(dispatch_id.to_owned(), entry);
+            links.insert(dispatch_id.to_owned(), (prev, next));
+        } else if key.starts_with("session/") {
+            continue;
+        }
+    }
+    let (head, count) = match records.get(RUN_META_KEY) {
+        Some(bytes) => decode_pending_meta(bytes)?,
+        None => (None, 0),
+    };
+    if count != pending.len() as u64 {
+        return Err("pending metadata count does not match records".into());
+    }
+    if count == 0 {
+        if head.is_some() {
+            return Err("empty pending list has a head".into());
+        }
+    } else {
+        let mut current = head.ok_or_else(|| "pending list has no head".to_string())?;
+        let mut previous = None;
+        let mut seen = BTreeSet::new();
+        let mut tail = None;
+        let mut ended = false;
+        for _ in 0..count {
+            if !seen.insert(current.clone()) {
+                return Err("pending list contains a cycle".into());
+            }
+            let Some((prev, next)) = links.get(&current) else {
+                return Err("pending list names a missing record".into());
+            };
+            if prev.as_deref() != previous.as_deref() {
+                return Err("pending list has a broken previous link".into());
+            }
+            previous = Some(current.clone());
+            tail = Some(current.clone());
+            current = match next {
+                Some(next) => next.clone(),
+                None => {
+                    ended = true;
+                    current
+                }
+            };
+            if ended {
+                break;
+            }
+        }
+        if seen.len() != count as usize || !ended || tail != Some(current) {
+            return Err("pending list has an invalid tail or count".into());
+        }
+        for (id, (prev, next)) in &links {
+            if let Some(next) = next
+                && links.get(next).and_then(|(prev, _)| prev.as_ref()) != Some(id)
+            {
+                return Err("pending list has a broken next link".into());
+            }
+            if let Some(prev) = prev
+                && links.get(prev).and_then(|(_, next)| next.as_ref()) != Some(id)
+            {
+                return Err("pending list has a broken previous link".into());
+            }
+        }
+    }
+    for (key, bytes) in records {
+        let Some(run_id) = key.strip_prefix("session/") else {
+            continue;
+        };
+        let dispatch_id = dispatch_id_for(run_id);
+        let entry = pending
+            .get(&dispatch_id)
+            .ok_or_else(|| "snapshot session names no in-flight run".to_string())?;
+        decode_session_record(run_id, bytes, entry)?;
+    }
+    super::conversations::validate_records(records)?;
+    Ok(pending)
 }
 
 fn validate_decoded_delegations(
@@ -410,14 +644,58 @@ fn validate_decoded_session(
     Ok(())
 }
 
-type Committed = (
-    crate::receipts::Records,
-    u64,
-    BTreeMap<String, PendingState>,
-    BTreeMap<String, AgentSession>,
-    BTreeMap<String, DelegationState>,
-    Option<BTreeMap<String, crate::ModelRecord>>,
-);
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum StateVersion {
+    V0,
+    V1,
+    V2,
+}
+
+pub(super) struct Committed {
+    pub(super) version: StateVersion,
+    pub(super) receipts: crate::receipts::Records,
+    pub(super) next_action_item: u64,
+    pub(super) pending: BTreeMap<String, PendingState>,
+    pub(super) sessions: BTreeMap<String, AgentSession>,
+    pub(super) delegations: BTreeMap<String, DelegationState>,
+    pub(super) legacy_models: Option<BTreeMap<String, crate::ModelRecord>>,
+}
+
+fn decode_delegations(
+    cur: &mut codec::Cursor,
+    min_entry_bytes: u64,
+) -> Result<BTreeMap<String, DelegationState>, String> {
+    let mut delegations = BTreeMap::new();
+    let count = take_count(cur, min_entry_bytes, "delegation")?;
+    for _ in 0..count {
+        let id = take_lp_string(cur)?;
+        let state: DelegationState = serde_json::from_slice(&take_lp_bytes(cur)?)
+            .map_err(|error| format!("snapshot delegation failed to decode: {error}"))?;
+        insert_ascending(&mut delegations, id, state)?;
+    }
+    Ok(delegations)
+}
+
+fn decode_post_b(cur: &mut codec::Cursor) -> Result<Committed, String> {
+    const MIN_DELEGATION_BYTES: u64 = 8 + 8;
+    let receipts: crate::receipts::Records = sdk::wire::decode(&take_lp_bytes(cur)?)?;
+    let next_action_item = take_u64(cur)?;
+    let delegations = decode_delegations(cur, MIN_DELEGATION_BYTES)?;
+    if cur.remaining() != 0 {
+        return Err("snapshot has trailing bytes".into());
+    }
+    let pending = validate_post_b_records(&receipts)?;
+    validate_decoded_delegations(&pending, &delegations)?;
+    Ok(Committed {
+        version: StateVersion::V2,
+        receipts,
+        next_action_item,
+        pending: BTreeMap::new(),
+        sessions: BTreeMap::new(),
+        delegations,
+        legacy_models: None,
+    })
+}
 
 pub(super) fn decode_committed(bytes: &[u8]) -> Result<Committed, String> {
     // Each pending entry includes identity generation, causal provenance,
@@ -434,18 +712,26 @@ pub(super) fn decode_committed(bytes: &[u8]) -> Result<Committed, String> {
     let post_a = bytes.len() >= 8
         && u64::from_le_bytes(bytes[..8].try_into().expect("length checked")) == POST_A_MAGIC;
     let mut cur = codec::Cursor::new(bytes);
-    if post_a {
+    let version = if post_a {
         let _ = take_u64(&mut cur)?;
-        let version = take_byte(&mut cur, "post-A state version")?;
-        if version != POST_A_VERSION {
-            return Err(format!("unsupported post-A state version {version}"));
-        }
+        take_byte(&mut cur, "post-A state version")?
+    } else {
+        0
+    };
+    if post_a && version == POST_B_VERSION {
+        return decode_post_b(&mut cur);
+    }
+    if post_a && version != POST_A_VERSION {
+        return Err(format!("unsupported state version {version}"));
     }
     let action_requests = sdk::wire::decode(&take_lp_bytes(&mut cur)?)?;
     let next_action_item = take_u64(&mut cur)?;
 
     let mut pending: BTreeMap<String, PendingState> = BTreeMap::new();
     let count = take_count(&mut cur, MIN_PENDING_BYTES, "pending")?;
+    if count > super::MAX_PENDING_RUNS {
+        return Err("pending state exceeds its capacity".into());
+    }
     for _ in 0..count {
         let dispatch_id = take_lp_string(&mut cur)?;
         let account = take_u64(&mut cur)?;
@@ -508,14 +794,7 @@ pub(super) fn decode_committed(bytes: &[u8]) -> Result<Committed, String> {
         insert_ascending(&mut sessions, run_id, session)?;
     }
 
-    let mut delegations: BTreeMap<String, DelegationState> = BTreeMap::new();
-    let count = take_count(&mut cur, MIN_DELEGATION_BYTES, "delegation")?;
-    for _ in 0..count {
-        let id = take_lp_string(&mut cur)?;
-        let state: DelegationState = serde_json::from_slice(&take_lp_bytes(&mut cur)?)
-            .map_err(|error| format!("snapshot delegation failed to decode: {error}"))?;
-        insert_ascending(&mut delegations, id, state)?;
-    }
+    let delegations = decode_delegations(&mut cur, MIN_DELEGATION_BYTES)?;
     validate_decoded_delegations(&pending, &delegations)?;
     super::conversations::validate_records(&action_requests)?;
 
@@ -553,12 +832,17 @@ pub(super) fn decode_committed(bytes: &[u8]) -> Result<Committed, String> {
     if cur.remaining() != 0 {
         return Err("snapshot has trailing bytes".into());
     }
-    Ok((
-        action_requests,
+    Ok(Committed {
+        version: if post_a {
+            StateVersion::V1
+        } else {
+            StateVersion::V0
+        },
+        receipts: action_requests,
         next_action_item,
         pending,
         sessions,
         delegations,
-        models,
-    ))
+        legacy_models: models,
+    })
 }

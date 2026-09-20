@@ -91,11 +91,14 @@ impl RunsModule {
                 sentence: "runs received a program call completion it did not request".into(),
             });
         };
-        let entry = self.pending_entry(&event.dispatch_id).cloned();
-        let attempt = entry
-            .as_ref()
-            .and_then(|entry| self.session(&entry.run_id))
-            .map(|session| session.lease.attempt);
+        let entry = self.pending_entry(&event.dispatch_id).await?;
+        let attempt = match entry.as_ref() {
+            Some(entry) => self
+                .session_for_pending(&entry.run_id, entry)
+                .await?
+                .map(|session| session.lease.attempt),
+            None => None,
+        };
         let mut effects = super::action_requests::EffectsCtx {
             inner: ctx,
             messages: Vec::new(),
@@ -184,30 +187,32 @@ impl Module for RunsModule {
     }
 
     /// state-based commitment: sha256 over the canonical committed encoding —
-    /// a length-prefixed fold of every watch, pending-entry, and agent-session
-    /// field in sorted-key order. sensitive to every field, so any transition
-    /// moves the root — opening a session, spending one of its actions, and
-    /// pruning it each move the root-hash, because the session registry IS the
-    /// mid-run ACL and every validator must hold the same one. the preimage IS
-    /// the snapshot encoding.
+    /// the sorted receipt records plus the remaining module-owned state.
+    /// Sensitive to every field, so any transition moves the root — opening a
+    /// session, spending one of its actions, and pruning it each move the
+    /// root-hash, because the session registry IS the mid-run ACL and every
+    /// validator must hold the same one. The preimage IS the snapshot encoding.
     fn root(&self) -> StateRoot {
         let records = self.receipts.snapshot();
-        match &self.legacy_models {
-            Some(models) => super::state::legacy_root(
+        match self.legacy_state_version {
+            Some(super::state::StateVersion::V0) => super::state::legacy_root(
                 &records,
                 self.next_action_item,
-                &self.pending,
-                &self.sessions,
+                self.legacy_pending.as_ref().unwrap(),
+                self.legacy_sessions.as_ref().unwrap(),
                 &self.delegations,
-                models,
+                self.legacy_models.as_ref().unwrap(),
             ),
-            None => committed_root(
+            Some(super::state::StateVersion::V1) => super::state::post_a_root(
                 &records,
                 self.next_action_item,
-                &self.pending,
-                &self.sessions,
+                self.legacy_pending.as_ref().unwrap(),
+                self.legacy_sessions.as_ref().unwrap(),
                 &self.delegations,
             ),
+            Some(super::state::StateVersion::V2) | None => {
+                committed_root(&records, self.next_action_item, &self.delegations)
+            }
         }
     }
 
@@ -216,7 +221,7 @@ impl Module for RunsModule {
     }
 
     async fn execute(&mut self, ctx: &mut dyn Ctx, msg: &Msg) -> Result<(), Error> {
-        self.stage_legacy_models()?;
+        self.stage_legacy_state()?;
         // Receipt facts and journal facts live only inside one execute;
         // nothing carries across ops.
         self.prepared_receipts.borrow_mut().clear();
@@ -308,13 +313,13 @@ impl Module for RunsModule {
                 )))
             }
             RunsQuery::PendingRuns => {
-                let runs = Self::visible_ids(&self.pending, &self.pending_overlay)
+                let mut runs: Vec<_> = self
+                    .pending_list()
+                    .await?
                     .into_iter()
-                    .filter_map(|dispatch_id| {
-                        self.pending_entry(&dispatch_id)
-                            .map(|p| Self::pending_view(&dispatch_id, p))
-                    })
+                    .map(|(dispatch_id, pending)| Self::pending_view(&dispatch_id, &pending))
                     .collect();
+                runs.sort_by(|left, right| left.dispatch_id.cmp(&right.dispatch_id));
                 Ok(encode_reply(&RunsReply::PendingRuns(runs)))
             }
             RunsQuery::RecentRuns => Ok(encode_reply(&RunsReply::RecentRuns(
@@ -324,10 +329,7 @@ impl Module for RunsModule {
             // the audit surface: who holds a key right now, and how much of the
             // budget they have spent. ascending by run id.
             RunsQuery::AgentSessions => {
-                let sessions = Self::visible_ids(&self.sessions, &self.pending_sessions)
-                    .into_iter()
-                    .filter_map(|run_id| self.session(&run_id).cloned())
-                    .collect();
+                let sessions = self.session_list().await?;
                 Ok(encode_reply(&RunsReply::AgentSessions(sessions)))
             }
             RunsQuery::Delegations { caller_run_id } => {
@@ -355,7 +357,7 @@ impl Module for RunsModule {
     }
 
     async fn acknowledge(&mut self, ctx: &mut dyn Ctx, ack: &sdk::Ack) -> Result<(), Error> {
-        self.stage_legacy_models()?;
+        self.stage_legacy_state()?;
         self.journal.clear();
         if !self.acknowledge_conversation(ctx, ack).await? {
             self.acknowledge_action(ctx, ack).await?;
@@ -391,30 +393,13 @@ impl Module for RunsModule {
         self.receipts.commit().await?;
         if self.legacy_migration_staged {
             self.legacy_models = None;
+            self.legacy_pending = None;
+            self.legacy_sessions = None;
+            self.legacy_state_version = None;
             self.legacy_migration_staged = false;
         }
         if let Some(next) = self.staged_next_action_item.take() {
             self.next_action_item = next;
-        }
-        for (dispatch_id, staged) in std::mem::take(&mut self.pending_overlay) {
-            match staged {
-                Some(entry) => {
-                    self.pending.insert(dispatch_id, entry);
-                }
-                None => {
-                    self.pending.remove(&dispatch_id);
-                }
-            }
-        }
-        for (run_id, staged) in std::mem::take(&mut self.pending_sessions) {
-            match staged {
-                Some(session) => {
-                    self.sessions.insert(run_id, session);
-                }
-                None => {
-                    self.sessions.remove(&run_id);
-                }
-            }
         }
         for (id, staged) in std::mem::take(&mut self.pending_delegations) {
             match staged {
@@ -462,8 +447,6 @@ impl Module for RunsModule {
         self.receipts.abort();
         self.legacy_migration_staged = false;
         self.staged_next_action_item = None;
-        self.pending_overlay.clear();
-        self.pending_sessions.clear();
         self.pending_delegations.clear();
         self.pending_history.clear();
         self.pending_pr_links.clear();

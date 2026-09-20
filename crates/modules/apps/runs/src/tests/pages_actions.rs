@@ -44,7 +44,7 @@ fn pages_triggered_run_replies_in_the_same_comment_thread() {
     let prepared =
         block_on(m.prepare_page_dispatch(&engage_ctx, model, &run_id, "thread-1", 1, &budget))
             .unwrap();
-    m.stage_dispatch_run(
+    block_on(m.stage_dispatch_run(
         &mut engage_ctx,
         &run_id,
         "bot".into(),
@@ -53,7 +53,8 @@ fn pages_triggered_run_replies_in_the_same_comment_thread() {
         RunOrigin::Program(2),
         prepared,
         BTreeMap::new(),
-    );
+    ))
+    .unwrap();
     commit(&mut m);
 
     let run_id = page_run_id_for("thread-1", 1, "bot");

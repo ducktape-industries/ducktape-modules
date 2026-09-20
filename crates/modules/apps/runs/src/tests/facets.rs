@@ -27,10 +27,12 @@ fn canonical_forge_sink() -> WireSink {
 /// this field, so a fixture testing `emit_sink`'s OWN gates (branch state,
 /// duplicate-PR, …) must commit the SAME sink its `RunnerResult` later echoes.
 fn commit_sink(m: &mut RunsModule, run_id: &str, sink: WireSink) {
-    m.pending
-        .get_mut(&dispatch_id_for(run_id))
-        .expect("pending fixture run")
-        .sink = sink;
+    let dispatch_id = dispatch_id_for(run_id);
+    let mut entry = block_on(m.pending_entry(&dispatch_id))
+        .unwrap()
+        .expect("pending fixture run");
+    entry.sink = sink;
+    block_on(m.stage_pending_update(&dispatch_id, entry)).unwrap();
 }
 
 /// a module wired with the forge sink and one attributed
@@ -56,8 +58,17 @@ fn a_snapshot_preserves_the_committed_sink_and_program_identity() {
     let mut restored = module().with_sink_forge("forge");
     restored.install(&bytes, original.root()).unwrap();
     let dispatch = dispatch_id_for(&run_id);
-    assert_eq!(restored.pending[&dispatch], original.pending[&dispatch]);
-    assert_eq!(restored.pending[&dispatch].sink, canonical_forge_sink());
+    assert_eq!(
+        block_on(restored.pending_entry(&dispatch)).unwrap(),
+        block_on(original.pending_entry(&dispatch)).unwrap()
+    );
+    assert_eq!(
+        block_on(restored.pending_entry(&dispatch))
+            .unwrap()
+            .unwrap()
+            .sink,
+        canonical_forge_sink()
+    );
     assert_eq!(restored.snapshot(), bytes);
 }
 
@@ -728,13 +739,12 @@ fn forge_push_run() -> (RunsModule, Registry, String) {
 /// focused on the committed tracker lookup that verifies the title.
 fn bind_run_to_forge_issue(m: &mut RunsModule, run_id: &str, number: u64) -> String {
     let old_dispatch = dispatch_id_for(run_id);
-    let mut entry = m
-        .pending
-        .remove(&old_dispatch)
+    let mut entry = block_on(m.pending_entry(&old_dispatch))
+        .unwrap()
         .expect("pending fixture run");
     entry.channel_id = format!("forge:app:{number}");
     let bound_run_id = entry.run_id();
-    m.pending.insert(dispatch_id_for(&bound_run_id), entry);
+    block_on(m.stage_pending_update(&old_dispatch, entry)).unwrap();
     bound_run_id
 }
 

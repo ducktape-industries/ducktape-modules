@@ -131,7 +131,7 @@ impl RunsModule {
         )
     }
 
-    fn corrupt_record(sentence: impl Into<String>) -> Error {
+    pub(super) fn corrupt_record(sentence: impl Into<String>) -> Error {
         Error::Module {
             reason: refusal::CORRUPT.into(),
             sentence: sentence.into(),
@@ -264,7 +264,6 @@ impl RunsModule {
         for (key, ids) in owners {
             self.stage_index(&key, &ids, MAX_AGENTS_PER_OWNER)?;
         }
-        self.legacy_migration_staged = true;
         Ok(())
     }
 
