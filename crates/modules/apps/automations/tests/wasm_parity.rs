@@ -22,22 +22,23 @@
 use attribution_module as attribution;
 use identity_module as identity;
 
+use automations::consumer_wire::{
+    chat::{Block, ChatMsg, PostPolicy, encode_msg as chat_encode_msg},
+    tasks,
+};
 use automations::{
     Action, Automations, AutomationsMsg, AutomationsQuery, AutomationsReply, MAX_FILTER_BYTES,
     MAX_ID_BYTES, MAX_TEMPLATE_BYTES, Trigger, decode_reply, encode_msg, encode_query,
 };
-use chat::{Block, Chat, ChatMsg, PostPolicy, encode_msg as chat_encode_msg};
 use commonware_cryptography::{Signer as _, ed25519::PrivateKey};
 use commonware_runtime::{Runner as _, Supervisor as _, deterministic};
 use host::{BlockContext, Host, MemberOutcome, SubmitError};
-use inbox::Inbox;
 use sdk::{Error, Module, Msg, Origin, StateRoot};
 use statesync::qmdb::QmdbStore;
-use tasks::{
-    TaskMsg, TaskQuery, TaskReply, Tasks, decode_task_reply as tasks_decode_reply,
-    encode_task_msg as tasks_encode_msg, encode_task_query as tasks_encode_query,
-};
 use wasm_host::WasmModule;
+
+#[path = "support/mod.rs"]
+mod support;
 
 /// GENERATED artifact — built from the `automations` module's guest port by
 /// guest-builder (`make wasm-modules`); committed so this proof is self-contained.
@@ -103,19 +104,13 @@ async fn identity_fixture() -> identity::Identity {
     identity
 }
 
-/// the shared native sibling set: chat over a REAL qmdb store (the module the
-/// hook events and probes run against), tasks, identity, attribution, inbox.
+/// The shared sibling set uses committed Chat/Tasks/Inbox guests and real system modules.
 async fn siblings(
-    context: &deterministic::Context,
-    label: &'static str,
+    _context: &deterministic::Context,
+    _label: &'static str,
 ) -> Vec<Box<dyn sdk::Module>> {
-    let store = QmdbStore::init(context.child(label), "chat").await;
     vec![
-        Box::new(
-            Chat::new("chat", Box::new(store))
-                .with_identity("identity")
-                .with_attribution("attribution"),
-        ),
+        Box::new(support::chat()),
         Box::new(identity_fixture().await),
         Box::new(
             attribution::AttributionModule::new(
@@ -124,18 +119,8 @@ async fn siblings(
             )
             .with_subscribers(["inbox"]),
         ),
-        Box::new(Tasks::new(
-            "tasks",
-            "identity",
-            "attribution",
-            Box::new(sdk_testkit::MemStore::new()),
-        )),
-        Box::new(Inbox::new(
-            "inbox",
-            Box::new(sdk_testkit::MemStore::new()),
-            "attribution",
-            "identity",
-        )),
+        Box::new(support::tasks()),
+        Box::new(support::inbox()),
     ]
 }
 
@@ -351,14 +336,14 @@ async fn task_ids(h: &Host) -> Vec<String> {
     let reply = h
         .query(
             "tasks",
-            &tasks_encode_query(&TaskQuery::List {
+            &tasks::encode_task_query(&tasks::TaskQuery::List {
                 limit: tasks::MAX_LIST_LIMIT,
                 after: None,
             }),
         )
         .await
         .expect("tasks query");
-    let TaskReply::Tasks(tasks) = tasks_decode_reply(&reply).expect("decode") else {
+    let tasks::TaskReply::Tasks(tasks) = tasks::decode_task_reply(&reply).expect("decode") else {
         panic!("a list answers a page");
     };
     tasks.into_iter().map(|t| t.id).collect()
@@ -588,7 +573,7 @@ fn same_ops_same_replies_follow_ups_land_and_probes_downgrade() {
                 block(11, ops.clone()),
                 Msg {
                     target: "tasks".into(),
-                    payload: tasks_encode_msg(&TaskMsg::CreateTask {
+                    payload: tasks::encode_task_msg(&tasks::TaskMsg::CreateTask {
                         task_id: "job-r-task-general-6".into(),
                         title: "squatted".into(),
                         owner: None,

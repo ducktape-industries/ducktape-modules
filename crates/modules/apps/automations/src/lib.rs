@@ -6,27 +6,31 @@
 pub use automations_wire::*;
 
 use borsh::{BorshDeserialize, BorshSerialize};
-use chat::{
-    Block, ChatEvent, ChatMsg, ChatQuery, ChatReply, Party, decode_event as chat_decode_event,
+use consumer_wire::Party;
+use consumer_wire::chat::{
+    Block, ChatEvent, ChatMsg, ChatQuery, ChatReply, decode_event as chat_decode_event,
     decode_reply as chat_decode_reply, encode_msg as chat_encode_msg,
     encode_query as chat_encode_query,
+};
+use consumer_wire::tasks::{
+    MAX_OPEN_TASKS_PER_OWNER, MAX_TASK_ID, TaskMsg, TaskQuery, TaskReply,
+    decode_task_reply as tasks_decode_reply, encode_task_msg as tasks_encode_msg,
+    encode_task_query as tasks_encode_query,
 };
 use sdk::refusal;
 use sdk::{
     AccountNumber, Ctx, Error, MerkleStore, Module, ModuleId, Msg, Origin, ResolverSyncTarget,
     StagedStore, StateRoot, StateSyncHandle, require_non_empty,
 };
-use tasks::{
-    TaskMsg, TaskQuery, TaskReply, decode_task_reply as tasks_decode_reply,
-    encode_task_msg as tasks_encode_msg, encode_task_query as tasks_encode_query,
-};
+
+pub mod consumer_wire;
 
 /// max rules retained NETWORK-WIDE. registering beyond this is rejected at
 /// execute. [`MAX_RULES_PER_OWNER`] is the per-account bound that keeps any
 /// ONE account from being the reason this global roster ever fills.
 pub const MAX_RULES: usize = 1024;
 /// max rules one creator may hold at once, the tasks board's
-/// [`tasks::MAX_OPEN_TASKS_PER_OWNER`] shape applied to the rule roster: no
+/// [`MAX_OPEN_TASKS_PER_OWNER`] shape applied to the rule roster: no
 /// single account can fill [`MAX_RULES`] and permanently deny the feature to
 /// everyone else. an [`AutomationsMsg::DeleteRule`], from any account, frees
 /// a slot.
@@ -751,8 +755,7 @@ impl Automations {
                 // KEY_SEP a rule author is free to put in the prefix) unwinds
                 // the triggering post. MAX_ID_BYTES happens to equal
                 // MAX_TASK_ID today; that coincidence is not the constraint.
-                sdk::validate_id("task_id", &task_id, tasks::MAX_TASK_ID)
-                    .map_err(|e| e.to_string())?;
+                sdk::validate_id("task_id", &task_id, MAX_TASK_ID).map_err(|e| e.to_string())?;
                 // probe: the composed task id must be unused — tasks rejects
                 // duplicates, which would abort the block. ONE by-id read: the
                 // board walk this replaced cost a store read per task, so a
@@ -788,7 +791,7 @@ impl Automations {
                 // module's identity (see the created task's `owner` below),
                 // so a full owner refuses the RULE's action here, never the
                 // triggering post's block.
-                let owner_actor = tasks::Party::Account(rule.owner);
+                let owner_actor = Party::Account(rule.owner);
                 let req = tasks_encode_query(&TaskQuery::OwnerOpenCount {
                     owner: owner_actor.clone(),
                 });
@@ -805,10 +808,10 @@ impl Automations {
                                 .get(&rule.owner)
                                 .copied()
                                 .unwrap_or(0);
-                            if count + reserved >= tasks::MAX_OPEN_TASKS_PER_OWNER as u64 {
+                            if count + reserved >= MAX_OPEN_TASKS_PER_OWNER as u64 {
                                 return Err(format!(
                                     "rule owner at task cap: {} open tasks",
-                                    tasks::MAX_OPEN_TASKS_PER_OWNER
+                                    MAX_OPEN_TASKS_PER_OWNER
                                 ));
                             }
                         }

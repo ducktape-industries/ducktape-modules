@@ -196,7 +196,6 @@ dependencies = [
  "attribution-wire",
  "automations-wire",
  "borsh",
- "chat",
  "commonware-cryptography",
  "commonware-runtime",
  "ducktape-module-sdk",
@@ -204,13 +203,11 @@ dependencies = [
  "host",
  "identity",
  "identity-wire",
- "inbox",
  "sdk",
  "sdk-testkit",
  "serde",
  "serde_json",
  "statesync",
- "tasks",
  "wasm-host",
 ]
 
@@ -547,7 +544,6 @@ dependencies = [
  "identity-wire",
  "index-guest",
  "keyscheme",
- "pages",
  "sdk",
  "sdk-testkit",
  "serde",
@@ -4431,7 +4427,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys",
