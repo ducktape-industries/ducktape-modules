@@ -37,10 +37,11 @@
 //! asserts an identity — a participant is a chat [`Party`], and the module
 //! verifies that the caller IS that party or holds its binding.
 
-// the wire surface: this module's shared types, flattened at the crate root.
-pub use collaboration_wire::*;
-// the wire crate under the name the module's own files reach it by.
-pub(crate) use collaboration_wire as interface;
+// this module owns its protocol shapes and codecs; flatten them for existing
+// module and test callers without creating a shared API crate.
+mod producer;
+pub(crate) use producer as interface;
+pub use producer::*;
 
 // the wasm-guest port: the dispatch shell that adapts this module to the
 // ducktape:module world. compiled only by the guest-builder's synthesized
