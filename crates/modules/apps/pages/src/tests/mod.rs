@@ -144,12 +144,25 @@ async fn target_thread_count(p: &Pages, target: &str) -> u64 {
     }
 }
 async fn query_thread(p: &Pages, thread_id: &str) -> Option<ThreadView> {
+    query_thread_page(p, thread_id, None, 0).await.unwrap()
+}
+async fn query_thread_page(
+    p: &Pages,
+    thread_id: &str,
+    after: Option<&str>,
+    limit: u64,
+) -> Result<Option<ThreadView>, Error> {
     let q = PageQuery::CommentThread {
         thread_id: thread_id.into(),
+        after: after.map(str::to_string),
+        limit,
     };
-    match decode_reply(&p.query(&encode_query(&q)).await.unwrap()).unwrap() {
-        PageReply::CommentThread(v) => v,
-        _ => panic!("expected CommentThread"),
+    match p.query(&encode_query(&q)).await {
+        Ok(bytes) => match decode_reply(&bytes).unwrap() {
+            PageReply::CommentThread(v) => Ok(v),
+            _ => panic!("expected CommentThread"),
+        },
+        Err(error) => Err(error),
     }
 }
 async fn query_comment(p: &Pages, comment_id: &str) -> Option<Comment> {

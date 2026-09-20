@@ -1,7 +1,8 @@
 use super::{
-    Comment, MAX_COMMENT_ID_BYTES, MAX_COMMENT_TARGET_BYTES, MAX_COMMENT_TEXT_BYTES,
-    MAX_COMMENT_WORK_PER_TARGET, MAX_COMMENTS_PER_THREAD, MAX_THREAD_ID_BYTES,
-    MAX_THREADS_PER_TARGET, PageError, PageMsg, Pages, Party, Thread, ThreadView, id_is_index_safe,
+    Comment, Error, MAX_COMMENT_ID_BYTES, MAX_COMMENT_TARGET_BYTES, MAX_COMMENT_TEXT_BYTES,
+    MAX_COMMENT_WORK_PER_TARGET, MAX_COMMENTS_PER_THREAD, MAX_PAGE_QUERY_LIMIT,
+    MAX_THREAD_ID_BYTES, MAX_THREADS_PER_TARGET, PageError, PageMsg, Pages, Party, Thread,
+    ThreadView, id_is_index_safe,
 };
 use crate::text_ranges::{TextEdit, rebase_anchor, valid_range};
 
@@ -98,19 +99,55 @@ impl Pages {
     pub(super) async fn thread_view(
         &self,
         thread_id: &str,
-    ) -> Result<Option<ThreadView>, PageError> {
-        let thread = match self.load_thread(thread_id).await? {
+        after: Option<&str>,
+        limit: u64,
+    ) -> Result<Option<ThreadView>, Error> {
+        let thread = match self
+            .load_thread(thread_id)
+            .await
+            .map_err(super::page_refusal)?
+        {
             Some(t) => t,
             None => return Ok(None),
         };
-        let mut comments = Vec::new();
-        for cid in &thread.comment_ids {
-            let c = self.load_comment(cid).await?.ok_or(PageError::Corrupt)?;
+
+        let start = match after {
+            Some(cursor) => thread
+                .comment_ids
+                .iter()
+                .position(|id| id == cursor)
+                .map(|index| index + 1)
+                .ok_or_else(invalid_thread_cursor)?,
+            None => 0,
+        };
+        let limit = if limit == 0 {
+            MAX_PAGE_QUERY_LIMIT as u64
+        } else {
+            limit.min(MAX_PAGE_QUERY_LIMIT as u64)
+        } as usize;
+        let mut comments = Vec::with_capacity(limit);
+        let mut scanned = 0;
+        let mut last_scanned = None;
+        for cid in thread.comment_ids.iter().skip(start).take(limit) {
+            scanned += 1;
+            last_scanned = Some(cid.clone());
+            let c = self
+                .load_comment(cid)
+                .await
+                .map_err(super::page_refusal)?
+                .ok_or_else(|| super::page_refusal(PageError::Corrupt))?;
             if !c.deleted {
                 comments.push(c);
             }
         }
-        Ok(Some(ThreadView { thread, comments }))
+        let has_more = start + scanned < thread.comment_ids.len();
+        let next_after = has_more.then(|| last_scanned.expect("a remaining id was scanned"));
+        Ok(Some(ThreadView {
+            thread,
+            comments,
+            has_more,
+            next_after,
+        }))
     }
 
     /// remove every comment thread (its comments + the target index) anchored
@@ -401,5 +438,12 @@ impl Pages {
             }
             _ => unreachable!("non-comment op routed to apply_comment_op"),
         }
+    }
+}
+
+fn invalid_thread_cursor() -> Error {
+    Error::Module {
+        reason: sdk::refusal::INVALID_INPUT.into(),
+        sentence: "The comment cursor names no comment in this thread.".into(),
     }
 }
