@@ -1,51 +1,9 @@
 //! Untrusted snapshots preserve model ownership, live sessions and queued work.
 mod support;
 use futures::executor::block_on;
-use sdk::{Module, StateRoot, StateSyncHandle};
+use sdk::{Module, StateRoot};
 use sha2::{Digest, Sha256};
 use support::*;
-
-fn module() -> runs::RunsModule {
-    runs::RunsModule::new(
-        "runs",
-        "chat",
-        "saga",
-        "attribution",
-        "dispatch",
-        "agent",
-        Some("tasks".into()),
-        Some("tasks".into()),
-    )
-}
-
-async fn source() -> (Vec<u8>, StateRoot, Network) {
-    let mut network = Network::new().await;
-    let run = network.provision().await;
-    network
-        .submit(
-            session(),
-            msg(
-                "runs",
-                &runs::RunsMsg::AgentAction {
-                    run_id: run,
-                    request_id: "pending".into(),
-                    action: create_task("pending", "persisted request"),
-                },
-            ),
-        )
-        .await;
-    let (snapshot, _) =
-        network
-            .host
-            .capture_current_snapshot(network.height, host::CapturePayloads::All, || {
-                std::time::Duration::ZERO
-            });
-    let runs = snapshot.module("runs").unwrap();
-    let StateSyncHandle::SnapshotBytes(bytes) = &runs.state_sync else {
-        panic!("runs snapshot bytes");
-    };
-    (bytes.clone(), runs.root, network)
-}
 
 #[test]
 fn installing_real_pending_state_preserves_queries_and_queued_items() {
