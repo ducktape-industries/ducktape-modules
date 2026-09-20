@@ -13,7 +13,7 @@ fn task_actions_without_a_configured_tasks_module_fail_the_run() {
         None,
         None,
     );
-    m.models = registry.clone();
+    m.seed_test_models(&registry).unwrap();
     commit(&mut m);
     request_post(&mut m, &registry, 2, &[]);
     commit(&mut m);

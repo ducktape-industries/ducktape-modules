@@ -241,11 +241,30 @@ fn validate_reason(step: u64, reason: &Reason) -> Result<(), Error> {
     }
 }
 
+/// the most steps one bound program may hold. every step is at most one
+/// sibling read, and a run walks each step once, so this is what bounds the
+/// reads a single delivery makes. the same 256 `MAX_INVOCATION_PAGE` puts
+/// on a page of invocations: a program is a plan, not a database.
+const MAX_PROGRAM_STEPS: usize = 256;
+
 /// a program as the module accepts it off the wire: every target a later
 /// step or the end, every reference resolvable by construction, every module
 /// a sibling (a program cannot query its own executor: that read is refused
 /// by the host), every literal renderable.
 pub(crate) fn validate_program(program: &Program, executor: &str) -> Result<(), Error> {
+    // a program is forward-only (`validate_target`), so a run executes each
+    // step at most once and the sibling reads one delivery makes are bounded
+    // by the step count — by nothing else. without this cap the work an
+    // ordinary change costs scales with however large a program the account
+    // bound, not with the change. refused where the program enters, so what
+    // is stored is already the bounded thing.
+    let steps = program.steps.len();
+    if steps > MAX_PROGRAM_STEPS {
+        return Err(module_error(
+            refusal::CAPACITY,
+            format!("a program of {steps} steps exceeds the bound of {MAX_PROGRAM_STEPS}"),
+        ));
+    }
     let len = program.steps.len() as u64;
     let mut bound: BTreeSet<&str> = BTreeSet::new();
     for (index, step) in program.steps.iter().enumerate() {
@@ -1128,6 +1147,32 @@ mod tests {
             assert!(
                 validate_program(&program, "agent").is_err(),
                 "{name} must be refused"
+            );
+        }
+    }
+
+    #[test]
+    fn a_program_past_the_step_bound_is_refused_where_it_enters() {
+        // the bound is what keeps one delivery's reads proportional to the
+        // change: a run walks each step at most once, so an uncapped program
+        // is an uncapped read. a program at the cap still binds.
+        let at_cap = Program {
+            steps: vec![Step::Finish; MAX_PROGRAM_STEPS],
+        };
+        assert_eq!(validate_program(&at_cap, "agent"), Ok(()));
+
+        for steps in [MAX_PROGRAM_STEPS + 1, 10_000] {
+            let program = Program {
+                steps: vec![Step::Finish; steps],
+            };
+            let Err(Error::Module { reason, sentence }) = validate_program(&program, "agent")
+            else {
+                panic!("a program of {steps} steps must be refused");
+            };
+            assert_eq!(reason, refusal::CAPACITY);
+            assert_eq!(
+                sentence,
+                format!("a program of {steps} steps exceeds the bound of {MAX_PROGRAM_STEPS}")
             );
         }
     }

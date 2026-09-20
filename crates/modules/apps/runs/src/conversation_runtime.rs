@@ -68,7 +68,7 @@ impl RunsModule {
         let job_id = match &binding {
             Some(binding) => binding.job_id.clone(),
             None => {
-                let Some(entry) = self.pending_entry(&dispatch_id_for(run_id)) else {
+                let Some(entry) = self.pending_entry(&dispatch_id_for(run_id)).await? else {
                     return Ok(None);
                 };
                 let Some(job_id) = &entry.job_id else {
@@ -167,7 +167,7 @@ impl RunsModule {
         run_id: &str,
         attempt: u32,
     ) -> Result<(), Error> {
-        let session = self.session(run_id).ok_or_else(|| Error::Module {
+        let session = self.session(run_id).await?.ok_or_else(|| Error::Module {
             reason: refusal::WRONG_STATE.into(),
             sentence: format!("run {run_id} has no live session"),
         })?;
@@ -180,7 +180,7 @@ impl RunsModule {
                 sentence: format!("attempt {attempt} of run {run_id} is not held by this signer"),
             });
         }
-        self.session_holds_lease(ctx, run_id, session).await
+        self.session_holds_lease(ctx, run_id, &session).await
     }
     async fn authorize_worker_boundary(
         &self,
@@ -199,6 +199,7 @@ impl RunsModule {
             })?;
         let entry = self
             .pending_entry(&dispatch_id_for(run_id))
+            .await?
             .ok_or_else(|| Error::Module {
                 reason: refusal::WRONG_STATE.into(),
                 sentence: format!("run {run_id} is not in flight"),
@@ -272,6 +273,7 @@ impl RunsModule {
         }
         let entry = self
             .pending_entry(&dispatch_id_for(&run_id))
+            .await?
             .expect("authorized worker is in flight");
         let generation = self.active_generation(ctx, entry.account).await?;
         if generation != entry.generation {
@@ -307,11 +309,12 @@ impl RunsModule {
         }
         let session = self
             .session(&run_id)
+            .await?
             .expect("authorized worker has a session");
-        let next_session = crate::sessions::reserve_session_action(session)?;
+        let next_session = crate::sessions::reserve_session_action(&session)?;
         self.receipts
             .stage(receipt_key, sdk::wire::encode(&digest))?;
-        self.pending_sessions.insert(run_id, Some(next_session));
+        self.stage_session(next_session)?;
         ctx.emit_msg(Msg {
             target: self.jobs.clone().expect("authorized worker has Jobs"),
             payload: bytes,
@@ -460,6 +463,7 @@ impl RunsModule {
         if let Some(turn) = &state.active_turn {
             let already_dispatched = self
                 .pending_entry(&dispatch_id_for(&turn.run_id))
+                .await?
                 .is_some_and(|pending| pending.job_id.as_ref() == Some(&job.job_id));
             if already_dispatched {
                 return Ok(None);
@@ -901,7 +905,8 @@ impl RunsModule {
             Origin::Program(state.account),
             prepared,
             BTreeMap::new(),
-        );
+        )
+        .await?;
         Ok(())
     }
     pub(crate) async fn checkpoint_conversation(
@@ -916,6 +921,7 @@ impl RunsModule {
         // use a durable operation receipt as authority after ownership moves.
         let session = self
             .session(&checkpoint.run_id)
+            .await?
             .ok_or_else(|| Error::Module {
                 reason: refusal::WRONG_STATE.into(),
                 sentence: format!("run {} has no live session", checkpoint.run_id),
@@ -932,7 +938,7 @@ impl RunsModule {
                 ),
             });
         }
-        self.session_holds_lease(ctx, &checkpoint.run_id, session)
+        self.session_holds_lease(ctx, &checkpoint.run_id, &session)
             .await?;
         if self
             .operation_seen(&id, &checkpoint.operation_id, &payload)
@@ -1209,32 +1215,32 @@ impl RunsModule {
         &self,
         limit: usize,
     ) -> Result<Vec<sdk::PendingItem>, Error> {
-        let queue: BTreeMap<u64, String> = self
-            .receipts
-            .committed(WAKE_QUEUE)
+        let queue: WakeQueue = self.committed_record(WAKE_QUEUE).await?.unwrap_or_default();
+        // Until the carry-over has drained the whole map, the committed view
+        // still holds whatever is left of it; serve it read-only after the
+        // linked queue so no wake is stranded in between. The carry-over takes
+        // the oldest items first, so what is left is the youngest — last is
+        // where the map itself would have served them.
+        let mut left_over = self
+            .legacy_wake_queue(View::Committed)
             .await?
-            .map(|bytes| {
-                sdk::wire::decode(&bytes).map_err(|sentence| Error::Module {
-                    reason: refusal::CORRUPT.into(),
-                    sentence,
-                })
-            })
-            .transpose()?
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .into_keys()
+            .take(limit);
+        let mut linked = queue.head;
+        let mut next = linked.or_else(|| left_over.next());
         let mut pending = Vec::new();
-        for (item, id) in queue.into_iter().take(limit) {
-            let bytes = self
-                .receipts
-                .committed(&format!("conversation/wake/{item}"))
+        while let Some(item) = next {
+            if pending.len() == limit {
+                break;
+            }
+            let wake: Wake = self
+                .committed_record(&wake_key(item))
                 .await?
                 .ok_or_else(|| Error::Module {
                     reason: refusal::CORRUPT.into(),
                     sentence: format!("wake item {item} is queued but has no record"),
                 })?;
-            let wake: Wake = sdk::wire::decode(&bytes).map_err(|sentence| Error::Module {
-                reason: refusal::CORRUPT.into(),
-                sentence,
-            })?;
             let reference = sdk::ItemRef {
                 source: self.id.clone(),
                 item,
@@ -1243,13 +1249,24 @@ impl RunsModule {
                 item,
                 target: self.id.clone(),
                 payload: encode_msg(&RunsMsg::ReconcileConversation {
-                    conversation_id: id,
+                    conversation_id: wake.conversation_id,
                 }),
                 cause: sdk::Cause::Chain {
                     root: wake.cause.root_for_item(&reference),
                     hop: sdk::Hop::Delivery(reference),
                 },
             });
+            next = match linked {
+                Some(_) => {
+                    linked = self
+                        .committed_record::<WakeLink>(&wake_link_key(item))
+                        .await?
+                        .unwrap_or_default()
+                        .next;
+                    linked.or_else(|| left_over.next())
+                }
+                None => left_over.next(),
+            };
         }
         Ok(pending)
     }
@@ -1258,8 +1275,8 @@ impl RunsModule {
         ctx: &dyn Ctx,
         ack: &sdk::Ack,
     ) -> Result<bool, Error> {
-        let wake_key = format!("conversation/wake/{}", ack.item);
-        let Some(mut wake) = self.conversation_read::<Wake>(&wake_key).await? else {
+        let record_key = wake_key(ack.item);
+        let Some(mut wake) = self.conversation_read::<Wake>(&record_key).await? else {
             return Ok(false);
         };
         let authentic = ctx.env().origin == Origin::System && ack.target == self.id;
@@ -1282,15 +1299,10 @@ impl RunsModule {
                 ),
             });
         }
-        let mut queue: BTreeMap<u64, String> = self
-            .conversation_read(WAKE_QUEUE)
-            .await?
-            .unwrap_or_default();
-        queue.remove(&ack.item);
-        self.receipts
-            .stage(WAKE_QUEUE.into(), sdk::wire::encode(&queue))?;
+        self.detach_conversation_wake(ack.item, &wake.conversation_id)
+            .await?;
         wake.acknowledged = Some(digest);
-        self.receipts.stage(wake_key, sdk::wire::encode(&wake))?;
+        self.receipts.stage(record_key, sdk::wire::encode(&wake))?;
         let state = self.require_conversation(&wake.conversation_id).await?;
         match ack.outcome {
             sdk::DeliveryOutcome::Applied => {}
@@ -1322,10 +1334,7 @@ impl RunsModule {
         if !own_delivery {
             return Ok(());
         }
-        let Some(wake) = self
-            .conversation_read::<Wake>(&format!("conversation/wake/{}", item.item))
-            .await?
-        else {
+        let Some(wake) = self.conversation_read::<Wake>(&wake_key(item.item)).await? else {
             return Ok(());
         };
         if wake.conversation_id != id {
@@ -1339,12 +1348,7 @@ impl RunsModule {
         }
         // Detach this exact wake before deciding. A new chunk/turn may enqueue
         // another item; waiting on a nonterminal receipt enqueues nothing.
-        let mut queue: BTreeMap<u64, String> = self
-            .conversation_read(WAKE_QUEUE)
-            .await?
-            .unwrap_or_default();
-        queue.remove(&item.item);
-        self.receipts
-            .stage(WAKE_QUEUE.into(), sdk::wire::encode(&queue))
+        self.detach_conversation_wake(item.item, &wake.conversation_id)
+            .await
     }
 }

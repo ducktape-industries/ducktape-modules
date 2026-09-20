@@ -23,15 +23,17 @@ use super::{
     ActionEnvelope, AgentResponse, AgentSession, BTreeMap, Ctx, DELEGATED_CHILD_CORES,
     DELEGATED_CHILD_MEM_GB, DelegationRequest, DelegationState, DelegationStatus, DelegationView,
     DispatchQuery, DispatchReply, Error, Lane, MAX_ACTIONS_PER_SESSION,
-    MAX_DELEGATION_INSTRUCTION_BYTES, MAX_DELEGATIONS_BYTES, MAX_DELEGATIONS_PER_RUN, ModelStatus,
-    Origin, PendingState, RunsModule, SESSION_KEY_LEN, SiblingReadBudget, delegated_run_id_for,
-    delegation_id_for, dispatch_decode_reply, dispatch_encode_query, dispatch_id_for, page_source,
+    MAX_DELEGATION_EDGES_PER_RUN, MAX_DELEGATION_INSTRUCTION_BYTES, MAX_DELEGATIONS_BYTES,
+    MAX_DELEGATIONS_PER_RUN, ModelStatus, Origin, PendingState, RunsModule, SESSION_KEY_LEN,
+    Sha256, SiblingReadBudget, delegated_run_id_for, delegation_id_for, dispatch_decode_reply,
+    dispatch_encode_query, dispatch_id_for, page_source,
 };
 use dispatch::DispatchStatus;
 use saga::{
     SagaQuery, SagaReply, decode_reply as saga_decode_reply, encode_query as saga_encode_query,
 };
 use sdk::refusal;
+use sha2::Digest;
 
 /// The same authoritative allowance pays for tool actions and semantic worker
 /// reports. Decide the next value here; its writer shares the target's transaction.
@@ -83,7 +85,7 @@ impl RunsModule {
         // agent working, and nothing a session could legitimately write; an
         // unknown one never had any.
         let dispatch_id = dispatch_id_for(&run_id);
-        let Some(entry) = self.pending_entry(&dispatch_id).cloned() else {
+        let Some(entry) = self.pending_entry(&dispatch_id).await? else {
             return Err(Error::Module {
                 reason: refusal::WRONG_STATE.into(),
                 sentence: format!("run is not in flight: {run_id}"),
@@ -108,10 +110,12 @@ impl RunsModule {
                 ),
             });
         }
-        let previous = self.session(&run_id);
-        let already_bound = previous.is_some_and(|open| open.lease == lease);
+        let previous = self.session_for_pending(&run_id, &entry).await?;
+        let already_bound = previous.as_ref().is_some_and(|open| open.lease == lease);
         if already_bound {
-            let same_key = previous.is_some_and(|open| open.session_key == session_key);
+            let same_key = previous
+                .as_ref()
+                .is_some_and(|open| open.session_key == session_key);
             if same_key {
                 return Ok(());
             }
@@ -130,17 +134,14 @@ impl RunsModule {
         );
         // the agent id comes from the run's COMMITTED entry, never from the
         // payload — identity is never a submitter's to assert.
-        self.pending_sessions.insert(
-            run_id.clone(),
-            Some(AgentSession {
-                run_id,
-                agent_id: entry.agent_id,
-                session_key,
-                lease,
-                opened_at: ctx.env().consensus_time,
-                actions,
-            }),
-        );
+        self.stage_session(AgentSession {
+            run_id,
+            agent_id: entry.agent_id,
+            session_key,
+            lease,
+            opened_at: ctx.env().consensus_time,
+            actions,
+        })?;
         Ok(())
     }
 
@@ -167,13 +168,13 @@ impl RunsModule {
         };
         // a settled run has no lease, no agent working, and nothing a session
         // could legitimately write; the session map is pruned with it.
-        let Some(entry) = self.pending_entry(&dispatch_id_for(&run_id)).cloned() else {
+        let Some(entry) = self.pending_entry(&dispatch_id_for(&run_id)).await? else {
             return Err(Error::Module {
                 reason: refusal::WRONG_STATE.into(),
                 sentence: format!("run is not in flight: {run_id}"),
             });
         };
-        let Some(session) = self.session(&run_id).cloned() else {
+        let Some(session) = self.session_for_pending(&run_id, &entry).await? else {
             return Err(Error::Module {
                 reason: refusal::WRONG_STATE.into(),
                 sentence: format!("run has no open agent session: {run_id}"),
@@ -231,7 +232,7 @@ impl RunsModule {
         // record and the id salt the NEXT action mints from, so it must move on
         // every applied action and on no refused one (a refusal is an `Err`, and
         // the host rolls this op's staging back with it).
-        self.pending_sessions.insert(run_id, Some(next_session));
+        self.stage_session(next_session)?;
         ctx.set_output(sdk::wire::encode(&serde_json::json!({"receipt_id": id})));
         Ok(())
     }
@@ -372,14 +373,11 @@ impl RunsModule {
         request: DelegationRequest,
         budget: &SiblingReadBudget,
     ) -> Result<(), Error> {
-        let session = self
-            .session(&run_id)
-            .cloned()
-            .ok_or_else(|| Error::Module {
-                reason: refusal::WRONG_STATE.into(),
-                sentence: format!("run {run_id} has no live session"),
-            })?;
-        let Some(owner) = self.pending_entry(&dispatch_id_for(&run_id)) else {
+        let session = self.session(&run_id).await?.ok_or_else(|| Error::Module {
+            reason: refusal::WRONG_STATE.into(),
+            sentence: format!("run {run_id} has no live session"),
+        })?;
+        let Some(owner) = self.pending_entry(&dispatch_id_for(&run_id)).await? else {
             return Err(Error::Module {
                 reason: refusal::WRONG_STATE.into(),
                 sentence: format!("run is not in flight: {run_id}"),
@@ -401,7 +399,7 @@ impl RunsModule {
         self.session_holds_lease(&*ctx, &run_id, &session).await?;
         let entry = self
             .pending_entry(&dispatch_id_for(&run_id))
-            .cloned()
+            .await?
             .ok_or_else(|| Error::Module {
                 reason: refusal::WRONG_STATE.into(),
                 sentence: format!("run is not in flight: {run_id}"),
@@ -417,8 +415,10 @@ impl RunsModule {
             sentence,
         })?;
         let delegation_id = delegation_id_for(&run_id, &request_id);
-        if let Some(existing) = self.delegation(&delegation_id) {
-            return if existing.view.caller_run_id == run_id && existing.request == request {
+        let request_digest: [u8; 32] = Sha256::digest(sdk::wire::encode(&request)).into();
+        if let Some(existing) = self.delegation_header(&delegation_id).await? {
+            return if existing.caller_run_id == run_id && existing.request_digest == request_digest
+            {
                 Ok(())
             } else {
                 Err(Error::Module {
@@ -478,8 +478,9 @@ impl RunsModule {
         }
         let root_run_id = match entry.delegation_id.as_deref() {
             Some(id) => self
-                .delegation(id)
-                .map(|state| state.view.root_run_id.clone())
+                .delegation_header(id)
+                .await?
+                .map(|header| header.root_run_id)
                 .ok_or_else(|| Error::Module {
                     reason: refusal::CORRUPT.into(),
                     sentence: format!(
@@ -489,20 +490,23 @@ impl RunsModule {
             None => run_id.clone(),
         };
         self.pending_entry(&dispatch_id_for(&root_run_id))
+            .await?
             .ok_or_else(|| Error::Module {
                 reason: refusal::WRONG_STATE.into(),
                 sentence: format!("delegation root run {root_run_id} is no longer in flight"),
             })?;
-        let spent = self
-            .delegation_ids()
-            .into_iter()
-            .filter_map(|id| self.delegation(&id))
-            .filter(|state| {
-                state.view.root_run_id == root_run_id
-                    && state.view.status == DelegationStatus::Pending
-            })
-            .count();
-        if spent >= MAX_DELEGATIONS_PER_RUN {
+        let tree = self.delegation_tree(&root_run_id).await?;
+        let pending = tree.as_ref().map_or(0, |tree| tree.pending as usize);
+        let total = tree.as_ref().map_or(0, |tree| tree.ids.len());
+        if total >= MAX_DELEGATION_EDGES_PER_RUN {
+            return Err(Error::Module {
+                reason: refusal::CAPACITY.into(),
+                sentence: format!(
+                    "delegation tree has reached its lifetime limit of {MAX_DELEGATION_EDGES_PER_RUN} edges"
+                ),
+            });
+        }
+        if pending >= MAX_DELEGATIONS_PER_RUN {
             return Err(Error::Module {
                 reason: refusal::CAPACITY.into(),
                 sentence: format!(
@@ -576,24 +580,22 @@ impl RunsModule {
                 sentence,
             })?;
         let now = ctx.env().consensus_time;
-        self.pending_delegations.insert(
-            delegation_id.clone(),
-            Some(DelegationState {
-                view: DelegationView {
-                    delegation_id: delegation_id.clone(),
-                    request_id,
-                    caller_run_id: run_id.clone(),
-                    root_run_id,
-                    callee_run_id: callee_run_id.clone(),
-                    callee_agent_id: callee.agent_id.clone(),
-                    status: DelegationStatus::Pending,
-                    result: None,
-                    created_at: now,
-                    completed_at: None,
-                },
-                request,
-            }),
-        );
+        let delegation = DelegationState {
+            view: DelegationView {
+                delegation_id: delegation_id.clone(),
+                request_id,
+                caller_run_id: run_id.clone(),
+                root_run_id,
+                callee_run_id: callee_run_id.clone(),
+                callee_agent_id: callee.agent_id.clone(),
+                status: DelegationStatus::Pending,
+                result: None,
+                created_at: now,
+                completed_at: None,
+            },
+            request,
+        };
+        self.stage_delegation(&delegation).await?;
         self.stage_scoped_dispatch_run(
             ctx,
             &callee_run_id,
@@ -608,7 +610,13 @@ impl RunsModule {
                 ("mem_gb".into(), DELEGATED_CHILD_MEM_GB),
             ]),
             Some(delegation_id),
-        );
+        )
+        .await?;
+        // The callee dispatch has the fully composed instruction in its
+        // payload; no later production path needs the request body.
+        self.receipts.remove(crate::state::delegation_request_key(
+            &delegation.view.delegation_id,
+        ));
         Ok(())
     }
 

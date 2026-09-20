@@ -5,6 +5,10 @@ use super::*;
 use capability::validate_tag;
 use sdk::refusal;
 
+const MODEL_INDEX_KEY: &str = "model/index";
+const MODEL_ITEM_PREFIX: &str = "model/item/";
+const MODEL_OWNER_PREFIX: &str = "model/owner/";
+
 /// a skill's `source_prefix` must be a SCOPED duckfs subtree, never a
 /// namespace root: `resolve_skills` copies it verbatim into a run's
 /// dispatch payload, and the provisioner's checkout runs one full checkout
@@ -116,18 +120,183 @@ impl RunsModule {
         Ok(())
     }
 
-    pub(super) fn model(&self, id: &str) -> Option<&ModelRecord> {
-        match self.pending_models.get(id) {
-            Some(record) => record.as_ref(),
-            None => self.models.get(id),
+    fn model_item_key(id: &str) -> String {
+        format!("{MODEL_ITEM_PREFIX}{id}")
+    }
+
+    pub(crate) fn model_owner_key(owner: &RunOrigin) -> String {
+        format!(
+            "{MODEL_OWNER_PREFIX}{}",
+            serde_json::to_string(owner).expect("model owner serializes")
+        )
+    }
+
+    pub(super) fn corrupt_record(sentence: impl Into<String>) -> Error {
+        Error::Module {
+            reason: refusal::CORRUPT.into(),
+            sentence: sentence.into(),
         }
     }
 
-    pub(super) fn model_records(&self) -> Vec<ModelRecord> {
-        Self::visible_ids(&self.models, &self.pending_models)
-            .into_iter()
-            .filter_map(|id| self.model(&id).cloned())
-            .collect()
+    fn validate_model_record(id: &str, record: &ModelRecord) -> Result<(), Error> {
+        if id != record.agent_id || record.account == 0 {
+            return Err(Self::corrupt_record(
+                "model record key does not match its agent",
+            ));
+        }
+        validate_agent_id(id).map_err(Self::corrupt_record)?;
+        if sdk::wire::encode(record).len() > MAX_AGENT_RECORD_BYTES {
+            return Err(Self::corrupt_record("model record exceeds its store bound"));
+        }
+        Ok(())
+    }
+
+    async fn model_ids(&self) -> Result<Vec<String>, Error> {
+        self.index_ids(MODEL_INDEX_KEY, MAX_REGISTERED_AGENTS, "model registry")
+            .await
+    }
+
+    async fn owner_ids(&self, owner: &RunOrigin) -> Result<Vec<String>, Error> {
+        self.index_ids(
+            &Self::model_owner_key(owner),
+            MAX_AGENTS_PER_OWNER,
+            "model owner",
+        )
+        .await
+    }
+
+    async fn index_ids(&self, key: &str, limit: usize, label: &str) -> Result<Vec<String>, Error> {
+        let Some(bytes) = self.receipts.get(key).await? else {
+            return Ok(Vec::new());
+        };
+        let ids: Vec<String> = sdk::wire::decode(&bytes).map_err(Self::corrupt_record)?;
+        if ids.len() > limit || ids.windows(2).any(|pair| pair[0] >= pair[1]) {
+            return Err(Self::corrupt_record(format!("invalid {label} index")));
+        }
+        for id in &ids {
+            validate_agent_id(id).map_err(Self::corrupt_record)?;
+        }
+        Ok(ids)
+    }
+
+    fn stage_index(&mut self, key: &str, ids: &[String], limit: usize) -> Result<(), Error> {
+        if ids.len() > limit || ids.windows(2).any(|pair| pair[0] >= pair[1]) {
+            return Err(Error::Module {
+                reason: refusal::CAPACITY.into(),
+                sentence: "model index exceeds its capacity".into(),
+            });
+        }
+        self.receipts.stage(key.into(), sdk::wire::encode(&ids))
+    }
+
+    /// Install native test fixtures through the same point-record layout used
+    /// in production. Re-seeding only replaces model records, preserving any
+    /// unrelated receipt writes staged by the test's current block.
+    #[cfg(test)]
+    pub(crate) fn seed_test_models(
+        &mut self,
+        models: &BTreeMap<String, ModelRecord>,
+    ) -> Result<(), Error> {
+        if self.legacy_models.is_some() {
+            return Ok(());
+        }
+        let mut old_keys: BTreeSet<String> = self
+            .receipts
+            .snapshot()
+            .into_keys()
+            .filter(|key| key.starts_with("model/"))
+            .collect();
+        old_keys.extend(
+            self.receipts
+                .staged()
+                .keys()
+                .filter(|key| key.starts_with("model/"))
+                .cloned(),
+        );
+        for key in old_keys {
+            self.receipts.remove(key);
+        }
+
+        let ids: Vec<String> = models.keys().cloned().collect();
+        let mut owners = BTreeMap::<String, Vec<String>>::new();
+        for (id, record) in models {
+            Self::validate_model_record(id, record)?;
+            owners
+                .entry(Self::model_owner_key(&record.owner))
+                .or_default()
+                .push(id.clone());
+            self.receipts
+                .stage(Self::model_item_key(id), sdk::wire::encode(record))?;
+        }
+        self.stage_index(MODEL_INDEX_KEY, &ids, MAX_REGISTERED_AGENTS)?;
+        for (key, ids) in owners {
+            self.stage_index(&key, &ids, MAX_AGENTS_PER_OWNER)?;
+        }
+        Ok(())
+    }
+
+    /// Move the old collection into point records at the start of the first
+    /// mutable operation. The legacy map remains until commit so abort can
+    /// retry the exact old state without exposing a partial migration.
+    pub(super) fn stage_legacy_models(&mut self) -> Result<(), Error> {
+        let Some(legacy_models) = self.legacy_models.as_ref() else {
+            return Ok(());
+        };
+        if self.legacy_migration_staged {
+            return Ok(());
+        }
+        let models: Vec<(String, ModelRecord)> = legacy_models
+            .iter()
+            .map(|(id, record)| (id.clone(), record.clone()))
+            .collect();
+        let ids: Vec<String> = models.iter().map(|(id, _)| id.clone()).collect();
+        let mut owners = BTreeMap::<String, Vec<String>>::new();
+        for (id, record) in &models {
+            Self::validate_model_record(id, record)?;
+            owners
+                .entry(Self::model_owner_key(&record.owner))
+                .or_default()
+                .push(id.clone());
+            self.receipts
+                .stage(Self::model_item_key(id), sdk::wire::encode(record))?;
+        }
+        self.stage_index(MODEL_INDEX_KEY, &ids, MAX_REGISTERED_AGENTS)?;
+        for (key, ids) in owners {
+            self.stage_index(&key, &ids, MAX_AGENTS_PER_OWNER)?;
+        }
+        Ok(())
+    }
+
+    pub(super) async fn model(&self, id: &str) -> Result<Option<ModelRecord>, Error> {
+        if self.legacy_models.is_some() && !self.legacy_migration_staged {
+            return Ok(self
+                .legacy_models
+                .as_ref()
+                .and_then(|models| models.get(id).cloned()));
+        }
+        let Some(bytes) = self.receipts.get(&Self::model_item_key(id)).await? else {
+            return Ok(None);
+        };
+        let record: ModelRecord = sdk::wire::decode(&bytes).map_err(Self::corrupt_record)?;
+        Self::validate_model_record(id, &record)?;
+        Ok(Some(record))
+    }
+
+    pub(super) async fn model_records(&self) -> Result<Vec<ModelRecord>, Error> {
+        if let Some(legacy_models) = self.legacy_models.as_ref()
+            && !self.legacy_migration_staged
+        {
+            return Ok(legacy_models.values().cloned().collect());
+        }
+        let ids = self.model_ids().await?;
+        let mut records = Vec::with_capacity(ids.len());
+        for id in ids {
+            let Some(record) = self.model(&id).await? else {
+                return Err(Self::corrupt_record("model index names a missing record"));
+            };
+            records.push(record);
+        }
+        Ok(records)
     }
 
     pub(super) async fn account_control(
@@ -219,13 +388,12 @@ impl RunsModule {
                 sentence: format!("model record exceeds {MAX_AGENT_RECORD_BYTES} bytes"),
             });
         }
-        self.pending_models
-            .insert(record.agent_id.clone(), Some(record));
-        Ok(())
+        self.receipts
+            .stage(Self::model_item_key(&record.agent_id), bytes)
     }
 
-    fn registered_model(&self, id: &str) -> Result<ModelRecord, Error> {
-        self.model(id).cloned().ok_or_else(|| Error::Module {
+    async fn registered_model(&self, id: &str) -> Result<ModelRecord, Error> {
+        self.model(id).await?.ok_or_else(|| Error::Module {
             reason: refusal::NOT_FOUND.into(),
             sentence: format!("unknown model: {id}"),
         })
@@ -255,14 +423,14 @@ impl RunsModule {
                     reason: refusal::INVALID_INPUT.into(),
                     sentence,
                 })?;
-                if self.model(&agent_id).is_some() {
+                if self.model(&agent_id).await?.is_some() {
                     return Err(Error::Module {
                         reason: refusal::ALREADY_EXISTS.into(),
                         sentence: format!("model already exists: {agent_id}"),
                     });
                 }
-                let records = self.model_records();
-                if records.len() >= MAX_REGISTERED_AGENTS {
+                let mut ids = self.model_ids().await?;
+                if ids.len() >= MAX_REGISTERED_AGENTS {
                     return Err(Error::Module {
                         reason: refusal::CAPACITY.into(),
                         sentence: format!(
@@ -271,11 +439,8 @@ impl RunsModule {
                     });
                 }
                 let owner = canonical_origin(&ctx.env().origin)?;
-                let owned = records
-                    .iter()
-                    .filter(|record| record.owner == owner)
-                    .count();
-                if owned >= MAX_AGENTS_PER_OWNER {
+                let mut owned_ids = self.owner_ids(&owner).await?;
+                if owned_ids.len() >= MAX_AGENTS_PER_OWNER {
                     return Err(Error::Module {
                         reason: refusal::CAPACITY.into(),
                         sentence: format!(
@@ -290,7 +455,7 @@ impl RunsModule {
                 let record = ModelRecord {
                     account,
                     agent_id: agent_id.clone(),
-                    owner,
+                    owner: owner.clone(),
                     display_name,
                     capability: capability.clone(),
                     status: ModelStatus::Active,
@@ -301,6 +466,16 @@ impl RunsModule {
                     skills,
                 };
                 self.stage_model(record)?;
+                ids.push(agent_id.clone());
+                ids.sort_unstable();
+                self.stage_index(MODEL_INDEX_KEY, &ids, MAX_REGISTERED_AGENTS)?;
+                owned_ids.push(agent_id.clone());
+                owned_ids.sort_unstable();
+                self.stage_index(
+                    &Self::model_owner_key(&owner),
+                    &owned_ids,
+                    MAX_AGENTS_PER_OWNER,
+                )?;
                 self.apply_model_change(
                     ctx,
                     ModelChange::Registered {
@@ -316,7 +491,7 @@ impl RunsModule {
                 recipe_hash,
                 skills,
             } => {
-                let mut record = self.registered_model(&agent_id)?;
+                let mut record = self.registered_model(&agent_id).await?;
                 if let Some(name) = display_name {
                     Self::validate_non_empty("display_name", &name)?;
                     record.display_name = name;
@@ -357,8 +532,22 @@ impl RunsModule {
                     .await
             }
             ModelMsg::DeregisterModel { agent_id } => {
-                self.registered_model(&agent_id)?;
-                self.pending_models.insert(agent_id.clone(), None);
+                let record = self.registered_model(&agent_id).await?;
+                let mut ids = self.model_ids().await?;
+                ids.retain(|id| id != &agent_id);
+                self.stage_index(MODEL_INDEX_KEY, &ids, MAX_REGISTERED_AGENTS)?;
+                let mut owned_ids = self.owner_ids(&record.owner).await?;
+                owned_ids.retain(|id| id != &agent_id);
+                if owned_ids.is_empty() {
+                    self.receipts.remove(Self::model_owner_key(&record.owner));
+                } else {
+                    self.stage_index(
+                        &Self::model_owner_key(&record.owner),
+                        &owned_ids,
+                        MAX_AGENTS_PER_OWNER,
+                    )?;
+                }
+                self.receipts.remove(Self::model_item_key(&agent_id));
                 self.apply_model_change(ctx, ModelChange::Deregistered { agent_id })
             }
         }
@@ -370,7 +559,7 @@ impl RunsModule {
         id: String,
         status: ModelStatus,
     ) -> Result<(), Error> {
-        let mut record = self.registered_model(&id)?;
+        let mut record = self.registered_model(&id).await?;
         record.status = status;
         record.updated_at = ctx.env().consensus_time;
         self.stage_model(record)

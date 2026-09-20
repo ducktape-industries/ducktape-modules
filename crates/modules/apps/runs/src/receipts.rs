@@ -21,14 +21,16 @@ enum Backing {
 
 pub(super) struct Receipts {
     backing: Backing,
-    pending: Records,
+    /// this block's staged writes; `None` is a staged delete, which `get`
+    /// answers as absent and `commit` applies as a removal.
+    pending: BTreeMap<String, Option<Vec<u8>>>,
 }
 
 impl Default for Receipts {
     fn default() -> Self {
         Self {
             backing: Backing::Memory(Records::new()),
-            pending: Records::new(),
+            pending: BTreeMap::new(),
         }
     }
 }
@@ -38,13 +40,13 @@ impl Receipts {
     pub fn hosted(store: Box<dyn MerkleStore>) -> Self {
         Self {
             backing: Backing::Host(store),
-            pending: Records::new(),
+            pending: BTreeMap::new(),
         }
     }
 
     pub async fn get(&self, key: &str) -> Result<Option<Vec<u8>>, Error> {
-        if let Some(value) = self.pending.get(key) {
-            return Ok(Some(value.clone()));
+        if let Some(staged) = self.pending.get(key) {
+            return Ok(staged.clone());
         }
         match &self.backing {
             Backing::Memory(records) => Ok(records.get(key).cloned()),
@@ -75,19 +77,32 @@ impl Receipts {
                 sentence: "action receipt record exceeds the store value bound".into(),
             });
         }
-        self.pending.insert(key, value);
+        self.pending.insert(key, Some(value));
         Ok(())
+    }
+
+    /// Stage a removal. The store's write batch already carries deletes, so a
+    /// record that falls out of an index leaves nothing behind to decode.
+    pub fn remove(&mut self, key: String) {
+        self.pending.insert(key, None);
     }
 
     pub async fn commit(&mut self) -> Result<(), Error> {
         match &mut self.backing {
-            Backing::Memory(records) => records.append(&mut self.pending),
+            Backing::Memory(records) => {
+                for (key, staged) in std::mem::take(&mut self.pending) {
+                    match staged {
+                        Some(value) => records.insert(key, value),
+                        None => records.remove(&key),
+                    };
+                }
+            }
             #[cfg(any(test, all(feature = "guest", target_arch = "wasm32")))]
             Backing::Host(store) => {
                 let writes = self
                     .pending
                     .iter()
-                    .map(|(key, value)| (sdk::store_key(key.as_bytes()), Some(value.clone())))
+                    .map(|(key, value)| (sdk::store_key(key.as_bytes()), value.clone()))
                     .collect();
                 store.commit_batch(writes).await?;
                 self.pending.clear();
@@ -126,7 +141,7 @@ impl Receipts {
     }
 
     #[cfg(test)]
-    pub fn staged(&self) -> &Records {
+    pub fn staged(&self) -> &BTreeMap<String, Option<Vec<u8>>> {
         &self.pending
     }
 }

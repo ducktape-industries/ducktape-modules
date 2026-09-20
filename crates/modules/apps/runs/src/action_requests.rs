@@ -213,7 +213,7 @@ impl RunsModule {
                 ),
             });
         }
-        let Some(model) = self.model(&request.model_id) else {
+        let Some(model) = self.model(&request.model_id).await? else {
             return Err(Error::Module {
                 reason: refusal::NOT_FOUND.into(),
                 sentence: format!("model {} was removed", request.model_id),
@@ -235,7 +235,7 @@ impl RunsModule {
         match &request.scope {
             RequestScope::Result => Ok(()),
             RequestScope::Session { lease } => {
-                let Some(session) = self.session(&request.view.run_id) else {
+                let Some(session) = self.session(&request.view.run_id).await? else {
                     return Err(Error::Module {
                         reason: refusal::WRONG_STATE.into(),
                         sentence: format!("run {} has no live session", request.view.run_id),
@@ -250,7 +250,7 @@ impl RunsModule {
                         ),
                     });
                 }
-                self.session_holds_lease(ctx, &request.view.run_id, session)
+                self.session_holds_lease(ctx, &request.view.run_id, &session)
                     .await
             }
         }

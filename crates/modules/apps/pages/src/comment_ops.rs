@@ -96,6 +96,14 @@ impl Pages {
     /// a thread plus its LIVE (non-tombstoned) comments in order. `None` when
     /// the thread is absent; a listed comment missing from the store is
     /// corruption, surfaced loudly.
+    ///
+    /// Only the thread's first [`MAX_THREAD_VIEW_COMMENTS`] ids are READ: a
+    /// thread holds up to [`MAX_COMMENTS_PER_THREAD`] of them, and answering
+    /// one query with thousands of record reads makes the cost of the query
+    /// the size of the thread rather than the size of the reply. The
+    /// truncation is visible to the caller without a wire change — `thread`
+    /// still carries every id, so `comment_ids.len()` against `comments.len()`
+    /// says whether anything was left behind.
     pub(super) async fn thread_view(
         &self,
         thread_id: &str,
@@ -110,7 +118,6 @@ impl Pages {
             Some(t) => t,
             None => return Ok(None),
         };
-
         let start = match after {
             Some(cursor) => thread
                 .comment_ids
@@ -350,6 +357,20 @@ impl Pages {
                     let mut next = self.load_target_index(&target).await?;
                     if !next.contains(&thread_id) && next.len() >= MAX_THREADS_PER_TARGET {
                         return Err(PageError::TooManyThreads);
+                    }
+                    // a move carries the whole thread — its comments included —
+                    // onto the destination block, so it is charged the same
+                    // aggregate budget `AddComment` charges one reply. without
+                    // this, threads capped individually at their old targets
+                    // pile onto one block until removing it exceeds the
+                    // subtree-removal budget and the block can never be deleted.
+                    if !next.contains(&thread_id)
+                        && self.comment_work_for_target(&target).await?
+                            + thread.comment_ids.len()
+                            + 1
+                            > MAX_COMMENT_WORK_PER_TARGET
+                    {
+                        return Err(PageError::TooMuchCommentWork);
                     }
                     let mut previous = self.load_target_index(&thread.target).await?;
                     previous.retain(|id| id != &thread_id);

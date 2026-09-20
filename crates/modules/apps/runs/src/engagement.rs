@@ -272,39 +272,13 @@ impl RunsModule {
                             ),
                         });
                     };
-                    let bytes = ctx
-                        .query(
-                            source,
-                            &pages::encode_query(&pages::PageQuery::CommentThread {
-                                thread_id: comment.thread_id.clone(),
-                            }),
-                        )
-                        .await?;
-                    let pages::PageReply::CommentThread(Some(thread)) = pages::decode_reply(&bytes)
+                    let ordinal = self
+                        .page_comment_ordinal(&*ctx, source, &comment.thread_id, &comment.id)
+                        .await
                         .map_err(|sentence| Error::Module {
                             reason: refusal::UNEXPECTED_REPLY.into(),
                             sentence,
-                        })?
-                    else {
-                        return Err(Error::Module {
-                            reason: refusal::NOT_FOUND.into(),
-                            sentence: format!(
-                                "comment thread {} is unavailable",
-                                comment.thread_id
-                            ),
-                        });
-                    };
-                    let Some(index) = thread
-                        .comments
-                        .iter()
-                        .position(|item| item.id == comment.id)
-                    else {
-                        return Err(Error::Module {
-                            reason: refusal::UNEXPECTED_REPLY.into(),
-                            sentence: "comment is not in its thread".into(),
-                        });
-                    };
-                    let ordinal = index as u64 + 1;
+                        })?;
                     let prepared = self
                         .prepare_page_dispatch(
                             &*ctx,
@@ -386,7 +360,8 @@ impl RunsModule {
             };
         self.stage_dispatch_run(
             ctx, &run_id, agent_id, channel, anchor, requester, prepared, demands,
-        );
+        )
+        .await?;
         ctx.set_output(sdk::wire::encode(&serde_json::json!({"run_id": run_id})));
         Ok(())
     }

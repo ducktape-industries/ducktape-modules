@@ -23,6 +23,8 @@ fn page_trigger_thread() -> pages::ThreadView {
             edited_at: None,
             deleted: false,
         }],
+        has_more: false,
+        next_after: None,
     }
 }
 
@@ -37,14 +39,14 @@ fn pages_triggered_run_replies_in_the_same_comment_thread() {
         .with_registry(&registry)
         .with_page("p1", page_blocks("p1", "Spec"))
         .with_page_thread(page_trigger_thread());
-    m.models = registry.clone();
+    m.seed_test_models(&registry).unwrap();
     let run_id = page_run_id_for("thread-1", 1, "bot");
     let budget = SiblingReadBudget::default();
     let model = registry.get("bot").unwrap();
     let prepared =
         block_on(m.prepare_page_dispatch(&engage_ctx, model, &run_id, "thread-1", 1, &budget))
             .unwrap();
-    m.stage_dispatch_run(
+    block_on(m.stage_dispatch_run(
         &mut engage_ctx,
         &run_id,
         "bot".into(),
@@ -53,7 +55,8 @@ fn pages_triggered_run_replies_in_the_same_comment_thread() {
         RunOrigin::Program(2),
         prepared,
         BTreeMap::new(),
-    );
+    ))
+    .unwrap();
     commit(&mut m);
 
     let run_id = page_run_id_for("thread-1", 1, "bot");
@@ -94,11 +97,41 @@ fn pages_triggered_run_replies_in_the_same_comment_thread() {
 }
 
 #[test]
+fn pages_comment_pagination_rejects_missing_or_non_advancing_cursors() {
+    let max_queries =
+        pages::MAX_COMMENTS_PER_THREAD.div_ceil(usize::from(pages::MAX_PAGE_QUERY_LIMIT));
+    let module = module().with_pages_module("pages");
+
+    for use_ordinal_lookup in [false, true] {
+        for (label, non_advancing) in [("missing", false), ("non-advancing", true)] {
+            let ctx = CaptureCtx::new().with_page_thread(page_trigger_thread());
+            let ctx = if non_advancing {
+                ctx.with_non_advancing_page_thread_cursor()
+            } else {
+                ctx.with_missing_page_thread_cursor()
+            };
+            let error = if use_ordinal_lookup {
+                block_on(module.page_comment_at_ordinal(&ctx, "pages", "thread-1", 1)).unwrap_err()
+            } else {
+                block_on(module.page_comment_ordinal(&ctx, "pages", "thread-1", "comment-1"))
+                    .unwrap_err()
+            };
+            assert!(error.contains("pages thread pagination failed to advance"));
+            assert!(
+                ctx.page_thread_query_count() <= max_queries,
+                "{label} cursor took too many queries: {}",
+                ctx.page_thread_query_count()
+            );
+        }
+    }
+}
+
+#[test]
 fn inline_page_composer_keeps_the_exact_source_when_page_context_is_bounded() {
     let registry = registry(&["bot"]);
     let model = registry.get("bot").unwrap();
     let mut module = module().with_pages_module("pages");
-    module.models = registry.clone();
+    module.seed_test_models(&registry).unwrap();
     let mut blocks = page_with_block_count(1024, &"x".repeat(4096));
     let target = blocks.last_mut().unwrap();
     target.text = "Review this exact final block".into();
@@ -374,7 +407,7 @@ fn a_pathological_channel_still_yields_a_safe_hashed_comment_id() {
     let channel = "c".repeat(400);
     let registry = registry(&["bot"]);
     let mut m = module().with_pages_module("pages");
-    m.models = registry.clone();
+    m.seed_test_models(&registry).unwrap();
     commit(&mut m);
     let mut ctx = CaptureCtx::new()
         .at(2)

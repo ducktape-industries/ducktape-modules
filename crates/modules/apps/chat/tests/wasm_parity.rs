@@ -67,6 +67,7 @@ fn fill_message_head(head: &mut MessageHead) -> String {
 }
 
 async fn exercise_message_capacity(host: &mut Host) -> Vec<host::DispatchRecord> {
+    let chain = "dognet-b5b6ea90".parse().expect("test chain id");
     let keys: Vec<_> = (1..=3)
         .map(|seed| {
             ed25519::PrivateKey::from_seed(seed)
@@ -230,7 +231,7 @@ async fn exercise_message_capacity(host: &mut Host) -> Vec<host::DispatchRecord>
             "system",
             None,
             chat::client::ChatReader::nobody(),
-            &"dognet-b5b6ea90".parse().expect("test chain"),
+            &chain,
             height,
         )
         .unwrap()
@@ -240,11 +241,8 @@ async fn exercise_message_capacity(host: &mut Host) -> Vec<host::DispatchRecord>
             | chat::client::ChatDelta::Edited { message, .. } => message,
             other => panic!("unexpected delta {other:?}"),
         };
-        let hydrated = chat::client::chat_message(
-            projected,
-            chat::client::ChatReader::nobody(),
-            &"dognet-b5b6ea90".parse().expect("test chain"),
-        );
+        let hydrated =
+            chat::client::chat_message(projected, chat::client::ChatReader::nobody(), &chain);
         assert_eq!(message.blocks, hydrated.blocks);
         assert_eq!(message.body, hydrated.body);
         trace.extend(outcome.dispatches);
@@ -406,6 +404,7 @@ async fn exercise_key_mention_fanout(
     write: FanoutWrite,
     references: FanoutReferences,
 ) {
+    let chain = "dognet-b5b6ea90".parse().expect("test chain id");
     let signer = fanout_key(1);
     let created = host
         .submit_at(
@@ -561,7 +560,7 @@ async fn exercise_key_mention_fanout(
         "system",
         None,
         chat::client::ChatReader::nobody(),
-        &"dognet-b5b6ea90".parse().expect("test chain"),
+        &chain,
         height,
     )
     .unwrap()
@@ -571,11 +570,8 @@ async fn exercise_key_mention_fanout(
         | chat::client::ChatDelta::Edited { message, .. } => message,
         other => panic!("unexpected delta {other:?}"),
     };
-    let hydrated = chat::client::chat_message(
-        projected,
-        chat::client::ChatReader::nobody(),
-        &"dognet-b5b6ea90".parse().expect("test chain"),
-    );
+    let hydrated =
+        chat::client::chat_message(projected, chat::client::ChatReader::nobody(), &chain);
     assert_eq!(message.blocks, hydrated.blocks);
     assert_eq!(message.body, hydrated.body);
 

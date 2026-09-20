@@ -23,7 +23,7 @@ const MODULE_ID: &str = "runs";
 /// surface, saga the dead-letter origin, attribution the source-report plane,
 /// dispatch the recipe and call ledger, agent the program executor, tasks/jobs the
 /// action and board lanes, files the envelope's source-snapshot pin, forge
-/// the PR/merge sink target, pages the `duck://page/` context + effects lane,
+/// the PR/merge sink target, pages the canonical page context + effects lane,
 /// collaboration the agent-to-agent messaging plane.
 const CHAT_ID: &str = "chat";
 const SAGA_ID: &str = "saga";
@@ -86,10 +86,19 @@ fn loaded_module() -> Result<RunsModule, host::Error> {
     .with_collaboration_module(COLLABORATION_ID)
     // the per-network parameter a fixed component cannot compile in: the host
     // seeded it into this store tenant's genesis records (`__config`), and every
-    // `duck://` link the injector renders stamps its `?net=` half from it. a
-    // missing or malformed record is host wiring corruption, refused
-    // deterministically rather than silently producing network-less links.
-    .with_chain_id(ducktape_module_sdk::store_genesis_chain_id(MODULE_ID)?)
+    // canonical `duck://` link the injector renders carries it in its authority.
+    // A missing, malformed, or non-ChainId record is host wiring corruption,
+    // refused deterministically rather than silently producing foreign links.
+    .with_chain_id({
+        let chain_id = ducktape_module_sdk::store_genesis_chain_id(MODULE_ID)?;
+        crate::RunsModule::parse_address_chain_id(&chain_id).map_err(|error| {
+            rejected(
+                refusal::INVALID_INPUT,
+                format!("runs genesis chain_id invalid: {error}"),
+            )
+        })?;
+        chain_id
+    })
     .with_time_unit(ducktape_module_sdk::store_genesis_time_unit(MODULE_ID)?);
     if let Some((bytes, root)) = load_store_state() {
         module
@@ -151,7 +160,7 @@ impl Guest for Component {
         // commit/abort boundary (see the crate doc), so an aborted block
         // discards the ring append exactly like the native `abort_block`.
         block_on(module.commit_block()).map_err(error_to_wit)?;
-        save_store_state(&module.snapshot(), module.root().as_bytes());
+        save_store_state(&module.snapshot(), module.root().as_bytes())?;
         host::state_set(&sdk::store_key(HISTORY_KEY), &module.history_snapshot());
         Ok(())
     }
@@ -174,7 +183,7 @@ impl Guest for Component {
         block_on(module.acknowledge(&mut ctx, &ducktape_module_sdk::ack_from_wit(ack)))
             .map_err(error_to_wit)?;
         block_on(module.commit_block()).map_err(error_to_wit)?;
-        save_store_state(&module.snapshot(), module.root().as_bytes());
+        save_store_state(&module.snapshot(), module.root().as_bytes())?;
         Ok(())
     }
 
