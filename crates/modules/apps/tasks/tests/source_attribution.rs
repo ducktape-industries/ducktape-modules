@@ -561,7 +561,10 @@ fn every_semantic_worker_event_is_delivered_once_from_an_immutable_source() {
             assert_eq!(detail.created_at_revision, 1);
             assert_eq!(detail.job_attempt, 1);
             assert_eq!(detail.submitter, Party::Account(1));
-            assert_eq!(detail.actor, change.actor);
+            assert_eq!(
+                sdk::wire::encode(&detail.actor),
+                sdk::wire::encode(&change.actor)
+            );
             assert_eq!(detail.height, change.height);
             assert_eq!(detail.operation, operation);
             let source_root = host.module_root("attribution").unwrap();

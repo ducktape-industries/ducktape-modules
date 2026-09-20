@@ -52,6 +52,7 @@ use std::collections::BTreeMap;
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
+use crate::consumer_wire::{attribution, dispatch};
 pub use attribution::Reason;
 pub use dispatch::{Attempt, CallOutcome, Refusal};
 pub use sdk::AccountNumber;

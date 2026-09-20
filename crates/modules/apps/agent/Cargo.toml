@@ -21,14 +21,8 @@ guest = ["dep:ducktape-module-sdk"]
 # crate, pulled only when the guest build compiles this crate for wasm32.
 ducktape-module-sdk = { workspace = true, optional = true }
 sdk = { workspace = true }
-# the three siblings whose wire surfaces cross this edge: identity (the
-# program account and its control record), attribution (the change that
-# invokes a program, and the report a program emits), dispatch (the call
-# queue and the mailbox a call's completion returns through). wire types
-# and codecs only — no sibling's module logic is linked here.
-identity = { workspace = true }
-attribution = { workspace = true }
-dispatch = { workspace = true }
+# sibling wire contracts are owned locally in `src/consumer_wire.rs`; no
+# sibling module or shared wire crate is linked here.
 # the store-record codec (and, for interface types, the stored-embedded
 # derive): compact, canonical, deterministic. wire stays sdk::wire.
 borsh = { workspace = true }

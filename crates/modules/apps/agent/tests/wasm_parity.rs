@@ -1,6 +1,7 @@
 //! Compiled program, attribution and dispatch guests preserve authority fences,
 //! failure recovery and earlier successful effects across queued reaction steps.
 
+use agent::consumer_wire::{attribution, identity};
 use agent::{AgentMsg, Continuation, Decode, Program, Step, Value};
 use attribution::{
     Actor, AttributionMsg, AttributionQuery, AttributionReply, ObjectRef, Reason, Relation,

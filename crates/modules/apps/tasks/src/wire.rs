@@ -19,7 +19,7 @@
 //! board-prefixed `encode_task_*`/`encode_job_*` helpers wrap a board message
 //! in that envelope, so a caller keeps building `TaskMsg`/`JobsMsg` values.
 
-pub use attribution::Actor as Party;
+pub use crate::consumer_wire::attribution::Actor as Party;
 use sdk::AccountNumber;
 use serde::{Deserialize, Serialize};
 
