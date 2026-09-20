@@ -345,6 +345,7 @@ impl RunsModule {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use collaboration::Party as ChatParty;
 
     // ---- channel parsing ------------------------------------------------------
 
@@ -432,7 +433,7 @@ mod tests {
             kind,
             title: "t".into(),
             state,
-            author: chat::Party::Key(vec![1; 32]),
+            author: ChatParty::Key(vec![1; 32]),
             created_at: 1,
             updated_at: 2,
         };
@@ -459,7 +460,7 @@ mod tests {
                 kind,
                 title: "Fix the flaky gate".into(),
                 state: forge::ItemState::Open,
-                author: chat::Party::Key(vec![1; 32]),
+                author: ChatParty::Key(vec![1; 32]),
                 created_at: 1,
                 updated_at: 2,
             },

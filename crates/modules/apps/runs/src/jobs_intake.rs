@@ -1,3 +1,4 @@
+use crate::tasks;
 use super::{
     Ctx, DispatchMsg, Error, JOB_FINALIZE_PAYLOAD_BYTES, JOB_RUN_LEASE_VIEWS, JobStatus, JobsEvent,
     JobsMsg, JobsQuery, JobsReply, MAX_PAYLOAD_BYTES, Msg, PendingState, RunsModule,

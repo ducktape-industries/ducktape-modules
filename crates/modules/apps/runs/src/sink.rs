@@ -667,6 +667,7 @@ impl RunsModule {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use collaboration::Party as ChatParty;
 
     fn block(kind: &str, text: &str, lang: Option<&str>) -> ReplyBlock {
         ReplyBlock {
@@ -878,7 +879,7 @@ mod tests {
         };
         assert_eq!(
             item.summary.author,
-            chat::Party::Module("runs".into()),
+            ChatParty::Module("runs".into()),
             "the PR is authored by the emitting MODULE, not a forged user"
         );
         let _ = std::fs::remove_dir_all(&base);

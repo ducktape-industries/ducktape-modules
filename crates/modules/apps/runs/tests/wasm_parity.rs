@@ -3,14 +3,13 @@
 //! leased interactive sessions and job finalization. Both hosts run the same
 //! native siblings; only runs changes runtime. Every block compares events,
 //! decoded queries and sibling roots. Runs roots use different physical layouts.
-use agent::AgentModule;
-use agent_module as agent;
 use attribution::AttributionModule;
 use attribution_module as attribution;
 use capability::{CapabilityMsg, CapabilityRegistry};
 use capability_module as capability;
+use runs::contracts::{agent, chat, pages, tasks};
 use chat::{
-    Block, Chat, ChatMsg, ChatQuery, ChatReply, Mark, Party, PostPolicy, Span,
+    Block, ChatMsg, ChatQuery, ChatReply, Mark, Party, PostPolicy, Span,
     decode_reply as chat_decode_reply, encode_msg as chat_encode_msg,
     encode_query as chat_encode_query,
 };
@@ -23,7 +22,6 @@ use dispatch_module as dispatch;
 use files::Files;
 use host::{BlockContext, Host, MemberOutcome, SubmitError};
 use identity_module as identity;
-use pages::Pages;
 use runs::{ActionEnvelope, AgentResponse, OP_TASKS_CREATE, ReplyBlock, SkillRef, encode_response};
 use runs::{
     RunsModule, RunsMsg, RunsQuery, RunsReply, decode_reply as runs_decode_reply, dispatch_id_for,
@@ -39,7 +37,7 @@ use sdk::{Error, Event, Msg, Origin, StateRoot};
 use statesync::qmdb::QmdbStore;
 use tasks::{JobsMsg, encode_job_msg as jobs_encode_msg};
 use tasks::{
-    TaskQuery, TaskReply, Tasks, decode_task_reply as tasks_decode_reply,
+    TaskQuery, TaskReply, decode_task_reply as tasks_decode_reply,
     encode_task_query as tasks_encode_query,
 };
 use valset::Valset;
@@ -49,6 +47,10 @@ use wasm_host::WasmModule;
 /// GENERATED artifact — built from the `runs` module's guest port by
 /// guest-builder (`make wasm-modules`); committed so this proof is self-contained.
 const RUNS_WASM: &[u8] = include_bytes!("../component.wasm");
+const AGENT_WASM: &[u8] = include_bytes!("../../agent/component.wasm");
+const CHAT_WASM: &[u8] = include_bytes!("../../chat/component.wasm");
+const PAGES_WASM: &[u8] = include_bytes!("../../pages/component.wasm");
+const TASKS_WASM: &[u8] = include_bytes!("../../tasks/component.wasm");
 
 /// the chain id both hosts run on — the genesis `__config` parameter the
 /// composer seeds into this store tenant, and the network every `duck://`
@@ -168,17 +170,8 @@ async fn siblings(
     let pages_store = QmdbStore::init(context.child(pages_label), "pages").await;
     let agent_store = QmdbStore::init(context.child(agent_label), "agent").await;
     let mut modules: Vec<Box<dyn sdk::Module>> = vec![
-        Box::new(
-            Chat::new("chat", Box::new(chat_store))
-                .with_identity("identity")
-                .with_attribution("attribution"),
-        ),
-        Box::new(
-            Pages::new("pages", Box::new(pages_store))
-                .with_identity("identity")
-                .with_attribution("attribution")
-                .with_files("files"),
-        ),
+        Box::new(WasmModule::with_store("chat", CHAT_WASM, Box::new(chat_store)).unwrap()),
+        Box::new(WasmModule::with_store("pages", PAGES_WASM, Box::new(pages_store)).unwrap()),
         Box::new(
             AttributionModule::new("attribution", Box::new(sdk_testkit::MemStore::new()))
                 .with_subscribers(["agent"]),
@@ -195,21 +188,8 @@ async fn siblings(
             "identity",
             Box::new(sdk_testkit::MemStore::new()),
         )),
-        Box::new(AgentModule::new(
-            "agent",
-            Box::new(agent_store),
-            agent::Siblings {
-                identity: "identity".into(),
-                attribution: "attribution".into(),
-                dispatch: "dispatch".into(),
-            },
-        )),
-        Box::new(Tasks::new(
-            "tasks",
-            "identity",
-            "attribution",
-            Box::new(sdk_testkit::MemStore::new()),
-        )),
+        Box::new(WasmModule::with_store("agent", AGENT_WASM, Box::new(agent_store)).unwrap()),
+        Box::new(WasmModule::with_store("tasks", TASKS_WASM, Box::new(sdk_testkit::MemStore::new())).unwrap()),
         Box::new(Files::open("files", files_dir).expect("files open")),
     ];
     if let Some(members) = assignment_members {
@@ -921,7 +901,7 @@ impl Pair {
                 &agent::AgentMsg::Provision {
                     request_id: id.into(),
                     name: id.into(),
-                    program: runs::model_program(id),
+                    program: agent::from_wire(runs::model_program(id)),
                 },
             ),
         )

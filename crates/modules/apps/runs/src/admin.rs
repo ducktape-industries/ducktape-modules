@@ -148,7 +148,14 @@ impl RunsModule {
                 kind,
                 payload,
             } => {
-                self.report_job(ctx, run_id, attempt, operation_id, kind, payload)
+                self.report_job(
+                    ctx,
+                    run_id,
+                    attempt,
+                    operation_id,
+                    crate::contracts::as_wire(kind),
+                    payload,
+                )
                     .await
             }
             RunsMsg::SettleJobCancellation {
@@ -201,6 +208,7 @@ impl RunsModule {
                 call,
                 result,
             } => {
+                let result = crate::contracts::agent::from_wire(result);
                 self.complete_action_request(ctx, request_id, call, result)
                     .await
             }

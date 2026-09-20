@@ -1,5 +1,6 @@
 //! Effectful adapter for the pure conversation transition core.
 use super::*;
+use crate::{chat, pages, tasks};
 use sdk::refusal;
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -155,10 +156,10 @@ impl RunsModule {
             .map(|job| WorkerControls {
                 job_id: job.job_id,
                 job_attempt: job.attempt,
-                job_status: job.status,
-                result: job.result,
-                controls: job.controls,
-                reports: job.reports,
+                job_status: crate::contracts::as_wire(job.status),
+                result: crate::contracts::as_wire(job.result),
+                controls: crate::contracts::as_wire(job.controls),
+                reports: crate::contracts::as_wire(job.reports),
             }))
     }
     async fn authorize_execution_boundary(

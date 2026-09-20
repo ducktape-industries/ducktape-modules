@@ -1,9 +1,9 @@
 #![allow(dead_code)]
 //! Real host regression: mentions reach a keyless model program, and external
 //! session credentials propose work whose actual target runs as that account.
-// the NATIVE modules under their module names — the same names in
-// [dependencies] are the wire surfaces these re-export.
-use agent_module as agent;
+// The app siblings are the committed guest components. Runs only imports the
+// small local contracts below, so this host proof does not pull sibling source.
+pub use runs::contracts::{agent, chat, pages, tasks};
 use attribution_module as attribution;
 use capability_module as capability;
 use dispatch_module as dispatch;
@@ -13,6 +13,12 @@ use valset_module as valset;
 use host::{BlockContext, Host};
 use sdk::{Msg, Origin, StateRoot, StateSyncHandle};
 use sdk_testkit::MemStore;
+use wasm_host::WasmModule;
+
+const AGENT_WASM: &[u8] = include_bytes!("../../../agent/component.wasm");
+const CHAT_WASM: &[u8] = include_bytes!("../../../chat/component.wasm");
+const PAGES_WASM: &[u8] = include_bytes!("../../../pages/component.wasm");
+const TASKS_WASM: &[u8] = include_bytes!("../../../tasks/component.wasm");
 
 pub fn store() -> Box<dyn sdk::MerkleStore> {
     Box::new(MemStore::new())
@@ -103,25 +109,9 @@ impl Network {
                 attribution::AttributionModule::new("attribution", store())
                     .with_subscribers(["agent"]),
             ),
-            Box::new(agent::AgentModule::new(
-                "agent",
-                store(),
-                agent::Siblings {
-                    identity: "identity".into(),
-                    attribution: "attribution".into(),
-                    dispatch: "dispatch".into(),
-                },
-            )),
-            Box::new(
-                chat::Chat::new("chat", store())
-                    .with_identity("identity")
-                    .with_attribution("attribution"),
-            ),
-            Box::new(
-                pages::Pages::new("pages", store())
-                    .with_identity("identity")
-                    .with_attribution("attribution"),
-            ),
+            Box::new(WasmModule::with_store("agent", AGENT_WASM, store()).unwrap()),
+            Box::new(WasmModule::with_store("chat", CHAT_WASM, store()).unwrap()),
+            Box::new(WasmModule::with_store("pages", PAGES_WASM, store()).unwrap()),
             Box::new(valset),
             Box::new(capability::CapabilityRegistry::new(
                 "capability",
@@ -141,12 +131,7 @@ impl Network {
                 "identity",
                 store(),
             )),
-            Box::new(tasks::Tasks::new(
-                "tasks",
-                "identity",
-                "attribution",
-                store(),
-            )),
+            Box::new(WasmModule::with_store("tasks", TASKS_WASM, store()).unwrap()),
             Box::new(
                 runs::RunsModule::new(
                     "runs",
@@ -237,7 +222,8 @@ impl Network {
         task
     }
     pub async fn provision(&mut self) -> String {
-        self.provision_program(runs::model_program("builder")).await
+        self.provision_program(agent::from_wire(runs::model_program("builder")))
+            .await
     }
     pub async fn provision_program(&mut self, program: agent::Program) -> String {
         self.submit(

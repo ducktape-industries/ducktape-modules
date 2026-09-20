@@ -140,7 +140,7 @@ fn a_programs_changed_payload_cannot_complete_the_original_proposal() {
     block_on(async {
         use agent::{Step, Value};
         use std::collections::BTreeMap;
-        let mut program = runs::model_program("builder");
+        let mut program: agent::Program = agent::from_wire(runs::model_program("builder"));
         for step in &mut program.steps {
             let Step::Call { module, msg, .. } = step else {
                 continue;
@@ -231,7 +231,7 @@ fn an_actual_target_rejection_reaches_the_tool_receipt() {
 #[test]
 fn a_program_that_ignores_a_tool_request_returns_a_terminal_receipt() {
     block_on(async {
-        let mut program = runs::model_program("builder");
+        let mut program: agent::Program = agent::from_wire(runs::model_program("builder"));
         let finish = program.steps.len() as u64 - 1;
         let agent::Step::Branch { then, .. } = &mut program.steps[0] else {
             panic!("default router");

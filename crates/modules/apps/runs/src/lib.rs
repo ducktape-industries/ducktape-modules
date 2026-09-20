@@ -10,6 +10,10 @@
 pub use runs_wire::catalog;
 pub use runs_wire::*;
 
+pub mod contracts;
+pub use contracts::{chat, pages, tasks};
+use contracts::agent;
+
 mod model_config;
 
 mod conversations;
@@ -32,7 +36,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use attribution::{Actor, AttributionMsg, ObjectRef, Reason, Relation};
-use chat::{
+use crate::chat::{
     Block, ChatMsg, ChatQuery, ChatReply, MAX_THREAD_REPLIES, MessageView,
     decode_reply as chat_decode_reply, encode_msg as chat_encode_msg,
     encode_query as chat_encode_query,
@@ -50,12 +54,12 @@ use files::{
 use sdk::{Ctx, Error, Event, Module, ModuleId, Msg, Origin, StateRoot, StateSyncHandle};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tasks::{
+use crate::tasks::{
     JobStatus, JobsEvent, JobsMsg, JobsQuery, JobsReply, decode_job_event as jobs_decode_event,
     decode_job_reply as jobs_decode_reply, encode_job_msg as jobs_encode_msg,
     encode_job_query as jobs_encode_query,
 };
-use tasks::{
+use crate::tasks::{
     TaskMsg, TaskQuery, TaskReply, TaskStatus, decode_task_reply as tasks_decode_reply,
     encode_task_msg as tasks_encode_msg, encode_task_query as tasks_encode_query,
 };
