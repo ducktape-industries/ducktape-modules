@@ -11,9 +11,11 @@
 //! account must continue its numbering and still refuse the change it
 //! already held.
 
-use attribution::{Actor, AttributionEvent, Change, ChangeKind, Reason, Source, encode_event};
 use commonware_runtime::{Runner as _, Supervisor as _, deterministic};
-use identity::{
+use inbox::consumer_wire::attribution::{
+    Actor, AttributionEvent, Change, ChangeKind, Reason, Source, encode_event,
+};
+use inbox::consumer_wire::identity::{
     AccountView, Control, IdentityQuery, IdentityReply, KeyScheme, KeyView,
     decode_query as identity_decode_query, encode_reply as identity_encode_reply,
 };

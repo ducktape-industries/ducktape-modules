@@ -26,7 +26,7 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
-pub use attribution::ChangeRef;
+pub use crate::consumer_wire::attribution::ChangeRef;
 pub use sdk::AccountNumber;
 
 /// per-account queue bound. when a delivery would exceed this, the OLDEST

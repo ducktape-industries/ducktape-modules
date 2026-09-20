@@ -8,5 +8,5 @@ version.workspace = true
 [dependencies]
 sdk = { workspace = true }
 directory = { workspace = true }
-kv = { workspace = true }
+serde = { workspace = true }
 async-trait = { workspace = true }

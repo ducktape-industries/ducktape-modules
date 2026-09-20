@@ -7,7 +7,6 @@ mod producer;
 pub use producer::*;
 
 use borsh::{BorshDeserialize, BorshSerialize};
-use consumer_wire::Party;
 use consumer_wire::chat::{
     Block, ChatEvent, ChatMsg, ChatQuery, ChatReply, decode_event as chat_decode_event,
     decode_reply as chat_decode_reply, encode_msg as chat_encode_msg,
@@ -18,6 +17,7 @@ use consumer_wire::tasks::{
     decode_task_reply as tasks_decode_reply, encode_task_msg as tasks_encode_msg,
     encode_task_query as tasks_encode_query,
 };
+use consumer_wire::{Party, attribution, identity};
 use sdk::refusal;
 use sdk::{
     AccountNumber, Ctx, Error, MerkleStore, Module, ModuleId, Msg, Origin, ResolverSyncTarget,

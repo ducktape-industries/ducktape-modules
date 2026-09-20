@@ -82,6 +82,8 @@
 mod producer;
 pub use producer::*;
 
+pub mod consumer_wire;
+
 // the derived-tier read model: the PURE decision core (fold + view over
 // index_guest::StateRead), compiled everywhere and unit-tested natively.
 // the engine shell that runs it inside the module's index database is
@@ -103,9 +105,10 @@ mod index_guest;
 use sdk::refusal;
 use std::cmp::Ordering;
 
-use attribution::{AttributionEvent, Change, decode_event};
 use borsh::{BorshDeserialize, BorshSerialize};
-use identity::{
+use consumer_wire::attribution::{AttributionEvent, Change, decode_event};
+use consumer_wire::identity;
+use consumer_wire::identity::{
     Control, IdentityQuery, IdentityReply, decode_reply as identity_decode_reply,
     encode_query as identity_encode_query,
 };
