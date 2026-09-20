@@ -433,14 +433,14 @@ fn synced_store_reconstructs_source_root_and_records() {
         let AgentReply::Invocations(listing) = invocations else {
             panic!("listing");
         };
-        assert_eq!(listing.len(), 1);
-        assert_eq!(listing[0].invocation.seq, 9);
+        assert_eq!(listing.entries.len(), 1);
+        assert_eq!(listing.entries[0].invocation.seq, 9);
         assert_eq!(
-            listing[0].invocation.status,
+            listing.entries[0].invocation.status,
             Status::Finished { at_step: 1 }
         );
         assert_eq!(
-            listing[0].invocation.bindings["posted"],
+            listing.entries[0].invocation.bindings["posted"],
             serde_json::json!({"applied": {"output": {"message_id": "m10"}, "assigned": null}})
         );
     });

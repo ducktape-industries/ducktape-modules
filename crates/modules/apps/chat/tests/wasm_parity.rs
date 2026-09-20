@@ -200,6 +200,7 @@ async fn exercise_message_capacity(host: &mut Host) -> Vec<host::DispatchRecord>
         index_guest::apply_to_map(&mut indexed, writes);
         let request = serde_json::to_vec(&chat::index::ChatViewQuery::Message {
             message_id: "long".into(),
+            viewer_handles: Vec::new(),
         })
         .unwrap();
         let indexed_bytes = chat::index::serve_view(&indexed, &request).unwrap();
@@ -541,6 +542,7 @@ async fn exercise_key_mention_fanout(
         &indexed,
         &serde_json::to_vec(&chat::index::ChatViewQuery::Message {
             message_id: "fanout-message".into(),
+            viewer_handles: Vec::new(),
         })
         .unwrap(),
     )

@@ -23,6 +23,8 @@ fn page_trigger_thread() -> pages::ThreadView {
             edited_at: None,
             deleted: false,
         }],
+        has_more: false,
+        next_after: None,
     }
 }
 
@@ -92,6 +94,36 @@ fn pages_triggered_run_replies_in_the_same_comment_thread() {
     assert_eq!(text, "Reviewed.");
     assert!(mentions.is_empty());
     assert!(anchor.is_none());
+}
+
+#[test]
+fn pages_comment_pagination_rejects_missing_or_non_advancing_cursors() {
+    let max_queries =
+        pages::MAX_COMMENTS_PER_THREAD.div_ceil(usize::from(pages::MAX_PAGE_QUERY_LIMIT));
+    let module = module().with_pages_module("pages");
+
+    for use_ordinal_lookup in [false, true] {
+        for (label, non_advancing) in [("missing", false), ("non-advancing", true)] {
+            let ctx = CaptureCtx::new().with_page_thread(page_trigger_thread());
+            let ctx = if non_advancing {
+                ctx.with_non_advancing_page_thread_cursor()
+            } else {
+                ctx.with_missing_page_thread_cursor()
+            };
+            let error = if use_ordinal_lookup {
+                block_on(module.page_comment_at_ordinal(&ctx, "pages", "thread-1", 1)).unwrap_err()
+            } else {
+                block_on(module.page_comment_ordinal(&ctx, "pages", "thread-1", "comment-1"))
+                    .unwrap_err()
+            };
+            assert!(error.contains("pages thread pagination failed to advance"));
+            assert!(
+                ctx.page_thread_query_count() <= max_queries,
+                "{label} cursor took too many queries: {}",
+                ctx.page_thread_query_count()
+            );
+        }
+    }
 }
 
 #[test]

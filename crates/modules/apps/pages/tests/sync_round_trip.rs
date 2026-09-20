@@ -198,6 +198,8 @@ fn synced_store_reconstructs_source_root() {
             &synced
                 .query(&encode_query(&PageQuery::CommentThread {
                     thread_id: "th1".into(),
+                    after: None,
+                    limit: 0,
                 }))
                 .await
                 .unwrap(),

@@ -873,11 +873,14 @@ impl Module for Pages {
                     });
                 Ok(encode_reply(&PageReply::CommentThreadHead(head)))
             }
-            PageQuery::CommentThread { thread_id } => {
+            PageQuery::CommentThread {
+                thread_id,
+                after,
+                limit,
+            } => {
                 let view = self
-                    .thread_view(&thread_id)
-                    .await
-                    .map_err(super::page_refusal)?;
+                    .thread_view(&thread_id, after.as_deref(), limit)
+                    .await?;
                 Ok(encode_reply(&PageReply::CommentThread(view)))
             }
             PageQuery::GetComment { comment_id } => {
