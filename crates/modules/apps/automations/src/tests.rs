@@ -28,7 +28,7 @@ use crate::consumer_wire::chat::{
     decode_msg as chat_decode_msg, decode_query as chat_decode_query,
     encode_event as chat_encode_event, encode_reply as chat_encode_reply,
 };
-use crate::consumer_wire::{Party, tasks};
+use crate::consumer_wire::{Party, attribution, identity, tasks};
 use crate::{AutomationsReply, decode_reply, encode_msg, encode_query};
 use attribution::{AttributionMsg, decode_msg as attribution_decode_msg};
 use futures::executor::block_on;

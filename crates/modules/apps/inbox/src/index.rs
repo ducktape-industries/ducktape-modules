@@ -34,7 +34,7 @@
 //! compiled natively and unit-tested against a plain map. the wasm shell
 //! (`src/index_guest.rs`, feature `index-guest`) wires it into the engine.
 
-use attribution::{AttributionEvent, ChangeRef, decode_event};
+use crate::consumer_wire::attribution::{AttributionEvent, ChangeRef, decode_event};
 use index_guest::{Fail, OpRow, OriginKind, StateRead, Writes};
 use serde::{Deserialize, Serialize};
 
@@ -331,8 +331,10 @@ pub fn serve_view(read: &impl StateRead, req: &[u8]) -> Result<Vec<u8>, Fail> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::consumer_wire::attribution::{
+        Actor, Change, ChangeKind, Reason, Source, encode_event,
+    };
     use crate::{encode_assigned, encode_msg};
-    use attribution::{Actor, Change, ChangeKind, Reason, Source, encode_event};
     use index_guest::{OriginTag, apply_to_map};
     use std::collections::BTreeMap;
 

@@ -205,6 +205,46 @@ fn reports(host: &Host) -> usize {
 }
 
 #[test]
+fn invocation_listing_paginates_through_the_real_guest() {
+    const INVOCATIONS: u64 = 257;
+
+    let mut host = setup(Program {
+        steps: vec![Step::Finish],
+    });
+    for index in 0..INVOCATIONS {
+        let height = 4 + index * 2;
+        publish(&mut host, height, &format!("page-{index}"));
+        pump(&mut host, height + 1);
+    }
+
+    let query = |after, limit| {
+        agent::encode_query(&agent::AgentQuery::Invocations {
+            account: PROGRAM,
+            after,
+            limit,
+        })
+    };
+    let first_bytes = block_on(host.query("agent", &query(0, u64::MAX))).unwrap();
+    let agent::AgentReply::Invocations(first) = agent::decode_reply(&first_bytes).unwrap() else {
+        panic!("invocations");
+    };
+    assert_eq!(first.entries.len(), 256);
+    assert_eq!(first.entries.first().unwrap().at, 1);
+    assert_eq!(first.entries.last().unwrap().at, 256);
+    assert!(first.has_more);
+    assert_eq!(first.next_after, Some(256));
+
+    let second_bytes = block_on(host.query("agent", &query(first.next_after.unwrap(), 0))).unwrap();
+    let agent::AgentReply::Invocations(second) = agent::decode_reply(&second_bytes).unwrap() else {
+        panic!("invocations");
+    };
+    assert_eq!(second.entries.len(), 1);
+    assert_eq!(second.entries[0].at, 257);
+    assert!(!second.has_more);
+    assert_eq!(second.next_after, None);
+}
+
+#[test]
 fn revoked_program_does_not_report_on_a_fresh_attribution() {
     let mut host = setup(Program {
         steps: vec![report(), Step::Finish],
