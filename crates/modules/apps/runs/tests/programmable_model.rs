@@ -161,7 +161,7 @@ fn a_programs_changed_payload_cannot_complete_the_original_proposal() {
             )]));
         }
         let mut network = Network::new().await;
-        let run = network.provision_program(program).await;
+        let run = network.provision_program(agent_program(program)).await;
         let request = propose_task(&mut network, &run, "requested").await;
         network.drain().await;
         let receipt = network.action(&request).await;
@@ -238,7 +238,7 @@ fn a_program_that_ignores_a_tool_request_returns_a_terminal_receipt() {
         };
         *then = finish;
         let mut network = Network::new().await;
-        let run = network.provision_program(program).await;
+        let run = network.provision_program(agent_program(program)).await;
         let request = propose_task(&mut network, &run, "ignored").await;
         network.drain().await;
         assert!(matches!(

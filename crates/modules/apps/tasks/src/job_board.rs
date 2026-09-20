@@ -59,7 +59,7 @@ use crate::{
     WorkerHistory, WorkerReport, WorkerReportKind, controls, encode_job_event, stage_record,
 };
 
-pub use tasks_wire::MAX_JOB_ID;
+pub use crate::MAX_JOB_ID;
 
 /// max bytes of a `kind` (non-empty).
 pub const MAX_KIND: usize = 64;
@@ -80,10 +80,10 @@ pub const MAX_JOBS: usize = 65536;
 /// finalizing or cancelling a job does not free the slot, because the record
 /// (and its spec bytes) is still on the board -- only a prune drops it.
 pub const MAX_LIVE_JOBS_PER_SUBMITTER: usize = 1024;
-pub use tasks_wire::MIN_LEASE_VIEWS;
+pub use crate::MIN_LEASE_VIEWS;
 /// upper clamp for a claim lease, in views.
 pub const MAX_LEASE_VIEWS: u64 = 10_000;
-pub use tasks_wire::MAX_ATTEMPTS;
+pub use crate::MAX_ATTEMPTS;
 /// the result payload a reclaim writes when it gives up on a job. the index
 /// mapper folds the same string, so the two tiers cannot drift.
 pub const ATTEMPTS_EXHAUSTED_RESULT: &str = "attempts exhausted";
@@ -93,9 +93,9 @@ pub const MAX_WORKERS: usize = 16;
 pub const MAX_WORKER_MODULE_ID: usize = 256;
 /// Bounds are admission limits, never automatic archive deletion.
 pub const MAX_JOB_CONTROLS: usize = 32;
-pub use tasks_wire::MAX_CONTROL_ACKNOWLEDGEMENTS;
+pub use crate::MAX_CONTROL_ACKNOWLEDGEMENTS;
 pub const MAX_WORKER_REPORTS: usize = 32;
-pub use tasks_wire::MAX_WORKER_TEXT_BYTES;
+pub use crate::MAX_WORKER_TEXT_BYTES;
 pub const MAX_WORKER_EXECUTIONS: usize = 64;
 /// Native run keys are opaque and may contain Runs' internal separators.
 pub const MAX_NATIVE_RUN_ID_BYTES: usize = 1024;

@@ -40,6 +40,20 @@ pub fn msg<T: serde::Serialize>(target: &str, payload: &T) -> Msg {
     }
 }
 
+pub fn agent_program<T: serde::Serialize>(program: T) -> agent::Program {
+    let value = serde_json::to_value(program).expect("Agent program serializes");
+    serde_json::from_value(value)
+        .unwrap_or_else(|error| panic!("program does not fit Agent wire: {error}"))
+}
+
+pub fn model_program(id: &str) -> agent::Program {
+    agent_program(runs::model_program(id))
+}
+
+pub fn conversation_program(id: &str) -> agent::Program {
+    agent_program(runs::conversation_program(id))
+}
+
 pub struct Network {
     pub host: Host,
     pub height: u64,
@@ -237,7 +251,7 @@ impl Network {
         task
     }
     pub async fn provision(&mut self) -> String {
-        self.provision_program(runs::model_program("builder")).await
+        self.provision_program(model_program("builder")).await
     }
     pub async fn provision_program(&mut self, program: agent::Program) -> String {
         self.submit(
