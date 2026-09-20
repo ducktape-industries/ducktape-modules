@@ -124,7 +124,27 @@ pub mod attribution {
 }
 
 pub mod identity {
-    pub use keyscheme::KeyScheme;
+    #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case")]
+    pub enum KeyScheme {
+        Ed25519,
+        Secp256k1,
+        Secp256r1,
+    }
+
+    #[cfg(test)]
+    #[test]
+    fn key_scheme_matches_producer_tags() {
+        for (scheme, tag) in [
+            (KeyScheme::Ed25519, "ed25519"),
+            (KeyScheme::Secp256k1, "secp256k1"),
+            (KeyScheme::Secp256r1, "secp256r1"),
+        ] {
+            let bytes = format!("\"{tag}\"").into_bytes();
+            assert_eq!(sdk::wire::encode(&scheme), bytes);
+            assert_eq!(sdk::wire::decode::<KeyScheme>(&bytes).unwrap(), scheme);
+        }
+    }
     use sdk::{AccountNumber, ModuleId};
     use serde::{Deserialize, Serialize};
 

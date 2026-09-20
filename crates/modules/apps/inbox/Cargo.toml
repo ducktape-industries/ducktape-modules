@@ -28,7 +28,6 @@ index_guest = { workspace = true }
 sdk = { workspace = true }
 # local contracts for the attribution delivery/change reference and identity
 # lookup seams; these types mirror only the shapes this consumer uses.
-keyscheme = { workspace = true }
 # the store-record codec: compact, canonical, deterministic. wire stays sdk::wire.
 borsh = { workspace = true }
 serde = { workspace = true }
