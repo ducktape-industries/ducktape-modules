@@ -196,7 +196,6 @@ dependencies = [
  "attribution-wire",
  "automations-wire",
  "borsh",
- "chat",
  "commonware-cryptography",
  "commonware-runtime",
  "ducktape-module-sdk",
@@ -204,13 +203,11 @@ dependencies = [
  "host",
  "identity",
  "identity-wire",
- "inbox",
  "sdk",
  "sdk-testkit",
  "serde",
  "serde_json",
  "statesync",
- "tasks",
  "wasm-host",
 ]
 
