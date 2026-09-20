@@ -4,8 +4,8 @@
 //! Their field order, variant names, and envelope shape mirror the BASE wire
 //! codecs; the fixtures below pin the bytes produced by the owning codec.
 
-use serde::{Deserialize, Serialize};
 use sdk::AccountNumber;
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -18,8 +18,8 @@ pub enum Party {
 
 pub mod chat {
     use super::Party;
-    use serde::{Deserialize, Serialize};
     use sdk::AccountNumber;
+    use serde::{Deserialize, Serialize};
 
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(deny_unknown_fields)]
@@ -203,16 +203,9 @@ pub mod tasks {
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(rename_all = "snake_case")]
     pub enum TaskQuery {
-        Get {
-            task_id: String,
-        },
-        List {
-            limit: u64,
-            after: Option<String>,
-        },
-        OwnerOpenCount {
-            owner: Party,
-        },
+        Get { task_id: String },
+        List { limit: u64, after: Option<String> },
+        OwnerOpenCount { owner: Party },
     }
 
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -274,18 +267,20 @@ pub mod tasks {
 
 #[cfg(test)]
 mod fixtures {
-    use super::{chat, tasks, Party};
+    use super::{Party, chat, tasks};
 
-    // BASE owner codec provenance: ducktape-sdk b66f47f, chat-wire/tasks-wire
+    // BASE owner codec provenance: ducktape-sdk 8c764093, chat-wire/tasks-wire
     // wrappers over sdk::wire::encode/decode. These are immutable owner bytes,
     // not values produced by the consumer decoder.
     const CHAT_EVENT: &[u8] = br#"{"message_posted":{"channel_id":"general","seq":5,"thread_root":null,"author":{"account":7},"mentions":[3]}}"#;
     const CHAT_POST: &[u8] = br#"{"post_message":{"channel_id":"general","message_id":"auto-r1-general-5","blocks":[{"paragraph":[{"text":"hello","marks":[]}]}],"thread":null}}"#;
     const CHAT_CHANNEL_QUERY: &[u8] = br#"{"channel":{"channel_id":"general"}}"#;
     const CHAT_MESSAGE_QUERY: &[u8] = br#"{"message":{"message_id":"m1"}}"#;
-    const CHAT_RANGE_QUERY: &[u8] = br#"{"messages_range":{"channel_id":"general","from_seq":5,"limit":1}}"#;
+    const CHAT_RANGE_QUERY: &[u8] =
+        br#"{"messages_range":{"channel_id":"general","from_seq":5,"limit":1}}"#;
     const CHAT_REPLY: &[u8] = br#"{"messages":[{"channel_id":"general","seq":5,"head":{"message_id":"m1","author":{"account":7},"origin":{"External":[1,2]},"content_origin":{"External":[1,2]},"blocks":[{"paragraph":[{"text":"hello","marks":[]}]}],"created_at":100,"rev":0,"revision":1,"edited_at":null,"base_rev":null,"deleted":false,"thread":null,"reply_count":0,"last_reply_seq":null}}]}"#;
-    const TASK_MSG: &[u8] = br#"{"task":{"create_task":{"task_id":"t1","title":"hello","owner":7}}}"#;
+    const TASK_MSG: &[u8] =
+        br#"{"task":{"create_task":{"task_id":"t1","title":"hello","owner":7}}}"#;
     const TASK_GET: &[u8] = br#"{"task":{"get":{"task_id":"t1"}}}"#;
     const TASK_OWNER_COUNT: &[u8] = br#"{"task":{"owner_open_count":{"owner":{"account":7}}}}"#;
     const TASK_REPLY: &[u8] = br#"{"task":{"task":{"id":"t1","title":"hello","status":"open","owner":{"account":7},"created_at":100,"updated_at":100}}}"#;

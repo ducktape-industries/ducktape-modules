@@ -23,20 +23,18 @@ fn retired_tagged_trigger_shape_rejects_loudly() {
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::{AutomationsReply, decode_reply, encode_msg, encode_query};
-use attribution::{AttributionMsg, decode_msg as attribution_decode_msg};
 use crate::consumer_wire::chat::{
     Block, Channel, ChatMsg, ChatQuery, ChatReply, Mark, MessageHead, MessageView, Span,
     decode_msg as chat_decode_msg, decode_query as chat_decode_query,
     encode_event as chat_encode_event, encode_reply as chat_encode_reply,
 };
+use crate::consumer_wire::{Party, tasks};
+use crate::{AutomationsReply, decode_reply, encode_msg, encode_query};
+use attribution::{AttributionMsg, decode_msg as attribution_decode_msg};
 use futures::executor::block_on;
 use sdk::{Env, Event};
 use sdk_testkit::{MemStore, TestCtx};
-use crate::consumer_wire::{Party, tasks};
-use tasks::{
-    Task, decode_task_msg as tasks_decode_msg, encode_task_reply as tasks_encode_reply,
-};
+use tasks::{Task, decode_task_msg as tasks_decode_msg, encode_task_reply as tasks_encode_reply};
 
 const CHAT: &str = "chat";
 const TASKS: &str = "tasks";
@@ -198,10 +196,7 @@ impl Ctx for CaptureCtx {
                     Ok(chat_encode_reply(&ChatReply::Messages(window)))
                 }
                 ChatQuery::Channel { channel_id } => {
-                    let channel = self
-                        .channels
-                        .contains(&channel_id)
-                        .then_some(Channel {});
+                    let channel = self.channels.contains(&channel_id).then_some(Channel {});
                     Ok(chat_encode_reply(&ChatReply::Channel(channel)))
                 }
                 ChatQuery::Message { message_id } => Ok(chat_encode_reply(&ChatReply::Message(
@@ -226,7 +221,7 @@ impl Ctx for CaptureCtx {
                         .tasks
                         .iter()
                         .filter(|t| after.as_deref().is_none_or(|cursor| t.id.as_str() > cursor))
-                    .take(limit.clamp(1, tasks::MAX_LIST_LIMIT) as usize)
+                        .take(limit.clamp(1, tasks::MAX_LIST_LIMIT) as usize)
                         .cloned()
                         .collect();
                     Ok(tasks_encode_reply(&TaskReply::Tasks(page)))

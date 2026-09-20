@@ -1,6 +1,6 @@
 //! integration: the real host routes a chat hook follow-up into automations with
 //! `Origin::Module("chat")`, a rule fires, and its `CreateTask` follow-up lands
-//! in the minimal tasks protocol fixture — all atomically within one block.
+//! in the real Tasks guest — all atomically within one block.
 
 // the NATIVE modules under their module names — the `identity`/`attribution`
 // crates in [dependencies] are the wire surfaces these re-export.
@@ -8,17 +8,20 @@ use attribution_module as attribution;
 use identity_module as identity;
 
 use automations::Automations;
+use automations::consumer_wire::{
+    Party,
+    chat::{ChatEvent, encode_event},
+    tasks,
+};
 use automations::{
     Action, AutomationsMsg, AutomationsQuery, AutomationsReply, RunRecord, Trigger, decode_reply,
     encode_msg, encode_query,
 };
-use automations::consumer_wire::{Party, chat::{ChatEvent, encode_event}, tasks};
 use futures::executor::block_on;
 use host::{BlockContext, Host};
 use sdk::{Ctx, Error, Module, ModuleId, Msg, Origin, StateRoot};
 #[path = "support/mod.rs"]
 mod support;
-use support::ProtocolTasks;
 
 const AUTO: &str = "automations";
 const CHAT: &str = "chat";
@@ -136,7 +139,7 @@ async fn genesis() -> Host {
             "attribution",
             Box::new(sdk_testkit::MemStore::new()),
         )),
-        Box::new(ProtocolTasks::new()),
+        Box::new(support::tasks()),
         Box::new(RelayChat),
         Box::new(auto),
     ])
@@ -275,7 +278,7 @@ fn squatted_task_id_is_caught_by_probe_and_block_commits() {
             },
             Msg {
                 target: TASKS.into(),
-            payload: tasks::encode_task_msg(&tasks::TaskMsg::CreateTask {
+                payload: tasks::encode_task_msg(&tasks::TaskMsg::CreateTask {
                     task_id: "auto-capture-general-5".into(),
                     title: "squatted".into(),
                     owner: None,

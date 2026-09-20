@@ -22,13 +22,13 @@
 use attribution_module as attribution;
 use identity_module as identity;
 
-use automations::{
-    Action, Automations, AutomationsMsg, AutomationsQuery, AutomationsReply, MAX_FILTER_BYTES,
-    MAX_ID_BYTES, MAX_TEMPLATE_BYTES, Trigger, decode_reply, encode_msg, encode_query,
-};
 use automations::consumer_wire::{
     chat::{Block, ChatMsg, PostPolicy, encode_msg as chat_encode_msg},
     tasks,
+};
+use automations::{
+    Action, Automations, AutomationsMsg, AutomationsQuery, AutomationsReply, MAX_FILTER_BYTES,
+    MAX_ID_BYTES, MAX_TEMPLATE_BYTES, Trigger, decode_reply, encode_msg, encode_query,
 };
 use commonware_cryptography::{Signer as _, ed25519::PrivateKey};
 use commonware_runtime::{Runner as _, Supervisor as _, deterministic};
@@ -39,7 +39,6 @@ use wasm_host::WasmModule;
 
 #[path = "support/mod.rs"]
 mod support;
-use support::{ProtocolChat, ProtocolInbox, ProtocolTasks};
 
 /// GENERATED artifact — built from the `automations` module's guest port by
 /// guest-builder (`make wasm-modules`); committed so this proof is self-contained.
@@ -105,14 +104,13 @@ async fn identity_fixture() -> identity::Identity {
     identity
 }
 
-/// the shared sibling set: minimal chat/tasks/inbox protocol fixtures plus the
-/// real system modules. The fixture owns only the calls Automations makes.
+/// The shared sibling set uses committed Chat/Tasks/Inbox guests and real system modules.
 async fn siblings(
     _context: &deterministic::Context,
     _label: &'static str,
 ) -> Vec<Box<dyn sdk::Module>> {
     vec![
-        Box::new(ProtocolChat::new()),
+        Box::new(support::chat()),
         Box::new(identity_fixture().await),
         Box::new(
             attribution::AttributionModule::new(
@@ -121,8 +119,8 @@ async fn siblings(
             )
             .with_subscribers(["inbox"]),
         ),
-        Box::new(ProtocolTasks::new()),
-        Box::new(ProtocolInbox::new()),
+        Box::new(support::tasks()),
+        Box::new(support::inbox()),
     ]
 }
 

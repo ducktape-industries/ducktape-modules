@@ -17,11 +17,14 @@
 //! any record — the joiner answers the full listing and the run history
 //! exactly like the source.
 
+use automations::consumer_wire::{
+    Party,
+    chat::{ChatEvent, encode_event as chat_encode_event},
+};
 use automations::{
     Action, Automations, AutomationsMsg, AutomationsQuery, AutomationsReply, MAX_ID_BYTES, Trigger,
     decode_reply, encode_msg, encode_query,
 };
-use automations::consumer_wire::{Party, chat::{ChatEvent, encode_event as chat_encode_event}};
 use commonware_runtime::{Runner as _, Supervisor as _, deterministic};
 use sdk::{Env, MerkleStore as _, Module, Msg, Origin, StateRoot};
 use sdk_testkit::TestCtx;
