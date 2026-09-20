@@ -343,6 +343,10 @@ fn native_job_report_relay_is_authenticated_atomic_metered_and_delivered() {
         kind: tasks::WorkerReportKind,
         payload: &str,
     ) -> Msg {
+        let kind = serde_json::from_value(
+            serde_json::to_value(kind).expect("worker report kind serializes"),
+        )
+        .unwrap_or_else(|error| panic!("worker report kind does not fit Runs wire: {error}"));
         msg(
             "runs",
             &runs::RunsMsg::ReportJob {

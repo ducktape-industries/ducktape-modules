@@ -149,17 +149,27 @@ impl RunsModule {
         ctx: &dyn Ctx,
         run_id: &str,
     ) -> Result<Option<WorkerControls>, Error> {
-        Ok(self
-            .bound_worker_job(ctx, run_id)
+        self.bound_worker_job(ctx, run_id)
             .await?
-            .map(|job| WorkerControls {
-                job_id: job.job_id,
-                job_attempt: job.attempt,
-                job_status: job.status,
-                result: job.result,
-                controls: job.controls,
-                reports: job.reports,
-            }))
+            .map(|job| {
+                Ok(WorkerControls {
+                    job_id: job.job_id,
+                    job_attempt: job.attempt,
+                    job_status: task_wire(job.status)?,
+                    result: job.result.map(task_wire).transpose()?,
+                    controls: job
+                        .controls
+                        .into_iter()
+                        .map(task_wire)
+                        .collect::<Result<_, _>>()?,
+                    reports: job
+                        .reports
+                        .into_iter()
+                        .map(task_wire)
+                        .collect::<Result<_, _>>()?,
+                })
+            })
+            .transpose()
     }
     async fn authorize_execution_boundary(
         &self,

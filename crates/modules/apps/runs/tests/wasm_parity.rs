@@ -56,6 +56,12 @@ const RUNS_WASM: &[u8] = include_bytes!("../component.wasm");
 /// on the `?net=` of a rendered page link.
 const PARITY_CHAIN_ID: &str = "parity#d0cdf950";
 
+fn module_model_program(id: &str) -> agent::Program {
+    let value = serde_json::to_value(runs::model_program(id)).expect("model program serializes");
+    serde_json::from_value(value)
+        .unwrap_or_else(|error| panic!("model program does not fit Agent wire: {error}"))
+}
+
 fn wasm_runs(store: SharedStore) -> WasmModule {
     WasmModule::with_store("runs", RUNS_WASM, Box::new(store)).expect("load component")
 }
@@ -923,7 +929,7 @@ impl Pair {
                 &agent::AgentMsg::Provision {
                     request_id: id.into(),
                     name: id.into(),
-                    program: runs::model_program(id),
+                    program: module_model_program(id),
                 },
             ),
         )

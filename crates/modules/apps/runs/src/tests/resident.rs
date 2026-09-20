@@ -1319,7 +1319,10 @@ fn native_cancellation_reads_retained_execution_after_real_prune_and_id_reuse() 
     let controls = block_on(module.worker_controls(&ctx, &run_id))
         .unwrap()
         .unwrap();
-    assert_eq!(controls.job_status, JobStatus::Cancelled);
+    assert_eq!(
+        serde_json::to_value(&controls.job_status).unwrap(),
+        serde_json::to_value(JobStatus::Cancelled).unwrap()
+    );
     assert_eq!(
         controls.result.as_ref().unwrap().payload,
         "settled old execution"
