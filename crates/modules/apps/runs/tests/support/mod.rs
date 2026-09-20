@@ -3,11 +3,11 @@
 //! session credentials propose work whose actual target runs as that account.
 // The app siblings are the committed guest components. Runs only imports the
 // small local contracts below, so this host proof does not pull sibling source.
-pub use runs::contracts::{agent, chat, pages, tasks};
 use attribution_module as attribution;
 use capability_module as capability;
 use dispatch_module as dispatch;
 use identity_module as identity;
+pub use runs::contracts::{agent, chat, pages, tasks};
 use valset_module as valset;
 
 use host::{BlockContext, Host};

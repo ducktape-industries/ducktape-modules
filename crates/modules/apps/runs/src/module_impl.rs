@@ -1,9 +1,9 @@
-use crate::tasks;
 use super::{
     Ctx, Error, Event, Module, ModuleId, Msg, Origin, RunsModule, RunsQuery, RunsReply,
     SiblingReadBudget, StateRoot, StateSyncHandle, committed_root, decode_query, dispatch_id_for,
     encode_reply,
 };
+use crate::tasks;
 use sdk::refusal;
 
 #[derive(Clone, Copy)]

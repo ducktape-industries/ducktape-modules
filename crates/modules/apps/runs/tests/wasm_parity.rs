@@ -7,7 +7,6 @@ use attribution::AttributionModule;
 use attribution_module as attribution;
 use capability::{CapabilityMsg, CapabilityRegistry};
 use capability_module as capability;
-use runs::contracts::{agent, chat, pages, tasks};
 use chat::{
     Block, ChatMsg, ChatQuery, ChatReply, Mark, Party, PostPolicy, Span,
     decode_reply as chat_decode_reply, encode_msg as chat_encode_msg,
@@ -22,6 +21,7 @@ use dispatch_module as dispatch;
 use files::Files;
 use host::{BlockContext, Host, MemberOutcome, SubmitError};
 use identity_module as identity;
+use runs::contracts::{agent, chat, pages, tasks};
 use runs::{ActionEnvelope, AgentResponse, OP_TASKS_CREATE, ReplyBlock, SkillRef, encode_response};
 use runs::{
     RunsModule, RunsMsg, RunsQuery, RunsReply, decode_reply as runs_decode_reply, dispatch_id_for,
@@ -189,7 +189,10 @@ async fn siblings(
             Box::new(sdk_testkit::MemStore::new()),
         )),
         Box::new(WasmModule::with_store("agent", AGENT_WASM, Box::new(agent_store)).unwrap()),
-        Box::new(WasmModule::with_store("tasks", TASKS_WASM, Box::new(sdk_testkit::MemStore::new())).unwrap()),
+        Box::new(
+            WasmModule::with_store("tasks", TASKS_WASM, Box::new(sdk_testkit::MemStore::new()))
+                .unwrap(),
+        ),
         Box::new(Files::open("files", files_dir).expect("files open")),
     ];
     if let Some(members) = assignment_members {

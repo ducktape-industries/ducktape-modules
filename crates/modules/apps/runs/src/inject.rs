@@ -16,15 +16,15 @@
 
 use std::collections::BTreeMap;
 
-use base64::Engine as _;
-use base64::engine::general_purpose::STANDARD;
 use crate::chat;
 use crate::chat::MessageView;
-use duck_address::Address;
-use files_wire::FileAddress;
+use crate::pages;
 use crate::pages::PageAddress;
 use crate::pages::{Block, BlockKind, PageQuery, PageReply};
-use crate::pages;
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
+use duck_address::Address;
+use files_wire::FileAddress;
 use sdk::Ctx;
 
 use crate::forge_source::{ForgeItem, ForgeItemKind};

@@ -727,9 +727,9 @@ impl RunsModule {
             )
             .await?;
         let invocation = match agent::decode_reply(&bytes).map_err(|sentence| Error::Module {
-                reason: refusal::UNEXPECTED_REPLY.into(),
-                sentence,
-            })? {
+            reason: refusal::UNEXPECTED_REPLY.into(),
+            sentence,
+        })? {
             agent::AgentReply::Invocation(invocation) => invocation,
             agent::AgentReply::Invocations(_) => {
                 return Err(Error::Module {

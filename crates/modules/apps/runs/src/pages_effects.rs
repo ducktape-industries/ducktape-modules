@@ -7,11 +7,11 @@ use super::action_requests::Prepared;
 use super::catalog::{ContentPart, Operation, PageAnchor};
 use super::response::ReplyPosts;
 use super::{Ctx, Lane, Msg, PendingState, ReplyDestination, RunsModule};
+use crate::pages;
 use crate::pages::{
     BlockKind, NewBlock, PageMsg, PageQuery, PageReply, encode_msg as pages_encode_msg,
     encode_query as pages_encode_query,
 };
-use crate::pages;
 
 /// deterministic ids for an agent comment: derived from the run id and the
 /// action's [`Lane`] slot — its index in the validated response on the settle

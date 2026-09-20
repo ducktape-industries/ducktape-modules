@@ -1,5 +1,5 @@
-use std::collections::BTreeMap;
 use crate::{chat, pages};
+use std::collections::BTreeMap;
 
 use super::{
     CONTEXT_WINDOW, ChatQuery, ChatReply, Ctx, DispatchMsg, DispatchQuery, DispatchReply,

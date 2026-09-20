@@ -26,9 +26,9 @@
 
 use std::collections::BTreeSet;
 
-use crate::{LoadMode, MAX_SKILLS_PER_AGENT, ModelRecord, SKILL_LIBRARY_PREFIX, SkillRef};
 use crate::chat::{Block, MessageView, Party};
 use crate::pages;
+use crate::{LoadMode, MAX_SKILLS_PER_AGENT, ModelRecord, SKILL_LIBRARY_PREFIX, SkillRef};
 use files::paths::canonical as canonical_duckfs_path;
 use serde::Serialize;
 
