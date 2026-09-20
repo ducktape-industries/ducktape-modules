@@ -22,15 +22,18 @@
 //! and the message a delivery names) and they must answer identically on both
 //! sides or the comparison would be measuring them.
 
+mod common;
+
 use sdk::refusal;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use collaboration::consumer_wire::{chat, identity, tasks};
+use collaboration::consumer_wire::chat;
 use collaboration::{
     BoundPrincipal, Collaboration, CollaborationMsg, CollaborationQuery, DeliverRequest,
     DeliveryState, MessageKind, Party, ProtectedRead, encode_msg, encode_query,
 };
+use common::producer;
 use commonware_runtime::{Runner as _, Supervisor as _, deterministic};
 use host::{BlockContext, Host, SubmitError};
 use sdk::{Ctx, Error, MerkleStore as _, Module, ModuleId, Msg, Origin, StateRoot};
@@ -94,14 +97,14 @@ impl Module for Stub {
 fn identity_stub() -> Stub {
     Stub {
         id: "identity".into(),
-        reply: identity::encode_reply(&identity::IdentityReply::Account(None)),
+        reply: producer::encode_identity_reply(None),
     }
 }
 
 fn tasks_stub() -> Stub {
     Stub {
         id: "tasks".into(),
-        reply: tasks::encode_job_reply(&tasks::JobsReply::Job(None)),
+        reply: producer::encode_job_reply(None),
     }
 }
 
@@ -134,7 +137,7 @@ impl Module for ChatStub {
         })? {
             chat::ChatQuery::Access { channel_id, .. } => {
                 let open = channel_id == "c1";
-                chat::ChatReply::Access(chat::ChannelAccess {
+                producer::ChatReply::Access(producer::ChannelAccess {
                     may_read: open,
                     may_post: open,
                 })
@@ -146,25 +149,18 @@ impl Module for ChatStub {
                     "m3" => Some(M3_SEQ),
                     _ => None,
                 };
-                chat::ChatReply::Message(seq.map(|seq| chat::MessageView {
-                    channel_id: "c1".into(),
-                    seq,
-                    head: chat::MessageHead {
-                        message_id,
-                        author: party(SERVICE),
-                        origin: Origin::External(vec![SERVICE; 32]),
-                        content_origin: Origin::External(vec![SERVICE; 32]),
-                        blocks: Vec::new(),
-                        created_at: seq,
-                        rev: 0,
-                        revision: 1,
-                        edited_at: None,
-                        base_rev: None,
-                        deleted: false,
-                        thread: None,
-                        reply_count: 0,
-                        last_reply_seq: None,
-                    },
+                producer::ChatReply::Message(seq.map(|seq| {
+                    let mut message = producer::message(
+                        "c1",
+                        &message_id,
+                        seq,
+                        party(SERVICE),
+                        Origin::External(vec![SERVICE; 32]),
+                        "please review",
+                        None,
+                    );
+                    message.head.created_at = seq;
+                    message
                 }))
             }
             other => {
@@ -174,7 +170,7 @@ impl Module for ChatStub {
                 });
             }
         };
-        Ok(chat::encode_reply(&reply))
+        Ok(producer::encode_chat_reply(&reply))
     }
 }
 

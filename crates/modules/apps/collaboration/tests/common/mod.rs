@@ -12,11 +12,12 @@
 #![allow(dead_code)]
 
 use sdk::refusal;
+use serde::Serialize;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
-pub use collaboration::consumer_wire::{chat, identity, tasks};
+pub use collaboration::consumer_wire::chat;
 use collaboration::{
     BoundPrincipal, Collaboration, CollaborationMsg, CollaborationQuery, CollaborationReply,
     DeliverRequest, MessageKind, Party, ProtectedRead, encode_msg, encode_query,
@@ -33,6 +34,227 @@ pub const CHAT: &str = "chat";
 pub const MAX_TTL: u64 = collaboration::max_delivery_ttl(sdk::genesis_config::TimeUnit::Height);
 /// the network every op in these tests is bound to.
 pub const NETWORK: &str = "test-net";
+
+/// Complete producer-shaped replies used by the fake siblings below. These
+/// stay test-local so the consumer tests do not import a sibling's wire crate,
+/// while still proving the local decoders accept the records real producers
+/// emit.
+pub mod producer {
+    use super::{Origin, Party, Serialize};
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "snake_case")]
+    #[expect(
+        clippy::large_enum_variant,
+        reason = "test fixture mirrors the complete producer reply shape"
+    )]
+    pub enum ChatReply {
+        Access(ChannelAccess),
+        Message(Option<MessageView>),
+    }
+
+    #[derive(Serialize)]
+    pub struct ChannelAccess {
+        pub may_read: bool,
+        pub may_post: bool,
+    }
+
+    #[derive(Serialize, Clone)]
+    pub struct MessageView {
+        pub channel_id: String,
+        pub seq: u64,
+        pub head: MessageHead,
+    }
+
+    #[derive(Serialize, Clone)]
+    pub struct MessageHead {
+        pub message_id: String,
+        pub author: Party,
+        pub origin: Origin,
+        pub content_origin: Origin,
+        pub blocks: Vec<Block>,
+        pub created_at: u64,
+        pub rev: u32,
+        pub revision: u64,
+        pub edited_at: Option<u64>,
+        pub base_rev: Option<u32>,
+        pub deleted: bool,
+        pub thread: Option<u64>,
+        pub reply_count: u64,
+        pub last_reply_seq: Option<u64>,
+    }
+
+    #[derive(Serialize, Clone)]
+    #[serde(rename_all = "snake_case")]
+    pub enum Block {
+        Paragraph(Vec<Span>),
+        Code { lang: Option<String>, text: String },
+        Quote(Vec<Span>),
+        Divider,
+    }
+
+    #[derive(Serialize, Clone)]
+    pub struct Span {
+        pub text: String,
+        pub marks: Vec<Mark>,
+    }
+
+    #[derive(Serialize, Clone)]
+    #[serde(rename_all = "snake_case")]
+    pub enum Mark {
+        Bold,
+        Italic,
+        Link(String),
+        Mention(Party),
+    }
+
+    impl Block {
+        pub fn paragraph(text: impl Into<String>) -> Self {
+            Self::Paragraph(vec![Span {
+                text: text.into(),
+                marks: Vec::new(),
+            }])
+        }
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "snake_case")]
+    pub enum IdentityReply {
+        Account(Option<AccountView>),
+    }
+
+    #[derive(Serialize)]
+    pub struct AccountView {
+        pub number: u64,
+        pub name: String,
+        pub control: Control,
+        pub keys: Vec<KeyView>,
+        pub avatar: Option<String>,
+        pub bio: Option<String>,
+        pub updated_at: u64,
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "snake_case")]
+    pub enum Control {
+        Program {
+            controller: u64,
+            executor: String,
+            generation: u64,
+            standing: ProgramStanding,
+        },
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "snake_case")]
+    pub enum ProgramStanding {
+        Active,
+        Suspended,
+    }
+
+    #[derive(Serialize)]
+    pub struct KeyView {
+        pub scheme: String,
+        pub pubkey: Vec<u8>,
+        pub label: Option<String>,
+        pub added_at: u64,
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "snake_case")]
+    pub enum JobsReply {
+        Job(Option<Job>),
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "snake_case")]
+    pub enum WorkReply {
+        Job(JobsReply),
+    }
+
+    #[derive(Serialize, Clone)]
+    #[serde(rename_all = "snake_case")]
+    pub enum JobExecution {
+        OneShot,
+        Conversation,
+    }
+
+    #[derive(Serialize, Clone)]
+    #[serde(rename_all = "snake_case")]
+    pub enum JobStatus {
+        Pending,
+        Processing,
+        Done,
+        Failed,
+        Cancelled,
+    }
+
+    #[derive(Serialize, Clone)]
+    pub struct Job {
+        pub job_id: String,
+        pub execution: JobExecution,
+        pub conversation_id: String,
+        pub previous_job_id: Option<String>,
+        pub continuation_operation_id: Option<String>,
+        pub controls: Vec<()>,
+        pub reports: Vec<()>,
+        pub native_history: Option<()>,
+        pub kind: String,
+        pub spec: String,
+        pub submitter: Party,
+        pub status: JobStatus,
+        pub attempt: u64,
+        pub claim: Option<()>,
+        pub result: Option<()>,
+        pub comments: Vec<()>,
+        pub created_at_revision: u64,
+        pub created_at_height: u64,
+        pub updated_at_height: u64,
+    }
+
+    pub fn encode_chat_reply(reply: &ChatReply) -> Vec<u8> {
+        sdk::wire::encode(reply)
+    }
+
+    pub fn encode_identity_reply(account: Option<AccountView>) -> Vec<u8> {
+        sdk::wire::encode(&IdentityReply::Account(account))
+    }
+
+    pub fn encode_job_reply(job: Option<Job>) -> Vec<u8> {
+        sdk::wire::encode(&WorkReply::Job(JobsReply::Job(job)))
+    }
+
+    pub fn message(
+        channel_id: &str,
+        message_id: &str,
+        seq: u64,
+        author: Party,
+        origin: Origin,
+        body: &str,
+        thread: Option<u64>,
+    ) -> MessageView {
+        MessageView {
+            channel_id: channel_id.into(),
+            seq,
+            head: MessageHead {
+                message_id: message_id.into(),
+                author,
+                origin: origin.clone(),
+                content_origin: origin,
+                blocks: vec![Block::paragraph(body)],
+                created_at: 1,
+                rev: 0,
+                revision: 1,
+                edited_at: None,
+                base_rev: None,
+                deleted: false,
+                thread,
+                reply_count: 0,
+                last_reply_seq: None,
+            },
+        }
+    }
+}
 
 pub fn module() -> Collaboration {
     module_on(NETWORK, MAX_TTL)
@@ -75,7 +297,7 @@ pub struct FakeChannel {
 #[derive(Default)]
 pub struct FakeChat {
     pub channels: BTreeMap<String, FakeChannel>,
-    pub messages: BTreeMap<String, chat::MessageView>,
+    pub messages: BTreeMap<String, producer::MessageView>,
     next_seq: BTreeMap<String, u64>,
 }
 
@@ -114,26 +336,9 @@ impl FakeChat {
         };
         self.messages.insert(
             message_id.into(),
-            chat::MessageView {
-                channel_id: channel_id.into(),
-                seq: assigned,
-                head: chat::MessageHead {
-                    message_id: message_id.into(),
-                    author,
-                    origin: origin.clone(),
-                    content_origin: origin,
-                    blocks: Vec::new(),
-                    created_at: 1,
-                    rev: 0,
-                    revision: 1,
-                    edited_at: None,
-                    base_rev: None,
-                    deleted: false,
-                    thread,
-                    reply_count: 0,
-                    last_reply_seq: None,
-                },
-            },
+            producer::message(
+                channel_id, message_id, assigned, author, origin, "ping", thread,
+            ),
         );
         assigned
     }
@@ -148,13 +353,13 @@ impl FakeChat {
                     .channels
                     .get(&channel_id)
                     .is_some_and(|channel| channel.members.contains(&party) || !party.is_person());
-                chat::ChatReply::Access(chat::ChannelAccess {
+                producer::ChatReply::Access(producer::ChannelAccess {
                     may_read: standing,
                     may_post: standing,
                 })
             }
             chat::ChatQuery::Message { message_id } => {
-                chat::ChatReply::Message(self.messages.get(&message_id).cloned())
+                producer::ChatReply::Message(self.messages.get(&message_id).cloned())
             }
             other => {
                 return Err(Error::Module {
@@ -163,7 +368,7 @@ impl FakeChat {
                 });
             }
         };
-        Ok(chat::encode_reply(&reply))
+        Ok(producer::encode_chat_reply(&reply))
     }
 }
 
@@ -186,30 +391,36 @@ pub fn as_program(chat: &Chat, now: u64, account: sdk::AccountNumber) -> TestCtx
         cause: Cause::Direct,
     })
     .on_query(IDENTITY, move |_| {
-        Ok(identity::encode_reply(&identity::IdentityReply::Account(
-            Some(program_account(account)),
-        )))
+        Ok(producer::encode_identity_reply(Some(program_account(
+            account,
+        ))))
     })
-    .on_query(TASKS, |_| {
-        Ok(tasks::encode_job_reply(&tasks::JobsReply::Job(None)))
-    })
+    .on_query(TASKS, |_| Ok(producer::encode_job_reply(None)))
     .on_query(CHAT, move |req| chat.borrow().answer(req))
 }
 
 /// an ACTIVE program account executed by the `agent` module — what identity
 /// holds for an account the call lane may run.
-pub fn program_account(number: sdk::AccountNumber) -> identity::AccountView {
-    identity::AccountView {
+pub fn program_account(number: sdk::AccountNumber) -> producer::AccountView {
+    producer::AccountView {
         number,
-        control: identity::Control::Program {
-            standing: identity::ProgramStanding::Active,
+        name: format!("program-{number}"),
+        control: producer::Control::Program {
+            controller: 1,
+            executor: "agent".into(),
+            generation: 0,
+            standing: producer::ProgramStanding::Active,
         },
+        keys: Vec::new(),
+        avatar: None,
+        bio: None,
+        updated_at: 0,
     }
 }
 
 /// a ctx whose `tasks` sibling answers with `job` for every job query — the
 /// attempt fence's input.
-pub fn with_job(chat: &Chat, now: u64, origin: Origin, job: Option<tasks::Job>) -> TestCtx {
+pub fn with_job(chat: &Chat, now: u64, origin: Origin, job: Option<producer::Job>) -> TestCtx {
     let chat = chat.clone();
     TestCtx::with_env(Env {
         height: now,
@@ -218,21 +429,34 @@ pub fn with_job(chat: &Chat, now: u64, origin: Origin, job: Option<tasks::Job>) 
         me: MODULE.into(),
         cause: Cause::Direct,
     })
-    .on_query(IDENTITY, |_| {
-        Ok(identity::encode_reply(&identity::IdentityReply::Account(
-            None,
-        )))
-    })
-    .on_query(TASKS, move |_| {
-        Ok(tasks::encode_job_reply(&tasks::JobsReply::Job(job.clone())))
-    })
+    .on_query(IDENTITY, |_| Ok(producer::encode_identity_reply(None)))
+    .on_query(TASKS, move |_| Ok(producer::encode_job_reply(job.clone())))
     .on_query(CHAT, move |req| chat.borrow().answer(req))
 }
 
 /// a job record with `attempt`, enough for the attempt fence to read.
-pub fn job(job_id: &str, attempt: u64) -> tasks::Job {
-    let _ = job_id;
-    tasks::Job { attempt }
+pub fn job(job_id: &str, attempt: u64) -> producer::Job {
+    producer::Job {
+        job_id: job_id.into(),
+        execution: producer::JobExecution::OneShot,
+        conversation_id: format!("{job_id}:1"),
+        previous_job_id: None,
+        continuation_operation_id: None,
+        controls: Vec::new(),
+        reports: Vec::new(),
+        native_history: None,
+        kind: "review".into(),
+        spec: "{}".into(),
+        submitter: Party::System,
+        status: producer::JobStatus::Processing,
+        attempt,
+        claim: None,
+        result: None,
+        comments: Vec::new(),
+        created_at_revision: 1,
+        created_at_height: 1,
+        updated_at_height: 1,
+    }
 }
 
 /// wrap an op for THIS network — the binding every op carries.
