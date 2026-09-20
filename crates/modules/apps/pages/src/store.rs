@@ -7,6 +7,28 @@ use super::{
 use crate::comment_ops::{comment_key, target_index_key, thread_key};
 use sdk::refusal;
 
+/// One ancestor of the block a page walk stands on: its ordered children and
+/// the index of the child the walk descended into. Carrying this chain across
+/// rows is what keeps [`Pages::load_page_page`]'s reads proportional to the
+/// rows it returns — without it every row re-reads, and re-decodes, its parent
+/// just to find its own position there, so one parent with N children costs N
+/// reads of a record that may be [`MAX_BLOCK_LEN`] bytes.
+struct Ancestor {
+    id: String,
+    children: Vec<String>,
+    index: usize,
+}
+
+impl Ancestor {
+    fn of(block: &Block, index: usize) -> Self {
+        Self {
+            id: block.id.clone(),
+            children: block.children.clone(),
+            index,
+        }
+    }
+}
+
 impl Pages {
     /// wrap the host-constructed store under module identity `id`. sync — the
     /// store arrives already opened (or already synced to a verified root).
@@ -383,6 +405,7 @@ impl Pages {
             _ => return Ok(None),
         };
         let root_id = root.id.clone();
+        let mut trail = Vec::new();
         let mut current = match after {
             Some(cursor) => {
                 if cursor.starts_with('\0') {
@@ -392,9 +415,8 @@ impl Pages {
                     .query_block(&cursor, &mut reads)
                     .await?
                     .ok_or_else(invalid_page_cursor)?;
-                self.validate_page_cursor(&root_id, &block, &mut reads)
-                    .await?;
-                self.following_page_block(&root_id, &block, &mut reads)
+                trail = self.page_cursor_trail(&root_id, &block, &mut reads).await?;
+                self.following_page_block(&root_id, &block, &mut trail, &mut reads)
                     .await?
             }
             None => Some(root),
@@ -416,7 +438,7 @@ impl Pages {
             }
             spent += cost;
             current = self
-                .following_page_block(&root_id, &block, &mut reads)
+                .following_page_block(&root_id, &block, &mut trail, &mut reads)
                 .await?;
             blocks.push(block);
         }
@@ -426,14 +448,18 @@ impl Pages {
         Ok(Some(PageBlockPage { blocks, next_after }))
     }
 
-    async fn validate_page_cursor(
+    /// Rebuild the ancestor trail a RESUMED page starts from, validating the
+    /// cursor on the way up: the cursor must be a live child of its parent and
+    /// belong to this page. Costs one read per ancestor ONCE per call, in place
+    /// of the old climb that re-read them for every row.
+    async fn page_cursor_trail(
         &self,
         root_id: &str,
         cursor: &Block,
         reads: &mut usize,
-    ) -> Result<(), Error> {
+    ) -> Result<Vec<Ancestor>, Error> {
         if cursor.id == root_id {
-            return Ok(());
+            return Ok(Vec::new());
         }
         let parent_id = match cursor.parent.as_deref() {
             Some(parent_id) => parent_id,
@@ -444,36 +470,59 @@ impl Pages {
             .query_block(parent_id, reads)
             .await?
             .ok_or_else(corrupt)?;
-        if !parent.children.iter().any(|id| id == &cursor.id) {
-            return Err(corrupt());
-        }
+        let index = parent
+            .children
+            .iter()
+            .position(|id| id == &cursor.id)
+            .ok_or_else(corrupt)?;
         let belongs_to_page = if cursor.kind == BlockKind::Page {
             parent.page == root_id
         } else {
             cursor.page == root_id && parent.page == root_id
         };
-        if belongs_to_page {
-            Ok(())
-        } else {
-            Err(invalid_page_cursor())
+        if !belongs_to_page {
+            return Err(invalid_page_cursor());
         }
+
+        let mut trail = vec![Ancestor::of(&parent, index)];
+        let mut child = parent;
+        for _ in 0..MAX_PAGE_DEPTH {
+            if child.id == root_id {
+                trail.reverse();
+                return Ok(trail);
+            }
+            let parent_id = child.parent.as_deref().ok_or_else(corrupt)?;
+            let parent = self
+                .query_block(parent_id, reads)
+                .await?
+                .ok_or_else(corrupt)?;
+            let index = parent
+                .children
+                .iter()
+                .position(|id| id == &child.id)
+                .ok_or_else(corrupt)?;
+            trail.push(Ancestor::of(&parent, index));
+            child = parent;
+        }
+        Err(corrupt())
     }
 
+    /// The next block in preorder, advancing `trail` — the ancestors of
+    /// `current`, root first. Descending pushes; exhausting a parent's children
+    /// pops. Every step reads at most the one block it returns.
     async fn following_page_block(
         &self,
         root_id: &str,
         current: &Block,
+        trail: &mut Vec<Ancestor>,
         reads: &mut usize,
     ) -> Result<Option<Block>, Error> {
         let may_descend = current.kind != BlockKind::Page || current.id == root_id;
-        let child_id = if may_descend {
-            current.children.first()
-        } else {
-            None
-        };
-        if let Some(child_id) = child_id {
+        if may_descend && let Some(child_id) = current.children.first() {
+            let child_id = child_id.clone();
+            trail.push(Ancestor::of(current, 0));
             return self
-                .query_block(child_id, reads)
+                .query_block(&child_id, reads)
                 .await?
                 .ok_or_else(corrupt)
                 .map(Some);
@@ -482,36 +531,26 @@ impl Pages {
             return Ok(None);
         }
 
-        let mut child_id = current.id.clone();
-        let mut parent_id = current.parent.clone();
-        for _ in 0..MAX_PAGE_DEPTH {
-            let Some(id) = parent_id else {
-                return if child_id == root_id {
-                    Ok(None)
-                } else {
-                    Err(corrupt())
-                };
+        loop {
+            let Some(parent) = trail.last_mut() else {
+                return Err(corrupt());
             };
-            let parent = self.query_block(&id, reads).await?.ok_or_else(corrupt)?;
-            let child_index = parent
-                .children
-                .iter()
-                .position(|id| id == &child_id)
-                .ok_or_else(corrupt)?;
-            if let Some(sibling_id) = parent.children.get(child_index + 1) {
+            parent.index += 1;
+            if let Some(sibling_id) = parent.children.get(parent.index) {
+                let sibling_id = sibling_id.clone();
                 return self
-                    .query_block(sibling_id, reads)
+                    .query_block(&sibling_id, reads)
                     .await?
                     .ok_or_else(corrupt)
                     .map(Some);
             }
-            if parent.id == root_id {
+            // that parent is spent: the walk leaves it and looks for ITS next
+            // sibling one level up, unless it is the page root and the
+            // traversal is over.
+            if trail.pop().is_some_and(|spent| spent.id == root_id) {
                 return Ok(None);
             }
-            child_id = parent.id;
-            parent_id = parent.parent;
         }
-        Err(corrupt())
     }
 
     async fn query_block(&self, block_id: &str, reads: &mut usize) -> Result<Option<Block>, Error> {

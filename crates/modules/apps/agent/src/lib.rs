@@ -771,6 +771,14 @@ fn require_completion_of(cause: &Cause, id: &CallId) -> Result<(), Error> {
     Ok(())
 }
 
+/// the most invocations one [`AgentQuery::Invocations`] answers with, whatever
+/// limit the caller asked for. the wire limit is a `u64`, so without a ceiling
+/// here a single query walks an account's whole invocation history — three
+/// store reads per entry — and the reply grows with the account's age instead
+/// of with the request. the same 256 the identity module's `MAX_QUERY_LIMIT`
+/// puts on its own paged reads.
+const MAX_INVOCATION_PAGE: u64 = 256;
+
 /// the ordinals one page of a dense numbering covers: `after + 1 ..= count`,
 /// at most `limit` of them. a cursor at or past the end is an empty page.
 fn page(count: u64, after: u64, limit: u64) -> impl Iterator<Item = u64> {
@@ -1798,14 +1806,17 @@ impl AgentModule {
         }))
     }
 
+    /// the caller supplies the account's binding: it is the SAME record for
+    /// every invocation on that account, so a page of views reads it once
+    /// rather than once per row.
     async fn view_of(
         &self,
         account: AccountNumber,
         seq: u64,
         record: InvocationRecord,
+        binding: Option<&BindingRecord>,
     ) -> Result<InvocationView, Error> {
-        let binding = self.binding(account).await?;
-        let status = status_of(&record, binding.as_ref());
+        let status = status_of(&record, binding);
         let mut bindings = BTreeMap::new();
         for (name, fact) in &record.facts {
             let json = program::fact_json(fact).map_err(|fault| {
@@ -1834,7 +1845,12 @@ impl AgentModule {
         seq: u64,
     ) -> Result<Option<InvocationView>, Error> {
         match self.invocation(account, seq).await? {
-            Some(record) => Ok(Some(self.view_of(account, seq, record).await?)),
+            Some(record) => {
+                let binding = self.binding(account).await?;
+                Ok(Some(
+                    self.view_of(account, seq, record, binding.as_ref()).await?,
+                ))
+            }
             None => Ok(None),
         }
     }
@@ -1846,12 +1862,13 @@ impl AgentModule {
         limit: u64,
     ) -> Result<Vec<InvocationEntry>, Error> {
         let count = self.invocation_count(account).await?;
+        let binding = self.binding(account).await?;
         let mut entries = Vec::new();
-        for at in page(count, after, limit) {
+        for at in page(count, after, limit.min(MAX_INVOCATION_PAGE)) {
             let (seq, record) = self.invocation_at(account, at).await?;
             entries.push(InvocationEntry {
                 at,
-                invocation: self.view_of(account, seq, record).await?,
+                invocation: self.view_of(account, seq, record, binding.as_ref()).await?,
             });
         }
         Ok(entries)
@@ -3148,6 +3165,43 @@ mod tests {
         assert_eq!(listing.len(), 1);
         assert_eq!(listing[0].at, 1);
         assert_eq!(listing[0].invocation, view);
+    }
+
+    #[test]
+    fn a_listing_answers_with_one_page_however_large_a_limit_asks_for() {
+        const INVOCATIONS: u64 = 2_000;
+
+        let mut world = World::new();
+        let account = world.provision(alice(), finish_program());
+        for seq in 0..INVOCATIONS {
+            world
+                .deliver(&mention(seq, account, Actor::Account(ALICE)), seq + 1)
+                .expect("delivery applies");
+        }
+
+        // the wire limit is a `u64`: without a server-side ceiling this reply
+        // grows with the account's whole history, three reads an entry.
+        let AgentReply::Invocations(page) = world.query(&AgentQuery::Invocations {
+            account,
+            after: 0,
+            limit: u64::MAX,
+        }) else {
+            panic!("listing");
+        };
+        assert_eq!(page.len() as u64, MAX_INVOCATION_PAGE);
+        assert_eq!(page[0].at, 1);
+        assert_eq!(page.last().unwrap().at, MAX_INVOCATION_PAGE);
+
+        // and the cursor still walks the rest, a page at a time.
+        let AgentReply::Invocations(next) = world.query(&AgentQuery::Invocations {
+            account,
+            after: MAX_INVOCATION_PAGE,
+            limit: u64::MAX,
+        }) else {
+            panic!("listing");
+        };
+        assert_eq!(next.len() as u64, MAX_INVOCATION_PAGE);
+        assert_eq!(next[0].at, MAX_INVOCATION_PAGE + 1);
     }
 
     #[test]

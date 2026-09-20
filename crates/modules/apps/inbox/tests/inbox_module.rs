@@ -9,6 +9,7 @@
 //! revoked one, and an account number nobody holds.
 
 use attribution::{Actor, AttributionEvent, Change, ChangeKind, Reason, Source, encode_event};
+use borsh::BorshSerialize;
 use futures::executor::block_on;
 use identity::{
     AccountView, Control, IdentityQuery, IdentityReply, KeyScheme, KeyView, ProgramStanding,
@@ -19,7 +20,7 @@ use inbox::{
     decode_assigned, encode_msg,
 };
 use sdk::refusal;
-use sdk::{Cause, Env, Error, Hop, ItemRef, Module, Msg, Origin, Root};
+use sdk::{Cause, Env, Error, Hop, ItemRef, MerkleStore, Module, Msg, Origin, Root, store_key};
 use sdk_testkit::{MemStore, TestCtx};
 
 const INBOX: &str = "inbox";
@@ -511,6 +512,91 @@ fn queue_overflow_drops_oldest_and_counts_the_eviction() {
     });
 }
 
+/// the live set is the meta's `first_live..next_seq` WINDOW, not a stored
+/// list, so the counters and the item keys must stay in step across a long
+/// life. this walks an inbox to twice its cap, then through a mark-read, a
+/// mid-window clear, three no-op clears and one more delivery, asserting the
+/// window is exactly right at every boundary. a counter that drifts LOW makes
+/// `queue_view` read a seq whose record was dropped (a loud CORRUPT); one that
+/// drifts HIGH drops live items out of the listed range.
+#[test]
+fn a_long_lived_queue_evicts_clears_and_reads_exactly_at_its_boundaries() {
+    block_on(async {
+        let mut inbox = fresh();
+        let cap = MAX_ITEMS_PER_ACCOUNT as u64;
+        let delivered = cap * 2;
+        for seq in 1..=delivered {
+            deliver(&mut inbox, seq, &change(seq, ALICE)).await.unwrap();
+        }
+        inbox.commit_block().await.unwrap();
+
+        // twice the cap delivered: the window holds the LAST `cap` seqs, each
+        // still with its record, and every earlier one was dropped and counted.
+        let (next, items) = queue(&inbox, ALICE).await.unwrap();
+        assert_eq!(next, delivered + 1);
+        assert_eq!(
+            items.iter().map(|n| n.seq).collect::<Vec<_>>(),
+            (delivered - cap + 1..=delivered).collect::<Vec<_>>()
+        );
+        assert_eq!(inbox.evicted_count(ALICE).await.unwrap(), delivered - cap);
+
+        // the watermark clamps to the last seq ASSIGNED, not to the window.
+        inbox
+            .execute(&mut submitter(ALICE_KEY_1, 1), &mark_read(ALICE, u64::MAX))
+            .await
+            .unwrap();
+        inbox.commit_block().await.unwrap();
+        assert_eq!(inbox.read_watermark_view(ALICE).await.unwrap(), delivered);
+
+        // a clear landing INSIDE the window removes exactly that prefix.
+        let cut = delivered - 10;
+        inbox
+            .execute(&mut submitter(ALICE_KEY_2, 2), &clear(ALICE, cut))
+            .await
+            .unwrap();
+        inbox.commit_block().await.unwrap();
+        let cleared = inbox.root();
+        let (next, items) = queue(&inbox, ALICE).await.unwrap();
+        assert_eq!(next, delivered + 1, "next_seq never rewinds");
+        assert_eq!(
+            items.iter().map(|n| n.seq).collect::<Vec<_>>(),
+            (cut + 1..=delivered).collect::<Vec<_>>()
+        );
+
+        // and every clear at or below the new low end — including the whole
+        // long-evicted range — is a byte-identical no-op.
+        for up_to in [cut, delivered - cap, 0] {
+            inbox
+                .execute(&mut submitter(ALICE_KEY_1, 3), &clear(ALICE, up_to))
+                .await
+                .unwrap();
+        }
+        inbox.commit_block().await.unwrap();
+        assert_eq!(inbox.root(), cleared);
+
+        // delivery continues past the clear, and a window back below its cap
+        // evicts nothing.
+        assert_eq!(
+            deliver(&mut inbox, 4, &change(delivered + 1, ALICE))
+                .await
+                .unwrap(),
+            InboxAssigned::Delivered { seq: delivered + 1 }
+        );
+        inbox.commit_block().await.unwrap();
+        let (_, items) = queue(&inbox, ALICE).await.unwrap();
+        assert_eq!(
+            items.iter().map(|n| n.seq).collect::<Vec<_>>(),
+            (cut + 1..=delivered + 1).collect::<Vec<_>>()
+        );
+        assert_eq!(inbox.evicted_count(ALICE).await.unwrap(), delivered - cap);
+        assert!(inbox.is_read(ALICE, delivered).await.unwrap());
+        assert!(
+            !inbox.is_read(ALICE, delivered + 1).await.unwrap(),
+            "the delivery after the ack is unread"
+        );
+    });
+}
+
 #[test]
 fn seq_exhaustion_rejects_deterministically() {
     block_on(async {
@@ -581,5 +667,160 @@ fn root_moves_only_on_commit_and_abort_leaves_no_trace() {
         assert_ne!(inbox.root(), genesis);
         let (next, items) = queue(&inbox, ALICE).await.unwrap();
         assert_eq!((next, items.len()), (2, 1));
+    });
+}
+
+// ---- the pre-versioned meta record -------------------------------------
+//
+// the live network keeps module state across a guest swap, so an account
+// whose meta predates the live-window rewrite still holds the OLD layout —
+// four counters plus an explicit live-seq list, under `meta\0{account}`.
+// these two seed exactly that record and drive it through the module.
+
+/// the meta record as the module stored it BEFORE the live-window rewrite,
+/// byte for byte. the module's own copy is private (it only ever DECODES
+/// one), so the seeder carries this mirror; if the stored shape ever drifts
+/// from it, the carry-over stops being able to read a real old record.
+#[derive(BorshSerialize)]
+struct LegacyAccountMeta {
+    next_seq: u64,
+    seqs: Vec<u64>,
+    evicted: u64,
+    read_watermark: u64,
+    last_change: u64,
+}
+
+/// the pre-versioned meta key: `meta` + 0 + the account number.
+fn legacy_meta_key(account: AccountNumber) -> Vec<u8> {
+    let mut key = b"meta".to_vec();
+    key.push(0);
+    key.extend_from_slice(&account.to_le_bytes());
+    key
+}
+
+/// the per-notification key, unchanged by the rewrite: `item` + 0 + the
+/// account number + big-endian seq.
+fn item_key(account: AccountNumber, seq: u64) -> Vec<u8> {
+    let mut key = b"item".to_vec();
+    key.push(0);
+    key.extend_from_slice(&account.to_le_bytes());
+    key.extend_from_slice(&seq.to_be_bytes());
+    key
+}
+
+/// an inbox over a store already holding `account`'s OLD meta record and one
+/// item per live seq (change seq = item seq, `created_at` = seq * 10) —
+/// committed state, as a guest swap would leave it.
+async fn carried_over(
+    account: AccountNumber,
+    next_seq: u64,
+    seqs: &[u64],
+    evicted: u64,
+    read_watermark: u64,
+    last_change: u64,
+) -> Inbox {
+    let meta = LegacyAccountMeta {
+        next_seq,
+        seqs: seqs.to_vec(),
+        evicted,
+        read_watermark,
+        last_change,
+    };
+    let mut writes = vec![(
+        store_key(&legacy_meta_key(account)),
+        Some(borsh::to_vec(&meta).expect("the old meta serializes")),
+    )];
+    for &seq in seqs {
+        let item = Notification {
+            seq,
+            account,
+            change: change(seq, account).reference(),
+            created_at: seq * 10,
+        };
+        writes.push((
+            store_key(&item_key(account, seq)),
+            Some(borsh::to_vec(&item).expect("an item serializes")),
+        ));
+    }
+    let mut store = MemStore::new();
+    store.commit_batch(writes).await.expect("the seed commits");
+    Inbox::new(INBOX, Box::new(store), ATTRIBUTION, IDENTITY)
+}
+
+#[test]
+fn a_pre_versioned_meta_record_reads_as_its_window_and_moves_on_the_first_write() {
+    block_on(async {
+        // seqs [3, 4, 5] out of 6: two items already evicted, reads up to 4.
+        let mut inbox = carried_over(ALICE, 6, &[3, 4, 5], 2, 4, 9).await;
+
+        // a READ converts the old record on the spot — the live window is
+        // exactly the list's span — but stages nothing, so the record stays
+        // where it was.
+        let (next, items) = queue(&inbox, ALICE).await.expect("alice's inbox");
+        assert_eq!(next, 6);
+        assert_eq!(tuples(&items), vec![(3, 3, 30), (4, 4, 40), (5, 5, 50)]);
+        assert_eq!(inbox.evicted_count(ALICE).await.unwrap(), 2);
+        assert_eq!(inbox.read_watermark_view(ALICE).await.unwrap(), 4);
+        assert!(inbox.is_read(ALICE, 4).await.unwrap());
+        assert!(!inbox.is_read(ALICE, 5).await.unwrap());
+        assert_eq!(inbox.last_change_view(ALICE).await.unwrap(), 9);
+        assert_eq!(
+            inbox.meta_records_present(ALICE).await.unwrap(),
+            (false, true),
+            "a read never moves the record"
+        );
+
+        // a WRITE carries it over: converted, staged under the current key
+        // and the old key retired, in the very operation that saw the miss.
+        assert_eq!(
+            deliver(&mut inbox, 60, &change(11, ALICE)).await.unwrap(),
+            InboxAssigned::Delivered { seq: 6 }
+        );
+        inbox.commit_block().await.unwrap();
+        assert_eq!(
+            inbox.meta_records_present(ALICE).await.unwrap(),
+            (true, false),
+            "the carried-over record replaces the old one"
+        );
+
+        // and nothing about the account changed but the new item: the queue
+        // continues at 6, every counter carried over verbatim.
+        let (next, items) = queue(&inbox, ALICE).await.expect("alice's inbox");
+        assert_eq!(next, 7);
+        assert_eq!(
+            tuples(&items),
+            vec![(3, 3, 30), (4, 4, 40), (5, 5, 50), (6, 11, 60)]
+        );
+        assert_eq!(inbox.evicted_count(ALICE).await.unwrap(), 2);
+        assert_eq!(inbox.read_watermark_view(ALICE).await.unwrap(), 4);
+        assert_eq!(inbox.last_change_view(ALICE).await.unwrap(), 11);
+    });
+}
+
+#[test]
+fn a_pre_versioned_record_with_an_empty_list_carries_over_an_empty_window() {
+    block_on(async {
+        // everything ever queued here is gone (cleared or evicted): the old
+        // record's list is empty, so the window opens at `next_seq`.
+        let mut inbox = carried_over(BOB, 12, &[], 11, 11, 20).await;
+        let (next, items) = queue(&inbox, BOB).await.expect("bob's inbox");
+        assert_eq!(next, 12);
+        assert!(items.is_empty(), "an empty list is an empty window");
+        assert_eq!(inbox.evicted_count(BOB).await.unwrap(), 11);
+
+        deliver(&mut inbox, 70, &change(21, BOB)).await.unwrap();
+        inbox.commit_block().await.unwrap();
+        assert_eq!(
+            inbox.meta_records_present(BOB).await.unwrap(),
+            (true, false)
+        );
+        let (next, items) = queue(&inbox, BOB).await.expect("bob's inbox");
+        assert_eq!(next, 13);
+        assert_eq!(
+            tuples(&items),
+            vec![(12, 21, 70)],
+            "the queue resumes at the seq the old record left off at"
+        );
+        assert_eq!(inbox.read_watermark_view(BOB).await.unwrap(), 11);
     });
 }

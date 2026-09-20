@@ -864,3 +864,137 @@ fn reply_metadata_excludes_comment_bodies() {
         assert!(bytes.len() < 128);
     });
 }
+
+// stage one `Page` block, plus one thread of `comments` synthetic comment ids
+// carried on the per-target index. the comment RECORDS are only written when
+// asked for: the aggregate-work count reads threads, the thread view reads
+// comments, and each test pays for just the one it measures.
+fn seed_thread(
+    p: &mut Pages,
+    target: &str,
+    thread_id: &str,
+    comments: usize,
+    records: bool,
+) -> Vec<String> {
+    p.store_block(&Block {
+        author: Party::System,
+        id: target.into(),
+        parent: None,
+        page: target.into(),
+        kind: BlockKind::Page,
+        text: String::new(),
+        marks: Vec::new(),
+        checked: false,
+        children: Vec::new(),
+    })
+    .unwrap();
+    p.stage_index(&BTreeMap::from([(target.to_string(), None)]))
+        .unwrap();
+    let comment_ids: Vec<String> = (0..comments)
+        .map(|index| format!("{thread_id}-c{index}"))
+        .collect();
+    p.stage(
+        &format!("\0ct:{thread_id}"),
+        serde_json::to_vec(&Thread {
+            id: thread_id.into(),
+            target: target.into(),
+            opener: Party::System,
+            created_at: 0,
+            anchor: None,
+            resolved: false,
+            resolved_by: None,
+            comment_ids: comment_ids.clone(),
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    p.stage(
+        &format!("\0ci:{target}"),
+        serde_json::to_vec(&vec![thread_id]).unwrap(),
+    )
+    .unwrap();
+    if records {
+        for id in &comment_ids {
+            p.stage(
+                &format!("\0cc:{id}"),
+                serde_json::to_vec(&Comment {
+                    id: id.clone(),
+                    thread_id: thread_id.into(),
+                    author: Party::System,
+                    text: String::new(),
+                    mentions: Vec::new(),
+                    created_at: 0,
+                    edited_at: None,
+                    deleted: false,
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        }
+    }
+    comment_ids
+}
+
+/// A move carries a whole thread onto the destination, so it must be charged
+/// the same aggregate budget an `AddComment` is charged. Without that, threads
+/// each capped at their own old target pile onto one block until removing that
+/// block exceeds the subtree-removal budget and it can never be deleted again.
+#[test]
+fn moving_a_thread_onto_a_crowded_block_is_refused_at_the_aggregate_cap() {
+    deterministic::Runner::default().start(|_context| async move {
+        let mut p = Pages::new("pages", Box::new(sdk_testkit::MemStore::new()));
+        // one thread plus its comments leaves room for exactly one more unit.
+        seed_thread(
+            &mut p,
+            "crowded",
+            "settled",
+            MAX_COMMENT_WORK_PER_TARGET - 2,
+            false,
+        );
+        seed_thread(&mut p, "quiet", "roamer", 1, false);
+        p.commit_block().await.unwrap();
+
+        let err = p
+            .apply(
+                PageMsg::MoveCommentThread {
+                    thread_id: "roamer".into(),
+                    target: "crowded".into(),
+                    anchor: None,
+                },
+                &Party::System,
+                0,
+            )
+            .await
+            .expect_err("the move must be refused");
+
+        assert!(matches!(err, PageError::TooMuchCommentWork), "{err:?}");
+        assert_eq!(err.class(), sdk::refusal::CAPACITY);
+        p.abort_block().await.unwrap();
+        // and nothing moved half-way.
+        assert_eq!(
+            p.load_thread("roamer").await.unwrap().unwrap().target,
+            "quiet"
+        );
+        assert_eq!(target_thread_count(&p, "crowded").await, 1);
+    });
+}
+
+/// `CommentThread` answers with a PAGE of a thread, never with however many
+/// comments it has accumulated: the reply's `comments` stop at
+/// [`MAX_THREAD_VIEW_COMMENTS`] while `thread.comment_ids` still names every
+/// one, so the truncation is visible to the caller without a wire change.
+#[test]
+fn a_thread_view_reads_a_page_of_comments_not_the_whole_thread() {
+    deterministic::Runner::default().start(|_context| async move {
+        const COMMENTS: usize = 2_000;
+        let mut p = Pages::new("pages", Box::new(sdk_testkit::MemStore::new()));
+        seed_thread(&mut p, "target", "thread", COMMENTS, true);
+        p.commit_block().await.unwrap();
+
+        let view = query_thread(&p, "thread").await.expect("thread exists");
+
+        assert_eq!(view.comments.len(), MAX_THREAD_VIEW_COMMENTS);
+        assert_eq!(view.thread.comment_ids.len(), COMMENTS);
+        assert_eq!(view.comments[0].id, "thread-c0");
+    });
+}
