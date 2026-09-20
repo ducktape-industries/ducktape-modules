@@ -408,6 +408,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
+name = "call"
+version = "0.1.0"
+dependencies = [
+ "opus-rs",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "capability"
 version = "0.1.0"
 source = "git+https://github.com/ducktape-industries/ducktape?branch=dev#f5c9e69b8942233d859b64cdb79f282f24f68e92"
@@ -3064,6 +3072,12 @@ dependencies = [
  "tokio",
  "tokio-stream",
 ]
+
+[[package]]
+name = "opus-rs"
+version = "0.1.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1cc978697f3ada0ad98b323b9d85e85c6b08d478830148636c19b6d5f2ac9b85"
 
 [[package]]
 name = "p256"

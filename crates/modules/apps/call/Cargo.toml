@@ -1,0 +1,24 @@
+[package]
+name = "call"
+edition.workspace = true
+version.workspace = true
+
+# the call module's media guest: the OFF-consensus real-time media logic a
+# huddle rides — Opus framing + per-speaker jitter buffering + client-side
+# mixing (voice), video frame fragmentation/reassembly and the
+# `/v1/call/ws` binary framing — as a pure library that builds for
+# wasm32-unknown-unknown with NO host imports. Ported from ducktape
+# `crates/services/media` at dfa41ce12409fe0e3403b7c71d04ae49aa04dd40; the
+# transport, the task pump, the clock and the random epoch stay with the host
+# and arrive as explicit inputs. The picture codec (JPEG) is native-only and
+# deliberately absent. No realtime WIT shim yet: that waits on the SDK pin.
+[features]
+# the wasm self-test harness (src/selftest.rs): exports every unit test as a
+# C-ABI entry so a plain wasm runtime can execute them without libtest.
+selftest = []
+
+[dependencies]
+# pure-Rust Opus (no C, no allocator tricks): the exact version the Core
+# media service is locked to.
+opus-rs = "=0.1.23"
+thiserror = "2"
