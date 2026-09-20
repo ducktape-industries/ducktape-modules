@@ -100,8 +100,6 @@ files = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = 
 files-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "files-wire" }
 duck-address = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "duck-address" }
 forge = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "forge-wire" }
-pages = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "pages-wire" }
-pages-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "pages-wire" }
 runs-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "runs-wire" }
 tasks = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "tasks-wire" }
 tasks-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "tasks-wire" }

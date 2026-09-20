@@ -51,8 +51,14 @@
 //! [`Module::serve_sync`] and [`Module::resolver_sync_target`] delegate
 //! straight to the store.
 
-// the wire surface: this module's shared types, flattened at the crate root.
-pub use pages_wire::*;
+// Pages owns its wire records, codecs, semantic helpers, and index reducer.
+mod error;
+pub mod index;
+pub mod record_ops;
+pub mod text_ranges;
+mod wire;
+pub use error::{PageError, to_page_err};
+pub use wire::*;
 
 // the CLIENT view model: applied-op classification for feed followers —
 // module-owned beside the index fold, pure, ui.wasm-portable.
