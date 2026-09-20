@@ -77,8 +77,10 @@
 //! account until its first write lands. the fallback is removed in a later
 //! round, once no old record can remain.
 
-// the wire surface: this module's shared types, flattened at the crate root.
-pub use inbox_wire::*;
+// this module owns its protocol shapes and codecs; flatten them for existing
+// module and test callers without creating a shared API crate.
+mod producer;
+pub use producer::*;
 
 // the derived-tier read model: the PURE decision core (fold + view over
 // index_guest::StateRead), compiled everywhere and unit-tested natively.
