@@ -11,8 +11,8 @@ pub use runs_wire::catalog;
 pub use runs_wire::*;
 
 pub mod contracts;
-pub use contracts::{chat, pages, tasks};
 use contracts::agent;
+pub use contracts::{chat, pages, tasks};
 
 mod model_config;
 
@@ -35,12 +35,21 @@ use sdk::refusal;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use attribution::{Actor, AttributionMsg, ObjectRef, Reason, Relation};
 use crate::chat::{
     Block, ChatMsg, ChatQuery, ChatReply, MAX_THREAD_REPLIES, MessageView,
     decode_reply as chat_decode_reply, encode_msg as chat_encode_msg,
     encode_query as chat_encode_query,
 };
+use crate::tasks::{
+    JobStatus, JobsEvent, JobsMsg, JobsQuery, JobsReply, decode_job_event as jobs_decode_event,
+    decode_job_reply as jobs_decode_reply, encode_job_msg as jobs_encode_msg,
+    encode_job_query as jobs_encode_query,
+};
+use crate::tasks::{
+    TaskMsg, TaskQuery, TaskReply, TaskStatus, decode_task_reply as tasks_decode_reply,
+    encode_task_msg as tasks_encode_msg, encode_task_query as tasks_encode_query,
+};
+use attribution::{Actor, AttributionMsg, ObjectRef, Reason, Relation};
 use dispatch::{
     DispatchMsg, DispatchQuery, DispatchReply, MAX_PAYLOAD_BYTES, OutputContract, ResultEvent,
     Routing, decode_reply as dispatch_decode_reply, encode_msg as dispatch_encode_msg,
@@ -54,15 +63,6 @@ use files::{
 use sdk::{Ctx, Error, Event, Module, ModuleId, Msg, Origin, StateRoot, StateSyncHandle};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use crate::tasks::{
-    JobStatus, JobsEvent, JobsMsg, JobsQuery, JobsReply, decode_job_event as jobs_decode_event,
-    decode_job_reply as jobs_decode_reply, encode_job_msg as jobs_encode_msg,
-    encode_job_query as jobs_encode_query,
-};
-use crate::tasks::{
-    TaskMsg, TaskQuery, TaskReply, TaskStatus, decode_task_reply as tasks_decode_reply,
-    encode_task_msg as tasks_encode_msg, encode_task_query as tasks_encode_query,
-};
 
 /// how many transcript messages (newest-first, ending at the anchor) one run
 /// embeds into its composed payload — the bounded prompt window (P4).

@@ -1,6 +1,7 @@
 mod support;
 
 use futures::executor::block_on;
+use runs::contracts::pages;
 use support::*;
 
 async fn page(network: &Network, query: pages::PageQuery) -> pages::PageReply {

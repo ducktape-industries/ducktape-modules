@@ -99,9 +99,7 @@ async fn awaiting_pr_with_actions<P: serde::Serialize>(
             .with_attribution("attribution")
             .with_chain_id("runs-test"),
     ));
-    network
-        .provision_program(agent::from_wire(program))
-        .await;
+    network.provision_program(agent::from_wire(program)).await;
     network
         .submit(member(), msg("forge", &push("dev", None, Some(1))))
         .await;

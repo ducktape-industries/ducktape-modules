@@ -1,4 +1,3 @@
-use crate::tasks;
 use super::{
     Ctx, DispatchMsg, Error, JOB_FINALIZE_PAYLOAD_BYTES, JOB_RUN_LEASE_VIEWS, JobStatus, JobsEvent,
     JobsMsg, JobsQuery, JobsReply, MAX_PAYLOAD_BYTES, Msg, PendingState, RunsModule,
@@ -6,6 +5,7 @@ use super::{
     job_run_id_for, job_spec_hash, jobs_decode_event, jobs_decode_reply, jobs_encode_msg,
     jobs_encode_query, recipe_id_for,
 };
+use crate::tasks;
 use sdk::refusal;
 
 impl RunsModule {

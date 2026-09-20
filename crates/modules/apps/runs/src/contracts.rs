@@ -1,8 +1,8 @@
 //! The small sibling surfaces Runs actually reads and emits.
 //!
 //! These are deliberately local mirrors, not a replacement wire crate. Their
-//! serde shapes are pinned by the fixture tests below; the owning modules keep
-//! the canonical encoders and may evolve without making Runs link their code.
+//! serde shapes track the current platform codec; the owning modules keep the
+//! canonical encoders without making Runs link their implementations.
 
 use serde::{Deserialize, Serialize};
 
@@ -32,7 +32,11 @@ pub mod agent {
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
     pub enum Step {
-        Query { module: String, query: Value, bind: String },
+        Query {
+            module: String,
+            query: Value,
+            bind: String,
+        },
         Call {
             module: String,
             msg: Value,
@@ -47,18 +51,33 @@ pub mod agent {
             decode: Decode,
             on_failure: Continuation,
         },
-        Branch { test: Predicate, then: u64, or: u64 },
-        Report { recipient: Value, reason: attribution::Reason, detail: Value },
+        Branch {
+            test: Predicate,
+            then: u64,
+            or: u64,
+        },
+        Report {
+            recipient: Value,
+            reason: attribution::Reason,
+            detail: Value,
+        },
         Finish,
     }
 
     #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
-    pub enum Decode { Json, Text, Bytes }
+    pub enum Decode {
+        Json,
+        Text,
+        Bytes,
+    }
 
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
-    pub enum Continuation { Step(u64), Unhandled }
+    pub enum Continuation {
+        Step(u64),
+        Unhandled,
+    }
 
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
@@ -86,17 +105,32 @@ pub mod agent {
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
     pub enum AgentMsg {
-        Provision { request_id: String, name: String, program: Program },
-        Replace { account: u64, program: Program },
+        Provision {
+            request_id: String,
+            name: String,
+            program: Program,
+        },
+        Replace {
+            account: u64,
+            program: Program,
+        },
     }
 
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
     pub enum CallResult {
-        Applied { output: serde_json::Value, assigned: serde_json::Value },
-        Rejected { reason: String },
+        Applied {
+            output: serde_json::Value,
+            assigned: serde_json::Value,
+        },
+        Rejected {
+            reason: String,
+        },
         Refused(serde_json::Value),
-        Unrepresentable { attempted: serde_json::Value },
+        Unrepresentable {
+            attempted: serde_json::Value,
+        },
+        StaleGeneration,
     }
 
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -109,10 +143,21 @@ pub mod agent {
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
     pub enum Status {
-        Running { step: u64, awaiting: Outstanding },
-        Finished { at_step: u64 },
-        Failed { step: u64, failure: serde_json::Value },
-        Aborted { at_step: u64, reason: serde_json::Value },
+        Running {
+            step: u64,
+            awaiting: Outstanding,
+        },
+        Finished {
+            at_step: u64,
+        },
+        Failed {
+            step: u64,
+            failure: serde_json::Value,
+        },
+        Aborted {
+            at_step: u64,
+            reason: serde_json::Value,
+        },
     }
 
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -127,18 +172,34 @@ pub mod agent {
         pub invocation: InvocationView,
     }
 
+    #[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(deny_unknown_fields)]
+    pub struct InvocationPage {
+        pub entries: Vec<InvocationEntry>,
+        pub has_more: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub next_after: Option<u64>,
+    }
+
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
     pub enum AgentQuery {
-        Invocation { account: u64, seq: u64 },
-        Invocations { account: u64, after: u64, limit: u64 },
+        Invocation {
+            account: u64,
+            seq: u64,
+        },
+        Invocations {
+            account: u64,
+            after: u64,
+            limit: u64,
+        },
     }
 
     #[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
     pub enum AgentReply {
         Invocation(Option<InvocationView>),
-        Invocations(Vec<InvocationEntry>),
+        Invocations(InvocationPage),
     }
 
     pub fn encode_query(value: &AgentQuery) -> Vec<u8> {
@@ -153,7 +214,6 @@ pub mod agent {
         serde_json::from_value(serde_json::to_value(value).expect("wire value serializes"))
             .expect("local contract matches the owner wire shape")
     }
-
 }
 
 pub mod chat {
@@ -189,7 +249,10 @@ pub mod chat {
 
     impl Span {
         pub fn plain(text: impl Into<String>) -> Self {
-            Self { text: text.into(), marks: Vec::new() }
+            Self {
+                text: text.into(),
+                marks: Vec::new(),
+            }
         }
     }
 
@@ -270,20 +333,51 @@ pub mod chat {
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
     pub enum ChatMsg {
-        CreateChannel { channel_id: String, name: String, post_policy: PostPolicy },
-        PostMessage { channel_id: String, message_id: String, blocks: Vec<Block>, thread: Option<u64> },
-        AddReaction { channel_id: String, seq: u64, emoji: String },
-        RemoveReaction { channel_id: String, seq: u64, emoji: String },
-        RegisterHook { channel_id: String, module_id: String },
+        CreateChannel {
+            channel_id: String,
+            name: String,
+            post_policy: PostPolicy,
+        },
+        PostMessage {
+            channel_id: String,
+            message_id: String,
+            blocks: Vec<Block>,
+            thread: Option<u64>,
+        },
+        AddReaction {
+            channel_id: String,
+            seq: u64,
+            emoji: String,
+        },
+        RemoveReaction {
+            channel_id: String,
+            seq: u64,
+            emoji: String,
+        },
+        RegisterHook {
+            channel_id: String,
+            module_id: String,
+        },
     }
 
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
     pub enum ChatQuery {
-        Channel { channel_id: String },
-        MessagesRange { channel_id: String, from_seq: u64, limit: u64 },
-        Message { message_id: String },
-        Access { channel_id: String, party: Party },
+        Channel {
+            channel_id: String,
+        },
+        MessagesRange {
+            channel_id: String,
+            from_seq: u64,
+            limit: u64,
+        },
+        Message {
+            message_id: String,
+        },
+        Access {
+            channel_id: String,
+            party: Party,
+        },
     }
 
     #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -305,17 +399,39 @@ pub mod chat {
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
     pub enum ChatEvent {
-        MessagePosted { channel_id: String, seq: u64, thread_root: Option<u64>, author: Party, mentions: Vec<u64> },
+        MessagePosted {
+            channel_id: String,
+            seq: u64,
+            thread_root: Option<u64>,
+            author: Party,
+            mentions: Vec<u64>,
+        },
     }
 
-    pub fn encode_msg(value: &ChatMsg) -> Vec<u8> { encode(value) }
-    pub fn decode_msg(bytes: &[u8]) -> Result<ChatMsg, String> { decode(bytes) }
-    pub fn encode_query(value: &ChatQuery) -> Vec<u8> { encode(value) }
-    pub fn decode_query(bytes: &[u8]) -> Result<ChatQuery, String> { decode(bytes) }
-    pub fn encode_reply(value: &ChatReply) -> Vec<u8> { encode(value) }
-    pub fn decode_reply(bytes: &[u8]) -> Result<ChatReply, String> { decode(bytes) }
-    pub fn encode_event(value: &ChatEvent) -> Vec<u8> { encode(value) }
-    pub fn decode_event(bytes: &[u8]) -> Result<ChatEvent, String> { decode(bytes) }
+    pub fn encode_msg(value: &ChatMsg) -> Vec<u8> {
+        encode(value)
+    }
+    pub fn decode_msg(bytes: &[u8]) -> Result<ChatMsg, String> {
+        decode(bytes)
+    }
+    pub fn encode_query(value: &ChatQuery) -> Vec<u8> {
+        encode(value)
+    }
+    pub fn decode_query(bytes: &[u8]) -> Result<ChatQuery, String> {
+        decode(bytes)
+    }
+    pub fn encode_reply(value: &ChatReply) -> Vec<u8> {
+        encode(value)
+    }
+    pub fn decode_reply(bytes: &[u8]) -> Result<ChatReply, String> {
+        decode(bytes)
+    }
+    pub fn encode_event(value: &ChatEvent) -> Vec<u8> {
+        encode(value)
+    }
+    pub fn decode_event(bytes: &[u8]) -> Result<ChatEvent, String> {
+        decode(bytes)
+    }
 }
 
 pub mod pages {
@@ -334,33 +450,63 @@ pub mod pages {
     pub const MANAGED_RECORD_COMMENT_REASON: &str = "managed_record_comment";
 
     pub fn id_is_index_safe(value: &str) -> bool {
-        !value.chars().any(|c| c == '"' || c == '\\' || (c as u32) < 0x20)
+        !value
+            .chars()
+            .any(|c| c == '"' || c == '\\' || (c as u32) < 0x20)
     }
 
     #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
     pub enum BlockKind {
-        Page, Paragraph, Heading1, Heading2, Heading3, Bulleted, Numbered, Todo,
-        Toggle, Quote, Code, Callout, Divider,
+        Page,
+        Paragraph,
+        Heading1,
+        Heading2,
+        Heading3,
+        Bulleted,
+        Numbered,
+        Todo,
+        Toggle,
+        Quote,
+        Code,
+        Callout,
+        Divider,
     }
 
     #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
     pub enum InlineMark {
-        Bold, Italic, Underline, Strikethrough, Code, Mention(u64),
+        Bold,
+        Italic,
+        Underline,
+        Strikethrough,
+        Code,
+        Mention(u64),
     }
 
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(deny_unknown_fields)]
-    pub struct SpanMark { pub start: u32, pub end: u32, pub kind: InlineMark }
+    pub struct SpanMark {
+        pub start: u32,
+        pub end: u32,
+        pub kind: InlineMark,
+    }
 
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(deny_unknown_fields)]
-    pub struct RelativeAnchor { pub start: u32, pub end: u32 }
+    pub struct RelativeAnchor {
+        pub start: u32,
+        pub end: u32,
+    }
 
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
-    pub enum Party { Account(u64), Key(Vec<u8>), Module(String), System }
+    pub enum Party {
+        Account(u64),
+        Key(Vec<u8>),
+        Module(String),
+        System,
+    }
 
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(deny_unknown_fields)]
@@ -379,7 +525,13 @@ pub mod pages {
 
     #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
-    pub enum DiscussionMutation { Created, Edited, Retargeted, Recreated, ContextChanged }
+    pub enum DiscussionMutation {
+        Created,
+        Edited,
+        Retargeted,
+        Recreated,
+        ContextChanged,
+    }
 
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(deny_unknown_fields)]
@@ -409,7 +561,13 @@ pub mod pages {
 
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(deny_unknown_fields)]
-    pub struct ThreadView { pub thread: Thread, pub comments: Vec<Comment> }
+    pub struct ThreadView {
+        pub thread: Thread,
+        pub comments: Vec<Comment>,
+        pub has_more: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub next_after: Option<String>,
+    }
 
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(deny_unknown_fields)]
@@ -446,10 +604,28 @@ pub mod pages {
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
     pub enum PageMsg {
-        CreatePage { page_id: String, title: String, #[serde(default, skip_serializing_if = "Vec::is_empty")] blocks: Vec<NewBlock> },
-        InsertBlock { parent: String, after: Option<String>, block: NewBlock },
-        SetSpanMark { block_id: String, start: u32, end: u32, kind: InlineMark, active: bool },
-        SetChecked { block_id: String, checked: bool },
+        CreatePage {
+            page_id: String,
+            title: String,
+            #[serde(default, skip_serializing_if = "Vec::is_empty")]
+            blocks: Vec<NewBlock>,
+        },
+        InsertBlock {
+            parent: String,
+            after: Option<String>,
+            block: NewBlock,
+        },
+        SetSpanMark {
+            block_id: String,
+            start: u32,
+            end: u32,
+            kind: InlineMark,
+            active: bool,
+        },
+        SetChecked {
+            block_id: String,
+            checked: bool,
+        },
         AddComment {
             thread_id: String,
             comment_id: String,
@@ -460,32 +636,73 @@ pub mod pages {
             #[serde(default, skip_serializing_if = "Vec::is_empty")]
             mentions: Vec<u64>,
         },
+        DeleteComment {
+            comment_id: String,
+        },
     }
 
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
     pub enum PageQuery {
-        RecordCollection { page_id: String },
-        Records { page_id: String, after: Option<String>, limit: u16 },
-        Record { page_id: String, record_id: String },
-        RecordReceipt { page_id: String, request_id: String },
-        RecordState { page_id: String, key: String },
-        GetPage { page_id: String, after: Option<String>, limit: u16 },
-        GetBlock { block_id: String },
-        CommentThreadHead { thread_id: String },
-        CommentThread { thread_id: String },
-        GetComment { comment_id: String },
-        TargetThreadCount { target: String },
+        RecordCollection {
+            page_id: String,
+        },
+        Records {
+            page_id: String,
+            after: Option<String>,
+            limit: u16,
+        },
+        Record {
+            page_id: String,
+            record_id: String,
+        },
+        RecordReceipt {
+            page_id: String,
+            request_id: String,
+        },
+        RecordState {
+            page_id: String,
+            key: String,
+        },
+        GetPage {
+            page_id: String,
+            after: Option<String>,
+            limit: u16,
+        },
+        GetBlock {
+            block_id: String,
+        },
+        CommentThreadHead {
+            thread_id: String,
+        },
+        CommentThread {
+            thread_id: String,
+            #[serde(default)]
+            after: Option<String>,
+            limit: u64,
+        },
+        GetComment {
+            comment_id: String,
+        },
+        TargetThreadCount {
+            target: String,
+        },
         PageCount,
     }
 
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(deny_unknown_fields)]
-    pub struct CommentThreadHead { pub target: String, pub comment_count: u64 }
+    pub struct CommentThreadHead {
+        pub target: String,
+        pub comment_count: u64,
+    }
 
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(deny_unknown_fields)]
-    pub struct PageBlockPage { pub blocks: Vec<Block>, pub next_after: Option<String> }
+    pub struct PageBlockPage {
+        pub blocks: Vec<Block>,
+        pub next_after: Option<String>,
+    }
 
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
@@ -499,12 +716,24 @@ pub mod pages {
         PageCount(u64),
     }
 
-    pub fn encode_msg(value: &PageMsg) -> Vec<u8> { encode(value) }
-    pub fn decode_msg(bytes: &[u8]) -> Result<PageMsg, String> { decode(bytes) }
-    pub fn encode_query(value: &PageQuery) -> Vec<u8> { encode(value) }
-    pub fn decode_query(bytes: &[u8]) -> Result<PageQuery, String> { decode(bytes) }
-    pub fn encode_reply(value: &PageReply) -> Vec<u8> { encode(value) }
-    pub fn decode_reply(bytes: &[u8]) -> Result<PageReply, String> { decode(bytes) }
+    pub fn encode_msg(value: &PageMsg) -> Vec<u8> {
+        encode(value)
+    }
+    pub fn decode_msg(bytes: &[u8]) -> Result<PageMsg, String> {
+        decode(bytes)
+    }
+    pub fn encode_query(value: &PageQuery) -> Vec<u8> {
+        encode(value)
+    }
+    pub fn decode_query(bytes: &[u8]) -> Result<PageQuery, String> {
+        decode(bytes)
+    }
+    pub fn encode_reply(value: &PageReply) -> Vec<u8> {
+        encode(value)
+    }
+    pub fn decode_reply(bytes: &[u8]) -> Result<PageReply, String> {
+        decode(bytes)
+    }
 }
 
 pub mod tasks {
@@ -519,11 +748,20 @@ pub mod tasks {
 
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
-    pub enum Party { Account(u64), Key(Vec<u8>), Module(String), System }
+    pub enum Party {
+        Account(u64),
+        Key(Vec<u8>),
+        Module(String),
+        System,
+    }
 
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
-    pub enum TaskStatus { Open, InProgress, Done }
+    pub enum TaskStatus {
+        Open,
+        InProgress,
+        Done,
+    }
 
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(deny_unknown_fields)]
@@ -539,44 +777,93 @@ pub mod tasks {
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
     pub enum TaskMsg {
-        CreateTask { task_id: String, title: String, #[serde(default)] owner: Option<u64> },
-        UpdateStatus { task_id: String, status: TaskStatus },
+        CreateTask {
+            task_id: String,
+            title: String,
+            #[serde(default)]
+            owner: Option<u64>,
+        },
+        UpdateStatus {
+            task_id: String,
+            status: TaskStatus,
+        },
     }
 
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
     pub enum TaskQuery {
-        Get { task_id: String },
-        List { limit: u64, #[serde(default)] after: Option<String> },
-        OwnerOpenCount { owner: Party },
+        Get {
+            task_id: String,
+        },
+        List {
+            limit: u64,
+            #[serde(default)]
+            after: Option<String>,
+        },
+        OwnerOpenCount {
+            owner: Party,
+        },
     }
 
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
-    pub enum TaskReply { Task(Option<Task>), Tasks(Vec<Task>), OwnerOpenCount(u64) }
+    pub enum TaskReply {
+        Task(Option<Task>),
+        Tasks(Vec<Task>),
+        OwnerOpenCount(u64),
+    }
 
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
-    pub enum JobStatus { Pending, Processing, Done, Failed, Cancelled }
+    pub enum JobStatus {
+        Pending,
+        Processing,
+        Done,
+        Failed,
+        Cancelled,
+    }
 
-    impl JobStatus { pub fn is_terminal(&self) -> bool { matches!(self, Self::Done | Self::Failed | Self::Cancelled) } }
+    impl JobStatus {
+        pub fn is_terminal(&self) -> bool {
+            matches!(self, Self::Done | Self::Failed | Self::Cancelled)
+        }
+    }
 
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(deny_unknown_fields)]
-    pub struct Claim { pub worker: Party, pub claimed_at_height: u64, pub lease_views: u64 }
+    pub struct Claim {
+        pub worker: Party,
+        pub claimed_at_height: u64,
+        pub lease_views: u64,
+    }
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(deny_unknown_fields)]
-    pub struct JobResult { pub ok: bool, pub payload: String }
+    pub struct JobResult {
+        pub ok: bool,
+        pub payload: String,
+    }
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(deny_unknown_fields)]
-    pub struct JobComment { pub id: String, pub author: Party, pub text: String, pub height: u64 }
+    pub struct JobComment {
+        pub id: String,
+        pub author: Party,
+        pub text: String,
+        pub height: u64,
+    }
 
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
-    pub enum JobControlInput { Steer { text: String }, Cancel }
+    pub enum JobControlInput {
+        Steer { text: String },
+        Cancel,
+    }
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(deny_unknown_fields)]
-    pub struct ControlAcknowledgement { pub worker: Party, pub attempt: u64, pub height: u64 }
+    pub struct ControlAcknowledgement {
+        pub worker: Party,
+        pub attempt: u64,
+        pub height: u64,
+    }
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(deny_unknown_fields)]
     pub struct JobControl {
@@ -588,7 +875,10 @@ pub mod tasks {
     }
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(rename_all = "snake_case")]
-    pub enum WorkerReportKind { Checkpoint, Report }
+    pub enum WorkerReportKind {
+        Checkpoint,
+        Report,
+    }
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(deny_unknown_fields)]
     pub struct WorkerReport {
@@ -612,10 +902,16 @@ pub mod tasks {
     }
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(deny_unknown_fields)]
-    pub struct WorkerHistory { pub conversation_id: String, pub executions: Vec<Job> }
+    pub struct WorkerHistory {
+        pub conversation_id: String,
+        pub executions: Vec<Job>,
+    }
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
-    pub enum JobExecution { OneShot, Conversation }
+    pub enum JobExecution {
+        OneShot,
+        Conversation,
+    }
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(deny_unknown_fields)]
     pub struct Job {
@@ -643,18 +939,68 @@ pub mod tasks {
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
     pub enum JobsMsg {
-        Comment { job_id: String, created_at_revision: u64, comment_id: String, text: String },
-        Submit { job_id: String, kind: String, spec: String },
-        SubmitConversation { job_id: String, kind: String, spec: String },
-        Control { job_id: String, operation_id: String, input: JobControlInput },
-        AcknowledgeControl { job_id: String, operation_id: String, attempt: u64 },
-        SettleCancellation { job_id: String, operation_id: String, attempt: u64, payload: String },
-        Checkpoint { job_id: String, operation_id: String, attempt: u64, kind: WorkerReportKind, payload: String },
-        CheckpointNativeHistory { job_id: String, attempt: u64, run_id: String, execution_attempt: u32, revision: u64, snapshot: String },
-        Claim { job_id: String, lease_views: u64 },
-        Finalize { job_id: String, ok: bool, payload: String },
-        Reclaim { job_id: String },
-        Prune { job_id: String },
+        Comment {
+            job_id: String,
+            created_at_revision: u64,
+            comment_id: String,
+            text: String,
+        },
+        Submit {
+            job_id: String,
+            kind: String,
+            spec: String,
+        },
+        SubmitConversation {
+            job_id: String,
+            kind: String,
+            spec: String,
+        },
+        Control {
+            job_id: String,
+            operation_id: String,
+            input: JobControlInput,
+        },
+        AcknowledgeControl {
+            job_id: String,
+            operation_id: String,
+            attempt: u64,
+        },
+        SettleCancellation {
+            job_id: String,
+            operation_id: String,
+            attempt: u64,
+            payload: String,
+        },
+        Checkpoint {
+            job_id: String,
+            operation_id: String,
+            attempt: u64,
+            kind: WorkerReportKind,
+            payload: String,
+        },
+        CheckpointNativeHistory {
+            job_id: String,
+            attempt: u64,
+            run_id: String,
+            execution_attempt: u32,
+            revision: u64,
+            snapshot: String,
+        },
+        Claim {
+            job_id: String,
+            lease_views: u64,
+        },
+        Finalize {
+            job_id: String,
+            ok: bool,
+            payload: String,
+        },
+        Reclaim {
+            job_id: String,
+        },
+        Prune {
+            job_id: String,
+        },
         RegisterWorker {},
         UnregisterWorker {},
     }
@@ -674,35 +1020,114 @@ pub mod tasks {
     }
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
-    pub enum JobsEvent { Submitted { job_id: String, kind: String, submitter: Party, spec: String, spec_hash: Vec<u8> } }
+    pub enum JobsEvent {
+        Submitted {
+            job_id: String,
+            kind: String,
+            submitter: Party,
+            spec: String,
+            spec_hash: Vec<u8>,
+        },
+    }
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
-    pub enum JobsQuery { Get { job_id: String }, GetWorker { conversation_id: String }, Controls { job_id: String } }
+    pub enum JobsQuery {
+        Get { job_id: String },
+        GetWorker { conversation_id: String },
+        Controls { job_id: String },
+    }
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
-    pub enum JobsReply { Job(Option<Job>), Worker(Option<WorkerHistory>), Controls(Vec<JobControl>) }
+    #[allow(
+        clippy::large_enum_variant,
+        reason = "the local wire mirror preserves the owner reply shape"
+    )]
+    pub enum JobsReply {
+        Job(Option<Job>),
+        Worker(Option<WorkerHistory>),
+        Controls(Vec<JobControl>),
+    }
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
-    enum WorkMsg { Task(TaskMsg), Job(JobsMsg) }
+    enum WorkMsg {
+        Task(TaskMsg),
+        Job(JobsMsg),
+    }
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
-    enum WorkQuery { Task(TaskQuery), Job(JobsQuery) }
+    enum WorkQuery {
+        Task(TaskQuery),
+        Job(JobsQuery),
+    }
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
-    enum WorkReply { Task(TaskReply), Job(JobsReply) }
+    #[allow(
+        clippy::large_enum_variant,
+        reason = "the local wire mirror preserves the owner envelope shape"
+    )]
+    enum WorkReply {
+        Task(TaskReply),
+        Job(JobsReply),
+    }
 
-    pub fn encode_task_msg(value: &TaskMsg) -> Vec<u8> { encode(&WorkMsg::Task(value.clone())) }
-    pub fn encode_task_query(value: &TaskQuery) -> Vec<u8> { encode(&WorkQuery::Task(value.clone())) }
-    pub fn encode_task_reply(value: &TaskReply) -> Vec<u8> { encode(&WorkReply::Task(value.clone())) }
-    pub fn decode_task_msg(bytes: &[u8]) -> Result<TaskMsg, String> { match decode(bytes)? { WorkMsg::Task(value) => Ok(value), WorkMsg::Job(_) => Err("expected task op".into()) } }
-    pub fn decode_task_query(bytes: &[u8]) -> Result<TaskQuery, String> { match decode(bytes)? { WorkQuery::Task(value) => Ok(value), WorkQuery::Job(_) => Err("expected task query".into()) } }
-    pub fn decode_task_reply(bytes: &[u8]) -> Result<TaskReply, String> { match decode(bytes)? { WorkReply::Task(value) => Ok(value), WorkReply::Job(_) => Err("expected task reply".into()) } }
-    pub fn encode_job_msg(value: &JobsMsg) -> Vec<u8> { encode(&WorkMsg::Job(value.clone())) }
-    pub fn encode_job_query(value: &JobsQuery) -> Vec<u8> { encode(&WorkQuery::Job(value.clone())) }
-    pub fn encode_job_reply(value: &JobsReply) -> Vec<u8> { encode(&WorkReply::Job(value.clone())) }
-    pub fn decode_job_msg(bytes: &[u8]) -> Result<JobsMsg, String> { match decode(bytes)? { WorkMsg::Job(value) => Ok(value), WorkMsg::Task(_) => Err("expected job op".into()) } }
-    pub fn decode_job_query(bytes: &[u8]) -> Result<JobsQuery, String> { match decode(bytes)? { WorkQuery::Job(value) => Ok(value), WorkQuery::Task(_) => Err("expected job query".into()) } }
-    pub fn decode_job_reply(bytes: &[u8]) -> Result<JobsReply, String> { match decode(bytes)? { WorkReply::Job(value) => Ok(value), WorkReply::Task(_) => Err("expected job reply".into()) } }
-    pub fn encode_job_event(value: &JobsEvent) -> Vec<u8> { encode(value) }
-    pub fn decode_job_event(bytes: &[u8]) -> Result<JobsEvent, String> { decode(bytes) }
+    pub fn encode_task_msg(value: &TaskMsg) -> Vec<u8> {
+        encode(&WorkMsg::Task(value.clone()))
+    }
+    pub fn encode_task_query(value: &TaskQuery) -> Vec<u8> {
+        encode(&WorkQuery::Task(value.clone()))
+    }
+    pub fn encode_task_reply(value: &TaskReply) -> Vec<u8> {
+        encode(&WorkReply::Task(value.clone()))
+    }
+    pub fn decode_task_msg(bytes: &[u8]) -> Result<TaskMsg, String> {
+        match decode(bytes)? {
+            WorkMsg::Task(value) => Ok(value),
+            WorkMsg::Job(_) => Err("expected task op".into()),
+        }
+    }
+    pub fn decode_task_query(bytes: &[u8]) -> Result<TaskQuery, String> {
+        match decode(bytes)? {
+            WorkQuery::Task(value) => Ok(value),
+            WorkQuery::Job(_) => Err("expected task query".into()),
+        }
+    }
+    pub fn decode_task_reply(bytes: &[u8]) -> Result<TaskReply, String> {
+        match decode(bytes)? {
+            WorkReply::Task(value) => Ok(value),
+            WorkReply::Job(_) => Err("expected task reply".into()),
+        }
+    }
+    pub fn encode_job_msg(value: &JobsMsg) -> Vec<u8> {
+        encode(&WorkMsg::Job(value.clone()))
+    }
+    pub fn encode_job_query(value: &JobsQuery) -> Vec<u8> {
+        encode(&WorkQuery::Job(value.clone()))
+    }
+    pub fn encode_job_reply(value: &JobsReply) -> Vec<u8> {
+        encode(&WorkReply::Job(value.clone()))
+    }
+    pub fn decode_job_msg(bytes: &[u8]) -> Result<JobsMsg, String> {
+        match decode(bytes)? {
+            WorkMsg::Job(value) => Ok(value),
+            WorkMsg::Task(_) => Err("expected job op".into()),
+        }
+    }
+    pub fn decode_job_query(bytes: &[u8]) -> Result<JobsQuery, String> {
+        match decode(bytes)? {
+            WorkQuery::Job(value) => Ok(value),
+            WorkQuery::Task(_) => Err("expected job query".into()),
+        }
+    }
+    pub fn decode_job_reply(bytes: &[u8]) -> Result<JobsReply, String> {
+        match decode(bytes)? {
+            WorkReply::Job(value) => Ok(value),
+            WorkReply::Task(_) => Err("expected job reply".into()),
+        }
+    }
+    pub fn encode_job_event(value: &JobsEvent) -> Vec<u8> {
+        encode(value)
+    }
+    pub fn decode_job_event(bytes: &[u8]) -> Result<JobsEvent, String> {
+        decode(bytes)
+    }
 }

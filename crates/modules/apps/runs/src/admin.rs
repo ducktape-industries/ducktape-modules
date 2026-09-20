@@ -156,7 +156,7 @@ impl RunsModule {
                     crate::contracts::as_wire(kind),
                     payload,
                 )
-                    .await
+                .await
             }
             RunsMsg::SettleJobCancellation {
                 run_id,
