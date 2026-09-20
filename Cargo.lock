@@ -56,20 +56,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "agent-wire"
-version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#8c764093d5974b4328c0b90de157d72597540020"
-dependencies = [
- "attribution-wire",
- "borsh",
- "dispatch-wire",
- "identity-wire",
- "sdk",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
