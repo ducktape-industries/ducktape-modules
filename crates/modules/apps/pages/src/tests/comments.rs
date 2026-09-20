@@ -643,6 +643,8 @@ fn resolving_with_real_accounts_preserves_source_relations() {
         let relations = host.module_root("attribution");
         let query = encode_query(&PageQuery::CommentThread {
             thread_id: "thread".into(),
+            after: None,
+            limit: 0,
         });
         for (resolved, signer, expected) in [(true, 1, Some(Party::Account(1))), (false, 2, None)] {
             let operation = msg(&PageMsg::ResolveThread {
@@ -668,6 +670,113 @@ fn resolving_with_real_accounts_preserves_source_relations() {
                 Party::Account(u64::from(signer))
             );
         }
+    });
+}
+
+#[test]
+fn comment_thread_paging_counts_tombstones_and_preserves_metadata() {
+    deterministic::Runner::default().start(|_context| async move {
+        let mut p = Pages::new("pages", Box::new(sdk_testkit::MemStore::new()));
+        let comment_ids: Vec<_> = (0..MAX_PAGE_QUERY_LIMIT as usize + 4)
+            .map(|index| format!("comment-{index}"))
+            .collect();
+        p.stage(
+            "\0ct:thread",
+            serde_json::to_vec(&Thread {
+                id: "thread".into(),
+                target: "target".into(),
+                opener: Party::System,
+                created_at: 7,
+                anchor: None,
+                resolved: false,
+                resolved_by: None,
+                comment_ids: comment_ids.clone(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        for (index, id) in comment_ids.iter().enumerate() {
+            p.stage(
+                &format!("\0cc:{id}"),
+                serde_json::to_vec(&Comment {
+                    id: id.clone(),
+                    thread_id: "thread".into(),
+                    author: Party::System,
+                    text: String::new(),
+                    mentions: Vec::new(),
+                    created_at: 7,
+                    edited_at: None,
+                    deleted: index == 0,
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        }
+        p.commit_block().await.unwrap();
+
+        let first = query_thread_page(&p, "thread", None, 1)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(first.comments.is_empty());
+        assert!(first.has_more);
+        assert_eq!(first.next_after.as_deref(), Some("comment-0"));
+
+        let max = query_thread_page(&p, "thread", None, u64::MAX)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(max.comments.len(), MAX_PAGE_QUERY_LIMIT as usize - 1);
+        assert_eq!(max.comments.first().unwrap().id, "comment-1");
+        assert_eq!(max.comments.last().unwrap().id, "comment-255");
+        assert!(max.has_more);
+        assert_eq!(max.next_after.as_deref(), Some("comment-255"));
+        assert_eq!(max.thread.comment_ids, comment_ids);
+
+        let default = query_thread_page(&p, "thread", None, 0)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(default.comments, max.comments);
+        assert_eq!(default.next_after, max.next_after);
+        assert_eq!(default.has_more, max.has_more);
+        assert_eq!(default.thread.comment_ids, comment_ids);
+
+        let next = query_thread_page(&p, "thread", max.next_after.as_deref(), 2)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            next.comments
+                .iter()
+                .map(|comment| comment.id.as_str())
+                .collect::<Vec<_>>(),
+            ["comment-256", "comment-257"]
+        );
+        assert!(next.has_more);
+        assert_eq!(next.next_after.as_deref(), Some("comment-257"));
+
+        let last = query_thread_page(&p, "thread", next.next_after.as_deref(), 0)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            last.comments
+                .iter()
+                .map(|comment| comment.id.as_str())
+                .collect::<Vec<_>>(),
+            ["comment-258", "comment-259"]
+        );
+        assert!(!last.has_more);
+        assert_eq!(last.next_after, None);
+
+        let error = query_thread_page(&p, "thread", Some("missing"), 1)
+            .await
+            .expect_err("a cursor outside the thread must be rejected");
+        assert!(matches!(
+            error,
+            Error::Module { reason, .. } if reason == sdk::refusal::INVALID_INPUT
+        ));
     });
 }
 
@@ -981,8 +1090,8 @@ fn moving_a_thread_onto_a_crowded_block_is_refused_at_the_aggregate_cap() {
 
 /// `CommentThread` answers with a PAGE of a thread, never with however many
 /// comments it has accumulated: the reply's `comments` stop at
-/// [`MAX_THREAD_VIEW_COMMENTS`] while `thread.comment_ids` still names every
-/// one, so the truncation is visible to the caller without a wire change.
+/// [`MAX_PAGE_QUERY_LIMIT`] while `thread.comment_ids` still names every one;
+/// the canonical cursor makes the truncation explicit to the caller.
 #[test]
 fn a_thread_view_reads_a_page_of_comments_not_the_whole_thread() {
     deterministic::Runner::default().start(|_context| async move {
@@ -993,8 +1102,10 @@ fn a_thread_view_reads_a_page_of_comments_not_the_whole_thread() {
 
         let view = query_thread(&p, "thread").await.expect("thread exists");
 
-        assert_eq!(view.comments.len(), MAX_THREAD_VIEW_COMMENTS);
+        assert_eq!(view.comments.len(), MAX_PAGE_QUERY_LIMIT as usize);
         assert_eq!(view.thread.comment_ids.len(), COMMENTS);
         assert_eq!(view.comments[0].id, "thread-c0");
+        assert!(view.has_more);
+        assert_eq!(view.next_after.as_deref(), Some("thread-c255"));
     });
 }

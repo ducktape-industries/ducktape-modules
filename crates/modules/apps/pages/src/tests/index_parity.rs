@@ -517,6 +517,8 @@ fn managed_batches_and_stale_retries_preserve_ordinary_document_index_parity() {
             &map,
             &serde_json::to_vec(&PagesViewQuery::GetThread {
                 thread_id: "thread".into(),
+                after: None,
+                limit: 0,
             })
             .unwrap(),
         )
@@ -524,8 +526,8 @@ fn managed_batches_and_stale_retries_preserve_ordinary_document_index_parity() {
         let PagesViewReply::Thread(Some(thread)) = serde_json::from_slice(&bytes).unwrap() else {
             panic!("thread")
         };
-        assert_eq!(thread.anchor, query.thread.anchor);
-        assert_eq!(thread.comments[0].text, query.comments[0].text);
+        assert_eq!(thread.thread.anchor, query.thread.anchor);
+        assert_eq!(thread.opener.text, query.comments[0].text);
     });
 }
 

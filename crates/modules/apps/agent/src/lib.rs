@@ -1859,18 +1859,29 @@ impl AgentModule {
         account: AccountNumber,
         after: u64,
         limit: u64,
-    ) -> Result<Vec<InvocationEntry>, Error> {
+    ) -> Result<InvocationPage, Error> {
         let count = self.invocation_count(account).await?;
         let binding = self.binding(account).await?;
         let mut entries = Vec::new();
-        for at in page(count, after, limit.min(MAX_INVOCATION_PAGE)) {
+        let limit = if limit == 0 {
+            MAX_INVOCATION_PAGE
+        } else {
+            limit.min(MAX_INVOCATION_PAGE)
+        };
+        for at in page(count, after, limit) {
             let (seq, record) = self.invocation_at(account, at).await?;
             entries.push(InvocationEntry {
                 at,
                 invocation: self.view_of(account, seq, record, binding.as_ref()).await?,
             });
         }
-        Ok(entries)
+        let next_after = entries.last().map(|entry| entry.at);
+        let has_more = next_after.is_some_and(|at| at < count);
+        Ok(InvocationPage {
+            entries,
+            has_more,
+            next_after: has_more.then(|| next_after.expect("a page with more has an entry")),
+        })
     }
 }
 
@@ -2612,7 +2623,11 @@ mod tests {
                 after: 0,
                 limit: 10
             }),
-            AgentReply::Invocations(Vec::new())
+            AgentReply::Invocations(InvocationPage {
+                entries: Vec::new(),
+                has_more: false,
+                next_after: None,
+            })
         );
         let request = AgentMsg::Initialize {
             account,
@@ -3161,9 +3176,9 @@ mod tests {
         }) else {
             panic!("listing");
         };
-        assert_eq!(listing.len(), 1);
-        assert_eq!(listing[0].at, 1);
-        assert_eq!(listing[0].invocation, view);
+        assert_eq!(listing.entries.len(), 1);
+        assert_eq!(listing.entries[0].at, 1);
+        assert_eq!(listing.entries[0].invocation, view);
     }
 
     #[test]
@@ -3187,9 +3202,20 @@ mod tests {
         }) else {
             panic!("listing");
         };
-        assert_eq!(page.len() as u64, MAX_INVOCATION_PAGE);
-        assert_eq!(page[0].at, 1);
-        assert_eq!(page.last().unwrap().at, MAX_INVOCATION_PAGE);
+        assert_eq!(page.entries.len() as u64, MAX_INVOCATION_PAGE);
+        assert_eq!(page.entries[0].at, 1);
+        assert_eq!(page.entries.last().unwrap().at, MAX_INVOCATION_PAGE);
+        assert!(page.has_more);
+        assert_eq!(page.next_after, Some(MAX_INVOCATION_PAGE));
+
+        let AgentReply::Invocations(default) = world.query(&AgentQuery::Invocations {
+            account,
+            after: 0,
+            limit: 0,
+        }) else {
+            panic!("listing");
+        };
+        assert_eq!(default, page, "zero selects the canonical 256-row page");
 
         // and the cursor still walks the rest, a page at a time.
         let AgentReply::Invocations(next) = world.query(&AgentQuery::Invocations {
@@ -3199,8 +3225,10 @@ mod tests {
         }) else {
             panic!("listing");
         };
-        assert_eq!(next.len() as u64, MAX_INVOCATION_PAGE);
-        assert_eq!(next[0].at, MAX_INVOCATION_PAGE + 1);
+        assert_eq!(next.entries.len() as u64, MAX_INVOCATION_PAGE);
+        assert_eq!(next.entries[0].at, MAX_INVOCATION_PAGE + 1);
+        assert!(next.has_more);
+        assert_eq!(next.next_after, Some(MAX_INVOCATION_PAGE * 2));
     }
 
     #[test]
@@ -3375,6 +3403,7 @@ mod tests {
         };
         assert_eq!(
             listing
+                .entries
                 .iter()
                 .map(|entry| entry.invocation.seq)
                 .collect::<Vec<_>>(),
@@ -3387,9 +3416,9 @@ mod tests {
         }) else {
             panic!("listing");
         };
-        assert_eq!(page.len(), 1);
-        assert_eq!(page[0].at, 5);
-        assert_eq!(page[0].invocation.seq, 44);
+        assert_eq!(page.entries.len(), 1);
+        assert_eq!(page.entries[0].at, 5);
+        assert_eq!(page.entries[0].invocation.seq, 44);
         let AgentReply::Invocations(past) = world.query(&AgentQuery::Invocations {
             account,
             after: 6,
@@ -3397,7 +3426,9 @@ mod tests {
         }) else {
             panic!("listing");
         };
-        assert!(past.is_empty());
+        assert!(past.entries.is_empty());
+        assert!(!past.has_more);
+        assert_eq!(past.next_after, None);
     }
 
     #[test]

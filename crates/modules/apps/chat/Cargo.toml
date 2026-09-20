@@ -58,9 +58,8 @@ sha2 = { workspace = true }
 
 [dev-dependencies]
 wasm-host = { workspace = true }
-# the NATIVE sibling modules a test composes, not their wire crates: `pages`
-# lives in this workspace, `identity`/`attribution` in the platform repo.
-pages = { path = "../pages" }
+# The pages edge uses its committed guest plus this consumer's local contract;
+# identity/attribution remain the native system modules under test.
 identity-module = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "identity" }
 attribution-module = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "attribution" }
 futures = { workspace = true }
