@@ -45,10 +45,9 @@ use crate::{
     RunEvent, RunFact, RunOutcome, decode_assigned, delegated_run_id_for, dispatch_id_for,
     page_source,
 };
-// the shapes this fold answers with live in the wire crate, so the daemon can
-// decode a `/v1/index/runs` reply without linking the module that folded it.
-// re-exported here, so `runs::index::RunsViewQuery` still names the same type.
-pub use runs_wire::view::*;
+// Runs owns the shapes this fold answers with; re-export them here so
+// `runs::index::RunsViewQuery` remains the local module-facing path.
+pub use crate::view::*;
 
 /// [`Fail`] code: an applied op's assigned stamp did not decode — interface
 /// drift, which only a refold can honestly repair.

@@ -432,7 +432,10 @@ mod tests {
             kind,
             title: "t".into(),
             state,
-            author: chat::Party::Key(vec![1; 32]),
+            author: serde_json::from_value(
+                serde_json::to_value(chat::Party::Key(vec![1; 32])).unwrap(),
+            )
+            .unwrap(),
             created_at: 1,
             updated_at: 2,
         };
@@ -459,7 +462,10 @@ mod tests {
                 kind,
                 title: "Fix the flaky gate".into(),
                 state: forge::ItemState::Open,
-                author: chat::Party::Key(vec![1; 32]),
+                author: serde_json::from_value(
+                    serde_json::to_value(chat::Party::Key(vec![1; 32])).unwrap(),
+                )
+                .unwrap(),
                 created_at: 1,
                 updated_at: 2,
             },

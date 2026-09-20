@@ -510,10 +510,9 @@ dependencies = [
  "attribution",
  "attribution-wire",
  "borsh",
- "chat-message",
- "chat-wire",
  "commonware-cryptography",
  "commonware-runtime",
+ "duck-address",
  "ducktape-module-sdk",
  "futures",
  "host",
@@ -3840,7 +3839,6 @@ dependencies = [
  "node-work",
  "pages",
  "run-envelope",
- "runs-wire",
  "saga",
  "sdk",
  "sdk-testkit",
@@ -3854,27 +3852,6 @@ dependencies = [
  "valset",
  "valset-wire",
  "wasm-host",
-]
-
-[[package]]
-name = "runs-wire"
-version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#8c764093d5974b4328c0b90de157d72597540020"
-dependencies = [
- "agent-wire",
- "borsh",
- "chat-wire",
- "collaboration-wire",
- "dispatch-wire",
- "duck-address",
- "governance-wire",
- "node-work",
- "run-envelope",
- "sdk",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tasks-wire",
 ]
 
 [[package]]

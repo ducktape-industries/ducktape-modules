@@ -1,0 +1,1 @@
+[{"run_id":"run-1","fact":{"settled":{"outcome":"action_rejected","reason":"refused","degraded":true,"executing_node":"node-1","output_ref":null,"pr":null}}}]
