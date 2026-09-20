@@ -10,6 +10,7 @@ use sdk::refusal;
 use sdk::{Ctx, Error, Origin, StagedStore};
 
 use crate::bindings::{self, Advanced, live_binding};
+use crate::consumer_wire::tasks::{self, JobsQuery, JobsReply};
 use crate::interface::{
     BLOB_HEX_LEN, COMMIT_HEX_LEN, Credential, DUCK_SCHEME, DeliverRequest, Delivery, DeliveryState,
     EventBody, MAX_MAILBOX_QUEUED_BYTES, MAX_MAILBOX_UNDELIVERED, MAX_REFERENCE_BYTES,
@@ -138,24 +139,15 @@ async fn check_attempt(
     task: &TaskRef,
     what: &str,
 ) -> Result<(), Error> {
-    let request = tasks::encode_job_query(&tasks::JobsQuery::Get {
+    let request = tasks::encode_job_query(&JobsQuery::Get {
         job_id: task.id.clone(),
     });
     let bytes = ctx.query(tasks_id, &request).await?;
-    let tasks::JobsReply::Job(job) =
+    let JobsReply::Job(job) =
         tasks::decode_job_reply(&bytes).map_err(|sentence| Error::Module {
             reason: refusal::UNEXPECTED_REPLY.into(),
             sentence,
-        })?
-    else {
-        return Err(Error::Module {
-            reason: refusal::UNEXPECTED_REPLY.into(),
-            sentence: format!(
-                "tasks answered the lookup for task {} with something other than a job",
-                task.id
-            ),
-        });
-    };
+        })?;
     let job = job.ok_or_else(|| Error::Module {
         reason: refusal::NOT_FOUND.into(),
         sentence: format!("no task {}", task.id),

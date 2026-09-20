@@ -631,17 +631,14 @@ name = "collaboration"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "chat-wire",
  "commonware-runtime",
  "ducktape-module-sdk",
  "futures",
  "host",
- "identity-wire",
  "sdk",
  "sdk-testkit",
  "serde",
  "statesync",
- "tasks-wire",
  "wasm-host",
 ]
 
@@ -4307,16 +4304,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "wasm-host",
-]
-
-[[package]]
-name = "tasks-wire"
-version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#8c764093d5974b4328c0b90de157d72597540020"
-dependencies = [
- "attribution-wire",
- "sdk",
- "serde",
 ]
 
 [[package]]

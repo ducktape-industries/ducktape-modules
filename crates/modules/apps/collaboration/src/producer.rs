@@ -18,12 +18,36 @@
 //!   the caller already posted; chat's own id uniqueness is the dedup, and a
 //!   delivery record is keyed by the sequence chat assigned.
 
-pub use chat::Party;
 use sdk::AccountNumber;
 use sdk::genesis_config::TimeUnit;
 use serde::{Deserialize, Serialize};
 
 // ---- bounds ---------------------------------------------------------------
+
+/// A participant resolved from an authenticated origin. This module owns the
+/// shape because it is part of both its public records and the sibling wire
+/// values it consumes.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum Party {
+    Account(AccountNumber),
+    Key(Vec<u8>),
+    Module(String),
+    System,
+}
+
+impl Party {
+    pub fn account(&self) -> Option<AccountNumber> {
+        match self {
+            Self::Account(account) => Some(*account),
+            Self::Key(_) | Self::Module(_) | Self::System => None,
+        }
+    }
+
+    pub fn is_person(&self) -> bool {
+        matches!(self, Self::Account(_) | Self::Key(_))
+    }
+}
 
 /// Most references one delivery may carry.
 pub const MAX_REFERENCES: usize = 16;
