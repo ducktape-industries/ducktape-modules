@@ -5,6 +5,7 @@
 //! has identical Runs producer blobs; its later `4f8bce7` fixture commit is
 //! only provenance for these captured bytes.
 
+use runs::contracts::pages;
 use runs::{
     AgentResponse, ReplyBlock, RunEvent, RunFact, RunOutcome, RunRecord, RunsMsg, RunsQuery,
     RunsReply, RunsViewQuery,

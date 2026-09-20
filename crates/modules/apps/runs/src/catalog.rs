@@ -12,6 +12,7 @@
 //! an operation on the strength of the agent's record: only the target
 //! module's own rules do.
 
+use crate::contracts::chat;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};

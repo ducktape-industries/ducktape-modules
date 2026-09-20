@@ -1,4 +1,5 @@
 //! The default model workflow is an ordinary program that the controller may replace.
+use crate::contracts::agent;
 use agent::{Continuation, Decode, Predicate, Program, Step, Value};
 use std::collections::BTreeMap;
 
