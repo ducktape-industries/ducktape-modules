@@ -11,6 +11,8 @@
 //!   status change moves the row between partitions in one atomic fold.
 //! - `job/{job_id}`               — the current [`JobRow`].
 //! - `job-status/{status}/{job_id}` — the SAME row, partitioned by status.
+//! - `job-kind/{kind}/{job_id}`   — the SAME row, partitioned by kind, so
+//!   hunting a rare kind reads that kind and not the whole board.
 //! - `jobcnt/{status}`            — the per-status census counter (u64 BE),
 //!   maintained transition-by-transition so `job_counts` is five point
 //!   reads, never a board walk.
@@ -27,14 +29,17 @@ use index_guest::{Fail, OpRow, StateRead, Writes};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ATTEMPTS_EXHAUSTED_RESULT, JobStatus, JobsMsg, MAX_ATTEMPTS, MAX_LEASE_VIEWS, MIN_LEASE_VIEWS,
-    Party, TaskMsg, TaskStatus, WorkAssigned, WorkMsg, decode_assigned, decode_work_msg,
+    ATTEMPTS_EXHAUSTED_RESULT, JobStatus, JobsMsg, MAX_ATTEMPTS, MAX_LEASE_VIEWS, MAX_LIST_LIMIT,
+    MIN_LEASE_VIEWS, Party, TaskMsg, TaskStatus, WorkAssigned, WorkMsg, decode_assigned,
+    decode_work_msg,
 };
 
-/// default page size for by-status listing (the cap is the scan clamp).
+/// default page size for task and job listing. the SERVER-SIDE cap on either
+/// is [`MAX_LIST_LIMIT`] — the same page clamp the module tier advertises on
+/// the wire, so an over-ask costs one page, never a board walk.
 const DEFAULT_LIST_LIMIT: usize = 50;
-/// max page size for job listing.
-const MAX_JOB_LIST_LIMIT: usize = 256;
+/// that cap as a page size.
+const MAX_PAGE_LIMIT: usize = MAX_LIST_LIMIT as usize;
 
 /// [`Fail`] code: an applied op's payload did not decode — interface drift,
 /// which only a refold can honestly repair.
@@ -122,8 +127,11 @@ pub enum TasksViewQuery {
         task_id: String,
     },
     /// job pages: one status partition (or the whole board), optionally
-    /// kind-filtered. the filter applies within the scanned page, so a page
-    /// may return fewer than `limit` rows while `has_more` still cursors on.
+    /// kind-filtered. a `kind_prefix` scans the kind partition instead, so
+    /// the page fills with matches rather than with whatever the board
+    /// happened to hold there; a `status` alongside it narrows within that
+    /// page, so such a page may return fewer than `limit` rows while
+    /// `has_more` still cursors on.
     Jobs {
         #[serde(default)]
         status: Option<JobStatus>,
@@ -180,6 +188,13 @@ pub(crate) fn job_status_key(status: &JobStatus) -> &'static str {
 
 fn job_by_status_key(status: &JobStatus, id: &str) -> String {
     format!("job-status/{}/{id}", job_status_key(status))
+}
+
+/// the kind partition. a job's kind is set at submit and never changes, so
+/// this key is stable for the row's whole life — only [`JobsMsg::Prune`]
+/// removes it.
+fn job_by_kind_key(kind: &str, id: &str) -> String {
+    format!("job-kind/{kind}/{id}")
 }
 
 fn job_count_key(status: &JobStatus) -> String {
@@ -316,6 +331,7 @@ fn put_job_row(out: &mut Writes, row: &JobRow) -> Result<(), Fail> {
         .map_err(|e| Fail::new(FAIL_ROW_DECODE, e.to_string()))?;
     index_guest::put(out, format!("job-lineage/{}", row.job_id), lineage);
     index_guest::put(out, job_key(&row.job_id), bytes.clone());
+    index_guest::put(out, job_by_kind_key(&row.kind, &row.job_id), bytes.clone());
     index_guest::put(out, job_by_status_key(&row.status, &row.job_id), bytes);
     Ok(())
 }
@@ -541,6 +557,7 @@ fn fold_job(op: &OpRow, read: &impl StateRead, msg: JobsMsg) -> Result<Writes, F
                 return Ok(out);
             };
             index_guest::delete(&mut out, job_by_status_key(&row.status, &row.job_id));
+            index_guest::delete(&mut out, job_by_kind_key(&row.kind, &row.job_id));
             index_guest::delete(&mut out, job_key(&row.job_id));
             move_job_count(read, &mut out, Some(&row.status), None);
         }
@@ -565,7 +582,7 @@ pub fn serve_view(read: &impl StateRead, req: &[u8]) -> Result<Vec<u8>, Fail> {
             let page = read.scan_page(
                 prefix.as_bytes(),
                 after.as_deref().map(str::as_bytes),
-                limit.unwrap_or(DEFAULT_LIST_LIMIT),
+                limit.unwrap_or(DEFAULT_LIST_LIMIT).clamp(1, MAX_PAGE_LIMIT),
             );
             let mut tasks = Vec::with_capacity(page.entries.len());
             for (_key, value) in &page.entries {
@@ -590,23 +607,29 @@ pub fn serve_view(read: &impl StateRead, req: &[u8]) -> Result<Vec<u8>, Fail> {
             after,
             limit,
         } => {
-            let prefix = match &status {
-                Some(status) => format!("job-status/{}/", job_status_key(status)),
-                None => "job/".to_string(),
+            // scan the NARROWEST partition the request names: a kind hunt
+            // reads the kind index, so it costs the kind's population and
+            // not the board's. `job-kind/{kind}/{id}` keys sort by kind, so
+            // a partial kind is still a key prefix — but one that runs past
+            // the kind into the id matches keys the row itself does not, so
+            // both filters stay below as the exact decision.
+            let prefix = match (&kind_prefix, &status) {
+                (Some(kind), _) => format!("job-kind/{kind}"),
+                (None, Some(status)) => format!("job-status/{}/", job_status_key(status)),
+                (None, None) => "job/".to_string(),
             };
             let page = read.scan_page(
                 prefix.as_bytes(),
                 after.as_deref().map(str::as_bytes),
-                limit
-                    .unwrap_or(DEFAULT_LIST_LIMIT)
-                    .clamp(1, MAX_JOB_LIST_LIMIT),
+                limit.unwrap_or(DEFAULT_LIST_LIMIT).clamp(1, MAX_PAGE_LIMIT),
             );
             let mut jobs = Vec::with_capacity(page.entries.len());
             for (_key, value) in &page.entries {
                 let row = decode_job_row(value)?;
                 let keep = kind_prefix
                     .as_ref()
-                    .is_none_or(|prefix| row.kind.starts_with(prefix.as_str()));
+                    .is_none_or(|prefix| row.kind.starts_with(prefix.as_str()))
+                    && status.as_ref().is_none_or(|status| &row.status == status);
                 if keep {
                     jobs.push(row);
                 }
@@ -785,6 +808,45 @@ mod tests {
         assert_eq!(tasks.len(), 3);
     }
 
+    /// the by-status page size is the SERVER's call, not the caller's: an
+    /// over-ask answers one capped page and cursors on. unclamped, the only
+    /// bound left is the host's own scan cap — a whole partition's worth of
+    /// rows scanned and decoded for one request.
+    #[test]
+    fn by_status_clamps_an_oversized_limit_and_cursors() {
+        let mut map = BTreeMap::new();
+        for i in 0..2_000u64 {
+            fold(
+                &mut map,
+                1 + i,
+                &TaskMsg::CreateTask {
+                    task_id: format!("t{i:05}"),
+                    title: "bulk".into(),
+                    owner: None,
+                },
+            );
+        }
+
+        let TasksViewReply::Tasks {
+            tasks,
+            has_more,
+            next_after,
+        } = view(
+            &map,
+            serde_json::json!({"by_status": {"status": "open", "limit": 10_000_000}}),
+        )
+        else {
+            panic!("wrong reply shape")
+        };
+        assert_eq!(tasks.len(), MAX_PAGE_LIMIT, "the server caps the page");
+        assert!(has_more, "the rest of the partition stays behind a cursor");
+        assert_eq!(
+            next_after.as_deref(),
+            Some(by_status_key(&TaskStatus::Open, "t00255").as_str()),
+            "the cursor resumes at the capped page's end"
+        );
+    }
+
     // ---- the job board -------------------------------------------------
 
     fn job_op(height: u64, origin: OriginTag, msg: &JobsMsg) -> OpRow {
@@ -889,7 +951,7 @@ mod tests {
         assert_eq!(pending.len(), 2);
         assert_eq!(pending[0].submitter, "module:runs");
 
-        // kind filter applies within the page.
+        // a kind hunt reads the kind partition; a status narrows within it.
         let builds = jobs(
             &map,
             serde_json::json!({"jobs": {"status": "pending", "kind_prefix": "build/"}}),
@@ -938,6 +1000,10 @@ mod tests {
         );
         assert_eq!(counts(&map).done, 0);
         assert!(jobs(&map, serde_json::json!({"jobs": {}})).len() == 1);
+        assert!(
+            jobs(&map, serde_json::json!({"jobs": {"kind_prefix": "build/"}})).is_empty(),
+            "a prune clears the kind partition too"
+        );
 
         // release requeues; the whole-board page sees it under job/.
         fold_job_msg(
@@ -978,7 +1044,7 @@ mod tests {
             );
         }
 
-        // an over-ask clamps to MAX_JOB_LIST_LIMIT, ascending id order.
+        // an over-ask clamps to MAX_PAGE_LIMIT, ascending id order.
         let TasksViewReply::Jobs {
             jobs,
             has_more,
@@ -987,7 +1053,7 @@ mod tests {
         else {
             panic!("wrong reply shape")
         };
-        assert_eq!(jobs.len(), MAX_JOB_LIST_LIMIT, "limit clamped to 256");
+        assert_eq!(jobs.len(), MAX_PAGE_LIMIT, "limit clamped to 256");
         assert_eq!(jobs.first().unwrap().job_id, "job-000");
         assert_eq!(jobs.last().unwrap().job_id, "job-255");
         assert!(has_more);
@@ -1011,16 +1077,57 @@ mod tests {
         };
         assert_eq!(jobs.len(), 1);
 
-        // the kind filter applies WITHIN the scanned page: a page whose only
-        // row fails the filter answers empty while has_more still cursors on.
+        // a kind hunt scans the KIND partition, so the page fills with
+        // matches — job-000 is build/ and is never scanned at all.
         let TasksViewReply::Jobs { jobs, has_more, .. } = view(
             &map,
             serde_json::json!({"jobs": {"kind_prefix": "test/", "limit": 1}}),
         ) else {
             panic!("wrong reply shape")
         };
-        assert!(jobs.is_empty(), "job-000 is build/, filtered from the page");
-        assert!(has_more, "the cursor keeps going past the filtered page");
+        assert_eq!(jobs.len(), 1, "the page holds a match, not a filtered row");
+        assert_eq!(jobs[0].job_id, "job-001");
+        assert!(has_more, "the cursor keeps going through the kind");
+    }
+
+    /// hunting a rare kind costs the KIND, not the board: the needle is the
+    /// last row of a board that is otherwise all noise. filtered after the
+    /// scan instead of before it, one page reads 50 noise rows and answers
+    /// nothing — the caller pages the whole board to find one job.
+    #[test]
+    fn a_rare_kind_is_found_in_one_page_of_a_noisy_board() {
+        let mut map = BTreeMap::new();
+        for i in 0..600u64 {
+            fold_job_msg(
+                &mut map,
+                1 + i,
+                &JobsMsg::Submit {
+                    job_id: format!("job-{i:03}"),
+                    kind: if i == 599 {
+                        "rare/needle"
+                    } else {
+                        "bulk/noise"
+                    }
+                    .into(),
+                    spec: "{}".into(),
+                },
+            );
+        }
+
+        let found = jobs(&map, serde_json::json!({"jobs": {"kind_prefix": "rare/"}}));
+        assert_eq!(found.len(), 1, "one default-sized page holds the needle");
+        assert_eq!(found[0].job_id, "job-599");
+
+        // a prefix that runs past the kind into the id key-matches rows the
+        // row itself does not; the decoded kind stays the exact decision.
+        assert!(
+            jobs(
+                &map,
+                serde_json::json!({"jobs": {"kind_prefix": "rare/needle/job"}})
+            )
+            .is_empty(),
+            "the scan narrows, the filter decides"
+        );
     }
 
     /// the board requeues an expired reclaim until MAX_ATTEMPTS and FAILS the

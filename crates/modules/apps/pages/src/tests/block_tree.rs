@@ -1210,3 +1210,79 @@ fn deletion_batches_budget_the_removed_distinct_authors_and_mentions() {
         assert!(p.load_block("leaf-0000").await.unwrap().is_none());
     });
 }
+
+/// One `GetPage` page must cost reads proportional to the rows it RETURNS, not
+/// to how many children the parent happens to hold. The walk used to find each
+/// row's successor by re-reading — and re-DECODING — that row's parent to look
+/// its own id up in `children`, so a 256-row page over a wide parent paid two
+/// reads per row and decoded a record that may reach [`MAX_BLOCK_LEN`] 256
+/// times. Carrying the position through the walk makes it one read per row.
+#[test]
+fn a_page_walk_reads_what_it_returns_not_the_whole_parent_each_row() {
+    deterministic::Runner::default().start(|_context| async move {
+        const CHILDREN: usize = 3_000;
+        let reads = std::rc::Rc::new(std::cell::Cell::new(0_usize));
+        let store = CountingStore {
+            reads: reads.clone(),
+            ..Default::default()
+        };
+        let mut p = Pages::new("pages", Box::new(store));
+
+        let child_ids: Vec<String> = (0..CHILDREN).map(|i| format!("b{i:05}")).collect();
+        p.store_block(&Block {
+            author: Party::System,
+            id: "wide".into(),
+            parent: None,
+            page: "wide".into(),
+            kind: BlockKind::Page,
+            text: "wide".into(),
+            marks: Vec::new(),
+            checked: false,
+            children: child_ids.clone(),
+        })
+        .unwrap();
+        for id in &child_ids {
+            p.store_block(&Block {
+                author: Party::System,
+                id: id.clone(),
+                parent: Some("wide".into()),
+                page: "wide".into(),
+                kind: BlockKind::Paragraph,
+                text: id.clone(),
+                marks: Vec::new(),
+                checked: false,
+                children: Vec::new(),
+            })
+            .unwrap();
+        }
+        p.stage_index(&BTreeMap::from([("wide".into(), None)]))
+            .unwrap();
+        p.commit_block().await.unwrap();
+
+        // the first page: the root plus one read per row emitted.
+        reads.set(0);
+        let first = page_slice(&p, "wide", None, 0).await;
+        let spent = reads.get();
+        assert_eq!(first.blocks.len(), MAX_PAGE_QUERY_LIMIT as usize);
+        assert!(
+            spent <= first.blocks.len() + 8,
+            "{spent} reads for {} rows over {CHILDREN} children: the walk is \
+             re-reading a parent per row",
+            first.blocks.len()
+        );
+
+        // and a cursored page, which additionally rebuilds the ancestor chain
+        // once — once per CALL, not once per row.
+        let cursor = first.next_after.expect("more rows follow");
+        reads.set(0);
+        let next = page_slice(&p, "wide", Some(&cursor), 0).await;
+        let spent = reads.get();
+        assert_eq!(next.blocks.len(), MAX_PAGE_QUERY_LIMIT as usize);
+        assert!(
+            spent <= next.blocks.len() + 8,
+            "{spent} reads for {} resumed rows: the cursor walk is re-reading a \
+             parent per row",
+            next.blocks.len()
+        );
+    });
+}
