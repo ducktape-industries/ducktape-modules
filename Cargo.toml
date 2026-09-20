@@ -75,34 +75,12 @@ keyscheme = { git = "https://github.com/ducktape-industries/ducktape-sdk", branc
 index_guest = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "index-guest" }
 
 # system-module wire surfaces
-acl = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "acl-wire" }
-attribution = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "attribution-wire" }
-capability = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "capability-wire" }
-dispatch = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "dispatch-wire" }
-governance = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "governance-wire" }
-identity = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "identity-wire" }
-kv = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "kv-wire" }
-modules = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "modules-wire" }
-valset = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "valset-wire" }
 
 # app-module wire surfaces. The ones whose module crate also lives here are
 # the crate's OWN wire (`chat-wire` under `crates/modules/apps/chat`) or a
 # sibling's format read without linking the sibling (`pages` in chat's tests,
 # `agent` in runs).
-agent = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "agent-wire" }
-agent-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "agent-wire" }
-boards-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "boards-wire" }
-chat = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "chat-wire" }
-chat-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "chat-wire" }
-chat-message = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "chat-message" }
-collaboration = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "collaboration-wire" }
-files = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "files-wire" }
-files-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "files-wire" }
 duck-address = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "duck-address" }
-forge = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "forge-wire" }
-runs-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "runs-wire" }
-tasks = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "tasks-wire" }
-tasks-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "tasks-wire" }
 
 # ---------------------------------------------------------------------------
 # ducktape — the platform. DEV-ONLY here, except the two pure envelope crates:

@@ -1761,16 +1761,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "files-wire"
-version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#8c764093d5974b4328c0b90de157d72597540020"
-dependencies = [
- "duck-address",
- "duckfs-core",
- "refusal-class",
-]
-
-[[package]]
 name = "find-msvc-tools"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
