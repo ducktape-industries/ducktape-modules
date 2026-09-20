@@ -14,9 +14,200 @@ use commonware_cryptography::{Signer as _, ed25519};
 use futures::executor::block_on;
 use host::{BlockContext, Host};
 use identity::{Identity, IdentityMsg, KeyScheme};
-use pages::{InlineMark, NewBlock, PageMsg, Pages, SpanMark};
+use page_contract::{BlockKind, InlineMark, NewBlock, PageMsg, SpanMark};
 use sdk::{Ctx, Error, Module, ModuleId, Msg, Origin, StateRoot};
 use sdk_testkit::{MemStore, TestCtx};
+use wasm_host::WasmModule;
+
+mod page_contract {
+    use serde::{Deserialize, Serialize};
+
+    pub const MAX_PAGE_TITLE_LEN: usize = 512;
+
+    #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum BlockKind {
+        Paragraph,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum InlineMark {
+        Mention(u64),
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(deny_unknown_fields)]
+    pub struct SpanMark {
+        pub start: u32,
+        pub end: u32,
+        pub kind: InlineMark,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(deny_unknown_fields)]
+    pub struct NewBlock {
+        pub id: String,
+        pub kind: BlockKind,
+        pub text: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pub marks: Vec<SpanMark>,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum PageMsg {
+        CreatePage {
+            page_id: String,
+            title: String,
+            #[serde(default, skip_serializing_if = "Vec::is_empty")]
+            blocks: Vec<NewBlock>,
+        },
+        InsertBlock {
+            parent: String,
+            after: Option<String>,
+            block: NewBlock,
+        },
+        UpdateText {
+            block_id: String,
+            text: String,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            marks: Option<Vec<SpanMark>>,
+        },
+        AddComment {
+            thread_id: String,
+            comment_id: String,
+            target: String,
+            text: String,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            anchor: Option<serde_json::Value>,
+            #[serde(default, skip_serializing_if = "Vec::is_empty")]
+            mentions: Vec<u64>,
+        },
+        EditComment {
+            comment_id: String,
+            text: String,
+            #[serde(default, skip_serializing_if = "Vec::is_empty")]
+            mentions: Vec<u64>,
+        },
+        RemoveBlock {
+            block_id: String,
+        },
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum PageQuery {
+        GetBlock { block_id: String },
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum PageReply {
+        Block(Option<serde_json::Value>),
+    }
+
+    pub fn encode_msg(message: &PageMsg) -> Vec<u8> {
+        sdk::wire::encode(message)
+    }
+
+    pub fn encode_query(query: &PageQuery) -> Vec<u8> {
+        sdk::wire::encode(query)
+    }
+
+    pub fn encode_reply(reply: &PageReply) -> Vec<u8> {
+        sdk::wire::encode(reply)
+    }
+
+    pub fn decode_reply(bytes: &[u8]) -> Result<PageReply, String> {
+        sdk::wire::decode(bytes)
+    }
+}
+
+const PAGES_WASM: &[u8] = include_bytes!("../../pages/component.wasm");
+// Produced by pages-wire at the frozen owner revision b66f47f; these are
+// consumer fixtures, not values obtained by round-tripping this local copy.
+const PAGE_CREATE_P: &[u8] = br#"{"create_page":{"page_id":"p","title":"Program's page"}}"#;
+const PAGE_INSERT_B: &[u8] = br#"{"insert_block":{"parent":"p","after":null,"block":{"id":"b","kind":"paragraph","text":"tag","marks":[{"start":0,"end":3,"kind":{"mention":1}}]}}}"#;
+const PAGE_UPDATE_B: &[u8] = br#"{"update_text":{"block_id":"b","text":"next","marks":[]}}"#;
+const PAGE_ADD_COMMENT: &[u8] = br#"{"add_comment":{"thread_id":"t","comment_id":"c","target":"b","text":"ping","mentions":[3]}}"#;
+const PAGE_EDIT_COMMENT: &[u8] =
+    br#"{"edit_comment":{"comment_id":"c","text":"changed","mentions":[1]}}"#;
+const PAGE_REMOVE_P: &[u8] = br#"{"remove_block":{"block_id":"p"}}"#;
+const PAGE_GET_BLOCK_WIDE: &[u8] = br#"{"get_block":{"block_id":"wide"}}"#;
+const PAGE_BLOCK_NONE_REPLY: &[u8] = br#"{"block":null}"#;
+
+#[test]
+fn page_consumer_contract_uses_owner_bytes() {
+    assert_eq!(
+        page_contract::encode_msg(&PageMsg::CreatePage {
+            page_id: "p".into(),
+            title: "Program's page".into(),
+            blocks: Vec::new(),
+        }),
+        PAGE_CREATE_P
+    );
+    assert_eq!(
+        page_contract::encode_msg(&PageMsg::InsertBlock {
+            parent: "p".into(),
+            after: None,
+            block: NewBlock {
+                id: "b".into(),
+                kind: BlockKind::Paragraph,
+                text: "tag".into(),
+                marks: vec![SpanMark {
+                    start: 0,
+                    end: 3,
+                    kind: InlineMark::Mention(1),
+                }],
+            },
+        }),
+        PAGE_INSERT_B
+    );
+    assert_eq!(
+        page_contract::encode_msg(&PageMsg::UpdateText {
+            block_id: "b".into(),
+            text: "next".into(),
+            marks: Some(Vec::new()),
+        }),
+        PAGE_UPDATE_B
+    );
+    assert_eq!(
+        page_contract::encode_msg(&PageMsg::AddComment {
+            thread_id: "t".into(),
+            comment_id: "c".into(),
+            target: "b".into(),
+            text: "ping".into(),
+            anchor: None,
+            mentions: vec![3],
+        }),
+        PAGE_ADD_COMMENT
+    );
+    assert_eq!(
+        page_contract::encode_msg(&PageMsg::EditComment {
+            comment_id: "c".into(),
+            text: "changed".into(),
+            mentions: vec![1],
+        }),
+        PAGE_EDIT_COMMENT
+    );
+    assert_eq!(
+        page_contract::encode_msg(&PageMsg::RemoveBlock {
+            block_id: "p".into(),
+        }),
+        PAGE_REMOVE_P
+    );
+    assert_eq!(
+        page_contract::encode_query(&page_contract::PageQuery::GetBlock {
+            block_id: "wide".into(),
+        }),
+        PAGE_GET_BLOCK_WIDE
+    );
+    assert_eq!(
+        page_contract::encode_reply(&page_contract::PageReply::Block(None)),
+        PAGE_BLOCK_NONE_REPLY
+    );
+}
 
 struct Executor;
 #[async_trait::async_trait(?Send)]
@@ -75,9 +266,8 @@ async fn boot() -> Host {
             .with_attribution("attribution"),
     ));
     host.register(Box::new(
-        Pages::new("pages", Box::new(MemStore::new()))
-            .with_identity("identity")
-            .with_attribution("attribution"),
+        WasmModule::with_store("pages", PAGES_WASM, Box::new(MemStore::new()))
+            .expect("load committed pages guest"),
     ));
     host.register(Box::new(Executor));
     for byte in [1, 2] {
@@ -354,7 +544,7 @@ fn pages_text_and_comment_edits_remove_mentions_and_subtree_purge_retires_relati
                 after: None,
                 block: NewBlock {
                     id: "b".into(),
-                    kind: pages::BlockKind::Paragraph,
+                    kind: BlockKind::Paragraph,
                     text: "tag".into(),
                     marks: vec![SpanMark {
                         start: 0,
@@ -457,8 +647,8 @@ fn pages_text_and_comment_edits_remove_mentions_and_subtree_purge_retires_relati
 #[test]
 fn a_local_page_rejection_preserves_previous_staging_without_abort() {
     block_on(async {
-        let mut pages =
-            Pages::new("pages", Box::new(MemStore::new())).with_attribution("attribution");
+        let mut pages = WasmModule::with_store("pages", PAGES_WASM, Box::new(MemStore::new()))
+            .expect("load committed pages guest");
         let mut ctx = TestCtx::at_height(1);
         pages
             .execute(
@@ -482,7 +672,7 @@ fn a_local_page_rejection_preserves_previous_staging_without_abort() {
                         "pages",
                         &PageMsg::CreatePage {
                             page_id: "bad".into(),
-                            title: "x".repeat(pages::MAX_PAGE_TITLE_LEN + 1),
+                            title: "x".repeat(page_contract::MAX_PAGE_TITLE_LEN + 1),
                             blocks: Vec::new(),
                         }
                     )
@@ -493,14 +683,15 @@ fn a_local_page_rejection_preserves_previous_staging_without_abort() {
         pages.commit_block().await.unwrap();
         for (id, exists) in [("kept", true), ("bad", false)] {
             let bytes = pages
-                .query(&pages::encode_query(&pages::PageQuery::GetBlock {
-                    block_id: id.into(),
-                }))
+                .query(&page_contract::encode_query(
+                    &page_contract::PageQuery::GetBlock {
+                        block_id: id.into(),
+                    },
+                ))
                 .await
                 .unwrap();
-            let pages::PageReply::Block(block) = pages::decode_reply(&bytes).unwrap() else {
-                panic!("block")
-            };
+            let page_contract::PageReply::Block(block) =
+                page_contract::decode_reply(&bytes).unwrap();
             assert_eq!(block.is_some(), exists);
         }
     });
@@ -1081,7 +1272,7 @@ fn attribution_batches_retire_more_than_the_host_dispatch_limit_of_sources() {
                     after: None,
                     block: NewBlock {
                         id: format!("leaf-{index}"),
-                        kind: pages::BlockKind::Paragraph,
+                        kind: BlockKind::Paragraph,
                         text: "mention".into(),
                         marks: vec![SpanMark {
                             start: 0,
@@ -1116,18 +1307,15 @@ fn attribution_batches_retire_more_than_the_host_dispatch_limit_of_sources() {
             );
         }
         assert!(retired_page.revision > before.revision);
-        let bytes = host
-            .query(
-                "pages",
-                &pages::encode_query(&pages::PageQuery::GetBlock {
-                    block_id: "wide".into(),
-                }),
-            )
-            .await
-            .unwrap();
+        let query = page_contract::encode_query(&page_contract::PageQuery::GetBlock {
+            block_id: "wide".into(),
+        });
+        assert_eq!(query, PAGE_GET_BLOCK_WIDE);
+        let bytes = host.query("pages", &query).await.unwrap();
+        assert_eq!(bytes, PAGE_BLOCK_NONE_REPLY);
         assert_eq!(
-            pages::decode_reply(&bytes).unwrap(),
-            pages::PageReply::Block(None)
+            page_contract::decode_reply(&bytes).unwrap(),
+            page_contract::PageReply::Block(None)
         );
     });
 }
