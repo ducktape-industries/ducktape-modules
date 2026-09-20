@@ -1022,7 +1022,8 @@ fn exec(m: &mut RunsModule, ctx: &mut CaptureCtx, op: &Msg) -> Result<(), Error>
         .staged()
         .iter()
         .filter(|(id, _)| id.starts_with("action/body/") && !previous.contains(*id))
-        .map(|(_, bytes)| {
+        .filter_map(|(_, staged)| staged.as_ref())
+        .map(|bytes| {
             let request: super::action_requests::ActionRequest = sdk::wire::decode(bytes).unwrap();
             Msg {
                 target: request.view.target,
@@ -1464,7 +1465,7 @@ mod delivery;
 mod facets;
 mod job_runs;
 mod pages_actions;
-mod receipts;
+pub(crate) mod receipts;
 mod registry;
 mod resident;
 mod sessions;
