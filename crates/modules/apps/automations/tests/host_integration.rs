@@ -1,6 +1,6 @@
 //! integration: the real host routes a chat hook follow-up into automations with
 //! `Origin::Module("chat")`, a rule fires, and its `CreateTask` follow-up lands
-//! in the real tasks module — all atomically within one block.
+//! in the minimal tasks protocol fixture — all atomically within one block.
 
 // the NATIVE modules under their module names — the `identity`/`attribution`
 // crates in [dependencies] are the wire surfaces these re-export.
@@ -12,15 +12,13 @@ use automations::{
     Action, AutomationsMsg, AutomationsQuery, AutomationsReply, RunRecord, Trigger, decode_reply,
     encode_msg, encode_query,
 };
-use chat::{ChatEvent, Party, encode_event};
+use automations::consumer_wire::{Party, chat::{ChatEvent, encode_event}, tasks};
 use futures::executor::block_on;
 use host::{BlockContext, Host};
 use sdk::{Ctx, Error, Module, ModuleId, Msg, Origin, StateRoot};
-use tasks::Tasks;
-use tasks::{
-    TaskQuery, TaskReply, decode_task_reply as tasks_decode_reply,
-    encode_task_query as tasks_encode_query,
-};
+#[path = "support/mod.rs"]
+mod support;
+use support::ProtocolTasks;
 
 const AUTO: &str = "automations";
 const CHAT: &str = "chat";
@@ -91,12 +89,12 @@ fn chat_event_msg(channel: &str, seq: u64, author: Party) -> Msg {
 }
 
 async fn tasks_of(host: &Host) -> Vec<tasks::Task> {
-    let req = tasks_encode_query(&TaskQuery::List {
+    let req = tasks::encode_task_query(&tasks::TaskQuery::List {
         limit: tasks::MAX_LIST_LIMIT,
         after: None,
     });
     let bytes = host.query(TASKS, &req).await.expect("query");
-    let TaskReply::Tasks(tasks) = tasks_decode_reply(&bytes).expect("reply") else {
+    let tasks::TaskReply::Tasks(tasks) = tasks::decode_task_reply(&bytes).expect("reply") else {
         panic!("a list answers a page");
     };
     tasks
@@ -138,12 +136,7 @@ async fn genesis() -> Host {
             "attribution",
             Box::new(sdk_testkit::MemStore::new()),
         )),
-        Box::new(Tasks::new(
-            TASKS,
-            "identity",
-            "attribution",
-            Box::new(sdk_testkit::MemStore::new()),
-        )),
+        Box::new(ProtocolTasks::new()),
         Box::new(RelayChat),
         Box::new(auto),
     ])
@@ -282,7 +275,7 @@ fn squatted_task_id_is_caught_by_probe_and_block_commits() {
             },
             Msg {
                 target: TASKS.into(),
-                payload: tasks::encode_task_msg(&tasks::TaskMsg::CreateTask {
+            payload: tasks::encode_task_msg(&tasks::TaskMsg::CreateTask {
                     task_id: "auto-capture-general-5".into(),
                     title: "squatted".into(),
                     owner: None,

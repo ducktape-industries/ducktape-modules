@@ -1,6 +1,7 @@
 use automations::{
     Action, Automations, AutomationsMsg, AutomationsQuery, AutomationsReply, Trigger,
 };
+use automations::consumer_wire::{Party, chat::{self, ChatEvent}};
 // the NATIVE modules under their module names — the `identity`/`attribution`
 // crates in [dependencies] are the wire surfaces these re-export.
 use attribution_module as attribution;
@@ -132,12 +133,12 @@ async fn create_rule(host: &mut Host) {
     .await
     .unwrap();
 }
-async fn fire(host: &mut Host, author: chat::Party) {
+async fn fire(host: &mut Host, author: Party) {
     host.submit_at(
         ctx(Origin::System),
         Msg {
             target: "chat".into(),
-            payload: chat::encode_event(&chat::ChatEvent::MessagePosted {
+            payload: chat::encode_event(&ChatEvent::MessagePosted {
                 channel_id: "general".into(),
                 seq: 1,
                 thread_root: None,
@@ -205,11 +206,11 @@ fn a_rule_keeps_firing_whatever_becomes_of_its_creator_account() {
             ),
         ] {
             let mut host = arena().await;
-            fire(&mut host, chat::Party::Account(3)).await;
+            fire(&mut host, Party::Account(3)).await;
             assert_eq!(rule(&host).await.fire_count, 1);
             identity_op(&mut host, origin, change).await;
             let before = host.root_hash();
-            fire(&mut host, chat::Party::Module("worker".into())).await;
+            fire(&mut host, Party::Module("worker".into())).await;
             assert_ne!(host.root_hash(), before, "the fire landed");
             assert_eq!(rule(&host).await.fire_count, 2);
             assert_eq!(changes(&host).await.len(), 2);
@@ -221,7 +222,7 @@ fn a_rule_keeps_firing_whatever_becomes_of_its_creator_account() {
 fn each_report_has_a_fresh_source_even_after_rule_recreation() {
     block_on(async {
         let mut host = arena().await;
-        fire(&mut host, chat::Party::System).await;
+        fire(&mut host, Party::System).await;
         host.submit_at(
             ctx(Origin::Program(3)),
             Msg {
@@ -234,7 +235,7 @@ fn each_report_has_a_fresh_source_even_after_rule_recreation() {
         .await
         .unwrap();
         create_rule(&mut host).await;
-        fire(&mut host, chat::Party::Module("worker".into())).await;
+        fire(&mut host, Party::Module("worker".into())).await;
         let records = changes(&host).await;
         assert_eq!(records.len(), 2);
         assert_ne!(

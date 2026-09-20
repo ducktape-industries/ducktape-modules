@@ -1,7 +1,8 @@
-//! the probe layer against the REAL chat module: a squatted deterministic
+//! the probe layer against a minimal chat protocol fixture: a squatted deterministic
 //! message id and a missing action channel are downgraded to run records
 //! instead of aborting the posting user's block, while the happy path still
-//! posts — all through chat's genuine hook fan-out, not a stand-in.
+//! posts — all through the fixture's hook fan-out and the real host dispatch
+//! seam.
 
 // the NATIVE modules under their module names — the `identity`/`attribution`
 // crates in [dependencies] are the wire surfaces these re-export.
@@ -14,17 +15,18 @@ use automations::{
     decode_reply as auto_decode_reply, encode_msg as auto_encode_msg,
     encode_query as auto_encode_query,
 };
-use chat::Chat;
-use chat::{
-    Block, ChatMsg, ChatQuery, ChatReply, MessageView, Party, PostPolicy,
+use automations::consumer_wire::chat::{
+    Block, ChatMsg, ChatQuery, ChatReply, MessageView, PostPolicy,
     decode_reply as chat_decode_reply, encode_msg as chat_encode_msg,
     encode_query as chat_encode_query,
 };
-use commonware_runtime::{Runner as _, Supervisor as _, deterministic};
+use automations::consumer_wire::Party;
+use commonware_runtime::{Runner as _, deterministic};
 use host::{BlockContext, Host};
 use sdk::{Msg, Origin};
-use statesync::qmdb::QmdbStore;
-use tasks::Tasks;
+#[path = "../tests/support/mod.rs"]
+mod support;
+use support::{ProtocolChat, ProtocolTasks};
 
 const AUTO: &str = "automations";
 const CHAT: &str = "chat";
@@ -108,14 +110,11 @@ async fn run_history(host: &Host, rule_id: &str) -> Vec<RunRecord> {
 
 /// genesis a real chat + tasks + automations host with channel "general"
 /// created, the automations hook registered on it, and one rule installed.
-async fn arena(context: deterministic::Context, rule_id: &str, action: Action) -> Host {
-    let chat = Chat::new(
-        CHAT,
-        Box::new(QmdbStore::init(context.child(CHAT), CHAT).await),
-    );
+async fn arena(_context: deterministic::Context, rule_id: &str, action: Action) -> Host {
+    let chat = ProtocolChat::new();
     let auto = Automations::new(
         AUTO,
-        Box::new(QmdbStore::init(context.child(AUTO), AUTO).await),
+        Box::new(sdk_testkit::MemStore::new()),
         CHAT,
         TASKS,
         IDENTITY,
@@ -132,12 +131,7 @@ async fn arena(context: deterministic::Context, rule_id: &str, action: Action) -
             Box::new(sdk_testkit::MemStore::new()),
         )),
         Box::new(chat),
-        Box::new(Tasks::new(
-            TASKS,
-            "identity",
-            "attribution",
-            Box::new(sdk_testkit::MemStore::new()),
-        )),
+        Box::new(ProtocolTasks::new()),
         Box::new(auto),
     ])
     .expect("genesis");
