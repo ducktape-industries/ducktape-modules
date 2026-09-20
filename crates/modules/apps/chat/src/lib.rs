@@ -47,6 +47,7 @@
 //! serve surface.
 
 pub mod client;
+mod consumer_wire;
 pub mod index;
 mod message;
 mod wire;
@@ -84,10 +85,11 @@ mod index_guest;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use attribution::{
+use consumer_wire::attribution::{
     Actor, AttributionMsg, ObjectRef, Reason, Relation, encode_msg as attribution_encode_msg,
 };
-use identity::{
+use consumer_wire::identity;
+use consumer_wire::identity::{
     IdentityQuery, IdentityReply, decode_reply as identity_decode_reply,
     encode_query as identity_encode_query,
 };

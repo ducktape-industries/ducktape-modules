@@ -52,6 +52,7 @@
 //! straight to the store.
 
 // Pages owns its wire records, codecs, semantic helpers, and index reducer.
+mod consumer_wire;
 mod error;
 pub mod index;
 pub mod record_ops;

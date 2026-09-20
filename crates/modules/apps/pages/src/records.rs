@@ -2,6 +2,7 @@
 //! The root is a top-level Page, and record documents cannot contain subpages.
 //! Consequently every protected block's `page` is either the collection root or
 //! a managed record ID: no ancestor walk or unbounded reverse index is needed.
+use super::consumer_wire::files;
 use super::{
     BlockKind, MAX_BLOCK_ID_BYTES, MAX_RECORD_ARTIFACTS, MAX_RECORD_BATCH_BYTES,
     MAX_RECORD_CHANGES, MAX_RECORD_DATA_BYTES, MAX_RECORD_DOCUMENT_BLOCKS,

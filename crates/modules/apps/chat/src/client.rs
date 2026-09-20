@@ -19,6 +19,7 @@ use duck_address::ChainId;
 use duck_address::identity::AccountAddress;
 use sha2::{Digest, Sha256};
 
+use crate::consumer_wire::identity;
 use crate::index::{self, MsgRow};
 use crate::{Block, ChatAssigned, ChatMsg, Mark, Party, PostPolicy, Span, decode_msg};
 use sdk::Error;
