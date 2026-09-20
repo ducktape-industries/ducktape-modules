@@ -110,15 +110,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
-name = "automations-wire"
-version = "0.1.0"
-dependencies = [
- "borsh",
- "sdk",
- "serde",
-]
-
-[[package]]
 name = "aws-lc-rs"
 version = "1.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -232,16 +223,6 @@ dependencies = [
  "glob",
  "threadpool",
  "zeroize",
-]
-
-[[package]]
-name = "boards-wire"
-version = "0.1.0"
-dependencies = [
- "refusal-class",
- "serde",
- "serde_json",
- "syn 2.0.119",
 ]
 
 [[package]]
@@ -1642,16 +1623,6 @@ dependencies = [
  "borsh",
  "duck-address",
  "keyscheme",
- "sdk",
- "serde",
-]
-
-[[package]]
-name = "inbox-wire"
-version = "0.1.0"
-dependencies = [
- "attribution-wire",
- "borsh",
  "sdk",
  "serde",
 ]

@@ -57,14 +57,11 @@ members = [
 
     # app modules — wire surfaces only
     "crates/modules/apps/agent/wire",
-    "crates/modules/apps/automations/wire",
-    "crates/modules/apps/boards/wire",
     "crates/modules/apps/chat/message",
     "crates/modules/apps/chat/wire",
     "crates/modules/apps/collaboration/wire",
     "crates/modules/apps/files/wire",
     "crates/modules/apps/forge/wire",
-    "crates/modules/apps/inbox/wire",
     "crates/modules/apps/pages/wire",
     "crates/modules/apps/runs/wire",
     "crates/modules/apps/tasks/wire",
@@ -211,10 +208,6 @@ valset-wire = { path = "crates/modules/system/valset/wire" }
 
 agent = { package = "agent-wire", path = "crates/modules/apps/agent/wire" }
 agent-wire = { path = "crates/modules/apps/agent/wire" }
-automations = { package = "automations-wire", path = "crates/modules/apps/automations/wire" }
-automations-wire = { path = "crates/modules/apps/automations/wire" }
-boards = { package = "boards-wire", path = "crates/modules/apps/boards/wire" }
-boards-wire = { path = "crates/modules/apps/boards/wire" }
 chat = { package = "chat-wire", path = "crates/modules/apps/chat/wire" }
 chat-wire = { path = "crates/modules/apps/chat/wire" }
 chat-message = { path = "crates/modules/apps/chat/message" }
@@ -224,8 +217,6 @@ files = { package = "files-wire", path = "crates/modules/apps/files/wire" }
 files-wire = { path = "crates/modules/apps/files/wire" }
 forge = { package = "forge-wire", path = "crates/modules/apps/forge/wire" }
 forge-wire = { path = "crates/modules/apps/forge/wire" }
-inbox = { package = "inbox-wire", path = "crates/modules/apps/inbox/wire" }
-inbox-wire = { path = "crates/modules/apps/inbox/wire" }
 pages = { package = "pages-wire", path = "crates/modules/apps/pages/wire" }
 pages-wire = { path = "crates/modules/apps/pages/wire" }
 runs = { package = "runs-wire", path = "crates/modules/apps/runs/wire" }
