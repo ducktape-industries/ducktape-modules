@@ -29,6 +29,8 @@ jobs:
       - run: rustup show
       - run: cargo fmt --all -- --check
       - run: cargo test --locked --workspace --lib --no-fail-fast
+      # The lane echo is a pinned contract fixture, not a CI rebuild target.
+      - run: cargo test --locked -p wasm-host --test lane_world
       - run: cargo clippy --locked --workspace --tests --no-deps -- -D warnings
       - run: cargo build --locked --release -p guest-builder
       - run: make view-wasm-check CARGO="cargo --locked"
