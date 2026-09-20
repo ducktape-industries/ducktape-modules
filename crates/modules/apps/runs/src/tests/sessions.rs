@@ -120,6 +120,461 @@ fn with_open_hosted_session() -> (RunsModule, receipts::Backing, Registry, Strin
     (m, backing, registry, run_id)
 }
 
+/// Upper-bound point-record stress only: this deliberately bypasses the old
+/// decoder/migration and uses synthetic request digests. It is not an
+/// achievable old embedded snapshot.
+fn seed_upper_bound_point_records(
+    m: &mut RunsModule,
+    root: &str,
+    edge_count: usize,
+) -> Vec<String> {
+    let mut ids = Vec::with_capacity(edge_count);
+    let mut previous_callee = None;
+    for index in 0..edge_count {
+        let caller = if index < MAX_ACTIONS_PER_SESSION as usize {
+            root.to_owned()
+        } else {
+            previous_callee.clone().unwrap()
+        };
+        let request_id = format!("compat-{index}");
+        let delegation_id = delegation_id_for(&caller, &request_id);
+        let callee_run_id = delegated_run_id_for(&delegation_id, "worker");
+        let header = DelegationHeader {
+            delegation_id: delegation_id.clone(),
+            request_id,
+            caller_run_id: caller,
+            root_run_id: root.into(),
+            callee_run_id: callee_run_id.clone(),
+            callee_agent_id: "worker".into(),
+            status: DelegationStatus::Delivered,
+            request_digest: [index as u8; 32],
+            created_at: 1,
+            completed_at: Some(2),
+        };
+        m.receipts
+            .stage(
+                crate::state::delegation_key(&delegation_id),
+                crate::state::encode_delegation_header(&header),
+            )
+            .unwrap();
+        m.receipts
+            .stage(
+                crate::state::delegation_run_key(&callee_run_id),
+                crate::state::encode_delegation_run_index(&crate::state::DelegationRunIndex {
+                    run_id: callee_run_id.clone(),
+                    delegation_id: delegation_id.clone(),
+                    root_run_id: root.into(),
+                }),
+            )
+            .unwrap();
+        m.receipts
+            .stage(
+                crate::state::delegation_reply_key(&delegation_id),
+                crate::state::encode_delegation_result(
+                    &delegation_id,
+                    &DelegationResult {
+                        reply_blocks: vec![ReplyBlock {
+                            kind: "paragraph".into(),
+                            text: "compatibility result".into(),
+                            lang: None,
+                        }],
+                        output_ref: None,
+                        error: None,
+                    },
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        ids.push(delegation_id);
+        previous_callee = Some(callee_run_id);
+    }
+    ids.sort();
+    m.receipts
+        .stage(
+            crate::state::delegation_tree_key(root),
+            crate::state::encode_delegation_tree(
+                root,
+                &crate::state::DelegationTree {
+                    ids: ids.clone(),
+                    pending: 0,
+                },
+            ),
+        )
+        .unwrap();
+    ids
+}
+
+fn realistic_legacy_snapshot(
+    source: &RunsModule,
+    root: &str,
+    edge_count: usize,
+) -> (Vec<u8>, StateRoot, String) {
+    const PENDING_CHILDREN: usize = 8;
+    let template = block_on(source.pending_entry(&dispatch_id_for(root)))
+        .unwrap()
+        .unwrap();
+    let unrelated_root = "unrelated-legacy-root".to_owned();
+    let mut pending = BTreeMap::from([(dispatch_id_for(root), template.clone())]);
+    let mut delegations = BTreeMap::new();
+    let mut previous_callee = root.to_owned();
+
+    for index in 0..edge_count {
+        let caller = if index < MAX_ACTIONS_PER_SESSION as usize {
+            root.to_owned()
+        } else {
+            previous_callee.clone()
+        };
+        let request_id = format!("legacy-ceiling-{index}");
+        let delegation_id = delegation_id_for(&caller, &request_id);
+        let callee_run_id = delegated_run_id_for(&delegation_id, "worker");
+        let is_pending = index < PENDING_CHILDREN;
+        if is_pending {
+            let mut child = template.clone();
+            child.run_id = callee_run_id.clone();
+            child.agent_id = "worker".into();
+            child.delegation_id = Some(delegation_id.clone());
+            pending.insert(dispatch_id_for(&callee_run_id), child);
+        } else {
+            previous_callee = callee_run_id.clone();
+        }
+        delegations.insert(
+            delegation_id.clone(),
+            DelegationState {
+                view: DelegationView {
+                    delegation_id,
+                    request_id,
+                    caller_run_id: caller,
+                    root_run_id: root.into(),
+                    callee_run_id,
+                    callee_agent_id: "worker".into(),
+                    status: if is_pending {
+                        DelegationStatus::Pending
+                    } else {
+                        DelegationStatus::Delivered
+                    },
+                    result: (!is_pending).then_some(DelegationResult {
+                        reply_blocks: Vec::new(),
+                        output_ref: None,
+                        error: None,
+                    }),
+                    created_at: 1,
+                    completed_at: (!is_pending).then_some(2),
+                },
+                request: DelegationRequest {
+                    agent_id: "worker".into(),
+                    instruction: "work".into(),
+                    skills: Vec::new(),
+                },
+            },
+        );
+    }
+
+    let unrelated_id = delegation_id_for(&unrelated_root, "unrelated");
+    let unrelated_callee = delegated_run_id_for(&unrelated_id, "worker");
+    delegations.insert(
+        unrelated_id.clone(),
+        DelegationState {
+            view: DelegationView {
+                delegation_id: unrelated_id,
+                request_id: "unrelated".into(),
+                caller_run_id: unrelated_root.clone(),
+                root_run_id: unrelated_root.clone(),
+                callee_run_id: unrelated_callee,
+                callee_agent_id: "worker".into(),
+                status: DelegationStatus::Delivered,
+                result: Some(DelegationResult {
+                    reply_blocks: Vec::new(),
+                    output_ref: None,
+                    error: None,
+                }),
+                created_at: 1,
+                completed_at: Some(2),
+            },
+            request: DelegationRequest {
+                agent_id: "worker".into(),
+                instruction: "work".into(),
+                skills: Vec::new(),
+            },
+        },
+    );
+    let mut unrelated_entry = template;
+    unrelated_entry.run_id = unrelated_root.clone();
+    unrelated_entry.delegation_id = None;
+    pending.insert(dispatch_id_for(&unrelated_root), unrelated_entry);
+
+    let mut records = source.receipts.snapshot();
+    records.retain(|key, _| key != crate::state::RUN_META_KEY && !key.starts_with("run/"));
+    let pending_ids: Vec<_> = pending.keys().cloned().collect();
+    records.insert(
+        crate::state::RUN_META_KEY.into(),
+        crate::state::encode_pending_meta(
+            pending_ids.first().map(String::as_str),
+            pending_ids.len() as u64,
+        ),
+    );
+    for (index, dispatch_id) in pending_ids.iter().enumerate() {
+        records.insert(
+            crate::state::pending_key(dispatch_id),
+            crate::state::encode_pending_record(
+                &pending[dispatch_id],
+                (index > 0).then(|| pending_ids[index - 1].as_str()),
+                pending_ids.get(index + 1).map(String::as_str),
+            ),
+        );
+    }
+    let bytes =
+        crate::state::encode_post_b_committed(&records, source.next_action_item, &delegations);
+    let root_hash = crate::state::post_b_root(&records, source.next_action_item, &delegations);
+    (bytes, root_hash, unrelated_root)
+}
+
+#[test]
+fn realistic_legacy_near_ceiling_migrates_reinstalls_and_reads_with_eight_pending_children() {
+    const EDGE_COUNT: usize = 1_700;
+    let (source, _source_registry, root) = with_open_session();
+    let (old_snapshot, old_root, unrelated_root) =
+        realistic_legacy_snapshot(&source, &root, EDGE_COUNT);
+    assert!(old_snapshot.len() <= sdk::MAX_STORE_VALUE_BYTES);
+    eprintln!(
+        "realistic legacy snapshot: edges={EDGE_COUNT} pending=8 bytes={}",
+        old_snapshot.len()
+    );
+
+    let mut module = super::module();
+    module.install(&old_snapshot, old_root).unwrap();
+    let before = delegations(&module, &root);
+    assert_eq!(before.len(), MAX_ACTIONS_PER_SESSION as usize);
+    assert_eq!(
+        before
+            .iter()
+            .filter(|delegation| delegation.status == DelegationStatus::Pending)
+            .count(),
+        8
+    );
+
+    let update = Msg {
+        target: "runs".into(),
+        payload: encode_msg(&RunsMsg::EnableJobWorker { enabled: true }),
+    };
+    let mut ctx = CaptureCtx::new().with_origin(Origin::External(vec![1; 32]));
+    block_on(module.execute(&mut ctx, &update)).unwrap();
+    block_on(module.commit_block()).unwrap();
+    assert!(module.legacy_state_version.is_none());
+    let migrated_snapshot = module.snapshot();
+    let migrated_root = module.root();
+
+    let mut reinstall = super::module();
+    reinstall
+        .install(&migrated_snapshot, migrated_root)
+        .unwrap();
+    assert_eq!(delegations(&reinstall, &root), before);
+
+    let backing = receipts::Backing::default();
+    let mut hosted = super::module();
+    hosted.install(&migrated_snapshot, migrated_root).unwrap();
+    let records = hosted.receipts.snapshot();
+    hosted.receipts = crate::receipts::Receipts::hosted(Box::new(backing.clone()));
+    for (key, value) in records {
+        hosted.receipts.stage(key, value).unwrap();
+    }
+    commit(&mut hosted);
+    let tree_key = crate::state::delegation_tree_key(&root);
+    let tree = crate::state::decode_delegation_tree(
+        &root,
+        &block_on(hosted.receipts.committed(&tree_key))
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(tree.ids.len(), EDGE_COUNT);
+    assert_eq!(tree.pending, 8);
+
+    backing.forget_reads();
+    let queried = delegations(&hosted, &root);
+    let query_reads = backing.distinct_reads();
+    assert_eq!(queried, before);
+    assert!(query_reads < 4096, "query distinct reads: {query_reads}");
+
+    backing.forget_reads();
+    backing.forget_writes();
+    let registry = registry(&["bot", "worker"]);
+    let mut close = CaptureCtx::new()
+        .at(12)
+        .with_dispatch_origin()
+        .with_registry(&registry)
+        .with_transcript("general", transcript(2));
+    exec(
+        &mut hosted,
+        &mut close,
+        &result_event(
+            &root,
+            Ok(runner_wrapper("realistic root done", serde_json::json!({}))),
+        ),
+    )
+    .unwrap();
+    commit(&mut hosted);
+    let close_reads = backing.distinct_reads();
+    eprintln!(
+        "realistic legacy reads: edges={EDGE_COUNT} query_distinct_reads={query_reads} close_distinct_reads={close_reads}",
+    );
+    assert!(close_reads < 4096, "close distinct reads: {close_reads}");
+    let unrelated_id = delegation_id_for(&unrelated_root, "unrelated");
+    let unrelated_callee = delegated_run_id_for(&unrelated_id, "worker");
+    for key in [
+        crate::state::delegation_tree_key(&unrelated_root),
+        crate::state::delegation_key(&unrelated_id),
+        crate::state::delegation_run_key(&unrelated_callee),
+        crate::state::delegation_reply_key(&unrelated_id),
+    ] {
+        assert_eq!(backing.read_key_count(&key), 0, "unrelated read {key}");
+        assert_eq!(backing.write_key_count(&key), 0, "unrelated write {key}");
+        assert_eq!(backing.delete_key_count(&key), 0, "unrelated delete {key}");
+    }
+}
+
+#[test]
+fn conservative_point_record_upper_bound_stays_below_4096_distinct_reads() {
+    let (mut m, backing, registry, root) = with_open_hosted_session();
+    let ids = seed_upper_bound_point_records(
+        &mut m,
+        &root,
+        crate::state::MAX_LEGACY_DELEGATION_EDGES_PER_RUN,
+    );
+    let unrelated_root = "unrelated-root";
+    let unrelated_id = delegation_id_for(unrelated_root, "unrelated");
+    let unrelated_callee = delegated_run_id_for(&unrelated_id, "worker");
+    let unrelated_header = DelegationHeader {
+        delegation_id: unrelated_id.clone(),
+        request_id: "unrelated".into(),
+        caller_run_id: unrelated_root.into(),
+        root_run_id: unrelated_root.into(),
+        callee_run_id: unrelated_callee.clone(),
+        callee_agent_id: "worker".into(),
+        status: DelegationStatus::Delivered,
+        request_digest: [9; 32],
+        created_at: 1,
+        completed_at: Some(2),
+    };
+    m.receipts
+        .stage(
+            crate::state::delegation_key(&unrelated_id),
+            crate::state::encode_delegation_header(&unrelated_header),
+        )
+        .unwrap();
+    m.receipts
+        .stage(
+            crate::state::delegation_run_key(&unrelated_callee),
+            crate::state::encode_delegation_run_index(&crate::state::DelegationRunIndex {
+                run_id: unrelated_callee.clone(),
+                delegation_id: unrelated_id.clone(),
+                root_run_id: unrelated_root.into(),
+            }),
+        )
+        .unwrap();
+    m.receipts
+        .stage(
+            crate::state::delegation_reply_key(&unrelated_id),
+            crate::state::encode_delegation_result(
+                &unrelated_id,
+                &DelegationResult {
+                    reply_blocks: vec![ReplyBlock {
+                        kind: "paragraph".into(),
+                        text: "unrelated result".into(),
+                        lang: None,
+                    }],
+                    output_ref: None,
+                    error: None,
+                },
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    m.receipts
+        .stage(
+            crate::state::delegation_tree_key(unrelated_root),
+            crate::state::encode_delegation_tree(
+                unrelated_root,
+                &crate::state::DelegationTree {
+                    ids: vec![unrelated_id.clone()],
+                    pending: 0,
+                },
+            ),
+        )
+        .unwrap();
+    commit(&mut m);
+    for id in &ids {
+        for key in [
+            crate::state::delegation_key(id),
+            crate::state::delegation_reply_key(id),
+            crate::state::delegation_run_key(&delegated_run_id_for(id, "worker")),
+        ] {
+            assert!(backing.value_len(&key).unwrap() <= sdk::MAX_STORE_VALUE_BYTES);
+        }
+    }
+    assert!(
+        backing
+            .value_len(&crate::state::delegation_tree_key(&root))
+            .unwrap()
+            <= sdk::MAX_STORE_VALUE_BYTES
+    );
+    let max_tree_bytes = backing
+        .value_len(&crate::state::delegation_tree_key(&root))
+        .unwrap();
+
+    backing.forget_reads();
+    let queried = delegations(&m, &root);
+    let query_reads = backing.distinct_reads();
+    assert_eq!(queried.len(), MAX_ACTIONS_PER_SESSION as usize);
+    assert!(query_reads < 4096, "query distinct reads: {query_reads}");
+    assert_eq!(
+        backing.read_key_count(&crate::state::delegation_tree_key(unrelated_root)),
+        0
+    );
+    assert_eq!(
+        backing.read_key_count(&crate::state::delegation_key(&unrelated_id)),
+        0
+    );
+
+    backing.forget_reads();
+    backing.forget_writes();
+    let mut close = CaptureCtx::new()
+        .at(12)
+        .with_dispatch_origin()
+        .with_registry(&registry)
+        .with_transcript("general", transcript(2));
+    exec(
+        &mut m,
+        &mut close,
+        &result_event(
+            &root,
+            Ok(runner_wrapper(
+                "compatibility root done",
+                serde_json::json!({}),
+            )),
+        ),
+    )
+    .unwrap();
+    commit(&mut m);
+    let close_reads = backing.distinct_reads();
+    eprintln!(
+        "compatibility max records: edges={} query_distinct_reads={} close_distinct_reads={} tree_bytes={}",
+        ids.len(),
+        query_reads,
+        close_reads,
+        max_tree_bytes
+    );
+    assert!(close_reads < 4096, "close distinct reads: {close_reads}");
+    for key in [
+        crate::state::delegation_tree_key(unrelated_root),
+        crate::state::delegation_key(&unrelated_id),
+        crate::state::delegation_run_key(&unrelated_callee),
+        crate::state::delegation_reply_key(&unrelated_id),
+    ] {
+        assert_eq!(backing.read_key_count(&key), 0, "unrelated read {key}");
+        assert_eq!(backing.write_key_count(&key), 0, "unrelated write {key}");
+    }
+}
+
 #[test]
 fn agent_action_reads_do_not_scan_unrelated_pending_runs() {
     let (mut one, one_backing, one_registry, one_run) = with_open_hosted_session();

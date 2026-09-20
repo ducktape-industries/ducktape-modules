@@ -442,6 +442,363 @@ fn legacy_delegation_fixture() -> LegacyDelegationFixture {
 }
 
 #[test]
+fn post_b_129_terminal_edges_install_and_query_after_compatibility_correction() {
+    let fixture = legacy_delegation_fixture();
+    let mut delegations = fixture.delegations.clone();
+    let mut caller_run_id = fixture.root_run_id.clone();
+    for index in 0..128 {
+        let request_id = format!("legacy-over-128-{index}");
+        let delegation_id = delegation_id_for(&caller_run_id, &request_id);
+        let callee_run_id = delegated_run_id_for(&delegation_id, "worker");
+        delegations.insert(
+            delegation_id.clone(),
+            DelegationState {
+                view: DelegationView {
+                    delegation_id: delegation_id.clone(),
+                    request_id,
+                    caller_run_id: caller_run_id.clone(),
+                    root_run_id: fixture.root_run_id.clone(),
+                    callee_run_id: callee_run_id.clone(),
+                    callee_agent_id: "worker".into(),
+                    status: DelegationStatus::Delivered,
+                    result: Some(DelegationResult {
+                        reply_blocks: vec![ReplyBlock {
+                            kind: "paragraph".into(),
+                            text: "historical result".into(),
+                            lang: None,
+                        }],
+                        output_ref: None,
+                        error: None,
+                    }),
+                    created_at: 1,
+                    completed_at: Some(2),
+                },
+                request: DelegationRequest {
+                    agent_id: "worker".into(),
+                    instruction: "historical work".into(),
+                    skills: Vec::new(),
+                },
+            },
+        );
+        caller_run_id = callee_run_id;
+    }
+    assert_eq!(delegations.len(), 130);
+    let bytes = crate::state::encode_post_b_committed(
+        &fixture.post_b_records,
+        fixture.next_action_item,
+        &delegations,
+    );
+    assert!(bytes.len() <= sdk::MAX_STORE_VALUE_BYTES);
+    let root = crate::state::post_b_root(
+        &fixture.post_b_records,
+        fixture.next_action_item,
+        &delegations,
+    );
+    let mut receiver = super::module();
+    receiver.install(&bytes, root).unwrap();
+    match state_reply(
+        &receiver,
+        RunsQuery::Delegations {
+            caller_run_id: fixture.root_run_id,
+        },
+    ) {
+        RunsReply::Delegations(delegations) => assert_eq!(delegations.len(), 3),
+        other => panic!("unexpected delegation reply: {other:?}"),
+    }
+}
+
+#[test]
+fn historical_compatibility_cap_uses_the_conservative_entry_floor() {
+    let delegation_id = delegation_id_for("", "x");
+    let mut minimum = DelegationState {
+        view: DelegationView {
+            delegation_id: delegation_id.clone(),
+            request_id: "x".into(),
+            caller_run_id: String::new(),
+            root_run_id: "x".into(),
+            callee_run_id: String::new(),
+            callee_agent_id: String::new(),
+            status: DelegationStatus::Delivered,
+            result: None,
+            created_at: 0,
+            completed_at: None,
+        },
+        request: DelegationRequest {
+            agent_id: String::new(),
+            instruction: String::new(),
+            skills: Vec::new(),
+        },
+    };
+    let mut minimums = Vec::new();
+    for status in [
+        DelegationStatus::Pending,
+        DelegationStatus::Delivered,
+        DelegationStatus::Failed,
+        DelegationStatus::Cancelled,
+    ] {
+        let mut status_minimum = usize::MAX;
+        for result in [
+            None,
+            Some(DelegationResult {
+                reply_blocks: Vec::new(),
+                output_ref: None,
+                error: None,
+            }),
+        ] {
+            for completed_at in [None, Some(0)] {
+                minimum.view.status = status;
+                minimum.view.result = result.clone();
+                minimum.view.completed_at = completed_at;
+                status_minimum = status_minimum.min(serde_json::to_vec(&minimum).unwrap().len());
+            }
+        }
+        minimums.push((status, status_minimum));
+    }
+    assert_eq!(minimums[0].1, 264);
+    assert_eq!(minimums[1].1, 266);
+    assert_eq!(minimums[2].1, 263);
+    assert_eq!(minimums[3].1, 266);
+    assert!(minimums.iter().all(|(_, minimum)| *minimum >= 256));
+    assert_eq!(crate::state::MAX_LEGACY_DELEGATION_EDGES_PER_RUN, 3_120);
+    assert_eq!(
+        crate::state::MAX_LEGACY_DELEGATION_EDGES_PER_RUN,
+        sdk::MAX_STORE_VALUE_BYTES / (8 + 64 + 8 + 256)
+    );
+}
+
+#[test]
+fn post_b_legacy_1400_edges_abort_migrate_reinstall_and_refuse_new_admission() {
+    const EDGE_COUNT: usize = 1_400;
+    let fixture = legacy_delegation_fixture();
+    let mut delegations = fixture.delegations.clone();
+    let mut caller_run_id = fixture.root_run_id.clone();
+    for index in 0..(EDGE_COUNT - delegations.len()) {
+        let request_id = format!("legacy-chain-{index}");
+        let delegation_id = delegation_id_for(&caller_run_id, &request_id);
+        let callee_run_id = delegated_run_id_for(&delegation_id, "worker");
+        delegations.insert(
+            delegation_id.clone(),
+            DelegationState {
+                view: DelegationView {
+                    delegation_id,
+                    request_id,
+                    caller_run_id: caller_run_id.clone(),
+                    root_run_id: fixture.root_run_id.clone(),
+                    callee_run_id: callee_run_id.clone(),
+                    callee_agent_id: "worker".into(),
+                    status: DelegationStatus::Delivered,
+                    result: Some(DelegationResult {
+                        reply_blocks: vec![ReplyBlock {
+                            kind: "paragraph".into(),
+                            text: "historical result".into(),
+                            lang: None,
+                        }],
+                        output_ref: None,
+                        error: None,
+                    }),
+                    created_at: 1,
+                    completed_at: Some(2),
+                },
+                request: DelegationRequest {
+                    agent_id: "worker".into(),
+                    instruction: "historical work".into(),
+                    skills: Vec::new(),
+                },
+            },
+        );
+        caller_run_id = callee_run_id;
+    }
+    assert_eq!(delegations.len(), EDGE_COUNT);
+    let bytes = crate::state::encode_post_b_committed(
+        &fixture.post_b_records,
+        fixture.next_action_item,
+        &delegations,
+    );
+    eprintln!(
+        "legacy carry-over compatibility: edges={} pending=1 snapshot_bytes={}",
+        delegations.len(),
+        bytes.len()
+    );
+    assert!(bytes.len() <= sdk::MAX_STORE_VALUE_BYTES);
+    let root = crate::state::post_b_root(
+        &fixture.post_b_records,
+        fixture.next_action_item,
+        &delegations,
+    );
+    let mut module = super::module();
+    module.install(&bytes, root).unwrap();
+    let before_root = state_reply(
+        &module,
+        RunsQuery::Delegations {
+            caller_run_id: fixture.root_run_id.clone(),
+        },
+    );
+    let old_snapshot = module.snapshot();
+    let old_root = module.root();
+    let update = Msg {
+        target: "runs".into(),
+        payload: encode_msg(&RunsMsg::EnableJobWorker { enabled: true }),
+    };
+    let mut ctx = CaptureCtx::new().with_origin(Origin::External(vec![1; 32]));
+    block_on(module.execute(&mut ctx, &update)).unwrap();
+    assert_eq!(module.snapshot(), old_snapshot);
+    block_on(module.abort_block()).unwrap();
+    assert_eq!(module.snapshot(), old_snapshot);
+    assert_eq!(module.root(), old_root);
+    assert_eq!(
+        state_reply(
+            &module,
+            RunsQuery::Delegations {
+                caller_run_id: fixture.root_run_id.clone(),
+            },
+        ),
+        before_root
+    );
+
+    block_on(module.execute(&mut ctx, &update)).unwrap();
+    block_on(module.commit_block()).unwrap();
+    let migrated = module.receipts.snapshot();
+    assert!(module.legacy_state_version.is_none());
+    assert!(
+        crate::state::decode_committed(&module.snapshot())
+            .unwrap()
+            .delegations
+            .is_empty()
+    );
+    assert!(migrated.keys().all(|key| !key.starts_with("dlg/req/")));
+    assert!(
+        migrated
+            .values()
+            .all(|value| value.len() <= sdk::MAX_STORE_VALUE_BYTES)
+    );
+    for (id, delegation) in &delegations {
+        let header = crate::state::decode_delegation_header(
+            id,
+            migrated.get(&crate::state::delegation_key(id)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(header, DelegationHeader::from_state(delegation));
+        match &delegation.view.result {
+            Some(expected) => {
+                let reply = crate::state::decode_delegation_result(
+                    id,
+                    migrated
+                        .get(&crate::state::delegation_reply_key(id))
+                        .unwrap(),
+                )
+                .unwrap();
+                assert_eq!(&reply, expected);
+            }
+            None => assert!(!migrated.contains_key(&crate::state::delegation_reply_key(id))),
+        }
+    }
+    assert_eq!(
+        state_reply(
+            &module,
+            RunsQuery::Delegations {
+                caller_run_id: fixture.root_run_id.clone(),
+            },
+        ),
+        before_root
+    );
+    let mut reinstall = super::module();
+    reinstall
+        .install(&module.snapshot(), module.root())
+        .unwrap();
+    assert_eq!(
+        state_reply(
+            &reinstall,
+            RunsQuery::Delegations {
+                caller_run_id: fixture.root_run_id.clone(),
+            },
+        ),
+        before_root
+    );
+
+    let hosted_backing = super::receipts::Backing::default();
+    let mut hosted = super::module();
+    hosted.install(&bytes, root).unwrap();
+    hosted.receipts = crate::receipts::Receipts::hosted(Box::new(hosted_backing.clone()));
+    for (key, value) in &fixture.post_b_records {
+        hosted.receipts.stage(key.clone(), value.clone()).unwrap();
+    }
+    commit(&mut hosted);
+    hosted_backing.forget_reads();
+    hosted_backing.forget_writes();
+    let mut hosted_ctx = CaptureCtx::new().with_origin(Origin::External(vec![1; 32]));
+    block_on(hosted.execute(&mut hosted_ctx, &update)).unwrap();
+    block_on(hosted.commit_block()).unwrap();
+    eprintln!(
+        "legacy migration writes: edges={} distinct_reads={} writes={} write_bytes={} largest_record={}",
+        delegations.len(),
+        hosted_backing.distinct_reads(),
+        hosted_backing.writes(),
+        hosted_backing.write_bytes(),
+        hosted_backing.largest_write()
+    );
+    assert_eq!(hosted_backing.distinct_reads(), 0);
+    assert!(hosted_backing.largest_write() <= sdk::MAX_STORE_VALUE_BYTES);
+
+    let before_delegation_records: BTreeMap<_, _> = migrated
+        .iter()
+        .filter(|(key, _)| key.starts_with("dlg/"))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    let registry = registry(&["bot", "worker"]);
+    let mut refusal_ctx = CaptureCtx::new()
+        .at(5)
+        .with_origin(Origin::External(vec![7; 32]))
+        .with_registry(&registry)
+        .with_transcript("general", transcript(2))
+        .with_lease_holder(&fixture.root_run_id, &[8; 32]);
+    let error = exec(
+        &mut module,
+        &mut refusal_ctx,
+        &admin(&RunsMsg::AgentAction {
+            run_id: fixture.root_run_id.clone(),
+            request_id: "post-migration-overflow".into(),
+            action: agent_call("worker", "after migration"),
+        }),
+    )
+    .unwrap_err();
+    eprintln!("post-migration admission refusal: {error:?}");
+    assert!(matches!(error, Error::Module { reason, .. } if reason == refusal::CAPACITY));
+    let after_refusal: BTreeMap<_, _> = module
+        .receipts
+        .snapshot()
+        .into_iter()
+        .filter(|(key, _)| key.starts_with("dlg/"))
+        .collect();
+    assert_eq!(after_refusal, before_delegation_records);
+    abort(&mut module);
+}
+
+#[test]
+fn post_c_tree_immediately_above_historical_compatibility_cap_is_rejected() {
+    let fixture = legacy_delegation_fixture();
+    let root = fixture.root_run_id.clone();
+    let ids: Vec<_> = (0..=crate::state::MAX_LEGACY_DELEGATION_EDGES_PER_RUN)
+        .map(|index| format!("{index:064x}"))
+        .collect();
+    let mut records = fixture.post_b_records.clone();
+    records.insert(
+        crate::state::delegation_tree_key(&root),
+        serde_json::to_vec(&(&root, crate::state::DelegationTree { ids, pending: 0 })).unwrap(),
+    );
+    let bytes =
+        crate::state::encode_committed(&records, fixture.next_action_item, &BTreeMap::new());
+    let expected =
+        crate::state::committed_root(&records, fixture.next_action_item, &BTreeMap::new());
+    let mut receiver = super::module();
+    let before = receiver.snapshot();
+    let before_root = receiver.root();
+    let error = receiver.install(&bytes, expected).unwrap_err();
+    assert!(matches!(error, Error::Module { reason, .. } if reason == refusal::CORRUPT));
+    assert_eq!(receiver.snapshot(), before);
+    assert_eq!(receiver.root(), before_root);
+}
+
+#[test]
 fn genuine_post_a_and_post_b_delegations_migrate_atomically_to_v3() {
     let fixture = legacy_delegation_fixture();
     for (label, bytes, root) in [
@@ -998,9 +1355,15 @@ fn maximum_legacy_delegation_population_migrates_without_body_reads() {
         .unwrap();
     let pending = BTreeMap::from([(dispatch_id_for(&root_run_id), root_entry)]);
     let mut delegations = BTreeMap::new();
+    let mut previous_callee = root_run_id.clone();
     for index in 0..MAX_DELEGATION_EDGES_PER_RUN {
         let request_id = format!("legacy-{index:03}");
-        let delegation_id = delegation_id_for(&root_run_id, &request_id);
+        let caller_run_id = if index < MAX_ACTIONS_PER_SESSION as usize {
+            root_run_id.clone()
+        } else {
+            previous_callee.clone()
+        };
+        let delegation_id = delegation_id_for(&caller_run_id, &request_id);
         let callee_run_id = delegated_run_id_for(&delegation_id, "worker");
         delegations.insert(
             delegation_id.clone(),
@@ -1008,9 +1371,9 @@ fn maximum_legacy_delegation_population_migrates_without_body_reads() {
                 view: DelegationView {
                     delegation_id,
                     request_id,
-                    caller_run_id: root_run_id.clone(),
+                    caller_run_id,
                     root_run_id: root_run_id.clone(),
-                    callee_run_id,
+                    callee_run_id: callee_run_id.clone(),
                     callee_agent_id: "worker".into(),
                     status: DelegationStatus::Delivered,
                     result: Some(DelegationResult {
@@ -1028,6 +1391,7 @@ fn maximum_legacy_delegation_population_migrates_without_body_reads() {
                 },
             },
         );
+        previous_callee = callee_run_id;
     }
     let models = BTreeMap::from([(String::from("bot"), record("bot"))]);
     let old = crate::state::encode_legacy_committed(
@@ -1081,7 +1445,7 @@ fn maximum_legacy_delegation_population_migrates_without_body_reads() {
     assert_eq!(backing.distinct_reads(), 0);
     assert_eq!(backing.read_bytes(), 0);
     assert_eq!(backing.writes(), 518);
-    assert_eq!(backing.write_bytes(), 106_960);
+    assert_eq!(backing.write_bytes(), 110_800);
     assert!(backing.writes() < 3000);
     assert_eq!(backing.largest_write(), 8_635);
     assert!(backing.largest_write() <= sdk::MAX_STORE_VALUE_BYTES);
@@ -1093,7 +1457,24 @@ fn maximum_legacy_delegation_population_migrates_without_body_reads() {
     assert_eq!(
         (0..MAX_DELEGATION_EDGES_PER_RUN)
             .map(|index| {
-                let id = delegation_id_for(&root_run_id, &format!("legacy-{index:03}"));
+                let caller_run_id = if index < MAX_ACTIONS_PER_SESSION as usize {
+                    root_run_id.clone()
+                } else {
+                    let mut caller = root_run_id.clone();
+                    for prior in 0..index {
+                        let prior_id = delegation_id_for(
+                            if prior < MAX_ACTIONS_PER_SESSION as usize {
+                                &root_run_id
+                            } else {
+                                &caller
+                            },
+                            &format!("legacy-{prior:03}"),
+                        );
+                        caller = delegated_run_id_for(&prior_id, "worker");
+                    }
+                    caller
+                };
+                let id = delegation_id_for(&caller_run_id, &format!("legacy-{index:03}"));
                 backing.write_key_count(&crate::state::delegation_key(&id))
                     + backing.write_key_count(&crate::state::delegation_reply_key(&id))
                     + backing.write_key_count(&crate::state::delegation_run_key(
