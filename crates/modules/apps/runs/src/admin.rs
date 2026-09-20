@@ -3,6 +3,7 @@ use super::{
     SiblingReadBudget, canonical_origin, decode_msg, dispatch_encode_msg, dispatch_id_for,
     envelope, jobs_encode_msg, reject_run_separator, run_id_for,
 };
+use sdk::refusal;
 
 impl RunsModule {
     // ---- admin ops + explicit runs (any other origin) --------------------------------
@@ -15,13 +16,19 @@ impl RunsModule {
         run_id: &str,
     ) -> Result<Option<String>, Error> {
         let dispatch_id = dispatch_id_for(run_id);
-        if self.pending_entry(&dispatch_id).is_some() {
+        if self.pending_entry(&dispatch_id).await?.is_some() {
             return Ok(Some(dispatch_id));
         }
         match self.turn_taken(ctx, &dispatch_id).await {
             Ok(true) => Ok(None),
-            Ok(false) => Err(Error::Module(format!("unknown run: {run_id}"))),
-            Err(reason) => Err(Error::Module(reason)),
+            Ok(false) => Err(Error::Module {
+                reason: refusal::NOT_FOUND.into(),
+                sentence: format!("unknown run: {run_id}"),
+            }),
+            Err(sentence) => Err(Error::Module {
+                reason: refusal::UNEXPECTED_REPLY.into(),
+                sentence,
+            }),
         }
     }
 
@@ -31,7 +38,10 @@ impl RunsModule {
         msg: &Msg,
         budget: &SiblingReadBudget,
     ) -> Result<(), Error> {
-        match decode_msg(&msg.payload).map_err(Error::Module)? {
+        match decode_msg(&msg.payload).map_err(|sentence| Error::Module {
+            reason: refusal::INVALID_INPUT.into(),
+            sentence,
+        })? {
             RunsMsg::ConfigureConversation {
                 conversation_id,
                 agent_id,
@@ -202,10 +212,11 @@ impl RunsModule {
             }
             RunsMsg::EnableJobWorker { enabled } => {
                 Self::admin_origin(&ctx.env().origin)?;
-                let jobs = self
-                    .jobs
-                    .clone()
-                    .ok_or_else(|| Error::Module("no jobs module is configured".into()))?;
+                let jobs = self.jobs.clone().ok_or_else(|| Error::Module {
+                    reason: refusal::UNSUPPORTED.into(),
+                    sentence: "enabling the job worker needs a Jobs module, and none is configured"
+                        .into(),
+                })?;
                 let payload = if enabled {
                     jobs_encode_msg(&JobsMsg::RegisterWorker {})
                 } else {
@@ -229,9 +240,10 @@ impl RunsModule {
                 // no-ops.
                 let requester = match &ctx.env().origin {
                     Origin::External(key) if key.is_empty() => {
-                        return Err(Error::Module(
-                            "run requests require a non-empty submitter id".into(),
-                        ));
+                        return Err(Error::Module {
+                            reason: refusal::INVALID_INPUT.into(),
+                            sentence: "run requests require a non-empty submitter id".into(),
+                        });
                     }
                     other => canonical_origin(other)?,
                 };
@@ -241,19 +253,32 @@ impl RunsModule {
                     .await?
                     .is_some_and(|state| state.agent_id == agent_id);
                 if resident {
-                    return Err(Error::Module(
-                        "resident channels use conversation intake, not one-shot RequestRun".into(),
-                    ));
+                    return Err(Error::Module {
+                        reason: refusal::INVALID_INPUT.into(),
+                        sentence:
+                            "resident channels use conversation intake, not one-shot RequestRun"
+                                .into(),
+                    });
                 }
                 // the requester's per-run skills, confined to the library by
                 // construction (names, not paths) — see `library_skills`.
-                let extra = envelope::library_skills(&skills).map_err(Error::Module)?;
-                let Some(agent) = self
-                    .agent_record(&*ctx, &agent_id)
-                    .await
-                    .map_err(Error::Module)?
+                let extra =
+                    envelope::library_skills(&skills).map_err(|sentence| Error::Module {
+                        reason: refusal::INVALID_INPUT.into(),
+                        sentence,
+                    })?;
+                let Some(agent) =
+                    self.agent_record(&*ctx, &agent_id)
+                        .await
+                        .map_err(|sentence| Error::Module {
+                            reason: refusal::CORRUPT.into(),
+                            sentence,
+                        })?
                 else {
-                    return Err(Error::Module(format!("unknown agent: {agent_id}")));
+                    return Err(Error::Module {
+                        reason: refusal::NOT_FOUND.into(),
+                        sentence: format!("unknown agent: {agent_id}"),
+                    });
                 };
                 let program_is_requesting_its_model =
                     ctx.env().origin == Origin::Program(agent.account);
@@ -261,9 +286,10 @@ impl RunsModule {
                     let item = self
                         .staged_next_action_item
                         .unwrap_or(self.next_action_item);
-                    let next = item
-                        .checked_add(1)
-                        .ok_or_else(|| Error::Module("run request counter exhausted".into()))?;
+                    let next = item.checked_add(1).ok_or_else(|| Error::Module {
+                        reason: refusal::EXHAUSTED.into(),
+                        sentence: "no action item numbers are left for a run request".into(),
+                    })?;
                     let actor = match &ctx.env().origin {
                         Origin::Program(account) => super::Actor::Account(*account),
                         Origin::External(key) => {
@@ -275,7 +301,12 @@ impl RunsModule {
                                     }),
                                 )
                                 .await?;
-                            match identity::decode_reply(&bytes).map_err(Error::Module)? {
+                            match identity::decode_reply(&bytes).map_err(|sentence| {
+                                Error::Module {
+                                    reason: refusal::UNEXPECTED_REPLY.into(),
+                                    sentence,
+                                }
+                            })? {
                                 identity::IdentityReply::Account(Some(account)) => {
                                     super::Actor::Account(account.number)
                                 }
@@ -283,9 +314,10 @@ impl RunsModule {
                                     super::Actor::Key(key.clone())
                                 }
                                 _ => {
-                                    return Err(Error::Module(
-                                        "unexpected requesting identity reply".into(),
-                                    ));
+                                    return Err(Error::Module {
+                                        reason: refusal::UNEXPECTED_REPLY.into(),
+                                        sentence: "unexpected requesting identity reply".into(),
+                                    });
                                 }
                             }
                         }
@@ -323,12 +355,18 @@ impl RunsModule {
                 if self
                     .turn_taken(&*ctx, &dispatch_id_for(&run_id))
                     .await
-                    .map_err(Error::Module)?
+                    .map_err(|sentence| Error::Module {
+                        reason: refusal::UNEXPECTED_REPLY.into(),
+                        sentence,
+                    })?
                 {
                     return Ok(());
                 }
                 if agent.status != ModelStatus::Active {
-                    return Err(Error::Module(format!("agent is paused: {agent_id}")));
+                    return Err(Error::Module {
+                        reason: refusal::WRONG_STATE.into(),
+                        sentence: format!("agent is paused: {agent_id}"),
+                    });
                 }
                 // unlike the engagement intake, an explicit request REJECTS
                 // on a failed preparation: this is the root op of its own
@@ -344,10 +382,14 @@ impl RunsModule {
                         budget,
                     )
                     .await
-                    .map_err(Error::Module)?;
+                    .map_err(|sentence| Error::Module {
+                        reason: refusal::UNEXPECTED_REPLY.into(),
+                        sentence,
+                    })?;
                 self.stage_dispatch_run(
                     ctx, &run_id, agent_id, channel_id, anchor_seq, requester, prepared, demands,
-                );
+                )
+                .await?;
                 Ok(())
             }
             RunsMsg::CancelRun { run_id } => {

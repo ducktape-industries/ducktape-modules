@@ -5,6 +5,7 @@ use super::{
     job_run_id_for, job_spec_hash, jobs_decode_event, jobs_decode_reply, jobs_encode_msg,
     jobs_encode_query, recipe_id_for,
 };
+use sdk::refusal;
 
 impl RunsModule {
     pub(super) async fn request_job_run(
@@ -16,17 +17,27 @@ impl RunsModule {
         let Some(model) = self
             .active_agent(&*ctx, &agent_id)
             .await
-            .map_err(Error::Module)?
+            .map_err(|sentence| Error::Module {
+                reason: refusal::CORRUPT.into(),
+                sentence,
+            })?
         else {
-            return Err(Error::Module("job model is not active".into()));
+            return Err(Error::Module {
+                reason: refusal::WRONG_STATE.into(),
+                sentence: format!("model {agent_id} is not active"),
+            });
         };
         if ctx.env().origin != sdk::Origin::Program(model.account) {
-            return Err(Error::Module(
-                "job work requires its model's program account".into(),
-            ));
+            return Err(Error::Module {
+                reason: refusal::UNAUTHORIZED.into(),
+                sentence: "job work requires its model's program account".into(),
+            });
         }
         let Some(jobs) = &self.jobs else {
-            return Err(Error::Module("jobs module is not configured".into()));
+            return Err(Error::Module {
+                reason: refusal::UNSUPPORTED.into(),
+                sentence: "job runs need a Jobs module, and none is configured".into(),
+            });
         };
         let bytes = ctx
             .query(
@@ -36,11 +47,22 @@ impl RunsModule {
                 }),
             )
             .await?;
-        let JobsReply::Job(Some(job)) = jobs_decode_reply(&bytes).map_err(Error::Module)? else {
-            return Err(Error::Module("job is unavailable".into()));
+        let JobsReply::Job(Some(job)) =
+            jobs_decode_reply(&bytes).map_err(|sentence| Error::Module {
+                reason: refusal::UNEXPECTED_REPLY.into(),
+                sentence,
+            })?
+        else {
+            return Err(Error::Module {
+                reason: refusal::NOT_FOUND.into(),
+                sentence: format!("Jobs has no job {job_id}"),
+            });
         };
         if job.kind != format!("agent/{agent_id}") {
-            return Err(Error::Module("job names another model".into()));
+            return Err(Error::Module {
+                reason: refusal::INVALID_INPUT.into(),
+                sentence: format!("job kind {} does not name model {agent_id}", job.kind),
+            });
         }
         let event = JobsEvent::Submitted {
             job_id,
@@ -123,9 +145,10 @@ impl RunsModule {
             let item = self
                 .staged_next_action_item
                 .unwrap_or(self.next_action_item);
-            let next = item
-                .checked_add(1)
-                .ok_or_else(|| Error::Module("job request counter exhausted".into()))?;
+            let next = item.checked_add(1).ok_or_else(|| Error::Module {
+                reason: refusal::EXHAUSTED.into(),
+                sentence: "no action item numbers are left for a job request".into(),
+            })?;
             ctx.emit_msg(Msg {
                 target: self.attribution.clone(),
                 payload: attribution::encode_msg(&attribution::AttributionMsg::Attribute {
@@ -158,7 +181,12 @@ impl RunsModule {
                 }),
             )
             .await?;
-        let JobsReply::Job(Some(job)) = jobs_decode_reply(&bytes).map_err(Error::Module)? else {
+        let JobsReply::Job(Some(job)) =
+            jobs_decode_reply(&bytes).map_err(|sentence| Error::Module {
+                reason: refusal::UNEXPECTED_REPLY.into(),
+                sentence,
+            })?
+        else {
             return Ok(());
         };
         if job.status != JobStatus::Pending {
@@ -250,9 +278,9 @@ impl RunsModule {
                 requester: requester.clone(),
             },
         );
-        self.pending_overlay.insert(
+        self.stage_pending_insert(
             dispatch_id,
-            Some(PendingState {
+            PendingState {
                 account: agent.account,
                 generation,
                 cause: ctx.env().cause.clone(),
@@ -268,8 +296,9 @@ impl RunsModule {
                 requester,
                 sink,
                 created_at: now,
-            }),
-        );
+            },
+        )
+        .await?;
         Ok(())
     }
     fn truncate_job_payload(payload: String) -> String {

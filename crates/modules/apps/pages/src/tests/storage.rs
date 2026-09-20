@@ -158,7 +158,7 @@ fn oversized_block_is_rejected_before_staging() {
                 after: None,
                 block: para("big", &huge),
             },
-            "block too large",
+            "The block is too large.",
         )
         .await;
         assert!(p.staged.is_empty(), "a rejected write must not be staged");
@@ -188,7 +188,7 @@ fn oversized_page_title_is_rejected_on_every_write_path() {
                 title: over_cap.clone(),
                 blocks: Vec::new(),
             },
-            "page title too large",
+            "The page title is too large.",
         )
         .await;
 
@@ -210,7 +210,7 @@ fn oversized_page_title_is_rejected_on_every_write_path() {
                 text: over_cap.clone(),
                 marks: None,
             },
-            "page title too large",
+            "The page title is too large.",
         )
         .await;
 
@@ -222,7 +222,7 @@ fn oversized_page_title_is_rejected_on_every_write_path() {
                 after: None,
                 block: page("p2", &over_cap),
             },
-            "page title too large",
+            "The page title is too large.",
         )
         .await;
 

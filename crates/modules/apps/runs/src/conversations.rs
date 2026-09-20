@@ -1,6 +1,8 @@
 //! Durable intake, turn ownership, and native history. Effects are written only by
 //! the executor below; source hooks never run a model in the source write cascade.
 use super::*;
+use crate::receipts::View;
+use sdk::refusal;
 use serde::de::DeserializeOwned;
 #[path = "conversation_runtime.rs"]
 mod runtime;
@@ -22,14 +24,44 @@ fn numbered(kind: &str, id: &str, n: u64) -> String {
 fn op_key(id: &str, op: &str) -> String {
     format!("{}/{}", key("operation", id), dispatch_id_for(op))
 }
-const WAKE_QUEUE: &str = "conversation/wakes";
+/// The pre-point-address whole-map queue. Carried over a chunk at a time by
+/// the writes that touch the new layout, and deleted once it is drained.
+const LEGACY_WAKE_QUEUE: &str = "conversation/wakes";
+/// How many pre-point-address entries one op carries over, for both the wake
+/// map and the timer queue.
+///
+/// Carrying one entry costs about one store read — the record it is about to
+/// claim, absent until this op stages it — and the wasm host refuses an op
+/// past `MAX_STORE_READS` (4096) distinct reads. A legacy record holds
+/// whatever fits under the 1 MiB store value bound, thousands of entries, so
+/// carrying the whole of one was an op the host could refuse EVERY time:
+/// timers and wakes wedged for good, with no write able to unwedge them. A
+/// chunk leaves the budget all but untouched and drains in
+/// `entries / CARRY_OVER_CHUNK` writes.
+pub(super) const CARRY_OVER_CHUNK: usize = 128;
+/// head/tail of the wake FIFO — two `Option<u64>`, fixed width forever.
+const WAKE_QUEUE: &str = "conversation/wake_queue";
+fn wake_key(item: u64) -> String {
+    format!("conversation/wake/{item}")
+}
+/// The queue links of one queued item. Written when the item joins the FIFO
+/// and deleted when it leaves, so the record exists only while it is queued —
+/// unlike `wake_key`, which outlives the queue to answer a repeated ack.
+fn wake_link_key(item: u64) -> String {
+    format!("conversation/wake_link/{item}")
+}
+/// The open wake of one conversation. Its presence IS the duplicate check.
+fn wake_of_key(id: &str) -> String {
+    format!("conversation/wake_of/{}", dispatch_id_for(id))
+}
 
 fn require_coordinating_source(state: &ConversationView) -> Result<(), Error> {
     let job_backed = matches!(state.source, ConversationSource::Job { .. });
     if job_backed {
-        return Err(Error::Module(
-            "job execution inputs require canonical Tasks operations".into(),
-        ));
+        return Err(Error::Module {
+            reason: refusal::INVALID_INPUT.into(),
+            sentence: "job execution inputs require canonical Tasks operations".into(),
+        });
     }
     Ok(())
 }
@@ -40,6 +72,24 @@ struct Wake {
     conversation_id: String,
     cause: sdk::Cause,
     acknowledged: Option<[u8; 32]>,
+}
+
+/// The FIFO ends. Both are `None` exactly when no wake is queued.
+#[derive(Clone, Copy, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WakeQueue {
+    head: Option<u64>,
+    tail: Option<u64>,
+}
+
+/// One queued item's neighbours. Doubly linked because a wake is detached
+/// where it is delivered, not where it sits: `begin_conversation_wake` and a
+/// late ack both unlink from the middle, and neither may walk the queue.
+#[derive(Clone, Copy, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WakeLink {
+    prev: Option<u64>,
+    next: Option<u64>,
 }
 
 /// Every state-machine input is visible here. Authentication and sibling reads
@@ -100,9 +150,21 @@ fn append(state: &ConversationView, event: ConversationEvent) -> Result<Vec<Comm
     let expected = state
         .admitted_cursor
         .checked_add(1)
-        .ok_or_else(|| Error::Module("conversation cursor exhausted".into()))?;
+        .ok_or_else(|| Error::Module {
+            reason: refusal::EXHAUSTED.into(),
+            sentence: format!(
+                "conversation {} has no event sequence numbers left",
+                state.conversation_id
+            ),
+        })?;
     if event.sequence != expected {
-        return Err(Error::Module("conversation event cursor mismatch".into()));
+        return Err(Error::Module {
+            reason: refusal::STALE.into(),
+            sentence: format!(
+                "event {} is not the next event {expected} of conversation {}",
+                event.sequence, state.conversation_id
+            ),
+        });
     }
     let mut next = state.clone();
     next.admitted_cursor = expected;
@@ -135,7 +197,13 @@ fn queue(state: &ConversationView) -> Result<Vec<Command>, Error> {
     let through_cursor = state
         .completed_cursor
         .checked_add(1)
-        .ok_or_else(|| Error::Module("conversation cursor exhausted".into()))?;
+        .ok_or_else(|| Error::Module {
+            reason: refusal::EXHAUSTED.into(),
+            sentence: format!(
+                "conversation {} has no event sequence numbers left",
+                state.conversation_id
+            ),
+        })?;
     let turn = ConversationTurn {
         turn: state.next_turn,
         run_id: format!(
@@ -151,10 +219,13 @@ fn queue(state: &ConversationView) -> Result<Vec<Command>, Error> {
         drained_actions: 0,
         outcome: None,
     };
-    next.next_turn = next
-        .next_turn
-        .checked_add(1)
-        .ok_or_else(|| Error::Module("conversation turn counter exhausted".into()))?;
+    next.next_turn = next.next_turn.checked_add(1).ok_or_else(|| Error::Module {
+        reason: refusal::EXHAUSTED.into(),
+        sentence: format!(
+            "conversation {} has no turn numbers left",
+            state.conversation_id
+        ),
+    })?;
     next.active_turn = Some(turn.clone());
     Ok(vec![Command::Turn(turn), Command::State(Box::new(next))])
 }
@@ -164,10 +235,10 @@ fn update_turn(state: &ConversationView, turn: ConversationTurn) -> Vec<Command>
     vec![Command::Turn(turn), Command::State(Box::new(next))]
 }
 fn active_turn(state: &ConversationView) -> Result<ConversationTurn, Error> {
-    state
-        .active_turn
-        .clone()
-        .ok_or_else(|| Error::Module("conversation has no active turn".into()))
+    state.active_turn.clone().ok_or_else(|| Error::Module {
+        reason: refusal::WRONG_STATE.into(),
+        sentence: "conversation has no active turn".into(),
+    })
 }
 fn requested(state: &ConversationView) -> Result<Vec<Command>, Error> {
     let mut turn = active_turn(state)?;
@@ -180,7 +251,10 @@ fn requested(state: &ConversationView) -> Result<Vec<Command>, Error> {
 fn started(state: &ConversationView) -> Result<Vec<Command>, Error> {
     let mut turn = active_turn(state)?;
     if turn.phase != ConversationTurnPhase::AwaitingProgram {
-        return Err(Error::Module("conversation turn was not requested".into()));
+        return Err(Error::Module {
+            reason: refusal::WRONG_STATE.into(),
+            sentence: "conversation turn was not requested".into(),
+        });
     }
     turn.phase = ConversationTurnPhase::Running;
     Ok(update_turn(state, turn))
@@ -191,17 +265,33 @@ fn job_started(
     event: ConversationEvent,
 ) -> Result<Vec<Command>, Error> {
     if state.active_turn.is_some() {
-        return Err(Error::Module(
-            "worker conversation still owns an execution".into(),
-        ));
+        return Err(Error::Module {
+            reason: refusal::WRONG_STATE.into(),
+            sentence: format!(
+                "worker conversation {} is still running a turn",
+                state.conversation_id
+            ),
+        });
     }
     let mut next = state.clone();
     next.admitted_cursor = state
         .admitted_cursor
         .checked_add(1)
-        .ok_or_else(|| Error::Module("worker input cursor exhausted".into()))?;
+        .ok_or_else(|| Error::Module {
+            reason: refusal::EXHAUSTED.into(),
+            sentence: format!(
+                "conversation {} has no input sequence numbers left",
+                state.conversation_id
+            ),
+        })?;
     if event.sequence != next.admitted_cursor {
-        return Err(Error::Module("worker input cursor mismatch".into()));
+        return Err(Error::Module {
+            reason: refusal::STALE.into(),
+            sentence: format!(
+                "event {} is not the next input {} of conversation {}",
+                event.sequence, next.admitted_cursor, state.conversation_id
+            ),
+        });
     }
     let turn = ConversationTurn {
         turn: next.next_turn,
@@ -214,10 +304,13 @@ fn job_started(
         drained_actions: 0,
         outcome: None,
     };
-    next.next_turn = next
-        .next_turn
-        .checked_add(1)
-        .ok_or_else(|| Error::Module("worker turn counter exhausted".into()))?;
+    next.next_turn = next.next_turn.checked_add(1).ok_or_else(|| Error::Module {
+        reason: refusal::EXHAUSTED.into(),
+        sentence: format!(
+            "conversation {} has no turn numbers left",
+            state.conversation_id
+        ),
+    })?;
     next.active_turn = Some(turn.clone());
     Ok(vec![
         Command::Event(event),
@@ -232,9 +325,10 @@ fn checkpoint(
     let mut turn = active_turn(state)?;
     let current = turn.phase == ConversationTurnPhase::Running && turn.run_id == checkpoint.run_id;
     if !current {
-        return Err(Error::Module(
-            "checkpoint is not for the active execution".into(),
-        ));
+        return Err(Error::Module {
+            reason: refusal::STALE.into(),
+            sentence: "checkpoint is not for the active execution".into(),
+        });
     }
     let prior_revision = turn
         .checkpoint
@@ -242,11 +336,21 @@ fn checkpoint(
         .map(|c| c.history.revision)
         .or_else(|| state.history.as_ref().map(|h| h.revision))
         .unwrap_or(0);
-    let next_revision = prior_revision
-        .checked_add(1)
-        .ok_or_else(|| Error::Module("history revision exhausted".into()))?;
+    let next_revision = prior_revision.checked_add(1).ok_or_else(|| Error::Module {
+        reason: refusal::EXHAUSTED.into(),
+        sentence: format!(
+            "conversation {} has no history revision numbers left",
+            state.conversation_id
+        ),
+    })?;
     if checkpoint.history.revision != next_revision {
-        return Err(Error::Module("history checkpoint revision mismatch".into()));
+        return Err(Error::Module {
+            reason: refusal::STALE.into(),
+            sentence: format!(
+                "checkpoint revision {} is not the next history revision {next_revision}",
+                checkpoint.history.revision
+            ),
+        });
     }
     checkpoint.delivery |= turn
         .checkpoint
@@ -265,7 +369,13 @@ fn action(state: &ConversationView, id: String) -> Result<Vec<Command>, Error> {
         ConversationTurnPhase::Running | ConversationTurnPhase::Draining
     );
     if !accepts_actions {
-        return Err(Error::Module("conversation turn is fenced".into()));
+        return Err(Error::Module {
+            reason: refusal::WRONG_STATE.into(),
+            sentence: format!(
+                "turn {} of conversation {} accepts no more actions",
+                turn.turn, state.conversation_id
+            ),
+        });
     }
     turn.actions.push(id);
     Ok(update_turn(state, turn))
@@ -276,9 +386,10 @@ fn model_ended(state: &ConversationView, outcome: RunOutcome) -> Result<Vec<Comm
         return Ok(Vec::new());
     }
     if turn.phase != ConversationTurnPhase::Running {
-        return Err(Error::Module(
-            "conversation completion is not for a running turn".into(),
-        ));
+        return Err(Error::Module {
+            reason: refusal::WRONG_STATE.into(),
+            sentence: "conversation completion is not for a running turn".into(),
+        });
     }
     turn.phase = ConversationTurnPhase::Draining;
     turn.outcome = Some(outcome);
@@ -292,7 +403,13 @@ fn actions_drained(state: &ConversationView, count: u64) -> Result<Vec<Command>,
         && count >= turn.drained_actions
         && count <= turn.actions.len() as u64;
     if !valid {
-        return Err(Error::Module("invalid conversation receipt cursor".into()));
+        return Err(Error::Module {
+            reason: refusal::INVALID_INPUT.into(),
+            sentence: format!(
+                "conversation {} cannot mark {count} of its turn's actions drained",
+                state.conversation_id
+            ),
+        });
     }
     turn.drained_actions = count;
     Ok(update_turn(state, turn))
@@ -302,7 +419,13 @@ fn drained(state: &ConversationView, attempt: Option<u32>) -> Result<Vec<Command
     let ready = turn.phase == ConversationTurnPhase::Draining
         && turn.drained_actions == turn.actions.len() as u64;
     if !ready {
-        return Err(Error::Module("conversation is not drained".into()));
+        return Err(Error::Module {
+            reason: refusal::WRONG_STATE.into(),
+            sentence: format!(
+                "conversation {} still has actions to drain",
+                state.conversation_id
+            ),
+        });
     }
     let Some(checkpoint) = &turn.checkpoint else {
         return pause(state, "history_checkpoint_missing".into());
@@ -331,9 +454,10 @@ fn retry(state: &ConversationView) -> Result<Vec<Command>, Error> {
     let safe_boundary = previous.phase == ConversationTurnPhase::Draining
         && previous.drained_actions == previous.actions.len() as u64;
     if !safe_boundary {
-        return Err(Error::Module(
-            "conversation retry requires drained execution effects".into(),
-        ));
+        return Err(Error::Module {
+            reason: refusal::WRONG_STATE.into(),
+            sentence: "conversation retry requires drained execution effects".into(),
+        });
     }
     let mut next = state.clone();
     next.status = ConversationStatus::Active;
@@ -369,10 +493,13 @@ fn retry(state: &ConversationView) -> Result<Vec<Command>, Error> {
                 drained_actions: 0,
                 outcome: None,
             };
-            next.next_turn = next
-                .next_turn
-                .checked_add(1)
-                .ok_or_else(|| Error::Module("conversation turn counter exhausted".into()))?;
+            next.next_turn = next.next_turn.checked_add(1).ok_or_else(|| Error::Module {
+                reason: refusal::EXHAUSTED.into(),
+                sentence: format!(
+                    "conversation {} has no turn numbers left",
+                    state.conversation_id
+                ),
+            })?;
             next.active_turn = Some(turn.clone());
             vec![
                 Command::Turn(previous),
@@ -390,7 +517,26 @@ impl RunsModule {
         self.receipts
             .get(key)
             .await?
-            .map(|b| sdk::wire::decode(&b).map_err(Error::Module))
+            .map(|b| {
+                sdk::wire::decode(&b).map_err(|sentence| Error::Module {
+                    reason: refusal::CORRUPT.into(),
+                    sentence,
+                })
+            })
+            .transpose()
+    }
+    /// The same point read against the previous block boundary. `pending_items`
+    /// runs before the block's writes are committed and must not see them.
+    async fn committed_record<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>, Error> {
+        self.receipts
+            .committed(key)
+            .await?
+            .map(|b| {
+                sdk::wire::decode(&b).map_err(|sentence| Error::Module {
+                    reason: refusal::CORRUPT.into(),
+                    sentence,
+                })
+            })
             .transpose()
     }
     pub(super) async fn conversation(&self, id: &str) -> Result<Option<ConversationView>, Error> {
@@ -444,7 +590,10 @@ impl RunsModule {
             let event = self
                 .conversation_read(&numbered("event", id, n))
                 .await?
-                .ok_or_else(|| Error::Module("conversation event is missing".into()))?;
+                .ok_or_else(|| Error::Module {
+                    reason: refusal::CORRUPT.into(),
+                    sentence: format!("conversation {id} has no event {n}"),
+                })?;
             events.push(event);
         }
         Ok(events)
@@ -471,35 +620,179 @@ impl RunsModule {
         self.receipts
             .stage(key("run", &turn.run_id), sdk::wire::encode(&id))
     }
-    async fn write_conversation_wake(&mut self, ctx: &dyn Ctx, id: &str) -> Result<(), Error> {
-        let mut queue: BTreeMap<u64, String> = self
+    /// What the whole-map queue still holds, absent once it has drained.
+    pub(super) async fn legacy_wake_queue(
+        &self,
+        view: View,
+    ) -> Result<Option<BTreeMap<u64, String>>, Error> {
+        let Some(bytes) = self.receipts.read(LEGACY_WAKE_QUEUE, view).await? else {
+            return Ok(None);
+        };
+        sdk::wire::decode(&bytes)
+            .map(Some)
+            .map_err(|sentence| Error::Module {
+                reason: refusal::CORRUPT.into(),
+                sentence,
+            })
+    }
+    /// Carry [`CARRY_OVER_CHUNK`] of the whole-map queue into the linked
+    /// layout, oldest item first, and leave the rest under the old key for the
+    /// next write. The FIFO appends, so carrying the OLDEST items first is
+    /// what keeps the map's delivery order: what is left is always younger
+    /// than what is linked, and `conversation_deliveries` serves it last.
+    async fn carry_over_wake_queue(&mut self) -> Result<(), Error> {
+        let Some(mut legacy) = self.legacy_wake_queue(View::Live).await? else {
+            return Ok(());
+        };
+        let remainder = match legacy.keys().nth(CARRY_OVER_CHUNK).copied() {
+            Some(first_left) => legacy.split_off(&first_left),
+            None => BTreeMap::new(),
+        };
+        let mut queue: WakeQueue = self
             .conversation_read(WAKE_QUEUE)
             .await?
             .unwrap_or_default();
-        let already_queued = queue.values().any(|queued| queued == id);
+        // A conversation holds one open wake. While the old key stands a write
+        // can open one for a conversation still sitting in it, so this read is
+        // not just the map's own duplicates: the slot is checked per entry and
+        // the one already linked keeps it.
+        for (item, id) in legacy {
+            let already = self
+                .conversation_read::<u64>(&wake_of_key(&id))
+                .await?
+                .is_some();
+            if already {
+                continue;
+            }
+            self.link_wake(&mut queue, item, &id).await?;
+        }
+        match remainder.is_empty() {
+            true => self.receipts.remove(LEGACY_WAKE_QUEUE.into()),
+            false => self
+                .receipts
+                .stage(LEGACY_WAKE_QUEUE.into(), sdk::wire::encode(&remainder))?,
+        }
+        self.receipts
+            .stage(WAKE_QUEUE.into(), sdk::wire::encode(&queue))
+    }
+    /// Forget one item the old map still holds. An ack can land on an item
+    /// whose chunk has not been carried over yet, and dropping it from the
+    /// linked layout alone would leave the carry-over to re-queue it.
+    async fn drop_legacy_wake(&mut self, item: u64) -> Result<(), Error> {
+        let Some(mut legacy) = self.legacy_wake_queue(View::Live).await? else {
+            return Ok(());
+        };
+        if legacy.remove(&item).is_none() {
+            return Ok(());
+        }
+        match legacy.is_empty() {
+            true => self.receipts.remove(LEGACY_WAKE_QUEUE.into()),
+            false => self
+                .receipts
+                .stage(LEGACY_WAKE_QUEUE.into(), sdk::wire::encode(&legacy))?,
+        }
+        Ok(())
+    }
+    /// Append `item` to the FIFO tail and claim the conversation's open slot.
+    async fn link_wake(&mut self, queue: &mut WakeQueue, item: u64, id: &str) -> Result<(), Error> {
+        let link = WakeLink {
+            prev: queue.tail,
+            next: None,
+        };
+        if let Some(tail) = queue.tail {
+            let mut previous: WakeLink = self
+                .conversation_read(&wake_link_key(tail))
+                .await?
+                .unwrap_or_default();
+            previous.next = Some(item);
+            self.receipts
+                .stage(wake_link_key(tail), sdk::wire::encode(&previous))?;
+        } else {
+            queue.head = Some(item);
+        }
+        queue.tail = Some(item);
+        self.receipts
+            .stage(wake_link_key(item), sdk::wire::encode(&link))?;
+        self.receipts
+            .stage(wake_of_key(id), sdk::wire::encode(&item))
+    }
+    async fn write_conversation_wake(&mut self, ctx: &dyn Ctx, id: &str) -> Result<(), Error> {
+        self.carry_over_wake_queue().await?;
+        let already_queued = self
+            .conversation_read::<u64>(&wake_of_key(id))
+            .await?
+            .is_some();
         if already_queued {
             return Ok(());
         }
         let item = self
             .staged_next_action_item
             .unwrap_or(self.next_action_item);
-        let next = item
-            .checked_add(1)
-            .ok_or_else(|| Error::Module("conversation wake counter exhausted".into()))?;
+        let next = item.checked_add(1).ok_or_else(|| Error::Module {
+            reason: refusal::EXHAUSTED.into(),
+            sentence: "no action item numbers are left for a conversation wake".into(),
+        })?;
         let wake = Wake {
             conversation_id: id.into(),
             cause: ctx.env().cause.clone(),
             acknowledged: None,
         };
-        self.receipts.stage(
-            format!("conversation/wake/{item}"),
-            sdk::wire::encode(&wake),
-        )?;
-        queue.insert(item, id.into());
+        self.receipts
+            .stage(wake_key(item), sdk::wire::encode(&wake))?;
+        let mut queue: WakeQueue = self
+            .conversation_read(WAKE_QUEUE)
+            .await?
+            .unwrap_or_default();
+        self.link_wake(&mut queue, item, id).await?;
         self.receipts
             .stage(WAKE_QUEUE.into(), sdk::wire::encode(&queue))?;
         self.staged_next_action_item = Some(next);
         Ok(())
+    }
+    /// Unlink one item wherever it sits. Reads its two neighbours and the
+    /// ends, never the queue between them.
+    async fn detach_conversation_wake(&mut self, item: u64, id: &str) -> Result<(), Error> {
+        self.carry_over_wake_queue().await?;
+        let Some(link) = self
+            .conversation_read::<WakeLink>(&wake_link_key(item))
+            .await?
+        else {
+            // Either already detached, or acked before its chunk was carried
+            // over — in which case the old map is still holding it.
+            return self.drop_legacy_wake(item).await;
+        };
+        let mut queue: WakeQueue = self
+            .conversation_read(WAKE_QUEUE)
+            .await?
+            .unwrap_or_default();
+        match link.prev {
+            Some(prev) => {
+                let mut previous: WakeLink = self
+                    .conversation_read(&wake_link_key(prev))
+                    .await?
+                    .unwrap_or_default();
+                previous.next = link.next;
+                self.receipts
+                    .stage(wake_link_key(prev), sdk::wire::encode(&previous))?;
+            }
+            None => queue.head = link.next,
+        }
+        match link.next {
+            Some(next) => {
+                let mut following: WakeLink = self
+                    .conversation_read(&wake_link_key(next))
+                    .await?
+                    .unwrap_or_default();
+                following.prev = link.prev;
+                self.receipts
+                    .stage(wake_link_key(next), sdk::wire::encode(&following))?;
+            }
+            None => queue.tail = link.prev,
+        }
+        self.receipts.remove(wake_link_key(item));
+        self.receipts.remove(wake_of_key(id));
+        self.receipts
+            .stage(WAKE_QUEUE.into(), sdk::wire::encode(&queue))
     }
     async fn apply_conversation(
         &mut self,
@@ -515,9 +808,10 @@ impl RunsModule {
             Command::Wake => true,
         });
         if !fits {
-            return Err(Error::Module(
-                "conversation record exceeds the store bound".into(),
-            ));
+            return Err(Error::Module {
+                reason: refusal::CAPACITY.into(),
+                sentence: "conversation record exceeds the store bound".into(),
+            });
         }
         for command in commands {
             match command {
@@ -537,9 +831,10 @@ impl RunsModule {
         Ok(())
     }
     async fn require_conversation(&self, id: &str) -> Result<ConversationView, Error> {
-        self.conversation(id)
-            .await?
-            .ok_or_else(|| Error::Module("unknown conversation".into()))
+        self.conversation(id).await?.ok_or_else(|| Error::Module {
+            reason: refusal::NOT_FOUND.into(),
+            sentence: format!("no conversation {id}"),
+        })
     }
     async fn conversation_controller(
         &self,
@@ -553,9 +848,10 @@ impl RunsModule {
             identity::Control::Program { controller, .. }
             | identity::Control::Revoked { controller } => controller,
             identity::Control::Keys => {
-                return Err(Error::Module(
-                    "conversation requires a program account".into(),
-                ));
+                return Err(Error::Module {
+                    reason: refusal::INVALID_INPUT.into(),
+                    sentence: "conversation requires a program account".into(),
+                });
             }
         };
         let actor = match &ctx.env().origin {
@@ -570,39 +866,51 @@ impl RunsModule {
                     )
                     .await?;
                 let identity::IdentityReply::Account(Some(account)) =
-                    identity::decode_reply(&bytes).map_err(Error::Module)?
+                    identity::decode_reply(&bytes).map_err(|sentence| Error::Module {
+                        reason: refusal::UNEXPECTED_REPLY.into(),
+                        sentence,
+                    })?
                 else {
-                    return Err(Error::Module(
-                        "conversation controller signer has no account".into(),
-                    ));
+                    return Err(Error::Module {
+                        reason: refusal::NOT_FOUND.into(),
+                        sentence: "conversation controller signer has no account".into(),
+                    });
                 };
                 account.number
             }
             Origin::Module(_) | Origin::System => {
-                return Err(Error::Module(
-                    "conversation control requires an account".into(),
-                ));
+                return Err(Error::Module {
+                    reason: refusal::UNAUTHORIZED.into(),
+                    sentence: "conversation control requires an account".into(),
+                });
             }
         };
         if actor != controller {
-            return Err(Error::Module(
-                "conversation control requires its current controller".into(),
-            ));
+            return Err(Error::Module {
+                reason: refusal::UNAUTHORIZED.into(),
+                sentence: "conversation control requires its current controller".into(),
+            });
         }
         Ok(())
     }
     async fn operation_seen(&self, id: &str, op: &str, payload: &[u8]) -> Result<bool, Error> {
         let valid = !op.is_empty() && op.len() <= MAX_REQUEST_ID_BYTES;
         if !valid {
-            return Err(Error::Module("invalid conversation operation id".into()));
+            return Err(Error::Module {
+                reason: refusal::INVALID_INPUT.into(),
+                sentence: format!("an operation id is 1 to {MAX_REQUEST_ID_BYTES} bytes"),
+            });
         }
         let Some(previous) = self.receipts.get(&op_key(id, op)).await? else {
             return Ok(false);
         };
         if previous != payload {
-            return Err(Error::Module(
-                "conversation operation id reused with different input".into(),
-            ));
+            return Err(Error::Module {
+                reason: refusal::ALREADY_EXISTS.into(),
+                sentence: format!(
+                    "operation {op} of conversation {id} already names different work"
+                ),
+            });
         }
         Ok(true)
     }
@@ -620,18 +928,22 @@ impl RunsModule {
         let worker_owned =
             id.starts_with("job/") || matches!(source, ConversationSource::Job { .. });
         if worker_owned {
-            return Err(Error::Module(
-                "job conversations are created by canonical Tasks intake".into(),
-            ));
+            return Err(Error::Module {
+                reason: refusal::INVALID_INPUT.into(),
+                sentence: "job conversations are created by canonical Tasks intake".into(),
+            });
         }
         let valid_id = !id.is_empty() && id.len() <= 256;
         if !valid_id {
-            return Err(Error::Module("invalid conversation id".into()));
+            return Err(Error::Module {
+                reason: refusal::INVALID_INPUT.into(),
+                sentence: "a conversation id is 1 to 256 bytes".into(),
+            });
         }
-        let model = self
-            .model(&agent_id)
-            .cloned()
-            .ok_or_else(|| Error::Module("unknown conversation model".into()))?;
+        let model = self.model(&agent_id).await?.ok_or_else(|| Error::Module {
+            reason: refusal::NOT_FOUND.into(),
+            sentence: format!("no model {agent_id}"),
+        })?;
         run_envelope::NativeConversation {
             conversation_id: id.clone(),
             turn_id: crate::conversation_turn_id(0, 0),
@@ -643,7 +955,10 @@ impl RunsModule {
             events: Vec::new(),
         }
         .validate()
-        .map_err(Error::Module)?;
+        .map_err(|sentence| Error::Module {
+            reason: refusal::INVALID_INPUT.into(),
+            sentence,
+        })?;
         let state = ConversationView {
             conversation_id: id.clone(),
             agent_id,
@@ -671,27 +986,30 @@ impl RunsModule {
             if exact {
                 return Ok(());
             }
-            return Err(Error::Module(
-                "conversation identity cannot be rebound".into(),
-            ));
+            return Err(Error::Module {
+                reason: refusal::ALREADY_EXISTS.into(),
+                sentence: "conversation identity cannot be rebound".into(),
+            });
         }
         let ConversationSource::Channel { channel_id } = source else {
             self.retain_conversation_packages(ctx, &state)?;
             return self.write_conversation_state(&state);
         };
         if self.conversation_for_channel(&channel_id).await?.is_some() {
-            return Err(Error::Module(
-                "channel already has a resident conversation".into(),
-            ));
+            return Err(Error::Module {
+                reason: refusal::ALREADY_EXISTS.into(),
+                sentence: format!("channel {channel_id} already has a resident conversation"),
+            });
         }
         if self
             .conversation_for_account(state.account)
             .await?
             .is_some()
         {
-            return Err(Error::Module(
-                "account already has a coordinating channel conversation".into(),
-            ));
+            return Err(Error::Module {
+                reason: refusal::ALREADY_EXISTS.into(),
+                sentence: "account already has a coordinating channel conversation".into(),
+            });
         }
         let bytes = ctx
             .query(
@@ -702,12 +1020,21 @@ impl RunsModule {
             )
             .await?;
         let chat::ChatReply::Channel(Some(channel)) =
-            chat::decode_reply(&bytes).map_err(Error::Module)?
+            chat::decode_reply(&bytes).map_err(|sentence| Error::Module {
+                reason: refusal::UNEXPECTED_REPLY.into(),
+                sentence,
+            })?
         else {
-            return Err(Error::Module("conversation channel is missing".into()));
+            return Err(Error::Module {
+                reason: refusal::NOT_FOUND.into(),
+                sentence: format!("no channel {channel_id}"),
+            });
         };
         if channel.archived {
-            return Err(Error::Module("conversation channel is archived".into()));
+            return Err(Error::Module {
+                reason: refusal::WRONG_STATE.into(),
+                sentence: format!("channel {channel_id} is archived"),
+            });
         }
         let mut state = state;
         // Binding an existing channel never replays its pre-install history.
@@ -738,10 +1065,12 @@ impl RunsModule {
         if state.packages.is_empty() {
             return Ok(());
         }
-        let files = self
-            .files
-            .clone()
-            .ok_or_else(|| Error::Module("package retention requires Files".into()))?;
+        let files = self.files.clone().ok_or_else(|| Error::Module {
+            reason: refusal::UNSUPPORTED.into(),
+            sentence:
+                "retaining conversation packages needs a Files module, and none is configured"
+                    .into(),
+        })?;
         for package in &state.packages {
             ctx.emit_msg(Msg {
                 target: files.clone(),
@@ -791,9 +1120,10 @@ impl RunsModule {
         self.conversation_controller(ctx, &state).await?;
         require_coordinating_source(&state)?;
         if matches!(input, ConversationInput::Chat { .. }) {
-            return Err(Error::Module(
-                "chat snapshots require the authenticated source hook".into(),
-            ));
+            return Err(Error::Module {
+                reason: refusal::UNAUTHORIZED.into(),
+                sentence: "chat snapshots require the authenticated source hook".into(),
+            });
         }
         self.admit_conversation_input(ctx, &state, op, input, ctx.env().origin.clone())
             .await
@@ -816,7 +1146,13 @@ impl RunsModule {
         let sequence = state
             .admitted_cursor
             .checked_add(1)
-            .ok_or_else(|| Error::Module("conversation cursor exhausted".into()))?;
+            .ok_or_else(|| Error::Module {
+                reason: refusal::EXHAUSTED.into(),
+                sentence: format!(
+                    "conversation {} has no event sequence numbers left",
+                    state.conversation_id
+                ),
+            })?;
         let event = ConversationEvent {
             sequence,
             operation_id: op.clone(),
@@ -876,9 +1212,17 @@ impl RunsModule {
             )
             .await?;
         let chat::ChatReply::Channel(channel) =
-            chat::decode_reply(&bytes).map_err(Error::Module)?
+            chat::decode_reply(&bytes).map_err(|sentence| Error::Module {
+                reason: refusal::UNEXPECTED_REPLY.into(),
+                sentence,
+            })?
         else {
-            return Err(Error::Module("unexpected channel reply".into()));
+            return Err(Error::Module {
+                reason: refusal::UNEXPECTED_REPLY.into(),
+                sentence: format!(
+                    "chat answered the lookup for channel {channel_id} with something other than a channel"
+                ),
+            });
         };
         let Some(channel) = channel else {
             return self
@@ -904,24 +1248,45 @@ impl RunsModule {
             )
             .await?;
         let chat::ChatReply::Messages(messages) =
-            chat::decode_reply(&bytes).map_err(Error::Module)?
+            chat::decode_reply(&bytes).map_err(|sentence| Error::Module {
+                reason: refusal::UNEXPECTED_REPLY.into(),
+                sentence,
+            })?
         else {
-            return Err(Error::Module("unexpected source messages reply".into()));
+            return Err(Error::Module {
+                reason: refusal::UNEXPECTED_REPLY.into(),
+                sentence: format!(
+                    "chat answered the message lookup for channel {channel_id} with something other than messages"
+                ),
+            });
         };
         if messages.is_empty() {
-            return Err(Error::Module(
-                "conversation source range is empty before its head".into(),
-            ));
+            return Err(Error::Module {
+                reason: refusal::UNEXPECTED_REPLY.into(),
+                sentence: "conversation source range is empty before its head".into(),
+            });
         }
         for message in messages {
             let current = self.require_conversation(&state.conversation_id).await?;
             let expected = current
                 .source_cursor
                 .checked_add(1)
-                .ok_or_else(|| Error::Module("source cursor exhausted".into()))?;
+                .ok_or_else(|| Error::Module {
+                    reason: refusal::EXHAUSTED.into(),
+                    sentence: format!(
+                        "conversation {} has no source sequence numbers left",
+                        state.conversation_id
+                    ),
+                })?;
             let contiguous = &message.channel_id == channel_id && message.seq == expected;
             if !contiguous {
-                return Err(Error::Module("conversation source gap".into()));
+                return Err(Error::Module {
+                    reason: refusal::UNEXPECTED_REPLY.into(),
+                    sentence: format!(
+                        "message {}/{} is not the next source message {channel_id}/{expected}",
+                        message.channel_id, message.seq
+                    ),
+                });
             }
             let human = matches!(message.head.content_origin, Origin::External(_));
             let retain = human && !message.head.deleted;

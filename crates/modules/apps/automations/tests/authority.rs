@@ -1,8 +1,12 @@
 use automations::{
     Action, Automations, AutomationsMsg, AutomationsQuery, AutomationsReply, Trigger,
 };
+// the NATIVE modules under their module names — the `identity`/`attribution`
+// crates in [dependencies] are the wire surfaces these re-export.
+use attribution_module as attribution;
 use futures::executor::block_on;
 use host::{BlockContext, Host};
+use identity_module as identity;
 use sdk::{Ctx, Error, Module, ModuleId, Msg, Origin, StateRoot};
 use sdk_testkit::MemStore;
 

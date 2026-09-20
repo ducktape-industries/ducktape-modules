@@ -37,6 +37,13 @@ members = [
     "crates/examples/greeter",
 ]
 
+# which repository this workspace IS. guest-builder reaches every module
+# through this URL as a git source at the revision it builds, and the URL is
+# part of every symbol hash — so it is written once, here, rather than guessed
+# from a checkout's remote.
+[workspace.metadata.guest-builder]
+platform = "https://github.com/ducktape-industries/ducktape-modules"
+
 [workspace.package]
 edition = "2024"
 version = "0.1.0"
@@ -59,6 +66,7 @@ ducktape-module-sdk = { git = "https://github.com/ducktape-industries/ducktape-s
 # dev-only shared test doubles for the sdk boundary traits (TestCtx +
 # in-memory MerkleStore). MAY ONLY appear in `[dev-dependencies]`.
 sdk-testkit = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "sdk-testkit" }
+wasm-host = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "wasm-host" }
 # the closed signature-scheme set + ONE verifier.
 keyscheme = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "keyscheme" }
 # keyed with the underscore ON PURPOSE: module crates declare a feature named
@@ -91,6 +99,8 @@ chat-message = { git = "https://github.com/ducktape-industries/ducktape-sdk", br
 collaboration = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "collaboration-wire" }
 collaboration-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "collaboration-wire" }
 files = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "files-wire" }
+files-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "files-wire" }
+duck-address = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "duck-address" }
 forge = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "forge-wire" }
 inbox-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "inbox-wire" }
 pages = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "pages-wire" }
@@ -106,9 +116,10 @@ tasks-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", bran
 # ---------------------------------------------------------------------------
 host = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "host" }
 statesync = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "statesync" }
-# the run envelope's magic + headless composer, and the node-side work spec.
-run-envelope = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "run-envelope" }
-node-work = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "node-work" }
+# the run envelope's magic + headless composer, and the node-side work spec —
+# both leaf libraries in ducktape-sdk, not the platform.
+run-envelope = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "run-envelope" }
+node-work = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "node-work" }
 
 # ---------------------------------------------------------------------------
 # internal — the reference modules in this repo

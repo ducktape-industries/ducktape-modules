@@ -1,3 +1,9 @@
+// the NATIVE modules under their module names — the `identity`/`attribution`
+// crates in [dependencies] are the wire surfaces these re-export.
+use attribution_module as attribution;
+use identity_module as identity;
+use sdk::refusal;
+
 use attribution::{AttributionMsg, AttributionQuery, AttributionReply, Reason, Source};
 use futures::executor::block_on;
 use host::{BlockContext, Host};
@@ -39,10 +45,16 @@ impl Module for WorkerEvents {
     async fn execute(&mut self, ctx: &mut dyn Ctx, msg: &Msg) -> Result<(), Error> {
         let from_attribution = ctx.env().origin == Origin::Module("attribution".into());
         if !from_attribution {
-            return Err(Error::Module("unauthenticated attribution delivery".into()));
+            return Err(Error::Module {
+                reason: refusal::UNAUTHORIZED.into(),
+                sentence: "unauthenticated attribution delivery".into(),
+            });
         }
         let attribution::AttributionEvent::Changed(change) =
-            attribution::decode_event(&msg.payload).map_err(Error::Module)?;
+            attribution::decode_event(&msg.payload).map_err(|sentence| Error::Module {
+                reason: refusal::UNEXPECTED_REPLY.into(),
+                sentence,
+            })?;
         self.staged.push(change);
         Ok(())
     }

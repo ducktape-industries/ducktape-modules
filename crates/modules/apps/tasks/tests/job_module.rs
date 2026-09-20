@@ -10,8 +10,14 @@
 //! the injected store. these tests inject an in-memory store and assert
 //! BEHAVIOR; the cross-node round trip over the REAL store is `sync_round_trip`.
 
+// the NATIVE identity and attribution modules under their module names: the
+// crates `identity`/`attribution` name in [dependencies] are the wire surfaces,
+// and these re-export them, so one alias serves both the module and its wire.
+use attribution_module as attribution;
 use futures::executor::block_on;
 use host::{BlockContext, Host, SubmitError};
+use identity_module as identity;
+use sdk::refusal;
 use sdk::{Ctx, Env, Error, MerkleStore as _, Module, ModuleId, Msg, Origin, StateRoot};
 use sdk_testkit::{MemStore, TestCtx};
 use tasks::{
@@ -273,25 +279,25 @@ fn register_worker_gating_idempotence_unregister_and_cap() {
         let err = stage(&mut jobs, 1, ext("operator"), register_worker())
             .await
             .expect_err("external registration rejected");
-        assert!(matches!(err, Error::Module(m) if m.contains("module origin")));
+        assert!(matches!(err, Error::Module { sentence: m, .. } if m.contains("module origin")));
         jobs.abort_block().await.unwrap();
 
         let err = stage(&mut jobs, 1, ext("operator"), unregister_worker())
             .await
             .expect_err("external unregistration rejected");
-        assert!(matches!(err, Error::Module(m) if m.contains("module origin")));
+        assert!(matches!(err, Error::Module { sentence: m, .. } if m.contains("module origin")));
         jobs.abort_block().await.unwrap();
 
         let err = stage(&mut jobs, 1, Origin::System, register_worker())
             .await
             .expect_err("system registration rejected");
-        assert!(matches!(err, Error::Module(m) if m.contains("module origin")));
+        assert!(matches!(err, Error::Module { sentence: m, .. } if m.contains("module origin")));
         jobs.abort_block().await.unwrap();
 
         let err = stage(&mut jobs, 1, Origin::System, unregister_worker())
             .await
             .expect_err("system unregistration rejected");
-        assert!(matches!(err, Error::Module(m) if m.contains("module origin")));
+        assert!(matches!(err, Error::Module { sentence: m, .. } if m.contains("module origin")));
         jobs.abort_block().await.unwrap();
 
         stage(
@@ -367,7 +373,9 @@ fn register_worker_gating_idempotence_unregister_and_cap() {
         )
         .await
         .expect_err("worker cap enforced");
-        assert!(matches!(err, Error::Module(m) if m.contains("worker cap reached")));
+        assert!(
+            matches!(err, Error::Module { sentence: m, .. } if m.contains(&format!("already has {MAX_WORKERS} registered workers")))
+        );
     });
 }
 
@@ -388,7 +396,7 @@ fn second_claim_is_rejected_same_and_later_block() {
         let err = stage(&mut jobs, 3, ext("worker-b"), claim("j1", 100))
             .await
             .expect_err("second claim rejected");
-        assert!(matches!(err, Error::Module(m) if m.contains("not claimable")));
+        assert!(matches!(err, Error::Module { sentence: m, .. } if m.contains("not claimable")));
 
         let job = get(&jobs, "j1").await.unwrap();
         assert_eq!(
@@ -411,14 +419,14 @@ fn wrong_worker_finalize_and_release_rejected() {
             .await
             .expect_err("wrong worker cannot finalize");
         assert!(
-            matches!(err, Error::Module(m) if m.contains("only the current claimant may finalize"))
+            matches!(err, Error::Module { sentence: m, .. } if m.contains("only the current claimant may finalize"))
         );
 
         let err = stage(&mut jobs, 3, ext("worker-b"), release("j1"))
             .await
             .expect_err("wrong worker cannot release");
         assert!(
-            matches!(err, Error::Module(m) if m.contains("only the current claimant may release"))
+            matches!(err, Error::Module { sentence: m, .. } if m.contains("only the current claimant may release"))
         );
 
         // the rightful claimant can both — release returns it to Pending, claim
@@ -449,7 +457,9 @@ fn finalize_on_terminal_rejected_result_singularity() {
         )
         .await
         .expect_err("terminal job cannot be re-finalized");
-        assert!(matches!(err, Error::Module(m) if m.contains("not in processing")));
+        assert!(
+            matches!(err, Error::Module { sentence: m, .. } if m.contains("not in processing"))
+        );
 
         let job = get(&jobs, "j1").await.unwrap();
         assert_eq!(job.status, JobStatus::Done);
@@ -472,13 +482,21 @@ fn premature_reclaim_rejected() {
         let err = stage(&mut jobs, 15, Origin::System, reclaim("j1"))
             .await
             .expect_err("reclaim at the deadline is premature");
-        assert!(matches!(err, Error::Module(m) if m.contains("lease not expired")));
+        assert!(
+            matches!(&err, Error::Module { reason, sentence } if reason == sdk::refusal::NOT_YET
+                && sentence.contains("lease on job j1 runs through height 15")),
+            "{err:?}"
+        );
 
         // and well before it.
         let err = stage(&mut jobs, 10, ext("anyone"), reclaim("j1"))
             .await
             .expect_err("early reclaim rejected");
-        assert!(matches!(err, Error::Module(m) if m.contains("lease not expired")));
+        assert!(
+            matches!(&err, Error::Module { reason, sentence } if reason == sdk::refusal::NOT_YET
+                && sentence.contains("lease on job j1 runs through height 15")),
+            "{err:?}"
+        );
     });
 }
 
@@ -552,7 +570,9 @@ fn cancel_only_from_pending_by_any_member() {
         let err = stage(&mut jobs, 6, ext("submitter"), cancel("j2"))
             .await
             .expect_err("claimed job cannot be cancelled");
-        assert!(matches!(err, Error::Module(m) if m.contains("cancel only applies to pending")));
+        assert!(
+            matches!(err, Error::Module { sentence: m, .. } if m.contains("cancel only applies to pending"))
+        );
     });
 }
 
@@ -566,7 +586,9 @@ fn prune_only_terminal_by_any_member_removes_record() {
         let err = stage(&mut jobs, 2, ext("submitter"), prune("j1"))
             .await
             .expect_err("pending job cannot be pruned");
-        assert!(matches!(err, Error::Module(m) if m.contains("prune only applies to terminal")));
+        assert!(
+            matches!(err, Error::Module { sentence: m, .. } if m.contains("prune only applies to terminal"))
+        );
 
         apply(&mut jobs, 3, ext("submitter"), cancel("j1")).await; // now terminal
 
@@ -593,9 +615,9 @@ fn caps_rejection_table() {
         let max_spec = "s".repeat(MAX_SPEC);
 
         let cases: Vec<(Msg, &str)> = vec![
-            (submit("", "k", ""), "job_id must not be empty"),
+            (submit("", "k", ""), "needs a non-empty job_id"),
             (submit(&too_long_id, "k", ""), "job_id exceeds"),
-            (submit("ok", "", ""), "kind must not be empty"),
+            (submit("ok", "", ""), "needs a non-empty kind"),
             (submit("ok", &too_long_kind, ""), "kind exceeds"),
             (submit("ok", "k", &over_spec), "spec exceeds"),
         ];
@@ -604,7 +626,7 @@ fn caps_rejection_table() {
                 .await
                 .expect_err("cap violation must reject");
             assert!(
-                matches!(err, Error::Module(m) if m.contains(needle)),
+                matches!(err, Error::Module { sentence: m, .. } if m.contains(needle)),
                 "expected `{needle}`"
             );
         }
@@ -624,7 +646,7 @@ fn caps_rejection_table() {
         let err = stage(&mut jobs, 3, ext("submitter"), submit("dup", "k", ""))
             .await
             .expect_err("duplicate rejected");
-        assert!(matches!(err, Error::Module(m) if m.contains("already exists")));
+        assert!(matches!(err, Error::Module { sentence: m, .. } if m.contains("already exists")));
 
         // payload cap on finalize.
         apply(&mut jobs, 4, ext("worker-a"), claim("dup", 100)).await;
@@ -637,7 +659,7 @@ fn caps_rejection_table() {
         )
         .await
         .expect_err("oversized payload rejected");
-        assert!(matches!(err, Error::Module(m) if m.contains("payload exceeds")));
+        assert!(matches!(err, Error::Module { sentence: m, .. } if m.contains("payload exceeds")));
         // exactly at the cap is accepted.
         let max_payload = "p".repeat(MAX_PAYLOAD);
         apply(
@@ -679,7 +701,7 @@ fn max_jobs_cap_is_overlay_aware() {
         )
         .await
         .expect_err("board full");
-        assert!(matches!(err, Error::Module(m) if m.contains("job board full")));
+        assert!(matches!(err, Error::Module { sentence: m, .. } if m.contains("job board full")));
     });
 }
 
@@ -704,7 +726,7 @@ fn one_submitter_cannot_fill_the_board() {
             .await
             .expect_err("the submitter is at its cap");
         assert!(
-            matches!(&err, Error::Module(m) if m.contains("job submitter at cap")),
+            matches!(&err, Error::Module { sentence: m, .. } if m.contains("job submitter at cap")),
             "the refusal names the cap: {err}"
         );
         assert!(get(&jobs, "one-more").await.is_none(), "nothing staged");
@@ -778,7 +800,7 @@ fn submitter_cap_is_shared_by_account_keys_and_isolated_per_program() {
                 .await
                 .expect_err("the canonical submitter is at capacity");
             assert!(
-                matches!(error, Error::Module(message) if message.contains("job submitter at cap"))
+                matches!(error, Error::Module { sentence: message, .. } if message.contains("job submitter at cap"))
             );
         }
         jobs.commit_block().await.unwrap();
@@ -1058,7 +1080,9 @@ fn identities_are_derived_from_origin() {
         )
         .await
         .expect_err("empty external origin rejected");
-        assert!(matches!(err, Error::Module(m) if m.contains("non-empty submitter id")));
+        assert!(
+            matches!(err, Error::Module { sentence: m, .. } if m.contains("non-empty submitter id"))
+        );
     });
 }
 
@@ -1346,7 +1370,10 @@ impl Module for ClaimingWorker {
 
     async fn execute(&mut self, ctx: &mut dyn Ctx, msg: &Msg) -> Result<(), Error> {
         let JobsEvent::Submitted { job_id, .. } =
-            decode_jobs_event(&msg.payload).map_err(Error::Module)?;
+            decode_jobs_event(&msg.payload).map_err(|sentence| Error::Module {
+                reason: refusal::UNEXPECTED_REPLY.into(),
+                sentence,
+            })?;
         ctx.emit_msg(claim(&job_id, 100));
         Ok(())
     }
@@ -1433,7 +1460,7 @@ fn host_first_claim_wins_across_ordered_blocks() {
             .expect_err("B loses the race");
         assert!(matches!(
             err,
-            SubmitError::Rejected(Error::Module(ref m)) if m.contains("not claimable")
+            SubmitError::Rejected(Error::Module { sentence: ref m, .. }) if m.contains("not claimable")
         ));
 
         // the losing claim left no trace: root unchanged, A still the claimant.
@@ -1506,7 +1533,7 @@ fn host_two_claims_in_one_block_abort_atomically() {
             .expect_err("the second claim aborts the block");
         assert!(matches!(
             err,
-            SubmitError::Rejected(Error::Module(ref m)) if m.contains("not claimable")
+            SubmitError::Rejected(Error::Module { sentence: ref m, .. }) if m.contains("not claimable")
         ));
 
         // nothing committed: the job is still exactly Pending, root byte-identical.
@@ -1621,7 +1648,7 @@ fn a_job_comment_cannot_be_overwritten_by_another_actor() {
         )
         .await
         .unwrap_err();
-        assert!(format!("{error}").contains("already exists"));
+        assert!(format!("{error}").contains("job j already has a comment c"));
         jobs.commit_block().await.unwrap();
         assert_eq!(jobs.root(), before);
         let job = get(&jobs, "j").await.unwrap();

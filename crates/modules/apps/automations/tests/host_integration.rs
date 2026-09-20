@@ -2,6 +2,11 @@
 //! `Origin::Module("chat")`, a rule fires, and its `CreateTask` follow-up lands
 //! in the real tasks module — all atomically within one block.
 
+// the NATIVE modules under their module names — the `identity`/`attribution`
+// crates in [dependencies] are the wire surfaces these re-export.
+use attribution_module as attribution;
+use identity_module as identity;
+
 use automations::Automations;
 use automations::{
     Action, AutomationsMsg, AutomationsQuery, AutomationsReply, RunRecord, Trigger, decode_reply,

@@ -291,11 +291,12 @@ fn the_event_stream_carries_binding_transitions() {
         assert_eq!(page.next_seq, 3);
         assert!(page.deliveries.is_empty());
         // and nothing about a delivery state rides a binding event.
-        assert!(
-            !bodies.iter().any(|body| matches!(
-                body,
-                collaboration::EventBody::DeliveryAdvanced { state: DeliveryState::Stored, .. }
-            ))
-        );
+        assert!(!bodies.iter().any(|body| matches!(
+            body,
+            collaboration::EventBody::DeliveryAdvanced {
+                state: DeliveryState::Stored,
+                ..
+            }
+        )));
     });
 }

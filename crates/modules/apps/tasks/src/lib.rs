@@ -65,6 +65,7 @@ pub mod index;
 #[cfg(feature = "index-guest")]
 mod index_guest;
 
+use sdk::refusal;
 use sha2::{Digest, Sha256};
 
 use sdk::{
@@ -126,10 +127,13 @@ impl Tasks {
 /// every other transition stages last); keep it that way when adding one.
 pub(crate) fn check_record(value: &[u8], what: &str) -> Result<(), Error> {
     if value.len() > MAX_RECORD_BYTES {
-        return Err(Error::Module(format!(
-            "{what} is {} bytes, over the {MAX_RECORD_BYTES}-byte store record cap",
-            value.len()
-        )));
+        return Err(Error::Module {
+            reason: refusal::CAPACITY.into(),
+            sentence: format!(
+                "{what} is {} bytes, over the {MAX_RECORD_BYTES}-byte store record cap",
+                value.len()
+            ),
+        });
     }
     Ok(())
 }
@@ -160,22 +164,30 @@ async fn actor_from_origin(ctx: &dyn Ctx, identity: &str) -> Result<Party, Error
                 }
             );
             if !is_active_program {
-                return Err(Error::Module("program account is not active".into()));
+                return Err(Error::Module {
+                    reason: refusal::WRONG_STATE.into(),
+                    sentence: format!(
+                        "account {} is not an active program account",
+                        account.number
+                    ),
+                });
             }
             Ok(Party::Account(account.number))
         }
         Origin::External(key) => {
             if key.is_empty() {
-                return Err(Error::Module(
-                    "external origin must carry a non-empty submitter id".into(),
-                ));
+                return Err(Error::Module {
+                    reason: refusal::INVALID_INPUT.into(),
+                    sentence: "external origin must carry a non-empty submitter id".into(),
+                });
             }
             let query = identity::IdentityQuery::OfKey { key: key.clone() };
             let reply = identity_reply(ctx, identity, query).await?;
             let identity::IdentityReply::Account(account) = reply else {
-                return Err(Error::Module(
-                    "identity returned an unexpected reply".into(),
-                ));
+                return Err(Error::Module {
+                    reason: refusal::UNEXPECTED_REPLY.into(),
+                    sentence: "identity returned an unexpected reply".into(),
+                });
             };
             Ok(account.map_or_else(
                 || Party::Key(key.clone()),
@@ -205,7 +217,10 @@ async fn identity_reply(
     query: identity::IdentityQuery,
 ) -> Result<identity::IdentityReply, Error> {
     let bytes = ctx.query(identity, &identity::encode_query(&query)).await?;
-    identity::decode_reply(&bytes).map_err(Error::Module)
+    identity::decode_reply(&bytes).map_err(|sentence| Error::Module {
+        reason: refusal::UNEXPECTED_REPLY.into(),
+        sentence,
+    })
 }
 
 async fn require_account(
@@ -215,7 +230,10 @@ async fn require_account(
 ) -> Result<identity::AccountView, Error> {
     let reply = identity_reply(ctx, identity, identity::IdentityQuery::Get { number }).await?;
     let identity::IdentityReply::Account(Some(account)) = reply else {
-        return Err(Error::Module("task owner account does not exist".into()));
+        return Err(Error::Module {
+            reason: refusal::NOT_FOUND.into(),
+            sentence: format!("task owner account {number} does not exist"),
+        });
     };
     Ok(account)
 }
@@ -228,16 +246,18 @@ async fn next_revision(
 ) -> Result<(Vec<u8>, u64), Error> {
     let key = sdk::wire::encode(&("attribution_revision", kind, object));
     let revision = match staged.get(&key).await? {
-        Some(bytes) => u64::from_le_bytes(
-            bytes
-                .try_into()
-                .map_err(|_| Error::Module("invalid attribution revision".into()))?,
-        ),
+        Some(bytes) => u64::from_le_bytes(bytes.try_into().map_err(|_| Error::Module {
+            reason: refusal::CORRUPT.into(),
+            sentence: format!(
+                "the stored attribution revision of {kind} {object} is not an 8-byte count"
+            ),
+        })?),
         None => 0,
     };
-    let next = revision
-        .checked_add(1)
-        .ok_or_else(|| Error::Module("attribution revision exhausted".into()))?;
+    let next = revision.checked_add(1).ok_or_else(|| Error::Module {
+        reason: refusal::EXHAUSTED.into(),
+        sentence: format!("{kind} {object} has no attribution revision numbers left"),
+    })?;
     Ok((key, next))
 }
 
@@ -562,14 +582,20 @@ impl Module for Tasks {
     }
 
     async fn execute(&mut self, ctx: &mut dyn Ctx, msg: &Msg) -> Result<(), Error> {
-        match decode_work_msg(&msg.payload).map_err(Error::Module)? {
+        match decode_work_msg(&msg.payload).map_err(|sentence| Error::Module {
+            reason: refusal::INVALID_INPUT.into(),
+            sentence,
+        })? {
             WorkMsg::Task(msg) => self.on_task(ctx, msg).await,
             WorkMsg::Job(msg) => self.on_job(ctx, msg).await,
         }
     }
 
     async fn query(&self, req: &[u8]) -> Result<Vec<u8>, Error> {
-        match decode_work_query(req).map_err(Error::Module)? {
+        match decode_work_query(req).map_err(|sentence| Error::Module {
+            reason: refusal::INVALID_INPUT.into(),
+            sentence,
+        })? {
             WorkQuery::Task(task_query) => Ok(encode_work_reply(&WorkReply::Task(
                 task_board::query(&self.staged, task_query).await?,
             ))),

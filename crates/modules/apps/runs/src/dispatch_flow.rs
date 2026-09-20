@@ -23,7 +23,9 @@ impl RunsModule {
         agent_id: &str,
     ) -> Result<Option<ModelRecord>, String> {
         let _ = ctx;
-        Ok(self.model(agent_id).cloned())
+        self.model(agent_id)
+            .await
+            .map_err(|error| error.to_string())
     }
 
     /// The live registry record of the agent a run executes as.
@@ -61,7 +63,12 @@ impl RunsModule {
         ctx: &dyn Ctx,
         dispatch_id: &str,
     ) -> Result<bool, String> {
-        if self.pending_entry(dispatch_id).is_some() {
+        if self
+            .pending_entry(dispatch_id)
+            .await
+            .map_err(|error| error.to_string())?
+            .is_some()
+        {
             return Ok(true);
         }
         let reply = ctx
@@ -273,7 +280,7 @@ impl RunsModule {
                 .await?
             }
         };
-        // `duck://page/<id>` refs in the trigger message text or the injected
+        // canonical page-address refs in the trigger message text or the injected
         // item body render referenced page subtrees into the same context
         // section — resolved from COMMITTED pages state at compose height,
         // appended after the referenced item context.
@@ -396,7 +403,7 @@ impl RunsModule {
             .await;
         portable.context = Some(inject::render_pages_section(
             &[(page_id, blocks)],
-            &self.net_query(),
+            self.address_chain_id(),
         ));
         let sink = portable.sink.clone();
         let payload = envelope::render_page_comment_payload(
@@ -449,7 +456,7 @@ impl RunsModule {
             .await;
         portable.context = Some(inject::render_pages_section(
             &[(block.page.clone(), blocks)],
-            &self.net_query(),
+            self.address_chain_id(),
         ));
         let sink = portable.sink.clone();
         let payload =
@@ -473,7 +480,7 @@ impl RunsModule {
     /// configured recipe returns a `ResultEvent` keyed by the dispatch id,
     /// which prunes the pending entry staged here.
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn stage_dispatch_run(
+    pub(super) async fn stage_dispatch_run(
         &mut self,
         ctx: &mut dyn Ctx,
         run_id: &str,
@@ -483,7 +490,7 @@ impl RunsModule {
         requester: RunOrigin,
         prepared: PreparedDispatch,
         demands: BTreeMap<String, u64>,
-    ) {
+    ) -> Result<(), super::Error> {
         let workspace_agent_id = agent_id.clone();
         self.stage_scoped_dispatch_run(
             ctx,
@@ -496,11 +503,12 @@ impl RunsModule {
             prepared,
             demands,
             None,
-        );
+        )
+        .await
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn stage_scoped_dispatch_run(
+    pub(super) async fn stage_scoped_dispatch_run(
         &mut self,
         ctx: &mut dyn Ctx,
         run_id: &str,
@@ -512,7 +520,7 @@ impl RunsModule {
         prepared: PreparedDispatch,
         demands: BTreeMap<String, u64>,
         delegation_id: Option<String>,
-    ) {
+    ) -> Result<(), super::Error> {
         let now = ctx.env().consensus_time;
         let dispatch_id = dispatch_id_for(run_id);
         ctx.emit_msg(Msg {
@@ -536,9 +544,9 @@ impl RunsModule {
                 requester: requester.clone(),
             },
         );
-        self.pending_overlay.insert(
+        self.stage_pending_insert(
             dispatch_id,
-            Some(PendingState {
+            PendingState {
                 account: prepared.account,
                 generation: prepared.generation,
                 cause: ctx.env().cause.clone(),
@@ -554,7 +562,8 @@ impl RunsModule {
                 requester,
                 sink: prepared.sink,
                 created_at: now,
-            }),
-        );
+            },
+        )
+        .await
     }
 }

@@ -9,9 +9,11 @@
 
 use crate::RunsModule;
 use ducktape_module_sdk::{
-    Guest, ROOT_KEY, STATE_KEY, WitCtx, block_on, host, load_store_state, save_store_state,
+    Guest, ROOT_KEY, STATE_KEY, WitCtx, block_on, error_to_wit, host, load_store_state, rejected,
+    save_store_state,
 };
-use sdk::{Error, Module as _, Msg, StateRoot};
+use sdk::refusal;
+use sdk::{Module as _, Msg, StateRoot};
 
 /// the genesis-constant id this module registers under (the native twin's id:
 /// `Env::me` and follow-up routing must read identically to ported logic).
@@ -21,7 +23,7 @@ const MODULE_ID: &str = "runs";
 /// surface, saga the dead-letter origin, attribution the source-report plane,
 /// dispatch the recipe and call ledger, agent the program executor, tasks/jobs the
 /// action and board lanes, files the envelope's source-snapshot pin, forge
-/// the PR/merge sink target, pages the `duck://page/` context + effects lane,
+/// the PR/merge sink target, pages the canonical page context + effects lane,
 /// collaboration the agent-to-agent messaging plane.
 const CHAT_ID: &str = "chat";
 const SAGA_ID: &str = "saga";
@@ -84,15 +86,24 @@ fn loaded_module() -> Result<RunsModule, host::Error> {
     .with_collaboration_module(COLLABORATION_ID)
     // the per-network parameter a fixed component cannot compile in: the host
     // seeded it into this store tenant's genesis records (`__config`), and every
-    // `duck://` link the injector renders stamps its `?net=` half from it. a
-    // missing or malformed record is host wiring corruption, refused
-    // deterministically rather than silently producing network-less links.
-    .with_chain_id(ducktape_module_sdk::store_genesis_chain_id(MODULE_ID)?)
+    // canonical `duck://` link the injector renders carries it in its authority.
+    // A missing, malformed, or non-ChainId record is host wiring corruption,
+    // refused deterministically rather than silently producing foreign links.
+    .with_chain_id({
+        let chain_id = ducktape_module_sdk::store_genesis_chain_id(MODULE_ID)?;
+        crate::RunsModule::parse_address_chain_id(&chain_id).map_err(|error| {
+            rejected(
+                refusal::INVALID_INPUT,
+                format!("runs genesis chain_id invalid: {error}"),
+            )
+        })?;
+        chain_id
+    })
     .with_time_unit(ducktape_module_sdk::store_genesis_time_unit(MODULE_ID)?);
     if let Some((bytes, root)) = load_store_state() {
         module
             .install(&bytes, StateRoot(root))
-            .map_err(|e| host::Error::Rejected(format!("runs state reload: {e}")))?;
+            .map_err(|e| rejected(refusal::CORRUPT, format!("runs state reload: {e}")))?;
     }
     // AFTER install (which clears the in-memory ring): adopt the persisted
     // recent-run ring. absent means the module never persisted — the
@@ -100,19 +111,9 @@ fn loaded_module() -> Result<RunsModule, host::Error> {
     if let Some(bytes) = host::state_get(&sdk::store_key(HISTORY_KEY)) {
         module
             .install_history(&bytes)
-            .map_err(|e| host::Error::Rejected(format!("runs history reload: {e}")))?;
+            .map_err(|e| rejected(refusal::CORRUPT, format!("runs history reload: {e}")))?;
     }
     Ok(module)
-}
-
-/// map an inner sdk error onto the wit surface. `Module` is the native
-/// rejection verbatim; anything else a native runs never surfaces from
-/// its own execute, so the debug rendering is purely diagnostic.
-fn to_wit_error(e: Error) -> host::Error {
-    match e {
-        Error::Module(m) => host::Error::Rejected(m),
-        other => host::Error::Rejected(other.to_string()),
-    }
 }
 
 impl Guest for Component {
@@ -152,14 +153,14 @@ impl Guest for Component {
                 payload,
             },
         ))
-        .map_err(to_wit_error)?;
+        .map_err(error_to_wit)?;
         // fully apply per dispatch: publish the inner per-op staging, then
         // persist the canonical snapshot — and the recent-run ring, under
         // its own key — as OUTER staged writes. the host owns the real
         // commit/abort boundary (see the crate doc), so an aborted block
         // discards the ring append exactly like the native `abort_block`.
-        block_on(module.commit_block()).map_err(to_wit_error)?;
-        save_store_state(&module.snapshot(), module.root().as_bytes());
+        block_on(module.commit_block()).map_err(error_to_wit)?;
+        save_store_state(&module.snapshot(), module.root().as_bytes())?;
         host::state_set(&sdk::store_key(HISTORY_KEY), &module.history_snapshot());
         Ok(())
     }
@@ -173,16 +174,16 @@ impl Guest for Component {
                     .map(ducktape_module_sdk::pending_item_to_wit)
                     .collect()
             })
-            .map_err(to_wit_error)
+            .map_err(error_to_wit)
     }
 
     fn acknowledge(ack: host::Ack) -> Result<(), host::Error> {
         let mut module = loaded_module()?;
         let mut ctx = WitCtx::new();
         block_on(module.acknowledge(&mut ctx, &ducktape_module_sdk::ack_from_wit(ack)))
-            .map_err(to_wit_error)?;
-        block_on(module.commit_block()).map_err(to_wit_error)?;
-        save_store_state(&module.snapshot(), module.root().as_bytes());
+            .map_err(error_to_wit)?;
+        block_on(module.commit_block()).map_err(error_to_wit)?;
+        save_store_state(&module.snapshot(), module.root().as_bytes())?;
         Ok(())
     }
 
@@ -195,7 +196,7 @@ impl Guest for Component {
         // the ring reloaded off `__history` — so the ctx-less native `query`
         // is the whole surface.
         let module = loaded_module()?;
-        block_on(module.query_with(&WitCtx::new(), &req)).map_err(to_wit_error)
+        block_on(module.query_with(&WitCtx::new(), &req)).map_err(error_to_wit)
     }
 }
 

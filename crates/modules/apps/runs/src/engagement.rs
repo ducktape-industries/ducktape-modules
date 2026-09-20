@@ -1,5 +1,6 @@
 //! Source context is read only after the user's program explicitly requests model work.
 use super::*;
+use sdk::refusal;
 
 /// Only runs publishes this detail. Manual request ownership is stamped from
 /// its authenticated origin before the program chooses whether to execute.
@@ -34,23 +35,37 @@ impl RunsModule {
         budget: &SiblingReadBudget,
     ) -> Result<(), Error> {
         let Origin::Program(account) = ctx.env().origin else {
-            return Err(Error::Module(
-                "attributed model work requires a program call".into(),
-            ));
+            return Err(Error::Module {
+                reason: refusal::UNAUTHORIZED.into(),
+                sentence: "attributed model work requires a program call".into(),
+            });
         };
         let Some(model) = self
             .active_agent(&*ctx, &agent_id)
             .await
-            .map_err(Error::Module)?
+            .map_err(|sentence| Error::Module {
+                reason: refusal::CORRUPT.into(),
+                sentence,
+            })?
         else {
-            return Err(Error::Module("model is not active".into()));
+            return Err(Error::Module {
+                reason: refusal::WRONG_STATE.into(),
+                sentence: format!("model {agent_id} is not active"),
+            });
         };
         if model.account != account {
-            return Err(Error::Module("model belongs to another account".into()));
+            return Err(Error::Module {
+                reason: refusal::UNAUTHORIZED.into(),
+                sentence: format!(
+                    "model {agent_id} belongs to account {}, not {account}",
+                    model.account
+                ),
+            });
         }
-        let after = change_seq
-            .checked_sub(1)
-            .ok_or_else(|| Error::Module("attribution changes start at one".into()))?;
+        let after = change_seq.checked_sub(1).ok_or_else(|| Error::Module {
+            reason: refusal::INVALID_INPUT.into(),
+            sentence: "attribution changes are numbered from 1, so change 0 does not exist".into(),
+        })?;
         let bytes = ctx
             .query(
                 &self.attribution,
@@ -60,20 +75,34 @@ impl RunsModule {
                 }),
             )
             .await?;
-        let attribution::AttributionReply::Changes(changes) =
-            attribution::decode_reply(&bytes).map_err(Error::Module)?
+        let attribution::AttributionReply::Changes(changes) = attribution::decode_reply(&bytes)
+            .map_err(|sentence| Error::Module {
+                reason: refusal::UNEXPECTED_REPLY.into(),
+                sentence,
+            })?
         else {
-            return Err(Error::Module("unexpected attribution reply".into()));
+            return Err(Error::Module {
+                reason: refusal::UNEXPECTED_REPLY.into(),
+                sentence:
+                    "attribution answered the change lookup with something other than changes"
+                        .into(),
+            });
         };
         let Some(entry) = changes.first() else {
-            return Err(Error::Module("attribution does not exist".into()));
+            return Err(Error::Module {
+                reason: refusal::NOT_FOUND.into(),
+                sentence: format!("no attribution change {change_seq}"),
+            });
         };
         let change = &entry.change;
         let addressed = change.seq == change_seq && change.recipient == account;
         if !addressed {
-            return Err(Error::Module(
-                "attribution belongs to another account".into(),
-            ));
+            return Err(Error::Module {
+                reason: refusal::UNAUTHORIZED.into(),
+                sentence: format!(
+                    "attribution change {change_seq} is not addressed to account {account}"
+                ),
+            });
         }
         let own_request = change.source.module == self.id && change.source.kind == "run_request";
         if !own_request && let Some(conversation) = self.conversation_for_account(account).await? {
@@ -82,16 +111,24 @@ impl RunsModule {
                 .await;
         }
         let run_id = if own_request {
-            match sdk::wire::decode::<RunRequest>(&change.detail).map_err(Error::Module)? {
+            match sdk::wire::decode::<RunRequest>(&change.detail).map_err(|sentence| {
+                Error::Module {
+                    reason: refusal::UNEXPECTED_REPLY.into(),
+                    sentence,
+                }
+            })? {
                 RunRequest::Conversation {
                     agent_id: requested,
                     conversation_id,
                     turn,
                 } => {
                     if requested != agent_id {
-                        return Err(Error::Module(
-                            "conversation request names another model".into(),
-                        ));
+                        return Err(Error::Module {
+                            reason: refusal::INVALID_INPUT.into(),
+                            sentence: format!(
+                                "conversation request names model {requested}, not {agent_id}"
+                            ),
+                        });
                     }
                     return self
                         .request_conversation_turn(ctx, conversation_id, turn)
@@ -102,7 +139,12 @@ impl RunsModule {
                     job_id,
                 } => {
                     if requested != agent_id {
-                        return Err(Error::Module("job request names another model".into()));
+                        return Err(Error::Module {
+                            reason: refusal::INVALID_INPUT.into(),
+                            sentence: format!(
+                                "job request names model {requested}, not {agent_id}"
+                            ),
+                        });
                     }
                     return self.request_job_run(ctx, agent_id, job_id).await;
                 }
@@ -113,7 +155,12 @@ impl RunsModule {
                     ..
                 } => {
                     if requested != agent_id {
-                        return Err(Error::Module("run request names another model".into()));
+                        return Err(Error::Module {
+                            reason: refusal::INVALID_INPUT.into(),
+                            sentence: format!(
+                                "run request names model {requested}, not {agent_id}"
+                            ),
+                        });
                     }
                     run_id_for(&channel_id, anchor_seq, &agent_id)
                 }
@@ -124,7 +171,10 @@ impl RunsModule {
         if self
             .turn_taken(&*ctx, &dispatch_id_for(&run_id))
             .await
-            .map_err(Error::Module)?
+            .map_err(|sentence| Error::Module {
+                reason: refusal::UNEXPECTED_REPLY.into(),
+                sentence,
+            })?
         {
             return Ok(());
         }
@@ -140,11 +190,18 @@ impl RunsModule {
                         )
                         .await?;
                     let ChatReply::Message(Some(message)) =
-                        chat_decode_reply(&bytes).map_err(Error::Module)?
+                        chat_decode_reply(&bytes).map_err(|sentence| Error::Module {
+                            reason: refusal::UNEXPECTED_REPLY.into(),
+                            sentence,
+                        })?
                     else {
-                        return Err(Error::Module(
-                            "attributed chat message is unavailable".into(),
-                        ));
+                        return Err(Error::Module {
+                            reason: refusal::NOT_FOUND.into(),
+                            sentence: format!(
+                                "attributed chat message {} is unavailable",
+                                change.source.object
+                            ),
+                        });
                     };
                     let channel = message.channel_id.clone();
                     let prepared = self
@@ -158,7 +215,10 @@ impl RunsModule {
                             budget,
                         )
                         .await
-                        .map_err(Error::Module)?;
+                        .map_err(|sentence| Error::Module {
+                            reason: refusal::UNEXPECTED_REPLY.into(),
+                            sentence,
+                        })?;
                     (
                         channel,
                         message.seq,
@@ -177,7 +237,10 @@ impl RunsModule {
                             budget,
                         )
                         .await
-                        .map_err(Error::Module)?;
+                        .map_err(|sentence| Error::Module {
+                            reason: refusal::UNEXPECTED_REPLY.into(),
+                            sentence,
+                        })?;
                     (
                         page_block_channel_id(&change.source.object),
                         change.revision,
@@ -195,12 +258,19 @@ impl RunsModule {
                             }),
                         )
                         .await?;
-                    let pages::PageReply::Comment(Some(comment)) =
-                        pages::decode_reply(&bytes).map_err(Error::Module)?
+                    let pages::PageReply::Comment(Some(comment)) = pages::decode_reply(&bytes)
+                        .map_err(|sentence| Error::Module {
+                            reason: refusal::UNEXPECTED_REPLY.into(),
+                            sentence,
+                        })?
                     else {
-                        return Err(Error::Module(
-                            "attributed page comment is unavailable".into(),
-                        ));
+                        return Err(Error::Module {
+                            reason: refusal::NOT_FOUND.into(),
+                            sentence: format!(
+                                "attributed page comment {} is unavailable",
+                                change.source.object
+                            ),
+                        });
                     };
                     let bytes = ctx
                         .query(
@@ -210,19 +280,29 @@ impl RunsModule {
                             }),
                         )
                         .await?;
-                    let pages::PageReply::CommentThread(Some(thread)) =
-                        pages::decode_reply(&bytes).map_err(Error::Module)?
+                    let pages::PageReply::CommentThread(Some(thread)) = pages::decode_reply(&bytes)
+                        .map_err(|sentence| Error::Module {
+                            reason: refusal::UNEXPECTED_REPLY.into(),
+                            sentence,
+                        })?
                     else {
-                        return Err(Error::Module(
-                            "attributed comment thread is unavailable".into(),
-                        ));
+                        return Err(Error::Module {
+                            reason: refusal::NOT_FOUND.into(),
+                            sentence: format!(
+                                "comment thread {} is unavailable",
+                                comment.thread_id
+                            ),
+                        });
                     };
                     let Some(index) = thread
                         .comments
                         .iter()
                         .position(|item| item.id == comment.id)
                     else {
-                        return Err(Error::Module("comment is not in its thread".into()));
+                        return Err(Error::Module {
+                            reason: refusal::UNEXPECTED_REPLY.into(),
+                            sentence: "comment is not in its thread".into(),
+                        });
                     };
                     let ordinal = index as u64 + 1;
                     let prepared = self
@@ -235,7 +315,10 @@ impl RunsModule {
                             budget,
                         )
                         .await
-                        .map_err(Error::Module)?;
+                        .map_err(|sentence| Error::Module {
+                            reason: refusal::UNEXPECTED_REPLY.into(),
+                            sentence,
+                        })?;
                     (
                         page_channel_id(&comment.thread_id),
                         ordinal,
@@ -252,14 +335,30 @@ impl RunsModule {
                         anchor_seq,
                         demands,
                         skills,
-                    } = sdk::wire::decode(&change.detail).map_err(Error::Module)?
+                    } = sdk::wire::decode(&change.detail).map_err(|sentence| Error::Module {
+                        reason: refusal::UNEXPECTED_REPLY.into(),
+                        sentence,
+                    })?
                     else {
-                        return Err(Error::Module("unexpected run request detail".into()));
+                        return Err(Error::Module {
+                            reason: refusal::UNEXPECTED_REPLY.into(),
+                            sentence: "this run request's detail is not a manual run request"
+                                .into(),
+                        });
                     };
                     if requested != agent_id {
-                        return Err(Error::Module("run request names another model".into()));
+                        return Err(Error::Module {
+                            reason: refusal::INVALID_INPUT.into(),
+                            sentence: format!(
+                                "run request names model {requested}, not {agent_id}"
+                            ),
+                        });
                     }
-                    let skills = envelope::library_skills(&skills).map_err(Error::Module)?;
+                    let skills =
+                        envelope::library_skills(&skills).map_err(|sentence| Error::Module {
+                            reason: refusal::INVALID_INPUT.into(),
+                            sentence,
+                        })?;
                     let prepared = self
                         .prepare_dispatch(
                             &*ctx,
@@ -271,18 +370,24 @@ impl RunsModule {
                             budget,
                         )
                         .await
-                        .map_err(Error::Module)?;
+                        .map_err(|sentence| Error::Module {
+                            reason: refusal::UNEXPECTED_REPLY.into(),
+                            sentence,
+                        })?;
                     (channel_id, anchor_seq, prepared, demands, requester)
                 }
                 _ => {
-                    return Err(Error::Module(
-                        "this model workflow has no composer for the attribution source".into(),
-                    ));
+                    return Err(Error::Module {
+                        reason: refusal::UNSUPPORTED.into(),
+                        sentence: "this model workflow has no composer for the attribution source"
+                            .into(),
+                    });
                 }
             };
         self.stage_dispatch_run(
             ctx, &run_id, agent_id, channel, anchor, requester, prepared, demands,
-        );
+        )
+        .await?;
         ctx.set_output(sdk::wire::encode(&serde_json::json!({"run_id": run_id})));
         Ok(())
     }

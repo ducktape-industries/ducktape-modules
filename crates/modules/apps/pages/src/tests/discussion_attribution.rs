@@ -1,4 +1,9 @@
 use super::*;
+// the NATIVE modules under their module names — the `identity`/`attribution`
+// crates in [dependencies] are the wire surfaces these re-export.
+use attribution_module as attribution;
+use identity_module as identity;
+
 use attribution::{Actor, AttributionQuery, AttributionReply, Change, ChangeKind, Reason, Source};
 use sdk::Origin;
 
@@ -329,9 +334,7 @@ fn full_json_source_envelope_is_bounded_and_large_valid_snapshots_reach_attribut
             .await
             .unwrap_err();
         assert!(
-            error
-                .to_string()
-                .contains("attribution source envelope too large"),
+            error.to_string().contains("an attribution source is"),
             "{error}"
         );
         assert_eq!(host.module_root("pages"), root);

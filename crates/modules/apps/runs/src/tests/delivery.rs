@@ -1,4 +1,5 @@
 use super::*;
+use sdk::refusal;
 
 // ---- the result intake ----------------------------------------------------------
 
@@ -169,7 +170,10 @@ fn invalid_responses_fail_the_run_and_surface_a_threaded_failure_reply() {
             panic!("expected a paragraph");
         };
         let text: String = spans.iter().map(|s| s.text.as_str()).collect();
-        assert_eq!(text, "⚠ BOT failed", "the reply names the agent's display name");
+        assert_eq!(
+            text, "⚠ BOT failed",
+            "the reply names the agent's display name"
+        );
         let Block::Code { text: detail, .. } = &blocks[1] else {
             panic!("expected the reason in a code block");
         };
@@ -611,7 +615,10 @@ fn dispatch_view_reads_through_testkit_on_query() {
         let dispatch::DispatchQuery::Dispatch {
             receiver,
             dispatch_id,
-        } = dispatch::decode_query(req).map_err(Error::Module)?
+        } = dispatch::decode_query(req).map_err(|sentence| Error::Module {
+            reason: refusal::INVALID_INPUT.into(),
+            sentence,
+        })?
         else {
             return Err(Error::QueryUnsupported);
         };

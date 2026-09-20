@@ -3,6 +3,7 @@
 use super::*;
 use governance::{GovAction, GovMsg, GovQuery, GovReply, ProposalStatus, ProposalView, VotingRule};
 use node_work::{Directive, ForgeBlob, Submission};
+use sdk::refusal;
 
 /// The same voting horizon the operator ceremony uses, in consensus-time units.
 const VOTING_PERIOD: u64 = 1_000_000;
@@ -88,7 +89,10 @@ fn on_stage(view: &ModuleUpdateView) -> Result<Option<Directive>, Error> {
             repo: request.source.repo.clone(),
             commit: request.source.commit.clone(),
             path: request.update.artifact.clone(),
-            hash: request.update.digest().map_err(Error::Module)?,
+            hash: request.update.digest().map_err(|sentence| Error::Module {
+                reason: refusal::CORRUPT.into(),
+                sentence,
+            })?,
         },
         on_ready: Submission {
             target: "runs".into(),
@@ -164,13 +168,19 @@ impl RunsModule {
         sequence: u64,
     ) -> Result<(), Error> {
         let Origin::External(node) = &ctx.env().origin else {
-            return Err(Error::Module(
-                "artifact residency must be reported by its node key".into(),
-            ));
+            return Err(Error::Module {
+                reason: refusal::UNAUTHORIZED.into(),
+                sentence: "artifact residency must be reported by its node key".into(),
+            });
         };
         let members = valset::members(ctx, "valset").await?;
         if !members.contains(node) {
-            return Err(Error::Module("artifact reporter is not a validator".into()));
+            return Err(Error::Module {
+                reason: refusal::UNAUTHORIZED.into(),
+                sentence:
+                    "this key is not a current validator, so it cannot report artifact residency"
+                        .into(),
+            });
         }
         let Some(view) = self.next_module_update().await? else {
             return Ok(());
@@ -200,17 +210,30 @@ impl RunsModule {
             return Ok(None);
         }
         let sequence = view.request.sequence;
-        let hash = view.request.update.digest().map_err(Error::Module)?;
+        let hash = view
+            .request
+            .update
+            .digest()
+            .map_err(|sentence| Error::Module {
+                reason: refusal::CORRUPT.into(),
+                sentence,
+            })?;
         let bytes = ctx
             .query(
                 "modules",
                 &modules::encode_query(&modules::ModulesQuery::ModuleStatus),
             )
             .await?;
-        let modules::ModulesReply::ModuleStatus { modules } =
-            modules::decode_reply(&bytes).map_err(Error::Module)?
+        let modules::ModulesReply::ModuleStatus { modules } = modules::decode_reply(&bytes)
+            .map_err(|sentence| Error::Module {
+                reason: refusal::UNEXPECTED_REPLY.into(),
+                sentence,
+            })?
         else {
-            return Err(Error::Module("unexpected module registry reply".into()));
+            return Err(Error::Module {
+                reason: refusal::UNEXPECTED_REPLY.into(),
+                sentence: "the module registry answered the status lookup with something other than module status".into(),
+            });
         };
         let Some(module) = modules
             .iter()
@@ -240,9 +263,17 @@ impl RunsModule {
             )
             .await?;
         let GovReply::Proposal(proposal) =
-            governance::decode_reply(&bytes).map_err(Error::Module)?
+            governance::decode_reply(&bytes).map_err(|sentence| Error::Module {
+                reason: refusal::UNEXPECTED_REPLY.into(),
+                sentence,
+            })?
         else {
-            return Err(Error::Module("unexpected deployment proposal reply".into()));
+            return Err(Error::Module {
+                reason: refusal::UNEXPECTED_REPLY.into(),
+                sentence: format!(
+                    "governance answered the proposal lookup for module update {sequence} with something other than a proposal"
+                ),
+            });
         };
         let staged = self
             .receipts
@@ -254,9 +285,17 @@ impl RunsModule {
                 .query("governance", &governance::encode_query(&GovQuery::Shares))
                 .await?;
             let GovReply::Shares(shares) =
-                governance::decode_reply(&bytes).map_err(Error::Module)?
+                governance::decode_reply(&bytes).map_err(|sentence| Error::Module {
+                    reason: refusal::UNEXPECTED_REPLY.into(),
+                    sentence,
+                })?
             else {
-                return Err(Error::Module("unexpected governance shares reply".into()));
+                return Err(Error::Module {
+                    reason: refusal::UNEXPECTED_REPLY.into(),
+                    sentence:
+                        "governance answered the shares lookup with something other than shares"
+                            .into(),
+                });
             };
             if shares.active {
                 return decide(Event::Refuse {

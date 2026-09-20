@@ -1,4 +1,10 @@
 use super::*;
+// the NATIVE modules under their module names — the `identity`/`attribution`/
+// `files` crates in [dependencies] are the wire surfaces these re-export.
+use attribution_module as attribution;
+use files_module as files;
+use identity_module as identity;
+
 use commonware_runtime::Supervisor as _;
 use sdk::Origin;
 
@@ -413,7 +419,7 @@ fn artifact_bounds_and_missing_files_configuration_fail_before_committing() {
                 &mut pages,
                 &with_artifacts(request, artifacts),
                 Origin::Program(42),
-                "invalid or oversized record batch",
+                "The record batch is invalid or too large.",
             )
             .await;
             assert!(

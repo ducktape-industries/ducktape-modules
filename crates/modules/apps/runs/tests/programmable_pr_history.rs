@@ -1,5 +1,12 @@
 mod support;
 
+// the NATIVE modules under their module names — the same names in
+// [dependencies] are the wire surfaces these re-export.
+use agent_module as agent;
+use dispatch_module as dispatch;
+use governance_module as governance;
+use modules_module as modules;
+
 use futures::executor::block_on;
 use support::*;
 
@@ -23,6 +30,7 @@ fn push(branch: &str, previous: Option<u8>, next: Option<u8>) -> forge::ForgeMsg
             prev_oid: previous.map(|byte| vec![byte; 20]),
             new_oid: next.map(|byte| vec![byte; 20]),
         }],
+        tags: Vec::new(),
         pack_digest: next.map(|_| vec![9; 32]),
         cert: None,
     }

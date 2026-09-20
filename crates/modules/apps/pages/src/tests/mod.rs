@@ -13,6 +13,44 @@ macro_rules! pages_on {
     };
 }
 
+/// a [`MerkleStore`] that counts its `get` calls, so a test can assert what a
+/// query READS and not merely what it answers. the counter is a shared handle
+/// because [`Pages::new`] takes the store by value: the test keeps one end and
+/// reads it after the query. only `get` is instrumented — every read the
+/// module makes, staged or committed, funnels through it.
+#[derive(Default)]
+struct CountingStore {
+    inner: sdk_testkit::MemStore,
+    reads: std::rc::Rc<std::cell::Cell<usize>>,
+}
+
+#[async_trait::async_trait(?Send)]
+impl MerkleStore for CountingStore {
+    async fn get(&self, key: &[u8; sdk::ROOT_LEN]) -> Result<Option<Vec<u8>>, Error> {
+        self.reads.set(self.reads.get() + 1);
+        self.inner.get(key).await
+    }
+
+    async fn commit_batch(
+        &mut self,
+        writes: Vec<([u8; sdk::ROOT_LEN], Option<Vec<u8>>)>,
+    ) -> Result<(), Error> {
+        self.inner.commit_batch(writes).await
+    }
+
+    fn root(&self) -> StateRoot {
+        self.inner.root()
+    }
+
+    async fn sync_target(&self) -> Result<ResolverSyncTarget, Error> {
+        self.inner.sync_target().await
+    }
+
+    async fn serve_sync(&self, req: &[u8]) -> Result<Vec<u8>, Error> {
+        self.inner.serve_sync(req).await
+    }
+}
+
 fn nb(id: &str, kind: BlockKind, text: &str) -> NewBlock {
     NewBlock {
         id: id.into(),
@@ -54,7 +92,7 @@ async fn apply_expect_err(p: &mut Pages, m: &PageMsg, needle: &str) {
         .await
         .expect_err("op must be rejected");
     assert!(
-        matches!(err, Error::Module(ref s) if s.contains(needle)),
+        matches!(err, Error::Module { sentence: ref s, .. } if s.contains(needle)),
         "unexpected error: {err:?}"
     );
     p.abort_block().await.unwrap();
@@ -120,16 +158,17 @@ async fn apply_commit_as(p: &mut Pages, m: &PageMsg, origin: sdk::Origin) {
     p.execute(&mut ctx_as(origin), &msg(m)).await.unwrap();
     p.commit_block().await.unwrap();
 }
-async fn apply_err_as(p: &mut Pages, m: &PageMsg, origin: sdk::Origin, needle: &str) {
+async fn apply_err_as(p: &mut Pages, m: &PageMsg, origin: sdk::Origin, needle: &str) -> Error {
     let err = p
         .execute(&mut ctx_as(origin), &msg(m))
         .await
         .expect_err("op must be rejected");
     assert!(
-        matches!(err, Error::Module(ref s) if s.contains(needle)),
+        matches!(err, Error::Module { sentence: ref s, .. } if s.contains(needle)),
         "unexpected error: {err:?}"
     );
     p.abort_block().await.unwrap();
+    err
 }
 /// the [`PageQuery::TargetThreadCount`] cap probe — the kept dispatch read
 /// over the per-target thread index (thread ENUMERATION is index-tier now).

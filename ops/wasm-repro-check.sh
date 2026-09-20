@@ -16,10 +16,11 @@
 # caught only by the comparison.
 #
 # Needs the wasm32-unknown-unknown target, a pushed HEAD and network access
-# (the builder itself is installed from the platform repository).
+# (the builder itself is installed from ducktape-sdk).
 #
-# GUEST_BUILDER_REV pins the revision the builder is installed from; unset
-# means its default branch.
+# GUEST_BUILDER pins an already-built binary and skips the install;
+# GUEST_BUILDER_REV pins the revision it is installed from otherwise, unset
+# meaning ducktape-sdk's default branch.
 set -euo pipefail
 
 MODULE=${MODULE:-crates/examples/directory}
@@ -31,18 +32,19 @@ work="$repo/target/wasm-repro"
 rm -rf "$work"
 mkdir -p "$work"
 
-# A builder of this checkout's own, never one a host config shares between
-# worktrees: guest-builder bakes its platform root in at compile time, so a
-# binary in a shared target belongs to whichever checkout built it last and
-# refuses every module here by name.
-builder_dir="$repo/target/guest-builder-bin"
-cargo install -q --locked --root "$builder_dir" \
-  --git https://github.com/ducktape-industries/ducktape \
-  ${GUEST_BUILDER_REV:+--rev "$GUEST_BUILDER_REV"} guest-builder
-builder="$builder_dir/bin/guest-builder"
+builder=${GUEST_BUILDER:-}
+if [ -z "$builder" ]; then
+  builder_dir="$repo/target/guest-builder-bin"
+  cargo install -q --locked --root "$builder_dir" \
+    --git https://github.com/ducktape-industries/ducktape-sdk \
+    ${GUEST_BUILDER_REV:+--rev "$GUEST_BUILDER_REV"} guest-builder
+  builder="$builder_dir/bin/guest-builder"
+fi
 
-"$builder" "$repo/$MODULE" --scratch "$work/here" --out "$work/here.wasm"
-"$builder" "$repo/$MODULE" --scratch "$work/there" --out "$work/there.wasm"
+# --platform names this checkout explicitly: the builder resolves the platform
+# from the working directory otherwise, and this script may be run from anywhere.
+"$builder" "$repo/$MODULE" --platform "$repo" --scratch "$work/here" --out "$work/here.wasm"
+"$builder" "$repo/$MODULE" --platform "$repo" --scratch "$work/there" --out "$work/there.wasm"
 
 if ! cmp "$work/here.wasm" "$work/there.wasm"; then
   echo "wasm-repro-check: $MODULE built in two scratch directories differs — a" >&2

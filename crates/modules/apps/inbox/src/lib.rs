@@ -57,7 +57,7 @@
 //! ## state model
 //!
 //! pure logic over a host-injected [`sdk::MerkleStore`]: one META record per
-//! account (`meta\0{account}` → [`AccountMeta`], borsh) and one record per
+//! account (`meta1\0{account}` → [`AccountMeta`], borsh) and one record per
 //! live notification (`item\0{account}{seq}` → [`Notification`]). the meta
 //! record lives as long as the account: `next_seq` and `last_change` never
 //! rewind, so a cleared inbox continues its numbering and never re-queues a
@@ -65,6 +65,17 @@
 //! surface lives on the index tier). writes are staged during a block and
 //! flushed in one batch at `commit_block`; the module root IS the store's
 //! merkle root, and sync belongs to the store (`QmdbStore::sync_from`).
+//!
+//! the meta record is VERSIONED in its key. the live network keeps module
+//! state across guest swaps, so accounts whose record predates the live-window
+//! rewrite still hold the old layout ([`LegacyAccountMeta`], under `meta\0`),
+//! and a decode failure on a stranger's inbox is unfixable from outside. so
+//! the new layout took a NEW key and the old one is read ONCE, on a miss:
+//! [`Inbox::meta`] converts it for a read, [`Inbox::meta_for_write`] also
+//! stages the converted record under `meta1\0` and retires the old key. that
+//! is state CARRY-OVER, not wire compatibility — bounded to one extra read per
+//! account until its first write lands. the fallback is removed in a later
+//! round, once no old record can remain.
 
 // the wire surface: this module's shared types, flattened at the crate root.
 pub use inbox_wire::*;
@@ -87,6 +98,7 @@ pub mod index;
 #[cfg(feature = "index-guest")]
 mod index_guest;
 
+use sdk::refusal;
 use std::cmp::Ordering;
 
 use attribution::{AttributionEvent, Change, decode_event};
@@ -100,13 +112,27 @@ use sdk::{
     ResolverSyncTarget, StagedStore, StateRoot, StateSyncHandle,
 };
 
-fn module_error(text: impl Into<String>) -> Error {
-    Error::Module(text.into())
+fn module_error(reason: &'static str, text: impl Into<String>) -> Error {
+    Error::Module {
+        reason: reason.into(),
+        sentence: text.into(),
+    }
 }
 
 /// per-account META record key: prefix + 0 + the account number. every key
-/// literal here is fixed and none is another followed by a 0 byte.
+/// literal here is fixed and none is another followed by a 0 byte (`meta1`
+/// is `meta` followed by `1`, not by 0, so the two key spaces stay disjoint).
 fn meta_key(account: AccountNumber) -> Vec<u8> {
+    let mut key = Vec::with_capacity(5 + 1 + 8);
+    key.extend_from_slice(b"meta1");
+    key.push(0);
+    key.extend_from_slice(&account.to_le_bytes());
+    key
+}
+
+/// the PRE-VERSIONED meta key ([`LegacyAccountMeta`]). read only on a miss of
+/// [`meta_key`], and never written — see [`Inbox::meta_for_write`].
+fn legacy_meta_key(account: AccountNumber) -> Vec<u8> {
     let mut key = Vec::with_capacity(4 + 1 + 8);
     key.extend_from_slice(b"meta");
     key.push(0);
@@ -125,17 +151,21 @@ fn item_key(account: AccountNumber, seq: u64) -> Vec<u8> {
     key
 }
 
-/// one account's queue metadata. `next_seq` is the NEXT seq to assign; it
-/// starts at 1 and never rewinds. `seqs` is the sorted live-seq list, bounded
-/// by construction to [`MAX_ITEMS_PER_ACCOUNT`] entries. `evicted` counts
-/// every item this account has ever lost to the overflow drop. `read_watermark`
-/// is the seq up to which every item is read: `MarkRead` only ever raises it.
-/// `last_change` is the canonical seq of the last change queued here — the
-/// duplicate gate, which never rewinds either.
+/// one account's queue metadata — five counters, a fixed-width record. seqs
+/// are dense and monotonic and BOTH removals (the overflow drop and `Clear`)
+/// only ever take the LOW end, so the live set is exactly the contiguous
+/// window `first_live..next_seq` and needs no stored list.
+///
+/// `next_seq` is the NEXT seq to assign; it starts at 1 and never rewinds.
+/// `first_live` is the LOWEST live seq (equal to `next_seq` when the queue is
+/// empty); it never rewinds either. `evicted` counts every item this account
+/// has ever lost to the overflow drop. `read_watermark` is the seq up to which
+/// every item is read: `MarkRead` only ever raises it. `last_change` is the
+/// canonical seq of the last change queued here — the duplicate gate.
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 struct AccountMeta {
     next_seq: u64,
-    seqs: Vec<u64>,
+    first_live: u64,
     evicted: u64,
     read_watermark: u64,
     last_change: u64,
@@ -145,10 +175,40 @@ impl Default for AccountMeta {
     fn default() -> Self {
         Self {
             next_seq: 1,
-            seqs: Vec::new(),
+            first_live: 1,
             evicted: 0,
             read_watermark: 0,
             last_change: 0,
+        }
+    }
+}
+
+/// the meta record as it was stored BEFORE the live-window rewrite: the same
+/// four counters plus the explicit live-seq list `first_live` replaced. kept
+/// to DECODE accounts whose record predates the change and nothing else — it
+/// is never written, and it goes away with the fallback in a later round.
+#[derive(BorshDeserialize)]
+struct LegacyAccountMeta {
+    next_seq: u64,
+    seqs: Vec<u64>,
+    evicted: u64,
+    read_watermark: u64,
+    last_change: u64,
+}
+
+impl From<LegacyAccountMeta> for AccountMeta {
+    /// `seqs` was always CONTIGUOUS — pushes are sequential and both removals
+    /// (the overflow drop and `Clear`) drain the low end — so the list is
+    /// exactly the window its first entry opens. an empty list is an empty
+    /// queue, whose window is `next_seq..next_seq`. every counter carries
+    /// over verbatim.
+    fn from(old: LegacyAccountMeta) -> Self {
+        Self {
+            next_seq: old.next_seq,
+            first_live: old.seqs.first().copied().unwrap_or(old.next_seq),
+            evicted: old.evicted,
+            read_watermark: old.read_watermark,
+            last_change: old.last_change,
         }
     }
 }
@@ -176,7 +236,8 @@ enum Ingest {
         meta: AccountMeta,
         seq: u64,
         record: Vec<u8>,
-        evicted: Vec<u64>,
+        /// the one item this delivery pushed out of the window, if any.
+        evicted: Option<u64>,
     },
     Duplicate,
 }
@@ -193,10 +254,13 @@ fn decide_delivery(
     match change.seq.cmp(&meta.last_change) {
         Ordering::Equal => return Ok(Ingest::Duplicate),
         Ordering::Less => {
-            return Err(module_error(format!(
-                "change {} reached account {account}'s inbox after change {}: deliveries arrive in change order",
-                change.seq, meta.last_change
-            )));
+            return Err(module_error(
+                refusal::STALE,
+                format!(
+                    "change {} reached account {account}'s inbox after change {}: deliveries arrive in change order",
+                    change.seq, meta.last_change
+                ),
+            ));
         }
         Ordering::Greater => {}
     }
@@ -204,23 +268,31 @@ fn decide_delivery(
     // seq-space exhaustion is a deterministic rejection, checked BEFORE any
     // mutation — never a panic or a wrapping re-assignment of an old seq.
     let seq = meta.next_seq;
-    meta.next_seq = seq
-        .checked_add(1)
-        .ok_or_else(|| module_error(format!("inbox seq space exhausted for account {account}")))?;
+    meta.next_seq = seq.checked_add(1).ok_or_else(|| {
+        module_error(
+            refusal::EXHAUSTED,
+            format!("inbox seq space exhausted for account {account}"),
+        )
+    })?;
     meta.last_change = change.seq;
-    meta.seqs.push(seq);
-    // overflow: drop the OLDEST (lowest seq) items. one insert per delivery
-    // means at most one drop, counted so the loss stays visible.
-    let overflow = meta.seqs.len().saturating_sub(MAX_ITEMS_PER_ACCOUNT);
-    let evicted: Vec<u64> = meta.seqs.drain(..overflow).collect();
-    meta.evicted = meta
-        .evicted
-        .checked_add(evicted.len() as u64)
-        .ok_or_else(|| {
-            module_error(format!(
-                "inbox eviction count exhausted for account {account}"
-            ))
+    // overflow: drop the OLDEST (lowest seq) item. one insert per delivery
+    // means at most one drop, counted so the loss stays visible. the live set
+    // is the window `first_live..next_seq`, so the drop is a counter bump —
+    // never a scan of the queue.
+    let live = meta.next_seq.saturating_sub(meta.first_live);
+    let mut evicted = None;
+    if live > MAX_ITEMS_PER_ACCOUNT as u64 {
+        // `first_live < next_seq` here (the window is over-full), so the bump
+        // cannot overflow.
+        evicted = Some(meta.first_live);
+        meta.first_live += 1;
+        meta.evicted = meta.evicted.checked_add(1).ok_or_else(|| {
+            module_error(
+                refusal::EXHAUSTED,
+                format!("inbox eviction count exhausted for account {account}"),
+            )
         })?;
+    }
     let record = borsh::to_vec(&Notification {
         seq,
         account,
@@ -230,10 +302,13 @@ fn decide_delivery(
     .expect("inbox record is serializable");
     let fits_the_store = record.len() <= MAX_STORE_VALUE_BYTES;
     if !fits_the_store {
-        return Err(module_error(format!(
-            "a notification of {} bytes exceeds the store's value bound of {MAX_STORE_VALUE_BYTES}",
-            record.len()
-        )));
+        return Err(module_error(
+            refusal::CAPACITY,
+            format!(
+                "a notification of {} bytes exceeds the store's value bound of {MAX_STORE_VALUE_BYTES}",
+                record.len()
+            ),
+        ));
     }
     Ok(Ingest::Queued {
         meta,
@@ -279,15 +354,17 @@ impl Inbox {
         T: BorshDeserialize,
     {
         match self.staged.get(key).await? {
-            Some(bytes) => Ok(Some(
-                borsh::from_slice(&bytes).map_err(|e| module_error(e.to_string()))?,
-            )),
+            Some(bytes) => {
+                Ok(Some(borsh::from_slice(&bytes).map_err(|e| {
+                    module_error(refusal::CORRUPT, e.to_string())
+                })?))
+            }
             None => Ok(None),
         }
     }
 
-    /// stage a meta record — bounded by construction (at most
-    /// [`MAX_ITEMS_PER_ACCOUNT`] seqs), so no byte gate is needed here.
+    /// stage a meta record — five u64 counters, a fixed-width record, so no
+    /// byte gate is needed here.
     fn store_meta(&mut self, account: AccountNumber, meta: &AccountMeta) {
         self.staged.stage(
             meta_key(account),
@@ -295,17 +372,54 @@ impl Inbox {
         );
     }
 
+    /// one account's meta, READ-ONLY: the current record, or — for an account
+    /// whose record predates the live-window rewrite — the pre-versioned one
+    /// converted on the spot. converting here stages NOTHING, so a caller
+    /// that cannot write never silently upgrades a record behind a read.
     async fn meta(&self, account: AccountNumber) -> Result<Option<AccountMeta>, Error> {
-        self.load(&meta_key(account)).await
+        if let Some(meta) = self.load(&meta_key(account)).await? {
+            return Ok(Some(meta));
+        }
+        Ok(self
+            .load::<LegacyAccountMeta>(&legacy_meta_key(account))
+            .await?
+            .map(AccountMeta::from))
     }
 
-    /// a live item the meta's seq list points at. a listed seq without its
-    /// record is a store bug — loud, never skipped.
+    /// the meta a WRITE path works from: as [`Inbox::meta`], plus the one-time
+    /// CARRY-OVER — a record found under the pre-versioned key is converted,
+    /// staged under the current key and the old key retired, all in the very
+    /// operation that observed the miss. bounded: one extra read per account,
+    /// once, and only until that account's first write lands.
+    async fn meta_for_write(
+        &mut self,
+        account: AccountNumber,
+    ) -> Result<Option<AccountMeta>, Error> {
+        if let Some(meta) = self.load(&meta_key(account)).await? {
+            return Ok(Some(meta));
+        }
+        let Some(legacy) = self
+            .load::<LegacyAccountMeta>(&legacy_meta_key(account))
+            .await?
+        else {
+            return Ok(None);
+        };
+        let meta = AccountMeta::from(legacy);
+        self.store_meta(account, &meta);
+        self.staged.delete(legacy_meta_key(account));
+        Ok(Some(meta))
+    }
+
+    /// a live item of the meta's `first_live..next_seq` window. a seq inside
+    /// the window without its record is a store bug — loud, never skipped.
     #[cfg(feature = "testkit")]
     async fn item(&self, account: AccountNumber, seq: u64) -> Result<Notification, Error> {
-        self.load(&item_key(account, seq))
-            .await?
-            .ok_or_else(|| module_error("missing notification record"))
+        self.load(&item_key(account, seq)).await?.ok_or_else(|| {
+            module_error(
+                refusal::CORRUPT,
+                format!("the inbox of account {account} lists item {seq} with no record"),
+            )
+        })
     }
 
     // ---- the identity seam ----------------------------------------------------
@@ -318,10 +432,16 @@ impl Inbox {
         let reply = ctx
             .query(&self.identity, &identity_encode_query(query))
             .await?;
-        match identity_decode_reply(&reply).map_err(Error::Module)? {
+        match identity_decode_reply(&reply).map_err(|sentence| Error::Module {
+            reason: refusal::UNEXPECTED_REPLY.into(),
+            sentence,
+        })? {
             IdentityReply::Account(account) => Ok(account),
             IdentityReply::Accounts(_) | IdentityReply::Resolved(_) | IdentityReply::Gen(_) => {
-                Err(module_error("inbox: unexpected identity reply"))
+                Err(module_error(
+                    refusal::UNEXPECTED_REPLY,
+                    "identity answered an account lookup with something other than an account",
+                ))
             }
         }
     }
@@ -352,37 +472,54 @@ impl Inbox {
             Origin::External(key) if !key.is_empty() => key.clone(),
             Origin::External(_) => {
                 return Err(module_error(
+                    refusal::INVALID_INPUT,
                     "external origin must carry a non-empty submitter key",
                 ));
             }
             Origin::Program(program) => {
-                return Err(module_error(format!(
-                    "a program account holds no human inbox: {program}"
-                )));
+                return Err(module_error(
+                    refusal::UNAUTHORIZED,
+                    format!("a program account holds no human inbox: {program}"),
+                ));
             }
             Origin::Module(id) => {
-                return Err(module_error(format!("a module holds no inbox: {id}")));
+                return Err(module_error(
+                    refusal::UNAUTHORIZED,
+                    format!("a module holds no inbox: {id}"),
+                ));
             }
-            Origin::System => return Err(module_error("the system holds no inbox")),
+            Origin::System => {
+                return Err(module_error(
+                    refusal::UNAUTHORIZED,
+                    "the system holds no inbox",
+                ));
+            }
         };
         let holder = self
             .identity_account(ctx, &IdentityQuery::OfKey { key })
             .await?;
         let Some(holder) = holder else {
-            return Err(module_error("this key belongs to no identity account"));
+            return Err(module_error(
+                refusal::NOT_FOUND,
+                "this key belongs to no identity account",
+            ));
         };
         let holds_the_account = holder.number == account;
         if !holds_the_account {
-            return Err(module_error(format!(
-                "only the account's own keys may ack its inbox: this key holds account {}, not {account}",
-                holder.number
-            )));
+            return Err(module_error(
+                refusal::UNAUTHORIZED,
+                format!(
+                    "only the account's own keys may ack its inbox: this key holds account {}, not {account}",
+                    holder.number
+                ),
+            ));
         }
         let is_key_held = matches!(holder.control, Control::Keys);
         if !is_key_held {
-            return Err(module_error(format!(
-                "account {account} is not key-held and holds no human inbox"
-            )));
+            return Err(module_error(
+                refusal::INVALID_INPUT,
+                format!("account {account} is not key-held and holds no human inbox"),
+            ));
         }
         Ok(())
     }
@@ -394,13 +531,22 @@ impl Inbox {
     fn classify(&self, origin: &Origin, payload: &[u8]) -> Result<Input, Error> {
         let from_attribution = *origin == Origin::Module(self.attribution.clone());
         if from_attribution {
-            let AttributionEvent::Changed(change) = decode_event(payload).map_err(Error::Module)?;
+            let AttributionEvent::Changed(change) =
+                decode_event(payload).map_err(|sentence| Error::Module {
+                    reason: refusal::UNEXPECTED_REPLY.into(),
+                    sentence,
+                })?;
             return Ok(Input::Changed(Box::new(change)));
         }
-        Ok(match decode_msg(payload).map_err(Error::Module)? {
-            InboxMsg::MarkRead { account, up_to_seq } => Input::MarkRead { account, up_to_seq },
-            InboxMsg::Clear { account, up_to_seq } => Input::Clear { account, up_to_seq },
-        })
+        Ok(
+            match decode_msg(payload).map_err(|sentence| Error::Module {
+                reason: refusal::INVALID_INPUT.into(),
+                sentence,
+            })? {
+                InboxMsg::MarkRead { account, up_to_seq } => Input::MarkRead { account, up_to_seq },
+                InboxMsg::Clear { account, up_to_seq } => Input::Clear { account, up_to_seq },
+            },
+        )
     }
 
     // ---- the handlers ----------------------------------------------------------
@@ -410,16 +556,17 @@ impl Inbox {
     async fn on_changed(&mut self, ctx: &mut dyn Ctx, change: Change) -> Result<(), Error> {
         let recipient = change.recipient;
         let Some(control) = self.recipient_control(ctx, recipient).await? else {
-            return Err(module_error(format!(
-                "recipient account {recipient} does not exist"
-            )));
+            return Err(module_error(
+                refusal::NOT_FOUND,
+                format!("recipient account {recipient} does not exist"),
+            ));
         };
         let holds_a_human_inbox = matches!(control, Control::Keys);
         if !holds_a_human_inbox {
             ctx.set_assigned(encode_assigned(&InboxAssigned::Ignored));
             return Ok(());
         }
-        let meta = self.meta(recipient).await?.unwrap_or_default();
+        let meta = self.meta_for_write(recipient).await?.unwrap_or_default();
         let created_at = ctx.env().consensus_time;
         let stamp = match decide_delivery(&meta, recipient, &change, created_at)? {
             Ingest::Duplicate => InboxAssigned::Duplicate,
@@ -429,7 +576,7 @@ impl Inbox {
                 record,
                 evicted,
             } => {
-                for oldest in evicted {
+                if let Some(oldest) = evicted {
                     self.staged.delete(item_key(recipient, oldest));
                 }
                 self.staged.stage(item_key(recipient, seq), record);
@@ -451,7 +598,7 @@ impl Inbox {
         up_to_seq: u64,
     ) -> Result<(), Error> {
         self.resolve_admin_account(ctx, account).await?;
-        let Some(mut meta) = self.meta(account).await? else {
+        let Some(mut meta) = self.meta_for_write(account).await? else {
             return Ok(());
         };
         // clamp to the last seq ever ASSIGNED, never the raw `up_to_seq`: an
@@ -474,17 +621,22 @@ impl Inbox {
         up_to_seq: u64,
     ) -> Result<(), Error> {
         self.resolve_admin_account(ctx, account).await?;
-        let Some(mut meta) = self.meta(account).await? else {
+        let Some(mut meta) = self.meta_for_write(account).await? else {
             return Ok(());
         };
-        let keep = meta.seqs.partition_point(|s| *s <= up_to_seq);
-        let nothing_to_clear = keep == 0;
+        // the cleared prefix is `first_live..new_first`, clamped to the live
+        // window so an `up_to_seq` past the end clears exactly the queue and
+        // an `up_to_seq` below `first_live` is a byte-identical no-op. the
+        // deletes are the work here; the bookkeeping is one counter.
+        let new_first = up_to_seq.saturating_add(1).min(meta.next_seq);
+        let nothing_to_clear = new_first <= meta.first_live;
         if nothing_to_clear {
             return Ok(());
         }
-        for seq in meta.seqs.drain(..keep) {
+        for seq in meta.first_live..new_first {
             self.staged.delete(item_key(account, seq));
         }
+        meta.first_live = new_first;
         // next_seq and last_change are left untouched: neither ever rewinds,
         // so a cleared inbox continues its numbering and never re-queues a
         // change it already held.
@@ -572,9 +724,9 @@ impl Inbox {
         let Some(meta) = self.meta(account).await? else {
             return Ok(None);
         };
-        let mut items = Vec::with_capacity(meta.seqs.len());
-        for seq in &meta.seqs {
-            items.push(self.item(account, *seq).await?);
+        let mut items = Vec::new();
+        for seq in meta.first_live..meta.next_seq {
+            items.push(self.item(account, seq).await?);
         }
         Ok(Some((meta.next_seq, items)))
     }
@@ -611,12 +763,29 @@ impl Inbox {
             .unwrap_or(0))
     }
 
+    /// where `account`'s meta record physically sits: `(under the current
+    /// key, under the pre-versioned one)`. the carry-over's only visible
+    /// effect — every view reads the same meta either way, so nothing else
+    /// can tell a converted record from one still read through the old key.
+    pub async fn meta_records_present(
+        &self,
+        account: AccountNumber,
+    ) -> Result<(bool, bool), Error> {
+        Ok((
+            self.staged.get(&meta_key(account)).await?.is_some(),
+            self.staged.get(&legacy_meta_key(account)).await?.is_some(),
+        ))
+    }
+
     /// stage an account whose seq space is one delivery from exhaustion — the
     /// boundary state is execute-reachable only after 2^64 - 2 deliveries, so
     /// the exhaustion test injects it instead.
     pub async fn testkit_saturate_seq(&mut self, account: AccountNumber) -> Result<(), Error> {
         let mut meta = self.meta(account).await?.unwrap_or_default();
         meta.next_seq = u64::MAX;
+        // an empty queue at the end of the seq space: the window stays
+        // coherent (`first_live == next_seq`) rather than claiming 2^64 items.
+        meta.first_live = meta.next_seq;
         self.store_meta(account, &meta);
         Ok(())
     }

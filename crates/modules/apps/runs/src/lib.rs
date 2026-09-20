@@ -7,11 +7,10 @@
 // they live in `runs-wire` now — the messages, the records, the action catalog,
 // the programs and the id derivations — so a view or the daemon can link the
 // format without linking this module.
-pub use runs_wire::*;
 pub use runs_wire::catalog;
+pub use runs_wire::*;
 
 mod model_config;
-
 
 mod conversations;
 // the derived-tier run journal: the PURE decision core (fold + view over
@@ -28,6 +27,7 @@ mod index_guest;
 // dispatch payload composition: the structured run envelope.
 mod envelope;
 
+use sdk::refusal;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -69,12 +69,18 @@ pub(crate) const CONTEXT_WINDOW: u64 = 64;
 /// bounds a malicious/chatty holder and leaves multi-hour work ample room.
 pub const RUN_DEADLINE_VIEWS: u64 = 6 * 60 * 60;
 
-/// one renewable agent-attempt lease. Saga's 64-view default is sized for
-/// short workers; the host heartbeats this wider window while the CLI lives.
-pub const RUN_LEASE_VIEWS: u64 = 1024;
+pub use runs_wire::RUN_LEASE_VIEWS;
 
 /// oracle attempts per run: one retry after an explicit provider failure.
 pub const RUN_MAX_ATTEMPTS: u32 = 2;
+
+/// Maximum number of live dispatch correlation records.
+pub const MAX_PENDING_RUNS: u64 = 4096;
+
+/// Maximum number of distinct delegation edges a root may create over its
+/// lifetime. This is separate from the concurrent-pending call limit carried
+/// by the runs wire contract.
+pub const MAX_DELEGATION_EDGES_PER_RUN: usize = 128;
 
 /// every peer-call callee requests this fixed sandbox profile. One root call
 /// tree runs at most `MAX_DELEGATIONS_PER_RUN` callees concurrently, so the
@@ -131,7 +137,6 @@ impl SiblingReadBudget {
         self.reserve(SiblingRead::Query(target.into(), req.to_vec()))
     }
 }
-
 
 /// Internal pending-state coordinates for Pages sources. The `runs:`
 /// chat namespace is reserved to this module, and Runs never mints chat
@@ -241,9 +246,9 @@ mod action_storage;
 mod deployment;
 mod dispatch_flow;
 mod engagement;
+mod facets;
 mod module_updates;
 mod receipts;
-mod facets;
 use facets::WireSink;
 // the forge compose lane (M1): forge:<repo>:<n> channel detection, committed
 // tracker/refs mirrors, and the item-session workspace/sink composition.
@@ -268,15 +273,16 @@ mod state;
 
 use response::canonical_origin;
 use state::{
-    committed_root, contains_run_separator, decode_committed, encode_committed,
-    reject_run_separator,
+    StateVersion, committed_root, contains_run_separator, decode_committed, encode_committed,
+    legacy_root, post_a_root, reject_run_separator,
 };
 
 /// one in-flight dispatch's correlation entry. the dispatch id is the map
 /// key; the run id is derivable from the fields. NOT a lifecycle record: it
 /// exists exactly while the dispatch is outstanding and is pruned when the
 /// result delivers.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct PendingState {
     account: u64,
     generation: u64,
@@ -356,6 +362,56 @@ struct DelegationState {
     request: DelegationRequest,
 }
 
+/// The point-addressed part of a delegation. The request body is intentionally
+/// absent: its digest preserves exact idempotent retry behavior after dispatch
+/// consumes the request record, while tree walks need only this header.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DelegationHeader {
+    delegation_id: String,
+    request_id: String,
+    caller_run_id: String,
+    root_run_id: String,
+    callee_run_id: String,
+    callee_agent_id: String,
+    status: DelegationStatus,
+    request_digest: [u8; 32],
+    created_at: u64,
+    completed_at: Option<u64>,
+}
+
+impl DelegationHeader {
+    fn from_state(state: &DelegationState) -> Self {
+        Self {
+            delegation_id: state.view.delegation_id.clone(),
+            request_id: state.view.request_id.clone(),
+            caller_run_id: state.view.caller_run_id.clone(),
+            root_run_id: state.view.root_run_id.clone(),
+            callee_run_id: state.view.callee_run_id.clone(),
+            callee_agent_id: state.view.callee_agent_id.clone(),
+            status: state.view.status,
+            request_digest: Sha256::digest(sdk::wire::encode(&state.request)).into(),
+            created_at: state.view.created_at,
+            completed_at: state.view.completed_at,
+        }
+    }
+
+    fn view(&self, result: Option<DelegationResult>) -> DelegationView {
+        DelegationView {
+            delegation_id: self.delegation_id.clone(),
+            request_id: self.request_id.clone(),
+            caller_run_id: self.caller_run_id.clone(),
+            root_run_id: self.root_run_id.clone(),
+            callee_run_id: self.callee_run_id.clone(),
+            callee_agent_id: self.callee_agent_id.clone(),
+            status: self.status,
+            result,
+            created_at: self.created_at,
+            completed_at: self.completed_at,
+        }
+    }
+}
+
 /// a chat run's read-only dispatch preparation: the pinned context plus the
 /// fully composed payload, gathered before anything is staged.
 #[derive(Debug)]
@@ -398,7 +454,7 @@ pub struct RunsModule {
     /// production composer wires it; unwired (dev tools/tests) the envelope
     /// still composes v1, with a null pin.
     files: Option<ModuleId>,
-    /// the pages module id — queried for `duck://page/<id>` refs so a run's
+    /// the pages module id — queried for canonical `duck://<chain>/pages/<id>` refs so a run's
     /// context can carry referenced page subtrees. genesis config, NOT
     /// committed state (never in `root()`). `None` on nodes not wired for
     /// pages; page refs then compose no page section (a silent skip, never
@@ -413,38 +469,24 @@ pub struct RunsModule {
     /// (`sdk::genesis_config::CHAIN_ID`) — the ONLY way a fixed component learns
     /// which network it is running on. Genesis config, NOT committed state
     /// (never in `root()`). Every `duck://` link this module renders into an
-    /// agent's context stamps its `?net=` half from it; empty (dev tools,
-    /// tests) renders the hand-typed form, which resolves against whichever
-    /// network the reader is on.
+    /// agent's context uses it to mint canonical `duck://` addresses; empty
+    /// (dev tools, tests) leaves generated page labels unlinked.
     chain_id: String,
     /// Genesis-bound clock scale; duration scheduling refuses absent wiring.
     time_unit: Option<sdk::genesis_config::TimeUnit>,
-    /// committed state — what `root()` and the root-hash commit to.
-    models: BTreeMap<String, ModelRecord>,
-    pending_models: BTreeMap<String, Option<ModelRecord>>,
+    /// Legacy collections retained only between an old-layout install and the
+    /// first committed migration. Post-B state lives in `receipts` records.
+    legacy_models: Option<BTreeMap<String, ModelRecord>>,
+    legacy_pending: Option<BTreeMap<String, PendingState>>,
+    legacy_sessions: Option<BTreeMap<String, AgentSession>>,
+    legacy_state_version: Option<StateVersion>,
+    legacy_migration_staged: bool,
     receipts: receipts::Receipts,
     next_action_item: u64,
     staged_next_action_item: Option<u64>,
-    /// in-flight correlation entries keyed by dispatch id — pruned on
-    /// delivery; the dispatch module owns lifecycle and history.
-    pending: BTreeMap<String, PendingState>,
-    /// the LIVE agent sessions keyed by run id — the ephemeral key each
-    /// executing node bound to its run, plus the budget it has spent. committed
-    /// state (in `root()`): the ACL every validator enforces mid-run, so it must
-    /// be the same on all of them. bounded by the pending runs — a session is
-    /// pruned in the same block as its run's entry and can never outlive it.
-    sessions: BTreeMap<String, AgentSession>,
-    /// ephemeral run-scoped call edges and their returned results. They are
-    /// committed because admission, budget and result collection must replay
-    /// identically, but a root run's settlement prunes its whole tree.
+    /// Legacy embedded delegation edges retained only until the first mutable
+    /// operation migrates them into `dlg/*` receipt records.
     delegations: BTreeMap<String, DelegationState>,
-    /// this block's staged writes, read ahead of committed state
-    /// (read-your-writes) but merged in — and reflected in `root()` — only at
-    /// `commit_block`. a pending
-    /// entry stages `None` for its prune; a session stages `None` for its prune.
-    pending_overlay: BTreeMap<String, Option<PendingState>>,
-    pending_sessions: BTreeMap<String, Option<AgentSession>>,
-    pending_delegations: BTreeMap<String, Option<DelegationState>>,
     /// the delivered-runs ring (last [`RUN_HISTORY_CAP`], oldest first —
     /// queries serve it reversed). DERIVED state: recorded at delivery,
     /// rebuilt by replay, never in `root()`/snapshot, empty after a
@@ -526,17 +568,15 @@ impl RunsModule {
             collaboration: None,
             chain_id: String::new(),
             time_unit: None,
-            models: BTreeMap::new(),
-            pending_models: BTreeMap::new(),
+            legacy_models: None,
+            legacy_pending: None,
+            legacy_sessions: None,
+            legacy_state_version: None,
+            legacy_migration_staged: false,
             receipts: receipts::Receipts::default(),
             next_action_item: 0,
             staged_next_action_item: None,
-            pending: BTreeMap::new(),
-            sessions: BTreeMap::new(),
             delegations: BTreeMap::new(),
-            pending_overlay: BTreeMap::new(),
-            pending_sessions: BTreeMap::new(),
-            pending_delegations: BTreeMap::new(),
             history: VecDeque::new(),
             pending_history: Vec::new(),
             pending_pr_links: BTreeMap::new(),
@@ -636,7 +676,7 @@ impl RunsModule {
         self
     }
 
-    /// wire the pages module so `duck://page/<id>` refs in a run's trigger
+    /// wire the pages module so canonical `duck://<chain>/pages/<id>` refs in a run's trigger
     /// message or injected item body render referenced page subtrees into the
     /// composed context, after construction — mirrors the injected
     /// `Option<ModuleId>` collaborators so `new` and every existing call site
@@ -668,7 +708,7 @@ impl RunsModule {
     /// wire this network's chain id, after construction — mirrors the injected
     /// collaborators so `new` and every existing call site stay untouched. the
     /// guest reads it out of the genesis `__config` record; unwired, produced
-    /// links carry no `?net=`.
+    /// page labels remain unlinked.
     pub fn with_time_unit(mut self, unit: sdk::genesis_config::TimeUnit) -> Self {
         self.time_unit = Some(unit);
         self
@@ -679,50 +719,647 @@ impl RunsModule {
         self
     }
 
-    /// the `?net=` every `duck://` link this module produces carries — the
-    /// chat client's one spelling of the query, never a second dialect.
-    pub(crate) fn net_query(&self) -> String {
-        chat::client::duck_net_query(&self.chain_id)
+    /// the genesis chain id used by canonical `duck://` address helpers.
+    pub(crate) fn address_chain_id(&self) -> &str {
+        &self.chain_id
+    }
+
+    /// Use the SDK's one chain-id grammar for both genesis (`<label>#<salt>`)
+    /// and address-authority (`<label>-<salt>`) spellings.
+    pub(crate) fn parse_address_chain_id(
+        chain_id: &str,
+    ) -> Result<duck_address::ChainId, duck_address::Refused> {
+        chain_id.parse()
     }
 
     // ---- staged-over-committed reads ---------------------------------------
 
-    fn pending_entry(&self, dispatch_id: &str) -> Option<&PendingState> {
-        match self.pending_overlay.get(dispatch_id) {
-            Some(staged) => staged.as_ref(),
-            None => self.pending.get(dispatch_id),
+    async fn pending_entry(&self, dispatch_id: &str) -> Result<Option<PendingState>, Error> {
+        if let Some(legacy) = self.legacy_pending.as_ref()
+            && !self.legacy_migration_staged
+        {
+            return Ok(legacy.get(dispatch_id).cloned());
         }
+        let Some(bytes) = self.receipts.get(&state::pending_key(dispatch_id)).await? else {
+            return Ok(None);
+        };
+        let (pending, _, _) =
+            state::decode_pending_record(dispatch_id, &bytes).map_err(Self::corrupt_record)?;
+        Ok(Some(pending))
     }
 
-    fn session(&self, run_id: &str) -> Option<&AgentSession> {
-        match self.pending_sessions.get(run_id) {
-            Some(staged) => staged.as_ref(),
-            None => self.sessions.get(run_id),
+    async fn session(&self, run_id: &str) -> Result<Option<AgentSession>, Error> {
+        if let Some(legacy) = self.legacy_sessions.as_ref()
+            && !self.legacy_migration_staged
+        {
+            return Ok(legacy.get(run_id).cloned());
         }
+        let Some(pending) = self.pending_entry(&dispatch_id_for(run_id)).await? else {
+            return Ok(None);
+        };
+        self.session_for_pending(run_id, &pending).await
     }
 
-    fn delegation(&self, delegation_id: &str) -> Option<&DelegationState> {
-        match self.pending_delegations.get(delegation_id) {
-            Some(staged) => staged.as_ref(),
-            None => self.delegations.get(delegation_id),
+    async fn session_for_pending(
+        &self,
+        run_id: &str,
+        pending: &PendingState,
+    ) -> Result<Option<AgentSession>, Error> {
+        if let Some(legacy) = self.legacy_sessions.as_ref()
+            && !self.legacy_migration_staged
+        {
+            return Ok(legacy.get(run_id).cloned());
         }
+        let Some(bytes) = self.receipts.get(&state::session_key(run_id)).await? else {
+            return Ok(None);
+        };
+        state::decode_session_record(run_id, &bytes, pending)
+            .map(Some)
+            .map_err(Self::corrupt_record)
     }
 
-    fn delegation_ids(&self) -> Vec<String> {
-        Self::visible_ids(&self.delegations, &self.pending_delegations)
+    async fn pending_list(&self) -> Result<Vec<(String, PendingState)>, Error> {
+        if let Some(legacy) = self.legacy_pending.as_ref()
+            && !self.legacy_migration_staged
+        {
+            return Ok(legacy
+                .iter()
+                .map(|(id, pending)| (id.clone(), pending.clone()))
+                .collect());
+        }
+        let Some(bytes) = self.receipts.get(state::RUN_META_KEY).await? else {
+            return Ok(Vec::new());
+        };
+        let (head, count) = state::decode_pending_meta(&bytes).map_err(Self::corrupt_record)?;
+        let Some(mut current) = head else {
+            if count == 0 {
+                return Ok(Vec::new());
+            }
+            return Err(Self::corrupt_record("pending metadata has no head"));
+        };
+        let mut result = Vec::with_capacity(count as usize);
+        let mut previous = None;
+        let mut seen = BTreeSet::new();
+        for _ in 0..count {
+            if !seen.insert(current.clone()) {
+                return Err(Self::corrupt_record("pending list contains a cycle"));
+            }
+            let Some(bytes) = self.receipts.get(&state::pending_key(&current)).await? else {
+                return Err(Self::corrupt_record("pending list names a missing record"));
+            };
+            let (pending, prev, next) =
+                state::decode_pending_record(&current, &bytes).map_err(Self::corrupt_record)?;
+            if prev != previous {
+                return Err(Self::corrupt_record(
+                    "pending list has a broken previous link",
+                ));
+            }
+            previous = Some(current.clone());
+            result.push((current.clone(), pending));
+            let Some(next) = next else {
+                if result.len() != count as usize {
+                    return Err(Self::corrupt_record("pending list ended before its count"));
+                }
+                return Ok(result);
+            };
+            current = next;
+        }
+        Err(Self::corrupt_record("pending list exceeds its count"))
     }
 
-    fn visible_ids<'a, V, W>(
-        committed: &'a BTreeMap<String, V>,
-        pending: &'a BTreeMap<String, W>,
-    ) -> Vec<String> {
-        pending
-            .keys()
-            .chain(committed.keys())
-            .cloned()
-            .collect::<BTreeSet<String>>()
-            .into_iter()
-            .collect()
+    async fn session_list(&self) -> Result<Vec<AgentSession>, Error> {
+        if let Some(legacy) = self.legacy_sessions.as_ref()
+            && !self.legacy_migration_staged
+        {
+            return Ok(legacy.values().cloned().collect());
+        }
+        let pending = self.pending_list().await?;
+        let mut result = Vec::new();
+        for (_, entry) in pending {
+            if let Some(session) = self.session_for_pending(&entry.run_id, &entry).await? {
+                result.push(session);
+            }
+        }
+        result.sort_by(|left, right| left.run_id.cmp(&right.run_id));
+        Ok(result)
+    }
+
+    fn legacy_delegations_active(&self) -> bool {
+        self.legacy_state_version.is_some() && !self.legacy_migration_staged
+    }
+
+    async fn delegation_header(
+        &self,
+        delegation_id: &str,
+    ) -> Result<Option<DelegationHeader>, Error> {
+        if self.legacy_delegations_active() {
+            return Ok(self
+                .delegations
+                .get(delegation_id)
+                .map(DelegationHeader::from_state));
+        }
+        let Some(bytes) = self
+            .receipts
+            .get(&state::delegation_key(delegation_id))
+            .await?
+        else {
+            return Ok(None);
+        };
+        state::decode_delegation_header(delegation_id, &bytes)
+            .map(Some)
+            .map_err(Self::corrupt_record)
+    }
+
+    async fn delegation_tree(
+        &self,
+        root_run_id: &str,
+    ) -> Result<Option<state::DelegationTree>, Error> {
+        if self.legacy_delegations_active() {
+            let mut ids = self
+                .delegations
+                .iter()
+                .filter(|(_, delegation)| delegation.view.root_run_id == root_run_id)
+                .map(|(id, _)| id.clone())
+                .collect::<Vec<_>>();
+            ids.sort();
+            if ids.is_empty() {
+                return Ok(None);
+            }
+            let pending = ids
+                .iter()
+                .filter(|id| {
+                    self.delegations.get(*id).is_some_and(|delegation| {
+                        delegation.view.status == DelegationStatus::Pending
+                    })
+                })
+                .count() as u64;
+            return Ok(Some(state::DelegationTree { ids, pending }));
+        }
+        let Some(bytes) = self
+            .receipts
+            .get(&state::delegation_tree_key(root_run_id))
+            .await?
+        else {
+            return Ok(None);
+        };
+        state::decode_delegation_tree(root_run_id, &bytes)
+            .map(Some)
+            .map_err(Self::corrupt_record)
+    }
+
+    async fn delegation_run_index(
+        &self,
+        run_id: &str,
+    ) -> Result<Option<state::DelegationRunIndex>, Error> {
+        let Some(bytes) = self
+            .receipts
+            .get(&state::delegation_run_key(run_id))
+            .await?
+        else {
+            return Ok(None);
+        };
+        state::decode_delegation_run_index(&dispatch_id_for(run_id), &bytes)
+            .map(Some)
+            .map_err(Self::corrupt_record)
+    }
+
+    async fn delegation_view(&self, header: &DelegationHeader) -> Result<DelegationView, Error> {
+        if self.legacy_delegations_active() {
+            return self
+                .delegations
+                .get(&header.delegation_id)
+                .map(|state| state.view.clone())
+                .ok_or_else(|| Self::corrupt_record("legacy delegation header disappeared"));
+        }
+        let result = if header.status == DelegationStatus::Pending {
+            None
+        } else {
+            let bytes = self
+                .receipts
+                .get(&state::delegation_reply_key(&header.delegation_id))
+                .await?
+                .ok_or_else(|| Self::corrupt_record("terminal delegation has no reply"))?;
+            Some(
+                state::decode_delegation_result(&header.delegation_id, &bytes)
+                    .map_err(Self::corrupt_record)?,
+            )
+        };
+        Ok(header.view(result))
+    }
+
+    async fn delegations_for_caller(
+        &self,
+        caller_run_id: &str,
+    ) -> Result<Vec<DelegationView>, Error> {
+        if self.legacy_delegations_active() {
+            return Ok(self
+                .delegations
+                .values()
+                .filter(|state| state.view.caller_run_id == caller_run_id)
+                .map(|state| state.view.clone())
+                .collect());
+        }
+        let (root_run_id, locator) =
+            if let Some(caller) = self.pending_entry(&dispatch_id_for(caller_run_id)).await? {
+                match caller.delegation_id.as_deref() {
+                    Some(id) => (
+                        self.delegation_header(id)
+                            .await?
+                            .ok_or_else(|| {
+                                Self::corrupt_record("caller run names no delegation header")
+                            })?
+                            .root_run_id,
+                        None,
+                    ),
+                    None => (caller_run_id.to_string(), None),
+                }
+            } else {
+                let Some(index) = self.delegation_run_index(caller_run_id).await? else {
+                    return Ok(Vec::new());
+                };
+                (index.root_run_id, Some(index.delegation_id))
+            };
+        let Some(tree) = self.delegation_tree(&root_run_id).await? else {
+            return Ok(Vec::new());
+        };
+        let mut result = Vec::new();
+        let mut locator_found = locator.is_none();
+        for id in tree.ids {
+            let Some(header) = self.delegation_header(&id).await? else {
+                return Err(Self::corrupt_record("delegation tree names no header"));
+            };
+            if locator.as_deref() == Some(id.as_str()) {
+                if header.callee_run_id != caller_run_id {
+                    return Err(Self::corrupt_record(
+                        "delegation run index does not match its header",
+                    ));
+                }
+                locator_found = true;
+            }
+            if header.caller_run_id == caller_run_id {
+                result.push(self.delegation_view(&header).await?);
+            }
+        }
+        if !locator_found {
+            return Err(Self::corrupt_record(
+                "delegation run index names no tree header",
+            ));
+        }
+        Ok(result)
+    }
+
+    fn stage_delegation_header(&mut self, header: &DelegationHeader) -> Result<(), Error> {
+        self.receipts.stage(
+            state::delegation_key(&header.delegation_id),
+            state::encode_delegation_header(header),
+        )
+    }
+
+    fn stage_delegation_result(
+        &mut self,
+        delegation_id: &str,
+        result: &DelegationResult,
+    ) -> Result<(), Error> {
+        self.receipts.stage(
+            state::delegation_reply_key(delegation_id),
+            state::encode_delegation_result(delegation_id, result)?,
+        )
+    }
+
+    fn stage_delegation_tree(
+        &mut self,
+        root_run_id: &str,
+        tree: &state::DelegationTree,
+    ) -> Result<(), Error> {
+        self.receipts.stage(
+            state::delegation_tree_key(root_run_id),
+            state::encode_delegation_tree(root_run_id, tree),
+        )
+    }
+
+    async fn stage_delegation(&mut self, state: &DelegationState) -> Result<(), Error> {
+        let header = DelegationHeader::from_state(state);
+        state::validate_delegation_header(&header).map_err(Self::corrupt_record)?;
+        let mut tree = self
+            .delegation_tree(&header.root_run_id)
+            .await?
+            .unwrap_or_default();
+        match tree.ids.binary_search(&header.delegation_id) {
+            Ok(_) => {
+                return Err(Self::corrupt_record(
+                    "delegation tree already contains edge",
+                ));
+            }
+            Err(index) => tree.ids.insert(index, header.delegation_id.clone()),
+        }
+        if tree.ids.len() > MAX_DELEGATION_EDGES_PER_RUN {
+            return Err(Error::Module {
+                reason: refusal::CAPACITY.into(),
+                sentence: format!(
+                    "delegation tree has reached its lifetime limit of {MAX_DELEGATION_EDGES_PER_RUN} edges"
+                ),
+            });
+        }
+        if header.status == DelegationStatus::Pending {
+            tree.pending = tree
+                .pending
+                .checked_add(1)
+                .ok_or_else(|| Self::corrupt_record("delegation tree pending count overflowed"))?;
+        }
+        self.stage_delegation_tree(&header.root_run_id, &tree)?;
+        self.stage_delegation_header(&header)?;
+        self.receipts.stage(
+            state::delegation_run_key(&header.callee_run_id),
+            state::encode_delegation_run_index(&state::DelegationRunIndex {
+                run_id: header.callee_run_id.clone(),
+                delegation_id: header.delegation_id.clone(),
+                root_run_id: header.root_run_id.clone(),
+            }),
+        )?;
+        self.receipts.stage(
+            state::delegation_request_key(&header.delegation_id),
+            state::encode_delegation_request(&state.request)?,
+        )?;
+        Ok(())
+    }
+
+    fn remove_delegation_records(&mut self, delegation_id: &str, callee_run_id: &str) {
+        self.receipts
+            .remove(state::delegation_run_key(callee_run_id));
+        self.receipts.remove(state::delegation_key(delegation_id));
+        self.receipts
+            .remove(state::delegation_request_key(delegation_id));
+        self.receipts
+            .remove(state::delegation_reply_key(delegation_id));
+    }
+
+    fn stage_legacy_pending_sessions(&mut self) -> Result<(), Error> {
+        let Some(pending) = self.legacy_pending.as_ref() else {
+            return Ok(());
+        };
+        let ids: Vec<String> = pending.keys().cloned().collect();
+        let count = ids.len() as u64;
+        self.receipts.stage(
+            state::RUN_META_KEY.into(),
+            state::encode_pending_meta(ids.first().map(String::as_str), count),
+        )?;
+        for (index, dispatch_id) in ids.iter().enumerate() {
+            let prev = (index > 0).then(|| ids[index - 1].as_str());
+            let next = ids.get(index + 1).map(String::as_str);
+            let entry = pending.get(dispatch_id).ok_or_else(|| {
+                Self::corrupt_record("legacy pending map changed during migration")
+            })?;
+            self.receipts.stage(
+                state::pending_key(dispatch_id),
+                state::encode_pending_record(entry, prev, next),
+            )?;
+        }
+        if let Some(sessions) = self.legacy_sessions.as_ref() {
+            for session in sessions.values() {
+                self.receipts.stage(
+                    state::session_key(&session.run_id),
+                    state::encode_session_record(session),
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    fn stage_legacy_delegations(&mut self) -> Result<(), Error> {
+        let mut trees = BTreeMap::<String, state::DelegationTree>::new();
+        let delegations = self.delegations.clone();
+        for (id, delegation) in &delegations {
+            let header = DelegationHeader::from_state(delegation);
+            state::validate_delegation_header(&header).map_err(Self::corrupt_record)?;
+            let tree = trees.entry(header.root_run_id.clone()).or_default();
+            let index = match tree.ids.binary_search(id) {
+                Ok(_) => {
+                    return Err(Self::corrupt_record(
+                        "legacy delegation tree contains a duplicate",
+                    ));
+                }
+                Err(index) => index,
+            };
+            tree.ids.insert(index, id.clone());
+            if header.status == DelegationStatus::Pending {
+                tree.pending += 1;
+            }
+            self.stage_delegation_header(&header)?;
+            self.receipts.stage(
+                state::delegation_run_key(&header.callee_run_id),
+                state::encode_delegation_run_index(&state::DelegationRunIndex {
+                    run_id: header.callee_run_id.clone(),
+                    delegation_id: header.delegation_id.clone(),
+                    root_run_id: header.root_run_id.clone(),
+                }),
+            )?;
+            self.receipts.stage(
+                state::delegation_request_key(id),
+                state::encode_delegation_request(&delegation.request)?,
+            )?;
+            // Request bodies are needed only while the callee dispatch is
+            // being admitted. All legacy edges are already admitted.
+            self.receipts.remove(state::delegation_request_key(id));
+            if let Some(result) = &delegation.view.result {
+                self.stage_delegation_result(id, result)?;
+            }
+        }
+        for (root, tree) in trees {
+            if tree.ids.len() > state::MAX_LEGACY_DELEGATION_EDGES_PER_RUN {
+                return Err(Error::Module {
+                    reason: refusal::CAPACITY.into(),
+                    sentence:
+                        "legacy delegation tree exceeds its historical compatibility capacity"
+                            .into(),
+                });
+            }
+            self.stage_delegation_tree(&root, &tree)?;
+        }
+        Ok(())
+    }
+
+    fn stage_legacy_state(&mut self) -> Result<(), Error> {
+        if self.legacy_state_version.is_none() || self.legacy_migration_staged {
+            return Ok(());
+        }
+        self.stage_legacy_models()?;
+        self.stage_legacy_pending_sessions()?;
+        self.stage_legacy_delegations()?;
+        self.legacy_migration_staged = true;
+        Ok(())
+    }
+
+    async fn stage_pending_insert(
+        &mut self,
+        dispatch_id: String,
+        pending: PendingState,
+    ) -> Result<(), Error> {
+        state::validate_decoded_pending(&dispatch_id, &pending).map_err(Self::corrupt_record)?;
+        if self
+            .receipts
+            .get(&state::pending_key(&dispatch_id))
+            .await?
+            .is_some()
+        {
+            return Err(Error::Module {
+                reason: refusal::ALREADY_EXISTS.into(),
+                sentence: format!("pending dispatch already exists: {dispatch_id}"),
+            });
+        }
+        let (head, count) = match self.receipts.get(state::RUN_META_KEY).await? {
+            Some(bytes) => state::decode_pending_meta(&bytes).map_err(Self::corrupt_record)?,
+            None => (None, 0),
+        };
+        if count > 0 && head.is_none() {
+            return Err(Self::corrupt_record("non-empty pending list has no head"));
+        }
+        if count >= MAX_PENDING_RUNS {
+            return Err(Error::Module {
+                reason: refusal::CAPACITY.into(),
+                sentence: format!("the live pending-run cap is {MAX_PENDING_RUNS}"),
+            });
+        }
+        if count == 0 && head.is_some() {
+            return Err(Self::corrupt_record("empty pending list has a head"));
+        }
+        if let Some(old_head) = &head {
+            let bytes = self
+                .receipts
+                .get(&state::pending_key(old_head))
+                .await?
+                .ok_or_else(|| Self::corrupt_record("pending metadata names a missing head"))?;
+            let (old, prev, next) =
+                state::decode_pending_record(old_head, &bytes).map_err(Self::corrupt_record)?;
+            if prev.is_some() {
+                return Err(Self::corrupt_record("pending head has a previous link"));
+            }
+            self.receipts.stage(
+                state::pending_key(old_head),
+                state::encode_pending_record(&old, Some(&dispatch_id), next.as_deref()),
+            )?;
+        }
+        self.receipts.stage(
+            state::pending_key(&dispatch_id),
+            state::encode_pending_record(&pending, None, head.as_deref()),
+        )?;
+        self.receipts.stage(
+            state::RUN_META_KEY.into(),
+            state::encode_pending_meta(Some(&dispatch_id), count + 1),
+        )?;
+        Ok(())
+    }
+
+    async fn stage_pending_remove(&mut self, dispatch_id: &str) -> Result<(), Error> {
+        let bytes = self
+            .receipts
+            .get(&state::pending_key(dispatch_id))
+            .await?
+            .ok_or_else(|| Self::corrupt_record("pending removal names no record"))?;
+        let (_, prev, next) =
+            state::decode_pending_record(dispatch_id, &bytes).map_err(Self::corrupt_record)?;
+        let (head, count) = self
+            .receipts
+            .get(state::RUN_META_KEY)
+            .await?
+            .ok_or_else(|| Self::corrupt_record("pending removal has no metadata"))
+            .and_then(|bytes| state::decode_pending_meta(&bytes).map_err(Self::corrupt_record))?;
+        let Some(head_id) = head.as_deref() else {
+            return Err(Self::corrupt_record("non-empty pending list has no head"));
+        };
+        if count == 0
+            || (prev.is_none() && head_id != dispatch_id)
+            || (prev.is_some() && head_id == dispatch_id)
+        {
+            return Err(Self::corrupt_record(
+                "pending removal disagrees with metadata",
+            ));
+        }
+        if head_id != dispatch_id {
+            let bytes = self
+                .receipts
+                .get(&state::pending_key(head_id))
+                .await?
+                .ok_or_else(|| Self::corrupt_record("pending metadata names a missing head"))?;
+            let (_, head_prev, _) =
+                state::decode_pending_record(head_id, &bytes).map_err(Self::corrupt_record)?;
+            if head_prev.is_some() {
+                return Err(Self::corrupt_record("pending head has a previous link"));
+            }
+        }
+        if let Some(prev_id) = &prev {
+            let bytes = self
+                .receipts
+                .get(&state::pending_key(prev_id))
+                .await?
+                .ok_or_else(|| Self::corrupt_record("pending previous neighbor is missing"))?;
+            let (entry, neighbor_prev, neighbor_next) =
+                state::decode_pending_record(prev_id, &bytes).map_err(Self::corrupt_record)?;
+            if neighbor_next.as_deref() != Some(dispatch_id) {
+                return Err(Self::corrupt_record("pending previous neighbor is broken"));
+            }
+            self.receipts.stage(
+                state::pending_key(prev_id),
+                state::encode_pending_record(&entry, neighbor_prev.as_deref(), next.as_deref()),
+            )?;
+        }
+        if let Some(next_id) = &next {
+            let bytes = self
+                .receipts
+                .get(&state::pending_key(next_id))
+                .await?
+                .ok_or_else(|| Self::corrupt_record("pending next neighbor is missing"))?;
+            let (entry, neighbor_prev, neighbor_next) =
+                state::decode_pending_record(next_id, &bytes).map_err(Self::corrupt_record)?;
+            if neighbor_prev.as_deref() != Some(dispatch_id) {
+                return Err(Self::corrupt_record("pending next neighbor is broken"));
+            }
+            self.receipts.stage(
+                state::pending_key(next_id),
+                state::encode_pending_record(&entry, prev.as_deref(), neighbor_next.as_deref()),
+            )?;
+        }
+        self.receipts.remove(state::pending_key(dispatch_id));
+        let new_head = if prev.is_none() {
+            next.as_deref()
+        } else {
+            Some(head_id)
+        };
+        self.receipts.stage(
+            state::RUN_META_KEY.into(),
+            state::encode_pending_meta(new_head, count - 1),
+        )?;
+        Ok(())
+    }
+
+    #[cfg(test)]
+    async fn stage_pending_update(
+        &mut self,
+        dispatch_id: &str,
+        pending: PendingState,
+    ) -> Result<(), Error> {
+        state::validate_decoded_pending(dispatch_id, &pending).map_err(Self::corrupt_record)?;
+        let bytes = self
+            .receipts
+            .get(&state::pending_key(dispatch_id))
+            .await?
+            .ok_or_else(|| Self::corrupt_record("pending update names no record"))?;
+        let (_, prev, next) =
+            state::decode_pending_record(dispatch_id, &bytes).map_err(Self::corrupt_record)?;
+        self.receipts.stage(
+            state::pending_key(dispatch_id),
+            state::encode_pending_record(&pending, prev.as_deref(), next.as_deref()),
+        )
+    }
+
+    fn stage_session(&mut self, session: AgentSession) -> Result<(), Error> {
+        self.receipts.stage(
+            state::session_key(&session.run_id),
+            state::encode_session_record(&session),
+        )
+    }
+
+    fn remove_session(&mut self, run_id: &str) {
+        self.receipts.remove(state::session_key(run_id));
     }
 
     // ---- views ---------------------------------------------------------------
@@ -746,7 +1383,10 @@ impl RunsModule {
 
     fn validate_non_empty(field: &str, value: &str) -> Result<(), Error> {
         if value.is_empty() {
-            return Err(Error::Module(format!("{field} must not be empty")));
+            return Err(Error::Module {
+                reason: refusal::INVALID_INPUT.into(),
+                sentence: format!("{field} must not be empty"),
+            });
         }
         Ok(())
     }
@@ -756,12 +1396,14 @@ impl RunsModule {
     /// any genesis path could wear) cannot administer model work.
     fn admin_origin(origin: &Origin) -> Result<RunOrigin, Error> {
         match origin {
-            Origin::External(key) if key.is_empty() => Err(Error::Module(
-                "runs admin ops require a non-empty submitter id".into(),
-            )),
-            Origin::System => Err(Error::Module(
-                "runs admin ops require an external or module origin".into(),
-            )),
+            Origin::External(key) if key.is_empty() => Err(Error::Module {
+                reason: refusal::INVALID_INPUT.into(),
+                sentence: "runs admin ops require a non-empty submitter id".into(),
+            }),
+            Origin::System => Err(Error::Module {
+                reason: refusal::UNAUTHORIZED.into(),
+                sentence: "runs admin ops require an external or module origin".into(),
+            }),
             other => canonical_origin(other),
         }
     }
@@ -789,14 +1431,30 @@ impl RunsModule {
     }
 
     pub fn snapshot(&self) -> Vec<u8> {
-        encode_committed(
-            &self.receipts.snapshot(),
-            self.next_action_item,
-            &self.pending,
-            &self.sessions,
-            &self.delegations,
-            &self.models,
-        )
+        let records = self.receipts.snapshot();
+        match self.legacy_state_version {
+            Some(StateVersion::V0) => state::encode_legacy_committed(
+                &records,
+                self.next_action_item,
+                self.legacy_pending.as_ref().unwrap(),
+                self.legacy_sessions.as_ref().unwrap(),
+                &self.delegations,
+                self.legacy_models.as_ref().unwrap(),
+            ),
+            Some(StateVersion::V1) => state::encode_post_a_committed(
+                &records,
+                self.next_action_item,
+                self.legacy_pending.as_ref().unwrap(),
+                self.legacy_sessions.as_ref().unwrap(),
+                &self.delegations,
+            ),
+            Some(StateVersion::V2) => {
+                state::encode_post_b_committed(&records, self.next_action_item, &self.delegations)
+            }
+            Some(StateVersion::V3) | None => {
+                encode_committed(&records, self.next_action_item, &self.delegations)
+            }
+        }
     }
 
     /// adopt a peer's snapshot as own committed state — but only after the
@@ -807,30 +1465,52 @@ impl RunsModule {
     /// dropped — a snapshot describes a block boundary, and nothing
     /// half-applied may shadow it.
     pub fn install(&mut self, bytes: &[u8], expected: StateRoot) -> Result<(), Error> {
-        let (action_requests, next_action_item, pending, sessions, delegations, models) =
-            decode_committed(bytes).map_err(Error::Module)?;
+        let decoded = decode_committed(bytes).map_err(|sentence| Error::Module {
+            reason: refusal::CORRUPT.into(),
+            sentence,
+        })?;
         sdk::verify_snapshot_root(
-            committed_root(
-                &action_requests,
-                next_action_item,
-                &pending,
-                &sessions,
-                &delegations,
-                &models,
-            ),
+            match decoded.version {
+                StateVersion::V0 => legacy_root(
+                    &decoded.receipts,
+                    decoded.next_action_item,
+                    &decoded.pending,
+                    &decoded.sessions,
+                    &decoded.delegations,
+                    decoded.legacy_models.as_ref().unwrap(),
+                ),
+                StateVersion::V1 => post_a_root(
+                    &decoded.receipts,
+                    decoded.next_action_item,
+                    &decoded.pending,
+                    &decoded.sessions,
+                    &decoded.delegations,
+                ),
+                StateVersion::V2 => state::post_b_root(
+                    &decoded.receipts,
+                    decoded.next_action_item,
+                    &decoded.delegations,
+                ),
+                StateVersion::V3 => committed_root(
+                    &decoded.receipts,
+                    decoded.next_action_item,
+                    &decoded.delegations,
+                ),
+            },
             expected,
         )?;
-        self.receipts.install(action_requests)?;
-        self.models = models;
-        self.pending_models.clear();
-        self.next_action_item = next_action_item;
+        self.receipts.install(decoded.receipts)?;
+        self.legacy_models = decoded.legacy_models;
+        self.legacy_pending = matches!(decoded.version, StateVersion::V0 | StateVersion::V1)
+            .then_some(decoded.pending);
+        self.legacy_sessions = matches!(decoded.version, StateVersion::V0 | StateVersion::V1)
+            .then_some(decoded.sessions);
+        self.legacy_state_version =
+            (decoded.version != StateVersion::V3).then_some(decoded.version);
+        self.legacy_migration_staged = false;
+        self.next_action_item = decoded.next_action_item;
         self.staged_next_action_item = None;
-        self.pending = pending;
-        self.sessions = sessions;
-        self.delegations = delegations;
-        self.pending_overlay.clear();
-        self.pending_sessions.clear();
-        self.pending_delegations.clear();
+        self.delegations = decoded.delegations;
         // the ring is derived per-node state: a snapshot describes a block
         // boundary this node never executed, so its history starts empty.
         self.history.clear();
@@ -865,13 +1545,19 @@ impl RunsModule {
     /// records are dropped — like [`RunsModule::install`], a persisted ring
     /// describes a dispatch boundary and nothing half-applied may shadow it.
     pub fn install_history(&mut self, bytes: &[u8]) -> Result<(), Error> {
-        let history: VecDeque<RunRecord> = serde_json::from_slice(bytes)
-            .map_err(|e| Error::Module(format!("run history decode: {e}")))?;
+        let history: VecDeque<RunRecord> =
+            serde_json::from_slice(bytes).map_err(|e| Error::Module {
+                reason: refusal::CORRUPT.into(),
+                sentence: format!("run history decode: {e}"),
+            })?;
         if history.len() > RUN_HISTORY_CAP {
-            return Err(Error::Module(format!(
-                "run history carries {} records; the cap is {RUN_HISTORY_CAP}",
-                history.len()
-            )));
+            return Err(Error::Module {
+                reason: refusal::CORRUPT.into(),
+                sentence: format!(
+                    "run history carries {} records; the cap is {RUN_HISTORY_CAP}",
+                    history.len()
+                ),
+            });
         }
         self.history = history;
         self.pending_history.clear();

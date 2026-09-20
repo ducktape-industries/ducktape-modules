@@ -46,19 +46,21 @@
 //! answers from COMMITTED state only, so a read never leaks a staged write that
 //! a block abort would take back.
 
+use sdk::refusal;
 use std::collections::BTreeSet;
 
 use sdk::{Ctx, Error, ModuleId, Msg, Origin, StagedStore};
 use sha2::{Digest, Sha256};
 
+use crate::index::job_status_key;
 use crate::{
     Claim, ControlAcknowledgement, Job, JobComment, JobControl, JobControlInput, JobExecution,
     JobResult, JobStatus, JobsEvent, JobsMsg, JobsQuery, JobsReply, NativeHistoryHead, Party,
     WorkerHistory, WorkerReport, WorkerReportKind, controls, encode_job_event, stage_record,
 };
 
-/// max bytes of a `job_id` (non-empty).
-pub const MAX_JOB_ID: usize = 256;
+pub use tasks_wire::MAX_JOB_ID;
+
 /// max bytes of a `kind` (non-empty).
 pub const MAX_KIND: usize = 64;
 /// max bytes of a job `spec`.
@@ -78,12 +80,10 @@ pub const MAX_JOBS: usize = 65536;
 /// finalizing or cancelling a job does not free the slot, because the record
 /// (and its spec bytes) is still on the board -- only a prune drops it.
 pub const MAX_LIVE_JOBS_PER_SUBMITTER: usize = 1024;
-/// lower clamp for a claim lease, in views.
-pub const MIN_LEASE_VIEWS: u64 = 10;
+pub use tasks_wire::MIN_LEASE_VIEWS;
 /// upper clamp for a claim lease, in views.
 pub const MAX_LEASE_VIEWS: u64 = 10_000;
-/// after this many claims, an expired reclaim fails the job instead of requeuing.
-pub const MAX_ATTEMPTS: u64 = 8;
+pub use tasks_wire::MAX_ATTEMPTS;
 /// the result payload a reclaim writes when it gives up on a job. the index
 /// mapper folds the same string, so the two tiers cannot drift.
 pub const ATTEMPTS_EXHAUSTED_RESULT: &str = "attempts exhausted";
@@ -93,9 +93,9 @@ pub const MAX_WORKERS: usize = 16;
 pub const MAX_WORKER_MODULE_ID: usize = 256;
 /// Bounds are admission limits, never automatic archive deletion.
 pub const MAX_JOB_CONTROLS: usize = 32;
-pub const MAX_CONTROL_ACKNOWLEDGEMENTS: usize = 64;
+pub use tasks_wire::MAX_CONTROL_ACKNOWLEDGEMENTS;
 pub const MAX_WORKER_REPORTS: usize = 32;
-pub const MAX_WORKER_TEXT_BYTES: usize = 4096;
+pub use tasks_wire::MAX_WORKER_TEXT_BYTES;
 pub const MAX_WORKER_EXECUTIONS: usize = 64;
 /// Native run keys are opaque and may contain Runs' internal separators.
 pub const MAX_NATIVE_RUN_ID_BYTES: usize = 1024;
@@ -125,16 +125,25 @@ async fn retained(staged: &StagedStore, job_id: &str) -> Result<Option<Job>, Err
         return Ok(None);
     };
     let Some(bytes) = staged.get(&key).await? else {
-        return Err(Error::Module("retained execution missing".into()));
+        return Err(Error::Module {
+            reason: refusal::CORRUPT.into(),
+            sentence: format!("job {job_id} points at a retained execution with no record"),
+        });
     };
     decode_job(&bytes).map(Some)
 }
 
 async fn conversation(staged: &StagedStore, id: &str) -> Result<Conversation, Error> {
     let Some(bytes) = staged.get(&conversation_key(id)).await? else {
-        return Err(Error::Module("worker conversation missing".into()));
+        return Err(Error::Module {
+            reason: refusal::CORRUPT.into(),
+            sentence: format!("no worker conversation {id}"),
+        });
     };
-    sdk::wire::decode(&bytes).map_err(Error::Module)
+    sdk::wire::decode(&bytes).map_err(|sentence| Error::Module {
+        reason: refusal::CORRUPT.into(),
+        sentence,
+    })
 }
 
 /// one job record per id.
@@ -158,7 +167,10 @@ fn record_key(job_id: &str) -> Vec<u8> {
 }
 
 fn decode_job(bytes: &[u8]) -> Result<Job, Error> {
-    sdk::wire::decode(bytes).map_err(|e| Error::Module(format!("job record decode: {e}")))
+    sdk::wire::decode(bytes).map_err(|e| Error::Module {
+        reason: refusal::CORRUPT.into(),
+        sentence: format!("job record decode: {e}"),
+    })
 }
 
 // ---- overlay-aware reads (execute-internal ONLY) ---------------------------
@@ -177,9 +189,10 @@ pub(crate) async fn load(staged: &StagedStore, job_id: &str) -> Result<Option<Jo
 
 /// the live job or a precise not-found rejection.
 async fn require(staged: &StagedStore, job_id: &str) -> Result<Job, Error> {
-    load(staged, job_id)
-        .await?
-        .ok_or_else(|| Error::Module(format!("job not found: {job_id}")))
+    load(staged, job_id).await?.ok_or_else(|| Error::Module {
+        reason: refusal::NOT_FOUND.into(),
+        sentence: format!("job not found: {job_id}"),
+    })
 }
 
 /// one census counter, reading through the staged overlay. an absent key is 0.
@@ -187,10 +200,10 @@ async fn read_census(staged: &StagedStore, key: &[u8]) -> Result<u64, Error> {
     let Some(bytes) = staged.get(key).await? else {
         return Ok(0);
     };
-    let raw: [u8; 8] = bytes
-        .as_slice()
-        .try_into()
-        .map_err(|_| Error::Module("job census record is not a u64".into()))?;
+    let raw: [u8; 8] = bytes.as_slice().try_into().map_err(|_| Error::Module {
+        reason: refusal::CORRUPT.into(),
+        sentence: "the job census record is not an 8-byte count".into(),
+    })?;
     Ok(u64::from_le_bytes(raw))
 }
 
@@ -236,7 +249,10 @@ async fn load_workers(staged: &StagedStore) -> Result<BTreeSet<ModuleId>, Error>
     let Some(bytes) = staged.get(WORKERS_KEY).await? else {
         return Ok(BTreeSet::new());
     };
-    sdk::wire::decode(&bytes).map_err(|e| Error::Module(format!("worker set decode: {e}")))
+    sdk::wire::decode(&bytes).map_err(|e| Error::Module {
+        reason: refusal::CORRUPT.into(),
+        sentence: format!("worker set decode: {e}"),
+    })
 }
 
 /// stage the worker set — an EMPTY set drops the key (see [`stage_count`]).
@@ -265,22 +281,28 @@ fn stage_job(staged: &mut StagedStore, job: &Job) -> Result<(), Error> {
 
 fn worker_module_from_origin(origin: &Origin, module_id: &ModuleId) -> Result<ModuleId, Error> {
     let Origin::Module(worker) = origin else {
-        return Err(Error::Module(
-            "worker registration requires a module origin".into(),
-        ));
+        return Err(Error::Module {
+            reason: refusal::UNAUTHORIZED.into(),
+            sentence: "worker registration requires a module origin".into(),
+        });
     };
     if worker.is_empty() {
-        return Err(Error::Module("worker module_id must not be empty".into()));
+        return Err(Error::Module {
+            reason: refusal::INVALID_INPUT.into(),
+            sentence: "a module with an empty id cannot register as a worker".into(),
+        });
     }
     if worker.len() > MAX_WORKER_MODULE_ID {
-        return Err(Error::Module(format!(
-            "worker module_id exceeds {MAX_WORKER_MODULE_ID} bytes"
-        )));
+        return Err(Error::Module {
+            reason: refusal::CAPACITY.into(),
+            sentence: format!("worker module_id exceeds {MAX_WORKER_MODULE_ID} bytes"),
+        });
     }
     if worker == module_id {
-        return Err(Error::Module(
-            "the work module cannot register itself as a worker".into(),
-        ));
+        return Err(Error::Module {
+            reason: refusal::INVALID_INPUT.into(),
+            sentence: "the work module cannot register itself as a worker".into(),
+        });
     }
     Ok(worker.clone())
 }
@@ -296,7 +318,12 @@ async fn register_worker(
         return Ok(());
     }
     if workers.len() >= MAX_WORKERS {
-        return Err(Error::Module("worker cap reached".into()));
+        return Err(Error::Module {
+            reason: refusal::CAPACITY.into(),
+            sentence: format!(
+                "the job board already has {MAX_WORKERS} registered workers, its limit"
+            ),
+        });
     }
     workers.insert(worker);
     stage_workers(staged, &workers)
@@ -350,9 +377,13 @@ async fn create_execution(
                 let history = conversation(staged, &previous.conversation_id).await?;
                 let at_capacity = history.executions.len() >= MAX_WORKER_EXECUTIONS;
                 if at_capacity {
-                    return Err(Error::Module(
-                        "worker conversation execution cap reached".into(),
-                    ));
+                    return Err(Error::Module {
+                        reason: refusal::CAPACITY.into(),
+                        sentence: format!(
+                            "worker conversation {} already has {MAX_WORKER_EXECUTIONS} executions, its limit",
+                            previous.conversation_id
+                        ),
+                    });
                 }
                 (
                     kind,
@@ -368,35 +399,55 @@ async fn create_execution(
     // oversized bytes never reach a committed record (the repo's poison-value
     // lesson).
     if job_id.is_empty() {
-        return Err(Error::Module("job_id must not be empty".into()));
+        return Err(Error::Module {
+            reason: refusal::INVALID_INPUT.into(),
+            sentence: "a job needs a non-empty job_id".into(),
+        });
     }
     if job_id.len() > MAX_JOB_ID {
-        return Err(Error::Module(format!("job_id exceeds {MAX_JOB_ID} bytes")));
+        return Err(Error::Module {
+            reason: refusal::CAPACITY.into(),
+            sentence: format!("job_id exceeds {MAX_JOB_ID} bytes"),
+        });
     }
     if kind.is_empty() {
-        return Err(Error::Module("kind must not be empty".into()));
+        return Err(Error::Module {
+            reason: refusal::INVALID_INPUT.into(),
+            sentence: "a job needs a non-empty kind".into(),
+        });
     }
     if kind.len() > MAX_KIND {
-        return Err(Error::Module(format!("kind exceeds {MAX_KIND} bytes")));
+        return Err(Error::Module {
+            reason: refusal::CAPACITY.into(),
+            sentence: format!("kind exceeds {MAX_KIND} bytes"),
+        });
     }
     if spec.len() > MAX_SPEC {
-        return Err(Error::Module(format!("spec exceeds {MAX_SPEC} bytes")));
+        return Err(Error::Module {
+            reason: refusal::CAPACITY.into(),
+            sentence: format!("spec exceeds {MAX_SPEC} bytes"),
+        });
     }
     if load(staged, &job_id).await?.is_some() {
-        return Err(Error::Module(format!("job already exists: {job_id}")));
+        return Err(Error::Module {
+            reason: refusal::ALREADY_EXISTS.into(),
+            sentence: format!("job already exists: {job_id}"),
+        });
     }
     let count = live_count(staged).await?;
     if count >= MAX_JOBS as u64 {
-        return Err(Error::Module(format!(
-            "job board full: {MAX_JOBS} live jobs"
-        )));
+        return Err(Error::Module {
+            reason: refusal::CAPACITY.into(),
+            sentence: format!("job board full: {MAX_JOBS} live jobs"),
+        });
     }
 
     let submitter_live = submitter_count(staged, &submitter).await?;
     if submitter_live >= MAX_LIVE_JOBS_PER_SUBMITTER as u64 {
-        return Err(Error::Module(format!(
-            "job submitter at cap: {MAX_LIVE_JOBS_PER_SUBMITTER} live jobs"
-        )));
+        return Err(Error::Module {
+            reason: refusal::CAPACITY.into(),
+            sentence: format!("job submitter at cap: {MAX_LIVE_JOBS_PER_SUBMITTER} live jobs"),
+        });
     }
     let spec_hash = Sha256::digest(spec.as_bytes()).to_vec();
     let (_, created_at_revision) = crate::next_revision(staged, "job", &job_id).await?;
@@ -494,22 +545,30 @@ async fn continue_worker(
         spec,
     } = msg
     else {
-        return Err(Error::Module("expected continuation".into()));
+        return Err(Error::Module {
+            reason: refusal::INVALID_INPUT.into(),
+            sentence: "this handler takes only a Continue message".into(),
+        });
     };
     sdk::validate_id("operation_id", &operation_id, MAX_JOB_ID)?;
     let Some(previous) = retained(staged, &previous_job_id).await? else {
-        return Err(Error::Module("previous execution not found".into()));
+        return Err(Error::Module {
+            reason: refusal::NOT_FOUND.into(),
+            sentence: format!("no retained execution of job {previous_job_id}"),
+        });
     };
     let is_conversation = previous.execution == JobExecution::Conversation;
     if !is_conversation {
-        return Err(Error::Module(
-            "continue requires a conversation execution".into(),
-        ));
+        return Err(Error::Module {
+            reason: refusal::INVALID_INPUT.into(),
+            sentence: "continue requires a conversation execution".into(),
+        });
     }
     if !previous.status.is_terminal() {
-        return Err(Error::Module(
-            "continue requires a terminal execution".into(),
-        ));
+        return Err(Error::Module {
+            reason: refusal::WRONG_STATE.into(),
+            sentence: "continue requires a terminal execution".into(),
+        });
     }
     let history = conversation(staged, &previous.conversation_id).await?;
     let previous_ref = (previous.job_id.clone(), previous.created_at_revision);
@@ -517,9 +576,10 @@ async fn continue_worker(
     if !is_latest {
         // A retry must match the original continuation exactly, never launch twice.
         let Some(next) = retained(staged, &job_id).await? else {
-            return Err(Error::Module(
-                "continue requires the latest execution".into(),
-            ));
+            return Err(Error::Module {
+                reason: refusal::STALE.into(),
+                sentence: "continue requires the latest execution".into(),
+            });
         };
         let same_continuation = next.conversation_id == previous.conversation_id
             && next.previous_job_id.as_deref() == Some(previous_job_id.as_str())
@@ -529,26 +589,37 @@ async fn continue_worker(
         if same_continuation {
             return Ok(());
         }
-        return Err(Error::Module(
-            "continue conflicts with an existing continuation".into(),
-        ));
+        return Err(Error::Module {
+            reason: refusal::ALREADY_EXISTS.into(),
+            sentence: format!("job {job_id} already exists as a different continuation"),
+        });
     }
     let reused_id = retained(staged, &job_id).await?.is_some();
     if reused_id {
-        return Err(Error::Module("continuation requires a fresh job_id".into()));
+        return Err(Error::Module {
+            reason: refusal::ALREADY_EXISTS.into(),
+            sentence: format!("job id {job_id} is already taken; a continuation needs a fresh one"),
+        });
     }
     // Operation IDs are unique within a conversation, not just one predecessor.
     for (id, revision) in &history.executions {
         let Some(bytes) = staged.get(&archive_key(id, *revision)).await? else {
-            return Err(Error::Module("retained execution missing".into()));
+            return Err(Error::Module {
+                reason: refusal::CORRUPT.into(),
+                sentence: format!("execution {id}/{revision} is listed but has no record"),
+            });
         };
         let execution = decode_job(&bytes)?;
         let reused_operation =
             execution.continuation_operation_id.as_deref() == Some(operation_id.as_str());
         if reused_operation {
-            return Err(Error::Module(
-                "continuation operation_id already exists".into(),
-            ));
+            return Err(Error::Module {
+                reason: refusal::ALREADY_EXISTS.into(),
+                sentence: format!(
+                    "operation {operation_id} already names different work in conversation {}",
+                    previous.conversation_id
+                ),
+            });
         }
     }
     let event = create_execution(
@@ -580,9 +651,13 @@ fn require_claim_attempt(
             .as_ref()
             .is_some_and(|claim| controls(&claim.worker, actor, origin));
     if !current_claim {
-        return Err(Error::Module(
-            "operation requires the current claimant and attempt".into(),
-        ));
+        return Err(Error::Module {
+            reason: refusal::STALE.into(),
+            sentence: format!(
+                "job {} is not claimed by this worker on attempt {attempt}",
+                job.job_id
+            ),
+        });
     }
     Ok(())
 }
@@ -590,9 +665,10 @@ fn require_claim_attempt(
 fn require_worker_text(text: &str) -> Result<(), Error> {
     let valid = !text.trim().is_empty() && text.len() <= MAX_WORKER_TEXT_BYTES;
     if !valid {
-        return Err(Error::Module(
-            "worker input requires non-empty text within the byte cap".into(),
-        ));
+        return Err(Error::Module {
+            reason: refusal::INVALID_INPUT.into(),
+            sentence: "worker input requires non-empty text within the byte cap".into(),
+        });
     }
     Ok(())
 }
@@ -619,25 +695,42 @@ async fn control(
         if identical {
             return Ok(());
         }
-        return Err(Error::Module("control operation_id already exists".into()));
+        return Err(Error::Module {
+            reason: refusal::ALREADY_EXISTS.into(),
+            sentence: format!(
+                "control operation {operation_id} on job {} already names different work",
+                job.job_id
+            ),
+        });
     }
     if job.status.is_terminal() {
-        return Err(Error::Module(
-            "controls require a nonterminal execution".into(),
-        ));
+        return Err(Error::Module {
+            reason: refusal::WRONG_STATE.into(),
+            sentence: "controls require a nonterminal execution".into(),
+        });
     }
     let at_capacity = job.controls.len() >= MAX_JOB_CONTROLS;
     if at_capacity {
-        return Err(Error::Module("job control cap reached".into()));
+        return Err(Error::Module {
+            reason: refusal::CAPACITY.into(),
+            sentence: format!(
+                "job {} already has {MAX_JOB_CONTROLS} controls, its limit",
+                job.job_id
+            ),
+        });
     }
     let report_id = job
         .reports
         .iter()
         .any(|report| report.operation_id == operation_id);
     if report_id {
-        return Err(Error::Module(
-            "operation_id already used by a report".into(),
-        ));
+        return Err(Error::Module {
+            reason: refusal::ALREADY_EXISTS.into(),
+            sentence: format!(
+                "operation {operation_id} on job {} already names different work: a report",
+                job.job_id
+            ),
+        });
     }
     job.controls.push(JobControl {
         operation_id,
@@ -665,7 +758,10 @@ async fn acknowledge_control(
         .iter_mut()
         .find(|control| control.operation_id == operation_id)
     else {
-        return Err(Error::Module("control not found".into()));
+        return Err(Error::Module {
+            reason: refusal::NOT_FOUND.into(),
+            sentence: format!("job {job_id} has no control {operation_id}"),
+        });
     };
     let already_acknowledged = control
         .acknowledgements
@@ -676,7 +772,12 @@ async fn acknowledge_control(
     }
     let at_capacity = control.acknowledgements.len() >= MAX_CONTROL_ACKNOWLEDGEMENTS;
     if at_capacity {
-        return Err(Error::Module("control acknowledgement cap reached".into()));
+        return Err(Error::Module {
+            reason: refusal::CAPACITY.into(),
+            sentence: format!(
+                "control {operation_id} of job {job_id} already has {MAX_CONTROL_ACKNOWLEDGEMENTS} acknowledgements, its limit"
+            ),
+        });
     }
     control.acknowledgements.push(ControlAcknowledgement {
         worker: actor.clone(),
@@ -707,15 +808,17 @@ async fn settle_cancellation(
                 .any(|ack| ack.attempt == attempt)
     });
     if !acknowledged_cancel {
-        return Err(Error::Module(
-            "cancellation requires acknowledgement by the current attempt".into(),
-        ));
+        return Err(Error::Module {
+            reason: refusal::WRONG_STATE.into(),
+            sentence: "cancellation requires acknowledgement by the current attempt".into(),
+        });
     }
     let oversized = payload.len() > MAX_PAYLOAD;
     if oversized {
-        return Err(Error::Module(format!(
-            "payload exceeds {MAX_PAYLOAD} bytes"
-        )));
+        return Err(Error::Module {
+            reason: refusal::CAPACITY.into(),
+            sentence: format!("payload exceeds {MAX_PAYLOAD} bytes"),
+        });
     }
     job.status = JobStatus::Cancelled;
     job.result = Some(JobResult {
@@ -752,20 +855,28 @@ async fn checkpoint_native_history(
         snapshot,
     } = msg
     else {
-        return Err(Error::Module("expected native history checkpoint".into()));
+        return Err(Error::Module {
+            reason: refusal::INVALID_INPUT.into(),
+            sentence: "this handler takes only a CheckpointNativeHistory message".into(),
+        });
     };
     let valid_run_id = !run_id.is_empty() && run_id.len() <= MAX_NATIVE_RUN_ID_BYTES;
     if !valid_run_id {
-        return Err(Error::Module(format!(
-            "native run_id must be nonempty and at most {MAX_NATIVE_RUN_ID_BYTES} bytes"
-        )));
+        return Err(Error::Module {
+            reason: refusal::INVALID_INPUT.into(),
+            sentence: format!(
+                "native run_id must be nonempty and at most {MAX_NATIVE_RUN_ID_BYTES} bytes"
+            ),
+        });
     }
     sdk::validate_id("snapshot", &snapshot, MAX_JOB_ID)?;
     let positive_revision = revision > 0;
     if !positive_revision {
-        return Err(Error::Module(
-            "native history revision must be positive".into(),
-        ));
+        return Err(Error::Module {
+            reason: refusal::INVALID_INPUT.into(),
+            sentence: "native history revisions are numbered from 1, so revision 0 is invalid"
+                .into(),
+        });
     }
     let mut job = require(staged, &job_id).await?;
     require_claim_attempt(&job, actor, &ctx.env().origin, attempt)?;
@@ -783,21 +894,30 @@ async fn checkpoint_native_history(
         }
         let newer_revision = revision > head.revision;
         if !newer_revision {
-            return Err(Error::Module(
-                "native history revision is stale or conflicting".into(),
-            ));
+            return Err(Error::Module {
+                reason: refusal::STALE.into(),
+                sentence: format!(
+                    "revision {revision} is not newer than the recorded native history revision {}",
+                    head.revision
+                ),
+            });
         }
         let changed_run_in_claim = same_claim && !same_run;
         if changed_run_in_claim {
-            return Err(Error::Module(
-                "native history run is fenced to the current job claim".into(),
-            ));
+            return Err(Error::Module {
+                reason: refusal::STALE.into(),
+                sentence: "native history run is fenced to the current job claim".into(),
+            });
         }
         let stale_execution = same_run && execution_attempt < head.execution_attempt;
         if stale_execution {
-            return Err(Error::Module(
-                "native history execution attempt is stale".into(),
-            ));
+            return Err(Error::Module {
+                reason: refusal::STALE.into(),
+                sentence: format!(
+                    "execution attempt {execution_attempt} is older than the recorded attempt {}",
+                    head.execution_attempt
+                ),
+            });
         }
     }
     job.native_history = Some(NativeHistoryHead {
@@ -827,7 +947,10 @@ async fn checkpoint(
         payload,
     } = msg
     else {
-        return Err(Error::Module("expected checkpoint".into()));
+        return Err(Error::Module {
+            reason: refusal::INVALID_INPUT.into(),
+            sentence: "this handler takes only a Checkpoint message".into(),
+        });
     };
     sdk::validate_id("operation_id", &operation_id, MAX_JOB_ID)?;
     require_worker_text(&payload)?;
@@ -845,20 +968,36 @@ async fn checkpoint(
         if identical {
             return Ok(());
         }
-        return Err(Error::Module("report operation_id already exists".into()));
+        return Err(Error::Module {
+            reason: refusal::ALREADY_EXISTS.into(),
+            sentence: format!(
+                "report operation {operation_id} on job {} already names different work",
+                job.job_id
+            ),
+        });
     }
     let control_id = job
         .controls
         .iter()
         .any(|control| control.operation_id == operation_id);
     if control_id {
-        return Err(Error::Module(
-            "operation_id already used by a control".into(),
-        ));
+        return Err(Error::Module {
+            reason: refusal::ALREADY_EXISTS.into(),
+            sentence: format!(
+                "operation {operation_id} on job {} already names different work: a control",
+                job.job_id
+            ),
+        });
     }
     let at_capacity = job.reports.len() >= MAX_WORKER_REPORTS;
     if at_capacity {
-        return Err(Error::Module("worker report cap reached".into()));
+        return Err(Error::Module {
+            reason: refusal::CAPACITY.into(),
+            sentence: format!(
+                "job {} already has {MAX_WORKER_REPORTS} reports, its limit",
+                job.job_id
+            ),
+        });
     }
     job.reports.push(WorkerReport {
         operation_id,
@@ -883,10 +1022,13 @@ async fn claim(
     if job.status != JobStatus::Pending {
         // the consensus order already picked the winner; this op lost the
         // race and fails deterministically on every node.
-        return Err(Error::Module(format!(
-            "job not claimable (status {:?}): {job_id}",
-            job.status
-        )));
+        return Err(Error::Module {
+            reason: refusal::WRONG_STATE.into(),
+            sentence: format!(
+                "job not claimable (status {}): {job_id}",
+                job_status_key(&job.status)
+            ),
+        });
     }
     let worker = actor.clone();
     job.status = JobStatus::Processing;
@@ -912,24 +1054,32 @@ async fn comment(
     sdk::validate_id("comment_id", &comment_id, MAX_JOB_ID)?;
     let valid_text = !text.trim().is_empty() && text.len() <= MAX_JOB_COMMENT_TEXT_BYTES;
     if !valid_text {
-        return Err(Error::Module(
-            "job comments require non-empty text within the byte cap".into(),
-        ));
+        return Err(Error::Module {
+            reason: refusal::INVALID_INPUT.into(),
+            sentence: "job comments require non-empty text within the byte cap".into(),
+        });
     }
     let mut job = require(staged, &job_id).await?;
     let same_instance = job.created_at_revision == created_at_revision;
     if !same_instance {
-        return Err(Error::Module(
-            "job was replaced before the comment could be applied".into(),
-        ));
+        return Err(Error::Module {
+            reason: refusal::STALE.into(),
+            sentence: "job was replaced before the comment could be applied".into(),
+        });
     }
     let full = job.comments.len() >= MAX_JOB_COMMENTS;
     if full {
-        return Err(Error::Module("job discussion is full".into()));
+        return Err(Error::Module {
+            reason: refusal::CAPACITY.into(),
+            sentence: format!("job {job_id} already has {MAX_JOB_COMMENTS} comments, its limit"),
+        });
     }
     let duplicate = job.comments.iter().any(|comment| comment.id == comment_id);
     if duplicate {
-        return Err(Error::Module("job comment id already exists".into()));
+        return Err(Error::Module {
+            reason: refusal::ALREADY_EXISTS.into(),
+            sentence: format!("job {job_id} already has a comment {comment_id}"),
+        });
     }
     job.comments.push(JobComment {
         id: comment_id,
@@ -954,24 +1104,29 @@ async fn finalize(
     // result singularity: a terminal job is not `Processing`, so this guard
     // rejects any second finalize.
     if job.status != JobStatus::Processing {
-        return Err(Error::Module(format!(
-            "job not in processing (status {:?}): {job_id}",
-            job.status
-        )));
+        return Err(Error::Module {
+            reason: refusal::WRONG_STATE.into(),
+            sentence: format!(
+                "job not in processing (status {}): {job_id}",
+                job_status_key(&job.status)
+            ),
+        });
     }
     let is_claimant = job
         .claim
         .as_ref()
         .is_some_and(|claim| controls(&claim.worker, actor, origin));
     if !is_claimant {
-        return Err(Error::Module(format!(
-            "only the current claimant may finalize: {job_id}"
-        )));
+        return Err(Error::Module {
+            reason: refusal::UNAUTHORIZED.into(),
+            sentence: format!("only the current claimant may finalize: {job_id}"),
+        });
     }
     if payload.len() > MAX_PAYLOAD {
-        return Err(Error::Module(format!(
-            "payload exceeds {MAX_PAYLOAD} bytes"
-        )));
+        return Err(Error::Module {
+            reason: refusal::CAPACITY.into(),
+            sentence: format!("payload exceeds {MAX_PAYLOAD} bytes"),
+        });
     }
     job.status = if ok {
         JobStatus::Done
@@ -992,19 +1147,23 @@ async fn release(
 ) -> Result<(), Error> {
     let mut job = require(staged, &job_id).await?;
     if job.status != JobStatus::Processing {
-        return Err(Error::Module(format!(
-            "job not in processing (status {:?}): {job_id}",
-            job.status
-        )));
+        return Err(Error::Module {
+            reason: refusal::WRONG_STATE.into(),
+            sentence: format!(
+                "job not in processing (status {}): {job_id}",
+                job_status_key(&job.status)
+            ),
+        });
     }
     let is_claimant = job
         .claim
         .as_ref()
         .is_some_and(|claim| controls(&claim.worker, actor, origin));
     if !is_claimant {
-        return Err(Error::Module(format!(
-            "only the current claimant may release: {job_id}"
-        )));
+        return Err(Error::Module {
+            reason: refusal::UNAUTHORIZED.into(),
+            sentence: format!("only the current claimant may release: {job_id}"),
+        });
     }
     job.status = JobStatus::Pending;
     job.claim = None; // attempt count kept
@@ -1018,20 +1177,26 @@ async fn reclaim(staged: &mut StagedStore, job_id: String, height: u64) -> Resul
     // -- a deterministic deadline of heights, identical on every node.
     let mut job = require(staged, &job_id).await?;
     if job.status != JobStatus::Processing {
-        return Err(Error::Module(format!(
-            "reclaim only applies to processing jobs (status {:?}): {job_id}",
-            job.status
-        )));
+        return Err(Error::Module {
+            reason: refusal::WRONG_STATE.into(),
+            sentence: format!(
+                "reclaim only applies to processing jobs (status {}): {job_id}",
+                job_status_key(&job.status)
+            ),
+        });
     }
-    let claim = job
-        .claim
-        .as_ref()
-        .ok_or_else(|| Error::Module(format!("processing job missing claim: {job_id}")))?;
+    let claim = job.claim.as_ref().ok_or_else(|| Error::Module {
+        reason: refusal::CORRUPT.into(),
+        sentence: format!("processing job missing claim: {job_id}"),
+    })?;
     let deadline = claim.claimed_at_height.saturating_add(claim.lease_views);
     if height <= deadline {
-        return Err(Error::Module(format!(
-            "lease not expired (height {height} <= deadline {deadline}): {job_id}"
-        )));
+        return Err(Error::Module {
+            reason: refusal::NOT_YET.into(),
+            sentence: format!(
+                "the lease on job {job_id} runs through height {deadline} (now {height})"
+            ),
+        });
     }
     if job.attempt >= MAX_ATTEMPTS {
         // give up: fail the job. the claim is retained for the record, the
@@ -1056,10 +1221,13 @@ async fn cancel(staged: &mut StagedStore, job_id: String, height: u64) -> Result
     let mut job = require(staged, &job_id).await?;
     // once claimed, the worker holds it until finalize/release/lease expiry.
     if job.status != JobStatus::Pending {
-        return Err(Error::Module(format!(
-            "cancel only applies to pending jobs (status {:?}): {job_id}",
-            job.status
-        )));
+        return Err(Error::Module {
+            reason: refusal::WRONG_STATE.into(),
+            sentence: format!(
+                "cancel only applies to pending jobs (status {}): {job_id}",
+                job_status_key(&job.status)
+            ),
+        });
     }
     job.status = JobStatus::Cancelled;
     job.updated_at_height = height;
@@ -1071,10 +1239,13 @@ async fn cancel(staged: &mut StagedStore, job_id: String, height: u64) -> Result
 async fn prune(staged: &mut StagedStore, job_id: String) -> Result<(), Error> {
     let job = require(staged, &job_id).await?;
     if !job.status.is_terminal() {
-        return Err(Error::Module(format!(
-            "prune only applies to terminal jobs (status {:?}): {job_id}",
-            job.status
-        )));
+        return Err(Error::Module {
+            reason: refusal::WRONG_STATE.into(),
+            sentence: format!(
+                "prune only applies to terminal jobs (status {}): {job_id}",
+                job_status_key(&job.status)
+            ),
+        });
     }
     let count = live_count(staged).await?;
     staged.delete(record_key(&job_id));
@@ -1192,14 +1363,20 @@ async fn get_worker(staged: &StagedStore, conversation_id: String) -> Result<Job
     else {
         return Ok(JobsReply::Worker(None));
     };
-    let history: Conversation = sdk::wire::decode(&bytes).map_err(Error::Module)?;
+    let history: Conversation = sdk::wire::decode(&bytes).map_err(|sentence| Error::Module {
+        reason: refusal::CORRUPT.into(),
+        sentence,
+    })?;
     let mut executions = Vec::with_capacity(history.executions.len());
     for (job_id, revision) in history.executions {
         let Some(bytes) = staged
             .get_committed(&archive_key(&job_id, revision))
             .await?
         else {
-            return Err(Error::Module("retained execution missing".into()));
+            return Err(Error::Module {
+                reason: refusal::CORRUPT.into(),
+                sentence: format!("execution {job_id}/{revision} is listed but has no record"),
+            });
         };
         executions.push(decode_job(&bytes)?);
     }
@@ -1214,7 +1391,10 @@ async fn get_controls(staged: &StagedStore, job_id: &str) -> Result<JobsReply, E
         return Ok(JobsReply::Controls(Vec::new()));
     };
     let Some(bytes) = staged.get_committed(&key).await? else {
-        return Err(Error::Module("retained execution missing".into()));
+        return Err(Error::Module {
+            reason: refusal::CORRUPT.into(),
+            sentence: format!("job {job_id} points at a retained execution with no record"),
+        });
     };
     Ok(JobsReply::Controls(decode_job(&bytes)?.controls))
 }

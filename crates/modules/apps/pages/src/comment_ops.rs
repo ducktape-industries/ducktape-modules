@@ -1,7 +1,8 @@
 use super::{
     Comment, MAX_COMMENT_ID_BYTES, MAX_COMMENT_TARGET_BYTES, MAX_COMMENT_TEXT_BYTES,
     MAX_COMMENT_WORK_PER_TARGET, MAX_COMMENTS_PER_THREAD, MAX_THREAD_ID_BYTES,
-    MAX_THREADS_PER_TARGET, PageError, PageMsg, Pages, Party, Thread, ThreadView, id_is_index_safe,
+    MAX_THREAD_VIEW_COMMENTS, MAX_THREADS_PER_TARGET, PageError, PageMsg, Pages, Party, Thread,
+    ThreadView, id_is_index_safe,
 };
 use crate::text_ranges::{TextEdit, rebase_anchor, valid_range};
 
@@ -95,6 +96,14 @@ impl Pages {
     /// a thread plus its LIVE (non-tombstoned) comments in order. `None` when
     /// the thread is absent; a listed comment missing from the store is
     /// corruption, surfaced loudly.
+    ///
+    /// Only the thread's first [`MAX_THREAD_VIEW_COMMENTS`] ids are READ: a
+    /// thread holds up to [`MAX_COMMENTS_PER_THREAD`] of them, and answering
+    /// one query with thousands of record reads makes the cost of the query
+    /// the size of the thread rather than the size of the reply. The
+    /// truncation is visible to the caller without a wire change — `thread`
+    /// still carries every id, so `comment_ids.len()` against `comments.len()`
+    /// says whether anything was left behind.
     pub(super) async fn thread_view(
         &self,
         thread_id: &str,
@@ -104,7 +113,7 @@ impl Pages {
             None => return Ok(None),
         };
         let mut comments = Vec::new();
-        for cid in &thread.comment_ids {
+        for cid in thread.comment_ids.iter().take(MAX_THREAD_VIEW_COMMENTS) {
             let c = self.load_comment(cid).await?.ok_or(PageError::Corrupt)?;
             if !c.deleted {
                 comments.push(c);
@@ -201,12 +210,15 @@ impl Pages {
                 }
                 let author = actor.clone();
                 if self.load_comment(&comment_id).await?.is_some() {
-                    return Err(PageError::DuplicateComment);
+                    return Err(PageError::DuplicateComment(comment_id.clone()));
                 }
                 match self.load_thread(&thread_id).await? {
                     Some(mut thread) => {
                         if thread.target != target {
-                            return Err(PageError::TargetMismatch);
+                            return Err(PageError::TargetMismatch {
+                                thread: thread_id.clone(),
+                                target: thread.target,
+                            });
                         }
                         if thread.comment_ids.len() >= MAX_COMMENTS_PER_THREAD {
                             return Err(PageError::TooManyComments);
@@ -239,7 +251,7 @@ impl Pages {
                             .load_block(&target)
                             .await
                             .map_err(|_| PageError::Corrupt)?
-                            .ok_or(PageError::BlockNotFound)?;
+                            .ok_or_else(|| PageError::BlockNotFound(target.clone()))?;
                         if let Some(anchor) = &anchor
                             && !valid_range(&block.text, anchor.start, anchor.end)
                         {
@@ -292,7 +304,7 @@ impl Pages {
                 let mut thread = self
                     .load_thread(&thread_id)
                     .await?
-                    .ok_or(PageError::ThreadNotFound)?;
+                    .ok_or_else(|| PageError::ThreadNotFound(thread_id.clone()))?;
                 if target.len() > MAX_COMMENT_TARGET_BYTES || !id_is_index_safe(&target) {
                     return Err(PageError::IdTooLarge);
                 }
@@ -300,7 +312,7 @@ impl Pages {
                     .load_block(&target)
                     .await
                     .map_err(|_| PageError::Corrupt)?
-                    .ok_or(PageError::BlockNotFound)?;
+                    .ok_or_else(|| PageError::BlockNotFound(target.clone()))?;
                 if let Some(anchor) = &anchor
                     && !valid_range(&block.text, anchor.start, anchor.end)
                 {
@@ -310,6 +322,20 @@ impl Pages {
                     let mut next = self.load_target_index(&target).await?;
                     if !next.contains(&thread_id) && next.len() >= MAX_THREADS_PER_TARGET {
                         return Err(PageError::TooManyThreads);
+                    }
+                    // a move carries the whole thread — its comments included —
+                    // onto the destination block, so it is charged the same
+                    // aggregate budget `AddComment` charges one reply. without
+                    // this, threads capped individually at their old targets
+                    // pile onto one block until removing it exceeds the
+                    // subtree-removal budget and the block can never be deleted.
+                    if !next.contains(&thread_id)
+                        && self.comment_work_for_target(&target).await?
+                            + thread.comment_ids.len()
+                            + 1
+                            > MAX_COMMENT_WORK_PER_TARGET
+                    {
+                        return Err(PageError::TooMuchCommentWork);
                     }
                     let mut previous = self.load_target_index(&thread.target).await?;
                     previous.retain(|id| id != &thread_id);
@@ -335,9 +361,9 @@ impl Pages {
                 let mut c = self
                     .load_comment(&comment_id)
                     .await?
-                    .ok_or(PageError::CommentNotFound)?;
+                    .ok_or_else(|| PageError::CommentNotFound(comment_id.clone()))?;
                 if c.deleted {
-                    return Err(PageError::CommentNotFound);
+                    return Err(PageError::CommentNotFound(comment_id.clone()));
                 }
                 c.text = text;
                 c.mentions = mentions;
@@ -348,7 +374,7 @@ impl Pages {
                 let mut c = self
                     .load_comment(&comment_id)
                     .await?
-                    .ok_or(PageError::CommentNotFound)?;
+                    .ok_or_else(|| PageError::CommentNotFound(comment_id.clone()))?;
                 if c.deleted {
                     return Ok(()); // idempotent
                 }
@@ -391,7 +417,7 @@ impl Pages {
                 let mut thread = self
                     .load_thread(&thread_id)
                     .await?
-                    .ok_or(PageError::ThreadNotFound)?;
+                    .ok_or_else(|| PageError::ThreadNotFound(thread_id.clone()))?;
                 thread.resolved = resolved;
                 thread.resolved_by = if resolved { Some(author) } else { None };
                 self.store_thread(&thread)

@@ -123,6 +123,22 @@ const PAGE_INDEX_KEY: &str = "\u{0}page-index";
 /// below the wasm host's 4096 store-read ceiling.
 const MAX_MOVE_SUBTREE_READS: usize = 3_000;
 
+/// How many of a thread's comment ids one [`PageQuery::CommentThread`] reads.
+/// The same page size [`MAX_PAGE_QUERY_LIMIT`] puts on a block walk, for the
+/// same reason: the query answers with a page of a thread, not with however
+/// many comments the thread has accumulated.
+const MAX_THREAD_VIEW_COMMENTS: usize = MAX_PAGE_QUERY_LIMIT as usize;
+
+/// the one structural [`PageError`] → refusal mapping: the variant's class
+/// ([`PageError::class`]) is the token, whichever call site raised it, and its
+/// display text is the sentence.
+fn page_refusal(error: PageError) -> Error {
+    Error::Module {
+        reason: error.class().into(),
+        sentence: error.to_string(),
+    }
+}
+
 /// a block-tree pages module over a host-injected authenticated store.
 pub struct Pages {
     id: ModuleId,

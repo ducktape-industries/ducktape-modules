@@ -58,6 +58,8 @@ tasks = { path = "../tasks", default-features = false }
 # default-features = false drops files' native `Files`/duckfs-disk (std::fs) so
 # the `runs` guest graph stays pure, same as chat/tasks/pages above.
 files = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "files", default-features = false }
+files-wire = { workspace = true }
+duck-address = { workspace = true }
 base64 = { workspace = true }
 # the pages wire types (paged PageQuery::GetPage / PageReply / Block) the
 # injector queries for `duck://page/<id>` refs. a normal prod-safe dep — pages pulls
@@ -74,6 +76,7 @@ async-trait = { workspace = true }
 index_guest = { workspace = true }
 
 [dev-dependencies]
+wasm-host = { workspace = true }
 files = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "files", features = ["native"] }
 tempfile = { workspace = true }
 syn = { version = "2", features = ["full"] }
@@ -87,5 +90,17 @@ commonware-runtime = { workspace = true }
 # forge is a DEV dependency ONLY — the sink emits a local Serialize mirror of
 # ForgeMsg::OpenPr (production), and a conformance test pins that mirror against
 # forge::decode_msg. keeping forge dev-only keeps vendored libgit2/git2 out of
-# runs' production build + clippy graph.
-forge = { workspace = true }
+# runs' production build + clippy graph. The NATIVE module (it re-exports its
+# wire), because the tests drive a real `forge::Forge`.
+forge = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "forge" }
+# the other NATIVE modules a programmable-run test composes. The same names in
+# [dependencies] are the WIRE crates, so these carry a `-module` suffix and the
+# test module aliases them back (`use dispatch_module as dispatch;`).
+agent-module = { path = "../agent", package = "agent" }
+attribution-module = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "attribution" }
+capability-module = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "capability" }
+dispatch-module = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "dispatch" }
+governance-module = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "governance" }
+identity-module = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "identity" }
+modules-module = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "modules" }
+valset-module = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "valset" }

@@ -1,5 +1,6 @@
 //! Effectful adapter for the pure conversation transition core.
 use super::*;
+use sdk::refusal;
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -67,7 +68,7 @@ impl RunsModule {
         let job_id = match &binding {
             Some(binding) => binding.job_id.clone(),
             None => {
-                let Some(entry) = self.pending_entry(&dispatch_id_for(run_id)) else {
+                let Some(entry) = self.pending_entry(&dispatch_id_for(run_id)).await? else {
                     return Ok(None);
                 };
                 let Some(job_id) = &entry.job_id else {
@@ -78,26 +79,34 @@ impl RunsModule {
                     .await?
                     .is_some();
                 if native_run {
-                    return Err(Error::Module(
-                        "native worker execution binding is missing".into(),
-                    ));
+                    return Err(Error::Module {
+                        reason: refusal::CORRUPT.into(),
+                        sentence: format!("native worker run {run_id} has no execution binding"),
+                    });
                 }
                 job_id.clone()
             }
         };
-        let jobs = self
-            .jobs
-            .as_ref()
-            .ok_or_else(|| Error::Module("worker run has no Jobs module".into()))?;
+        let jobs = self.jobs.as_ref().ok_or_else(|| Error::Module {
+            reason: refusal::UNSUPPORTED.into(),
+            sentence: "worker runs need a Jobs module, and none is configured".into(),
+        })?;
         let bytes = ctx
             .query(
                 jobs,
                 &tasks::encode_job_query(&tasks::JobsQuery::Get { job_id }),
             )
             .await?;
-        let tasks::JobsReply::Job(job) = tasks::decode_job_reply(&bytes).map_err(Error::Module)?
+        let tasks::JobsReply::Job(job) =
+            tasks::decode_job_reply(&bytes).map_err(|sentence| Error::Module {
+                reason: refusal::UNEXPECTED_REPLY.into(),
+                sentence,
+            })?
         else {
-            return Err(Error::Module("unexpected worker job reply".into()));
+            return Err(Error::Module {
+                reason: refusal::UNEXPECTED_REPLY.into(),
+                sentence: "Jobs answered a job lookup with something other than a job".into(),
+            });
         };
         let Some(binding) = binding else {
             return Ok(job);
@@ -116,9 +125,15 @@ impl RunsModule {
             )
             .await?;
         let tasks::JobsReply::Worker(history) =
-            tasks::decode_job_reply(&bytes).map_err(Error::Module)?
+            tasks::decode_job_reply(&bytes).map_err(|sentence| Error::Module {
+                reason: refusal::UNEXPECTED_REPLY.into(),
+                sentence,
+            })?
         else {
-            return Err(Error::Module("unexpected retained worker reply".into()));
+            return Err(Error::Module {
+                reason: refusal::UNEXPECTED_REPLY.into(),
+                sentence: "Jobs answered a worker lookup with something other than a worker".into(),
+            });
         };
         Ok(history
             .filter(|history| history.conversation_id == binding.conversation_id)
@@ -152,16 +167,20 @@ impl RunsModule {
         run_id: &str,
         attempt: u32,
     ) -> Result<(), Error> {
-        let session = self
-            .session(run_id)
-            .ok_or_else(|| Error::Module("worker boundary requires a live session".into()))?;
+        let session = self.session(run_id).await?.ok_or_else(|| Error::Module {
+            reason: refusal::WRONG_STATE.into(),
+            sentence: format!("run {run_id} has no live session"),
+        })?;
         let signer = ctx.env().origin == Origin::External(session.session_key.clone())
             || ctx.env().origin == Origin::External(session.lease.holder.clone());
         let current = signer && session.lease.attempt == attempt;
         if !current {
-            return Err(Error::Module("worker boundary attempt is stale".into()));
+            return Err(Error::Module {
+                reason: refusal::STALE.into(),
+                sentence: format!("attempt {attempt} of run {run_id} is not held by this signer"),
+            });
         }
-        self.session_holds_lease(ctx, run_id, session).await
+        self.session_holds_lease(ctx, run_id, &session).await
     }
     async fn authorize_worker_boundary(
         &self,
@@ -174,17 +193,27 @@ impl RunsModule {
         let job = self
             .bound_worker_job(ctx, run_id)
             .await?
-            .ok_or_else(|| Error::Module("worker job is unavailable".into()))?;
+            .ok_or_else(|| Error::Module {
+                reason: refusal::NOT_FOUND.into(),
+                sentence: format!("run {run_id} is bound to no available job"),
+            })?;
         let entry = self
             .pending_entry(&dispatch_id_for(run_id))
-            .ok_or_else(|| Error::Module("worker run is unavailable".into()))?;
+            .await?
+            .ok_or_else(|| Error::Module {
+                reason: refusal::WRONG_STATE.into(),
+                sentence: format!("run {run_id} is not in flight"),
+            })?;
         let owned = job.status == tasks::JobStatus::Processing
             && job.claim.as_ref().is_some_and(|claim| {
                 claim.worker == tasks::Party::Module(self.id.clone())
                     && claim.claimed_at_height == entry.job_claim_height
             });
         if !owned {
-            return Err(Error::Module("worker job claim has moved".into()));
+            return Err(Error::Module {
+                reason: refusal::STALE.into(),
+                sentence: format!("run {run_id} no longer holds its job's claim"),
+            });
         }
         Ok(job)
     }
@@ -221,9 +250,13 @@ impl RunsModule {
         let valid_text =
             !payload.trim().is_empty() && payload.len() <= tasks::MAX_WORKER_TEXT_BYTES;
         if !valid_text {
-            return Err(Error::Module(
-                "worker report requires bounded nonempty text".into(),
-            ));
+            return Err(Error::Module {
+                reason: refusal::INVALID_INPUT.into(),
+                sentence: format!(
+                    "a worker report needs non-empty text of at most {} bytes",
+                    tasks::MAX_WORKER_TEXT_BYTES
+                ),
+            });
         }
         let job = self
             .authorize_worker_boundary(ctx, &run_id, attempt)
@@ -233,16 +266,21 @@ impl RunsModule {
             .await?;
         let native_execution = binding.is_some_and(|binding| binding.matches(&job));
         if !native_execution {
-            return Err(Error::Module(
-                "semantic worker reports require a native Job execution".into(),
-            ));
+            return Err(Error::Module {
+                reason: refusal::INVALID_INPUT.into(),
+                sentence: "semantic worker reports require a native Job execution".into(),
+            });
         }
         let entry = self
             .pending_entry(&dispatch_id_for(&run_id))
+            .await?
             .expect("authorized worker is in flight");
         let generation = self.active_generation(ctx, entry.account).await?;
         if generation != entry.generation {
-            return Err(Error::Module("run program authority changed".into()));
+            return Err(Error::Module {
+                reason: refusal::STALE.into(),
+                sentence: format!("the program behind run {run_id} changed after the run began"),
+            });
         }
         let message = tasks::JobsMsg::Checkpoint {
             job_id: job.job_id,
@@ -262,17 +300,21 @@ impl RunsModule {
             if previous == digest {
                 return Ok(());
             }
-            return Err(Error::Module(
-                "worker report operation id conflicts with its receipt".into(),
-            ));
+            return Err(Error::Module {
+                reason: refusal::ALREADY_EXISTS.into(),
+                sentence: format!(
+                    "worker report operation {operation_id} already names different work"
+                ),
+            });
         }
         let session = self
             .session(&run_id)
+            .await?
             .expect("authorized worker has a session");
-        let next_session = crate::sessions::reserve_session_action(session)?;
+        let next_session = crate::sessions::reserve_session_action(&session)?;
         self.receipts
             .stage(receipt_key, sdk::wire::encode(&digest))?;
-        self.pending_sessions.insert(run_id, Some(next_session));
+        self.stage_session(next_session)?;
         ctx.emit_msg(Msg {
             target: self.jobs.clone().expect("authorized worker has Jobs"),
             payload: bytes,
@@ -302,9 +344,10 @@ impl RunsModule {
             if duplicate {
                 return Ok(());
             }
-            return Err(Error::Module(
-                "worker cancellation settlement conflicts with its receipt".into(),
-            ));
+            return Err(Error::Module {
+                reason: refusal::ALREADY_EXISTS.into(),
+                sentence: format!("the cancellation of run {run_id} already names different work"),
+            });
         }
         let job = self
             .authorize_worker_boundary(ctx, &run_id, attempt)
@@ -412,13 +455,15 @@ impl RunsModule {
             });
         let worker_source = matches!(state.source, ConversationSource::Job { .. });
         if !worker_source {
-            return Err(Error::Module(
-                "worker history belongs to another source kind".into(),
-            ));
+            return Err(Error::Module {
+                reason: refusal::INVALID_INPUT.into(),
+                sentence: format!("conversation {id} is not a job worker conversation"),
+            });
         }
         if let Some(turn) = &state.active_turn {
             let already_dispatched = self
                 .pending_entry(&dispatch_id_for(&turn.run_id))
+                .await?
                 .is_some_and(|pending| pending.job_id.as_ref() == Some(&job.job_id));
             if already_dispatched {
                 return Ok(None);
@@ -450,7 +495,13 @@ impl RunsModule {
         let sequence = state
             .admitted_cursor
             .checked_add(1)
-            .ok_or_else(|| Error::Module("worker input cursor exhausted".into()))?;
+            .ok_or_else(|| Error::Module {
+                reason: refusal::EXHAUSTED.into(),
+                sentence: format!(
+                    "conversation {} has no input sequence numbers left",
+                    state.conversation_id
+                ),
+            })?;
         let event = ConversationEvent {
             sequence,
             operation_id: format!("job/{}", dispatch_id_for(&job.job_id)),
@@ -513,7 +564,10 @@ impl RunsModule {
                 )
                 .await?;
             let chat::ChatReply::Message(Some(message)) =
-                chat::decode_reply(&bytes).map_err(Error::Module)?
+                chat::decode_reply(&bytes).map_err(|sentence| Error::Module {
+                    reason: refusal::UNEXPECTED_REPLY.into(),
+                    sentence,
+                })?
             else {
                 return Ok(());
             };
@@ -529,26 +583,35 @@ impl RunsModule {
                 == attribution::Reason::Defined(pages::MANAGED_RECORD_COMMENT_REASON.into());
         if managed_discussion {
             let snapshot: pages::ManagedDiscussionSnapshot = serde_json::from_slice(&change.detail)
-                .map_err(|error| {
-                    Error::Module(format!("invalid managed discussion snapshot: {error}"))
+                .map_err(|error| Error::Module {
+                    reason: refusal::UNEXPECTED_REPLY.into(),
+                    sentence: format!("invalid managed discussion snapshot: {error}"),
                 })?;
             let exact_source = snapshot.comment.id == change.source.object
                 && snapshot.thread.id == snapshot.comment.thread_id;
             if !exact_source {
-                return Err(Error::Module(
-                    "managed discussion snapshot does not match its source".into(),
-                ));
+                return Err(Error::Module {
+                    reason: refusal::UNEXPECTED_REPLY.into(),
+                    sentence: "managed discussion snapshot does not match its source".into(),
+                });
             }
-            content["source"] =
-                serde_json::to_value(snapshot).map_err(|error| Error::Module(error.to_string()))?;
+            content["source"] = serde_json::to_value(snapshot).map_err(|error| Error::Module {
+                reason: refusal::CORRUPT.into(),
+                sentence: error.to_string(),
+            })?;
         }
         let is_job_event =
             self.jobs.as_ref() == Some(&change.source.module) && change.source.kind == "job_event";
         if is_job_event {
-            let snapshot: tasks::JobEventDetail = sdk::wire::decode(&change.detail)
-                .map_err(|error| Error::Module(format!("invalid immutable job event: {error}")))?;
-            content["source"] =
-                serde_json::to_value(snapshot).map_err(|error| Error::Module(error.to_string()))?;
+            let snapshot: tasks::JobEventDetail =
+                sdk::wire::decode(&change.detail).map_err(|error| Error::Module {
+                    reason: refusal::UNEXPECTED_REPLY.into(),
+                    sentence: format!("invalid immutable job event: {error}"),
+                })?;
+            content["source"] = serde_json::to_value(snapshot).map_err(|error| Error::Module {
+                reason: refusal::CORRUPT.into(),
+                sentence: error.to_string(),
+            })?;
         }
         let is_job =
             self.jobs.as_ref() == Some(&change.source.module) && change.source.kind == "job";
@@ -562,12 +625,23 @@ impl RunsModule {
                 )
                 .await?;
             let tasks::JobsReply::Job(job) =
-                tasks::decode_job_reply(&bytes).map_err(Error::Module)?
+                tasks::decode_job_reply(&bytes).map_err(|sentence| Error::Module {
+                    reason: refusal::UNEXPECTED_REPLY.into(),
+                    sentence,
+                })?
             else {
-                return Err(Error::Module("unexpected job attribution source".into()));
+                return Err(Error::Module {
+                    reason: refusal::UNEXPECTED_REPLY.into(),
+                    sentence: format!(
+                        "Jobs answered the lookup for attributed job {} with something other than a job",
+                        change.source.object
+                    ),
+                });
             };
-            content["source"] =
-                serde_json::to_value(job).map_err(|error| Error::Module(error.to_string()))?;
+            content["source"] = serde_json::to_value(job).map_err(|error| Error::Module {
+                reason: refusal::CORRUPT.into(),
+                sentence: error.to_string(),
+            })?;
         }
         self.admit_conversation_input(
             ctx,
@@ -617,9 +691,10 @@ impl RunsModule {
             ConversationTurnPhase::AwaitingProgram => Ok(()),
             ConversationTurnPhase::Running => Ok(()),
             ConversationTurnPhase::Draining => self.drain_conversation(ctx, &state).await,
-            ConversationTurnPhase::Settled => Err(Error::Module(
-                "settled conversation still owns a turn".into(),
-            )),
+            ConversationTurnPhase::Settled => Err(Error::Module {
+                reason: refusal::CORRUPT.into(),
+                sentence: "settled conversation still owns a turn".into(),
+            }),
         }
     }
     async fn request_waiting_job(
@@ -640,9 +715,10 @@ impl RunsModule {
         let item = self
             .staged_next_action_item
             .unwrap_or(self.next_action_item);
-        let next = item
-            .checked_add(1)
-            .ok_or_else(|| Error::Module("worker request counter exhausted".into()))?;
+        let next = item.checked_add(1).ok_or_else(|| Error::Module {
+            reason: refusal::EXHAUSTED.into(),
+            sentence: "no action item numbers are left for a worker request".into(),
+        })?;
         ctx.emit_msg(Msg {
             target: self.attribution.clone(),
             payload: attribution::encode_msg(&attribution::AttributionMsg::Attribute {
@@ -681,9 +757,10 @@ impl RunsModule {
         let item = self
             .staged_next_action_item
             .unwrap_or(self.next_action_item);
-        let next = item
-            .checked_add(1)
-            .ok_or_else(|| Error::Module("conversation request counter exhausted".into()))?;
+        let next = item.checked_add(1).ok_or_else(|| Error::Module {
+            reason: refusal::EXHAUSTED.into(),
+            sentence: "no action item numbers are left for a conversation request".into(),
+        })?;
         self.apply_conversation(ctx, state, Input::Requested)
             .await?;
         self.staged_next_action_item = Some(next);
@@ -720,9 +797,10 @@ impl RunsModule {
         require_coordinating_source(&state)?;
         let authorized = ctx.env().origin == Origin::Program(state.account);
         if !authorized {
-            return Err(Error::Module(
-                "conversation turn requires its program account".into(),
-            ));
+            return Err(Error::Module {
+                reason: refusal::UNAUTHORIZED.into(),
+                sentence: "conversation turn requires its program account".into(),
+            });
         }
         let Some(turn) = &state.active_turn else {
             return Ok(());
@@ -731,7 +809,13 @@ impl RunsModule {
             return Ok(());
         }
         if number != turn.turn {
-            return Err(Error::Module("conversation turn mismatch".into()));
+            return Err(Error::Module {
+                reason: refusal::STALE.into(),
+                sentence: format!(
+                    "turn {number} is not the current turn {} of conversation {id}",
+                    turn.turn
+                ),
+            });
         }
         let dispatched = matches!(
             turn.phase,
@@ -741,20 +825,41 @@ impl RunsModule {
             return Ok(());
         }
         if state.status != ConversationStatus::Active {
-            return Err(Error::Module("conversation intake is paused".into()));
+            return Err(Error::Module {
+                reason: refusal::WRONG_STATE.into(),
+                sentence: format!("conversation {id} is paused and takes no new turns"),
+            });
         }
         let agent = self
             .active_agent(ctx, &state.agent_id)
             .await
-            .map_err(Error::Module)?
-            .ok_or_else(|| Error::Module("conversation model is not active".into()))?;
+            .map_err(|sentence| Error::Module {
+                reason: refusal::CORRUPT.into(),
+                sentence,
+            })?
+            .ok_or_else(|| Error::Module {
+                reason: refusal::WRONG_STATE.into(),
+                sentence: format!(
+                    "model {} of conversation {id} is not active",
+                    state.agent_id
+                ),
+            })?;
         if agent.account != state.account {
-            return Err(Error::Module("conversation account binding changed".into()));
+            return Err(Error::Module {
+                reason: refusal::STALE.into(),
+                sentence: format!(
+                    "model {} no longer runs as the account of conversation {id}",
+                    state.agent_id
+                ),
+            });
         }
         let portable = self
             .portable_inputs(ctx, &agent, &[])
             .await
-            .map_err(Error::Module)?;
+            .map_err(|sentence| Error::Module {
+                reason: refusal::UNEXPECTED_REPLY.into(),
+                sentence,
+            })?;
         let sink = portable.sink.clone();
         let generation = self.active_generation(ctx, agent.account).await?;
         let events = self
@@ -774,9 +879,10 @@ impl RunsModule {
         let payload =
             envelope::render_resident_payload(&agent, &turn.run_id, &state, &events, portable);
         if payload.len() > MAX_PAYLOAD_BYTES {
-            return Err(Error::Module(
-                "conversation event exceeds dispatch payload cap".into(),
-            ));
+            return Err(Error::Module {
+                reason: refusal::CAPACITY.into(),
+                sentence: "conversation event exceeds dispatch payload cap".into(),
+            });
         }
         let prepared = PreparedDispatch {
             account: agent.account,
@@ -799,7 +905,8 @@ impl RunsModule {
             Origin::Program(state.account),
             prepared,
             BTreeMap::new(),
-        );
+        )
+        .await?;
         Ok(())
     }
     pub(crate) async fn checkpoint_conversation(
@@ -814,16 +921,24 @@ impl RunsModule {
         // use a durable operation receipt as authority after ownership moves.
         let session = self
             .session(&checkpoint.run_id)
-            .ok_or_else(|| Error::Module("conversation checkpoint has no live session".into()))?;
+            .await?
+            .ok_or_else(|| Error::Module {
+                reason: refusal::WRONG_STATE.into(),
+                sentence: format!("run {} has no live session", checkpoint.run_id),
+            })?;
         let signer = ctx.env().origin == Origin::External(session.session_key.clone())
             || ctx.env().origin == Origin::External(session.lease.holder.clone());
         let current = signer && session.lease.attempt == checkpoint.attempt;
         if !current {
-            return Err(Error::Module(
-                "conversation checkpoint attempt is stale".into(),
-            ));
+            return Err(Error::Module {
+                reason: refusal::STALE.into(),
+                sentence: format!(
+                    "attempt {} of run {} is not held by this signer",
+                    checkpoint.attempt, checkpoint.run_id
+                ),
+            });
         }
-        self.session_holds_lease(ctx, &checkpoint.run_id, session)
+        self.session_holds_lease(ctx, &checkpoint.run_id, &session)
             .await?;
         if self
             .operation_seen(&id, &checkpoint.operation_id, &payload)
@@ -834,12 +949,15 @@ impl RunsModule {
         let valid_snapshot =
             !checkpoint.history.snapshot.is_empty() && checkpoint.history.snapshot.len() <= 256;
         if !valid_snapshot {
-            return Err(Error::Module("invalid native history snapshot".into()));
+            return Err(Error::Module {
+                reason: refusal::INVALID_INPUT.into(),
+                sentence: "a native history snapshot id is 1 to 256 bytes".into(),
+            });
         }
-        let files = self
-            .files
-            .as_ref()
-            .ok_or_else(|| Error::Module("native history requires Files".into()))?;
+        let files = self.files.as_ref().ok_or_else(|| Error::Module {
+            reason: refusal::UNSUPPORTED.into(),
+            sentence: "native history needs a Files module, and none is configured".into(),
+        })?;
         let bytes = ctx
             .query(
                 files,
@@ -850,14 +968,24 @@ impl RunsModule {
             )
             .await?;
         let files::FilesReply::Stat(Some(entry)) =
-            files::decode_reply(&bytes).map_err(Error::Module)?
+            files::decode_reply(&bytes).map_err(|sentence| Error::Module {
+                reason: refusal::UNEXPECTED_REPLY.into(),
+                sentence,
+            })?
         else {
-            return Err(Error::Module(
-                "native history file is not in the committed snapshot".into(),
-            ));
+            return Err(Error::Module {
+                reason: refusal::NOT_FOUND.into(),
+                sentence: "native history file is not in the committed snapshot".into(),
+            });
         };
         if entry.kind != files::EntryKindWire::File {
-            return Err(Error::Module("native history is not a file".into()));
+            return Err(Error::Module {
+                reason: refusal::INVALID_INPUT.into(),
+                sentence: format!(
+                    "native history {}/{} is not a file",
+                    state.history_prefix, state.session_path
+                ),
+            });
         }
         let files_id = files.clone();
         let turn = active_turn(&state)?;
@@ -920,14 +1048,16 @@ impl RunsModule {
         };
         let state = self.require_conversation(&id).await?;
         let Some(turn) = &state.active_turn else {
-            return Err(Error::Module(
-                "conversation action arrived after settlement".into(),
-            ));
+            return Err(Error::Module {
+                reason: refusal::STALE.into(),
+                sentence: format!("conversation {id} settled its turn before this action arrived"),
+            });
         };
         if turn.run_id != run {
-            return Err(Error::Module(
-                "conversation action belongs to a stale turn".into(),
-            ));
+            return Err(Error::Module {
+                reason: refusal::STALE.into(),
+                sentence: format!("run {run} is not the current turn of conversation {id}"),
+            });
         }
         // No wake is emitted by Action: model completion opens the drain.
         for command in step(&state, Input::Action(action))? {
@@ -936,8 +1066,9 @@ impl RunsModule {
                 Command::Turn(turn) => self.write_conversation_turn(&id, &turn)?,
                 Command::Event(event) => self.write_conversation_event(&id, &event)?,
                 Command::Wake => {
-                    let ctx = ctx.ok_or_else(|| {
-                        Error::Module("action transition unexpectedly requested a wake".into())
+                    let ctx = ctx.ok_or_else(|| Error::Module {
+                        reason: refusal::CORRUPT.into(),
+                        sentence: "action transition unexpectedly requested a wake".into(),
                     })?;
                     self.write_conversation_wake(ctx, &id).await?;
                 }
@@ -968,9 +1099,10 @@ impl RunsModule {
             .await?
             .is_some_and(|previous| previous != attempt);
         if conflicting {
-            return Err(Error::Module(
-                "conflicting conversation ending attempt".into(),
-            ));
+            return Err(Error::Module {
+                reason: refusal::STALE.into(),
+                sentence: format!("run {run} already ended under a different attempt"),
+            });
         }
         self.receipts
             .stage(ending_key, sdk::wire::encode(&attempt))?;
@@ -998,9 +1130,13 @@ impl RunsModule {
         // resumes the next deterministic chunk without replaying cleared receipts.
         for id in turn.actions.iter().skip(count as usize).take(8) {
             let Some(view) = self.action_view(ctx, id).await? else {
-                return Err(Error::Module(
-                    "conversation action receipt is missing".into(),
-                ));
+                return Err(Error::Module {
+                    reason: refusal::CORRUPT.into(),
+                    sentence: format!(
+                        "conversation {} has no receipt for action {id}",
+                        state.conversation_id
+                    ),
+                });
             };
             let terminal = matches!(
                 view.status,
@@ -1024,8 +1160,12 @@ impl RunsModule {
         let attempt = self
             .conversation_read::<Option<u32>>(&key("ending_attempt", &turn.run_id))
             .await?
-            .ok_or_else(|| {
-                Error::Module("draining conversation has no ending-attempt fence".into())
+            .ok_or_else(|| Error::Module {
+                reason: refusal::CORRUPT.into(),
+                sentence: format!(
+                    "conversation {} is draining, but run {} recorded no ending attempt",
+                    state.conversation_id, turn.run_id
+                ),
             })?;
         self.apply_conversation(ctx, &current, Input::Drained(attempt))
             .await?;
@@ -1051,10 +1191,11 @@ impl RunsModule {
         if expected.as_ref() == Some(&replacement) {
             return Ok(());
         }
-        let files = self
-            .files
-            .clone()
-            .ok_or_else(|| Error::Module("native history retention requires Files".into()))?;
+        let files = self.files.clone().ok_or_else(|| Error::Module {
+            reason: refusal::UNSUPPORTED.into(),
+            sentence: "retaining native history needs a Files module, and none is configured"
+                .into(),
+        })?;
         self.receipts
             .stage(reference_key, sdk::wire::encode(&replacement))?;
         ctx.emit_msg(Msg {
@@ -1074,21 +1215,32 @@ impl RunsModule {
         &self,
         limit: usize,
     ) -> Result<Vec<sdk::PendingItem>, Error> {
-        let queue: BTreeMap<u64, String> = self
-            .receipts
-            .committed(WAKE_QUEUE)
+        let queue: WakeQueue = self.committed_record(WAKE_QUEUE).await?.unwrap_or_default();
+        // Until the carry-over has drained the whole map, the committed view
+        // still holds whatever is left of it; serve it read-only after the
+        // linked queue so no wake is stranded in between. The carry-over takes
+        // the oldest items first, so what is left is the youngest — last is
+        // where the map itself would have served them.
+        let mut left_over = self
+            .legacy_wake_queue(View::Committed)
             .await?
-            .map(|bytes| sdk::wire::decode(&bytes).map_err(Error::Module))
-            .transpose()?
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .into_keys()
+            .take(limit);
+        let mut linked = queue.head;
+        let mut next = linked.or_else(|| left_over.next());
         let mut pending = Vec::new();
-        for (item, id) in queue.into_iter().take(limit) {
-            let bytes = self
-                .receipts
-                .committed(&format!("conversation/wake/{item}"))
+        while let Some(item) = next {
+            if pending.len() == limit {
+                break;
+            }
+            let wake: Wake = self
+                .committed_record(&wake_key(item))
                 .await?
-                .ok_or_else(|| Error::Module("conversation wake record missing".into()))?;
-            let wake: Wake = sdk::wire::decode(&bytes).map_err(Error::Module)?;
+                .ok_or_else(|| Error::Module {
+                    reason: refusal::CORRUPT.into(),
+                    sentence: format!("wake item {item} is queued but has no record"),
+                })?;
             let reference = sdk::ItemRef {
                 source: self.id.clone(),
                 item,
@@ -1097,13 +1249,24 @@ impl RunsModule {
                 item,
                 target: self.id.clone(),
                 payload: encode_msg(&RunsMsg::ReconcileConversation {
-                    conversation_id: id,
+                    conversation_id: wake.conversation_id,
                 }),
                 cause: sdk::Cause::Chain {
                     root: wake.cause.root_for_item(&reference),
                     hop: sdk::Hop::Delivery(reference),
                 },
             });
+            next = match linked {
+                Some(_) => {
+                    linked = self
+                        .committed_record::<WakeLink>(&wake_link_key(item))
+                        .await?
+                        .unwrap_or_default()
+                        .next;
+                    linked.or_else(|| left_over.next())
+                }
+                None => left_over.next(),
+            };
         }
         Ok(pending)
     }
@@ -1112,34 +1275,34 @@ impl RunsModule {
         ctx: &dyn Ctx,
         ack: &sdk::Ack,
     ) -> Result<bool, Error> {
-        let wake_key = format!("conversation/wake/{}", ack.item);
-        let Some(mut wake) = self.conversation_read::<Wake>(&wake_key).await? else {
+        let record_key = wake_key(ack.item);
+        let Some(mut wake) = self.conversation_read::<Wake>(&record_key).await? else {
             return Ok(false);
         };
         let authentic = ctx.env().origin == Origin::System && ack.target == self.id;
         if !authentic {
-            return Err(Error::Module(
-                "conversation acknowledgment requires host finalizer".into(),
-            ));
+            return Err(Error::Module {
+                reason: refusal::UNAUTHORIZED.into(),
+                sentence: "conversation acknowledgment requires host finalizer".into(),
+            });
         }
         let digest = Sha256::digest(sdk::wire::encode(&ack.outcome)).into();
         if let Some(previous) = wake.acknowledged {
             if previous == digest {
                 return Ok(true);
             }
-            return Err(Error::Module(
-                "conflicting conversation acknowledgment".into(),
-            ));
+            return Err(Error::Module {
+                reason: refusal::UNEXPECTED_REPLY.into(),
+                sentence: format!(
+                    "wake item {} was already acknowledged with a different outcome",
+                    ack.item
+                ),
+            });
         }
-        let mut queue: BTreeMap<u64, String> = self
-            .conversation_read(WAKE_QUEUE)
-            .await?
-            .unwrap_or_default();
-        queue.remove(&ack.item);
-        self.receipts
-            .stage(WAKE_QUEUE.into(), sdk::wire::encode(&queue))?;
+        self.detach_conversation_wake(ack.item, &wake.conversation_id)
+            .await?;
         wake.acknowledged = Some(digest);
-        self.receipts.stage(wake_key, sdk::wire::encode(&wake))?;
+        self.receipts.stage(record_key, sdk::wire::encode(&wake))?;
         let state = self.require_conversation(&wake.conversation_id).await?;
         match ack.outcome {
             sdk::DeliveryOutcome::Applied => {}
@@ -1171,23 +1334,21 @@ impl RunsModule {
         if !own_delivery {
             return Ok(());
         }
-        let Some(wake) = self
-            .conversation_read::<Wake>(&format!("conversation/wake/{}", item.item))
-            .await?
-        else {
+        let Some(wake) = self.conversation_read::<Wake>(&wake_key(item.item)).await? else {
             return Ok(());
         };
         if wake.conversation_id != id {
-            return Err(Error::Module("conversation wake identity mismatch".into()));
+            return Err(Error::Module {
+                reason: refusal::CORRUPT.into(),
+                sentence: format!(
+                    "wake item {} belongs to conversation {}, not {id}",
+                    item.item, wake.conversation_id
+                ),
+            });
         }
         // Detach this exact wake before deciding. A new chunk/turn may enqueue
         // another item; waiting on a nonterminal receipt enqueues nothing.
-        let mut queue: BTreeMap<u64, String> = self
-            .conversation_read(WAKE_QUEUE)
-            .await?
-            .unwrap_or_default();
-        queue.remove(&item.item);
-        self.receipts
-            .stage(WAKE_QUEUE.into(), sdk::wire::encode(&queue))
+        self.detach_conversation_wake(item.item, &wake.conversation_id)
+            .await
     }
 }

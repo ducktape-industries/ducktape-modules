@@ -94,7 +94,7 @@ fn any_flipped_byte_is_rejected_and_leaves_the_target_untouched() {
 
         let err = dst.install(&tampered, src_root).unwrap_err();
         assert!(
-            matches!(err, Error::Module(_)),
+            matches!(err, Error::Module { .. }),
             "byte {i}: tamper errs with Module"
         );
         assert_eq!(
@@ -126,7 +126,7 @@ fn any_truncated_snapshot_is_rejected() {
         let before = dst.root();
         let err = dst.install(&bytes[..cut], src_root).unwrap_err();
         assert!(
-            matches!(err, Error::Module(_)),
+            matches!(err, Error::Module { .. }),
             "cut {cut}: truncation errs with Module"
         );
         assert_eq!(

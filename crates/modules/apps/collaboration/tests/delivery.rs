@@ -24,7 +24,12 @@ async fn bound() -> Bound {
     let mut ctx = scene.as_alice(1);
     let alice = scene.alice.clone();
     let bob = scene.bob.clone();
-    ok(&mut scene.module, &mut ctx, bind("c1", &alice, key(0x5e), 0)).await;
+    ok(
+        &mut scene.module,
+        &mut ctx,
+        bind("c1", &alice, key(0x5e), 0),
+    )
+    .await;
     let mut ctx = scene.as_bob(1);
     ok(&mut scene.module, &mut ctx, bind("c1", &bob, key(0x5f), 0)).await;
     let seq = scene.alice_posts("c1", "m1");
@@ -80,7 +85,12 @@ async fn eligibility(bound: &Bound, now: u64) -> DeliveryEligibility {
     verdict
 }
 
-fn ack(seq: u64, recipient: &collaboration::Party, credential: u64, state: DeliveryState) -> CollaborationMsg {
+fn ack(
+    seq: u64,
+    recipient: &collaboration::Party,
+    credential: u64,
+    state: DeliveryState,
+) -> CollaborationMsg {
     CollaborationMsg::Acknowledge {
         channel_id: "c1".into(),
         seq,
@@ -172,7 +182,11 @@ fn only_the_origin_that_posted_the_message_may_request_its_delivery() {
             format!("{refusal:?}").contains("no chat message"),
             "{refusal:?}"
         );
-        bound.scene.chat.borrow_mut().channel("c2", &[alice.clone(), bob.clone()]);
+        bound
+            .scene
+            .chat
+            .borrow_mut()
+            .channel("c2", &[alice.clone(), bob.clone()]);
         bound.scene.alice_posts("c2", "m2");
         let refusal = apply(
             &mut bound.scene.module,
@@ -298,7 +312,10 @@ fn only_immutable_commit_blob_and_duck_references_are_admitted() {
                 }],
                 "40 lowercase hex",
             ),
-            (vec![Reference::Blob { hash: "AB".into() }], "64 lowercase hex"),
+            (
+                vec![Reference::Blob { hash: "AB".into() }],
+                "64 lowercase hex",
+            ),
             (
                 vec![Reference::Duck {
                     url: "file:///tmp/x".into(),
@@ -370,11 +387,12 @@ fn a_task_update_must_name_its_task_and_a_result_its_cause() {
             );
         }
         // a result that answers a thread needs no task.
-        bound
-            .scene
-            .chat
-            .borrow_mut()
-            .post_in_thread("c1", "m-reply", Origin::External(key(1)), Some(bound.seq));
+        bound.scene.chat.borrow_mut().post_in_thread(
+            "c1",
+            "m-reply",
+            Origin::External(key(1)),
+            Some(bound.seq),
+        );
         let mut request = deliver("c1", "m-reply", &bob, 100);
         request.kind = MessageKind::Result;
         ok(
@@ -411,7 +429,7 @@ fn a_delivery_naming_a_superseded_attempt_is_refused_as_stale() {
             .await
             .unwrap_err();
         assert!(
-            format!("{refusal:?}").contains("stale task target"),
+            format!("{refusal:?}").contains("of this delivery is on attempt"),
             "{refusal:?}"
         );
         let mut ctx = with_job(
@@ -438,7 +456,7 @@ fn a_delivery_naming_a_superseded_attempt_is_refused_as_stale() {
         .await
         .unwrap_err();
         assert!(
-            format!("{refusal:?}").contains("stale attempt acknowledgement"),
+            format!("{refusal:?}").contains("of this acknowledgement is on attempt"),
             "{refusal:?}"
         );
     });
@@ -473,10 +491,7 @@ fn delivery_advances_only_through_the_diagram_and_only_from_the_live_binding() {
         )
         .await
         .unwrap_err();
-        assert!(
-            format!("{refusal:?}").contains("is stale"),
-            "{refusal:?}"
-        );
+        assert!(format!("{refusal:?}").contains("is stale"), "{refusal:?}");
         // a reason must be a token.
         let refusal = apply(
             &mut bound.scene.module,
@@ -561,7 +576,11 @@ fn a_removed_recipient_cannot_acknowledge_late() {
         let mut bound = bound().await;
         requested(&mut bound, 100).await;
         let bob = bound.scene.bob.clone();
-        bound.scene.chat.borrow_mut().channel("c1", &[bound.scene.alice.clone()]);
+        bound
+            .scene
+            .chat
+            .borrow_mut()
+            .channel("c1", &[bound.scene.alice.clone()]);
         let mut ctx = bound.scene.as_key(2, 0x5f);
         let refusal = apply(
             &mut bound.scene.module,
@@ -608,7 +627,11 @@ fn expiry_is_permissionless_agreed_time_and_never_reported_by_a_service() {
         let refusal = apply(&mut bound.scene.module, &mut ctx, expire.clone())
             .await
             .unwrap_err();
-        assert!(format!("{refusal:?}").contains("not yet"), "{refusal:?}");
+        assert!(
+            matches!(&refusal, sdk::Error::Module { reason, sentence } if reason == sdk::refusal::NOT_YET
+                && sentence.contains("expires at consensus time 100, not yet at 99")),
+            "{refusal:?}"
+        );
 
         // at the deadline eligibility ends, and a stranger may sweep it.
         assert!(matches!(
@@ -706,7 +729,7 @@ fn one_sender_cannot_fill_another_mailbox_past_its_quota() {
         .await
         .unwrap_err();
         assert!(
-            format!("{refusal:?}").contains(collaboration::QUEUE_FULL),
+            matches!(&refusal, sdk::Error::Module { reason, .. } if reason == collaboration::QUEUE_FULL),
             "{refusal:?}"
         );
     });

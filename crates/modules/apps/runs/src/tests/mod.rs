@@ -17,6 +17,7 @@ use files::{
 };
 use futures::executor::block_on;
 use sdk::Env;
+use sdk::refusal;
 use std::cell::{Cell, RefCell};
 use tasks::{
     Claim as JobClaim, Job, Task, decode_task_msg as tasks_decode_msg,
@@ -71,7 +72,7 @@ struct CaptureCtx {
     /// Saga views distinguish pending execution leases from terminal results.
     sagas: BTreeMap<String, saga::SagaView>,
     /// page_id -> the canonical whole page in preorder, sliced by the "pages"
-    /// GetPage arm (the `duck://page/<id>` injection lane); GetBlock scans the
+    /// GetPage arm (the canonical page-address injection lane); GetBlock scans the
     /// same pages by block id (the pages-effects target resolution).
     pages: BTreeMap<String, Vec<pages::Block>>,
     page_query_count: Cell<usize>,
@@ -88,7 +89,7 @@ struct CaptureCtx {
     /// composer's `source_snapshot` pin. `None` = a fresh network (null pin).
     files_head: Option<String>,
     /// committed attachment bytes served by the "files" Read arm, keyed by
-    /// absolute path (the duck://files injection resolves these).
+    /// absolute path (the canonical file-address injection resolves these).
     files_content: BTreeMap<String, Vec<u8>>,
     msgs: Vec<Msg>,
     #[allow(dead_code)]
@@ -223,7 +224,7 @@ impl CaptureCtx {
         self
     }
     /// serve committed bytes at `path` from the "files" Read arm — the
-    /// duck://files attachment injection reads these.
+    /// canonical file-address attachment injection reads these.
     fn with_file(mut self, path: &str, bytes: &[u8]) -> Self {
         self.files_content.insert(path.into(), bytes.to_vec());
         self
@@ -447,7 +448,10 @@ impl Ctx for CaptureCtx {
         match target {
             "identity" => {
                 let query: identity::IdentityQuery =
-                    identity::decode_query(req).map_err(Error::Module)?;
+                    identity::decode_query(req).map_err(|sentence| Error::Module {
+                        reason: refusal::INVALID_INPUT.into(),
+                        sentence,
+                    })?;
                 let number = match query {
                     identity::IdentityQuery::Get { number } => number,
                     identity::IdentityQuery::OfKey { .. } => 1,
@@ -470,16 +474,22 @@ impl Ctx for CaptureCtx {
                     }),
                 )))
             }
-            "chat" => match chat::decode_query(req).map_err(Error::Module)? {
+            "chat" => match chat::decode_query(req).map_err(|sentence| Error::Module {
+                reason: refusal::INVALID_INPUT.into(),
+                sentence,
+            })? {
                 ChatQuery::MessagesRange {
                     channel_id,
                     from_seq,
                     limit,
                 } => {
-                    let transcript = self
-                        .transcripts
-                        .get(&channel_id)
-                        .ok_or_else(|| Error::Module(format!("unknown channel: {channel_id}")))?;
+                    let transcript =
+                        self.transcripts
+                            .get(&channel_id)
+                            .ok_or_else(|| Error::Module {
+                                reason: refusal::NOT_FOUND.into(),
+                                sentence: format!("unknown channel: {channel_id}"),
+                            })?;
                     let head = transcript.len() as u64;
                     let from = from_seq.max(1);
                     let mut window = Vec::new();
@@ -542,7 +552,10 @@ impl Ctx for CaptureCtx {
             },
             // the board answers the SAME two reads the real module does: the
             // by-id `Get` the validator probes with, and a bounded `List` page.
-            "tasks" => match tasks::decode_task_query(req).map_err(Error::Module)? {
+            "tasks" => match tasks::decode_task_query(req).map_err(|sentence| Error::Module {
+                reason: refusal::INVALID_INPUT.into(),
+                sentence,
+            })? {
                 TaskQuery::Get { task_id } => Ok(tasks_encode_reply(&TaskReply::Task(
                     self.tasks.iter().find(|t| t.id == task_id).cloned(),
                 ))),
@@ -565,7 +578,10 @@ impl Ctx for CaptureCtx {
                 if let Some(module) = &self.jobs_module {
                     return module.query(req).await;
                 }
-                match tasks::decode_job_query(req).map_err(Error::Module)? {
+                match tasks::decode_job_query(req).map_err(|sentence| Error::Module {
+                    reason: refusal::INVALID_INPUT.into(),
+                    sentence,
+                })? {
                     JobsQuery::Get { job_id } => Ok(jobs_encode_reply(&JobsReply::Job(
                         self.jobs.get(&job_id).cloned(),
                     ))),
@@ -578,7 +594,10 @@ impl Ctx for CaptureCtx {
                     ))),
                 }
             }
-            "dispatch" => match dispatch::decode_query(req).map_err(Error::Module)? {
+            "dispatch" => match dispatch::decode_query(req).map_err(|sentence| Error::Module {
+                reason: refusal::INVALID_INPUT.into(),
+                sentence,
+            })? {
                 DispatchQuery::Dispatch { dispatch_id, .. } => {
                     // an awaiting dispatch still names its saga (the lease lives
                     // there); a merely `taken` one already delivered.
@@ -611,7 +630,10 @@ impl Ctx for CaptureCtx {
                 }
                 _ => Err(Error::QueryUnsupported),
             },
-            "files" => match files_decode_query(req).map_err(Error::Module)? {
+            "files" => match files_decode_query(req).map_err(|sentence| Error::Module {
+                reason: refusal::INVALID_INPUT.into(),
+                sentence,
+            })? {
                 FilesQuery::Refs {} => Ok(files_encode_reply(&FilesReply::Refs(files::RefsInfo {
                     head: self.files_head.clone(),
                     pins: BTreeMap::new(),
@@ -654,7 +676,10 @@ impl Ctx for CaptureCtx {
                 }
                 _ => Err(Error::QueryUnsupported),
             },
-            "forge" => match forge::decode_query(req).map_err(Error::Module)? {
+            "forge" => match forge::decode_query(req).map_err(|sentence| Error::Module {
+                reason: refusal::INVALID_INPUT.into(),
+                sentence,
+            })? {
                 forge::ForgeQuery::ListRefs { repo } => {
                     let refs = self
                         .forge_refs
@@ -686,7 +711,10 @@ impl Ctx for CaptureCtx {
                 }
                 _ => Err(Error::QueryUnsupported),
             },
-            "pages" => match pages::decode_query(req).map_err(Error::Module)? {
+            "pages" => match pages::decode_query(req).map_err(|sentence| Error::Module {
+                reason: refusal::INVALID_INPUT.into(),
+                sentence,
+            })? {
                 pages::PageQuery::RecordCollection { .. }
                 | pages::PageQuery::Records { .. }
                 | pages::PageQuery::Record { .. }
@@ -783,7 +811,10 @@ impl Ctx for CaptureCtx {
                     &pages::PageReply::PageCount(self.pages.len() as u64),
                 )),
             },
-            "saga" => match saga::decode_query(req).map_err(Error::Module)? {
+            "saga" => match saga::decode_query(req).map_err(|sentence| Error::Module {
+                reason: refusal::INVALID_INPUT.into(),
+                sentence,
+            })? {
                 saga::SagaQuery::Get { saga_id } => {
                     let view = self.sagas.get(&saga_id).cloned();
                     Ok(saga::encode_reply(&saga::SagaReply::Saga(view)))
@@ -817,6 +848,7 @@ fn module() -> RunsModule {
         Some("tasks".into()),
         Some("jobs".into()),
     )
+    .with_chain_id("dognet#d0cdf950")
 }
 
 fn user(byte: u8) -> Origin {
@@ -943,7 +975,7 @@ fn jobs_event(job_id: &str, kind: &str, spec: &str) -> Msg {
 fn exec(m: &mut RunsModule, ctx: &mut CaptureCtx, op: &Msg) -> Result<(), Error> {
     // These unit probes exercise composition and validation with configured
     // models. The real host suite owns queue timing and program authority.
-    m.models = ctx.agents.clone();
+    m.seed_test_models(&ctx.agents)?;
     let previous: BTreeSet<_> = m
         .receipts
         .staged()
@@ -991,7 +1023,8 @@ fn exec(m: &mut RunsModule, ctx: &mut CaptureCtx, op: &Msg) -> Result<(), Error>
         .staged()
         .iter()
         .filter(|(id, _)| id.starts_with("action/body/") && !previous.contains(*id))
-        .map(|(_, bytes)| {
+        .filter_map(|(_, staged)| staged.as_ref())
+        .map(|bytes| {
             let request: super::action_requests::ActionRequest = sdk::wire::decode(bytes).unwrap();
             Msg {
                 target: request.view.target,
@@ -1152,7 +1185,7 @@ fn page_with_block_count(total: usize, text: &str) -> Vec<pages::Block> {
 /// A module whose current model configuration matches the query fixture.
 fn configured(registry: &Registry) -> RunsModule {
     let mut module = module();
-    module.models = registry.clone();
+    module.seed_test_models(registry).unwrap();
     module
 }
 
@@ -1433,7 +1466,7 @@ mod delivery;
 mod facets;
 mod job_runs;
 mod pages_actions;
-mod receipts;
+pub(crate) mod receipts;
 mod registry;
 mod resident;
 mod sessions;

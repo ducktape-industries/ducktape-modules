@@ -1,4 +1,10 @@
 //! Real source → attribution transactions, with stable identity and rollback.
+// the NATIVE modules under their module names — the `identity`/`attribution`
+// crates in [dependencies] are the wire surfaces these re-export.
+use attribution_module as attribution;
+use identity_module as identity;
+use sdk::refusal;
+
 use attribution::{
     Actor, AttributionModule, AttributionMsg, AttributionQuery, AttributionReply, ObjectRef,
     ObjectRelations, Reason, Source,
@@ -22,8 +28,12 @@ impl Module for Executor {
         StateRoot::ZERO
     }
     async fn execute(&mut self, ctx: &mut dyn Ctx, msg: &Msg) -> Result<(), Error> {
-        identity::authenticate_event(&ctx.env().origin, "identity", &msg.payload)
-            .map_err(Error::Module)?;
+        identity::authenticate_event(&ctx.env().origin, "identity", &msg.payload).map_err(
+            |sentence| Error::Module {
+                reason: refusal::UNEXPECTED_REPLY.into(),
+                sentence,
+            },
+        )?;
         Ok(())
     }
 }

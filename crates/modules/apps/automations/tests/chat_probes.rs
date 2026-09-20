@@ -3,6 +3,11 @@
 //! instead of aborting the posting user's block, while the happy path still
 //! posts — all through chat's genuine hook fan-out, not a stand-in.
 
+// the NATIVE modules under their module names — the `identity`/`attribution`
+// crates in [dependencies] are the wire surfaces these re-export.
+use attribution_module as attribution;
+use identity_module as identity;
+
 use automations::Automations;
 use automations::{
     Action, AutomationsMsg, AutomationsQuery, AutomationsReply, RunRecord, Trigger,

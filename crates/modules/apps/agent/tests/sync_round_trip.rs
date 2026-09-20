@@ -12,6 +12,7 @@
 //! operation-log ordered. only a real sync that ships the ACTUAL proven op
 //! range lands on the same root.
 
+use sdk::refusal;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -104,7 +105,10 @@ impl Scripted {
             cause,
         })
         .on_query("identity", move |req| {
-            let reply = match identity::decode_query(req).map_err(Error::Module)? {
+            let reply = match identity::decode_query(req).map_err(|sentence| Error::Module {
+                reason: refusal::INVALID_INPUT.into(),
+                sentence,
+            })? {
                 IdentityQuery::Get { number } => {
                     IdentityReply::Account(accounts.borrow().get(&number).cloned())
                 }
@@ -115,12 +119,20 @@ impl Scripted {
                         .find(|view| view.keys.iter().any(|held| held.pubkey == key))
                         .cloned(),
                 ),
-                other => return Err(Error::Module(format!("unscripted {other:?}"))),
+                other => {
+                    return Err(Error::Module {
+                        reason: refusal::UNSUPPORTED.into(),
+                        sentence: format!("unscripted {other:?}"),
+                    });
+                }
             };
             Ok(identity::encode_reply(&reply))
         })
         .on_query("attribution", move |req| {
-            let reply = match attribution::decode_query(req).map_err(Error::Module)? {
+            let reply = match attribution::decode_query(req).map_err(|sentence| Error::Module {
+                reason: refusal::INVALID_INPUT.into(),
+                sentence,
+            })? {
                 attribution::AttributionQuery::Changes { after, limit } => {
                     attribution::AttributionReply::Changes(
                         changes
@@ -134,7 +146,12 @@ impl Scripted {
                             .collect(),
                     )
                 }
-                other => return Err(Error::Module(format!("unscripted {other:?}"))),
+                other => {
+                    return Err(Error::Module {
+                        reason: refusal::UNSUPPORTED.into(),
+                        sentence: format!("unscripted {other:?}"),
+                    });
+                }
             };
             Ok(attribution::encode_reply(&reply))
         })

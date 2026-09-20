@@ -94,6 +94,7 @@ mod program;
 #[cfg(feature = "guest")]
 mod guest;
 
+use sdk::refusal;
 use std::collections::{BTreeMap, BTreeSet};
 
 use attribution::{AttributionEvent, AttributionMsg, AttributionQuery, AttributionReply, Change};
@@ -159,7 +160,12 @@ fn validate_provision_request_id(request_id: &str) -> Result<(), Error> {
         && request_id.len() <= MAX_PROVISION_REQUEST_ID_BYTES
         && !request_id.contains(SEP);
     if !valid {
-        return Err(module_error("invalid provision request_id"));
+        return Err(module_error(
+            refusal::INVALID_INPUT,
+            format!(
+                "a provision request_id is 1 to {MAX_PROVISION_REQUEST_ID_BYTES} bytes and has no reserved separator"
+            ),
+        ));
     }
     Ok(())
 }
@@ -240,12 +246,15 @@ struct PendingProvision {
     program: Program,
 }
 
-fn module_error(text: impl Into<String>) -> Error {
-    Error::Module(text.into())
+fn module_error(reason: &'static str, text: impl Into<String>) -> Error {
+    Error::Module {
+        reason: reason.into(),
+        sentence: text.into(),
+    }
 }
 
 fn decode_record<T: BorshDeserialize>(bytes: &[u8]) -> Result<T, Error> {
-    borsh::from_slice(bytes).map_err(|e| module_error(e.to_string()))
+    borsh::from_slice(bytes).map_err(|e| module_error(refusal::CORRUPT, e.to_string()))
 }
 
 fn encode_record<T: BorshSerialize>(value: &T) -> Vec<u8> {
@@ -253,9 +262,10 @@ fn encode_record<T: BorshSerialize>(value: &T) -> Vec<u8> {
 }
 
 fn exhausted(numbering: &str) -> Error {
-    module_error(format!(
-        "the agent {numbering} is exhausted; this op cannot be recorded"
-    ))
+    module_error(
+        refusal::EXHAUSTED,
+        format!("the agent {numbering} is exhausted; this op cannot be recorded"),
+    )
 }
 
 // ---- plans -------------------------------------------------------------------------
@@ -276,10 +286,13 @@ impl Plan {
     fn put(&mut self, key: Vec<u8>, value: Vec<u8>) -> Result<(), Error> {
         let fits_the_store = value.len() <= MAX_STORE_VALUE_BYTES;
         if !fits_the_store {
-            return Err(module_error(format!(
-                "a record of {} bytes exceeds the store's value bound of {MAX_STORE_VALUE_BYTES}",
-                value.len()
-            )));
+            return Err(module_error(
+                refusal::CAPACITY,
+                format!(
+                    "a record of {} bytes exceeds the store's value bound of {MAX_STORE_VALUE_BYTES}",
+                    value.len()
+                ),
+            ));
         }
         self.writes.push((key, Some(value)));
         Ok(())
@@ -628,10 +641,13 @@ fn decide_progress(
         let reserve = encode_record(&frame_too_large(&record, u64::MAX, u64::MAX));
         let reserve_fits = reserve.len() <= MAX_STORE_VALUE_BYTES;
         if !reserve_fits {
-            return Err(module_error(format!(
-                "the invocation's fixed record of {} bytes exceeds the store's value bound of {MAX_STORE_VALUE_BYTES}",
-                reserve.len()
-            )));
+            return Err(module_error(
+                refusal::CAPACITY,
+                format!(
+                    "the invocation's fixed record of {} bytes exceeds the store's value bound of {MAX_STORE_VALUE_BYTES}",
+                    reserve.len()
+                ),
+            ));
         }
         let at = count
             .checked_add(1)
@@ -711,16 +727,19 @@ fn delivered_item(cause: &Cause, source: &ModuleId) -> Result<ItemRef, Error> {
         ..
     } = cause
     else {
-        return Err(module_error(format!(
-            "items of {source} reach the agent only through the host's delivery lane, not under {cause:?}"
-        )));
+        return Err(module_error(
+            refusal::UNAUTHORIZED,
+            format!(
+                "items of {source} reach the agent only through the host's delivery lane, not under {cause:?}"
+            ),
+        ));
     };
     let from_source = &item.source == source;
     if !from_source {
-        return Err(module_error(format!(
-            "a delivery of {} carried an item of {source}",
-            item.source
-        )));
+        return Err(module_error(
+            refusal::UNEXPECTED_REPLY,
+            format!("a delivery of {} carried an item of {source}", item.source),
+        ));
     }
     Ok(item.clone())
 }
@@ -732,18 +751,33 @@ fn require_completion_of(cause: &Cause, id: &CallId) -> Result<(), Error> {
         ..
     } = cause
     else {
-        return Err(module_error(format!(
-            "call completions reach the agent only through the host's completion lane, not under {cause:?}"
-        )));
+        return Err(module_error(
+            refusal::UNAUTHORIZED,
+            format!(
+                "call completions reach the agent only through the host's completion lane, not under {cause:?}"
+            ),
+        ));
     };
     let is_this_call = completed == id;
     if !is_this_call {
-        return Err(module_error(format!(
-            "a completion of {completed:?} carried the outcome of {id:?}"
-        )));
+        return Err(module_error(
+            refusal::UNAUTHORIZED,
+            format!(
+                "a completion of call {}/{} carried the outcome of call {}/{}",
+                completed.invocation, completed.step, id.invocation, id.step
+            ),
+        ));
     }
     Ok(())
 }
+
+/// the most invocations one [`AgentQuery::Invocations`] answers with, whatever
+/// limit the caller asked for. the wire limit is a `u64`, so without a ceiling
+/// here a single query walks an account's whole invocation history — three
+/// store reads per entry — and the reply grows with the account's age instead
+/// of with the request. the same 256 the identity module's `MAX_QUERY_LIMIT`
+/// puts on its own paged reads.
+const MAX_INVOCATION_PAGE: u64 = 256;
 
 /// the ordinals one page of a dense numbering covers: `after + 1 ..= count`,
 /// at most `limit` of them. a cursor at or past the end is an empty page.
@@ -840,11 +874,15 @@ impl AgentModule {
         let seq: u64 = self
             .record(&invocation_entry_key(account, at))
             .await?
-            .ok_or_else(|| module_error("agent invocation index entry is missing"))?;
-        let record = self
-            .invocation(account, seq)
-            .await?
-            .ok_or_else(|| module_error(format!("agent index names missing invocation {seq}")))?;
+            .ok_or_else(|| {
+                module_error(refusal::CORRUPT, "agent invocation index entry is missing")
+            })?;
+        let record = self.invocation(account, seq).await?.ok_or_else(|| {
+            module_error(
+                refusal::CORRUPT,
+                format!("agent index names missing invocation {seq}"),
+            )
+        })?;
         Ok((seq, record))
     }
 
@@ -870,11 +908,15 @@ impl AgentModule {
         let bytes = reads
             .read(&self.siblings.identity, &identity::encode_query(query))
             .await?;
-        match identity::decode_reply(&bytes).map_err(Error::Module)? {
+        match identity::decode_reply(&bytes).map_err(|sentence| Error::Module {
+            reason: refusal::UNEXPECTED_REPLY.into(),
+            sentence,
+        })? {
             IdentityReply::Account(view) => Ok(view),
-            other => Err(module_error(format!(
-                "identity answered {query:?} with {other:?}"
-            ))),
+            other => Err(module_error(
+                refusal::UNEXPECTED_REPLY,
+                format!("identity answered {query:?} with {other:?}"),
+            )),
         }
     }
 
@@ -890,11 +932,15 @@ impl AgentModule {
             Principal::Key(key) => {
                 let query = IdentityQuery::OfKey { key: key.clone() };
                 let Some(view) = self.account_view(reads, &query).await? else {
-                    return Err(module_error("the submitting key belongs to no account"));
+                    return Err(module_error(
+                        refusal::NOT_FOUND,
+                        "the submitting key belongs to no account",
+                    ));
                 };
                 match view.control {
                     Control::Keys => Ok(view.number),
                     Control::Program { .. } | Control::Revoked { .. } => Err(module_error(
+                        refusal::UNEXPECTED_REPLY,
                         format!("identity resolved a key to keyless account {}", view.number),
                     )),
                 }
@@ -902,11 +948,17 @@ impl AgentModule {
             Principal::Program(account) => {
                 let is_no_account = *account == 0;
                 if is_no_account {
-                    return Err(module_error("account 0 acts for nobody"));
+                    return Err(module_error(
+                        refusal::INVALID_INPUT,
+                        "account 0 acts for nobody",
+                    ));
                 }
                 let query = IdentityQuery::Get { number: *account };
                 let Some(view) = self.account_view(reads, &query).await? else {
-                    return Err(module_error(format!("account {account} does not exist")));
+                    return Err(module_error(
+                        refusal::NOT_FOUND,
+                        format!("account {account} does not exist"),
+                    ));
                 };
                 match view.control {
                     Control::Program {
@@ -916,13 +968,18 @@ impl AgentModule {
                     Control::Program {
                         standing: ProgramStanding::Suspended,
                         ..
-                    } => Err(module_error(format!("program {account} is suspended"))),
-                    Control::Revoked { .. } => {
-                        Err(module_error(format!("program {account} is revoked")))
-                    }
-                    Control::Keys => Err(module_error(format!(
-                        "account {account} is key-held, not a program"
-                    ))),
+                    } => Err(module_error(
+                        refusal::WRONG_STATE,
+                        format!("program {account} is suspended"),
+                    )),
+                    Control::Revoked { .. } => Err(module_error(
+                        refusal::WRONG_STATE,
+                        format!("program {account} is revoked"),
+                    )),
+                    Control::Keys => Err(module_error(
+                        refusal::INVALID_INPUT,
+                        format!("account {account} is key-held, not a program"),
+                    )),
                 }
             }
         }
@@ -936,12 +993,16 @@ impl AgentModule {
     ) -> Result<Executed, Error> {
         let query = IdentityQuery::Get { number: account };
         let Some(view) = self.account_view(reads, &query).await? else {
-            return Err(module_error(format!("account {account} does not exist")));
+            return Err(module_error(
+                refusal::NOT_FOUND,
+                format!("account {account} does not exist"),
+            ));
         };
         match view.control {
-            Control::Keys => Err(module_error(format!(
-                "account {account} is key-held, not a program"
-            ))),
+            Control::Keys => Err(module_error(
+                refusal::INVALID_INPUT,
+                format!("account {account} is key-held, not a program"),
+            )),
             Control::Program {
                 controller,
                 executor,
@@ -950,10 +1011,13 @@ impl AgentModule {
             } => {
                 let executed_here = executor == self.id;
                 if !executed_here {
-                    return Err(module_error(format!(
-                        "program {account} is executed by {executor}, not by {}",
-                        self.id
-                    )));
+                    return Err(module_error(
+                        refusal::INVALID_INPUT,
+                        format!(
+                            "program {account} is executed by {executor}, not by {}",
+                            self.id
+                        ),
+                    ));
                 }
                 Ok(Executed::Live {
                     controller,
@@ -1091,7 +1155,12 @@ impl AgentModule {
             .into_iter()
             .find(|(id, _)| id.as_str() == module)
             .map(|(_, source)| source)
-            .ok_or_else(|| module_error(format!("module {module} has no surface here")))
+            .ok_or_else(|| {
+                module_error(
+                    refusal::UNAUTHORIZED,
+                    format!("module {module} has no surface here"),
+                )
+            })
     }
 
     fn source_of(&self, origin: &Origin) -> Result<Source, Error> {
@@ -1100,12 +1169,18 @@ impl AgentModule {
             Origin::External(key) => {
                 let unauthenticated = key.is_empty();
                 if unauthenticated {
-                    return Err(module_error("agent ops require a non-empty submitter id"));
+                    return Err(module_error(
+                        refusal::INVALID_INPUT,
+                        "agent ops require a non-empty submitter id",
+                    ));
                 }
                 Ok(Source::Principal(Principal::Key(key.clone())))
             }
             Origin::Program(account) => Ok(Source::Principal(Principal::Program(*account))),
-            Origin::System => Err(module_error("the system submits nothing to the agent")),
+            Origin::System => Err(module_error(
+                refusal::UNAUTHORIZED,
+                "the system submits nothing to the agent",
+            )),
         }
     }
 
@@ -1115,7 +1190,10 @@ impl AgentModule {
         let input = match self.source_of(origin)? {
             Source::Identity => {
                 let event = identity::authenticate_event(origin, &self.siblings.identity, payload)
-                    .map_err(Error::Module)?;
+                    .map_err(|sentence| Error::Module {
+                        reason: refusal::UNEXPECTED_REPLY.into(),
+                        sentence,
+                    })?;
                 match event {
                     IdentityEvent::ProgramCreated {
                         request,
@@ -1129,42 +1207,55 @@ impl AgentModule {
                 }
             }
             Source::Attribution => {
-                match attribution::decode_event(payload).map_err(Error::Module)? {
+                match attribution::decode_event(payload).map_err(|sentence| Error::Module {
+                    reason: refusal::UNEXPECTED_REPLY.into(),
+                    sentence,
+                })? {
                     AttributionEvent::Changed(change) => AgentInput::Changed {
                         change: Box::new(change),
                     },
                 }
             }
-            Source::Dispatch => match dispatch::decode_delivery(payload).map_err(Error::Module)? {
-                Delivery::Result(result) => AgentInput::Result { result },
-                Delivery::CallCompleted(completed) => AgentInput::CallCompleted { completed },
-            },
-            Source::Principal(by) => match decode_msg(payload).map_err(Error::Module)? {
-                AgentMsg::Provision {
-                    request_id,
-                    name,
-                    program,
-                } => AgentInput::Provision {
-                    by,
-                    request_id,
-                    name,
-                    program,
-                },
-                AgentMsg::Initialize {
-                    account,
-                    request_id,
-                } => AgentInput::Initialize {
-                    by,
-                    account,
-                    request_id,
-                },
-                AgentMsg::Replace { account, program } => AgentInput::Replace {
-                    by,
-                    account,
-                    program,
-                },
-                AgentMsg::Unbind { account } => AgentInput::Unbind { by, account },
-            },
+            Source::Dispatch => {
+                match dispatch::decode_delivery(payload).map_err(|sentence| Error::Module {
+                    reason: refusal::UNEXPECTED_REPLY.into(),
+                    sentence,
+                })? {
+                    Delivery::Result(result) => AgentInput::Result { result },
+                    Delivery::CallCompleted(completed) => AgentInput::CallCompleted { completed },
+                }
+            }
+            Source::Principal(by) => {
+                match decode_msg(payload).map_err(|sentence| Error::Module {
+                    reason: refusal::INVALID_INPUT.into(),
+                    sentence,
+                })? {
+                    AgentMsg::Provision {
+                        request_id,
+                        name,
+                        program,
+                    } => AgentInput::Provision {
+                        by,
+                        request_id,
+                        name,
+                        program,
+                    },
+                    AgentMsg::Initialize {
+                        account,
+                        request_id,
+                    } => AgentInput::Initialize {
+                        by,
+                        account,
+                        request_id,
+                    },
+                    AgentMsg::Replace { account, program } => AgentInput::Replace {
+                        by,
+                        account,
+                        program,
+                    },
+                    AgentMsg::Unbind { account } => AgentInput::Unbind { by, account },
+                }
+            }
         };
         Ok(input)
     }
@@ -1191,7 +1282,8 @@ impl AgentModule {
             let same_request = receipt.request_digest == request_digest;
             if !same_request {
                 return Err(module_error(
-                    "provision request_id was used with different content",
+                    refusal::ALREADY_EXISTS,
+                    format!("provision request {request_id} already names different work"),
                 ));
             }
             ctx.set_assigned(encode_assigned(&AgentAssigned::Provisioned {
@@ -1231,16 +1323,20 @@ impl AgentModule {
         controller: AccountNumber,
     ) -> Result<(), Error> {
         let Some(pending) = self.pending_provision(request).await? else {
-            return Err(module_error(format!(
-                "no provision request {request} is pending"
-            )));
+            return Err(module_error(
+                refusal::NOT_FOUND,
+                format!("no provision request {request} is pending"),
+            ));
         };
         let same_controller = pending.controller == controller;
         if !same_controller {
-            return Err(module_error(format!(
-                "provision request {request} was made for {}, not {controller}",
-                pending.controller
-            )));
+            return Err(module_error(
+                refusal::UNEXPECTED_REPLY,
+                format!(
+                    "provision request {request} was made for {}, not {controller}",
+                    pending.controller
+                ),
+            ));
         }
         let control = self.executed_account(&CtxReads(&*ctx), account).await?;
         let is_a_fresh_program_of_the_controller = matches!(
@@ -1252,14 +1348,20 @@ impl AgentModule {
             } if recorded == controller
         );
         if !is_a_fresh_program_of_the_controller {
-            return Err(module_error(format!(
-                "account {account} is not a fresh, active program of {controller} executed by {}",
-                self.id
-            )));
+            return Err(module_error(
+                refusal::UNEXPECTED_REPLY,
+                format!(
+                    "account {account} is not a fresh, active program of {controller} executed by {}",
+                    self.id
+                ),
+            ));
         }
         let already_bound = self.binding(account).await?.is_some();
         if already_bound {
-            return Err(module_error(format!("account {account} is already bound")));
+            return Err(module_error(
+                refusal::ALREADY_EXISTS,
+                format!("account {account} is already bound"),
+            ));
         }
         let plan = decide_bind(request, account, pending)?;
         self.stage_plan(plan);
@@ -1285,11 +1387,15 @@ impl AgentModule {
             ..
         } = self.executed_account(&reads, account).await?
         else {
-            return Err(module_error("a revoked program cannot be initialized"));
+            return Err(module_error(
+                refusal::WRONG_STATE,
+                "a revoked program cannot be initialized",
+            ));
         };
         let is_controller = acting == controller;
         if !is_controller {
             return Err(module_error(
+                refusal::UNAUTHORIZED,
                 "only the current controller initializes a program",
             ));
         }
@@ -1305,10 +1411,16 @@ impl AgentModule {
         }
         let is_active = standing == ProgramStanding::Active;
         if !is_active {
-            return Err(module_error("a suspended program cannot be initialized"));
+            return Err(module_error(
+                refusal::WRONG_STATE,
+                "a suspended program cannot be initialized",
+            ));
         }
         let Some(binding) = self.binding(account).await? else {
-            return Err(module_error("an unbound program cannot be initialized"));
+            return Err(module_error(
+                refusal::WRONG_STATE,
+                "an unbound program cannot be initialized",
+            ));
         };
         let receipt = InitializationReceipt {
             account,
@@ -1340,19 +1452,24 @@ impl AgentModule {
         let reads = CtxReads(&*ctx);
         let acting = self.acting_account(&reads, &by).await?;
         let Some(binding) = self.binding(account).await? else {
-            return Err(module_error(format!("account {account} is not bound")));
+            return Err(module_error(
+                refusal::WRONG_STATE,
+                format!("account {account} is not bound"),
+            ));
         };
         let Executed::Live { controller, .. } = self.executed_account(&reads, account).await?
         else {
-            return Err(module_error(format!(
-                "program {account} is revoked; it can only be unbound"
-            )));
+            return Err(module_error(
+                refusal::WRONG_STATE,
+                format!("program {account} is revoked; it can only be unbound"),
+            ));
         };
         let acting_is_controller = controller == acting;
         if !acting_is_controller {
-            return Err(module_error(format!(
-                "program {account} is controlled by {controller}, not by {acting}"
-            )));
+            return Err(module_error(
+                refusal::UNAUTHORIZED,
+                format!("program {account} is controlled by {controller}, not by {acting}"),
+            ));
         }
         let plan = decide_replace(account, program, binding.revision)?;
         self.stage_plan(plan);
@@ -1379,7 +1496,10 @@ impl AgentModule {
         let acting = self.acting_account(&reads, &by).await?;
         let is_bound = self.binding(account).await?.is_some();
         if !is_bound {
-            return Err(module_error(format!("account {account} is not bound")));
+            return Err(module_error(
+                refusal::WRONG_STATE,
+                format!("account {account} is not bound"),
+            ));
         }
         let control = self.executed_account(&reads, account).await?;
         let controller = match &control {
@@ -1387,9 +1507,10 @@ impl AgentModule {
         };
         let acting_is_controller = controller == acting;
         if !acting_is_controller {
-            return Err(module_error(format!(
-                "program {account} is controlled by {controller}, not by {acting}"
-            )));
+            return Err(module_error(
+                refusal::UNAUTHORIZED,
+                format!("program {account} is controlled by {controller}, not by {acting}"),
+            ));
         }
         self.stage_plan(decide_unbind(account));
         match control {
@@ -1472,20 +1593,23 @@ impl AgentModule {
     ) -> Result<(InvocationRecord, u64), Error> {
         let Correlation { account, seq } = *correlation;
         let Some(record) = self.invocation(account, seq).await? else {
-            return Err(module_error(format!(
-                "correlation names missing invocation {account}/{seq}"
-            )));
+            return Err(module_error(
+                refusal::NOT_FOUND,
+                format!("correlation names missing invocation {account}/{seq}"),
+            ));
         };
         let Progress::Running { step, awaiting } = &record.progress else {
-            return Err(module_error(format!(
-                "invocation {account}/{seq} is not waiting on {expected:?}"
-            )));
+            return Err(module_error(
+                refusal::WRONG_STATE,
+                format!("invocation {account}/{seq} is not waiting on {expected:?}"),
+            ));
         };
         let is_the_awaited = awaiting == expected;
         if !is_the_awaited {
-            return Err(module_error(format!(
-                "invocation {account}/{seq} waits on {awaiting:?}, not {expected:?}"
-            )));
+            return Err(module_error(
+                refusal::STALE,
+                format!("invocation {account}/{seq} waits on {awaiting:?}, not {expected:?}"),
+            ));
         }
         let step = *step;
         Ok((record, step))
@@ -1560,26 +1684,38 @@ impl AgentModule {
         require_completion_of(&ctx.env().cause, &completed.id)?;
         let queued_here = completed.id.requester == self.id;
         if !queued_here {
-            return Err(module_error(format!(
-                "call {:?} was queued by {}, not by {}",
-                completed.id, completed.id.requester, self.id
-            )));
+            return Err(module_error(
+                refusal::UNEXPECTED_REPLY,
+                format!(
+                    "call {}/{} was queued by {}, not by {}",
+                    completed.id.invocation, completed.id.step, completed.id.requester, self.id
+                ),
+            ));
         }
         let Some(correlation) = self
             .correlation(&call_correlation_key(&completed.id.invocation))
             .await?
         else {
-            return Err(module_error(format!(
-                "no invocation of {} queued call {:?}",
-                self.id, completed.id
-            )));
+            return Err(module_error(
+                refusal::NOT_FOUND,
+                format!(
+                    "no invocation of {} queued call {}/{}",
+                    self.id, completed.id.invocation, completed.id.step
+                ),
+            ));
         };
         let same_account = correlation.account == completed.account;
         if !same_account {
-            return Err(module_error(format!(
-                "call {:?} belongs to account {}, not {}",
-                completed.id, correlation.account, completed.account
-            )));
+            return Err(module_error(
+                refusal::UNEXPECTED_REPLY,
+                format!(
+                    "call {}/{} belongs to account {}, not {}",
+                    completed.id.invocation,
+                    completed.id.step,
+                    correlation.account,
+                    completed.account
+                ),
+            ));
         }
         let (record, step) = self
             .waiting_on(&correlation, &Outstanding::Call(completed.id.clone()))
@@ -1602,10 +1738,13 @@ impl AgentModule {
             .correlation(&dispatch_correlation_key(&result.dispatch_id))
             .await?
         else {
-            return Err(module_error(format!(
-                "no invocation of {} ran dispatch {}",
-                self.id, result.dispatch_id
-            )));
+            return Err(module_error(
+                refusal::NOT_FOUND,
+                format!(
+                    "no invocation of {} ran dispatch {}",
+                    self.id, result.dispatch_id
+                ),
+            ));
         };
         let awaited = Outstanding::Dispatch {
             dispatch_id: result.dispatch_id.clone(),
@@ -1667,18 +1806,24 @@ impl AgentModule {
         }))
     }
 
+    /// the caller supplies the account's binding: it is the SAME record for
+    /// every invocation on that account, so a page of views reads it once
+    /// rather than once per row.
     async fn view_of(
         &self,
         account: AccountNumber,
         seq: u64,
         record: InvocationRecord,
+        binding: Option<&BindingRecord>,
     ) -> Result<InvocationView, Error> {
-        let binding = self.binding(account).await?;
-        let status = status_of(&record, binding.as_ref());
+        let status = status_of(&record, binding);
         let mut bindings = BTreeMap::new();
         for (name, fact) in &record.facts {
             let json = program::fact_json(fact).map_err(|fault| {
-                module_error(format!("stored fact {name} does not decode: {fault:?}"))
+                module_error(
+                    refusal::CORRUPT,
+                    format!("stored fact {name} does not decode: {fault:?}"),
+                )
             })?;
             bindings.insert(name.clone(), json);
         }
@@ -1700,7 +1845,12 @@ impl AgentModule {
         seq: u64,
     ) -> Result<Option<InvocationView>, Error> {
         match self.invocation(account, seq).await? {
-            Some(record) => Ok(Some(self.view_of(account, seq, record).await?)),
+            Some(record) => {
+                let binding = self.binding(account).await?;
+                Ok(Some(
+                    self.view_of(account, seq, record, binding.as_ref()).await?,
+                ))
+            }
             None => Ok(None),
         }
     }
@@ -1712,12 +1862,13 @@ impl AgentModule {
         limit: u64,
     ) -> Result<Vec<InvocationEntry>, Error> {
         let count = self.invocation_count(account).await?;
+        let binding = self.binding(account).await?;
         let mut entries = Vec::new();
-        for at in page(count, after, limit) {
+        for at in page(count, after, limit.min(MAX_INVOCATION_PAGE)) {
             let (seq, record) = self.invocation_at(account, at).await?;
             entries.push(InvocationEntry {
                 at,
-                invocation: self.view_of(account, seq, record).await?,
+                invocation: self.view_of(account, seq, record, binding.as_ref()).await?,
             });
         }
         Ok(entries)
@@ -1755,7 +1906,10 @@ impl Module for AgentModule {
     }
 
     async fn query(&self, req: &[u8]) -> Result<Vec<u8>, Error> {
-        let reply = match decode_query(req).map_err(Error::Module)? {
+        let reply = match decode_query(req).map_err(|sentence| Error::Module {
+            reason: refusal::INVALID_INPUT.into(),
+            sentence,
+        })? {
             AgentQuery::Initialization {
                 account,
                 request_id,
@@ -1973,7 +2127,10 @@ mod tests {
             })
             .on_query(IDENTITY, move |req| {
                 let reply =
-                    match identity::decode_query(req).map_err(Error::Module)? {
+                    match identity::decode_query(req).map_err(|sentence| Error::Module {
+                        reason: refusal::INVALID_INPUT.into(),
+                        sentence,
+                    })? {
                         IdentityQuery::Get { number } => IdentityReply::Account(
                             directory.borrow().accounts.get(&number).cloned(),
                         ),
@@ -1982,25 +2139,39 @@ mod tests {
                                 |number| directory.borrow().accounts.get(number).cloned(),
                             ))
                         }
-                        other => return Err(Error::Module(format!("unscripted {other:?}"))),
+                        other => {
+                            return Err(Error::Module {
+                                reason: refusal::UNSUPPORTED.into(),
+                                sentence: format!("unscripted {other:?}"),
+                            });
+                        }
                     };
                 Ok(identity::encode_reply(&reply))
             })
             .on_query(ATTRIBUTION, move |req| {
-                let reply = match attribution::decode_query(req).map_err(Error::Module)? {
-                    AttributionQuery::Changes { after, limit } => AttributionReply::Changes(
-                        changes
-                            .borrow()
-                            .range(after + 1..)
-                            .take(limit as usize)
-                            .map(|(seq, change)| ChangeEntry {
-                                at: *seq,
-                                change: change.clone(),
-                            })
-                            .collect(),
-                    ),
-                    other => return Err(Error::Module(format!("unscripted {other:?}"))),
-                };
+                let reply =
+                    match attribution::decode_query(req).map_err(|sentence| Error::Module {
+                        reason: refusal::INVALID_INPUT.into(),
+                        sentence,
+                    })? {
+                        AttributionQuery::Changes { after, limit } => AttributionReply::Changes(
+                            changes
+                                .borrow()
+                                .range(after + 1..)
+                                .take(limit as usize)
+                                .map(|(seq, change)| ChangeEntry {
+                                    at: *seq,
+                                    change: change.clone(),
+                                })
+                                .collect(),
+                        ),
+                        other => {
+                            return Err(Error::Module {
+                                reason: refusal::UNSUPPORTED.into(),
+                                sentence: format!("unscripted {other:?}"),
+                            });
+                        }
+                    };
                 Ok(attribution::encode_reply(&reply))
             })
             .on_query("chat", move |_| Ok(chat_reply.borrow().clone()))
@@ -2994,6 +3165,43 @@ mod tests {
         assert_eq!(listing.len(), 1);
         assert_eq!(listing[0].at, 1);
         assert_eq!(listing[0].invocation, view);
+    }
+
+    #[test]
+    fn a_listing_answers_with_one_page_however_large_a_limit_asks_for() {
+        const INVOCATIONS: u64 = 2_000;
+
+        let mut world = World::new();
+        let account = world.provision(alice(), finish_program());
+        for seq in 0..INVOCATIONS {
+            world
+                .deliver(&mention(seq, account, Actor::Account(ALICE)), seq + 1)
+                .expect("delivery applies");
+        }
+
+        // the wire limit is a `u64`: without a server-side ceiling this reply
+        // grows with the account's whole history, three reads an entry.
+        let AgentReply::Invocations(page) = world.query(&AgentQuery::Invocations {
+            account,
+            after: 0,
+            limit: u64::MAX,
+        }) else {
+            panic!("listing");
+        };
+        assert_eq!(page.len() as u64, MAX_INVOCATION_PAGE);
+        assert_eq!(page[0].at, 1);
+        assert_eq!(page.last().unwrap().at, MAX_INVOCATION_PAGE);
+
+        // and the cursor still walks the rest, a page at a time.
+        let AgentReply::Invocations(next) = world.query(&AgentQuery::Invocations {
+            account,
+            after: MAX_INVOCATION_PAGE,
+            limit: u64::MAX,
+        }) else {
+            panic!("listing");
+        };
+        assert_eq!(next.len() as u64, MAX_INVOCATION_PAGE);
+        assert_eq!(next[0].at, MAX_INVOCATION_PAGE + 1);
     }
 
     #[test]

@@ -171,7 +171,7 @@ fn the_states_a_service_may_report_exclude_the_networks_own_facts() {
         let mut ctx = session_ctx(&registry, &run_id, Origin::External(SESSION_KEY.to_vec()));
         let err = exec(&mut m, &mut ctx, &act(&run_id, acknowledge(state))).unwrap_err();
         assert!(
-            matches!(&err, Error::Module(reason) if reason.contains("unknown delivery state")),
+            matches!(&err, Error::Module { sentence: reason, .. } if reason.contains("unknown delivery state")),
             "{state} must not be reportable: {err:?}"
         );
         abort(&mut m);
@@ -203,7 +203,7 @@ fn an_unwired_collaboration_plane_refuses_rather_than_degrades() {
     let mut ctx = session_ctx(&registry, &run_id, Origin::External(SESSION_KEY.to_vec()));
     let err = exec(&mut m, &mut ctx, &act(&run_id, deliver("m3"))).unwrap_err();
     assert!(
-        matches!(&err, Error::Module(reason) if reason.contains("wires none")),
+        matches!(&err, Error::Module { sentence: reason, .. } if reason.contains("wires none")),
         "{err:?}"
     );
     assert!(ctx.collaboration_msgs().is_empty());

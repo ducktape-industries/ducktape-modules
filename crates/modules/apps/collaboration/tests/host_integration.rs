@@ -8,6 +8,7 @@
 //! same request served that way is answered. Both are exercised here against
 //! the real host, not a test double of it.
 
+use sdk::refusal;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -59,7 +60,10 @@ impl Module for Stub {
         StateRoot::ZERO
     }
     async fn execute(&mut self, _ctx: &mut dyn Ctx, _msg: &Msg) -> Result<(), Error> {
-        Err(Error::Module("this stub only answers reads".into()))
+        Err(Error::Module {
+            reason: refusal::UNSUPPORTED.into(),
+            sentence: "this stub only answers reads".into(),
+        })
     }
     async fn query(&self, _req: &[u8]) -> Result<Vec<u8>, Error> {
         Ok(self.reply.clone())
@@ -99,7 +103,10 @@ impl Module for ChatStub {
         Ok(())
     }
     async fn query(&self, req: &[u8]) -> Result<Vec<u8>, Error> {
-        let reply = match chat::decode_query(req).map_err(Error::Module)? {
+        let reply = match chat::decode_query(req).map_err(|sentence| Error::Module {
+            reason: refusal::INVALID_INPUT.into(),
+            sentence,
+        })? {
             chat::ChatQuery::Access { channel_id, party } => {
                 let member = channel_id == "c1" && (party == party_of(1) || party == party_of(2));
                 chat::ChatReply::Access(chat::ChannelAccess {
@@ -107,8 +114,8 @@ impl Module for ChatStub {
                     may_post: member,
                 })
             }
-            chat::ChatQuery::Message { message_id } => chat::ChatReply::Message(
-                (message_id == "m1").then(|| chat::MessageView {
+            chat::ChatQuery::Message { message_id } => {
+                chat::ChatReply::Message((message_id == "m1").then(|| chat::MessageView {
                     channel_id: "c1".into(),
                     seq: 1,
                     head: chat::MessageHead {
@@ -127,9 +134,14 @@ impl Module for ChatStub {
                         reply_count: 0,
                         last_reply_seq: None,
                     },
-                }),
-            ),
-            other => return Err(Error::Module(format!("unserved {other:?}"))),
+                }))
+            }
+            other => {
+                return Err(Error::Module {
+                    reason: refusal::UNSUPPORTED.into(),
+                    sentence: format!("unserved {other:?}"),
+                });
+            }
         };
         Ok(chat::encode_reply(&reply))
     }
@@ -160,7 +172,10 @@ impl Module for Prober {
         let bytes = ctx.query(MODULE, &self.request).await?;
         self.seen
             .borrow_mut()
-            .push(decode_reply(&bytes).map_err(Error::Module)?);
+            .push(decode_reply(&bytes).map_err(|sentence| Error::Module {
+                reason: refusal::UNEXPECTED_REPLY.into(),
+                sentence,
+            })?);
         Ok(())
     }
 }

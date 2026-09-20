@@ -15,6 +15,7 @@
 //! canonically (object keys sorted), so the bytes a call carries are the same
 //! on every build whatever map the JSON library was compiled with.
 
+use sdk::refusal;
 use std::collections::{BTreeMap, BTreeSet};
 
 use attribution::{Actor, AttributionMsg, Change, ObjectRef, Relation};
@@ -103,18 +104,25 @@ pub(crate) trait Reads {
 
 // ---- validation (pure) ------------------------------------------------------------
 
-fn module_error(text: impl Into<String>) -> Error {
-    Error::Module(text.into())
+fn module_error(reason: &'static str, text: impl Into<String>) -> Error {
+    Error::Module {
+        reason: reason.into(),
+        sentence: text.into(),
+    }
 }
 
 fn validate_ident(field: &str, value: &str) -> Result<(), Error> {
     if value.is_empty() {
-        return Err(module_error(format!("{field} must be non-empty")));
+        return Err(module_error(
+            refusal::INVALID_INPUT,
+            format!("{field} must be non-empty"),
+        ));
     }
     if value.contains(SEP) {
-        return Err(module_error(format!(
-            "{field} must not contain the reserved separator"
-        )));
+        return Err(module_error(
+            refusal::INVALID_INPUT,
+            format!("{field} must not contain the reserved separator"),
+        ));
     }
     Ok(())
 }
@@ -133,9 +141,10 @@ fn validate_value(step: u64, value: &Value, bound: &BTreeSet<&str>) -> Result<()
         Value::Null | Value::Bool(_) | Value::Text(_) | Value::Bytes(_) => Ok(()),
         Value::Number(number) => match number_renders(*number) {
             true => Ok(()),
-            false => Err(module_error(format!(
-                "step {step}: number {number} is outside the JSON integer range"
-            ))),
+            false => Err(module_error(
+                refusal::INVALID_INPUT,
+                format!("step {step}: number {number} is outside the JSON integer range"),
+            )),
         },
         Value::List(items) => items
             .iter()
@@ -145,17 +154,21 @@ fn validate_value(step: u64, value: &Value, bound: &BTreeSet<&str>) -> Result<()
             .try_for_each(|entry| validate_value(step, entry, bound)),
         Value::Ref(path) => {
             let Some(root) = path.first() else {
-                return Err(module_error(format!(
-                    "step {step}: a reference has an empty path"
-                )));
+                return Err(module_error(
+                    refusal::INVALID_INPUT,
+                    format!("step {step}: a reference has an empty path"),
+                ));
             };
             let is_frame_root = RESERVED_ROOTS.contains(&root.as_str());
             let is_bound_earlier = bound.contains(root.as_str());
             let resolvable = is_frame_root || is_bound_earlier;
             if !resolvable {
-                return Err(module_error(format!(
-                    "step {step}: reference {root:?} names neither a frame root nor a name bound by an earlier step"
-                )));
+                return Err(module_error(
+                    refusal::INVALID_INPUT,
+                    format!(
+                        "step {step}: reference {root:?} names neither a frame root nor a name bound by an earlier step"
+                    ),
+                ));
             }
             Ok(())
         }
@@ -186,9 +199,12 @@ fn validate_target(step: u64, target: u64, len: u64) -> Result<(), Error> {
     let within_program = target <= len;
     let valid = moves_forward && within_program;
     if !valid {
-        return Err(module_error(format!(
-            "step {step} targets step {target}; a target is a later step, or {len} for the end"
-        )));
+        return Err(module_error(
+            refusal::INVALID_INPUT,
+            format!(
+                "step {step} targets step {target}; a target is a later step, or {len} for the end"
+            ),
+        ));
     }
     Ok(())
 }
@@ -204,9 +220,10 @@ fn validate_bind(step: u64, bind: &str) -> Result<(), Error> {
     validate_ident(&format!("step {step}: bind"), bind)?;
     let shadows_a_root = RESERVED_ROOTS.contains(&bind);
     if shadows_a_root {
-        return Err(module_error(format!(
-            "step {step}: bind {bind:?} is a frame root"
-        )));
+        return Err(module_error(
+            refusal::INVALID_INPUT,
+            format!("step {step}: bind {bind:?} is a frame root"),
+        ));
     }
     Ok(())
 }
@@ -224,11 +241,30 @@ fn validate_reason(step: u64, reason: &Reason) -> Result<(), Error> {
     }
 }
 
+/// the most steps one bound program may hold. every step is at most one
+/// sibling read, and a run walks each step once, so this is what bounds the
+/// reads a single delivery makes. the same 256 `MAX_INVOCATION_PAGE` puts
+/// on a page of invocations: a program is a plan, not a database.
+const MAX_PROGRAM_STEPS: usize = 256;
+
 /// a program as the module accepts it off the wire: every target a later
 /// step or the end, every reference resolvable by construction, every module
 /// a sibling (a program cannot query its own executor: that read is refused
 /// by the host), every literal renderable.
 pub(crate) fn validate_program(program: &Program, executor: &str) -> Result<(), Error> {
+    // a program is forward-only (`validate_target`), so a run executes each
+    // step at most once and the sibling reads one delivery makes are bounded
+    // by the step count — by nothing else. without this cap the work an
+    // ordinary change costs scales with however large a program the account
+    // bound, not with the change. refused where the program enters, so what
+    // is stored is already the bounded thing.
+    let steps = program.steps.len();
+    if steps > MAX_PROGRAM_STEPS {
+        return Err(module_error(
+            refusal::CAPACITY,
+            format!("a program of {steps} steps exceeds the bound of {MAX_PROGRAM_STEPS}"),
+        ));
+    }
     let len = program.steps.len() as u64;
     let mut bound: BTreeSet<&str> = BTreeSet::new();
     for (index, step) in program.steps.iter().enumerate() {
@@ -242,9 +278,10 @@ pub(crate) fn validate_program(program: &Program, executor: &str) -> Result<(), 
                 validate_ident(&format!("step {at}: module"), module)?;
                 let queries_the_executor = module == executor;
                 if queries_the_executor {
-                    return Err(module_error(format!(
-                        "step {at}: a program cannot query {executor}, its own executor"
-                    )));
+                    return Err(module_error(
+                        refusal::INVALID_INPUT,
+                        format!("step {at}: a program cannot query {executor}, its own executor"),
+                    ));
                 }
                 validate_value(at, query, &bound)?;
                 validate_bind(at, bind)?;
@@ -683,9 +720,10 @@ fn waiting_call(program: &Program, step: u64) -> Result<Waiting<'_>, Error> {
             decode: *decode,
             on_failure,
         }),
-        _ => Err(module_error(format!(
-            "invocation waits at step {step}, which is not a call of its program"
-        ))),
+        _ => Err(module_error(
+            refusal::CORRUPT,
+            format!("invocation waits at step {step}, which is not a call of its program"),
+        )),
     }
 }
 
@@ -701,9 +739,10 @@ fn waiting_dispatch(program: &Program, step: u64) -> Result<Waiting<'_>, Error> 
             decode: *decode,
             on_failure,
         }),
-        _ => Err(module_error(format!(
-            "invocation waits at step {step}, which is not a dispatch of its program"
-        ))),
+        _ => Err(module_error(
+            refusal::CORRUPT,
+            format!("invocation waits at step {step}, which is not a dispatch of its program"),
+        )),
     }
 }
 
@@ -1108,6 +1147,32 @@ mod tests {
             assert!(
                 validate_program(&program, "agent").is_err(),
                 "{name} must be refused"
+            );
+        }
+    }
+
+    #[test]
+    fn a_program_past_the_step_bound_is_refused_where_it_enters() {
+        // the bound is what keeps one delivery's reads proportional to the
+        // change: a run walks each step at most once, so an uncapped program
+        // is an uncapped read. a program at the cap still binds.
+        let at_cap = Program {
+            steps: vec![Step::Finish; MAX_PROGRAM_STEPS],
+        };
+        assert_eq!(validate_program(&at_cap, "agent"), Ok(()));
+
+        for steps in [MAX_PROGRAM_STEPS + 1, 10_000] {
+            let program = Program {
+                steps: vec![Step::Finish; steps],
+            };
+            let Err(Error::Module { reason, sentence }) = validate_program(&program, "agent")
+            else {
+                panic!("a program of {steps} steps must be refused");
+            };
+            assert_eq!(reason, refusal::CAPACITY);
+            assert_eq!(
+                sentence,
+                format!("a program of {steps} steps exceeds the bound of {MAX_PROGRAM_STEPS}")
             );
         }
     }
@@ -1617,7 +1682,13 @@ mod tests {
                 bind: "c".into(),
             }],
         };
-        let refusing = Siblings::answering("chat", Err(Error::Module("closed".into())));
+        let refusing = Siblings::answering(
+            "chat",
+            Err(Error::Module {
+                reason: refusal::WRONG_STATE.into(),
+                sentence: "closed".into(),
+            }),
+        );
         let run = block_on(super::run(&refusing, &erroring, &mut self::frame(), 0));
         assert!(matches!(
             run.end,
