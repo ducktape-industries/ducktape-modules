@@ -729,6 +729,8 @@ fn inline_page_and_block_mentions_preserve_source_and_program_reply_parity() {
                 .await;
             let query = pages::encode_query(&pages::PageQuery::CommentThread {
                 thread_id: format!("agent/{}/thread/reply", dispatch_id_for(run)),
+                after: None,
+                limit: 0,
             });
             let native = pair.native.query("pages", &query).await.unwrap();
             let wasm = pair.wasm.query("pages", &query).await.unwrap();

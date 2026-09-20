@@ -12,6 +12,9 @@ use super::{
 use crate::RunFact;
 use crate::facets::WireSink;
 
+const MAX_PAGE_THREAD_QUERIES: usize =
+    pages::MAX_COMMENTS_PER_THREAD.div_ceil(pages::MAX_PAGE_QUERY_LIMIT as usize);
+
 impl RunsModule {
     // ---- model configuration reads ---------------------------------------------
     // Reads include the current execute overlay, so an admitted configuration
@@ -336,8 +339,130 @@ impl RunsModule {
         })
     }
 
+    /// Find a live comment's 1-based ordinal by walking canonical Pages pages.
+    /// The cursor is the last raw id scanned, so tombstones consume the source
+    /// page budget but do not consume the live ordinal.
+    pub(super) async fn page_comment_ordinal(
+        &self,
+        ctx: &dyn Ctx,
+        pages: &str,
+        thread_id: &str,
+        comment_id: &str,
+    ) -> Result<u64, String> {
+        let mut after = None;
+        let mut ordinal = 0;
+        let mut query_count = 0;
+        loop {
+            if query_count == MAX_PAGE_THREAD_QUERIES {
+                return Err(format!(
+                    "pages thread pagination exceeded {MAX_PAGE_THREAD_QUERIES} queries: {thread_id}"
+                ));
+            }
+            query_count += 1;
+            let reply = ctx
+                .query(
+                    pages,
+                    &pages::encode_query(&pages::PageQuery::CommentThread {
+                        thread_id: thread_id.to_string(),
+                        after: after.clone(),
+                        limit: 0,
+                    }),
+                )
+                .await
+                .map_err(|e| format!("pages thread lookup failed: {e}"))?;
+            let view = match pages::decode_reply(&reply) {
+                Ok(pages::PageReply::CommentThread(Some(view))) => view,
+                Ok(_) => return Err(format!("pages thread is missing: {thread_id}")),
+                Err(e) => return Err(format!("pages thread reply failed to decode: {e}")),
+            };
+            if let Some(index) = view
+                .comments
+                .iter()
+                .position(|comment| comment.id == comment_id)
+            {
+                return Ok(ordinal + index as u64 + 1);
+            }
+            ordinal += view.comments.len() as u64;
+            if !view.has_more {
+                return Err(format!(
+                    "pages comment is missing: {thread_id}/{comment_id}"
+                ));
+            }
+            let Some(next_after) = view.next_after else {
+                return Err(format!(
+                    "pages thread pagination failed to advance: has_more without next_after for {thread_id}"
+                ));
+            };
+            if after.as_deref() == Some(next_after.as_str()) {
+                return Err(format!(
+                    "pages thread pagination failed to advance: next_after repeats the current cursor for {thread_id}"
+                ));
+            }
+            after = Some(next_after);
+        }
+    }
+
+    pub(super) async fn page_comment_at_ordinal(
+        &self,
+        ctx: &dyn Ctx,
+        pages: &str,
+        thread_id: &str,
+        ordinal: u64,
+    ) -> Result<(pages::ThreadView, pages::Comment), String> {
+        if ordinal == 0 {
+            return Err(format!("pages comment is missing: {thread_id}/0"));
+        }
+        let mut after = None;
+        let mut skipped = 0;
+        let mut query_count = 0;
+        loop {
+            if query_count == MAX_PAGE_THREAD_QUERIES {
+                return Err(format!(
+                    "pages thread pagination exceeded {MAX_PAGE_THREAD_QUERIES} queries: {thread_id}"
+                ));
+            }
+            query_count += 1;
+            let reply = ctx
+                .query(
+                    pages,
+                    &pages::encode_query(&pages::PageQuery::CommentThread {
+                        thread_id: thread_id.to_string(),
+                        after: after.clone(),
+                        limit: 0,
+                    }),
+                )
+                .await
+                .map_err(|e| format!("pages thread lookup failed: {e}"))?;
+            let view = match pages::decode_reply(&reply) {
+                Ok(pages::PageReply::CommentThread(Some(view))) => view,
+                Ok(_) => return Err(format!("pages thread is missing: {thread_id}")),
+                Err(e) => return Err(format!("pages thread reply failed to decode: {e}")),
+            };
+            let wanted = ordinal.saturating_sub(skipped);
+            if wanted > 0 && wanted <= view.comments.len() as u64 {
+                let comment = view.comments[wanted as usize - 1].clone();
+                return Ok((view, comment));
+            }
+            skipped += view.comments.len() as u64;
+            if !view.has_more {
+                return Err(format!("pages comment is missing: {thread_id}/{ordinal}"));
+            }
+            let Some(next_after) = view.next_after else {
+                return Err(format!(
+                    "pages thread pagination failed to advance: has_more without next_after for {thread_id}"
+                ));
+            };
+            if after.as_deref() == Some(next_after.as_str()) {
+                return Err(format!(
+                    "pages thread pagination failed to advance: next_after repeats the current cursor for {thread_id}"
+                ));
+            }
+            after = Some(next_after);
+        }
+    }
+
     /// Prepare a run triggered by one Pages comment. `ordinal` is 1-based in
-    /// the committed source thread. `run_id` is the
+    /// the live comments of the committed source thread. `run_id` is the
     /// caller's, exactly as in [`Self::prepare_dispatch`].
     pub(super) async fn prepare_page_dispatch(
         &self,
@@ -357,28 +482,9 @@ impl RunsModule {
             .pages
             .as_deref()
             .ok_or_else(|| "pages module is not configured".to_string())?;
-        let reply = ctx
-            .query(
-                pages,
-                &pages::encode_query(&pages::PageQuery::CommentThread {
-                    thread_id: thread_id.to_string(),
-                }),
-            )
-            .await
-            .map_err(|e| format!("pages thread lookup failed: {e}"))?;
-        let view = match pages::decode_reply(&reply) {
-            Ok(pages::PageReply::CommentThread(Some(view))) => view,
-            Ok(_) => return Err(format!("pages thread is missing: {thread_id}")),
-            Err(e) => return Err(format!("pages thread reply failed to decode: {e}")),
-        };
-        let index = usize::try_from(ordinal.saturating_sub(1))
-            .map_err(|_| "pages comment ordinal exceeds host usize".to_string())?;
-        let comment = view
-            .comments
-            .get(index)
-            .filter(|comment| !comment.deleted)
-            .cloned()
-            .ok_or_else(|| format!("pages comment is missing: {thread_id}/{ordinal}"))?;
+        let (view, comment) = self
+            .page_comment_at_ordinal(ctx, pages, thread_id, ordinal)
+            .await?;
         let author = match &comment.author {
             pages::Party::Key(key) => format!("user:{}", crate::hex(key)),
             pages::Party::Account(account) => format!("account:{account}"),

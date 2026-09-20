@@ -482,7 +482,7 @@ fn another_sources_run_request_detail_cannot_assign_manual_requester_authority()
         else {
             panic!("invocations");
         };
-        let last = &invocations.last().unwrap().invocation;
+        let last = &invocations.entries.last().unwrap().invocation;
         assert!(
             matches!(last.status, agent::Status::Failed { .. }),
             "{last:?}"
