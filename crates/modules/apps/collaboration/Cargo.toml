@@ -11,9 +11,6 @@ guest = ["dep:ducktape-module-sdk"]
 
 [dependencies]
 sdk = { workspace = true }
-identity = { workspace = true }
-chat = { workspace = true }
-tasks = { workspace = true }
 serde = { workspace = true }
 async-trait = { workspace = true }
 # wasm-only, behind `guest`: the port harness (WitCtx / host imports / the

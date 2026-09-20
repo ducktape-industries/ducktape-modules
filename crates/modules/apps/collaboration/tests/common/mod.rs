@@ -16,6 +16,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
+pub use collaboration::consumer_wire::{chat, identity, tasks};
 use collaboration::{
     BoundPrincipal, Collaboration, CollaborationMsg, CollaborationQuery, CollaborationReply,
     DeliverRequest, MessageKind, Party, ProtectedRead, encode_msg, encode_query,
@@ -121,7 +122,7 @@ impl FakeChat {
                     author,
                     origin: origin.clone(),
                     content_origin: origin,
-                    blocks: vec![chat::Block::paragraph("ping")],
+                    blocks: Vec::new(),
                     created_at: 1,
                     rev: 0,
                     revision: 1,
@@ -200,17 +201,9 @@ pub fn as_program(chat: &Chat, now: u64, account: sdk::AccountNumber) -> TestCtx
 pub fn program_account(number: sdk::AccountNumber) -> identity::AccountView {
     identity::AccountView {
         number,
-        name: format!("program-{number}"),
         control: identity::Control::Program {
-            controller: 1,
-            executor: "agent".into(),
-            generation: 0,
             standing: identity::ProgramStanding::Active,
         },
-        keys: Vec::new(),
-        avatar: None,
-        bio: None,
-        updated_at: 0,
     }
 }
 
@@ -238,27 +231,8 @@ pub fn with_job(chat: &Chat, now: u64, origin: Origin, job: Option<tasks::Job>) 
 
 /// a job record with `attempt`, enough for the attempt fence to read.
 pub fn job(job_id: &str, attempt: u64) -> tasks::Job {
-    tasks::Job {
-        job_id: job_id.into(),
-        execution: tasks::JobExecution::OneShot,
-        conversation_id: format!("{job_id}:1"),
-        previous_job_id: None,
-        continuation_operation_id: None,
-        controls: Vec::new(),
-        reports: Vec::new(),
-        native_history: None,
-        kind: "review".into(),
-        spec: "{}".into(),
-        submitter: tasks::Party::System,
-        status: tasks::JobStatus::Processing,
-        attempt,
-        claim: None,
-        result: None,
-        comments: Vec::new(),
-        created_at_revision: 1,
-        created_at_height: 1,
-        updated_at_height: 1,
-    }
+    let _ = job_id;
+    tasks::Job { attempt }
 }
 
 /// wrap an op for THIS network — the binding every op carries.

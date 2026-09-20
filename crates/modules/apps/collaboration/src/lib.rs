@@ -42,6 +42,7 @@
 mod producer;
 pub(crate) use producer as interface;
 pub use producer::*;
+pub mod consumer_wire;
 
 // the wasm-guest port: the dispatch shell that adapts this module to the
 // ducktape:module world. compiled only by the guest-builder's synthesized
@@ -57,6 +58,7 @@ mod store;
 pub use delivery::{MAX_REASON_BYTES, QUEUE_FULL};
 pub use store::MAX_RECORD_BYTES;
 
+use consumer_wire::{chat, identity};
 use sdk::refusal;
 use sdk::{
     Ctx, Error, MerkleStore, Module, ModuleId, Msg, Origin, ResolverSyncTarget, StagedStore,

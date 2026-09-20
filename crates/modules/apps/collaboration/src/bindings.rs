@@ -5,6 +5,7 @@
 use sdk::refusal;
 use sdk::{Ctx, Error, Origin, StagedStore};
 
+use crate::consumer_wire::chat::{ChatMsg, encode_msg};
 use crate::interface::{
     Binding, BoundPrincipal, Credential, EventBody, MAX_ID_BYTES, MAX_LABEL_BYTES,
     MAX_SERVICE_KEY_BYTES, Party,
@@ -120,7 +121,7 @@ fn seat(ctx: &mut dyn Ctx, chat: &str, channel_id: &str, principal: &BoundPrinci
     };
     ctx.emit_msg(sdk::Msg {
         target: chat.to_string(),
-        payload: chat::encode_msg(&chat::ChatMsg::SetMembership {
+        payload: encode_msg(&ChatMsg::SetMembership {
             channel_id: channel_id.to_string(),
             party: Party::Key(key.clone()),
             member,

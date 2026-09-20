@@ -26,6 +26,7 @@ use sdk::refusal;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use collaboration::consumer_wire::{chat, identity, tasks};
 use collaboration::{
     BoundPrincipal, Collaboration, CollaborationMsg, CollaborationQuery, DeliverRequest,
     DeliveryState, MessageKind, Party, ProtectedRead, encode_msg, encode_query,
@@ -153,7 +154,7 @@ impl Module for ChatStub {
                         author: party(SERVICE),
                         origin: Origin::External(vec![SERVICE; 32]),
                         content_origin: Origin::External(vec![SERVICE; 32]),
-                        blocks: vec![chat::Block::paragraph("please review")],
+                        blocks: Vec::new(),
                         created_at: seq,
                         rev: 0,
                         revision: 1,
