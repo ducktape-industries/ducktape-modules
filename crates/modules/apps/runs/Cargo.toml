@@ -24,17 +24,11 @@ node-work = { workspace = true }
 ducktape-module-sdk = { workspace = true, optional = true }
 sdk = { workspace = true }
 borsh = { workspace = true }
-saga = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "saga", default-features = false }
-# the duckfs wire types (FilesQuery::Refs / FilesReply::Refs / RefsInfo) the v1
-# composer queries for the committed head it pins as source_snapshot (W2), plus
-# `paths::canonical`. linked through the `files` MODULE's crate root (which
-# re-exports duckfs-core) rather than duckfs-core directly, per the module rule:
-# a module links other modules' wire surface, not their pure-core internals.
-# default-features = false drops files' native `Files`/duckfs-disk (std::fs) so
-# the `runs` guest graph stays pure.
-files = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "files", default-features = false }
 duck-address = { workspace = true }
 base64 = { workspace = true }
+# the NFC check in `contracts::files::paths::canonical` — duckfs path
+# canonicalization, mirrored locally rather than linking the files module.
+unicode-normalization = { workspace = true }
 sha2 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -46,7 +40,11 @@ index_guest = { workspace = true }
 
 [dev-dependencies]
 wasm-host = { workspace = true }
+# the REAL producers the mirrors in `contracts::{files,saga}` are pinned
+# against: the fixture registry decodes Runs' emitted bytes with these codecs
+# and answers with theirs, so a mirror that drifts fails the suite.
 files = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "files", features = ["native"] }
+saga = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "saga", default-features = false }
 tempfile = { workspace = true }
 syn = { version = "2", features = ["full"] }
 # the host-side qmdb store handle the chat test fixtures inject.

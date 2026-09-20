@@ -49,7 +49,7 @@ impl TryFrom<&Address> for FileAddress {
             return Err(());
         }
         let path = format!("/{}", address.path.join("/"));
-        files::paths::canonical(&path).map_err(|_| ())?;
+        crate::files::paths::canonical(&path).map_err(|_| ())?;
         Ok(Self {
             path: address.path.clone(),
         })

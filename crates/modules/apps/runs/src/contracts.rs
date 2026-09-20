@@ -1944,3 +1944,445 @@ pub mod valset {
         }
     }
 }
+
+/// The duckfs surface Runs speaks: the three read queries it issues (`Stat`,
+/// `Read`, `Refs`), the two writes it emits (`Commit`, `CompareExchangeRetention`),
+/// and the path grammar its validators enforce. The `files` module owns the
+/// canonical codec; the integration suite drives the REAL `files::Files` and
+/// decodes these bytes with `files::decode_msg`, so the mirror stays pinned.
+pub mod files {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    /// a sha256-derived object id rendered as 64-char lowercase hex on the wire.
+    pub type DigestHex = String;
+
+    pub const MAX_NAME_BYTES: usize = 255;
+    pub const MAX_PATH_BYTES: usize = 4096;
+    pub const MAX_DEPTH: usize = 128;
+
+    pub mod paths {
+        use super::{MAX_DEPTH, MAX_NAME_BYTES, MAX_PATH_BYTES};
+        use unicode_normalization::UnicodeNormalization;
+
+        /// validate a consensus path and split it into its segments. paths are
+        /// strict consensus data: utf-8, NFC-normalized, absolute,
+        /// `/`-separated, with no empty / `.` / `..` segments and no NUL bytes.
+        /// this only ever rejects — it never rewrites. a bare `/` (root) yields
+        /// an empty segment list.
+        pub fn canonical(path: &str) -> Result<Vec<String>, String> {
+            if !path.starts_with('/') {
+                return Err("path must be absolute (start with '/')".to_string());
+            }
+            if path.chars().nfc().collect::<String>() != path {
+                return Err("path is not NFC-normalized".to_string());
+            }
+            if path.contains('\0') {
+                return Err("path must not contain a NUL byte".to_string());
+            }
+            if path.len() > MAX_PATH_BYTES {
+                return Err(format!(
+                    "path exceeds the {MAX_PATH_BYTES}-byte length limit"
+                ));
+            }
+            if path == "/" {
+                return Ok(Vec::new());
+            }
+            let mut segments = Vec::new();
+            for segment in path[1..].split('/') {
+                if segment.is_empty() || segment == "." || segment == ".." {
+                    return Err("path contains an empty or dot segment".to_string());
+                }
+                if segment.len() > MAX_NAME_BYTES {
+                    return Err(format!(
+                        "segment name exceeds the {MAX_NAME_BYTES}-byte limit"
+                    ));
+                }
+                segments.push(segment.to_string());
+            }
+            if segments.len() > MAX_DEPTH {
+                return Err(format!("path exceeds the maximum depth of {MAX_DEPTH}"));
+            }
+            Ok(segments)
+        }
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case")]
+    pub enum FilesMsg {
+        /// atomic multi-path commit. `base_snapshot: None` means the empty tree
+        /// (first commit). per-path CAS: every changed path must be identical
+        /// between base and the live head or the whole commit rejects.
+        Commit {
+            base_snapshot: Option<DigestHex>,
+            message: String,
+            changes: Vec<Change>,
+        },
+        /// atomically replace a module-owned retention reference. the
+        /// authenticated module origin supplies the namespace.
+        CompareExchangeRetention {
+            key: String,
+            expected: Option<RetentionReference>,
+            replacement: Option<RetentionReference>,
+        },
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case")]
+    pub enum Change {
+        Put {
+            path: String,
+            exec: bool,
+            meta: BTreeMap<String, String>,
+            content: Content,
+        },
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case")]
+    pub enum Content {
+        /// small files ride inside the commit op; the module chunks + hashes.
+        Inline { b64: String },
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case")]
+    pub enum FilesQuery {
+        Stat {
+            path: String,
+            snapshot: Option<DigestHex>,
+        },
+        Read {
+            path: String,
+            snapshot: Option<DigestHex>,
+            offset: u64,
+            len: u64,
+        },
+        Refs {},
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case")]
+    pub enum EntryKindWire {
+        File,
+        Dir,
+        Symlink,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    pub struct EntryInfo {
+        pub path: String,
+        pub kind: EntryKindWire,
+        pub size: u64,
+        pub exec: bool,
+        pub object: DigestHex,
+        pub meta: BTreeMap<String, String>,
+    }
+
+    /// a module-owned immutable snapshot reference. replacements compare the
+    /// whole previous value and advance its nonzero revision.
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    pub struct RetentionReference {
+        pub snapshot: DigestHex,
+        pub revision: u64,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    pub struct RefsInfo {
+        pub head: Option<DigestHex>,
+        pub pins: BTreeMap<String, DigestHex>,
+        pub window_len: u64,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case")]
+    pub enum FilesReply {
+        Stat(Option<EntryInfo>),
+        Read { b64: String, eof: bool },
+        Refs(RefsInfo),
+    }
+
+    pub fn encode_msg(value: &FilesMsg) -> Vec<u8> {
+        super::encode(value)
+    }
+    pub fn decode_msg(bytes: &[u8]) -> Result<FilesMsg, String> {
+        super::decode(bytes)
+    }
+    pub fn encode_query(value: &FilesQuery) -> Vec<u8> {
+        super::encode(value)
+    }
+    pub fn decode_query(bytes: &[u8]) -> Result<FilesQuery, String> {
+        super::decode(bytes)
+    }
+    pub fn encode_reply(value: &FilesReply) -> Vec<u8> {
+        super::encode(value)
+    }
+    pub fn decode_reply(bytes: &[u8]) -> Result<FilesReply, String> {
+        super::decode(bytes)
+    }
+}
+
+/// The saga read Runs performs: the committed lease on the saga a run's
+/// dispatch names ([`SagaQuery::Get`]), which answers the session's
+/// execution-lease check and the delivery path's executing-node attribution.
+/// Runs never writes to saga — the dispatch module triggers on its behalf.
+pub mod saga {
+    use super::*;
+
+    pub type SagaId = String;
+
+    /// the canonical, serializable mirror of `sdk::Origin`, recorded on every
+    /// saga at trigger time.
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum SagaOrigin {
+        External(Vec<u8>),
+        Module(String),
+        System,
+    }
+
+    /// where a saga is in its (deterministic) lifecycle.
+    #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum SagaStatus {
+        Pending,
+        Done,
+        Failed,
+        TimedOut,
+        Cancelled,
+    }
+
+    impl SagaStatus {
+        /// true for every state a saga can never leave.
+        pub fn is_terminal(&self) -> bool {
+            !matches!(self, SagaStatus::Pending)
+        }
+    }
+
+    /// a saga's observable state — the full read projection. COMPLETE, because
+    /// the producing type is `deny_unknown_fields`: a partial mirror would
+    /// refuse to decode a real reply.
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(deny_unknown_fields)]
+    pub struct SagaView {
+        pub origin: SagaOrigin,
+        pub reply_to: Option<String>,
+        pub reply_payload: Vec<u8>,
+        pub spec: Vec<u8>,
+        pub capability: Option<String>,
+        pub status: SagaStatus,
+        pub attempt: u32,
+        pub max_attempts: u32,
+        pub assignee: Option<Vec<u8>>,
+        pub pinned_assignee: Option<Vec<u8>>,
+        pub lease_views: Option<u64>,
+        pub lease_expires_at: Option<u64>,
+        pub deadline: Option<u64>,
+        pub result: Option<Vec<u8>>,
+        pub error: Option<String>,
+        pub created_at: u64,
+        pub updated_at: u64,
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum SagaQuery {
+        Get { saga_id: SagaId },
+    }
+
+    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum SagaReply {
+        Saga(Option<SagaView>),
+    }
+
+    pub fn encode_query(value: &SagaQuery) -> Vec<u8> {
+        super::encode(value)
+    }
+    pub fn decode_query(bytes: &[u8]) -> Result<SagaQuery, String> {
+        super::decode(bytes)
+    }
+    pub fn encode_reply(value: &SagaReply) -> Vec<u8> {
+        super::encode(value)
+    }
+    pub fn decode_reply(bytes: &[u8]) -> Result<SagaReply, String> {
+        super::decode(bytes)
+    }
+}
+
+/// The producer-side pins for the two mirrors added when Runs stopped linking
+/// the `files` and `saga` module crates. Both stay DEV dependencies precisely
+/// so these can drive the real codecs: a mirror that drifts in a field name,
+/// a variant tag, or a refusal sentence fails here.
+#[cfg(test)]
+mod mirror_conformance {
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn duckfs_path_canonicalization_matches_the_files_module() {
+        // ok shapes, then one case per refusal the mirror can emit.
+        let cases = [
+            "/",
+            "/shared",
+            "/shared/skills/review",
+            "/home/acct:7/notes/todo.md",
+            "shared/relative",
+            "/shared//double",
+            "/shared/./dot",
+            "/shared/../parent",
+            "/shared/e\u{301}combiné",
+            "/shared/nul\0byte",
+        ];
+        for path in cases {
+            assert_eq!(
+                super::files::paths::canonical(path),
+                ::files::paths::canonical(path),
+                "canonical({path:?}) diverged from the files module"
+            );
+        }
+        // the byte/name/depth caps, checked at their boundaries.
+        let long_name = format!("/shared/{}", "a".repeat(256));
+        let deep = format!("/{}", vec!["d"; 129].join("/"));
+        let long_path = format!("/shared/{}", "a".repeat(200) + "/").repeat(64);
+        for path in [long_name, deep, long_path] {
+            assert_eq!(
+                super::files::paths::canonical(&path),
+                ::files::paths::canonical(&path),
+                "canonical({path:?}) diverged from the files module"
+            );
+        }
+    }
+
+    #[test]
+    fn the_files_mirror_encodes_the_bytes_the_files_module_decodes() {
+        let reference = super::files::RetentionReference {
+            snapshot: "ab".repeat(32),
+            revision: 3,
+        };
+        let commit = super::files::FilesMsg::Commit {
+            base_snapshot: Some("cd".repeat(32)),
+            message: "agent duckfs.write_text".into(),
+            changes: vec![super::files::Change::Put {
+                path: "/shared/notes/a.md".into(),
+                exec: false,
+                meta: BTreeMap::from([("k".to_string(), "v".to_string())]),
+                content: super::files::Content::Inline { b64: "aGk=".into() },
+            }],
+        };
+        let cas = super::files::FilesMsg::CompareExchangeRetention {
+            key: "conv/resident".into(),
+            expected: None,
+            replacement: Some(reference.clone()),
+        };
+        for msg in [commit, cas] {
+            let bytes = super::files::encode_msg(&msg);
+            ::files::decode_msg(&bytes).expect("the files module decodes the mirror's bytes");
+        }
+
+        for query in [
+            super::files::FilesQuery::Stat {
+                path: "/shared/notes/a.md".into(),
+                snapshot: Some("ef".repeat(32)),
+            },
+            super::files::FilesQuery::Read {
+                path: "/shared/notes/a.md".into(),
+                snapshot: None,
+                offset: 0,
+                len: 1024,
+            },
+            super::files::FilesQuery::Refs {},
+        ] {
+            let bytes = super::files::encode_query(&query);
+            ::files::decode_query(&bytes).expect("the files module decodes the mirror's query");
+        }
+    }
+
+    #[test]
+    fn the_files_mirror_decodes_what_the_files_module_replies() {
+        let entry = ::files::EntryInfo {
+            path: "/shared/notes/a.md".into(),
+            kind: ::files::EntryKindWire::File,
+            size: 7,
+            exec: false,
+            object: "00".repeat(32),
+            meta: BTreeMap::from([("k".to_string(), "v".to_string())]),
+        };
+        let replies = [
+            ::files::FilesReply::Stat(Some(entry.clone())),
+            ::files::FilesReply::Read {
+                b64: "aGk=".into(),
+                eof: true,
+            },
+            ::files::FilesReply::Refs(::files::RefsInfo {
+                head: Some("ab".repeat(32)),
+                pins: BTreeMap::from([("p".to_string(), "cd".repeat(32))]),
+                window_len: 4,
+            }),
+        ];
+        for reply in replies {
+            let bytes = ::files::encode_reply(&reply);
+            let mirrored = super::files::decode_reply(&bytes)
+                .expect("the mirror decodes the files module's reply");
+            // round-trips back to the identical bytes, so nothing is dropped.
+            assert_eq!(super::files::encode_reply(&mirrored), bytes);
+        }
+
+        let retention = ::files::RetentionReference {
+            snapshot: "ab".repeat(32),
+            revision: 3,
+        };
+        let bytes = sdk::wire::encode(&retention);
+        let mirrored: super::files::RetentionReference = sdk::wire::decode(&bytes).unwrap();
+        assert_eq!(sdk::wire::encode(&mirrored), bytes);
+    }
+
+    #[test]
+    fn the_saga_mirror_round_trips_against_the_saga_module() {
+        let query = super::saga::SagaQuery::Get {
+            saga_id: "dispatch\u{1f}runs\u{1f}run-1".into(),
+        };
+        let bytes = super::saga::encode_query(&query);
+        assert_eq!(
+            ::saga::decode_query(&bytes).expect("the saga module decodes the mirror's query"),
+            ::saga::SagaQuery::Get {
+                saga_id: "dispatch\u{1f}runs\u{1f}run-1".into(),
+            }
+        );
+
+        let view = ::saga::SagaView {
+            origin: ::saga::SagaOrigin::Module("dispatch".into()),
+            reply_to: Some("dispatch".into()),
+            reply_payload: vec![1, 2, 3],
+            spec: vec![4, 5],
+            capability: Some("model-1".into()),
+            status: ::saga::SagaStatus::Done,
+            attempt: 2,
+            max_attempts: 3,
+            assignee: Some(vec![0xaa, 0xbb]),
+            pinned_assignee: None,
+            lease_views: Some(8),
+            lease_expires_at: Some(64),
+            deadline: Some(128),
+            result: Some(vec![6]),
+            error: None,
+            created_at: 10,
+            updated_at: 12,
+        };
+        let bytes = ::saga::encode_reply(&::saga::SagaReply::Saga(Some(view)));
+        let super::saga::SagaReply::Saga(Some(mirrored)) =
+            super::saga::decode_reply(&bytes).expect("the mirror decodes the saga module's reply")
+        else {
+            panic!("expected a saga view");
+        };
+        // every field survives: `SagaView` is `deny_unknown_fields` on both
+        // sides, so a partial mirror would have failed the decode above, and
+        // re-encoding proves nothing was defaulted away.
+        assert!(mirrored.status.is_terminal());
+        assert_eq!(mirrored.assignee.as_deref(), Some(&[0xaa, 0xbb][..]));
+        assert_eq!(mirrored.attempt, 2);
+        assert_eq!(
+            super::saga::encode_reply(&super::saga::SagaReply::Saga(Some(mirrored))),
+            bytes
+        );
+    }
+}
