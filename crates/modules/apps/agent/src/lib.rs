@@ -82,6 +82,7 @@
 // the public re-export for the module's existing internal/test call sites.
 mod wire;
 pub use wire::*;
+pub mod consumer_wire;
 
 // the pure interpreter: program validation and invocation evaluation.
 mod program;
@@ -98,6 +99,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use attribution::{AttributionEvent, AttributionMsg, AttributionQuery, AttributionReply, Change};
 use borsh::{BorshDeserialize, BorshSerialize};
+use consumer_wire::{attribution, dispatch, identity};
 use dispatch::{AdmissionPolicy, CallCompleted, Delivery, DispatchMsg, ResultEvent};
 use identity::{
     AccountView, Control, IdentityEvent, IdentityMsg, IdentityQuery, IdentityReply, ProgramStanding,

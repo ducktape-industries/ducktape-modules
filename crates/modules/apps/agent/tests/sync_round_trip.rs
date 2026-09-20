@@ -17,6 +17,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
+use agent::consumer_wire::{attribution, dispatch, identity};
 use agent::{
     AgentModule, AgentMsg, AgentQuery, AgentReply, CallOutcome, Continuation, Decode, Program,
     Siblings, Status, Step, Value, decode_reply, encode_msg, encode_query,

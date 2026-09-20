@@ -1,9 +1,11 @@
 //! Compiled inbox ingestion and account administration agree with native
 //! state roots, stamps, rollback and source authentication.
 
-use attribution::{Actor, AttributionEvent, Change, ChangeKind, Reason, Source, encode_event};
 use futures::executor::block_on;
-use identity::{
+use inbox::consumer_wire::attribution::{
+    Actor, AttributionEvent, Change, ChangeKind, Reason, Source, encode_event,
+};
+use inbox::consumer_wire::identity::{
     AccountView, Control, IdentityQuery, IdentityReply, KeyScheme, KeyView, ProgramStanding,
     decode_query as identity_decode_query, encode_reply as identity_encode_reply,
 };

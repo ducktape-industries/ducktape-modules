@@ -21,8 +21,7 @@ sdk = { workspace = true }
 borsh = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-identity = { workspace = true }
-attribution = { workspace = true }
+keyscheme = { workspace = true }
 async-trait = { workspace = true }
 
 [dev-dependencies]
