@@ -1,6 +1,7 @@
-//! One deployable unit: a module (consensus code, optional index mapper,
-//! optional view) or a view alone. The frame says which; the registry commits
-//! the hash of the whole frame and activates it once.
+//! One deployable unit: a module (consensus code, optional realtime guest,
+//! optional index mapper, optional view) or a view alone. The frame says
+//! which; the registry commits the hash of the whole frame and activates it
+//! once.
 use std::collections::BTreeMap;
 
 use borsh::{BorshDeserialize, BorshSerialize};
@@ -80,22 +81,31 @@ pub fn lane_name_is_well_formed(name: &str) -> bool {
 /// The frame tag: what the artifact IS. The registry entry's `kind` names the
 /// same thing; a `Module` reader handed a `View` frame refuses, it never
 /// improvises an empty core.
-const MODULE_TAG: u8 = 0;
+const MODULE_TAG: u8 = 2;
 const VIEW_TAG: u8 = 1;
 
 /// One deployable unit. The tag is the first byte of the frame, and the hash
 /// covers the whole frame, tag included.
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize)]
+#[repr(u8)]
+#[borsh(use_discriminant = true)]
 pub enum Artifact {
-    /// Consensus code, its optional index mapper, and its optional view.
-    Module(ModuleArtifact),
+    /// Consensus code, its optional realtime guest, index mapper and view.
+    Module(ModuleArtifact) = 2,
     /// A view alone: no component, no mapper, no consensus state.
-    View(ViewArtifact),
+    View(ViewArtifact) = 1,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize)]
 pub struct ModuleArtifact {
     pub component: Vec<u8>,
+    /// The module's realtime guest (`<id>.realtime.wasm`): the data-plane
+    /// tenant that frames, codes and mixes on the lanes below, off the
+    /// consensus path. It ships in the SAME frame as the consensus code so
+    /// one hash covers both — a network cannot approve consensus bytes and be
+    /// handed a different realtime guest. `None` is a module with no realtime
+    /// half, which is most of them.
+    pub realtime: Option<Vec<u8>>,
     pub index: Option<Vec<u8>>,
     /// `None` removes the view, including all its assets, at activation.
     pub view: Option<ViewArtifact>,
@@ -116,6 +126,7 @@ impl ModuleArtifact {
     pub fn component(component: Vec<u8>) -> Self {
         Self {
             component,
+            realtime: None,
             index: None,
             view: None,
             lanes: Vec::new(),
@@ -150,6 +161,7 @@ impl Artifact {
         Ok(match ArtifactRef::decode(bytes)? {
             ArtifactRef::Module(module) => Self::Module(ModuleArtifact {
                 component: module.component.to_vec(),
+                realtime: module.realtime.map(<[u8]>::to_vec),
                 index: module.index.map(<[u8]>::to_vec),
                 view: module.view.map(ViewArtifactRef::to_owned),
                 lanes: module.lanes,
@@ -182,6 +194,7 @@ pub enum ArtifactRef<'a> {
 #[derive(Debug)]
 pub struct ModuleArtifactRef<'a> {
     pub component: &'a [u8],
+    pub realtime: Option<&'a [u8]>,
     pub index: Option<&'a [u8]>,
     pub view: Option<ViewArtifactRef<'a>>,
     /// Owned, unlike the payloads: a lane declaration is a handful of bytes
@@ -238,6 +251,11 @@ impl<'a> ArtifactRef<'a> {
 
 fn take_module<'a>(bytes: &mut &'a [u8]) -> Result<ModuleArtifactRef<'a>, String> {
     let component = take_bytes(bytes)?;
+    let realtime = match take_tag(bytes)? {
+        0 => None,
+        1 => Some(take_bytes(bytes)?),
+        _ => return Err("module artifact has an invalid realtime tag".into()),
+    };
     let index = match take_tag(bytes)? {
         0 => None,
         1 => Some(take_bytes(bytes)?),
@@ -251,6 +269,7 @@ fn take_module<'a>(bytes: &mut &'a [u8]) -> Result<ModuleArtifactRef<'a>, String
     let lanes = take_lanes(bytes)?;
     Ok(ModuleArtifactRef {
         component,
+        realtime,
         index,
         view,
         lanes,
@@ -438,6 +457,7 @@ mod tests {
     fn viewed() -> ModuleArtifact {
         ModuleArtifact {
             component: vec![1],
+            realtime: Some(vec![9]),
             index: Some(vec![2]),
             view: Some(ViewArtifact {
                 component: vec![3],
@@ -482,6 +502,7 @@ mod tests {
             vec![1u8],
             None::<Vec<u8>>,
             None::<Vec<u8>>,
+            None::<Vec<u8>>,
             lanes,
         ))
         .unwrap()
@@ -501,6 +522,7 @@ mod tests {
             MODULE_TAG,
             vec![1u8],
             None::<Vec<u8>>,
+            None::<Vec<u8>>,
             Some((vec![2u8], assets)),
             Vec::<RawLane>::new(),
         ))
@@ -515,8 +537,9 @@ mod tests {
     fn the_tag_is_the_first_byte_and_names_the_arm() {
         let module = Artifact::Module(viewed());
         let view = Artifact::View(view_only());
-        assert_eq!(module.encode()[0], MODULE_TAG);
-        assert_eq!(view.encode()[0], VIEW_TAG);
+        assert_eq!(module.encode()[0], 2);
+        assert_eq!(view.encode()[0], 1);
+        assert_eq!(view.encode(), borsh::to_vec(&(1u8, view_only())).unwrap());
         assert!(matches!(
             ArtifactRef::decode(&module.encode()).unwrap(),
             ArtifactRef::Module(_)
@@ -564,6 +587,7 @@ mod tests {
         // tag is covered by the hash.
         let embedded = Artifact::Module(ModuleArtifact {
             component: Vec::new(),
+            realtime: None,
             index: None,
             view: Some(view_only()),
             lanes: Vec::new(),
@@ -595,6 +619,7 @@ mod tests {
             panic!("module frame decoded as a view");
         };
         assert_eq!(borrowed.component, [1]);
+        assert_eq!(borrowed.realtime.unwrap(), [9]);
         assert_eq!(borrowed.index.unwrap(), [2]);
         let view = borrowed.view.unwrap();
         assert_eq!(view.component, [3]);
@@ -731,6 +756,7 @@ mod tests {
             vec![1u8],
             None::<Vec<u8>>,
             None::<Vec<u8>>,
+            None::<Vec<u8>>,
             u32::MAX,
         ))
         .unwrap();
@@ -819,6 +845,7 @@ mod tests {
             MODULE_TAG,
             vec![1u8],
             None::<Vec<u8>>,
+            None::<Vec<u8>>,
             1u8,
             vec![2u8],
             u32::MAX,
@@ -845,12 +872,13 @@ mod tests {
 
     #[test]
     fn total_frame_limit_includes_all_encoded_bytes() {
-        // One tag byte, a four-byte component length, the two absent-option
-        // tags, and the empty lane list's four-byte count.
-        let exact = Artifact::module(vec![0; MAX_ARTIFACT_BYTES - 11]).encode();
+        // One tag byte, a four-byte component length, the three absent-option
+        // tags (realtime, mapper, view), and the empty lane list's four-byte
+        // count.
+        let exact = Artifact::module(vec![0; MAX_ARTIFACT_BYTES - 12]).encode();
         assert_eq!(exact.len(), MAX_ARTIFACT_BYTES);
         assert!(ArtifactRef::decode(&exact).is_ok());
-        let oversized = Artifact::module(vec![0; MAX_ARTIFACT_BYTES - 10]).encode();
+        let oversized = Artifact::module(vec![0; MAX_ARTIFACT_BYTES - 11]).encode();
         assert!(
             ArtifactRef::decode(&oversized).is_err(),
             "oversized frame accepted"
@@ -883,10 +911,10 @@ mod tests {
             "untagged artifact format accepted"
         );
         let mut invalid = raw_view(vec![("a".into(), vec![])]);
-        invalid[7] = 2; // view option tag after the kind tag, component and mapper tag
+        invalid[8] = 2; // view option tag after the kind tag, component, realtime and mapper tags
         assert!(ArtifactRef::decode(&invalid).is_err());
         let mut invalid = raw_view(vec![("a".into(), vec![])]);
-        invalid[21] = 255; // asset path's first byte
+        invalid[22] = 255; // asset path's first byte
         assert!(
             ArtifactRef::decode(&invalid).is_err(),
             "invalid UTF-8 path accepted"
@@ -907,6 +935,7 @@ mod tests {
         let bytes = borsh::to_vec(&(
             MODULE_TAG,
             vec![1u8],
+            None::<Vec<u8>>,
             None::<Vec<u8>>,
             Some((vec![2u8], assets)),
             Vec::<RawLane>::new(),
@@ -948,6 +977,92 @@ mod tests {
     }
 
     #[test]
+    fn native_lanes_do_not_require_a_realtime_guest() {
+        let artifact = Artifact::Module(ModuleArtifact {
+            lanes: vec![LaneDecl {
+                id: 1,
+                name: "voice".into(),
+                stream: None,
+            }],
+            ..ModuleArtifact::component(vec![1])
+        });
+        assert_eq!(Artifact::decode(&artifact.encode()).unwrap(), artifact);
+    }
+
+    #[test]
+    fn the_realtime_guest_is_one_commitment_with_the_consensus_code() {
+        let bare = ModuleArtifact::component(vec![1, 2, 3]);
+        let paired = ModuleArtifact {
+            realtime: Some(vec![4, 5]),
+            ..bare.clone()
+        };
+        let encoded = Artifact::Module(paired.clone()).encode();
+        // the owned and borrowed paths read the same bytes, and the borrowed
+        // one points into the frame rather than copying it.
+        assert_eq!(
+            Artifact::decode(&encoded).unwrap(),
+            Artifact::Module(paired.clone())
+        );
+        let ArtifactRef::Module(borrowed) = ArtifactRef::decode(&encoded).unwrap() else {
+            panic!("module frame decoded as a view");
+        };
+        assert_eq!(borrowed.component, [1, 2, 3]);
+        assert_eq!(borrowed.realtime.unwrap(), [4, 5]);
+        let frame = encoded.as_ptr() as usize..encoded.as_ptr() as usize + encoded.len();
+        assert!(frame.contains(&(borrowed.realtime.unwrap().as_ptr() as usize)));
+        // presence, content and removal each move the hash; the consensus
+        // bytes beside them do not change.
+        let tampered = ModuleArtifact {
+            realtime: Some(vec![4, 6]),
+            ..bare.clone()
+        };
+        let empty = ModuleArtifact {
+            realtime: Some(Vec::new()),
+            ..bare.clone()
+        };
+        let paired_hash = Artifact::Module(paired).hash();
+        for other in [bare.clone(), tampered.clone(), empty.clone()] {
+            let other = Artifact::Module(other);
+            assert_ne!(
+                other.hash(),
+                paired_hash,
+                "realtime change escaped the hash"
+            );
+            let Artifact::Module(decoded) = Artifact::decode(&other.encode()).unwrap() else {
+                panic!("module frame decoded as a view");
+            };
+            assert_eq!(decoded.component, [1, 2, 3]);
+        }
+        assert_ne!(
+            Artifact::Module(bare).hash(),
+            Artifact::Module(empty).hash(),
+            "only None is absence"
+        );
+        // a hostile realtime tag or length is refused, and the frame limit
+        // counts the realtime bytes with everything else.
+        let mut bad_tag = encoded.clone();
+        bad_tag[8] = 2; // realtime option tag after the kind tag and component
+        assert!(Artifact::decode(&bad_tag).is_err());
+        let mut hostile_length = encoded.clone();
+        hostile_length[9..13].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(Artifact::decode(&hostile_length).is_err());
+        for end in 0..encoded.len() {
+            assert!(
+                Artifact::decode(&encoded[..end]).is_err(),
+                "accepted a frame truncated at {end}"
+            );
+        }
+        let oversized = Artifact::Module(ModuleArtifact {
+            realtime: Some(vec![0; MAX_ARTIFACT_BYTES]),
+            ..ModuleArtifact::component(vec![1])
+        });
+        assert!(
+            ArtifactRef::decode(&oversized.encode()).is_err(),
+            "realtime bytes escaped the frame limit"
+        );
+    }
+
+    #[test]
     fn malformed_tags_and_trailing_frames_are_rejected() {
         let bytes = Artifact::module(vec![1, 2, 3]).encode();
         for end in 0..bytes.len() {
@@ -959,7 +1074,7 @@ mod tests {
         let mut invalid_view_tag = bytes.clone();
         *invalid_view_tag.last_mut().unwrap() = 2;
         assert!(Artifact::decode(&invalid_view_tag).is_err());
-        for tag in 2..=u8::MAX {
+        for tag in std::iter::once(0).chain(3..=u8::MAX) {
             let mut invalid_kind_tag = bytes.clone();
             invalid_kind_tag[0] = tag;
             let error = Artifact::decode(&invalid_kind_tag).unwrap_err();
