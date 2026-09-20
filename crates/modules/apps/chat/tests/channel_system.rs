@@ -20,6 +20,7 @@ use identity::{
     AccountView, IdentityQuery, IdentityReply, decode_query as identity_decode_query,
     encode_reply as identity_encode_reply,
 };
+use identity_module as identity;
 use sdk::refusal;
 use sdk::{Error, Module, Msg, Origin, StateRoot};
 use sdk_testkit::TestCtx;

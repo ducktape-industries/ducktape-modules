@@ -18,8 +18,9 @@
 //! exactly like the source.
 
 use automations::consumer_wire::{
-    Party,
+    Party, attribution,
     chat::{ChatEvent, encode_event as chat_encode_event},
+    identity,
 };
 use automations::{
     Action, Automations, AutomationsMsg, AutomationsQuery, AutomationsReply, MAX_ID_BYTES, Trigger,

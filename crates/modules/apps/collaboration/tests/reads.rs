@@ -300,11 +300,7 @@ fn an_unresolvable_origin_denies_rather_than_erroring() {
             me: MODULE.into(),
             cause: Cause::Direct,
         })
-        .on_query(IDENTITY, |_| {
-            Ok(identity::encode_reply(&identity::IdentityReply::Account(
-                None,
-            )))
-        })
+        .on_query(IDENTITY, |_| Ok(producer::encode_identity_reply(None)))
         .on_query(CHAT, move |req| {
             let _ = req;
             let _ = &chat_for_ctx;

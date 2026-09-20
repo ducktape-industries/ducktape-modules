@@ -1,7 +1,7 @@
 //! Golden producer proof. Fixtures were captured before this relocation from
 //! SDK `b66f47f1f4b0c869786ce195e382f2e83fd15277`'s `collaboration-wire`;
 //! every direction uses the canonical `sdk::wire` JSON codec.
-use chat::Party;
+use collaboration::Party;
 use collaboration::{
     CollaborationAssigned, CollaborationEvent, CollaborationMsg, CollaborationQuery,
     CollaborationReply, DeliverRequest, DenyReason, MessageKind, ProtectedRead, Request,

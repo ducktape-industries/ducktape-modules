@@ -16,9 +16,10 @@ fn seats(ctx: &sdk_testkit::TestCtx) -> Vec<(Party, bool)> {
     ctx.msgs()
         .iter()
         .filter(|m| m.target == CHAT)
-        .map(|m| match chat::decode_msg(&m.payload).expect("a chat op") {
-            chat::ChatMsg::SetMembership { party, member, .. } => (party, member),
-            other => panic!("collaboration emitted {other:?}"),
+        .map(|m| {
+            let chat::ChatMsg::SetMembership { party, member, .. } =
+                chat::decode_msg(&m.payload).expect("a chat op");
+            (party, member)
         })
         .collect()
 }

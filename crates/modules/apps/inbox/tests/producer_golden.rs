@@ -1,8 +1,8 @@
 //! Golden producer proof. Fixtures were captured before this relocation from
 //! SDK `b66f47f1f4b0c869786ce195e382f2e83fd15277`'s `inbox-wire`;
 //! JSON uses `sdk::wire`, Notification/ChangeRef storage uses canonical Borsh.
-use attribution::{Actor, ChangeKind, ChangeRef, Reason, Source};
 use borsh::{from_slice, to_vec};
+use inbox::consumer_wire::attribution::{Actor, ChangeKind, ChangeRef, Reason, Source};
 use inbox::{
     InboxAssigned, InboxMsg, Notification, decode_assigned, decode_msg, encode_assigned, encode_msg,
 };

@@ -36,15 +36,12 @@ name = "agent"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "attribution-wire",
  "borsh",
  "commonware-cryptography",
  "commonware-runtime",
- "dispatch-wire",
  "ducktape-module-sdk",
  "futures",
  "host",
- "identity-wire",
  "sdk",
  "sdk-testkit",
  "serde",
@@ -178,7 +175,6 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "attribution",
- "attribution-wire",
  "borsh",
  "commonware-cryptography",
  "commonware-runtime",
@@ -186,7 +182,7 @@ dependencies = [
  "futures",
  "host",
  "identity",
- "identity-wire",
+ "keyscheme",
  "sdk",
  "sdk-testkit",
  "serde",
@@ -494,7 +490,6 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "attribution",
- "attribution-wire",
  "borsh",
  "commonware-cryptography",
  "commonware-runtime",
@@ -503,7 +498,6 @@ dependencies = [
  "futures",
  "host",
  "identity",
- "identity-wire",
  "index-guest",
  "keyscheme",
  "sdk",
@@ -635,17 +629,14 @@ name = "collaboration"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "chat-wire",
  "commonware-runtime",
  "ducktape-module-sdk",
  "futures",
  "host",
- "identity-wire",
  "sdk",
  "sdk-testkit",
  "serde",
  "statesync",
- "tasks-wire",
  "wasm-host",
 ]
 
@@ -2126,8 +2117,8 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "directory",
- "kv-wire",
  "sdk",
+ "serde",
 ]
 
 [[package]]
@@ -2480,14 +2471,13 @@ name = "inbox"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "attribution-wire",
  "borsh",
  "commonware-runtime",
  "ducktape-module-sdk",
  "futures",
- "identity-wire",
  "inbox",
  "index-guest",
+ "keyscheme",
  "sdk",
  "sdk-testkit",
  "serde",
@@ -2640,15 +2630,6 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "sha3",
-]
-
-[[package]]
-name = "kv-wire"
-version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#8c764093d5974b4328c0b90de157d72597540020"
-dependencies = [
- "sdk",
- "serde",
 ]
 
 [[package]]
@@ -3137,7 +3118,6 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "attribution",
- "attribution-wire",
  "borsh",
  "commonware-cryptography",
  "commonware-runtime",
@@ -3145,11 +3125,9 @@ dependencies = [
  "duck-address",
  "ducktape-module-sdk",
  "files",
- "files-wire",
  "futures",
  "host",
  "identity",
- "identity-wire",
  "index-guest",
  "keyscheme",
  "sdk",
@@ -4287,13 +4265,11 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "attribution",
- "attribution-wire",
  "commonware-runtime",
  "ducktape-module-sdk",
  "futures",
  "host",
  "identity",
- "identity-wire",
  "index-guest",
  "sdk",
  "sdk-testkit",
@@ -4304,16 +4280,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "wasm-host",
-]
-
-[[package]]
-name = "tasks-wire"
-version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#8c764093d5974b4328c0b90de157d72597540020"
-dependencies = [
- "attribution-wire",
- "sdk",
- "serde",
 ]
 
 [[package]]

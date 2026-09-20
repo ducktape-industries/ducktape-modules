@@ -8,10 +8,12 @@
 //! seam: two keys on alice's account, one on bob's, a program account, a
 //! revoked one, and an account number nobody holds.
 
-use attribution::{Actor, AttributionEvent, Change, ChangeKind, Reason, Source, encode_event};
 use borsh::BorshSerialize;
 use futures::executor::block_on;
-use identity::{
+use inbox::consumer_wire::attribution::{
+    Actor, AttributionEvent, Change, ChangeKind, Reason, Source, encode_event,
+};
+use inbox::consumer_wire::identity::{
     AccountView, Control, IdentityQuery, IdentityReply, KeyScheme, KeyView, ProgramStanding,
     decode_query as identity_decode_query, encode_reply as identity_encode_reply,
 };
