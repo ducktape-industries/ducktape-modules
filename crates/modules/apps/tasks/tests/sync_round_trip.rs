@@ -18,6 +18,7 @@ use commonware_runtime::{Runner as _, Supervisor as _, deterministic};
 use sdk::{Env, MerkleStore as _, Module, Msg, Origin, StateRoot, StateSyncHandle};
 use sdk_testkit::TestCtx;
 use statesync::qmdb::QmdbStore;
+use tasks::consumer_wire::{attribution, identity};
 use tasks::{
     Job, JobStatus, JobsMsg, JobsQuery, JobsReply, Task, TaskMsg, TaskQuery, TaskReply, Tasks,
     decode_job_reply, decode_task_reply, encode_job_msg, encode_job_query, encode_task_msg,
