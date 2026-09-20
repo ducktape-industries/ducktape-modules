@@ -1015,6 +1015,7 @@ fn key_mentions_are_frozen_as_accounts_in_canonical_heads_and_stamps() {
             &map,
             &serde_json::to_vec(&chat::index::ChatViewQuery::Message {
                 message_id: "key".into(),
+                viewer_handles: Vec::new(),
             })
             .unwrap(),
         )
