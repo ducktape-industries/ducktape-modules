@@ -152,6 +152,42 @@ pub const CASES: &[(&str, fn())] = &[
         "call_wire::short_and_wrong_tag_frames_decode_to_none",
         crate::call_wire::tests::short_and_wrong_tag_frames_decode_to_none,
     ),
+    (
+        "control::beacon_round_trips_and_rejects_other_frames",
+        crate::control::tests::beacon_round_trips_and_rejects_other_frames,
+    ),
+    (
+        "realtime::init_refuses_a_bad_self_peer_and_a_binding_without_voice",
+        crate::realtime::tests::init_refuses_a_bad_self_peer_and_a_binding_without_voice,
+    ),
+    (
+        "realtime::flows_derive_like_the_data_plane",
+        crate::realtime::tests::flows_derive_like_the_data_plane,
+    ),
+    (
+        "realtime::a_channel_opens_its_flows_with_its_first_seat_and_closes_them_with_its_last",
+        crate::realtime::tests::a_channel_opens_its_flows_with_its_first_seat_and_closes_them_with_its_last,
+    ),
+    (
+        "realtime::the_roster_minus_self_is_the_admission_set_on_both_lanes",
+        crate::realtime::tests::the_roster_minus_self_is_the_admission_set_on_both_lanes,
+    ),
+    (
+        "realtime::audio_is_stamped_out_to_the_roster_and_delivered_to_who_admits_the_sender",
+        crate::realtime::tests::audio_is_stamped_out_to_the_roster_and_delivered_to_who_admits_the_sender,
+    ),
+    (
+        "realtime::pictures_fragment_out_and_reassemble_in_per_sender",
+        crate::realtime::tests::pictures_fragment_out_and_reassemble_in_per_sender,
+    ),
+    (
+        "realtime::beacons_go_out_now_and_every_second_and_come_in_as_peer_beacons",
+        crate::realtime::tests::beacons_go_out_now_and_every_second_and_come_in_as_peer_beacons,
+    ),
+    (
+        "realtime::a_malformed_client_frame_closes_that_session_only",
+        crate::realtime::tests::a_malformed_client_frame_closes_that_session_only,
+    ),
 ];
 
 #[cfg(feature = "selftest")]
@@ -194,6 +230,8 @@ mod tests {
             include_str!("video/frame.rs"),
             include_str!("video/assembly.rs"),
             include_str!("call_wire.rs"),
+            include_str!("control.rs"),
+            include_str!("realtime.rs"),
         ];
         let declared: usize = src
             .iter()

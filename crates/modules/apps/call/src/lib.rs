@@ -14,8 +14,16 @@
 //! - [`voice`]: Opus encode, per-speaker jitter buffering, mixed playout.
 //! - [`video`]: VP8 frame fragmentation/reassembly over the video flow.
 //! - [`call_wire`]: the `/v1/call/ws` binary framing the webview leg speaks.
+//!
+//! And the hub over them: [`realtime`], the `ducktape:lane/media` step
+//! function Core's executor drives ([`control`] is its beacon wire), which
+//! [`guest`] exports as the component.
 
 pub mod call_wire;
+pub mod control;
+#[cfg(feature = "guest")]
+mod guest;
+pub mod realtime;
 #[cfg(any(test, feature = "selftest"))]
 pub mod selftest;
 pub mod video;
