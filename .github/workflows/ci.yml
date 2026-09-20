@@ -1,0 +1,30 @@
+# Linux only by owner order; macOS runners are deliberately excluded.
+# wasm-modules-check and ops/wasm-repro-check.sh rebuild wasm guests; defer them to nightly.
+name: ci
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [dev]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_BUILD_JOBS: 3
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - run: rustup show
+      - run: cargo fmt --all -- --check
+      - run: cargo test --locked --workspace --lib --no-fail-fast
+      - run: cargo clippy --locked --workspace --tests --no-deps -- -D warnings
