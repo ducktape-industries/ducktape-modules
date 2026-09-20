@@ -29,6 +29,12 @@ use tasks::{
 /// fixture before executing an operation.
 type Registry = BTreeMap<String, ModelRecord>;
 
+#[derive(Clone, Copy)]
+enum PageThreadCursor {
+    Missing,
+    NonAdvancing,
+}
+
 /// a minimal `Ctx` that captures emitted msgs/effects/events and serves
 /// model fixture records, chat transcripts, task lists, job records,
 /// and dispatch records — enough to unit-test `execute` in isolation
@@ -76,9 +82,11 @@ struct CaptureCtx {
     /// same pages by block id (the pages-effects target resolution).
     pages: BTreeMap<String, Vec<pages::Block>>,
     page_query_count: Cell<usize>,
+    page_thread_query_count: Cell<usize>,
     page_query_fail_after: Option<usize>,
     /// explicit committed page comment threads used by Pages-triggered runs.
     page_threads: BTreeMap<String, pages::ThreadView>,
+    page_thread_cursor: Option<PageThreadCursor>,
     /// thread/comment ids the pages module already holds — the squat
     /// simulation the CommentThread/GetComment freshness probes hit.
     taken_page_ids: BTreeSet<String>,
@@ -123,8 +131,10 @@ impl CaptureCtx {
             sagas: BTreeMap::new(),
             pages: BTreeMap::new(),
             page_query_count: Cell::new(0),
+            page_thread_query_count: Cell::new(0),
             page_query_fail_after: None,
             page_threads: BTreeMap::new(),
+            page_thread_cursor: None,
             taken_page_ids: BTreeSet::new(),
             page_target_threads: BTreeMap::new(),
             files_head: None,
@@ -198,8 +208,19 @@ impl CaptureCtx {
     fn page_query_count(&self) -> usize {
         self.page_query_count.get()
     }
+    fn page_thread_query_count(&self) -> usize {
+        self.page_thread_query_count.get()
+    }
     fn with_page_thread(mut self, view: pages::ThreadView) -> Self {
         self.page_threads.insert(view.thread.id.clone(), view);
+        self
+    }
+    fn with_missing_page_thread_cursor(mut self) -> Self {
+        self.page_thread_cursor = Some(PageThreadCursor::Missing);
+        self
+    }
+    fn with_non_advancing_page_thread_cursor(mut self) -> Self {
+        self.page_thread_cursor = Some(PageThreadCursor::NonAdvancing);
         self
     }
     /// mark a thread/comment id as already minted in the pages module (the
@@ -414,6 +435,8 @@ fn dummy_thread_view(id: &str) -> pages::ThreadView {
             comment_ids: Vec::new(),
         },
         comments: Vec::new(),
+        has_more: false,
+        next_after: None,
     }
 }
 
@@ -785,14 +808,30 @@ impl Ctx for CaptureCtx {
                         }),
                     )))
                 }
-                pages::PageQuery::CommentThread { thread_id } => {
-                    Ok(pages::encode_reply(&pages::PageReply::CommentThread(
-                        self.page_threads.get(&thread_id).cloned().or_else(|| {
-                            self.taken_page_ids
-                                .contains(&thread_id)
-                                .then(|| dummy_thread_view(&thread_id))
-                        }),
-                    )))
+                pages::PageQuery::CommentThread {
+                    thread_id, after, ..
+                } => {
+                    let query_count = self.page_thread_query_count.get();
+                    self.page_thread_query_count.set(query_count + 1);
+                    let view = self.page_threads.get(&thread_id).cloned().or_else(|| {
+                        self.taken_page_ids
+                            .contains(&thread_id)
+                            .then(|| dummy_thread_view(&thread_id))
+                    });
+                    let view = view.map(|mut view| {
+                        if let Some(cursor) = self.page_thread_cursor {
+                            view.comments.clear();
+                            view.has_more = true;
+                            view.next_after = match cursor {
+                                PageThreadCursor::Missing => None,
+                                PageThreadCursor::NonAdvancing => {
+                                    Some(after.unwrap_or_else(|| "cursor".into()))
+                                }
+                            };
+                        }
+                        view
+                    });
+                    Ok(pages::encode_reply(&pages::PageReply::CommentThread(view)))
                 }
                 pages::PageQuery::GetComment { comment_id } => {
                     Ok(pages::encode_reply(&pages::PageReply::Comment(
