@@ -650,7 +650,7 @@ fn inline_page_and_block_mentions_preserve_source_and_program_reply_parity() {
             ),
         )
         .await;
-        pair.submit(
+        let mut blocks = vec![(
             alice(),
             op!(
                 "pages",
@@ -661,12 +661,33 @@ fn inline_page_and_block_mentions_preserve_source_and_program_reply_parity() {
                         id: "inline-todo".into(),
                         kind: pages::BlockKind::Todo,
                         text: "Quackbot review the todo".into(),
-                        marks: Vec::new()
+                        marks: Vec::new(),
                     },
                 }
             ),
-        )
-        .await;
+        )];
+        let mut after = Some("inline-todo".to_string());
+        for index in 0..256 {
+            let id = format!("second-page-block-{index}");
+            blocks.push((
+                alice(),
+                op!(
+                    "pages",
+                    &pages::PageMsg::InsertBlock {
+                        parent: "inline".into(),
+                        after: after.clone(),
+                        block: pages::NewBlock {
+                            id: id.clone(),
+                            kind: pages::BlockKind::Paragraph,
+                            text: format!("Second page block {index}"),
+                            marks: Vec::new(),
+                        },
+                    }
+                ),
+            ));
+            after = Some(id);
+        }
+        pair.batch(blocks).await;
         pair.drain().await;
         for target in ["inline", "inline-todo"] {
             let checked = target == "inline";
@@ -688,6 +709,12 @@ fn inline_page_and_block_mentions_preserve_source_and_program_reply_parity() {
             pair.drain().await;
             let pending = pending_run_ids(&pair.native).await;
             assert_eq!(pending.len(), 1);
+            if target == "inline" {
+                let request = pair.requests.last().expect("page work request");
+                let spec: dispatch::WorkSpec = sdk::wire::decode(&request.spec).unwrap();
+                let payload = String::from_utf8(spec.payload).unwrap();
+                assert!(payload.contains("Second page block 255"));
+            }
             let run = &pending[0];
             pair.accept(run).await;
             pair.submit(
