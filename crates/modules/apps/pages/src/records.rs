@@ -10,7 +10,7 @@ use super::{
     Pages, Party, RecordChange, RecordCollection, RecordPage, RecordReceipt, RecordState,
     RecordStateChange, id_is_index_safe, to_page_err,
 };
-pub(crate) use pages_wire::record_ops::{document_ops, receipt_key, request_ids};
+pub(crate) use crate::record_ops::{document_ops, receipt_key, request_ids};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;

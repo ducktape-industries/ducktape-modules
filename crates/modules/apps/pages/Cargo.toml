@@ -17,7 +17,7 @@ guest = ["dep:ducktape-module-sdk"]
 index-guest = ["index_guest/guest"]
 
 [dependencies]
-pages-wire = { workspace = true }
+duck-address = { workspace = true }
 # wasm-only, behind `guest`: the port harness. a standalone-workspace path
 # crate, pulled only when the guest build compiles this crate for wasm32.
 ducktape-module-sdk = { workspace = true, optional = true }
@@ -42,6 +42,7 @@ serde_json = "1"
 sha2 = { workspace = true }
 
 [dev-dependencies]
+borsh = { workspace = true }
 keyscheme = { workspace = true, features = ["testkit"] }
 futures = { workspace = true }
 commonware-cryptography = { workspace = true }
