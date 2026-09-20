@@ -545,7 +545,6 @@ impl Ctx for CaptureCtx {
                         post_policy: chat::PostPolicy::Open,
                         hooks: Vec::new(),
                         pinned: Vec::new(),
-                        huddle: Vec::new(),
                         voice: false,
                         owner: chat::Party::System,
                         revision: 1,

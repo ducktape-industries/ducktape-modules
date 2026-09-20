@@ -280,14 +280,6 @@ pub mod chat {
 
     #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
     #[serde(deny_unknown_fields)]
-    pub struct HuddleMember {
-        pub party: Party,
-        pub node: Vec<u8>,
-        pub joined_at: u64,
-    }
-
-    #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-    #[serde(deny_unknown_fields)]
     pub struct Channel {
         pub id: String,
         pub name: String,
@@ -296,7 +288,6 @@ pub mod chat {
         pub post_policy: PostPolicy,
         pub hooks: Vec<String>,
         pub pinned: Vec<u64>,
-        pub huddle: Vec<HuddleMember>,
         pub voice: bool,
         pub owner: Party,
         pub archived: bool,

@@ -46,23 +46,10 @@ pub struct ChatChannel {
     pub name: String,
     pub archived: bool,
     pub members_only: bool,
-    pub huddle_count: i64,
     pub head_seq: i64,
-    /// Who is in the room's huddle, join order — what the room list shows
-    /// under the room, the way a voice channel shows its people.
-    pub huddle: Vec<HuddleSeat>,
-    /// A voice room: listed under its own heading, entered by joining.
+    /// A voice room: listed under its own heading, entered by joining its
+    /// call — whose seats are the `call` module's view, not this row.
     pub voice: bool,
-}
-
-#[derive(Clone, Debug, Hash, PartialEq, Default, serde::Serialize, serde::Deserialize)]
-pub struct HuddleSeat {
-    pub label: String,
-    pub initials: String,
-    pub is_you: bool,
-    /// The seat's NODE key (hex): what a call beacon names, so the room list
-    /// can light the seat that is talking.
-    pub node: String,
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Default, serde::Serialize)]
@@ -516,11 +503,6 @@ pub enum ChatDelta {
         added: bool,
         member: ChatMember,
     },
-    /// A huddle change first produces this directive; the shell reloads the
-    /// canonical row and replaces it with `ChannelUpdated` before publishing.
-    ChannelRefresh {
-        channel_id: String,
-    },
     ChannelUpdated {
         channel_id: String,
         channel: ChatChannel,
@@ -562,8 +544,6 @@ pub fn delta_from_op(
                 name,
                 archived: false,
                 members_only: post_policy == PostPolicy::MembersOnly,
-                huddle_count: 0,
-                huddle: Vec::new(),
                 head_seq: 0,
                 voice: false,
             },
@@ -574,8 +554,6 @@ pub fn delta_from_op(
                 name,
                 archived: false,
                 members_only: false,
-                huddle_count: 0,
-                huddle: Vec::new(),
                 head_seq: 0,
                 voice: true,
             },
@@ -593,9 +571,7 @@ pub fn delta_from_op(
                     name,
                     archived: false,
                     members_only: true,
-                    huddle_count: 0,
                     head_seq: 0,
-                    huddle: Vec::new(),
                     voice: false,
                 },
             }
@@ -733,9 +709,6 @@ pub fn delta_from_op(
                 },
             }
         }
-        ChatMsg::JoinHuddle { channel_id, .. }
-        | ChatMsg::LeaveHuddle { channel_id }
-        | ChatMsg::SweepHuddle { channel_id, .. } => ChatDelta::ChannelRefresh { channel_id },
     };
     Ok(Some(delta))
 }

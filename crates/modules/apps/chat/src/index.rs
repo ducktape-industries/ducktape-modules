@@ -1,5 +1,5 @@
 //! chat's read model: the FULL human-facing surface — channel lists, message
-//! pages, threads, revisions, reactions, members, huddles, full-text search,
+//! pages, threads, revisions, reactions, members, full-text search,
 //! and tags — folded from the applied-op feed into chat's per-module index
 //! database.
 //!
@@ -15,7 +15,7 @@
 //!   in-state assignment, never a counted derivation, so the mirror cannot
 //!   desync across a boundary stamp.
 //! - `channel/{id}`                     — one [`ChannelRow`]: metadata, post
-//!   policy, owner, archive flag, hooks, and the live huddle roster.
+//!   policy, owner, archive flag, and hooks.
 //!   enumeration IS the keyspace — the channel list is a prefix scan.
 //! - `msg/{channel}/{seq:016x}`         — the renderable head of one message
 //!   ([`MsgRow`]): structured blocks, flattened search text, authorship,
@@ -166,9 +166,10 @@ pub struct TagPage {
     pub next_after: Option<String>,
 }
 
-/// the stored row of one channel: metadata, policy, and the live huddle
-/// roster. the head sequence lives in the `seq/` mirror (one write per post
-/// instead of one row rewrite per post); channel views join the two.
+/// the stored row of one channel: metadata and policy. the head sequence
+/// lives in the `seq/` mirror (one write per post instead of one row rewrite
+/// per post); channel views join the two. who is in the channel's call is
+/// the `call` module's view, not this row.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChannelRow {
     pub id: String,
@@ -182,20 +183,9 @@ pub struct ChannelRow {
     pub archived: bool,
     /// module ids notified on every post.
     pub hooks: Vec<String>,
-    /// the live huddle roster, join order.
-    pub huddle: Vec<HuddleEntry>,
     /// a voice room (`CreateVoiceChannel`): listed under its own heading and
     /// entered by joining.
     pub voice: bool,
-}
-
-/// one huddle participant: rendered party handle plus the hex node key peers
-/// route media to.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct HuddleEntry {
-    pub party: String,
-    pub node: String,
-    pub joined_at: u64,
 }
 
 /// one channel member, keyed by rendered party handle.
@@ -577,6 +567,16 @@ fn delete_toks(out: &mut Writes, row: &MsgRow) {
 /// feed row. every applied post/edit stamps ([`crate::Module::execute`] sets
 /// it unconditionally), so an empty or undecodable stamp is interface drift —
 /// the [`FAIL_OP_DECODE`] class: fail loudly, the feed holds.
+/// lowercase hex — the byte-safe key component for channel ids, emojis and
+/// reactor handles.
+fn hex_lower(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        out.push_str(&format!("{b:02x}"));
+    }
+    out
+}
+
 fn decode_stamp(op: &OpRow) -> Result<ChatAssigned, Fail> {
     decode_assigned(&op.assigned).map_err(|e| Fail::new(FAIL_ASSIGNED_DECODE, e))
 }
@@ -608,7 +608,6 @@ pub fn fold_op(op: &OpRow, read: &impl StateRead) -> Result<Writes, Fail> {
                     owner: actor.clone(),
                     archived: false,
                     hooks: Vec::new(),
-                    huddle: Vec::new(),
                     voice: false,
                 },
             )?;
@@ -624,7 +623,6 @@ pub fn fold_op(op: &OpRow, read: &impl StateRead) -> Result<Writes, Fail> {
                     owner: actor.clone(),
                     archived: false,
                     hooks: Vec::new(),
-                    huddle: Vec::new(),
                     voice: true,
                 },
             )?;
@@ -646,7 +644,6 @@ pub fn fold_op(op: &OpRow, read: &impl StateRead) -> Result<Writes, Fail> {
                     owner: actor.clone(),
                     archived: false,
                     hooks: Vec::new(),
-                    huddle: Vec::new(),
                     voice: false,
                 },
             )?;
@@ -918,70 +915,8 @@ pub fn fold_op(op: &OpRow, read: &impl StateRead) -> Result<Writes, Fail> {
                 index_guest::delete(&mut out, key);
             }
         }
-        ChatMsg::JoinHuddle {
-            channel_id, node, ..
-        } => {
-            let Some(mut row) = read_channel(read, &channel_id)? else {
-                return Ok(out);
-            };
-            let party = party_handle(
-                decode_stamp(op)?
-                    .participant()
-                    .map_err(|e| Fail::new(FAIL_ASSIGNED_DECODE, e))?,
-            );
-            let node = hex_lower(&node);
-            match row.huddle.iter_mut().find(|m| m.party == party) {
-                Some(existing) => {
-                    if existing.node == node {
-                        return Ok(out);
-                    }
-                    // a re-join moves the member's node; join order and
-                    // joined_at stay, mirroring canonical.
-                    existing.node = node;
-                }
-                None => row.huddle.push(HuddleEntry {
-                    party,
-                    node,
-                    joined_at: op.time,
-                }),
-            }
-            put_channel(&mut out, &row)?;
-        }
-        ChatMsg::LeaveHuddle { channel_id } => {
-            let Some(mut row) = read_channel(read, &channel_id)? else {
-                return Ok(out);
-            };
-            let party = party_handle(
-                decode_stamp(op)?
-                    .participant()
-                    .map_err(|e| Fail::new(FAIL_ASSIGNED_DECODE, e))?,
-            );
-            row.huddle.retain(|m| m.party != party);
-            put_channel(&mut out, &row)?;
-        }
-        ChatMsg::SweepHuddle { channel_id, .. } => {
-            let Some(mut row) = read_channel(read, &channel_id)? else {
-                return Ok(out);
-            };
-            let target = party_handle(
-                decode_stamp(op)?
-                    .participant()
-                    .map_err(|e| Fail::new(FAIL_ASSIGNED_DECODE, e))?,
-            );
-            row.huddle.retain(|m| m.party != target);
-            put_channel(&mut out, &row)?;
-        }
     }
     Ok(out)
-}
-
-/// lowercase hex, the node-key rendering the media plane's routing UI reads.
-fn hex_lower(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        out.push_str(&format!("{b:02x}"));
-    }
-    out
 }
 
 fn hex_decode(text: &str) -> Option<String> {
@@ -1471,14 +1406,12 @@ mod tests {
                     key_mentions: Vec::new(),
                 })
             }
-            ChatMsg::SweepHuddle { .. }
-            | ChatMsg::AddReaction { .. }
-            | ChatMsg::RemoveReaction { .. }
-            | ChatMsg::JoinHuddle { .. }
-            | ChatMsg::LeaveHuddle { .. } => encode_assigned(&ChatAssigned::Participant {
-                actor: Party::Key(b"jess".to_vec()),
-                participant: Party::Key(b"jess".to_vec()),
-            }),
+            ChatMsg::AddReaction { .. } | ChatMsg::RemoveReaction { .. } => {
+                encode_assigned(&ChatAssigned::Participant {
+                    actor: Party::Key(b"jess".to_vec()),
+                    participant: Party::Key(b"jess".to_vec()),
+                })
+            }
             _ => encode_assigned(&ChatAssigned::Actor {
                 actor: Party::Key(b"jess".to_vec()),
             }),
@@ -1629,60 +1562,12 @@ mod tests {
                 },
                 participant(),
             );
-            apply(
-                key,
-                ChatMsg::JoinHuddle {
-                    channel_id: "g".into(),
-                    node: vec![1; 32],
-                    node_proof: Vec::new(),
-                },
-                participant(),
-            );
         }
         let channel = read_channel(&map, "g").unwrap().unwrap();
         assert_eq!(channel.owner, "acct:7");
-        assert_eq!(channel.huddle.len(), 1);
-        assert_eq!(channel.huddle[0].party, "acct:7");
         let message = read_row(&map, &msg_key("g", 1)).unwrap().unwrap();
         assert_eq!(message.author, "acct:7");
         assert_eq!(message.reactions[0].count, 1);
-    }
-
-    #[test]
-    fn self_sweep_folds_the_actual_historic_participant() {
-        let mut map = Map::new();
-        fold(
-            &mut map,
-            1,
-            &ChatMsg::CreateChannel {
-                channel_id: "g".into(),
-                name: "Room".into(),
-                post_policy: PostPolicy::Open,
-            },
-        );
-        fold(
-            &mut map,
-            2,
-            &ChatMsg::JoinHuddle {
-                channel_id: "g".into(),
-                node: vec![1; 32],
-                node_proof: Vec::new(),
-            },
-        );
-        let sweep = op_with(
-            3,
-            &ChatMsg::SweepHuddle {
-                channel_id: "g".into(),
-                party: Party::Account(7),
-            },
-            encode_assigned(&ChatAssigned::Participant {
-                actor: Party::Account(7),
-                participant: Party::Key(b"jess".to_vec()),
-            }),
-        );
-        let writes = fold_op(&sweep, &map).unwrap();
-        apply_to_map(&mut map, writes);
-        assert!(read_channel(&map, "g").unwrap().unwrap().huddle.is_empty());
     }
 
     #[test]
@@ -2373,7 +2258,7 @@ mod tests {
     }
 
     #[test]
-    fn members_and_huddles_track_rosters() {
+    fn members_track_rosters() {
         let mut map = Map::new();
         fold(&mut map, 1, &create("g", "General"));
         let membership = |user: &str, member: bool| ChatMsg::SetMembership {
@@ -2392,38 +2277,5 @@ mod tests {
         };
         assert_eq!(members.len(), 1);
         assert_eq!(members[0].party, "user:bob");
-
-        fold(
-            &mut map,
-            5,
-            &ChatMsg::JoinHuddle {
-                channel_id: "g".into(),
-                node: vec![0xab; 32],
-                node_proof: vec![0; 64],
-            },
-        );
-        let ChatViewReply::Channel(Some(info)) =
-            view(&map, serde_json::json!({"channel": {"channel_id": "g"}}))
-        else {
-            panic!("g exists")
-        };
-        assert_eq!(info.channel.huddle.len(), 1);
-        assert_eq!(info.channel.huddle[0].party, "user:jess");
-        assert_eq!(info.channel.huddle[0].node, "ab".repeat(32));
-
-        fold(
-            &mut map,
-            6,
-            &ChatMsg::SweepHuddle {
-                channel_id: "g".into(),
-                party: Party::Key(b"jess".to_vec()),
-            },
-        );
-        let ChatViewReply::Channel(Some(info)) =
-            view(&map, serde_json::json!({"channel": {"channel_id": "g"}}))
-        else {
-            panic!("g exists")
-        };
-        assert!(info.channel.huddle.is_empty(), "sweep clears by handle");
     }
 }

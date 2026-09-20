@@ -48,7 +48,7 @@ pub fn resolve_assigned_mentions(
 }
 
 /// who acts on chat state — the ONE party shape every author, owner, member,
-/// huddle participant, reactor and mention target takes.
+/// reactor and mention target takes.
 ///
 /// the module derives the acting party from `Env.origin` at write time, never
 /// from a payload: a member key resolves through identity to the account
@@ -94,7 +94,7 @@ impl Party {
     }
 
     /// a person's party — an account or a key — as opposed to trusted code.
-    /// post policy, the `:` channel namespace, creation caps and huddles all
+    /// post policy, the `:` channel namespace and creation caps all
     /// distinguish people from modules and the system on exactly this line.
     pub fn is_person(&self) -> bool {
         match self {

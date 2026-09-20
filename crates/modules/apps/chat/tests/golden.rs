@@ -91,7 +91,6 @@ fn frozen_b66_store_codecs_match() {
         post_policy: PostPolicy::Open,
         hooks: vec!["runs".into()],
         pinned: vec![2],
-        huddle: Vec::new(),
         voice: false,
         owner: Party::Account(7),
         archived: false,

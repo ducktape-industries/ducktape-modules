@@ -18,7 +18,7 @@ pub const MESSAGE_QUERY: &[u8] = br#"{"message":{"message_id":"m1"}}"#;
 pub const CHANNEL_NONE_REPLY: &[u8] = br#"{"channel":null}"#;
 pub const MESSAGES_EMPTY_REPLY: &[u8] = br#"{"messages":[]}"#;
 pub const MESSAGE_NONE_REPLY: &[u8] = br#"{"message":null}"#;
-pub const CHANNEL_REPLY: &[u8] = br#"{"channel":{"id":"general","name":"General","created_at":1,"head_seq":0,"post_policy":"open","hooks":[],"pinned":[],"huddle":[],"voice":false,"owner":{"account":7},"archived":false,"revision":1}}"#;
+pub const CHANNEL_REPLY: &[u8] = br#"{"channel":{"id":"general","name":"General","created_at":1,"head_seq":0,"post_policy":"open","hooks":[],"pinned":[],"voice":false,"owner":{"account":7},"archived":false,"revision":1}}"#;
 pub const MESSAGES_REPLY: &[u8] = br#"{"messages":[{"channel_id":"general","seq":1,"head":{"message_id":"m1","author":{"account":7},"origin":{"Program":3},"content_origin":{"Program":3},"blocks":[{"paragraph":[{"text":"hello","marks":[]}]}],"created_at":1,"rev":0,"revision":1,"edited_at":null,"base_rev":null,"deleted":false,"thread":null,"reply_count":0,"last_reply_seq":null}}]}"#;
 pub const MESSAGE_POSTED_EVENT: &[u8] = br#"{"message_posted":{"channel_id":"general","seq":1,"thread_root":null,"author":{"account":7},"mentions":[3]}}"#;
 
@@ -149,7 +149,6 @@ mod tests {
             post_policy: PostPolicy::Open,
             hooks: Vec::new(),
             pinned: Vec::new(),
-            huddle: Vec::new(),
             voice: false,
             owner: Party::Account(7),
             archived: false,

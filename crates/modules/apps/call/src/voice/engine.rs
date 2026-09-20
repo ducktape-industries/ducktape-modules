@@ -144,7 +144,7 @@ impl VoiceEngine {
     /// One datagram from an ADMITTED peer into its speaker lane (lanes appear
     /// on first frame from a peer). The plane authenticated `peer`, and the
     /// host re-checked the live roster before calling: a peer already kicked
-    /// from the huddle must never open or feed a lane.
+    /// from the call must never open or feed a lane.
     pub fn receive(&mut self, peer: PeerId, bytes: &[u8]) {
         let Ok((header, payload)) = media::decode_frame(bytes) else {
             self.malformed += 1;

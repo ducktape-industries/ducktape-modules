@@ -69,7 +69,7 @@ mod guest;
 // everything below is OFF-consensus: none of it touches qmdb or the
 // root-hash, and the index engine's deps (fluent31 IO) cannot cross into the
 // wasm guest — so the consensus state machine above compiles for wasm32
-// without them. (The call media planes live in the `media-service` crate.)
+// without them. (The call roster and media planes live in the `call` module.)
 //
 // The derived-tier materialized view (`index`: the PURE fold + view over
 // index_guest::StateRead) and the CLIENT view model (`client`: rendered row
@@ -371,6 +371,10 @@ pub struct Chat {
     /// sibling on this host (tests, minimal registries): such a host knows no
     /// account, so every external key stays a key and no mention resolves.
     identity: Option<ModuleId>,
+    /// the call module that owns every channel's call roster: archiving a
+    /// channel emits [`ChatEvent::ChannelArchived`] to it, when it is
+    /// registered on this host. `None` = no such sibling: nothing is emitted.
+    call: Option<ModuleId>,
 }
 
 impl Chat {
@@ -382,6 +386,7 @@ impl Chat {
             staged: StagedStore::new(store),
             attribution: None,
             identity: None,
+            call: None,
         }
     }
 
@@ -395,6 +400,31 @@ impl Chat {
     pub fn with_identity(mut self, identity: impl Into<ModuleId>) -> Self {
         self.identity = Some(identity.into());
         self
+    }
+
+    /// tell `call` when a channel is archived, so it ends the channel's call.
+    pub fn with_call(mut self, call: impl Into<ModuleId>) -> Self {
+        self.call = Some(call.into());
+        self
+    }
+
+    /// the archive follow-up: one `ChannelArchived` to the call module, in
+    /// this unit, when the host registers one (`ctx.module_root` — the same
+    /// liveness check a hook target passes; an absent module would poison
+    /// the block). unarchiving tells nobody.
+    fn end_call(&self, ctx: &mut dyn Ctx, channel_id: &str) {
+        let Some(call) = &self.call else {
+            return;
+        };
+        if ctx.module_root(call).is_none() {
+            return;
+        }
+        ctx.emit_msg(Msg {
+            target: call.clone(),
+            payload: encode_event(&ChatEvent::ChannelArchived {
+                channel_id: channel_id.into(),
+            }),
+        });
     }
 
     async fn get_raw(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Error> {
@@ -773,11 +803,12 @@ impl Chat {
     /// always pass — modules are genesis-fixed trusted code; people need
     /// membership under `MembersOnly`.
     async fn check_post_policy(&self, channel: &Channel, party: &Party) -> Result<(), Error> {
-        // an archived channel rejects posts, reactions, and huddle join/sweep:
-        // every posting-class op routes through here, so one guard turns them
-        // all away. edits and deletes deliberately do not call this — redacting
-        // your own message stays possible in a closed channel — and neither do
-        // membership, rename, or unarchive.
+        // an archived channel rejects posts and reactions (and, through
+        // `Access`, the call module's joins): every posting-class op routes
+        // through here, so one guard turns them all away. edits and deletes
+        // deliberately do not call this — redacting your own message stays
+        // possible in a closed channel — and neither do membership, rename,
+        // or unarchive.
         if channel.archived {
             return Err(Error::Module {
                 reason: refusal::WRONG_STATE.into(),
@@ -897,7 +928,6 @@ impl Chat {
             post_policy,
             hooks: Vec::new(),
             pinned: Vec::new(),
-            huddle: Vec::new(),
             voice,
             owner: party.clone(),
             archived: false,
@@ -1459,144 +1489,6 @@ impl Chat {
         Ok(())
     }
 
-    /// join (or start) the channel's huddle. only external users may — the
-    /// roster is a room of people, so module/system origins are rejected —
-    /// and members-only channels gate exactly like posting. `node_proof` must
-    /// verify as `node`'s own signature over this join (proof of possession —
-    /// see [`interface::huddle_join_preimage`]), refused with
-    /// `huddle_node_proof_invalid` otherwise. re-joining with the same node
-    /// key stages nothing (idempotent, byte-identical op log).
-    async fn stage_join_huddle(
-        &mut self,
-        authority: &Authority,
-        channel_id: &str,
-        node: Vec<u8>,
-        node_proof: Vec<u8>,
-        now: u64,
-    ) -> Result<Party, Error> {
-        let party = authority.party.clone();
-        require_non_empty("channel_id", channel_id)?;
-        if !party.is_person() {
-            return Err(Error::Module {
-                reason: refusal::UNAUTHORIZED.into(),
-                sentence: "only people may join a huddle".into(),
-            });
-        }
-        if node.len() != HUDDLE_NODE_KEY_BYTES {
-            return Err(Error::Module {
-                reason: refusal::INVALID_INPUT.into(),
-                sentence: format!(
-                    "huddle node key must be {HUDDLE_NODE_KEY_BYTES} bytes, got {}",
-                    node.len()
-                ),
-            });
-        }
-        let (namespace, preimage) = match &authority.origin {
-            Origin::External(key) => (HUDDLE_JOIN_NS, huddle_join_preimage(channel_id, key)),
-            Origin::Program(account) => (
-                PROGRAM_HUDDLE_JOIN_NS,
-                program_huddle_join_preimage(channel_id, *account),
-            ),
-            Origin::Module(_) | Origin::System => {
-                return Err(Error::Module {
-                    reason: refusal::UNAUTHORIZED.into(),
-                    sentence: "only people may join a huddle".into(),
-                });
-            }
-        };
-        if !keyscheme::KeyScheme::Ed25519.verify(&node, namespace, &preimage, &node_proof) {
-            return Err(Error::Module {
-                reason: refusal::INVALID_INPUT.into(),
-                sentence: format!(
-                    "the node key's proof for joining huddle {channel_id} does not verify"
-                ),
-            });
-        }
-        let mut channel = self.require_channel(channel_id).await?;
-        let party = authority.participant(channel.huddle.iter().map(|member| &member.party));
-        self.check_authorized_post(&channel, authority).await?;
-        if let Some(existing) = channel.huddle.iter_mut().find(|m| m.party == party) {
-            if existing.node == node {
-                return Ok(party);
-            }
-            existing.node = node;
-        } else {
-            if channel.huddle.len() >= MAX_HUDDLE_MEMBERS {
-                return Err(Error::Module {
-                    reason: refusal::CAPACITY.into(),
-                    sentence: format!("huddle is full: {channel_id}"),
-                });
-            }
-            channel.huddle.push(HuddleMember {
-                party: party.clone(),
-                node,
-                joined_at: now,
-            });
-        }
-        self.store_channel(&channel)?;
-        Ok(party)
-    }
-
-    /// leave the channel's huddle. absent participation is a deterministic
-    /// no-op; the last leaver empties the roster (= the huddle ends).
-    async fn stage_leave_huddle(
-        &mut self,
-        authority: &Authority,
-        channel_id: &str,
-    ) -> Result<Party, Error> {
-        let party = &authority.party;
-        require_non_empty("channel_id", channel_id)?;
-        if !party.is_person() {
-            return Err(Error::Module {
-                reason: refusal::UNAUTHORIZED.into(),
-                sentence: "only people may leave a huddle".into(),
-            });
-        }
-        let mut channel = self.require_channel(channel_id).await?;
-        let party = authority.participant(channel.huddle.iter().map(|member| &member.party));
-        let before = channel.huddle.len();
-        channel.huddle.retain(|m| m.party != party);
-        if channel.huddle.len() == before {
-            return Ok(party);
-        }
-        self.store_channel(&channel)?;
-        Ok(party)
-    }
-
-    /// evict `target` from the channel's huddle (staleness cleanup — see
-    /// `ChatMsg::SweepHuddle`). a person naming themself is a leave in
-    /// disguise; naming anyone else evicts them, by any person: `HuddleMember`
-    /// carries only `joined_at`, set once at join and never refreshed on
-    /// liveness, so the module holds no call-presence signal a staleness
-    /// rule could read, and the room's people are its only cleanup. absent
-    /// target = no-op either way.
-    async fn stage_sweep_huddle(
-        &mut self,
-        authority: &Authority,
-        channel_id: &str,
-        target: &Party,
-    ) -> Result<Party, Error> {
-        let party = &authority.party;
-        require_non_empty("channel_id", channel_id)?;
-        if !party.is_person() {
-            return Err(Error::Module {
-                reason: refusal::UNAUTHORIZED.into(),
-                sentence: "only people may sweep a huddle".into(),
-            });
-        }
-        if target == party {
-            return self.stage_leave_huddle(authority, channel_id).await;
-        }
-        let mut channel = self.require_channel(channel_id).await?;
-        let before = channel.huddle.len();
-        channel.huddle.retain(|m| m.party != *target);
-        if channel.huddle.len() == before {
-            return Ok(target.clone());
-        }
-        self.store_channel(&channel)?;
-        Ok(target.clone())
-    }
-
     /// hand one report to the attribution plane in this unit — the write and
     /// its attribution commit or abort together. a host wiring no plane
     /// reports nothing.
@@ -1738,6 +1630,9 @@ impl Chat {
                     .await?
                 {
                     self.report(ctx, &party, report);
+                    if archived {
+                        self.end_call(ctx, &channel_id);
+                    }
                 }
                 Ok(())
             }
@@ -1879,41 +1774,6 @@ impl Chat {
             } => {
                 self.stage_membership(&*ctx, &channel_id, member_party, member)
                     .await
-            }
-            ChatMsg::JoinHuddle {
-                channel_id,
-                node,
-                node_proof,
-            } => {
-                let participant = self
-                    .stage_join_huddle(&authority, &channel_id, node, node_proof, now)
-                    .await?;
-                ctx.set_assigned(encode_assigned(&ChatAssigned::Participant {
-                    actor: party.clone(),
-                    participant,
-                }));
-                Ok(())
-            }
-            ChatMsg::LeaveHuddle { channel_id } => {
-                let participant = self.stage_leave_huddle(&authority, &channel_id).await?;
-                ctx.set_assigned(encode_assigned(&ChatAssigned::Participant {
-                    actor: party.clone(),
-                    participant,
-                }));
-                Ok(())
-            }
-            ChatMsg::SweepHuddle {
-                channel_id,
-                party: target,
-            } => {
-                let participant = self
-                    .stage_sweep_huddle(&authority, &channel_id, &target)
-                    .await?;
-                ctx.set_assigned(encode_assigned(&ChatAssigned::Participant {
-                    actor: party.clone(),
-                    participant,
-                }));
-                Ok(())
             }
         }
     }

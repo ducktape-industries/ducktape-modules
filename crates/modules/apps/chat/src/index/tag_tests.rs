@@ -36,13 +36,12 @@ fn assigned_for(map: &Map, msg: &ChatMsg) -> Vec<u8> {
                 key_mentions: Vec::new(),
             })
         }
-        ChatMsg::AddReaction { .. }
-        | ChatMsg::RemoveReaction { .. }
-        | ChatMsg::JoinHuddle { .. }
-        | ChatMsg::LeaveHuddle { .. } => encode_assigned(&ChatAssigned::Participant {
-            actor: crate::Party::Key(b"jess".to_vec()),
-            participant: crate::Party::Key(b"jess".to_vec()),
-        }),
+        ChatMsg::AddReaction { .. } | ChatMsg::RemoveReaction { .. } => {
+            encode_assigned(&ChatAssigned::Participant {
+                actor: crate::Party::Key(b"jess".to_vec()),
+                participant: crate::Party::Key(b"jess".to_vec()),
+            })
+        }
         _ => encode_assigned(&ChatAssigned::Actor {
             actor: crate::Party::Key(b"jess".to_vec()),
         }),

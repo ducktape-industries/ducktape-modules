@@ -82,7 +82,15 @@ pub(crate) mod attribution {
 pub(crate) mod identity {
     use super::*;
 
-    pub use keyscheme::KeyScheme;
+    /// the closed signature-scheme set identity spells a key with — mirrored
+    /// here as spelling only: chat verifies nothing, so it links no crypto.
+    #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    pub enum KeyScheme {
+        Ed25519,
+        Secp256k1,
+        Secp256r1,
+    }
 
     pub const MAX_QUERY_LIMIT: u64 = 256;
 

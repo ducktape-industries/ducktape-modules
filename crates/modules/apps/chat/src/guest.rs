@@ -1,7 +1,7 @@
 //! the wasm port of this module, built the ADAPTER way: the native crate is
-//! compiled to wasm32 unmodified (minus the `native`-feature off-consensus
-//! submodules — the derived index and the voice/video media engines, which
-//! never touch the root-hash) and adapted to the `ducktape:module` world
+//! compiled to wasm32 unmodified (minus the off-consensus derived index,
+//! which never touches the root-hash) and adapted to the `ducktape:module`
+//! world
 //! through `ducktape-module-sdk`, so the module's logic is single-sourced (a
 //! behavior change in the native crate IS the wasm change). the packaging
 //! cdylib around this port is synthesized by `guest-builder` — this module is
@@ -19,7 +19,8 @@
 //!
 //! * the guest rebuilds the module FRESH per dispatch over the exact
 //!   production builder chain (`Chat::new("chat", store).with_attribution
-//!   ("attribution").with_identity("identity")`); its inner `pending`
+//!   ("attribution").with_identity("identity").with_call("call")`); its
+//!   inner `pending`
 //!   overlay is per-dispatch, and
 //!   cross-dispatch read-your-writes comes from the host's outer staged
 //!   overlay via `WitStore::get` (staged-over-committed).
@@ -34,8 +35,9 @@
 //! * `RegisterHook`'s registry check (`ctx.module_root`) is a host-routed
 //!   SIBLING read inside the guest, resolved by the runtime's memoized
 //!   replay, and so is every identity resolution (`OfKey`/`Get`) a write
-//!   makes; hook fan-out and the attribution reports ride `emit-msg`
-//!   follow-ups exactly like native.
+//!   makes and the archive follow-up's liveness check of the call module;
+//!   hook fan-out, the attribution reports and the `ChannelArchived` notice
+//!   ride `emit-msg` follow-ups exactly like native.
 //!
 //! equivalence is pinned block-by-block (roots, replies, aborts,
 //! multi-dispatch blocks) by `wasm_chat_parity`.
@@ -53,6 +55,10 @@ const ATTRIBUTION_ID: &str = "attribution";
 /// account is validated against (`Get`). genesis config compiled into the
 /// guest, like `ATTRIBUTION_ID`.
 const IDENTITY_ID: &str = "identity";
+/// the call module every archived channel's call ends in — told through a
+/// `ChannelArchived` follow-up when the host registers it. genesis config
+/// compiled into the guest, like `ATTRIBUTION_ID`.
+const CALL_ID: &str = "call";
 
 use ducktape_module_sdk::WitStore;
 
@@ -64,5 +70,6 @@ ducktape_module_sdk::store_guest! {
     shape: ducktape_module_sdk::store_shape(),
     new: Chat::new(MODULE_ID, Box::new(WitStore))
         .with_attribution(ATTRIBUTION_ID)
-        .with_identity(IDENTITY_ID),
+        .with_identity(IDENTITY_ID)
+        .with_call(CALL_ID),
 }

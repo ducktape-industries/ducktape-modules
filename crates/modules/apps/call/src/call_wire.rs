@@ -1,4 +1,4 @@
-//! The binary framing of `/v1/call/ws` — the webview leg of a huddle (audio +
+//! The binary framing of `/v1/call/ws` — the webview leg of a call (audio +
 //! camera video + call control on one websocket). This file is the ONLY
 //! definition of that wire: `noded`'s call-socket handler and the app's
 //! TypeScript leg (`app/src/domain/call-frames.ts`) both port their

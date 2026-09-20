@@ -15,8 +15,8 @@ use identity_module as identity;
 
 use attribution::AttributionModule;
 use chat::{
-    Block, Chat, ChatMsg, ChatQuery, ChatReply, HUDDLE_JOIN_NS, Mark, MessageHead, Party,
-    PostPolicy, Span, decode_reply, encode_msg, encode_query, huddle_join_preimage,
+    Block, Chat, ChatMsg, ChatQuery, ChatReply, Mark, MessageHead, Party, PostPolicy, Span,
+    decode_reply, encode_msg, encode_query,
 };
 use commonware_cryptography::{Signer as _, ed25519};
 use commonware_runtime::{Runner as _, Supervisor as _, deterministic};
@@ -688,18 +688,6 @@ fn key(tag: u8) -> Vec<u8> {
     vec![tag; 32]
 }
 
-/// a real `JoinHuddle` for `user_bytes`, naming `node` and carrying its proof
-/// of possession — the shape `stage_join_huddle` now requires past the
-/// node-length gate.
-fn join_huddle(channel_id: &str, user_bytes: &[u8], node: &ed25519::PrivateKey) -> ChatMsg {
-    let preimage = huddle_join_preimage(channel_id, user_bytes);
-    ChatMsg::JoinHuddle {
-        channel_id: channel_id.into(),
-        node: node.public_key().as_ref().to_vec(),
-        node_proof: node.sign(HUDDLE_JOIN_NS, &preimage).as_ref().to_vec(),
-    }
-}
-
 fn op(m: &ChatMsg) -> Msg {
     Msg {
         target: "chat".into(),
@@ -1007,25 +995,6 @@ fn same_ops_identical_roots_block_by_block() {
                     channel_id: "general".into(),
                     // m4 is general's THIRD sequence (m3 lives in "private").
                     seq: 3,
-                },
-                true,
-            ),
-            (
-                bob.clone(),
-                join_huddle("general", &bob, &ed25519::PrivateKey::from_seed(0x11)),
-                true,
-            ),
-            // re-joining with the same node key: stages nothing.
-            (
-                bob.clone(),
-                join_huddle("general", &bob, &ed25519::PrivateKey::from_seed(0x11)),
-                false,
-            ),
-            (
-                alice.clone(),
-                ChatMsg::SweepHuddle {
-                    channel_id: "general".into(),
-                    party: chat::Party::Key(bob.clone()),
                 },
                 true,
             ),

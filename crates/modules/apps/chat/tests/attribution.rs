@@ -10,7 +10,6 @@ use attribution::{
     ObjectRelations, Reason, Source,
 };
 use chat::{Block, Chat, ChatMsg, ChatQuery, ChatReply, Mark, Party, PostPolicy, Span};
-use commonware_cryptography::{Signer as _, ed25519};
 use futures::executor::block_on;
 use host::{BlockContext, Host};
 use identity::{Identity, IdentityMsg, KeyScheme};
@@ -701,14 +700,6 @@ fn a_local_page_rejection_preserves_previous_staging_without_abort() {
 fn joining_identity_preserves_the_original_keys_source_rights() {
     block_on(async {
         let mut host = boot().await;
-        let node = ed25519::PrivateKey::from_seed(99);
-        let node_proof = node
-            .sign(
-                chat::HUDDLE_JOIN_NS,
-                &chat::huddle_join_preimage("room", &[99; 32]),
-            )
-            .as_ref()
-            .to_vec();
         apply(
             &mut host,
             key(99),
@@ -777,17 +768,6 @@ fn joining_identity_preserves_the_original_keys_source_rights() {
         apply(
             &mut host,
             key(99),
-            "chat",
-            ChatMsg::JoinHuddle {
-                channel_id: "room".into(),
-                node: node.public_key().as_ref().to_vec(),
-                node_proof: node_proof.clone(),
-            },
-        )
-        .await;
-        apply(
-            &mut host,
-            key(99),
             "identity",
             IdentityMsg::Create {
                 name: "new-account".into(),
@@ -807,17 +787,6 @@ fn joining_identity_preserves_the_original_keys_source_rights() {
             },
         )
         .await;
-        apply(
-            &mut host,
-            key(99),
-            "chat",
-            ChatMsg::JoinHuddle {
-                channel_id: "room".into(),
-                node: node.public_key().as_ref().to_vec(),
-                node_proof: node_proof.clone(),
-            },
-        )
-        .await;
         assert_eq!(
             host.root_hash(),
             before,
@@ -834,42 +803,6 @@ fn joining_identity_preserves_the_original_keys_source_rights() {
             },
         )
         .await;
-        let swept = host
-            .submit_at(
-                context(key(99)),
-                message(
-                    "chat",
-                    &ChatMsg::SweepHuddle {
-                        channel_id: "room".into(),
-                        party: Party::Account(4),
-                    },
-                ),
-            )
-            .await
-            .unwrap();
-        let stamp = chat::decode_assigned(&swept.dispatches[0].assigned).unwrap();
-        assert_eq!(stamp.actor(), &Party::Account(4));
-        assert_eq!(
-            stamp.participant().unwrap(),
-            &Party::Key(vec![99; 32]),
-            "self-sweep publishes the actual historic entry removed"
-        );
-        let bytes = host
-            .query(
-                "chat",
-                &chat::encode_query(&ChatQuery::Channel {
-                    channel_id: "room".into(),
-                }),
-            )
-            .await
-            .unwrap();
-        let ChatReply::Channel(Some(room)) = chat::decode_reply(&bytes).unwrap() else {
-            panic!("room")
-        };
-        assert!(
-            room.huddle.is_empty(),
-            "the authenticated key can leave its historic entry"
-        );
         let added = host
             .submit_at(
                 context(key(99)),
@@ -1317,87 +1250,6 @@ fn attribution_batches_retire_more_than_the_host_dispatch_limit_of_sources() {
             page_contract::decode_reply(&bytes).unwrap(),
             page_contract::PageReply::Block(None)
         );
-    });
-}
-
-#[test]
-fn program_huddle_proof_binds_the_node_to_its_authenticated_account() {
-    block_on(async {
-        let mut host = boot().await;
-        apply(
-            &mut host,
-            key(1),
-            "chat",
-            ChatMsg::CreateChannel {
-                channel_id: "voice".into(),
-                name: "Voice".into(),
-                post_policy: PostPolicy::Open,
-            },
-        )
-        .await;
-        let node = ed25519::PrivateKey::from_seed(77);
-        for (namespace, preimage) in [
-            (
-                chat::HUDDLE_JOIN_NS,
-                chat::huddle_join_preimage("voice", &[1; 32]),
-            ),
-            (
-                chat::PROGRAM_HUDDLE_JOIN_NS,
-                chat::program_huddle_join_preimage("voice", 2),
-            ),
-            (
-                chat::PROGRAM_HUDDLE_JOIN_NS,
-                chat::program_huddle_join_preimage("other", 3),
-            ),
-        ] {
-            let before = host.root_hash();
-            let rejected = host
-                .submit_at(
-                    context(Origin::Program(3)),
-                    message(
-                        "chat",
-                        &ChatMsg::JoinHuddle {
-                            channel_id: "voice".into(),
-                            node: node.public_key().as_ref().to_vec(),
-                            node_proof: node.sign(namespace, &preimage).as_ref().to_vec(),
-                        },
-                    ),
-                )
-                .await;
-            assert!(rejected.is_err());
-            assert_eq!(host.root_hash(), before);
-        }
-        apply(
-            &mut host,
-            Origin::Program(3),
-            "chat",
-            ChatMsg::JoinHuddle {
-                channel_id: "voice".into(),
-                node: node.public_key().as_ref().to_vec(),
-                node_proof: node
-                    .sign(
-                        chat::PROGRAM_HUDDLE_JOIN_NS,
-                        &chat::program_huddle_join_preimage("voice", 3),
-                    )
-                    .as_ref()
-                    .to_vec(),
-            },
-        )
-        .await;
-        let bytes = host
-            .query(
-                "chat",
-                &chat::encode_query(&ChatQuery::Channel {
-                    channel_id: "voice".into(),
-                }),
-            )
-            .await
-            .unwrap();
-        let ChatReply::Channel(Some(channel)) = chat::decode_reply(&bytes).unwrap() else {
-            panic!("channel")
-        };
-        assert_eq!(channel.huddle[0].party, Party::Account(3));
-        assert_eq!(channel.huddle[0].node, node.public_key().as_ref());
     });
 }
 

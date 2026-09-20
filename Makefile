@@ -12,6 +12,7 @@ GUEST_BUILDER ?= ../ducktape-sdk/target/release/guest-builder
 
 # The consensus components (`guest` feature, `src/guest.rs`).
 BUILDER_MODULES := \
+  crates/modules/apps/call \
   crates/modules/apps/chat \
   crates/modules/apps/pages \
   crates/modules/apps/agent \
@@ -27,6 +28,7 @@ BUILDER_MODULES := \
 # `src/index_guest.rs`). That file IS the declaration — this list must name
 # exactly the crates that carry one.
 INDEX_MODULES := \
+  crates/modules/apps/call \
   crates/modules/apps/chat \
   crates/modules/apps/inbox \
   crates/modules/apps/pages \

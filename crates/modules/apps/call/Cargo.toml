@@ -3,22 +3,63 @@ name = "call"
 edition.workspace = true
 version.workspace = true
 
-# the call module's media guest: the OFF-consensus real-time media logic a
-# huddle rides — Opus framing + per-speaker jitter buffering + client-side
-# mixing (voice), video frame fragmentation/reassembly and the
-# `/v1/call/ws` binary framing — as a pure library that builds for
+# the call module: ONE module in two halves.
+#
+# the CONSENSUS half (src/lib.rs, src/wire.rs, src/index.rs) owns who is in a
+# channel's call: the channel-keyed roster, join/leave/sweep with the node
+# key's proof of possession, the roster read, and the derived-tier roster
+# view. authority over a channel stays with chat — one bounded `Access` read
+# per join — and chat's archive event clears the roster.
+#
+# the MEDIA half (src/voice, src/video, src/call_wire.rs) is the OFF-consensus
+# real-time media logic a call rides — Opus framing + per-speaker jitter
+# buffering + client-side mixing (voice), video frame fragmentation/reassembly
+# and the `/v1/call/ws` binary framing — as a pure library that builds for
 # wasm32-unknown-unknown with NO host imports. Ported from ducktape
 # `crates/services/media` at dfa41ce12409fe0e3403b7c71d04ae49aa04dd40; the
 # transport, the task pump, the clock and the random epoch stay with the host
 # and arrive as explicit inputs. The picture codec (JPEG) is native-only and
 # deliberately absent. No realtime WIT shim yet: that waits on the SDK pin.
 [features]
-# the wasm self-test harness (src/selftest.rs): exports every unit test as a
-# C-ABI entry so a plain wasm runtime can execute them without libtest.
+# the wasm self-test harness (src/selftest.rs): exports every media unit test
+# as a C-ABI entry so a plain wasm runtime can execute them without libtest.
 selftest = []
+# the wasm consensus port (src/guest.rs): the store-backed dispatch shell over
+# ducktape-module-sdk. non-default and wasm-only — enabled solely by the
+# guest-builder's synthesized cdylib workspace, never by the native gate.
+guest = ["dep:ducktape-module-sdk"]
+# the wasm index mapper shell (src/index_guest.rs): wires the pure roster
+# view into the fluent31 engine. wasm-only — enabled solely by
+# `guest-builder --index`.
+index-guest = ["index_guest/guest"]
 
 [dependencies]
+sdk = { workspace = true }
+# wasm-only, behind `guest`: the port harness (WitStore / WitCtx / host
+# imports / the dispatch-shell macros).
+ducktape-module-sdk = { workspace = true, optional = true }
+# the index CONTRACT (op-row envelope + the pure StateRead/Writes kit) — not
+# the engine: the default surface is pure types, wasm32-clean.
+index_guest = { workspace = true }
+async-trait = { workspace = true }
+# the one verifier a join's `node_proof` dispatches through (ed25519 over the
+# namespaced join preimage) — real crypto, not an enum import.
+keyscheme = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 # pure-Rust Opus (no C, no allocator tricks): the exact version the Core
 # media service is locked to.
 opus-rs = "=0.1.23"
 thiserror = "2"
+
+[dev-dependencies]
+wasm-host = { workspace = true }
+futures = { workspace = true }
+host = { workspace = true }
+sdk-testkit = { workspace = true }
+# the ed25519 node keypairs a join's `node_proof` test signs with.
+commonware-cryptography = { workspace = true }
+# the tests drive the module the way a host does: construct the concrete
+# QmdbStore and inject it as `Box<dyn MerkleStore>`.
+statesync = { workspace = true }
+commonware-runtime = { workspace = true }

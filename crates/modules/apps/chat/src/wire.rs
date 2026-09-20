@@ -4,8 +4,9 @@
 //! subscribers receive [`ChatEvent`] payloads. authorship is never part of a
 //! write payload — the module derives the acting [`Party`] from the dispatch
 //! origin — so a write names a party only where it addresses one (a mention,
-//! a membership, a huddle sweep), and replies and events carry the party the
-//! module resolved.
+//! a membership), and replies and events carry the party the module
+//! resolved. who is in a channel's CALL is not here: the `call` module owns
+//! that roster and asks chat only whether a party may post.
 
 use sdk::AccountNumber;
 use serde::{Deserialize, Serialize};
@@ -49,17 +50,6 @@ pub const MAX_HOOKS_PER_CHANNEL: usize = 8;
 pub const MAX_THREAD_REPLIES: usize = 4096;
 /// query page bound; larger limits are clamped down to this.
 pub const MAX_QUERY_LIMIT: u64 = 256;
-/// participants per channel huddle; further joins are rejected.
-pub const MAX_HUDDLE_MEMBERS: usize = 32;
-/// a huddle member's node key: raw ed25519 public key bytes.
-pub const HUDDLE_NODE_KEY_BYTES: usize = 32;
-/// the domain separator [`huddle_join_preimage`]'s signature is minted under —
-/// [`crate::HUDDLE_NODE_KEY_BYTES`]'s key proves it holds the join's `node` key
-/// by signing over exactly this namespace plus the channel/user pair, so a
-/// join can never be replayed as a different scheme's proof.
-pub const HUDDLE_JOIN_NS: &[u8] = b"ducktape/huddle-join/v1";
-/// Program-origin joins bind the proof to the account in a separate domain.
-pub const PROGRAM_HUDDLE_JOIN_NS: &[u8] = b"ducktape/huddle-join/program/v1";
 /// channels one creator (an account or key party) may have open at once.
 /// there is no `DeleteChannel` op — every created channel is permanent — so
 /// this is the only thing bounding one party's share of the channel set.
@@ -81,18 +71,6 @@ pub enum PostPolicy {
     MembersOnly,
 }
 
-/// one participant of a channel's live huddle. `node` is the raw ed25519 key
-/// of the member's node — where peers route this participant's voice frames
-/// (the media plane authenticates by transport identity; this is routing, not
-/// authorship). `party` derives from `Env.origin` like every chat actor.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct HuddleMember {
-    pub party: Party,
-    pub node: Vec<u8>,
-    pub joined_at: u64,
-}
-
 /// the per-channel record: metadata plus the head sequence counter that
 /// assigns every message's position (P3 — gap-free, in-state, at execute time).
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -108,25 +86,21 @@ pub struct Channel {
     pub hooks: Vec<String>,
     /// pinned message sequences (no pin op yet; carried for the record shape).
     pub pinned: Vec<u64>,
-    /// the channel's live huddle roster, join order. empty = no huddle. the
-    /// roster is consensus state (who is in the room); the audio itself rides
-    /// the off-consensus voice plane.
-    pub huddle: Vec<HuddleMember>,
     /// a voice room: opened by `CreateVoiceChannel`, entered by joining its
-    /// huddle rather than by reading it.
+    /// call (the `call` module's roster) rather than by reading it.
     pub voice: bool,
     /// the party that created the channel. a person owner is the only person
     /// who may administer it (rename, archive, roster, hooks); a module or
     /// system owner admits no person at all, and module and system parties
     /// administer every channel.
     pub owner: Party,
-    /// archived channels reject posts, reactions, and huddle joins; membership,
-    /// rename, and unarchive stay allowed.
+    /// archived channels reject posts and reactions (and, through `Access`,
+    /// call joins); membership, rename, and unarchive stay allowed.
     pub archived: bool,
     /// the channel's attribution revision: 1 at creation, +1 for every rename
     /// and archive toggle — the strictly increasing counter every attribution
-    /// report of this channel carries. roster ops (membership, hooks, huddle)
-    /// do not revise the channel.
+    /// report of this channel carries. roster ops (membership, hooks) do not
+    /// revise the channel.
     pub revision: u64,
 }
 
@@ -188,7 +162,7 @@ pub enum ChatMsg {
         name: String,
         post_policy: PostPolicy,
     },
-    /// open a voice room: a channel whose point is its huddle, listed under
+    /// open a voice room: a channel whose point is its call, listed under
     /// its own heading and entered by joining. it posts `PostPolicy::Open`
     /// like any channel; `Channel::voice` is what sets it apart. the same
     /// id and namespace rules as `CreateChannel`.
@@ -208,9 +182,11 @@ pub enum ChatMsg {
     /// a gate; the `:` namespace gate is what keeps a person off a
     /// module-namespaced channel.
     RenameChannel { channel_id: String, name: String },
-    /// archive or unarchive a channel. an archived channel rejects posts,
-    /// reactions, and huddle joins; membership, rename, and unarchive stay
-    /// allowed. authorization mirrors `RenameChannel`.
+    /// archive or unarchive a channel. an archived channel rejects posts and
+    /// reactions; membership, rename, and unarchive stay allowed. archiving
+    /// also ends the channel's call: chat emits [`ChatEvent::ChannelArchived`]
+    /// to the `call` module when one is registered. authorization mirrors
+    /// `RenameChannel`.
     SetChannelArchived { channel_id: String, archived: bool },
     /// post a message; `thread` = `Some(root_seq)` posts a thread reply, which
     /// is a normal message record consuming its own channel sequence. the
@@ -272,28 +248,6 @@ pub enum ChatMsg {
         party: Party,
         member: bool,
     },
-    /// join (or start) the channel's huddle. people only — huddles are human
-    /// affordances; members-only channels gate like posting. idempotent:
-    /// re-joining updates `node` (the joiner's node key, [`HUDDLE_NODE_KEY_BYTES`]
-    /// raw ed25519 bytes) and stages nothing when unchanged. `node_proof` is
-    /// `node`'s ed25519 signature over [`huddle_join_preimage`]`(channel_id,
-    /// user)` under [`HUDDLE_JOIN_NS`] — proof that the joining client holds
-    /// `node`'s private key. A Program origin signs
-    /// [`program_huddle_join_preimage`] under [`PROGRAM_HUDDLE_JOIN_NS`].
-    JoinHuddle {
-        channel_id: String,
-        node: Vec<u8>,
-        node_proof: Vec<u8>,
-    },
-    /// leave the channel's huddle. leaving a huddle one is not in is a
-    /// deterministic no-op; an empty roster means no huddle.
-    LeaveHuddle { channel_id: String },
-    /// evict a huddle member — call liveness is not consensus-observable (a
-    /// crashed client cannot leave), so cleanup has two paths: a person
-    /// naming themself is a leave in disguise; a person naming anyone else
-    /// evicts them, since the room's people are its only cleanup. sweeping an
-    /// absent party is a deterministic no-op.
-    SweepHuddle { channel_id: String, party: Party },
 }
 
 /// the DISPATCH read surface — exactly the point/computed reads other
@@ -348,8 +302,9 @@ pub enum ChatReply {
     Access(ChannelAccess),
 }
 
-/// the hook notification payload: one follow-up [`sdk::Msg`]-shaped dispatch
-/// per registered hook module, emitted in the same block as the post (P2).
+/// chat's follow-up payloads: one [`sdk::Msg`]-shaped dispatch per
+/// registered hook module for a post, emitted in the same block (P2), and
+/// the archive notice the `call` module clears a roster on.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum ChatEvent {
@@ -362,6 +317,9 @@ pub enum ChatEvent {
         /// first-occurrence order.
         mentions: Vec<AccountNumber>,
     },
+    /// the channel closed: addressed to the `call` module (never to hooks),
+    /// which ends the channel's call in the same unit.
+    ChannelArchived { channel_id: String },
 }
 
 /// the assigned stamp chat declares per applied op ([`sdk::Ctx::set_assigned`]):
@@ -391,7 +349,7 @@ pub enum ChatAssigned {
     DmChannel { channel_id: String, actor: Party },
     /// Canonical actor for an operation without an additional assignment.
     Actor { actor: Party },
-    /// Exact existing/new party whose reaction or huddle entry was affected.
+    /// Exact existing/new party whose reaction was affected.
     Participant { actor: Party, participant: Party },
 }
 
@@ -452,21 +410,6 @@ pub fn encode_assigned(a: &ChatAssigned) -> Vec<u8> {
 
 pub fn decode_assigned(b: &[u8]) -> Result<ChatAssigned, String> {
     sdk::wire::decode(b)
-}
-
-/// the bytes a `JoinHuddle`'s `node_proof` signs: `channel_id ‖ user`, each
-/// length-prefixed so no delimiter collision lets one field's tail bleed into
-/// the next's head. Signed and verified under [`HUDDLE_JOIN_NS`].
-pub fn huddle_join_preimage(channel_id: &str, user: &[u8]) -> Vec<u8> {
-    let mut out = Vec::new();
-    sdk::codec::push_str(&mut out, channel_id);
-    sdk::codec::push_bytes(&mut out, user);
-    out
-}
-
-/// A node's possession proof for an authenticated program account's join.
-pub fn program_huddle_join_preimage(channel_id: &str, account: sdk::AccountNumber) -> Vec<u8> {
-    huddle_join_preimage(channel_id, &account.to_be_bytes())
 }
 
 #[cfg(test)]
