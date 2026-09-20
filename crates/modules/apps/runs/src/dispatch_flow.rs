@@ -280,7 +280,7 @@ impl RunsModule {
                 .await?
             }
         };
-        // `duck://page/<id>` refs in the trigger message text or the injected
+        // canonical page-address refs in the trigger message text or the injected
         // item body render referenced page subtrees into the same context
         // section — resolved from COMMITTED pages state at compose height,
         // appended after the referenced item context.
@@ -403,7 +403,7 @@ impl RunsModule {
             .await;
         portable.context = Some(inject::render_pages_section(
             &[(page_id, blocks)],
-            &self.net_query(),
+            self.address_chain_id(),
         ));
         let sink = portable.sink.clone();
         let payload = envelope::render_page_comment_payload(
@@ -456,7 +456,7 @@ impl RunsModule {
             .await;
         portable.context = Some(inject::render_pages_section(
             &[(block.page.clone(), blocks)],
-            &self.net_query(),
+            self.address_chain_id(),
         ));
         let sink = portable.sink.clone();
         let payload =
