@@ -28,7 +28,7 @@ use super::{
     Sha256, SiblingReadBudget, delegated_run_id_for, delegation_id_for, dispatch_decode_reply,
     dispatch_encode_query, dispatch_id_for, page_source,
 };
-use dispatch::DispatchStatus;
+use crate::contracts::dispatch::DispatchStatus;
 use saga::{
     SagaQuery, SagaReply, decode_reply as saga_decode_reply, encode_query as saga_encode_query,
 };

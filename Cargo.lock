@@ -641,16 +641,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "collaboration-wire"
-version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#8c764093d5974b4328c0b90de157d72597540020"
-dependencies = [
- "chat-wire",
- "sdk",
- "serde",
-]
-
-[[package]]
 name = "commonware-actor"
 version = "2026.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1768,16 +1758,6 @@ dependencies = [
  "sdk",
  "serde_json",
  "tracing",
-]
-
-[[package]]
-name = "files-wire"
-version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#8c764093d5974b4328c0b90de157d72597540020"
-dependencies = [
- "duck-address",
- "duckfs-core",
- "refusal-class",
 ]
 
 [[package]]
@@ -3763,29 +3743,21 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "attribution",
- "attribution-wire",
  "base64 0.22.1",
  "borsh",
  "capability",
- "capability-wire",
- "collaboration-wire",
  "commonware-runtime",
  "dispatch",
- "dispatch-wire",
  "duck-address",
  "ducktape-module-sdk",
  "files",
- "files-wire",
  "forge",
  "futures",
  "governance",
- "governance-wire",
  "host",
  "identity",
- "identity-wire",
  "index-guest",
  "modules",
- "modules-wire",
  "node-work",
  "run-envelope",
  "saga",
@@ -3798,7 +3770,6 @@ dependencies = [
  "syn 2.0.119",
  "tempfile",
  "valset",
- "valset-wire",
  "wasm-host",
 ]
 

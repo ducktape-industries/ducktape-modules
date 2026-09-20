@@ -1,4 +1,4 @@
-use crate::contracts::{agent, tasks};
+use crate::contracts::{agent, dispatch, governance, tasks};
 use std::collections::BTreeMap;
 
 use crate::{ActionEnvelope, DelegationRequest, LaneKind, OperationView, ReplyBlock};

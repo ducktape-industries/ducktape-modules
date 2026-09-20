@@ -23,20 +23,8 @@ node-work = { workspace = true }
 # crate, pulled only when the guest build compiles this crate for wasm32.
 ducktape-module-sdk = { workspace = true, optional = true }
 sdk = { workspace = true }
-identity = { workspace = true }
-capability = { workspace = true }
-governance = { workspace = true }
-modules = { workspace = true }
-valset = { workspace = true }
 borsh = { workspace = true }
-# the collaboration wire types the two `collaboration.*` operations compose.
-# ONLY the wire surface crosses this edge: the authority check stays in that
-# module, where the program origin the effect arrives under is the one it
-# judges.
-collaboration = { workspace = true }
 saga = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "saga", default-features = false }
-attribution = { workspace = true }
-dispatch = { workspace = true }
 # the duckfs wire types (FilesQuery::Refs / FilesReply::Refs / RefsInfo) the v1
 # composer queries for the committed head it pins as source_snapshot (W2), plus
 # `paths::canonical`. linked through the `files` MODULE's crate root (which
@@ -45,7 +33,6 @@ dispatch = { workspace = true }
 # default-features = false drops files' native `Files`/duckfs-disk (std::fs) so
 # the `runs` guest graph stays pure.
 files = { git = "https://github.com/ducktape-industries/ducktape", branch = "dev", package = "files", default-features = false }
-files-wire = { workspace = true }
 duck-address = { workspace = true }
 base64 = { workspace = true }
 sha2 = { workspace = true }

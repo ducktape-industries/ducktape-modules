@@ -1,3 +1,5 @@
+use crate::contracts::{attribution, identity};
+
 use super::{
     Ctx, DispatchMsg, Error, JobsMsg, ModelStatus, Msg, Origin, RunsModule, RunsMsg,
     SiblingReadBudget, canonical_origin, decode_msg, dispatch_encode_msg, dispatch_id_for,
@@ -320,12 +322,6 @@ impl RunsModule {
                                 }
                                 identity::IdentityReply::Account(None) => {
                                     super::Actor::Key(key.clone())
-                                }
-                                _ => {
-                                    return Err(Error::Module {
-                                        reason: refusal::UNEXPECTED_REPLY.into(),
-                                        sentence: "unexpected requesting identity reply".into(),
-                                    });
                                 }
                             }
                         }

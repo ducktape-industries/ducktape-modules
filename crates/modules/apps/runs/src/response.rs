@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::MAX_DUCKFS_WRITE_TEXT_BYTES;
-use crate::{chat, pages, tasks};
+use crate::{chat, collaboration, pages, tasks};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use files::paths::canonical as canonical_duckfs_path;

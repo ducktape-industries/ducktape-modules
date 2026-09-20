@@ -228,13 +228,7 @@ impl RunsModule {
             .map_err(|sentence| Error::Module {
                 reason: refusal::UNEXPECTED_REPLY.into(),
                 sentence,
-            })?
-        else {
-            return Err(Error::Module {
-                reason: refusal::UNEXPECTED_REPLY.into(),
-                sentence: "the module registry answered the status lookup with something other than module status".into(),
-            });
-        };
+            })?;
         let Some(module) = modules
             .iter()
             .find(|module| module.module_id == view.request.update.module_id)

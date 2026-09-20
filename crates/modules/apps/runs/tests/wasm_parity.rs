@@ -21,7 +21,7 @@ use dispatch_module as dispatch;
 use files::Files;
 use host::{BlockContext, Host, MemberOutcome, SubmitError};
 use identity_module as identity;
-use runs::contracts::{agent, chat, pages, tasks};
+use runs::contracts::{agent, chat, collaboration, pages, tasks};
 use runs::{ActionEnvelope, AgentResponse, OP_TASKS_CREATE, ReplyBlock, SkillRef, encode_response};
 use runs::{
     RunsModule, RunsMsg, RunsQuery, RunsReply, decode_reply as runs_decode_reply, dispatch_id_for,
@@ -741,7 +741,7 @@ fn inline_page_and_block_mentions_preserve_source_and_program_reply_parity() {
                     .await
                     .status,
                 runs::ActionStatus::Completed {
-                    outcome: dispatch::CallOutcomeSummary::Applied { .. },
+                    outcome: runs::contracts::dispatch::CallOutcomeSummary::Applied { .. },
                     ..
                 }
             ));
@@ -1136,7 +1136,7 @@ fn the_collaboration_loop_lands_identically_on_both_runtimes() {
             .action(&format!("result/{}/0", dispatch_id_for(&manual)))
             .await;
         let runs::ActionStatus::Completed {
-            outcome: dispatch::CallOutcomeSummary::Rejected { reason },
+            outcome: runs::contracts::dispatch::CallOutcomeSummary::Rejected { reason },
             ..
         } = receipt.status
         else {
@@ -1329,7 +1329,7 @@ fn multi_dispatch_reads_prior_writes_and_isolates_rejected_control_and_receipts(
             assert!(matches!(
                 pair.action(&runs::action_request_id(&run, id)).await.status,
                 runs::ActionStatus::Completed {
-                    outcome: dispatch::CallOutcomeSummary::Applied { .. },
+                    outcome: runs::contracts::dispatch::CallOutcomeSummary::Applied { .. },
                     ..
                 }
             ));
@@ -1442,7 +1442,7 @@ fn the_session_lane_matches_lease_budget_and_close_out() {
         assert!(matches!(
             receipt.status,
             runs::ActionStatus::Completed {
-                outcome: dispatch::CallOutcomeSummary::Applied { .. },
+                outcome: runs::contracts::dispatch::CallOutcomeSummary::Applied { .. },
                 ..
             }
         ));
@@ -1707,7 +1707,7 @@ fn a_submit_carries_a_module_message_to_its_module_on_both_runtimes() {
         assert!(matches!(
             receipt.status,
             runs::ActionStatus::Completed {
-                outcome: dispatch::CallOutcomeSummary::Applied { .. },
+                outcome: runs::contracts::dispatch::CallOutcomeSummary::Applied { .. },
                 ..
             }
         ));

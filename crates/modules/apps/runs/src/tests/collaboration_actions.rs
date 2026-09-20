@@ -8,8 +8,8 @@
 //! `Origin::Module("runs")`, and no module speaks for a participant.
 
 use super::*;
+use crate::collaboration::{CollaborationMsg, DeliveryState, MessageKind, Party};
 use crate::{OP_COLLABORATION_ACKNOWLEDGE, OP_COLLABORATION_DELIVER};
-use collaboration::{CollaborationMsg, DeliveryState, MessageKind, Party};
 
 /// the network this test module is composed on — every emitted request is
 /// bound to it by name.
@@ -122,7 +122,7 @@ fn a_task_update_preserves_the_typed_attempt_reference() {
     assert_eq!(request.kind, MessageKind::TaskUpdate);
     assert_eq!(
         request.task,
-        Some(collaboration::TaskRef {
+        Some(crate::collaboration::TaskRef {
             id: "review-task".into(),
             expected_attempt: 7
         })

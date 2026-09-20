@@ -1,6 +1,7 @@
 //! The program chooses model work; the worker returns data; program calls
 //! apply the validated result. Job lifecycle and source writes are separate receipts.
 mod support;
+use dispatch_module as dispatch;
 use futures::executor::block_on;
 use sdk::Msg;
 use support::*;

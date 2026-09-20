@@ -227,7 +227,7 @@ async fn awaiting_pr_with_actions<P: serde::Serialize>(
             .await
             .status,
         runs::ActionStatus::Completed {
-            outcome: dispatch::CallOutcomeSummary::Applied { .. },
+            outcome: runs::contracts::dispatch::CallOutcomeSummary::Applied { .. },
             ..
         }
     ));
@@ -332,7 +332,10 @@ fn history_links_the_actual_program_allocation_after_another_item_wins_the_next_
             Some(3)
         );
         let opened = item(&network, 3).await.unwrap();
-        assert_eq!(opened.summary.author, collaboration::Party::Account(2));
+        assert_eq!(
+            serde_json::to_value(&opened.summary.author).unwrap(),
+            serde_json::json!({"account": 2})
+        );
         assert_eq!(opened.source_branch.as_deref(), Some("agent/item-1"));
         assert_eq!(opened.target_branch.as_deref(), Some("dev"));
     });
@@ -393,7 +396,7 @@ fn a_deployment_waits_for_the_program_and_pins_the_host_pushed_commit() {
             matches!(
                 receipt.status,
                 runs::ActionStatus::Completed {
-                    outcome: dispatch::CallOutcomeSummary::Applied { .. },
+                    outcome: runs::contracts::dispatch::CallOutcomeSummary::Applied { .. },
                     ..
                 }
             ),
@@ -461,7 +464,7 @@ fn a_rejected_program_target_never_links_a_predicted_pr() {
             matches!(
                 receipt.status,
                 runs::ActionStatus::Completed {
-                    outcome: dispatch::CallOutcomeSummary::Rejected { .. },
+                    outcome: runs::contracts::dispatch::CallOutcomeSummary::Rejected { .. },
                     ..
                 }
             ),
@@ -539,8 +542,8 @@ fn forged_program_output_cannot_redirect_the_link_of_a_successful_call() {
             None
         );
         assert_eq!(
-            item(&network, 2).await.unwrap().summary.author,
-            collaboration::Party::Account(2)
+            serde_json::to_value(&item(&network, 2).await.unwrap().summary.author).unwrap(),
+            serde_json::json!({"account": 2})
         );
         let bytes = network
             .host
