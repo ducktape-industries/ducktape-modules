@@ -26,6 +26,7 @@ members = [
     "crates/modules/apps/agent",
     "crates/modules/apps/automations",
     "crates/modules/apps/boards",
+    "crates/modules/apps/call",
     "crates/modules/apps/chat",
     "crates/modules/apps/collaboration",
     "crates/modules/apps/inbox",
