@@ -1,6 +1,7 @@
 //! Durable intake, turn ownership, and native history. Effects are written only by
 //! the executor below; source hooks never run a model in the source write cascade.
 use super::*;
+use crate::chat;
 use crate::receipts::View;
 use sdk::refusal;
 use serde::de::DeserializeOwned;
@@ -1293,27 +1294,12 @@ impl RunsModule {
             let seq = message.seq;
             if retain {
                 let actor = message.head.content_origin.clone();
-                // `runs-wire` still names SDK36's chat wire type. Re-encode at
-                // this consumer boundary so serde validates the complete
-                // producer record without coupling the modules together.
-                let message = serde_json::to_value(&message).map_err(|error| Error::Module {
-                    reason: refusal::UNEXPECTED_REPLY.into(),
-                    sentence: format!(
-                        "chat source snapshot cannot cross the runs boundary: {error}"
-                    ),
-                })?;
-                let message = serde_json::from_value(message).map_err(|error| Error::Module {
-                    reason: refusal::UNEXPECTED_REPLY.into(),
-                    sentence: format!(
-                        "chat source snapshot cannot decode at the runs boundary: {error}"
-                    ),
-                })?;
                 self.admit_conversation_input(
                     ctx,
                     &current,
                     format!("chat/{seq}"),
                     ConversationInput::Chat {
-                        message: Box::new(message),
+                        message: Box::new(crate::contracts::as_wire(message)),
                     },
                     actor,
                 )

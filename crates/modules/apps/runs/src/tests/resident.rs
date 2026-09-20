@@ -260,10 +260,11 @@ fn resident_program_keeps_action_routes_and_admits_structured_source_changes() {
         1,
         "only source intake differs; generic action authority is unchanged"
     );
+    let resident_step: agent::Step = crate::contracts::agent::from_wire(differences[0].1.clone());
     let agent::Step::Branch {
         test: agent::Predicate::Defined(agent::Value::Ref(path)),
         ..
-    } = differences[0].1
+    } = &resident_step
     else {
         panic!("resident inlet consumes a committed change");
     };
@@ -305,8 +306,8 @@ fn no_mention_human_posts_are_snapshotted_and_self_replies_do_not_recurse() {
         panic!("source body snapshot");
     };
     assert_eq!(
-        serde_json::to_value(&message.head.blocks).unwrap(),
-        serde_json::to_value(vec![Block::paragraph("first human")]).unwrap()
+        message.head.blocks,
+        vec![crate::contracts::as_wire(Block::paragraph("first human"))]
     );
     let root = module.root();
     let mut restored = super::module().with_files_module("files");
@@ -1204,11 +1205,13 @@ fn native_cancellation_reads_retained_execution_after_real_prune_and_id_reuse() 
         .at(3)
         .with_origin(Origin::Program(2))
         .with_registry(&registry);
-    ctx.jobs_module = Some(tasks::Tasks::new(
-        "jobs",
-        "identity",
-        "attribution",
-        Box::new(sdk_testkit::MemStore::new()),
+    ctx.jobs_module = Some(Box::new(
+        wasm_host::WasmModule::with_store(
+            "jobs",
+            include_bytes!("../../../tasks/component.wasm"),
+            Box::new(sdk_testkit::MemStore::new()),
+        )
+        .unwrap(),
     ));
     source_op(
         &mut ctx,
@@ -1323,8 +1326,8 @@ fn native_cancellation_reads_retained_execution_after_real_prune_and_id_reuse() 
         .unwrap()
         .unwrap();
     assert_eq!(
-        serde_json::to_value(&controls.job_status).unwrap(),
-        serde_json::to_value(JobStatus::Cancelled).unwrap()
+        controls.job_status,
+        crate::contracts::as_wire(JobStatus::Cancelled)
     );
     assert_eq!(
         controls.result.as_ref().unwrap().payload,

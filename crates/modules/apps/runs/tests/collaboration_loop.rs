@@ -343,17 +343,13 @@ fn native_job_report_relay_is_authenticated_atomic_metered_and_delivered() {
         kind: tasks::WorkerReportKind,
         payload: &str,
     ) -> Msg {
-        let kind = serde_json::from_value(
-            serde_json::to_value(kind).expect("worker report kind serializes"),
-        )
-        .unwrap_or_else(|error| panic!("worker report kind does not fit Runs wire: {error}"));
         msg(
             "runs",
             &runs::RunsMsg::ReportJob {
                 run_id: run_id.into(),
                 attempt,
                 operation_id: operation_id.into(),
-                kind,
+                kind: runs::contracts::as_wire(kind),
                 payload: payload.into(),
             },
         )
@@ -503,7 +499,7 @@ fn native_job_report_relay_is_authenticated_atomic_metered_and_delivered() {
                     "agent",
                     &agent::AgentMsg::Replace {
                         account: 2,
-                        program: runs::conversation_program("builder"),
+                        program: agent::from_wire(runs::conversation_program("builder")),
                     },
                 ),
             )
@@ -529,7 +525,7 @@ fn native_job_report_relay_is_authenticated_atomic_metered_and_delivered() {
                     &agent::AgentMsg::Provision {
                         request_id: "worker".into(),
                         name: "Worker".into(),
-                        program: runs::model_program("worker"),
+                        program: agent::from_wire(runs::model_program("worker")),
                     },
                 ),
             )
@@ -891,7 +887,7 @@ fn every_native_worker_checkpoint_and_ack_reaches_the_resident_queue() {
                     "agent",
                     &agent::AgentMsg::Replace {
                         account: 2,
-                        program: runs::conversation_program("builder"),
+                        program: agent::from_wire(runs::conversation_program("builder")),
                     },
                 ),
             )

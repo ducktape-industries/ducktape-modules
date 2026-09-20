@@ -1,8 +1,5 @@
 mod support;
 
-// the NATIVE modules under their module names — the same names in
-// [dependencies] are the wire surfaces these re-export.
-use agent_module as agent;
 use dispatch_module as dispatch;
 use governance_module as governance;
 use modules_module as modules;
@@ -82,16 +79,16 @@ async fn item(network: &Network, number: u64) -> Option<Box<forge::ItemDetail>> 
     item
 }
 
-async fn awaiting_pr(
+async fn awaiting_pr<P: serde::Serialize>(
     directory: &Directory,
-    program: agent::Program,
+    program: P,
 ) -> (Network, runs::PendingRun) {
     awaiting_pr_with_actions(directory, program, Vec::new()).await
 }
 
-async fn awaiting_pr_with_actions(
+async fn awaiting_pr_with_actions<P: serde::Serialize>(
     directory: &Directory,
-    program: agent::Program,
+    program: P,
     actions: Vec<runs::ActionEnvelope>,
 ) -> (Network, runs::PendingRun) {
     let mut network = Network::new().await;
@@ -102,7 +99,7 @@ async fn awaiting_pr_with_actions(
             .with_attribution("attribution")
             .with_chain_id("runs-test"),
     ));
-    network.provision_program(program).await;
+    network.provision_program(agent::from_wire(program)).await;
     network
         .submit(member(), msg("forge", &push("dev", None, Some(1))))
         .await;
@@ -303,7 +300,7 @@ async fn awaiting_pr_with_actions(
 fn history_links_the_actual_program_allocation_after_another_item_wins_the_next_number() {
     block_on(async {
         let directory = Directory::new("allocated");
-        let (mut network, run) = awaiting_pr(&directory, model_program("builder")).await;
+        let (mut network, run) = awaiting_pr(&directory, runs::model_program("builder")).await;
         issue(&mut network, "Another transaction allocates item two").await;
         network.drain().await;
         assert_eq!(
@@ -335,10 +332,7 @@ fn history_links_the_actual_program_allocation_after_another_item_wins_the_next_
             Some(3)
         );
         let opened = item(&network, 3).await.unwrap();
-        assert_eq!(
-            serde_json::to_value(&opened.summary.author).unwrap(),
-            serde_json::to_value(chat::Party::Account(2)).unwrap()
-        );
+        assert_eq!(opened.summary.author, collaboration::Party::Account(2));
         assert_eq!(opened.source_branch.as_deref(), Some("agent/item-1"));
         assert_eq!(opened.target_branch.as_deref(), Some("dev"));
     });
@@ -374,7 +368,7 @@ fn a_deployment_waits_for_the_program_and_pins_the_host_pushed_commit() {
         let directory = Directory::new("deployment");
         let (mut network, run) = awaiting_pr_with_actions(
             &directory,
-            model_program("builder"),
+            runs::model_program("builder"),
             vec![replacement_action()],
         )
         .await;
@@ -418,7 +412,7 @@ fn a_deployment_waits_for_the_program_and_pins_the_host_pushed_commit() {
 fn a_program_without_a_deployment_route_queues_no_upgrade() {
     block_on(async {
         let directory = Directory::new("deployment-refused");
-        let mut program = model_program("builder");
+        let mut program: agent::Program = agent::from_wire(runs::model_program("builder"));
         for step in &mut program.steps {
             let agent::Step::Call { module, msg, .. } = step else {
                 continue;
@@ -439,7 +433,7 @@ fn a_program_without_a_deployment_route_queues_no_upgrade() {
 fn a_rejected_program_target_never_links_a_predicted_pr() {
     block_on(async {
         let directory = Directory::new("rejected");
-        let (mut network, run) = awaiting_pr(&directory, model_program("builder")).await;
+        let (mut network, run) = awaiting_pr(&directory, runs::model_program("builder")).await;
         network
             .submit(
                 member(),
@@ -480,7 +474,7 @@ fn a_rejected_program_target_never_links_a_predicted_pr() {
 fn a_program_that_omits_the_target_leaves_the_pr_link_empty() {
     block_on(async {
         let directory = Directory::new("omitted");
-        let mut program = model_program("builder");
+        let mut program: agent::Program = agent::from_wire(runs::model_program("builder"));
         for step in &mut program.steps {
             if matches!(step, agent::Step::Call { module, .. } if module == "forge") {
                 *step = agent::Step::Finish;
@@ -504,7 +498,7 @@ fn a_program_that_omits_the_target_leaves_the_pr_link_empty() {
 fn forged_program_output_cannot_redirect_the_link_of_a_successful_call() {
     block_on(async {
         let directory = Directory::new("forged");
-        let mut program = model_program("builder");
+        let mut program: agent::Program = agent::from_wire(runs::model_program("builder"));
         for step in &mut program.steps {
             let agent::Step::Call {
                 msg: agent::Value::Map(message),
@@ -545,8 +539,8 @@ fn forged_program_output_cannot_redirect_the_link_of_a_successful_call() {
             None
         );
         assert_eq!(
-            serde_json::to_value(&item(&network, 2).await.unwrap().summary.author).unwrap(),
-            serde_json::to_value(chat::Party::Account(2)).unwrap()
+            item(&network, 2).await.unwrap().summary.author,
+            collaboration::Party::Account(2)
         );
         let bytes = network
             .host
@@ -572,7 +566,7 @@ async fn deployment_network(label: &str, actions: usize) -> (Directory, Network)
     let directory = Directory::new(label);
     let (mut network, _) = awaiting_pr_with_actions(
         &directory,
-        model_program("builder"),
+        runs::model_program("builder"),
         (0..actions).map(|_| replacement_action()).collect(),
     )
     .await;

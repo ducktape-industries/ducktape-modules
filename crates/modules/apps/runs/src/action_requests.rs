@@ -726,16 +726,17 @@ impl RunsModule {
                 }),
             )
             .await?;
-        let agent::AgentReply::Invocation(invocation) =
-            agent::decode_reply(&bytes).map_err(|sentence| Error::Module {
-                reason: refusal::UNEXPECTED_REPLY.into(),
-                sentence,
-            })?
-        else {
-            return Err(Error::Module {
-                reason: refusal::UNEXPECTED_REPLY.into(),
-                sentence: "the agent answered the invocation lookup with something other than an invocation".into(),
-            });
+        let invocation = match agent::decode_reply(&bytes).map_err(|sentence| Error::Module {
+            reason: refusal::UNEXPECTED_REPLY.into(),
+            sentence,
+        })? {
+            agent::AgentReply::Invocation(invocation) => invocation,
+            agent::AgentReply::Invocations(_) => {
+                return Err(Error::Module {
+                    reason: refusal::UNEXPECTED_REPLY.into(),
+                    sentence: "the agent answered the invocation lookup with a page".into(),
+                });
+            }
         };
         if invocation.is_none() {
             let bytes = ctx

@@ -16,13 +16,15 @@
 
 use std::collections::BTreeMap;
 
+use crate::chat;
+use crate::chat::MessageView;
+use crate::pages;
+use crate::pages::PageAddress;
+use crate::pages::{Block, BlockKind, PageQuery, PageReply};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
-use chat::MessageView;
 use duck_address::Address;
 use files_wire::FileAddress;
-use pages::PageAddress;
-use pages::{Block, BlockKind, PageQuery, PageReply};
 use sdk::Ctx;
 
 use crate::forge_source::{ForgeItem, ForgeItemKind};
@@ -1042,7 +1044,7 @@ mod tests {
 
     #[test]
     fn message_text_concatenates_the_anchor_blocks() {
-        use chat::{Block as ChatBlock, MessageHead};
+        use crate::chat::{Block as ChatBlock, MessageHead};
         let message = MessageView {
             channel_id: "general".into(),
             seq: 1,

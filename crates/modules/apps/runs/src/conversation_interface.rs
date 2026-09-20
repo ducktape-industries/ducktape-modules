@@ -1,5 +1,6 @@
 //! Resident conversation identity is independent of an execution and its signing session.
 
+use crate::contracts::{chat, tasks};
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct WorkerControls {

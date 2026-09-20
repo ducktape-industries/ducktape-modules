@@ -26,8 +26,9 @@
 
 use std::collections::BTreeSet;
 
+use crate::chat::{Block, MessageView, Party};
+use crate::pages;
 use crate::{LoadMode, MAX_SKILLS_PER_AGENT, ModelRecord, SKILL_LIBRARY_PREFIX, SkillRef};
-use chat::{Block, MessageView, Party};
 use files::paths::canonical as canonical_duckfs_path;
 use serde::Serialize;
 
@@ -500,7 +501,8 @@ fn render_block(block: &Block) -> String {
 mod tests {
     use super::*;
     use crate::ModelStatus;
-    use chat::MessageHead;
+    use crate::chat;
+    use crate::chat::MessageHead;
     use sdk::Origin as RunOrigin;
     use serde_json::Value;
 
