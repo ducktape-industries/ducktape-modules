@@ -18,7 +18,7 @@
 use sdk::refusal;
 use std::collections::{BTreeMap, BTreeSet};
 
-use attribution::{Actor, AttributionMsg, Change, ObjectRef, Relation};
+use crate::consumer_wire::attribution::{Actor, AttributionMsg, Change, ObjectRef, Relation};
 use borsh::{BorshDeserialize, BorshSerialize};
 use sdk::{AccountNumber, Cause, Error, ModuleId};
 use serde::Serialize;
@@ -836,8 +836,8 @@ pub(crate) async fn resume(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use attribution::{ChangeKind, Source};
-    use dispatch::Refusal;
+    use crate::consumer_wire::attribution::{ChangeKind, Source};
+    use crate::consumer_wire::dispatch::Refusal;
     use futures::executor::block_on;
     use sdk::{Hop, ItemRef, Root};
     use std::cell::RefCell;

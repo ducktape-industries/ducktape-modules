@@ -36,6 +36,7 @@
 // existing internal/test call sites.
 mod wire;
 pub use wire::*;
+pub mod consumer_wire;
 
 // the wasm-guest port: the dispatch shell that adapts this module to the
 // ducktape:module world. compiled only by the guest-builder's synthesized
@@ -67,6 +68,7 @@ pub mod index;
 #[cfg(feature = "index-guest")]
 mod index_guest;
 
+use consumer_wire::{attribution, identity};
 use sdk::refusal;
 use sha2::{Digest, Sha256};
 
