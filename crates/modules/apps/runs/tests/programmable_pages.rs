@@ -227,8 +227,15 @@ fn page_and_block_mentions_start_model_work_and_reply_under_program_authority() 
                 .await;
             network.drain().await;
             let thread_id = format!("agent/{}/thread/reply", run.dispatch_id);
-            let pages::PageReply::CommentThread(Some(thread)) =
-                page(&network, pages::PageQuery::CommentThread { thread_id }).await
+            let pages::PageReply::CommentThread(Some(thread)) = page(
+                &network,
+                pages::PageQuery::CommentThread {
+                    thread_id,
+                    after: None,
+                    limit: 0,
+                },
+            )
+            .await
             else {
                 panic!("the actual program reply must commit");
             };
@@ -310,7 +317,7 @@ fn another_module_cannot_present_its_attribution_as_a_page_block_source() {
         else {
             panic!("invocations");
         };
-        let last = &invocations.last().unwrap().invocation;
+        let last = &invocations.entries.last().unwrap().invocation;
         assert!(last.bindings["run"].get("rejected").is_some(), "{last:?}");
         assert!(
             serde_json::to_string(last)
@@ -399,6 +406,8 @@ fn a_comment_trigger_replies_in_its_thread_and_can_choose_another_destination() 
             &network,
             pages::PageQuery::CommentThread {
                 thread_id: "review".into(),
+                after: None,
+                limit: 0,
             },
         )
         .await
@@ -417,6 +426,8 @@ fn a_comment_trigger_replies_in_its_thread_and_can_choose_another_destination() 
             &network,
             pages::PageQuery::CommentThread {
                 thread_id: format!("agent/{}/thread/s1", run.dispatch_id),
+                after: None,
+                limit: 0,
             },
         )
         .await
@@ -426,5 +437,102 @@ fn a_comment_trigger_replies_in_its_thread_and_can_choose_another_destination() 
         assert_eq!(thread.thread.target, "todo");
         assert_eq!(thread.comments[0].author, pages::Party::Account(2));
         assert_eq!(thread.comments[0].text, "Leaving a note on the todo.");
+    });
+}
+
+#[test]
+fn a_comment_trigger_walks_beyond_a_tombstone_bearing_first_page() {
+    block_on(async {
+        let mut network = Network::new().await;
+        network.provision().await;
+        configure_pages(&mut network).await;
+        let first_page_len = usize::from(pages::MAX_PAGE_QUERY_LIMIT);
+        for index in 0..first_page_len {
+            network
+                .submit(
+                    member(),
+                    msg(
+                        "pages",
+                        &pages::PageMsg::AddComment {
+                            thread_id: "deep-review".into(),
+                            comment_id: format!("comment-{index}"),
+                            target: "spec".into(),
+                            text: format!("Earlier comment {index}"),
+                            anchor: None,
+                            mentions: Vec::new(),
+                        },
+                    ),
+                )
+                .await;
+        }
+        network
+            .submit(
+                member(),
+                msg(
+                    "pages",
+                    &pages::PageMsg::DeleteComment {
+                        comment_id: "comment-0".into(),
+                    },
+                ),
+            )
+            .await;
+        network
+            .submit(
+                member(),
+                msg(
+                    "pages",
+                    &pages::PageMsg::AddComment {
+                        thread_id: "deep-review".into(),
+                        comment_id: "target".into(),
+                        target: "spec".into(),
+                        text: "Target beyond the first raw page.".into(),
+                        anchor: None,
+                        mentions: vec![2],
+                    },
+                ),
+            )
+            .await;
+        network.drain().await;
+
+        let pages::PageReply::CommentThread(Some(first)) = page(
+            &network,
+            pages::PageQuery::CommentThread {
+                thread_id: "deep-review".into(),
+                after: None,
+                limit: 0,
+            },
+        )
+        .await
+        else {
+            panic!("first comment page");
+        };
+        assert_eq!(first.comments.len(), first_page_len - 1);
+        assert!(first.has_more);
+        let next_after = first.next_after.clone().expect("first page cursor");
+        let pages::PageReply::CommentThread(Some(second)) = page(
+            &network,
+            pages::PageQuery::CommentThread {
+                thread_id: "deep-review".into(),
+                after: Some(next_after),
+                limit: 0,
+            },
+        )
+        .await
+        else {
+            panic!("second comment page");
+        };
+        assert_eq!(second.comments[0].id, "target");
+
+        let run = network
+            .runs()
+            .await
+            .into_iter()
+            .find(|run| run.channel_id == "runs:pages:deep-review")
+            .expect("comment mention starts a run");
+        let (_, work) = saga_for(&network, &run).await;
+        let spec: dispatch::WorkSpec = sdk::wire::decode(&work.spec).unwrap();
+        let payload = String::from_utf8(spec.payload).unwrap();
+        assert!(payload.contains("Pages comment thread deep-review, comment 256."));
+        assert!(payload.contains("Target beyond the first raw page."));
     });
 }

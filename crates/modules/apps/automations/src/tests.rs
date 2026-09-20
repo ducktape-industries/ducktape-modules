@@ -23,19 +23,18 @@ fn retired_tagged_trigger_shape_rejects_loudly() {
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::{AutomationsReply, decode_reply, encode_msg, encode_query};
-use attribution::{AttributionMsg, decode_msg as attribution_decode_msg};
-use chat::{
-    Block, Channel, Mark, MessageHead, MessageView, PostPolicy, Span,
+use crate::consumer_wire::chat::{
+    Block, Channel, ChatMsg, ChatQuery, ChatReply, Mark, MessageHead, MessageView, Span,
     decode_msg as chat_decode_msg, decode_query as chat_decode_query,
     encode_event as chat_encode_event, encode_reply as chat_encode_reply,
 };
+use crate::consumer_wire::{Party, tasks};
+use crate::{AutomationsReply, decode_reply, encode_msg, encode_query};
+use attribution::{AttributionMsg, decode_msg as attribution_decode_msg};
 use futures::executor::block_on;
 use sdk::{Env, Event};
 use sdk_testkit::{MemStore, TestCtx};
-use tasks::{
-    Task, TaskStatus, decode_task_msg as tasks_decode_msg, encode_task_reply as tasks_encode_reply,
-};
+use tasks::{Task, decode_task_msg as tasks_decode_msg, encode_task_reply as tasks_encode_reply};
 
 const CHAT: &str = "chat";
 const TASKS: &str = "tasks";
@@ -105,10 +104,7 @@ impl CaptureCtx {
         self.tasks.push(Task {
             id: task_id.into(),
             title: task_id.into(),
-            status: TaskStatus::Open,
-            owner: tasks::Party::Module("test".into()),
-            created_at: 0,
-            updated_at: 0,
+            owner: Party::Module("test".into()),
         });
         self
     }
@@ -116,10 +112,7 @@ impl CaptureCtx {
         self.tasks.push(Task {
             id: task_id.into(),
             title: task_id.into(),
-            status: TaskStatus::Open,
-            owner: tasks::Party::Account(account_of(owner)),
-            created_at: 0,
-            updated_at: 0,
+            owner: Party::Account(account_of(owner)),
         });
         self
     }
@@ -203,26 +196,9 @@ impl Ctx for CaptureCtx {
                     Ok(chat_encode_reply(&ChatReply::Messages(window)))
                 }
                 ChatQuery::Channel { channel_id } => {
-                    let channel = self.channels.contains(&channel_id).then(|| Channel {
-                        id: channel_id.clone(),
-                        name: channel_id,
-                        created_at: 0,
-                        head_seq: 0,
-                        post_policy: PostPolicy::Open,
-                        hooks: Vec::new(),
-                        pinned: Vec::new(),
-                        huddle: Vec::new(),
-                        voice: false,
-                        owner: Party::System,
-                        revision: 0,
-                        archived: false,
-                    });
+                    let channel = self.channels.contains(&channel_id).then_some(Channel {});
                     Ok(chat_encode_reply(&ChatReply::Channel(channel)))
                 }
-                // no fire asks chat for a party's standing: a rule observes
-                // every hooked channel and posts wherever it names, so a
-                // standing probe is a query the module never sends.
-                ChatQuery::Access { .. } => Err(Error::QueryUnsupported),
                 ChatQuery::Message { message_id } => Ok(chat_encode_reply(&ChatReply::Message(
                     self.transcripts
                         .values()
@@ -345,30 +321,12 @@ fn posted(channel: &str, seq: u64, author: Party, mentions: Vec<u64>) -> Msg {
 }
 
 fn message(channel: &str, seq: u64, author: Party, blocks: Vec<Block>) -> MessageView {
-    let origin = match &author {
-        Party::Account(account) => Origin::Program(*account),
-        Party::Key(key) => Origin::External(key.clone()),
-        Party::Module(id) => Origin::Module(id.clone()),
-        Party::System => Origin::System,
-    };
     MessageView {
-        channel_id: channel.into(),
         seq,
         head: MessageHead {
             message_id: format!("{channel}-m{seq}"),
-            origin: origin.clone(),
-            content_origin: origin,
             author,
             blocks,
-            created_at: 0,
-            revision: 0,
-            rev: 0,
-            edited_at: None,
-            base_rev: None,
-            deleted: false,
-            thread: None,
-            reply_count: 0,
-            last_reply_seq: None,
         },
     }
 }
@@ -873,9 +831,7 @@ fn create_task_action_emits_deterministic_task_id() {
     .expect("fire");
     let tasks = chat_ctx.task_msgs();
     assert_eq!(tasks.len(), 1);
-    let TaskMsg::CreateTask { task_id, title, .. } = &tasks[0] else {
-        panic!("expected CreateTask");
-    };
+    let TaskMsg::CreateTask { task_id, title, .. } = &tasks[0];
     assert_eq!(
         task_id, "todo-r-general-5",
         "deterministic task id, the firing rule named in it"
@@ -972,21 +928,8 @@ fn post_message_fire_reads_chat_via_testkit_on_query() {
             reason: refusal::INVALID_INPUT.into(),
             sentence,
         })? {
-            ChatQuery::Channel { channel_id } => {
-                Ok(chat_encode_reply(&ChatReply::Channel(Some(Channel {
-                    id: channel_id.clone(),
-                    name: channel_id,
-                    created_at: 0,
-                    head_seq: 0,
-                    post_policy: PostPolicy::Open,
-                    hooks: Vec::new(),
-                    pinned: Vec::new(),
-                    huddle: Vec::new(),
-                    voice: false,
-                    owner: Party::System,
-                    revision: 0,
-                    archived: false,
-                }))))
+            ChatQuery::Channel { .. } => {
+                Ok(chat_encode_reply(&ChatReply::Channel(Some(Channel {}))))
             }
             ChatQuery::Message { .. } => Ok(chat_encode_reply(&ChatReply::Message(None))),
             _ => Err(Error::QueryUnsupported),
@@ -1112,9 +1055,7 @@ fn text_contains_filter_fetches_message_once() {
     exec(&mut m, &mut hit, &posted("general", 1, user(1), Vec::new())).expect("fire");
     let tasks = hit.task_msgs();
     assert_eq!(tasks.len(), 1);
-    let TaskMsg::CreateTask { title, .. } = &tasks[0] else {
-        panic!("expected CreateTask");
-    };
+    let TaskMsg::CreateTask { title, .. } = &tasks[0];
     assert_eq!(title, "seen: please deploy now", "{{text}} substituted");
 
     // text without the substring -> no fire.
@@ -1303,9 +1244,7 @@ fn legitimately_empty_body_is_valid_text() {
     .expect("fire");
     let tasks = chat_ctx.task_msgs();
     assert_eq!(tasks.len(), 1, "an empty body is valid content");
-    let TaskMsg::CreateTask { title, .. } = &tasks[0] else {
-        panic!("expected CreateTask");
-    };
+    let TaskMsg::CreateTask { title, .. } = &tasks[0];
     assert_eq!(title, "seen []");
 }
 

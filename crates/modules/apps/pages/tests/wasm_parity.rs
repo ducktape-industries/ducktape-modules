@@ -75,6 +75,8 @@ impl ResolutionParity {
     async fn thread(&self, id: &str) -> pages::Thread {
         let query = encode_query(&PageQuery::CommentThread {
             thread_id: id.into(),
+            after: None,
+            limit: 0,
         });
         let bytes = self.native.query("pages", &query).await.unwrap();
         assert_eq!(bytes, self.wasm.query("pages", &query).await.unwrap());
@@ -656,6 +658,8 @@ async fn replies(h: &Host) -> Vec<Vec<u8>> {
         }),
         encode_query(&PageQuery::CommentThread {
             thread_id: "t1".into(),
+            after: None,
+            limit: 0,
         }),
         encode_query(&PageQuery::GetComment {
             comment_id: "c1".into(),
