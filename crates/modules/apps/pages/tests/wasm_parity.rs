@@ -83,6 +83,8 @@ impl ResolutionParity {
         let pages::PageReply::CommentThread(Some(view)) = decode_reply(&bytes).unwrap() else {
             panic!("thread")
         };
+        assert!(!view.has_more);
+        assert_eq!(view.next_after, None);
         let query = encode_query(&PageQuery::CommentThreadHead {
             thread_id: id.into(),
         });
@@ -159,6 +161,73 @@ fn thread_comment(thread: &str, target: &str) -> PageMsg {
         mentions: vec![],
         anchor: None,
     }
+}
+
+#[test]
+fn comment_thread_pagination_matches_native_and_wasm() {
+    const COMMENTS: usize = 257;
+
+    deterministic::Runner::default().start(|context| async move {
+        let mut p = ResolutionParity::new(&context).await;
+        let alice = key(0xA1);
+        p.page(
+            Origin::External(alice.clone()),
+            PageMsg::CreatePage {
+                page_id: "thread-page".into(),
+                title: "Thread page".into(),
+                blocks: Vec::new(),
+            },
+        )
+        .await;
+        for index in 0..COMMENTS {
+            p.page(
+                Origin::External(alice.clone()),
+                PageMsg::AddComment {
+                    thread_id: "long-thread".into(),
+                    comment_id: format!("long-comment-{index}"),
+                    target: "thread-page".into(),
+                    text: format!("Comment {index}"),
+                    mentions: Vec::new(),
+                    anchor: None,
+                },
+            )
+            .await;
+        }
+
+        let query = |after| {
+            encode_query(&PageQuery::CommentThread {
+                thread_id: "long-thread".into(),
+                after,
+                limit: 0,
+            })
+        };
+        let first_query = query(None);
+        let first_native = p.native.query("pages", &first_query).await.unwrap();
+        let first_wasm = p.wasm.query("pages", &first_query).await.unwrap();
+        assert_eq!(first_native, first_wasm);
+        let pages::PageReply::CommentThread(Some(first)) = decode_reply(&first_wasm).unwrap()
+        else {
+            panic!("first comment page");
+        };
+        assert_eq!(first.thread.comment_ids.len(), COMMENTS);
+        assert_eq!(first.comments.len(), 256);
+        assert!(first.has_more);
+        let next_after = first.next_after.clone().expect("first page cursor");
+        assert_eq!(first.comments.last().unwrap().id, next_after);
+
+        let second_query = query(Some(next_after));
+        let second_native = p.native.query("pages", &second_query).await.unwrap();
+        let second_wasm = p.wasm.query("pages", &second_query).await.unwrap();
+        assert_eq!(second_native, second_wasm);
+        let pages::PageReply::CommentThread(Some(second)) = decode_reply(&second_wasm).unwrap()
+        else {
+            panic!("second comment page");
+        };
+        assert_eq!(second.comments.len(), 1);
+        assert_eq!(second.comments[0].id, "long-comment-256");
+        assert!(!second.has_more);
+        assert_eq!(second.next_after, None);
+    });
 }
 
 #[test]
