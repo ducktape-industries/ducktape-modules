@@ -363,7 +363,52 @@ fn a_pr_whose_source_is_dev_yields_a_work_branch_the_run_owns() {
     );
 }
 
-// ---- `duck://page/<id>` page-spec injection ---------------------------------
+// ---- canonical page/file address injection ----------------------------------
+
+#[test]
+fn chain_id_validation_accepts_genesis_and_authority_spellings() {
+    let genesis = crate::RunsModule::parse_address_chain_id("dognet#d0cdf950")
+        .expect("genesis spelling parses");
+    let authority = crate::RunsModule::parse_address_chain_id("dognet-d0cdf950")
+        .expect("authority spelling parses");
+    assert_eq!(genesis, authority);
+    assert!(
+        crate::RunsModule::parse_address_chain_id("dognet#not-a-salt").is_err(),
+        "malformed production genesis chain ids are rejected"
+    );
+}
+
+#[test]
+fn foreign_chain_page_and_file_refs_skip_local_queries_and_budget() {
+    let m = module()
+        .with_pages_module("pages")
+        .with_files_module("files");
+    let ctx = CaptureCtx::new()
+        .with_page("plan", page_blocks("plan", "local page"))
+        .with_file("/shared/attachments/u/notes.md", b"local file");
+    let budget = SiblingReadBudget::default();
+    let mut remaining = 2;
+
+    let page = block_on(m.page_context(
+        &ctx,
+        &["[Plan](duck://dognet-d0cdf951/pages/plan)"],
+        &mut remaining,
+        &budget,
+    ));
+    assert!(page.is_none(), "foreign page refs stay unresolved");
+    assert_eq!(ctx.page_query_count(), 0);
+    assert_eq!(remaining, 2);
+
+    let file = block_on(m.attachment_context(
+        &ctx,
+        &["[Notes](duck://dognet-d0cdf951/files/shared/attachments/u/notes.md)"],
+        &mut remaining,
+        &budget,
+    ));
+    assert!(file.is_none(), "foreign file refs stay unresolved");
+    assert_eq!(ctx.query_count(), 0);
+    assert_eq!(remaining, 2);
+}
 
 #[test]
 fn page_reads_follow_every_cursor_until_the_page_is_complete() {
@@ -388,7 +433,7 @@ fn page_reads_keep_accumulated_blocks_when_a_later_page_fails() {
     let blocks = block_on(m.page_blocks(&ctx, "pages", "plan")).expect("first page survives");
     let rendered = crate::inject::render_pages_section(
         &[("plan".into(), Some(blocks.clone()))],
-        &m.net_query(),
+        m.address_chain_id(),
     );
 
     assert_eq!(blocks.len(), usize::from(pages::MAX_PAGE_QUERY_LIMIT) + 1);
@@ -410,7 +455,7 @@ fn page_reads_mark_the_reference_query_ceiling_as_truncated() {
     let blocks = block_on(m.page_blocks(&ctx, "pages", "plan")).expect("partial page survives");
     let rendered = crate::inject::render_pages_section(
         &[("plan".into(), Some(blocks.clone()))],
-        &m.net_query(),
+        m.address_chain_id(),
     );
 
     assert_eq!(blocks.len(), page_limit * query_limit + 1);
@@ -434,7 +479,7 @@ fn request_run_keeps_reference_reads_inside_the_global_sibling_budget() {
             "forge:app:7",
             vec![message(
                 1,
-                "[Plan](duck://page/plan) [notes](duck://files/shared/attachments/u/notes.md)",
+                "[Plan](duck://dognet-d0cdf950/pages/plan) [notes](duck://dognet-d0cdf950/files/shared/attachments/u/notes.md)",
             )],
         )
         .with_forge_item("app", forge_issue(7, "Fix", "body"))
@@ -487,7 +532,7 @@ fn page_reads_stop_when_the_render_budget_is_full() {
     let blocks = block_on(m.page_blocks(&ctx, "pages", "plan")).expect("page exists");
     let rendered = crate::inject::render_pages_section(
         &[("plan".into(), Some(blocks.clone()))],
-        &m.net_query(),
+        m.address_chain_id(),
     );
 
     assert_eq!(blocks.len(), page_limit);
@@ -510,7 +555,10 @@ fn a_page_ref_in_the_trigger_message_injects_the_page_section() {
             "general",
             vec![
                 message(1, "msg 1"),
-                message(2, "please work from [Plan](duck://page/plan)"),
+                message(
+                    2,
+                    "please work from [Plan](duck://dognet-d0cdf950/pages/plan)",
+                ),
             ],
         )
         .with_page("plan", page_blocks("plan", "Project Plan"));
@@ -528,7 +576,7 @@ fn a_page_ref_in_the_trigger_message_injects_the_page_section() {
     let context = v["context"].as_str().expect("a page ref composes context");
     assert!(context.starts_with("Referenced pages:"), "{context}");
     assert!(
-        context.contains("[Project Plan](duck://page/plan)"),
+        context.contains("[Project Plan](duck://dognet-d0cdf950/pages/plan)"),
         "{context}"
     );
     assert!(context.contains("spec paragraph"), "{context}");
@@ -540,7 +588,7 @@ fn a_page_ref_in_the_trigger_message_injects_the_page_section() {
 
 #[test]
 fn a_file_ref_in_the_trigger_message_injects_the_attachment_text() {
-    // a duck://files ref pulls the referenced attachment's committed TEXT into
+    // a canonical file address pulls the referenced attachment's committed TEXT into
     // the same context section — the agent-integration payoff of the unified
     // grammar. an IMAGE (non-utf8) in the same message is named, not inlined.
     let registry = registry(&["bot"]);
@@ -552,8 +600,8 @@ fn a_file_ref_in_the_trigger_message_injects_the_attachment_text() {
             "general",
             vec![message(
                 1,
-                "notes [notes.md](duck://files/shared/attachments/u1/notes.md) \
-                 and ![shot](duck://files/shared/attachments/u2/shot.png)",
+                "notes [notes.md](duck://dognet-d0cdf950/files/shared/attachments/u1/notes.md) \
+                 and ![shot](duck://dognet-d0cdf950/files/shared/attachments/u2/shot.png)",
             )],
         )
         .with_file(
@@ -604,8 +652,10 @@ fn attachment_reads_stop_when_the_rendered_section_is_full() {
     let budget = SiblingReadBudget::default();
     let section = block_on(m.attachment_context(
         &ctx,
-        &["[full](duck://files/shared/attachments/u/full.txt) \
-           [unread](duck://files/shared/attachments/u/unread.txt)"],
+        &[
+            "[full](duck://dognet-d0cdf950/files/shared/attachments/u/full.txt) \
+           [unread](duck://dognet-d0cdf950/files/shared/attachments/u/unread.txt)",
+        ],
         &mut remaining,
         &budget,
     ))
@@ -625,7 +675,7 @@ fn an_unresolvable_file_ref_composes_its_marker_never_a_failure() {
         "general",
         vec![message(
             1,
-            "see [gone.txt](duck://files/shared/attachments/u/gone.txt)",
+            "see [gone.txt](duck://dognet-d0cdf950/files/shared/attachments/u/gone.txt)",
         )],
     );
     let prepared = block_on(m.prepare_dispatch(
@@ -655,7 +705,11 @@ fn a_page_ref_in_the_forge_item_body_appends_after_the_item_context() {
         .with_transcript("forge:app:7", transcript(2))
         .with_forge_item(
             "app",
-            forge_issue(7, "Fix the gate", "spec at [Plan](duck://page/plan)"),
+            forge_issue(
+                7,
+                "Fix the gate",
+                "spec at [Plan](duck://dognet-d0cdf950/pages/plan)",
+            ),
         )
         .with_forge_tip("app", "dev", &"cd".repeat(20))
         .with_page("plan", page_blocks("plan", "Project Plan"));
@@ -664,7 +718,7 @@ fn a_page_ref_in_the_forge_item_body_appends_after_the_item_context() {
     // the M1 item context is untouched and leads; the page section follows.
     assert!(context.starts_with("Forge item context"), "{context}");
     assert!(
-        context.contains("spec at [Plan](duck://page/plan)"),
+        context.contains("spec at [Plan](duck://dognet-d0cdf950/pages/plan)"),
         "{context}"
     );
     let item_body = context.find("spec at").unwrap();
@@ -676,7 +730,7 @@ fn a_page_ref_in_the_forge_item_body_appends_after_the_item_context() {
         "the page section follows the item context: {context}"
     );
     assert!(
-        context.contains("[Project Plan](duck://page/plan)"),
+        context.contains("[Project Plan](duck://dognet-d0cdf950/pages/plan)"),
         "{context}"
     );
     assert!(
@@ -692,9 +746,10 @@ fn a_missing_page_ref_composes_its_marker_never_a_failure() {
     let m = module()
         .with_files_module("files")
         .with_pages_module("pages");
-    let ctx = CaptureCtx::new()
-        .with_registry(&registry)
-        .with_transcript("general", vec![message(1, "see [Gone](duck://page/gone)")]);
+    let ctx = CaptureCtx::new().with_registry(&registry).with_transcript(
+        "general",
+        vec![message(1, "see [Gone](duck://dognet-d0cdf950/pages/gone)")],
+    );
     let prepared = block_on(m.prepare_dispatch(
         &ctx,
         &agent,
@@ -715,9 +770,10 @@ fn page_refs_without_a_wired_pages_module_compose_no_page_section() {
     let registry = registry(&["bot"]);
     let agent = record("bot");
     let m = module().with_files_module("files");
-    let ctx = CaptureCtx::new()
-        .with_registry(&registry)
-        .with_transcript("general", vec![message(1, "see [Plan](duck://page/plan)")]);
+    let ctx = CaptureCtx::new().with_registry(&registry).with_transcript(
+        "general",
+        vec![message(1, "see [Plan](duck://dognet-d0cdf950/pages/plan)")],
+    );
     let prepared = block_on(m.prepare_dispatch(
         &ctx,
         &agent,
@@ -743,7 +799,10 @@ fn page_injection_composes_byte_deterministically() {
         CaptureCtx::new()
             .with_registry(&registry)
             .with_transcript("forge:app:7", transcript(2))
-            .with_forge_item("app", forge_issue(7, "Fix", "see [Plan](duck://page/plan)"))
+            .with_forge_item(
+                "app",
+                forge_issue(7, "Fix", "see [Plan](duck://dognet-d0cdf950/pages/plan)"),
+            )
             .with_forge_tip("app", "dev", &"cd".repeat(20))
             .with_page("plan", page_blocks("plan", "Project Plan"))
     };

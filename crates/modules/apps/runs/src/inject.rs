@@ -2,8 +2,8 @@
 //! a forge-channel run's envelope carries in its `context` field, rendered
 //! from COMMITTED tracker state at compose height (I1) and byte-capped.
 //!
-//! extended with duck:// reference injection: `[label](duck://page/<id>)` and
-//! `[label](duck://files/<path>)` refs parsed from the trigger message text and
+//! extended with duck:// reference injection: canonical page and file
+//! addresses parsed from the trigger message text and
 //! the injected item body resolve against COMMITTED pages/files state at
 //! compose height — each referenced page's subtree and each attachment's text
 //! render into the same `context` section. The ref grammar is the console's
@@ -19,6 +19,9 @@ use std::collections::BTreeMap;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use chat::MessageView;
+use duck_address::Address;
+use files_wire::FileAddress;
+use pages::PageAddress;
 use pages::{Block, BlockKind, PageQuery, PageReply};
 use sdk::Ctx;
 
@@ -73,8 +76,8 @@ pub(crate) fn render_item_context(repo: &str, item: &ForgeItem, work_branch: &st
 // (app/src/console/views/chat/duck-ref.ts `splitDuckRefs`) — the two MUST
 // accept exactly the same refs, or the agent's injected context disagrees with
 // the chip a human sees:
-//   [label](duck://page/<id>)     -> the page's committed subtree
-//   [label](duck://files/<path>)  -> the attachment's committed text
+//   [label](duck://<chain>/pages/<id>) -> the page's committed subtree
+//   [label](duck://<chain>/files/<path>) -> the attachment's committed text
 // file refs are confined to /shared/attachments/<dir>/<name> — the console's
 // own confinement, and the only guard against a crafted ref pulling another
 // duckfs path into the agent's context (reads are not authority-gated).
@@ -112,19 +115,25 @@ pub(crate) fn message_text(message: &MessageView) -> String {
 /// each in first-seen order (deduped across all sources).
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct DuckRefs {
-    pub pages: Vec<String>,
+    pub pages: Vec<CanonicalRef>,
     /// absolute `/shared/attachments/<dir>/<name>` paths — already confined.
-    pub files: Vec<String>,
+    pub files: Vec<CanonicalRef>,
 }
 
-/// parse every `[label](duck://page|files/…)` markdown ref from the sources, in
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct CanonicalRef {
+    pub chain: duck_address::ChainId,
+    pub path: String,
+}
+
+/// parse every canonical `[label](duck://<chain>/pages|files/…)` markdown ref from the sources, in
 /// order, first-seen deduped — the Rust twin of the console's `splitDuckRefs`.
 /// A malformed ref (bad url, out-of-confinement file path) is skipped, NEVER a
 /// failure. The `![..]` embed marker and the label are ignored: only the
 /// referenced id/path matters for injection.
 ///
 /// parity ceiling: on a hand-typed ADVERSARIALLY-nested body (a ref whose
-/// label brackets wrap another ref, e.g. `[a](b[c](duck://page/p))`) this
+/// label brackets wrap another ref, e.g. `[a](b[c](duck://dognet-d0cdf950/pages/p))`) this
 /// under-reads relative to the console's regex — the refs parsed here are
 /// always a SUBSET of what a human's chips show, never a superset. That is the
 /// safe direction (the agent can miss a contrived ref; it can never be fed a
@@ -160,25 +169,31 @@ pub(crate) fn parse_duck_refs(sources: &[&str]) -> DuckRefs {
     out
 }
 
-/// classify one extracted `duck://…` url into the ref lists — the same rules
-/// as the console's `classify`: a page id is a single non-empty segment; a file
-/// path is exactly `<dir>/<name>` (non-empty, non-dot) under the attachments
-/// root. Anything else is dropped.
+/// classify one extracted canonical `duck://…` URL into the ref lists. The
+/// shared parser and typed module address validators reject legacy spellings,
+/// wrong modules, malformed paths, and query-bearing URLs.
 fn classify_duck_url(url: &str, out: &mut DuckRefs) {
-    // `?net=<digest>` names the network a produced link belongs to. A run
-    // resolves refs against the chain it is executing on and no other, so the
-    // component is dropped here — but it must be dropped rather than folded
-    // into the id, or a pasted produced link resolves to nothing.
-    let url = url.split_once('?').map(|(head, _)| head).unwrap_or(url);
-    if let Some(id) = url.strip_prefix("duck://page/") {
-        if !id.is_empty() && !id.contains('/') && !out.pages.iter().any(|p| p == id) {
-            out.pages.push(id.to_string());
+    let Ok(address) = Address::parse(url) else {
+        return;
+    };
+    if let Ok(page) = PageAddress::try_from(&address) {
+        if page.block.is_none()
+            && !out
+                .pages
+                .iter()
+                .any(|reference| reference.chain == address.chain && reference.path == page.page)
+        {
+            out.pages.push(CanonicalRef {
+                chain: address.chain,
+                path: page.page,
+            });
         }
         return;
     }
-    let Some(path) = url.strip_prefix("duck://files") else {
+    let Ok(file) = FileAddress::try_from(&address) else {
         return;
     };
+    let path = format!("/{}", file.path.join("/"));
     let Some(rest) = path.strip_prefix(ATTACHMENTS_ROOT) else {
         return;
     };
@@ -187,8 +202,16 @@ fn classify_duck_url(url: &str, out: &mut DuckRefs) {
         && segs
             .iter()
             .all(|s| !s.is_empty() && *s != "." && *s != "..");
-    if confined && !out.files.iter().any(|f| f == path) {
-        out.files.push(path.to_string());
+    if confined
+        && !out
+            .files
+            .iter()
+            .any(|reference| reference.chain == address.chain && reference.path == path)
+    {
+        out.files.push(CanonicalRef {
+            chain: address.chain,
+            path: path.to_string(),
+        });
     }
 }
 
@@ -198,11 +221,11 @@ fn classify_duck_url(url: &str, out: &mut DuckRefs) {
 /// [`PAGE_CONTEXT_BYTES`]. pure — same input, same bytes.
 pub(crate) fn render_pages_section(
     pages: &[(String, Option<Vec<Block>>)],
-    net_query: &str,
+    chain_id: &str,
 ) -> String {
     let rendered: Vec<String> = pages
         .iter()
-        .map(|(page_id, blocks)| render_page(page_id, blocks.as_deref(), net_query))
+        .map(|(page_id, blocks)| render_page(page_id, blocks.as_deref(), chain_id))
         .collect();
     crate::truncate_on_boundary(
         &format!("Referenced pages:\n\n{}", rendered.join("\n\n")),
@@ -215,20 +238,25 @@ pub(crate) fn render_pages_section(
 /// preorder subtree as one markdown line (nesting indents by tree depth; the
 /// parent of any block precedes it in preorder, so depth resolves in one
 /// pass). an unresolvable page is its one-line marker.
-fn render_page(page_id: &str, blocks: Option<&[Block]>, net_query: &str) -> String {
+fn render_page(page_id: &str, blocks: Option<&[Block]>, chain_id: &str) -> String {
     let Some((root, rest)) = blocks.and_then(|b| b.split_first()) else {
         return format!("[page {page_id} — not found]");
     };
-    // the header IS the live ref: an agent echoing it produces a working chip.
-    // The reference preserves the page id and network binding.
-    //
-    // it names its network in `?net=` like every other link the product mints
-    // — the module reads the chain id out of its genesis `__config` record
-    // (`sdk::genesis_config::CHAIN_ID`), the only way a fixed component learns
-    // which network it is running on. an unwired chain id (dev tools, tests)
-    // renders the bare hand-typed form, which resolves against whichever
-    // network the reader is connected to.
-    let mut out = format!("[{}](duck://page/{page_id}{net_query})", root.text);
+    // The header is the live ref: an agent echoing it produces a canonical
+    // page address. An unwired test module has no chain to mint against, so it
+    // emits the title without an unresolvable legacy link.
+    let mut out = match chain_id.parse().ok().and_then(|chain| {
+        PageAddress {
+            page: page_id.to_string(),
+            block: None,
+        }
+        .address(chain)
+        .ok()
+        .map(|address| address.to_string())
+    }) {
+        Some(address) => format!("[{}]({address})", root.text),
+        None => format!("[{}]", root.text),
+    };
     let mut depth = BTreeMap::from([(root.id.as_str(), 0usize)]);
     for block in rest {
         let d = block
@@ -270,9 +298,9 @@ fn render_page(page_id: &str, blocks: Option<&[Block]>, net_query: &str) -> Stri
     out
 }
 
-fn page_render_reaches_budget(page_id: &str, blocks: &[Block], net_query: &str) -> bool {
+fn page_render_reaches_budget(page_id: &str, blocks: &[Block], chain_id: &str) -> bool {
     let section_header_bytes = "Referenced pages:\n\n".len();
-    section_header_bytes.saturating_add(render_page(page_id, Some(blocks), net_query).len())
+    section_header_bytes.saturating_add(render_page(page_id, Some(blocks), chain_id).len())
         >= PAGE_CONTEXT_BYTES
 }
 
@@ -317,7 +345,7 @@ fn mark_page_section_truncated(section: String) -> String {
     )
 }
 
-// ---- duck://files attachment injection ----------------------------------------
+// ---- canonical file-address attachment injection -----------------------------
 
 /// the attachment-section byte budget across ALL injected attachments — also
 /// the per-file read cap, so one attachment can't blow the section.
@@ -381,7 +409,7 @@ fn mark_attachment_section_truncated(section: String) -> String {
 }
 
 impl RunsModule {
-    /// the `duck://page/<id>` page section for a run (M2): parse refs from the
+    /// the canonical page-address section for a run (M2): parse refs from the
     /// given sources (the trigger message text, then the injected item body),
     /// resolve each against COMMITTED pages state at compose height — the
     /// same cross-module query lane as the forge tracker reads (I1) — and
@@ -396,14 +424,22 @@ impl RunsModule {
     ) -> Option<String> {
         let pages = self.pages.clone()?;
         let refs = parse_duck_refs(sources).pages;
+        let Ok(local_chain) = RunsModule::parse_address_chain_id(self.address_chain_id()) else {
+            return None;
+        };
+        let refs: Vec<_> = refs
+            .into_iter()
+            .filter(|page_ref| page_ref.chain == local_chain)
+            .collect();
         if refs.is_empty() {
             return None;
         }
-        let net_query = self.net_query();
+        let chain_id = self.address_chain_id();
         let mut resolved = Vec::new();
-        for page_id in refs {
+        for page_ref in refs {
+            let page_id = page_ref.path;
             if *remaining_queries == 0 {
-                let section = render_pages_section(&resolved, &net_query);
+                let section = render_pages_section(&resolved, chain_id);
                 return Some(mark_page_section_truncated(section));
             }
             match self
@@ -413,17 +449,17 @@ impl RunsModule {
                 PageBlocksRead::Complete(blocks) => resolved.push((page_id, blocks)),
                 PageBlocksRead::Partial(blocks) => {
                     resolved.push((page_id, Some(blocks)));
-                    let section = render_pages_section(&resolved, &net_query);
+                    let section = render_pages_section(&resolved, chain_id);
                     return Some(mark_page_section_truncated(section));
                 }
             }
             let context_is_full =
-                render_pages_section(&resolved, &net_query).len() >= PAGE_CONTEXT_BYTES;
+                render_pages_section(&resolved, chain_id).len() >= PAGE_CONTEXT_BYTES;
             if context_is_full {
                 break;
             }
         }
-        Some(render_pages_section(&resolved, &net_query))
+        Some(render_pages_section(&resolved, chain_id))
     }
 
     /// One committed page in preorder, assembled from bounded Pages replies.
@@ -500,7 +536,8 @@ impl RunsModule {
                 return partial_blocks(blocks);
             }
             let page_is_complete = page.next_after.is_none();
-            let render_is_full = page_render_reaches_budget(page_id, &blocks, &self.net_query());
+            let render_is_full =
+                page_render_reaches_budget(page_id, &blocks, self.address_chain_id());
             if page_is_complete || render_is_full {
                 return PageBlocksRead::Complete(Some(blocks));
             }
@@ -509,7 +546,7 @@ impl RunsModule {
         partial_blocks(blocks)
     }
 
-    /// the `duck://files` attachment section for a run: parse the confined file
+    /// the canonical file-address attachment section for a run: parse the confined file
     /// refs from the same sources, resolve each against COMMITTED files state at
     /// compose height, and render its TEXT content. Images/binaries are named,
     /// not inlined (agent input is text-only); an unresolvable ref renders its
@@ -524,11 +561,19 @@ impl RunsModule {
     ) -> Option<String> {
         let files = self.files.clone()?;
         let paths = parse_duck_refs(sources).files;
+        let Ok(local_chain) = RunsModule::parse_address_chain_id(self.address_chain_id()) else {
+            return None;
+        };
+        let paths: Vec<_> = paths
+            .into_iter()
+            .filter(|file_ref| file_ref.chain == local_chain)
+            .collect();
         if paths.is_empty() {
             return None;
         }
         let mut resolved = Vec::new();
-        for path in paths {
+        for file_ref in paths {
+            let path = file_ref.path;
             let query = files_encode_query(&FilesQuery::Read {
                 path: path.clone(),
                 snapshot: None,
@@ -605,8 +650,8 @@ mod tests {
     use super::*;
     use crate::forge_source::{ForgeItem, ForgeItemKind, ForgeItemState};
 
-    /// the `?net=` of a network whose chain id is `<name>#d0cdf950`.
-    const TEST_NET: &str = "?net=d0cdf950";
+    /// a network whose chain id is `<name>#d0cdf950`.
+    const TEST_CHAIN: &str = "dognet#d0cdf950";
 
     fn issue(body: &str) -> ForgeItem {
         ForgeItem {
@@ -707,7 +752,7 @@ mod tests {
         assert_eq!(a.as_bytes(), b.as_bytes());
     }
 
-    // ---- `duck://page/<id>` page-spec injection -----------------------------
+    // ---- canonical page-address injection -----------------------------------
 
     /// a page block with derived-by-the-module fields filled in by hand.
     fn block(id: &str, parent: Option<&str>, kind: BlockKind, text: &str) -> Block {
@@ -748,55 +793,74 @@ mod tests {
         ]
     }
 
+    fn paths(refs: &[CanonicalRef]) -> Vec<&str> {
+        refs.iter()
+            .map(|reference| reference.path.as_str())
+            .collect()
+    }
+
     #[test]
     fn duck_page_refs_parse_across_sources_deduped_in_first_seen_order() {
         let refs = parse_duck_refs(&[
-            "see [Plan](duck://page/plan) and [Spec](duck://page/spec) and [P](duck://page/plan)",
-            "the body cites [S](duck://page/spec) then [N](duck://page/notes)",
+            "see [Plan](duck://dognet-d0cdf950/pages/plan) and [Spec](duck://dognet-d0cdf950/pages/spec) and [P](duck://dognet-d0cdf950/pages/plan)",
+            "the body cites [S](duck://dognet-d0cdf950/pages/spec) then [N](duck://dognet-d0cdf950/pages/notes)",
         ]);
-        assert_eq!(refs.pages, vec!["plan", "spec", "notes"]);
+        assert_eq!(paths(&refs.pages), vec!["plan", "spec", "notes"]);
         assert!(refs.files.is_empty());
     }
 
-    /// A produced link names its network (`?net=<digest>`). The run resolves
-    /// against the chain it runs on, so the component is dropped — never
-    /// folded into the id, which would make every copied link resolve to
-    /// nothing.
     #[test]
-    fn a_ref_that_names_its_network_resolves_to_the_bare_id() {
+    fn canonical_page_and_file_addresses_resolve() {
         let refs = parse_duck_refs(&[
-            "[Plan](duck://page/plan?net=d0cdf950)",
-            "[Shot](duck://files/shared/attachments/u1/s.png?net=d0cdf950)",
+            "[Plan](duck://dognet-d0cdf950/pages/plan)",
+            "[Shot](duck://dognet-d0cdf950/files/shared/attachments/u1/s.png)",
         ]);
-        assert_eq!(refs.pages, vec!["plan"]);
-        assert_eq!(refs.files, vec!["/shared/attachments/u1/s.png"]);
+        assert_eq!(paths(&refs.pages), vec!["plan"]);
+        assert_eq!(paths(&refs.files), vec!["/shared/attachments/u1/s.png"]);
+        assert_eq!(
+            refs.pages[0].chain,
+            "dognet-d0cdf950".parse::<duck_address::ChainId>().unwrap()
+        );
+        assert_eq!(
+            refs.files[0].chain,
+            "dognet-d0cdf950".parse::<duck_address::ChainId>().unwrap()
+        );
+    }
+
+    #[test]
+    fn old_form_stays_plain_text_and_is_not_resolved() {
+        let stored = "[Plan](duck://page/plan?net=d0cdf950)";
+        let refs = parse_duck_refs(&[stored]);
+        assert!(refs.pages.is_empty());
+        assert!(refs.files.is_empty());
+        assert!(stored.contains("duck://page/plan?net=d0cdf950"));
     }
 
     #[test]
     fn malformed_or_non_duck_refs_are_skipped_never_a_failure() {
         let refs = parse_duck_refs(&[
-            "[empty](duck://page/)",        // empty id
-            "[ext](https://example.com)",   // not a duck scheme
-            "[unterminated](duck://page/x", // no closing paren
-            "[nested](duck://page/a/b)",    // page id must be one segment
-            "plain [not a link] text",      // no url
-            "ok [Good](duck://page/ok) ok",
+            "[empty](duck://dognet-d0cdf950/pages/)",        // empty id
+            "[ext](https://example.com)",                    // not a duck scheme
+            "[unterminated](duck://dognet-d0cdf950/pages/x", // no closing paren
+            "[nested](duck://dognet-d0cdf950/pages/a/b)",    // page id must be one segment
+            "plain [not a link] text",                       // no url
+            "ok [Good](duck://dognet-d0cdf950/pages/ok) ok",
         ]);
-        assert_eq!(refs.pages, vec!["ok"]);
+        assert_eq!(paths(&refs.pages), vec!["ok"]);
     }
 
     #[test]
     fn duck_file_refs_are_confined_to_the_attachments_root() {
         let refs = parse_duck_refs(&[
-            "![img](duck://files/shared/attachments/u1/cat.png)", // ok (embed marker ignored)
-            "[doc](duck://files/shared/attachments/u2/notes.md)", // ok
-            "[home](duck://files/home/alice/secret.txt)",         // outside root — dropped
-            "[skill](duck://files/shared/skills/a/b)",            // wrong subtree — dropped
-            "[deep](duck://files/shared/attachments/a/b/c)",      // wrong depth — dropped
-            "[dots](duck://files/shared/attachments/../secret)",  // dot-segment — dropped
+            "![img](duck://dognet-d0cdf950/files/shared/attachments/u1/cat.png)", // ok (embed marker ignored)
+            "[doc](duck://dognet-d0cdf950/files/shared/attachments/u2/notes.md)", // ok
+            "[home](duck://dognet-d0cdf950/files/home/alice/secret.txt)", // outside root — dropped
+            "[skill](duck://dognet-d0cdf950/files/shared/skills/a/b)",    // wrong subtree — dropped
+            "[deep](duck://dognet-d0cdf950/files/shared/attachments/a/b/c)", // wrong depth — dropped
+            "[dots](duck://dognet-d0cdf950/files/shared/attachments/../secret)", // dot-segment — dropped
         ]);
         assert_eq!(
-            refs.files,
+            paths(&refs.files),
             vec![
                 "/shared/attachments/u1/cat.png",
                 "/shared/attachments/u2/notes.md",
@@ -808,17 +872,17 @@ mod tests {
     #[test]
     fn a_message_mixing_page_and_file_refs_parses_both() {
         let refs = parse_duck_refs(&[
-            "context in [Plan](duck://page/plan) and see ![shot](duck://files/shared/attachments/u/s.png)",
+            "context in [Plan](duck://dognet-d0cdf950/pages/plan) and see ![shot](duck://dognet-d0cdf950/files/shared/attachments/u/s.png)",
         ]);
-        assert_eq!(refs.pages, vec!["plan"]);
-        assert_eq!(refs.files, vec!["/shared/attachments/u/s.png"]);
+        assert_eq!(paths(&refs.pages), vec!["plan"]);
+        assert_eq!(paths(&refs.files), vec!["/shared/attachments/u/s.png"]);
     }
 
     #[test]
     fn a_shallow_file_path_under_the_root_is_not_confined() {
         // exactly one segment under the root (no <dir>/<name>) — dropped, same
         // as the console tokenizer.
-        let refs = parse_duck_refs(&["[x](duck://files/shared/attachments/only)"]);
+        let refs = parse_duck_refs(&["[x](duck://dognet-d0cdf950/files/shared/attachments/only)"]);
         assert!(refs.files.is_empty());
     }
 
@@ -837,10 +901,10 @@ mod tests {
 
     #[test]
     fn a_page_renders_headings_todos_lists_code_and_nesting_from_preorder() {
-        let section = render_pages_section(&[("plan".into(), Some(preorder_page()))], TEST_NET);
+        let section = render_pages_section(&[("plan".into(), Some(preorder_page()))], TEST_CHAIN);
         assert!(section.starts_with("Referenced pages:"), "{section}");
         assert!(
-            section.contains("[Project Plan](duck://page/plan?net=d0cdf950)"),
+            section.contains("[Project Plan](duck://dognet-d0cdf950/pages/plan)"),
             "{section}"
         );
         assert!(section.contains("\nthe intro\n"), "{section}");
@@ -872,11 +936,11 @@ mod tests {
                 ("plan".into(), Some(preorder_page())),
                 ("gone".into(), None),
             ],
-            TEST_NET,
+            TEST_CHAIN,
         );
         assert!(section.contains("[page gone — not found]"), "{section}");
         // an empty reply Vec is as unresolvable as None.
-        let empty = render_pages_section(&[("void".into(), Some(Vec::new()))], TEST_NET);
+        let empty = render_pages_section(&[("void".into(), Some(Vec::new()))], TEST_CHAIN);
         assert!(empty.contains("[page void — not found]"), "{empty}");
     }
 
@@ -891,7 +955,7 @@ mod tests {
                 &"x".repeat(128 * 1024),
             ),
         ];
-        let section = render_pages_section(&[("big".into(), Some(big))], TEST_NET);
+        let section = render_pages_section(&[("big".into(), Some(big))], TEST_CHAIN);
         assert_eq!(section.len(), PAGE_CONTEXT_BYTES);
         assert!(
             section.ends_with(PAGE_TRUNCATION_MARKER),
@@ -911,7 +975,7 @@ mod tests {
                 &"é".repeat(64 * 1024),
             ),
         ];
-        let section = render_pages_section(&[("big".into(), Some(big))], TEST_NET);
+        let section = render_pages_section(&[("big".into(), Some(big))], TEST_CHAIN);
         assert!(section.len() <= PAGE_CONTEXT_BYTES);
         assert!(section.len() > PAGE_CONTEXT_BYTES - 4);
         assert!(section.ends_with(PAGE_TRUNCATION_MARKER));
@@ -925,8 +989,8 @@ mod tests {
                 ("gone".to_string(), None),
             ]
         };
-        let a = render_pages_section(&pages(), TEST_NET);
-        let b = render_pages_section(&pages(), TEST_NET);
+        let a = render_pages_section(&pages(), TEST_CHAIN);
+        let b = render_pages_section(&pages(), TEST_CHAIN);
         assert_eq!(a.as_bytes(), b.as_bytes());
     }
 
@@ -947,16 +1011,16 @@ mod tests {
             None,
         )
         .with_chain_id("dognet#d0cdf950");
-        assert_eq!(on_a_network.net_query(), TEST_NET);
+        assert_eq!(on_a_network.address_chain_id(), TEST_CHAIN);
         let section = render_pages_section(
             &[("plan".into(), Some(preorder_page()))],
-            &on_a_network.net_query(),
+            on_a_network.address_chain_id(),
         );
         assert!(
-            section.contains("[Project Plan](duck://page/plan?net=d0cdf950)"),
+            section.contains("[Project Plan](duck://dognet-d0cdf950/pages/plan)"),
             "{section}"
         );
-        // an unwired chain id (dev tools, tests) renders the hand-typed form.
+        // an unwired chain id (dev tools, tests) emits no unrecognized link.
         let nowhere = RunsModule::new(
             "runs",
             "chat",
@@ -967,12 +1031,13 @@ mod tests {
             None,
             None,
         );
-        assert_eq!(nowhere.net_query(), "");
+        assert_eq!(nowhere.address_chain_id(), "");
         let bare = render_pages_section(
             &[("plan".into(), Some(preorder_page()))],
-            &nowhere.net_query(),
+            nowhere.address_chain_id(),
         );
-        assert!(bare.contains("[Project Plan](duck://page/plan)"), "{bare}");
+        assert!(bare.contains("[Project Plan]"), "{bare}");
+        assert!(!bare.contains("duck://"), "{bare}");
     }
 
     #[test]
@@ -987,10 +1052,10 @@ mod tests {
                 origin: sdk::Origin::External(vec![1; 32]),
                 content_origin: sdk::Origin::External(vec![1; 32]),
                 blocks: vec![
-                    ChatBlock::paragraph("see [Plan](duck://page/plan)"),
+                    ChatBlock::paragraph("see [Plan](duck://dognet-d0cdf950/pages/plan)"),
                     ChatBlock::Code {
                         lang: None,
-                        text: "and [Spec](duck://page/spec)".into(),
+                        text: "and [Spec](duck://dognet-d0cdf950/pages/spec)".into(),
                     },
                 ],
                 created_at: 0,
@@ -1005,11 +1070,17 @@ mod tests {
             },
         };
         let text = message_text(&message);
-        assert!(text.contains("see [Plan](duck://page/plan)"), "{text}");
-        assert!(text.contains("and [Spec](duck://page/spec)"), "{text}");
+        assert!(
+            text.contains("see [Plan](duck://dognet-d0cdf950/pages/plan)"),
+            "{text}"
+        );
+        assert!(
+            text.contains("and [Spec](duck://dognet-d0cdf950/pages/spec)"),
+            "{text}"
+        );
     }
 
-    // ---- duck://files attachment injection ------------------------------------
+    // ---- canonical file-address attachment injection -------------------------
 
     #[test]
     fn attachments_render_text_binary_and_missing() {

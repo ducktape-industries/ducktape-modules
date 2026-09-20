@@ -454,7 +454,7 @@ pub struct RunsModule {
     /// production composer wires it; unwired (dev tools/tests) the envelope
     /// still composes v1, with a null pin.
     files: Option<ModuleId>,
-    /// the pages module id — queried for `duck://page/<id>` refs so a run's
+    /// the pages module id — queried for canonical `duck://<chain>/pages/<id>` refs so a run's
     /// context can carry referenced page subtrees. genesis config, NOT
     /// committed state (never in `root()`). `None` on nodes not wired for
     /// pages; page refs then compose no page section (a silent skip, never
@@ -469,9 +469,8 @@ pub struct RunsModule {
     /// (`sdk::genesis_config::CHAIN_ID`) — the ONLY way a fixed component learns
     /// which network it is running on. Genesis config, NOT committed state
     /// (never in `root()`). Every `duck://` link this module renders into an
-    /// agent's context stamps its `?net=` half from it; empty (dev tools,
-    /// tests) renders the hand-typed form, which resolves against whichever
-    /// network the reader is on.
+    /// agent's context uses it to mint canonical `duck://` addresses; empty
+    /// (dev tools, tests) leaves generated page labels unlinked.
     chain_id: String,
     /// Genesis-bound clock scale; duration scheduling refuses absent wiring.
     time_unit: Option<sdk::genesis_config::TimeUnit>,
@@ -677,7 +676,7 @@ impl RunsModule {
         self
     }
 
-    /// wire the pages module so `duck://page/<id>` refs in a run's trigger
+    /// wire the pages module so canonical `duck://<chain>/pages/<id>` refs in a run's trigger
     /// message or injected item body render referenced page subtrees into the
     /// composed context, after construction — mirrors the injected
     /// `Option<ModuleId>` collaborators so `new` and every existing call site
@@ -709,7 +708,7 @@ impl RunsModule {
     /// wire this network's chain id, after construction — mirrors the injected
     /// collaborators so `new` and every existing call site stay untouched. the
     /// guest reads it out of the genesis `__config` record; unwired, produced
-    /// links carry no `?net=`.
+    /// page labels remain unlinked.
     pub fn with_time_unit(mut self, unit: sdk::genesis_config::TimeUnit) -> Self {
         self.time_unit = Some(unit);
         self
@@ -720,10 +719,17 @@ impl RunsModule {
         self
     }
 
-    /// the `?net=` every `duck://` link this module produces carries — the
-    /// chat client's one spelling of the query, never a second dialect.
-    pub(crate) fn net_query(&self) -> String {
-        chat::client::duck_net_query(&self.chain_id)
+    /// the genesis chain id used by canonical `duck://` address helpers.
+    pub(crate) fn address_chain_id(&self) -> &str {
+        &self.chain_id
+    }
+
+    /// Use the SDK's one chain-id grammar for both genesis (`<label>#<salt>`)
+    /// and address-authority (`<label>-<salt>`) spellings.
+    pub(crate) fn parse_address_chain_id(
+        chain_id: &str,
+    ) -> Result<duck_address::ChainId, duck_address::Refused> {
+        chain_id.parse()
     }
 
     // ---- staged-over-committed reads ---------------------------------------

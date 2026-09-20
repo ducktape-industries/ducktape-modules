@@ -1375,7 +1375,7 @@ fn delegate_run_truncates_references_at_the_dispatch_wide_sibling_budget() {
             message(1, "start"),
             message(
                 2,
-                "[Plan](duck://page/plan) [notes](duck://files/shared/attachments/u/notes.md)",
+                "[Plan](duck://dognet-d0cdf950/pages/plan) [notes](duck://dognet-d0cdf950/files/shared/attachments/u/notes.md)",
             ),
         ],
     )

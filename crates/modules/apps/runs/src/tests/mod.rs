@@ -72,7 +72,7 @@ struct CaptureCtx {
     /// Saga views distinguish pending execution leases from terminal results.
     sagas: BTreeMap<String, saga::SagaView>,
     /// page_id -> the canonical whole page in preorder, sliced by the "pages"
-    /// GetPage arm (the `duck://page/<id>` injection lane); GetBlock scans the
+    /// GetPage arm (the canonical page-address injection lane); GetBlock scans the
     /// same pages by block id (the pages-effects target resolution).
     pages: BTreeMap<String, Vec<pages::Block>>,
     page_query_count: Cell<usize>,
@@ -89,7 +89,7 @@ struct CaptureCtx {
     /// composer's `source_snapshot` pin. `None` = a fresh network (null pin).
     files_head: Option<String>,
     /// committed attachment bytes served by the "files" Read arm, keyed by
-    /// absolute path (the duck://files injection resolves these).
+    /// absolute path (the canonical file-address injection resolves these).
     files_content: BTreeMap<String, Vec<u8>>,
     msgs: Vec<Msg>,
     #[allow(dead_code)]
@@ -224,7 +224,7 @@ impl CaptureCtx {
         self
     }
     /// serve committed bytes at `path` from the "files" Read arm — the
-    /// duck://files attachment injection reads these.
+    /// canonical file-address attachment injection reads these.
     fn with_file(mut self, path: &str, bytes: &[u8]) -> Self {
         self.files_content.insert(path.into(), bytes.to_vec());
         self
@@ -848,6 +848,7 @@ fn module() -> RunsModule {
         Some("tasks".into()),
         Some("jobs".into()),
     )
+    .with_chain_id("dognet#d0cdf950")
 }
 
 fn user(byte: u8) -> Origin {
