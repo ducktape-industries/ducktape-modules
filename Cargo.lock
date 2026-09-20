@@ -3767,6 +3767,7 @@ dependencies = [
  "statesync",
  "syn 2.0.119",
  "tempfile",
+ "unicode-normalization",
  "valset",
  "wasm-host",
 ]

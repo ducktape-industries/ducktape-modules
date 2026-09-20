@@ -93,7 +93,7 @@ fn duckfs_write_text_with_no_base_delivers_on_a_non_empty_filesystem() {
     let files = ctx.files_msgs();
     assert_eq!(files.len(), 1, "the write follow-up must emit");
     match &files[0] {
-        FilesMsg::Commit {
+        files::FilesMsg::Commit {
             base_snapshot,
             message,
             changes,

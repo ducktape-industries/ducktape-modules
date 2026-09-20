@@ -11,10 +11,10 @@
 
 use crate::action_requests::{Prepared, ReceiptMeta};
 use crate::catalog::Operation;
-use crate::{OP_FORGE_OPEN_PR, PendingState, PrRef, ReplyBlock};
-use saga::{
+use crate::saga::{
     SagaQuery, SagaReply, decode_reply as saga_decode_reply, encode_query as saga_encode_query,
 };
+use crate::{OP_FORGE_OPEN_PR, PendingState, PrRef, ReplyBlock};
 use sdk::{Ctx, ModuleId, Msg};
 use serde::Serialize;
 

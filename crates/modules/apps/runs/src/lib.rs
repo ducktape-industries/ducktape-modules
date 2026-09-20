@@ -38,8 +38,8 @@ pub const MAX_PAGE_TITLE_LEN: usize = 512;
 pub mod contracts;
 use contracts::agent;
 pub use contracts::{
-    attribution, capability, chat, collaboration, dispatch, governance, identity, modules, pages,
-    tasks, valset,
+    attribution, capability, chat, collaboration, dispatch, files, governance, identity, modules,
+    pages, saga, tasks, valset,
 };
 
 mod model_config;
@@ -68,6 +68,11 @@ use crate::chat::{
     decode_reply as chat_decode_reply, encode_msg as chat_encode_msg,
     encode_query as chat_encode_query,
 };
+use crate::files::{
+    Change as FilesChange, Content as FilesContent, EntryInfo, FilesMsg, FilesQuery, FilesReply,
+    decode_reply as files_decode_reply, encode_msg as files_encode_msg,
+    encode_query as files_encode_query,
+};
 use crate::tasks::{
     JobStatus, JobsEvent, JobsMsg, JobsQuery, JobsReply, decode_job_event as jobs_decode_event,
     decode_job_reply as jobs_decode_reply, encode_job_msg as jobs_encode_msg,
@@ -82,11 +87,6 @@ use dispatch::{
     DispatchMsg, DispatchQuery, DispatchReply, MAX_PAYLOAD_BYTES, OutputContract, ResultEvent,
     Routing, decode_reply as dispatch_decode_reply, encode_msg as dispatch_encode_msg,
     encode_query as dispatch_encode_query,
-};
-use files::{
-    Change as FilesChange, Content as FilesContent, EntryInfo, FilesMsg, FilesQuery, FilesReply,
-    decode_reply as files_decode_reply, encode_msg as files_encode_msg,
-    encode_query as files_encode_query,
 };
 use sdk::{Ctx, Error, Event, Module, ModuleId, Msg, Origin, StateRoot, StateSyncHandle};
 use serde::{Deserialize, Serialize};

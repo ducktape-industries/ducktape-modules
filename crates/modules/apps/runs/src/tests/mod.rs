@@ -11,6 +11,11 @@ use dispatch::{
     DispatchStatus, DispatchView, decode_msg as dispatch_decode_msg,
     encode_reply as dispatch_encode_reply,
 };
+// the REAL producer crates, named explicitly so these shadow the crate-root
+// mirrors `use super::*` glob-imports: the fixture registry is what pins
+// `contracts::{files,saga}` against the modules that own those codecs.
+pub(crate) use ::files;
+pub(crate) use ::saga;
 use files::{
     decode_msg as files_decode_msg, decode_query as files_decode_query,
     encode_reply as files_encode_reply,
@@ -404,7 +409,7 @@ impl CaptureCtx {
             .collect()
     }
     /// decoded files msgs emitted this dispatch.
-    fn files_msgs(&self) -> Vec<FilesMsg> {
+    fn files_msgs(&self) -> Vec<files::FilesMsg> {
         self.msgs
             .iter()
             .filter(|m| m.target == "files")
@@ -656,12 +661,14 @@ impl Ctx for CaptureCtx {
                 reason: refusal::INVALID_INPUT.into(),
                 sentence,
             })? {
-                FilesQuery::Refs {} => Ok(files_encode_reply(&FilesReply::Refs(files::RefsInfo {
-                    head: self.files_head.clone(),
-                    pins: BTreeMap::new(),
-                    window_len: 0,
-                }))),
-                FilesQuery::Read {
+                files::FilesQuery::Refs {} => Ok(files_encode_reply(&files::FilesReply::Refs(
+                    files::RefsInfo {
+                        head: self.files_head.clone(),
+                        pins: BTreeMap::new(),
+                        window_len: 0,
+                    },
+                ))),
+                files::FilesQuery::Read {
                     path, offset, len, ..
                 } => {
                     let reply = match self.files_content.get(&path) {
@@ -669,7 +676,7 @@ impl Ctx for CaptureCtx {
                             let start = (offset as usize).min(bytes.len());
                             let end = (start + len as usize).min(bytes.len());
                             let slice = &bytes[start..end];
-                            FilesReply::Read {
+                            files::FilesReply::Read {
                                 b64: base64::engine::general_purpose::STANDARD.encode(slice),
                                 eof: end == bytes.len(),
                             }
@@ -685,7 +692,7 @@ impl Ctx for CaptureCtx {
                 // serves the SAME committed entry regardless of `snapshot` —
                 // enough to model "path exists" vs "path is new", which is all
                 // a duckfs write test needs.
-                FilesQuery::Stat { path, .. } => {
+                files::FilesQuery::Stat { path, .. } => {
                     let entry = self.files_content.get(&path).map(|bytes| files::EntryInfo {
                         path: path.clone(),
                         kind: files::EntryKindWire::File,
@@ -694,7 +701,7 @@ impl Ctx for CaptureCtx {
                         object: "00".repeat(32),
                         meta: BTreeMap::new(),
                     });
-                    Ok(files_encode_reply(&FilesReply::Stat(entry)))
+                    Ok(files_encode_reply(&files::FilesReply::Stat(entry)))
                 }
                 _ => Err(Error::QueryUnsupported),
             },
