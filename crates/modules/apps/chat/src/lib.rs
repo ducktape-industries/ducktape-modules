@@ -57,6 +57,7 @@ pub use wire::*;
 // the owning wire surface is flattened at the crate root for existing module
 // and test callers; it is ordinary internal code, not a shared API crate.
 use client::validate_channel_namespace;
+pub mod contract_golden;
 use sdk::refusal;
 
 // the wasm-guest port: the dispatch shell that adapts this module to the
