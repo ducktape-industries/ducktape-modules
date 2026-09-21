@@ -1,6 +1,7 @@
 // The rules natively over `store::Memory`: what the founding suite checks on the host, without the host.
 
 use abi::{Cause, Env, Origin, reason};
+use module_registry::ADMISSION;
 use store::{Memory, Page};
 
 use crate::{Genesis, Member, Membership, Op, Query, Reply, Standing};
@@ -42,7 +43,7 @@ fn founded() -> Memory {
 }
 
 fn govern(store: &mut Memory, op: Op) -> Result<(), abi::Refusal> {
-    crate::execute(store, &env(Origin::Program("admission".into())), op)
+    crate::execute(store, &env(Origin::Program(ADMISSION.into())), op)
 }
 
 fn ask(store: &Memory, query: Query) -> Reply {

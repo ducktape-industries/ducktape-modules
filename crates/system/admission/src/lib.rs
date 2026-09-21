@@ -11,7 +11,7 @@ pub use rules::execute;
 
 use borsh::{BorshDeserialize, BorshSerialize};
 
-pub const PROGRAM: &str = "admission";
+pub use module_registry::ADMISSION as PROGRAM;
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Op {
