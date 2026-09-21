@@ -1,25 +1,12 @@
-# modules — the network module-code registry. It commits each hot-swappable
-# module's active code hash and at most one readiness-gated scheduled swap.
 [package]
 name = "modules"
 version.workspace = true
 edition.workspace = true
 
-[features]
-guest = ["dep:ducktape-module-sdk"]
+[lib]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-ducktape-module-sdk = { workspace = true, optional = true }
-sdk = { workspace = true }
-# the store-record codec: compact, canonical, deterministic. wire stays sdk::wire.
+abi = { workspace = true }
+guest = { workspace = true }
 borsh = { workspace = true }
-# the lane declaration shapes: a module declares them in its artifact frame
-# and this registry commits what the frame said, so the definition is the
-# frame crate's and there is no second copy to drift.
-module-artifact = { workspace = true }
-serde = { workspace = true }
-async-trait = { workspace = true }
-
-[dev-dependencies]
-futures = { workspace = true }
-sdk-testkit = { workspace = true }

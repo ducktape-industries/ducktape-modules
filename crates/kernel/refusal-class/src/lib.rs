@@ -1,8 +1,7 @@
 //! The classes a refusal token names, and the rule for minting one.
 //!
-//! `sdk::refusal` re-exports every constant here and owns the frame a refusal
-//! crosses the component boundary in; this crate holds only the words, so a
-//! crate that must not link sdk names the same ones.
+//! `abi::Refusal` is the frame a refusal crosses the program boundary in;
+//! this crate holds only the words, so a leaf crate names the same ones.
 //!
 //! The rule: a token names the CLASS of failure, which is the same as naming
 //! how a caller recovers. Two refusals share a token exactly when a caller

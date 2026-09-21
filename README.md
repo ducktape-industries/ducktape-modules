@@ -1,45 +1,65 @@
 # ducktape-sdk
 
-The contract line of the ducktape platform: everything a module is authored
-against, and everything a program that talks to a module needs in order to
-speak its format without linking the module itself.
+The contract line of the ducktape platform: what a wasm program is authored
+against, what a wasm view is authored against, and the leaf libraries both are
+made of.
 
 This repository depends on no other ducktape repository. Every other one
 depends on it.
 
 ## What is in here
 
-- **`crates/kernel/sdk`** — the module contract: the `Module` trait, `Ctx`,
-  `MerkleStore`, the ids and origins, and `sdk::wire` (the encode/decode pair
-  every wire surface delegates to). The only crate a module may depend on
-  besides its own wire surfaces.
-- **`crates/module-sdk`** — the wasm authoring surface: the `ducktape:module`
-  WIT world, the generated bindings, the adapter that presents host imports as
-  an `sdk::Ctx`, and the wasm32 `getrandom` patch crates under `stubs/` a
-  guest graph needs. A standalone workspace — it compiles for
-  `wasm32-unknown-unknown` only.
-- **`crates/kernel/sdk-testkit`** — dev-only test doubles for the `sdk`
-  boundary traits. `[dev-dependencies]` only.
-- **`crates/modules/system/*`** — the system modules. Each crate is its own
-  api: the types and codecs at the root, a `client` of typed functions over
-  `Ctx` for a sibling that calls it, and the module behind a feature
-  (`guest` for the wasm port). `identity = { workspace = true }` links the
-  module crate; nothing links a separate wire crate. (`identity` and
-  `attribution` are on this shape; the rest still ship a `wire` subcrate.)
-- **`crates/kernel/{wasm-host, module-artifact, index-guest, keyscheme,
-  blobstore, node-work}`** and the leaf libraries
-  (`duckfs/{core,disk}`, `duckdns`, `git-primitives`, `run-envelope`,
-  `view-wire`, `design`) the surfaces above are made of.
-- **`crates/view-guest`** — the runtime a wasm view is written against
-  (`App`, `Driver`, `export_app!`, the host protocol, editor primitives, test
-  helpers). A view links it as `ducktape-view-guest` (`package =
-  "view-guest"`). It pins `wit-bindgen` for the view WIT world on its own,
-  apart from `crates/module-sdk`'s pin for the module world.
-- **`bin/guest-builder`** — the componentizer that turns a module crate into a
-  `component.wasm`, with `wit-component` pinned exactly: the same cdylib at
-  another version is another hash.
-- **`crates/guests`** — the standalone fixture guests (hello, its replacement,
-  noop, sibling, object) the host suites run.
+- **`crates/kernel/abi`** — the bytes ABI a program and the host share, all
+  borsh: `GuestCall` (`Init` / `Execute` / `Query`), `HostOp` and `HostReply`
+  (reads, writes, scans, blobs, sibling queries, messages, events, `Respond`,
+  crypto), `Env`, `Refusal`, and the two fixed contracts the host reads
+  (`roster`: the `modules` program; `validators`: the `valset` program).
+- **`crates/kernel/guest`** — what a program compiles against: the `Program`
+  trait (`init`, `execute`, `query`), the `program!` macro that emits the two
+  exports (`alloc`, `call`), and one typed function per host op
+  (`guest::get`, `guest::set`, `guest::scan`, `guest::emit`,
+  `guest::respond`, …). wasm32 only for the host calls; the types build
+  everywhere.
+- **`crates/modules/system/{modules, valset, identity}`** — the system
+  programs: the roster the host reads, the validators it seats, and the
+  accounts (numbered, key-held, named) every other program attributes to.
+  Each is a cdylib for wasm32 and an rlib of its types and rules everywhere.
+- **`crates/kernel/{refusal-class, keyscheme}`** — the refusal words as bare
+  constants, and the key schemes a proof is verified under.
+- **`crates/view-wire`**, **`crates/view-guest`**, **`crates/design`** — the
+  host<->view wire, the runtime a wasm view is written against (`View`,
+  `Cx`, `export_view!`, the host protocol, the composer, test helpers) and
+  the palette they draw from. A view links `view-guest` as
+  `ducktape-view-guest`.
+- **`crates/{duck-address, duckdns, duckfs/core, git-primitives,
+  run-envelope}`** — the leaf libraries: the `duck://` grammar, `.duck`
+  names, the duckfs paths/objects/wire, git read types, the run envelope.
+
+## A program
+
+```rust
+use abi::{Refusal, Scan};
+use guest::Program;
+
+struct Counter;
+
+impl Program for Counter {
+    fn execute(payload: &[u8]) -> Result<(), Refusal> {
+        let n: u64 = abi::decode(payload)?;
+        guest::set(b"n".to_vec(), abi::encode(&n));
+        Ok(())
+    }
+    fn query(_request: &[u8]) -> Result<(), Refusal> {
+        guest::respond(guest::get(b"n").unwrap_or_default());
+        Ok(())
+    }
+}
+
+guest::program!(Counter);
+```
+
+Built with `cargo build --release --target wasm32-unknown-unknown`; the host
+loads the `.wasm` by the blob id the `modules` program records for it.
 
 ## Repository graph
 
@@ -52,10 +72,11 @@ depends on it.
           ducktape-app
 ```
 
-- `ducktape` — the node, the kernel host, consensus, networking, the CLI.
-- `ducktape-modules` — the module implementations behind these wire surfaces.
-- `ducktape-views` — the wasm views the desktop app renders.
-- `ducktape-app` — the native desktop client, on top of `ducktape`.
+- `ducktape` — the kernel host (runtime, state, blobs, host, node, consensus,
+  statesync), the daemon and the CLI.
+- `ducktape-modules` — the programs, and the views that live beside them.
+- `ducktape-views` — the remaining wasm views the desktop app renders.
+- `ducktape-app` — the native desktop client.
 
 ## How it is consumed
 
@@ -64,16 +85,12 @@ Downstream repositories name it as a cargo git dependency in their
 
 ```toml
 [workspace.dependencies]
-sdk = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev" }
-identity = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "identity" }
+abi = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "abi" }
+guest = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "guest" }
 ```
-
-A wasm module pins `ducktape-module-sdk` out of this repository by revision and
-patches in the `stubs/` crates for its `wasm32-unknown-unknown` build; that
-revision is what its committed component bytes came out of.
 
 ## Building
 
-The toolchain is pinned in `rust-toolchain.toml`. The committed wasm component
-bytes are rustc-dependent, so a floating channel means two operators hash
-different bundles into the same descriptor.
+The toolchain is pinned in `rust-toolchain.toml`. `cargo test --workspace`,
+`cargo clippy --workspace --tests -- -D warnings`, `make program-wasm-check`
+and `make view-wasm-check` are what CI runs.
