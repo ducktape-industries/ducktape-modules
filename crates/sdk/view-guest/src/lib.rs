@@ -8,7 +8,6 @@ use std::task::{Context, Poll, Wake, Waker};
 use std::time::Duration;
 
 pub use view_wire as wire;
-pub use wit_bindgen;
 
 use futures::StreamExt;
 use std::collections::HashSet;
@@ -555,8 +554,7 @@ macro_rules! export_app {
     };
 }
 
-/// The manifest section, the driver cell, the native entry points and the
-/// wasm32 component exports for an `App`. `export_app!` and `export_view!`
+/// The manifest section and the wasm32 exports ([`wire::abi`]) for an `App`. `export_app!` and `export_view!`
 /// both end here; a view invokes one of those, not this.
 #[macro_export]
 macro_rules! export_driver {
@@ -568,97 +566,145 @@ macro_rules! export_driver {
         static MANIFEST_SECTION: [u8; MANIFEST.len() + <$app>::PREFERRED_WINDOW_SIZE.len() + 2 + $crate::wire::WIRE_EPOCH.ilog10() as usize] =
             $crate::manifest_bytes(MANIFEST, <$app>::PREFERRED_WINDOW_SIZE);
 
-        thread_local! {
-            static DRIVER: ::std::cell::RefCell<Option<$crate::Driver<$app>>> =
-                const { ::std::cell::RefCell::new(None) };
-        }
-
-
-        pub fn boot_native() {
-            DRIVER.with(|driver| *driver.borrow_mut() = Some($crate::Driver::new()));
-        }
-
-        pub fn snapshot_native() -> ::std::result::Result<::std::vec::Vec<u8>, ::std::string::String> {
-            DRIVER.with(|driver| driver.borrow().as_ref().ok_or_else(|| ::std::string::String::from("initialize first"))?.snapshot())
-        }
-
-        pub fn restore_native(bytes: &[u8], macos: bool) -> ::std::result::Result<(), ::std::string::String> {
-            let candidate = $crate::Driver::from_snapshot(bytes, macos)?;
-            DRIVER.with(|driver| *driver.borrow_mut() = Some(candidate));
-            ::std::result::Result::Ok(())
-        }
-
-        pub fn tick_native(events: Vec<$crate::wire::Event>) -> $crate::wire::Frame {
-            DRIVER.with(|driver| driver.borrow_mut().as_mut().expect("boot first").tick(events))
-        }
-
-        // `runtime_path` is a string, so it cannot say `$crate`: the runtime is
-        // re-exported at the view's root under a fixed name and reached by
-        // `crate::`, which names no crate. This macro is invoked at the root.
-        #[cfg(target_arch = "wasm32")]
-        use $crate::wit_bindgen as __ducktape_view_wit_bindgen;
-
         #[cfg(target_arch = "wasm32")]
         mod wasm_exports {
-            macro_rules! bindings {
-                ($wit:literal) => {
-                    $crate::wit_bindgen::generate!({
-                        inline: $wit,
-                        runtime_path: "crate::__ducktape_view_wit_bindgen::rt",
-                    });
-                };
-            }
-            $crate::wire::with_view_wit!(bindings);
+            use super::*;
 
-            struct Component;
-
-            fn install_panic_hook() {
-                    // A trapped instance can never be entered again, so the
-                    // message leaves through the host's import before the
-                    // abort that follows the hook.
-                    ::std::panic::set_hook(::std::boxed::Box::new(|info| {
-                        let payload = info.payload();
-                        let message = payload
-                            .downcast_ref::<&str>()
-                            .copied()
-                            .or_else(|| payload.downcast_ref::<::std::string::String>().map(|text| text.as_str()))
-                            .unwrap_or("panicked");
-                        let at = info
-                            .location()
-                            .map(|location| ::std::format!("{}:{}", location.file(), location.line()))
-                            .unwrap_or_else(|| "unknown".into());
-                        panicked(&$crate::panic_line(message, &at));
-                    }));
+            #[unsafe(export_name = "alloc")]
+            extern "C" fn alloc(len: u32) -> u32 {
+                $crate::exports::alloc(len)
             }
 
-            impl Guest for Component {
-                fn init(macos: bool) {
-                    install_panic_hook();
-                    super::DRIVER.with(|driver| *driver.borrow_mut() = Some($crate::Driver::with_macos(macos)));
-                }
-
-                fn snapshot() -> Result<Vec<u8>, String> { super::snapshot_native() }
-                fn restore(state: Vec<u8>, macos: bool) -> Result<(), String> {
-                    install_panic_hook();
-                    super::restore_native(&state, macos)
-                }
-
-                fn tick(events: Vec<u8>) -> Vec<u8> {
-                    let events: Vec<$crate::wire::Event> =
-                        $crate::wire::decode(&events).expect("invalid host event frame");
-                    let mut frame = super::tick_native(events);
-                    // The host keeps the tree it has, or patches it; the
-                    // whole tree crosses only when neither will do.
-                    if frame.unchanged || !frame.patches.is_empty() {
-                        frame.root = None;
-                    }
-                    $crate::wire::encode(&frame)
-                }
+            #[unsafe(export_name = "init")]
+            extern "C" fn init(macos: u32) {
+                $crate::exports::init::<$app>(macos)
             }
 
-            export!(Component);
+            #[unsafe(export_name = "tick")]
+            extern "C" fn tick(ptr: u32, len: u32) -> u64 {
+                $crate::exports::tick::<$app>(ptr, len)
+            }
+
+            #[unsafe(export_name = "snapshot")]
+            extern "C" fn snapshot() -> u64 {
+                $crate::exports::snapshot::<$app>()
+            }
+
+            #[unsafe(export_name = "restore")]
+            extern "C" fn restore(ptr: u32, len: u32, macos: u32) -> u64 {
+                $crate::exports::restore::<$app>(ptr, len, macos)
+            }
         }
     };
+}
+
+/// The guest's half of [`wire::abi`]: what `export_driver!` builds the five
+/// exports from. A module runs one app, so its driver lives here.
+#[cfg(target_arch = "wasm32")]
+#[doc(hidden)]
+pub mod exports {
+    use std::any::Any;
+    use std::cell::RefCell;
+
+    use crate::{Driver, SnapshotApp, wire};
+
+    #[link(wasm_import_module = "ducktape_view")]
+    unsafe extern "C" {
+        fn panicked(ptr: u32, len: u32);
+    }
+
+    thread_local! {
+        // The last answer, kept until the next export is entered: the host
+        // copies it out before it calls again.
+        static ANSWER: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+        static DRIVER: RefCell<Option<Box<dyn Any>>> = const { RefCell::new(None) };
+    }
+
+    fn driver<A: SnapshotApp, R>(run: impl FnOnce(&mut Driver<A>) -> R) -> R {
+        DRIVER.with_borrow_mut(|driver| {
+            run(driver
+                .as_mut()
+                .and_then(|driver| driver.downcast_mut())
+                .expect("init or restore first"))
+        })
+    }
+
+    pub fn init<A: SnapshotApp>(macos: u32) {
+        install_panic_hook();
+        let driver = Driver::<A>::with_macos(macos != 0);
+        DRIVER.set(Some(Box::new(driver)));
+    }
+
+    pub fn tick<A: SnapshotApp>(ptr: u32, len: u32) -> u64 {
+        let events: Vec<wire::Event> =
+            wire::decode(&take(ptr, len)).expect("invalid host event frame");
+        let mut frame = driver::<A, _>(|driver| driver.tick(events));
+        // The host keeps the tree it has, or patches it; the whole tree
+        // crosses only when neither will do.
+        if frame.unchanged || !frame.patches.is_empty() {
+            frame.root = None;
+        }
+        answer(wire::encode(&frame))
+    }
+
+    pub fn snapshot<A: SnapshotApp>() -> u64 {
+        answer(wire::abi::encode_result(driver::<A, _>(|driver| {
+            driver.snapshot()
+        })))
+    }
+
+    /// A refused state leaves the driver that was there in place.
+    pub fn restore<A: SnapshotApp>(ptr: u32, len: u32, macos: u32) -> u64 {
+        install_panic_hook();
+        let restored = Driver::<A>::from_snapshot(&take(ptr, len), macos != 0).map(|driver| {
+            DRIVER.set(Some(Box::new(driver)));
+            Vec::new()
+        });
+        answer(wire::abi::encode_result(restored))
+    }
+
+    /// A buffer the host fills and the next export [`take`]s. `0` for none.
+    pub fn alloc(len: u32) -> u32 {
+        if len == 0 {
+            return 0;
+        }
+        Box::into_raw(vec![0u8; len as usize].into_boxed_slice()) as *mut u8 as u32
+    }
+
+    /// The argument the host wrote into what [`alloc`] gave it.
+    fn take(ptr: u32, len: u32) -> Vec<u8> {
+        if len == 0 {
+            return Vec::new();
+        }
+        let bytes = std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, len as usize);
+        unsafe { Box::from_raw(bytes) }.into_vec()
+    }
+
+    fn answer(bytes: Vec<u8>) -> u64 {
+        ANSWER.with_borrow_mut(|answer| {
+            *answer = bytes;
+            wire::abi::pack(answer.as_ptr() as u32, answer.len() as u32)
+        })
+    }
+
+    /// A trapped instance can never be entered again, so the message leaves
+    /// through the host's import before the abort that follows the hook.
+    fn install_panic_hook() {
+        std::panic::set_hook(Box::new(|info| {
+            let payload = info.payload();
+            let message = payload
+                .downcast_ref::<&str>()
+                .copied()
+                .or_else(|| payload.downcast_ref::<String>().map(|text| text.as_str()))
+                .unwrap_or("panicked");
+            let at = info
+                .location()
+                .map(|location| format!("{}:{}", location.file(), location.line()))
+                .unwrap_or_else(|| "unknown".into());
+            let line = crate::panic_line(message, &at);
+            unsafe { panicked(line.as_ptr() as u32, line.len() as u32) };
+        }));
+    }
 }
 
 mod combo;
