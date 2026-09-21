@@ -11,8 +11,10 @@ SYSTEM := crates/modules/system
 # from (crates/kernel/fixtures, `make kernel-fixtures` there).
 DUCKTAPE ?= ../ducktape
 
-# The app programs: each its own wasm32 workspace, like the boot set.
-PROGRAMS := crates/app/chat-program
+# The app programs, by manifest path: chat-program is its own wasm32 workspace
+# (the view links `chat`, never a program), forge a root member whose wasm
+# entry is wasm32-gated.
+PROGRAMS := crates/app/chat-program crates/app/forge
 
 # The views: cdylibs for wasm32-unknown-unknown the desktop loads from a file.
 VIEWS := chat-view

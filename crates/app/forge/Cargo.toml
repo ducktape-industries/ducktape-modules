@@ -1,0 +1,13 @@
+[package]
+name = "forge"
+edition.workspace = true
+version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+gitcore = { workspace = true }
+abi = { workspace = true }
+guest = { workspace = true }
+borsh = { workspace = true }
