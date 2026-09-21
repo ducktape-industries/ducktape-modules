@@ -5,13 +5,10 @@
 //! this is module-owned deliberately: a client folds the same applied-op
 //! feed the index guest folds, so the fold vocabulary (rows, authorship
 //! rendering, stamp decoding) lives beside `index.rs` — never pinned inside
-//! a particular app shell. the desktop shell consumes it today via plain
-//! linkage; the module-bundled-UI lane compiles this same module into the
-//! shipped `ui.wasm`.
+//! a particular view. `chat-view` copies the slice it draws.
 //!
 //! everything here is PURE data-in/data-out: no IO, no async, no renderer
-//! types. shell-side effects (rpc loads, iced styling, editors) stay in the
-//! shell.
+//! types. view-side effects (rpc loads, styling, editors) stay in the view.
 
 use crate::message::inline_spans;
 pub use crate::message::parse_message;
