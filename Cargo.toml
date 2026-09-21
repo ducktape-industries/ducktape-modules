@@ -126,7 +126,9 @@ unicode-normalization = "0.1"
 tempfile = "3"
 
 # commonware — one ecosystem, version-aligned.
-commonware-cryptography = "2026.9.0"
+# no default `std`: it carries `bls12381` -> blst, C that never builds for
+# wasm32. every consumer here uses ed25519 only, which is no_std-clean.
+commonware-cryptography = { version = "2026.9.0", default-features = false }
 commonware-codec = "2026.9.0"
 commonware-utils = "2026.9.0"
 

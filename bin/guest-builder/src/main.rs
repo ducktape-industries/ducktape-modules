@@ -838,12 +838,12 @@ codegen-units = 1
 }
 
 /// the uniform wasm32 patch set: the crates a guest substitutes because they
-/// cannot compile to wasm32, out of `crates/module-sdk/stubs` in the module
-/// SDK's repository at the revision the platform pins. Spelled against the
-/// SAME source as the module's own `ducktape-module-sdk` dependency, so one
-/// checkout at one revision serves both. Applied to every guest; cargo's
-/// "unused patch" warning on a module whose graph never pulls one of these
-/// crates is expected and harmless.
+/// cannot compile to wasm32. The `getrandom` refusals come out of
+/// `crates/module-sdk/stubs` in the module SDK's repository at the revision
+/// the platform pins — spelled against the SAME source as the module's own
+/// `ducktape-module-sdk` dependency, so one checkout at one revision serves
+/// both. Applied to every guest; cargo's "unused patch" warning on a module whose graph never pulls one of these crates is
+/// expected and harmless.
 fn patch_section(sdk: &str) -> String {
     format!(
         r#"
@@ -851,7 +851,6 @@ fn patch_section(sdk: &str) -> String {
 getrandom-02 = {{ package = "getrandom", version = "0.2", {sdk} }}
 getrandom-03 = {{ package = "getrandom", version = "0.3", {sdk} }}
 getrandom-04 = {{ package = "getrandom", version = "0.4", {sdk} }}
-blst = {{ {sdk} }}
 "#
     )
 }
@@ -1448,7 +1447,6 @@ mod tests {
         assert!(patches.contains(
             "getrandom-02 = { package = \"getrandom\", version = \"0.2\", git = \"https://github.com/ducktape-industries/ducktape-sdk\", branch = \"dev\" }"
         ));
-        assert!(patches.contains("blst = { git = \"https://github.com/ducktape-industries/ducktape-sdk\", branch = \"dev\" }"));
         // the revision is the lock's job: a written one would be a second source
         assert!(!patches.contains("rev ="));
 
@@ -1798,7 +1796,6 @@ dependencies = [
             ("random02", "getrandom", "0.2.17"),
             ("random03", "getrandom", "0.3.4"),
             ("random04", "getrandom", "0.4.3"),
-            ("blst", "blst", "0.3.16"),
         ] {
             fixture_file(
                 root,

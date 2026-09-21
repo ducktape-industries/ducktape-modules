@@ -15,9 +15,9 @@ depends on it.
   besides its own wire surfaces.
 - **`crates/module-sdk`** — the wasm authoring surface: the `ducktape:module`
   WIT world, the generated bindings, the adapter that presents host imports as
-  an `sdk::Ctx`, and the wasm32 patch crates under `stubs/` a guest graph
-  needs. A standalone workspace — it compiles for `wasm32-unknown-unknown`
-  only.
+  an `sdk::Ctx`, and the wasm32 `getrandom` patch crates under `stubs/` a
+  guest graph needs. A standalone workspace — it compiles for
+  `wasm32-unknown-unknown` only.
 - **`crates/kernel/sdk-testkit`** — dev-only test doubles for the `sdk`
   boundary traits. `[dev-dependencies]` only.
 - **`crates/modules/**/wire`** — one wire crate per module: its messages,
