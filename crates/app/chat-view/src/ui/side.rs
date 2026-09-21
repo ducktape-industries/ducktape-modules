@@ -1,6 +1,7 @@
 //! The side panes: the open thread, and the channel's details (link, rename,
 //! members, archive).
-use ducktape_view_guest::view::{Cx, Loaded};
+use ducktape_view_guest::Context;
+use ducktape_view_guest::view::Loaded;
 use ducktape_view_guest::wire::{self, Length, Node, kit, kit::Tone};
 
 use super::close_glyph;
@@ -9,7 +10,7 @@ use crate::composer::Target;
 use crate::{Chat, Pane};
 use ducktape_view_guest::wire::kit::*;
 
-pub fn thread(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
+pub fn thread(chat: &Chat, cx: &mut Context<Chat>) -> Node {
     let key = "chat/thread";
     let room = chat.room.as_ref().expect("a room");
     let thread = room.thread.as_ref().expect("a thread");
@@ -74,8 +75,12 @@ pub fn thread(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
         cx,
     ));
     if thread.has_more {
-        let more = (!thread.more_loading && !chat.session.busy)
-            .then(|| cx.on(|chat, cx| chat.load_more_replies(cx)));
+        let more = (!thread.more_loading && !chat.session.busy).then(|| {
+            cx.listener(|chat, _event: &(), _window, cx| {
+                cx.notify();
+                chat.load_more_replies(cx)
+            })
+        });
         children.push(padded_all(
             subtle(format!("{key}/more"), "Load more replies", more),
             kit::spacing::SM as f32,
@@ -111,7 +116,7 @@ pub fn thread(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
     )
 }
 
-pub fn details(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
+pub fn details(chat: &Chat, cx: &mut Context<Chat>) -> Node {
     let key = "chat/details";
     let details = chat.details.as_ref().expect("details open");
     let info = chat.room_info();
@@ -137,8 +142,12 @@ pub fn details(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
         ));
     }
     let link = crate::files::channel_link(&chat.session.chain, &chat.room_id(), None);
-    let copy = (!link.is_empty())
-        .then(|| cx.on(move |chat, cx| chat.copy_text(link.clone(), "Channel link copied", cx)));
+    let copy = (!link.is_empty()).then(|| {
+        cx.listener(move |chat, _event: &(), _window, cx| {
+            cx.notify();
+            chat.copy_text(link.clone(), "Channel link copied", cx)
+        })
+    });
     let about = kit::column(
         format!("{key}/about"),
         [
@@ -158,12 +167,17 @@ pub fn details(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
         ],
     );
 
-    let typed = cx.on_value(|chat, text: String, _| {
+    let typed = cx.listener(|chat, event: &String, _window, cx| {
+        let text = event.clone();
+        cx.notify();
         if let Some(d) = &mut chat.details {
             d.name_draft = text;
         }
     });
-    let rename = cx.on(|chat, cx| chat.rename(cx));
+    let rename = cx.listener(|chat, _event: &(), _window, cx| {
+        cx.notify();
+        chat.rename(cx)
+    });
     let rename_ok = !busy && !details.name_draft.trim().is_empty();
     let rename_section = kit::column(
         format!("{key}/rename"),
@@ -190,12 +204,15 @@ pub fn details(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
         ],
     );
 
-    let typed = cx.on_value(|chat, text: String, _| {
+    let typed = cx.listener(|chat, event: &String, _window, cx| {
+        let text = event.clone();
+        cx.notify();
         if let Some(d) = &mut chat.details {
             d.member_draft = text;
         }
     });
-    let add = cx.on(|chat, cx| {
+    let add = cx.listener(|chat, _event: &(), _window, cx| {
+        cx.notify();
         let text = chat
             .details
             .as_ref()
@@ -231,7 +248,12 @@ pub fn details(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
     for member in roster {
         let row_key = format!("{key}/member/{}", member.key);
         let party = member.key.clone();
-        let remove = (!busy).then(|| cx.on(move |chat, cx| chat.set_member(&party, false, cx)));
+        let remove = (!busy).then(|| {
+            cx.listener(move |chat, _event: &(), _window, cx| {
+                cx.notify();
+                chat.set_member(&party, false, cx)
+            })
+        });
         let mut button = subtle(format!("{row_key}/remove"), "Remove", remove);
         if let Node::Button {
             description, label, ..
@@ -249,7 +271,12 @@ pub fn details(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
         ));
     }
 
-    let archive = (!busy).then(|| cx.on(move |chat, cx| chat.set_archived(!archived, cx)));
+    let archive = (!busy).then(|| {
+        cx.listener(move |chat, _event: &(), _window, cx| {
+            cx.notify();
+            chat.set_archived(!archived, cx)
+        })
+    });
     let lifecycle = kit::column(
         format!("{key}/lifecycle"),
         [

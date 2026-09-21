@@ -39,12 +39,18 @@ impl Capability for Props {
     fn encode(_: &()) -> Vec<u8> {
         Vec::new()
     }
+    fn decode_request(_: &[u8]) -> Result<(), ducktape_view_guest::host::Refusal> {
+        Ok(())
+    }
+    fn encode_reply(reply: &PropsItem) -> Vec<u8> {
+        serde_json::to_vec(reply).expect("props reply encodes")
+    }
     fn decode(bytes: &[u8]) -> Result<PropsItem, ducktape_view_guest::host::Refusal> {
         ducktape_view_guest::view::json_decode(bytes)
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum PropsItem {
     Background {

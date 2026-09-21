@@ -1,6 +1,6 @@
 //! The message menus: the floating "…" list, the reaction picker and the
 //! delete confirmation at the pointer; the edit composer under its stream.
-use ducktape_view_guest::view::Cx;
+use ducktape_view_guest::Context;
 use ducktape_view_guest::wire::{self, AlignX, ButtonPreset, Length, Node, kit};
 
 use crate::client::reaction_palette;
@@ -35,7 +35,7 @@ pub fn focus_key(pane: Pane, mode: Mode) -> String {
 
 /// The menu that floats at the pointer. An edit is not one — it sits under
 /// its stream (see `editing`).
-pub fn floating(chat: &Chat, cx: &mut Cx<Chat>) -> Option<Node> {
+pub fn floating(chat: &Chat, cx: &mut Context<Chat>) -> Option<Node> {
     let menu = chat.menu.as_ref()?;
     let size = match menu.mode {
         Mode::More => menu_size(if menu.pane == Pane::Thread { 4 } else { 5 }),
@@ -62,12 +62,12 @@ pub fn floating(chat: &Chat, cx: &mut Cx<Chat>) -> Option<Node> {
 }
 
 /// The edit composer, when the open menu is an edit in `pane`.
-pub fn editing(chat: &Chat, pane: Pane, cx: &mut Cx<Chat>) -> Option<Node> {
+pub fn editing(chat: &Chat, pane: Pane, cx: &mut Context<Chat>) -> Option<Node> {
     let menu = chat.menu.as_ref()?;
     (menu.mode == Mode::Editing && menu.pane == pane).then(|| message_menu(chat, menu, cx))
 }
 
-fn message_menu(chat: &Chat, menu: &Menu, cx: &mut Cx<Chat>) -> Node {
+fn message_menu(chat: &Chat, menu: &Menu, cx: &mut Context<Chat>) -> Node {
     let (pane, seq, rev) = (menu.pane, menu.seq, menu.rev);
     let key = focus_key(pane, menu.mode);
     let prefix = prefix(pane);
@@ -77,7 +77,10 @@ fn message_menu(chat: &Chat, menu: &Menu, cx: &mut Cx<Chat>) -> Node {
         Mode::Toolbar | Mode::More => {
             let mut items = Vec::new();
             if pane == Pane::Timeline {
-                let open = cx.on(move |chat, cx| chat.open_thread(seq, cx));
+                let open = cx.listener(move |chat, _event: &(), _window, cx| {
+                    cx.notify();
+                    chat.open_thread(seq, cx)
+                });
                 items.push(item(
                     format!("{prefix}reply"),
                     "↩",
@@ -87,18 +90,30 @@ fn message_menu(chat: &Chat, menu: &Menu, cx: &mut Cx<Chat>) -> Node {
             }
             let link = chat.message_link(seq);
             let copy = (!link.is_empty()).then(|| {
-                cx.on(move |chat, cx| {
+                cx.listener(move |chat, _event: &(), _window, cx| {
+                    cx.notify();
                     chat.close_menu();
                     chat.copy_text(link.clone(), "Message link copied", cx);
                 })
             });
             let react = writable.then(|| {
-                cx.on(move |chat, cx| chat.open_menu(pane, seq, rev, Mode::Reactions, cx))
+                cx.listener(move |chat, _event: &(), window, cx| {
+                    cx.notify();
+                    chat.open_menu(pane, seq, rev, Mode::Reactions, window, cx)
+                })
             });
-            let edit = writable
-                .then(|| cx.on(move |chat, cx| chat.open_menu(pane, seq, rev, Mode::Editing, cx)));
-            let delete = writable
-                .then(|| cx.on(move |chat, cx| chat.open_menu(pane, seq, rev, Mode::Delete, cx)));
+            let edit = writable.then(|| {
+                cx.listener(move |chat, _event: &(), window, cx| {
+                    cx.notify();
+                    chat.open_menu(pane, seq, rev, Mode::Editing, window, cx)
+                })
+            });
+            let delete = writable.then(|| {
+                cx.listener(move |chat, _event: &(), window, cx| {
+                    cx.notify();
+                    chat.open_menu(pane, seq, rev, Mode::Delete, window, cx)
+                })
+            });
             items.extend([
                 item(format!("{prefix}add-reaction"), "😀", "Add reaction", react),
                 item(format!("{prefix}copy-link"), "🔗", "Copy link", copy),
@@ -114,8 +129,12 @@ fn message_menu(chat: &Chat, menu: &Menu, cx: &mut Cx<Chat>) -> Node {
             let cells = reaction_palette()
                 .into_iter()
                 .map(|emoji| {
-                    let press = writable
-                        .then(|| cx.on(move |chat, cx| chat.react(seq, emoji.into(), true, cx)));
+                    let press = writable.then(|| {
+                        cx.listener(move |chat, _event: &(), _window, cx| {
+                            cx.notify();
+                            chat.react(seq, emoji.into(), true, cx)
+                        })
+                    });
                     cell(format!("{prefix}reaction/{emoji}"), emoji, press)
                 })
                 .collect();
@@ -149,7 +168,10 @@ fn message_menu(chat: &Chat, menu: &Menu, cx: &mut Cx<Chat>) -> Node {
                 !chat.session.busy,
                 cx,
             ));
-            let close = cx.on(|chat, _| chat.close_menu());
+            let close = cx.listener(|chat, _event: &(), _window, cx| {
+                cx.notify();
+                chat.close_menu()
+            });
             children.push(aligned_x(
                 kit::column(
                     format!("{prefix}close-row"),
@@ -163,8 +185,16 @@ fn message_menu(chat: &Chat, menu: &Menu, cx: &mut Cx<Chat>) -> Node {
             ));
         }
         Mode::Delete => {
-            let close = cx.on(|chat, _| chat.close_menu());
-            let confirm = (!chat.session.busy).then(|| cx.on(|chat, cx| chat.delete_armed(cx)));
+            let close = cx.listener(|chat, _event: &(), _window, cx| {
+                cx.notify();
+                chat.close_menu()
+            });
+            let confirm = (!chat.session.busy).then(|| {
+                cx.listener(|chat, _event: &(), _window, cx| {
+                    cx.notify();
+                    chat.delete_armed(cx)
+                })
+            });
             children.push(kit::strong(
                 format!("{prefix}confirm"),
                 "Delete this message?",

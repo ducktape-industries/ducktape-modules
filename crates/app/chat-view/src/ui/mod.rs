@@ -8,14 +8,15 @@ pub mod message;
 pub mod room;
 pub mod side;
 pub mod sidebar;
+mod timeline;
 
-use ducktape_view_guest::view::Cx;
+use ducktape_view_guest::Context;
 use ducktape_view_guest::wire::{AlignX, AlignY, Node, kit};
 
 use crate::Chat;
 use ducktape_view_guest::wire::kit::*;
 
-pub fn render(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
+pub fn render(chat: &Chat, cx: &mut Context<Chat>) -> Node {
     let screen = if chat.session.connected {
         connected(chat, cx)
     } else {
@@ -27,12 +28,19 @@ pub fn render(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
     };
     // every press reports where it landed before the control under it
     // answers, so a menu opens at the pointer
-    let pressed = cx.on_value(|chat, at: (f32, f32), _| chat.layout.press = at);
+    let pressed = cx.listener(|chat, event: &(f32, f32), _window, cx| {
+        let at = *event;
+        cx.notify();
+        chat.layout.press = at
+    });
     let screen = with_press_at(mouse_area("chat/press-area", screen), pressed);
     let screen = match menu::floating(chat, cx) {
         None => screen,
         Some(menu) => {
-            let dismiss = cx.on(|chat, _| chat.close_menu());
+            let dismiss = cx.listener(|chat, _event: &(), _window, cx| {
+                cx.notify();
+                chat.close_menu()
+            });
             overlay(
                 "chat/menu-overlay",
                 "Message menu",
@@ -49,7 +57,10 @@ pub fn render(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
     let screen = match dialogs::preview(chat, cx) {
         None => screen,
         Some(card) => {
-            let close = cx.on(|chat, _| chat.preview = None);
+            let close = cx.listener(|chat, _event: &(), _window, cx| {
+                cx.notify();
+                chat.preview = None
+            });
             overlay(
                 "chat/preview-overlay",
                 "Attachment preview",
@@ -67,7 +78,12 @@ pub fn render(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
         None => screen,
         Some(card) => {
             let busy = chat.create.as_ref().is_some_and(|c| c.busy);
-            let close = (!busy).then(|| cx.on(|chat, _| chat.create = None));
+            let close = (!busy).then(|| {
+                cx.listener(|chat, _event: &(), _window, cx| {
+                    cx.notify();
+                    chat.create = None
+                })
+            });
             overlay(
                 "chat/create-overlay",
                 "Create channel",
@@ -81,7 +97,9 @@ pub fn render(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
             )
         }
     };
-    let measured = cx.on_value(|chat, size: (f32, f32), _| {
+    let measured = cx.listener(|chat, event: &(f32, f32), _window, cx| {
+        let size = *event;
+        cx.notify();
         chat.layout.viewport = size;
         chat.layout.clamp();
     });
@@ -99,7 +117,7 @@ pub fn render(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
 
 /// Sidebar, room, and one side pane: details in front of a thread when both
 /// are open, so each pane's width is clamped as the only one beside the room.
-fn connected(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
+fn connected(chat: &Chat, cx: &mut Context<Chat>) -> Node {
     let mut panes = vec![
         sidebar::render(chat, cx),
         divider("chat/sidebar-resize", cx, |chat, dx| {
@@ -122,8 +140,10 @@ fn connected(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
     fill(kit::spaced(kit::row("chat/panes", panes), 0.))
 }
 
-fn divider(key: &str, cx: &mut Cx<Chat>, drag: impl Fn(&mut Chat, f32) + 'static) -> Node {
-    let on_drag = cx.on_value(move |chat, (dx, _): (f64, f64), _| {
+fn divider(key: &str, cx: &mut Context<Chat>, drag: impl Fn(&mut Chat, f32) + 'static) -> Node {
+    let on_drag = cx.listener(move |chat, event: &(f64, f64), _window, cx| {
+        let (dx, _) = *event;
+        cx.notify();
         drag(chat, dx as f32);
         chat.layout.clamp();
     });
@@ -133,9 +153,12 @@ fn divider(key: &str, cx: &mut Cx<Chat>, drag: impl Fn(&mut Chat, f32) + 'static
 pub(crate) fn close_glyph(
     key: &str,
     label: &str,
-    cx: &mut Cx<Chat>,
-    run: impl FnMut(&mut Chat, &mut Cx<Chat>) + 'static,
+    cx: &mut Context<Chat>,
+    run: impl Fn(&mut Chat, &mut Context<Chat>) + 'static,
 ) -> Node {
-    let press = cx.on(run);
+    let press = cx.listener(move |chat, _event: &(), _window, cx| {
+        cx.notify();
+        run(chat, cx)
+    });
     glyph(key, "✕", label, Some(press))
 }

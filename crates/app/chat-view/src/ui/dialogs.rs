@@ -1,34 +1,45 @@
 //! What opens over the screen: the channel-creation card and the attachment
 //! preview.
-use ducktape_view_guest::view::{Cx, Loaded};
+use ducktape_view_guest::Context;
+use ducktape_view_guest::view::Loaded;
 use ducktape_view_guest::wire::{Length, Node, SurfaceValue, kit, kit::Tone};
 
 use crate::Chat;
 use ducktape_view_guest::wire::kit::*;
 
-pub fn channel_create(chat: &Chat, cx: &mut Cx<Chat>) -> Option<Node> {
+pub fn channel_create(chat: &Chat, cx: &mut Context<Chat>) -> Option<Node> {
     let create = chat.create.as_ref()?;
     let key = "chat/create";
     let busy = create.busy;
-    let typed = cx.on_value(|chat, text: String, _| {
+    let typed = cx.listener(|chat, event: &String, _window, cx| {
+        let text = event.clone();
+        cx.notify();
         if let Some(c) = &mut chat.create {
             c.name = text;
         }
     });
-    let submit = cx.on(|chat, cx| chat.create_channel(cx));
-    let voice = cx.on(|chat, _| {
+    let submit = cx.listener(|chat, _event: &(), _window, cx| {
+        cx.notify();
+        chat.create_channel(cx)
+    });
+    let voice = cx.listener(|chat, _event: &(), _window, cx| {
+        cx.notify();
         if let Some(c) = &mut chat.create {
             c.voice = !c.voice;
         }
     });
-    let members = cx.on(|chat, _| {
+    let members = cx.listener(|chat, _event: &(), _window, cx| {
+        cx.notify();
         if let Some(c) = &mut chat.create
             && !c.voice
         {
             c.members_only = !c.members_only;
         }
     });
-    let cancel = cx.on(|chat, _| chat.create = None);
+    let cancel = cx.listener(|chat, _event: &(), _window, cx| {
+        cx.notify();
+        chat.create = None
+    });
     let mut children = vec![
         kit::heading(format!("{key}/title"), "Create a channel"),
         text_field(
@@ -90,14 +101,20 @@ pub fn channel_create(chat: &Chat, cx: &mut Cx<Chat>) -> Option<Node> {
 /// The file pressed, shown where the reader is: a picture at the size the
 /// screen allows, a text file's head in a code plate, or the plate that says
 /// there is nothing to show.
-pub fn preview(chat: &Chat, cx: &mut Cx<Chat>) -> Option<Node> {
+pub fn preview(chat: &Chat, cx: &mut Context<Chat>) -> Option<Node> {
     let preview = chat.preview.as_ref()?;
     let key = "chat/preview";
     let link = preview.link.clone();
     let path = crate::files::attachment_file_path(&link);
     let name = path.rsplit('/').next().unwrap_or_default().to_owned();
-    let open = cx.on(move |chat, _| chat.open_link(link.clone()));
-    let close = cx.on(|chat, _| chat.preview = None);
+    let open = cx.listener(move |chat, _event: &(), _window, cx| {
+        cx.notify();
+        chat.open_link(link.clone(), cx)
+    });
+    let close = cx.listener(|chat, _event: &(), _window, cx| {
+        cx.notify();
+        chat.preview = None
+    });
     let header = kit::spaced(
         kit::centered_row(
             format!("{key}/header"),
@@ -116,7 +133,7 @@ pub fn preview(chat: &Chat, cx: &mut Cx<Chat>) -> Option<Node> {
     ))
 }
 
-fn preview_body(chat: &Chat, key: &str, path: &str, cx: &mut Cx<Chat>) -> Node {
+fn preview_body(chat: &Chat, key: &str, path: &str, cx: &mut Context<Chat>) -> Node {
     let preview = chat.preview.as_ref().expect("a preview");
     let screen = chat.layout.viewport;
     if let Some(&(w, h)) = chat.pictures.get(&preview.link)
@@ -166,9 +183,11 @@ fn preview_body(chat: &Chat, key: &str, path: &str, cx: &mut Cx<Chat>) -> Node {
     // binary-or-text is the wire's call; markdown-vs-code is the path's
     let dark = chat.session.dark;
     let document = if crate::files::markdown_path(path) {
-        let on_link = cx.on_value(|chat, value: SurfaceValue, _| {
+        let on_link = cx.listener(|chat, event: &SurfaceValue, _window, cx| {
+            let value = event.clone();
+            cx.notify();
             if let SurfaceValue::Str(link) = value {
-                chat.open_link(link);
+                chat.open_link(link, cx);
             }
         });
         Node::Surface {

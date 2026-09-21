@@ -1,13 +1,15 @@
 //! The room pane: its header, the search results or the message stream
 //! (intro, older pages, unread marker, floating actions, copy range, jump to
 //! latest, the edit under it), and the composer or the reason there is none.
-use ducktape_view_guest::view::{Cx, Loaded};
-use ducktape_view_guest::wire::{self, AlignX, AlignY, Length, Node, kit, kit::Tone};
+use ducktape_view_guest::Context;
+use ducktape_view_guest::view::Loaded;
+use ducktape_view_guest::wire::{self, Length, Node, kit, kit::Tone};
 
-use super::message::{self, Plate};
-use crate::client::ChatMessage;
+use super::message;
+pub use super::timeline::list;
+use super::timeline::stream;
+use crate::Chat;
 use crate::composer::Target;
-use crate::{Chat, Mode, Pane};
 use ducktape_view_guest::wire::kit::*;
 
 /// The room around a composer: the timeline's 16px sides, and air under it.
@@ -18,7 +20,7 @@ const COMPOSER_MARGIN: wire::Edges = wire::Edges {
     left: 16.,
 };
 
-pub fn render(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
+pub fn render(chat: &Chat, cx: &mut Context<Chat>) -> Node {
     let key = "chat/room";
     let Some(room) = &chat.room else {
         return no_room(chat, key, cx);
@@ -72,7 +74,10 @@ pub fn render(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
         kit::spacing::SM as f32,
     ))];
     header.extend(info.map(|info| huddle(chat, key, info, cx)));
-    let details = cx.on(|chat, _| chat.toggle_details());
+    let details = cx.listener(|chat, _event: &(), _window, cx| {
+        cx.notify();
+        chat.toggle_details()
+    });
     header.push(glyph(
         format!("{key}/details"),
         "Details",
@@ -84,7 +89,10 @@ pub fn render(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
         kit::divider(format!("{key}/header-rule")),
     ];
     if !chat.notice.is_empty() {
-        let dismiss = cx.on(|chat, _| chat.notice.clear());
+        let dismiss = cx.listener(|chat, _event: &(), _window, cx| {
+            cx.notify();
+            chat.notice.clear()
+        });
         children.push(padded_all(
             kit::notice(
                 format!("{key}/error"),
@@ -145,7 +153,7 @@ pub fn render(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
 }
 
 /// The pane with no room open: nothing here pretends to be one.
-fn no_room(chat: &Chat, key: &str, cx: &mut Cx<Chat>) -> Node {
+fn no_room(chat: &Chat, key: &str, cx: &mut Context<Chat>) -> Node {
     let key = format!("{key}/no-room");
     let plate = match &chat.channels {
         Loaded::Idle | Loaded::Loading(_) => kit::empty_state(
@@ -162,7 +170,10 @@ fn no_room(chat: &Chat, key: &str, cx: &mut Cx<Chat>) -> Node {
             "Pick a room from the list to read it.",
         ),
         Loaded::Ready(_) => {
-            let open = cx.on(|chat, _| chat.create = Some(crate::ChannelCreate::default()));
+            let open = cx.listener(|chat, _event: &(), _window, cx| {
+                cx.notify();
+                chat.create = Some(crate::ChannelCreate::default())
+            });
             kit::empty_state_action(
                 &key,
                 "No channels yet",
@@ -180,7 +191,7 @@ fn no_room(chat: &Chat, key: &str, cx: &mut Cx<Chat>) -> Node {
 
 /// The header speaks for THIS room's huddle: seated elsewhere, the room on
 /// screen still offers its own to join.
-fn huddle(chat: &Chat, key: &str, info: &crate::chat::ChannelInfo, cx: &mut Cx<Chat>) -> Node {
+fn huddle(chat: &Chat, key: &str, info: &crate::chat::ChannelInfo, cx: &mut Context<Chat>) -> Node {
     let key = format!("{key}/huddle");
     let session = &chat.session;
     if session.huddle_joined && session.huddle_channel == info.channel.id {
@@ -193,8 +204,14 @@ fn huddle(chat: &Chat, key: &str, info: &crate::chat::ChannelInfo, cx: &mut Cx<C
         if session.call_muted {
             children.push(kit::badge(format!("{key}/muted"), "Muted", Tone::Neutral));
         }
-        let show = cx.on(|_, cx| cx.notify::<crate::api::ShowHuddle>(()));
-        let leave = cx.on(|_, cx| cx.notify::<crate::api::LeaveHuddle>(()));
+        let show = cx.listener(|_, _event: &(), _window, cx| {
+            cx.notify();
+            cx.host().notify::<crate::api::ShowHuddle>(())
+        });
+        let leave = cx.listener(|_, _event: &(), _window, cx| {
+            cx.notify();
+            cx.host().notify::<crate::api::LeaveHuddle>(())
+        });
         children.push(with_label(
             subtle(format!("{key}/show"), "Show", Some(show)),
             "Show call",
@@ -211,9 +228,16 @@ fn huddle(chat: &Chat, key: &str, info: &crate::chat::ChannelInfo, cx: &mut Cx<C
     let allowed = session.holds_account() && !info.channel.archived;
     let join = if info.channel.voice {
         let id = info.channel.id.clone();
-        cx.on(move |_, cx| cx.notify::<crate::api::JoinVoice>(serde_json::json!({"id": id})))
+        cx.listener(move |_, _event: &(), _window, cx| {
+            cx.notify();
+            cx.host()
+                .notify::<crate::api::JoinVoice>(serde_json::json!({"id": id}))
+        })
     } else {
-        cx.on(|_, cx| cx.notify::<crate::api::JoinHuddle>(()))
+        cx.listener(|_, _event: &(), _window, cx| {
+            cx.notify();
+            cx.host().notify::<crate::api::JoinHuddle>(())
+        })
     };
     let label = if info.channel.huddle.is_empty() {
         "Call"
@@ -227,7 +251,7 @@ fn huddle(chat: &Chat, key: &str, info: &crate::chat::ChannelInfo, cx: &mut Cx<C
     )
 }
 
-fn search_results(chat: &Chat, key: &str, cx: &mut Cx<Chat>) -> Node {
+fn search_results(chat: &Chat, key: &str, cx: &mut Context<Chat>) -> Node {
     let key = format!("{key}/search-results");
     let children = match &chat.search.hits {
         Loaded::Idle | Loaded::Loading(_) => vec![loading(format!("{key}/loading"))],
@@ -281,7 +305,10 @@ fn search_results(chat: &Chat, key: &str, cx: &mut Cx<Chat>) -> Node {
                     hit.text.clone()
                 };
                 let (channel, seq) = (hit.channel_id.clone(), hit.seq);
-                let open = cx.on(move |chat, cx| chat.open_hit(channel.clone(), seq, cx));
+                let open = cx.listener(move |chat, _event: &(), window, cx| {
+                    cx.notify();
+                    chat.open_hit(channel.clone(), seq, window, cx)
+                });
                 let content = kit::spaced(
                     kit::column(
                         format!("{hit_key}/content"),
@@ -321,8 +348,12 @@ fn search_results(chat: &Chat, key: &str, cx: &mut Cx<Chat>) -> Node {
                 rows.push(button);
             }
             if hits.has_more {
-                let more =
-                    (!chat.search.more_loading).then(|| cx.on(|chat, cx| chat.search_more(cx)));
+                let more = (!chat.search.more_loading).then(|| {
+                    cx.listener(|chat, _event: &(), _window, cx| {
+                        cx.notify();
+                        chat.search_more(cx)
+                    })
+                });
                 let label = if chat.search.more_loading {
                     "Loading more results…"
                 } else {
@@ -349,348 +380,21 @@ pub fn loading(key: String) -> Node {
     kit::empty_state(key, "Loading messages…", "The newest arrive first.")
 }
 
-/// The room's beginning: its name as a title and what this place is.
-fn intro(key: &str, name: &str, dm: Option<&str>) -> Node {
-    let (title, detail) = match dm {
-        Some(peer) => (
-            peer.to_owned(),
-            format!("This is the very beginning of your conversation with {peer}."),
-        ),
-        None => (
-            format!("#{name}"),
-            format!(
-                "This is the very beginning of #{name}. Say hello, or pin what the room is for."
-            ),
-        ),
-    };
-    kit::padded(
-        kit::spaced(
-            kit::column(
-                key,
-                [
-                    kit::title(format!("{key}/name"), title),
-                    kit::wrapping(kit::secondary(format!("{key}/detail"), detail)),
-                    kit::gap(kit::spacing::XXS as f32),
-                    kit::divider(format!("{key}/rule")),
-                ],
-            ),
-            kit::spacing::XS as f32,
-        ),
-        wire::Edges {
-            top: kit::spacing::XL as f32,
-            right: 16.,
-            bottom: kit::spacing::SM as f32,
-            left: 16.,
-        },
-    )
-}
-
-/// The stream and what stands around it.
-fn stream(chat: &Chat, key: &str, name: &str, dm: Option<&str>, cx: &mut Cx<Chat>) -> Vec<Node> {
-    let room = chat.room.as_ref().expect("a room");
-    let messages = chat.messages(Pane::Timeline);
-    let mut children = Vec::new();
-    match &room.messages {
-        Loaded::Loading(_) if messages.is_empty() => {
-            children.push(loading(format!("{key}/loading")))
-        }
-        Loaded::Failed(refusal) => children.push(padded_all(
-            kit::notice(
-                format!("{key}/failed"),
-                kit::wrapping(kit::text(
-                    format!("{key}/failed/text"),
-                    refusal.sentence.clone(),
-                )),
-                Tone::Danger,
-            ),
-            kit::spacing::LG as f32,
-        )),
-        Loaded::Ready(_) if messages.is_empty() => {
-            // an empty room opens on its beginning, down by the composer
-            children.push(kit::space(None, Some(Length::Fill)));
-            children.push(intro(&format!("{key}/empty"), name, dm));
-            return children;
-        }
-        _ => {}
-    }
-    if room.has_older && !room.landed {
-        let older = (!room.older_loading && !chat.session.busy)
-            .then(|| cx.on(|chat, cx| chat.load_older(cx)));
-        let label = if room.older_loading {
-            "Loading older messages…"
-        } else {
-            "Load older messages"
-        };
-        children.push(padded_all(
-            aligned_x(
-                kit::column(
-                    format!("{key}/older-row"),
-                    [subtle(format!("{key}/older"), label, older)],
-                ),
-                AlignX::Center,
-            ),
-            kit::spacing::SM as f32,
-        ));
-    }
-    if !messages.is_empty() {
-        let whole_history = !room.has_older && !room.landed;
-        let lead = whole_history.then(|| intro(&format!("{key}/intro"), name, dm));
-        children.push(list(
-            chat,
-            super::super::room::STREAM_KEY,
-            &messages,
-            Pane::Timeline,
-            lead,
-            cx,
-        ));
-    }
-    if chat.copy.is_some_and(|c| c.pane == Pane::Timeline) {
-        children.push(selection_bar(chat, key, cx));
-    }
-    let behind_head = room.landed && !room.reaches_head;
-    if !messages.is_empty() && (behind_head || !room.at_tail || room.landed) {
-        let id = room.id.clone();
-        let latest = cx.on(move |chat, cx| chat.open(id.clone(), cx));
-        children.push(padded_xy(
-            aligned_x(
-                kit::column(
-                    format!("{key}/latest-row"),
-                    [action(
-                        format!("{key}/latest"),
-                        "Jump to latest",
-                        Some(latest),
-                    )],
-                ),
-                AlignX::Center,
-            ),
-            16.,
-            kit::spacing::XXS as f32,
-        ));
-    }
-    children.extend(super::menu::editing(chat, Pane::Timeline, cx));
-    children
-}
-
-/// The keyed, virtual list of one pane's messages: each row a card under a
-/// hover bar of actions, a right press opening the same menu.
-pub fn list(
-    chat: &Chat,
-    key: &str,
-    messages: &[ChatMessage],
-    pane: Pane,
-    lead: Option<Node>,
-    cx: &mut Cx<Chat>,
-) -> Node {
-    let thread = pane == Pane::Thread;
-    let mut keys = Vec::new();
-    let mut rows = Vec::new();
-    let boundary = chat.reads.boundary;
-    let unread_marker = (!thread && boundary > 0)
-        .then(|| {
-            messages
-                .iter()
-                .find(|m| !m.pending && m.seq > boundary)
-                .map(|m| m.seq)
-        })
-        .flatten();
-    let writable = chat.may_write();
-    for (index, message) in messages.iter().enumerate() {
-        let scope = format!("{key}/message/{}", message.id);
-        let ranged = chat.copy.is_some_and(|c| c.holds(pane, message.seq));
-        let chosen = chat
-            .menu
-            .as_ref()
-            .is_some_and(|m| m.pane == pane && m.seq == message.seq && message.seq > 0);
-        let plate = match (message.deleted, chosen, ranged) {
-            (true, _, _) | (false, false, false) => Plate::Plain,
-            (false, true, _) => Plate::Selected,
-            (false, false, true) => Plate::Ranged,
-        };
-        let mut children = Vec::new();
-        if unread_marker == Some(message.seq) {
-            children.push(unread_marker_node(format!("{scope}/unread")));
-        }
-        let card = message::card(chat, message, pane, plate, cx);
-        if !message.pending && !message.deleted {
-            let (seq, rev) = (message.seq, message.rev);
-            let mut controls = Vec::new();
-            if !thread && message.reply_count == 0 {
-                let open = cx.on(move |chat, cx| chat.open_thread(seq, cx));
-                controls.push(glyph(
-                    format!("{scope}/thread"),
-                    "💬",
-                    "Open thread",
-                    Some(open),
-                ));
-            }
-            let thumbs =
-                writable.then(|| cx.on(move |chat, cx| chat.react(seq, "👍".into(), true, cx)));
-            controls.push(glyph(
-                format!("{scope}/thumbs-up"),
-                "👍",
-                "React with 👍",
-                thumbs,
-            ));
-            let react = writable.then(|| {
-                cx.on(move |chat, cx| chat.open_menu(pane, seq, rev, Mode::Reactions, cx))
-            });
-            controls.push(glyph(
-                format!("{scope}/react"),
-                "😀",
-                "Manage reactions",
-                react,
-            ));
-            let more = cx.on(move |chat, cx| chat.open_menu(pane, seq, rev, Mode::More, cx));
-            controls.push(glyph(
-                format!("{scope}/more"),
-                "⋯",
-                "More message actions",
-                Some(more),
-            ));
-            let mut wash = kit::palette().surface_raised;
-            wash[3] = 0.6;
-            let hover = Node::Hover {
-                key: format!("{scope}/hover"),
-                width: Some(Length::Fill),
-                height: None,
-                padding: None,
-                background: None,
-                border: None,
-                tint: (!chosen).then_some(wire::Rgba(wash)),
-                radius: 0.,
-                open: chosen,
-                children: vec![card, floating_actions(format!("{scope}/actions"), controls)],
-            };
-            children.push(hover);
-            let content = kit::spaced(kit::column(format!("{scope}/content"), children), 0.);
-            rows.push(with_right_press(mouse_area(scope, content), more));
-        } else {
-            children.push(card);
-            rows.push(kit::spaced(kit::column(scope, children), 0.));
-        }
-        let list_key = if message.pending {
-            -(index as i64) - 1
-        } else {
-            message.seq as i64
-        };
-        keys.push(wire::ListKey::from(list_key));
-    }
-    let list = Node::KeyedColumn {
-        key: format!("{key}/rows"),
-        keys: Some(keys),
-        children: rows,
-        background: None,
-        border: None,
-        spacing: None,
-        padding: Some(wire::Edges {
-            top: kit::spacing::SM as f32,
-            right: 0.,
-            bottom: kit::spacing::SM as f32,
-            left: 0.,
-        }),
-        width: Some(Length::Fill),
-        height: None,
-        max_width: None,
-        align: None,
-        virtual_row: Some(44.),
-    };
-    let content = match lead {
-        Some(intro) => kit::spaced(kit::column(format!("{key}/lead"), [intro, list]), 0.),
-        None => list,
-    };
-    let mut scroll = kit::scroll(key, content);
-    if let Node::Scroll {
-        virtual_rows,
-        anchor_y,
-        on_scroll,
-        ..
-    } = &mut scroll
-    {
-        *virtual_rows = true;
-        // a room grows upward from its composer; a thread reads down
-        *anchor_y = if thread {
-            wire::ScrollAnchor::Start
-        } else {
-            wire::ScrollAnchor::End
-        };
-        if !thread {
-            *on_scroll = Some(
-                cx.on_value(|chat, (_, _, _, ry): (f32, f32, f32, f32), cx| chat.scrolled(ry, cx)),
-            );
-        }
-    }
-    scroll
-}
-
-/// The bar of quiet actions that floats over a message's top-right.
-fn floating_actions(key: String, controls: Vec<Node>) -> Node {
-    let p = kit::palette();
-    let bar = width(
-        padded_all(
-            bordered(
-                background(
-                    kit::spaced(kit::row(format!("{key}/bar"), controls), 0.),
-                    p.background,
-                ),
-                Some(p.border),
-                Some(1.),
-                kit::radius::CONTROL as f32,
-            ),
-            2.,
-        ),
-        Length::Shrink,
-    );
-    kit::padded(
-        height(
-            aligned_y(
-                aligned_x(kit::container(key, bar), AlignX::Right),
-                AlignY::Top,
-            ),
-            Length::Fill,
-        ),
-        wire::Edges {
-            top: 0.,
-            right: kit::spacing::LG as f32,
-            bottom: 0.,
-            left: 0.,
-        },
-    )
-}
-
-fn unread_marker_node(key: String) -> Node {
-    let p = kit::palette();
-    let mut rule = kit::divider(format!("{key}/rule"));
-    if let Node::Rule { color, .. } = &mut rule {
-        *color = Some(kit::rgba(p.accent));
-    }
-    padded_xy(
-        kit::spaced(
-            kit::centered_row(
-                key.clone(),
-                [
-                    kit::container(format!("{key}/line"), rule),
-                    kit::nowrap(kit::colored(
-                        kit::caption(format!("{key}/label"), "New messages"),
-                        p.accent_foreground,
-                    )),
-                ],
-            ),
-            kit::spacing::SM as f32,
-        ),
-        16.,
-        kit::spacing::XS as f32,
-    )
-}
-
-pub fn selection_bar(chat: &Chat, key: &str, cx: &mut Cx<Chat>) -> Node {
+pub fn selection_bar(chat: &Chat, key: &str, cx: &mut Context<Chat>) -> Node {
     let key = format!("{key}/copy-range");
     let count = chat.copy_count();
     let label = match count {
         1 => "1 message selected".to_owned(),
         n => format!("{n} messages selected"),
     };
-    let clear = cx.on(|chat, _| chat.copy = None);
-    let copy = cx.on(|chat, cx| chat.copy_range(cx));
+    let clear = cx.listener(|chat, _event: &(), _window, cx| {
+        cx.notify();
+        chat.copy = None
+    });
+    let copy = cx.listener(|chat, _event: &(), _window, cx| {
+        cx.notify();
+        chat.copy_range(cx)
+    });
     padded_xy(
         kit::notice(
             key.clone(),
@@ -710,12 +414,16 @@ pub fn selection_bar(chat: &Chat, key: &str, cx: &mut Cx<Chat>) -> Node {
 }
 
 /// What stands where the composer would: why the reader may not post here.
-fn gate(chat: &Chat, key: &str, refusal: &str, cx: &mut Cx<Chat>) -> Node {
+fn gate(chat: &Chat, key: &str, refusal: &str, cx: &mut Context<Chat>) -> Node {
     let key = format!("{key}/refusal");
     match refusal {
         "channel_archived" => {
-            let reopen =
-                (!chat.session.busy).then(|| cx.on(|chat, cx| chat.set_archived(false, cx)));
+            let reopen = (!chat.session.busy).then(|| {
+                cx.listener(|chat, _event: &(), _window, cx| {
+                    cx.notify();
+                    chat.set_archived(false, cx)
+                })
+            });
             kit::notice(
                 key.clone(),
                 kit::spaced(
@@ -763,7 +471,7 @@ pub fn composer(
     target: Target,
     hint: &str,
     editable: bool,
-    cx: &mut Cx<Chat>,
+    cx: &mut Context<Chat>,
 ) -> Node {
     let key = crate::draft_key(&target);
     let choices = chat.mention_choices();
@@ -777,6 +485,6 @@ pub fn composer(
         crate::ATTACHMENTS,
         &choices,
         cx,
-        move |chat, event, cx| chat.composer(target.clone(), event, cx),
+        move |chat, event, window, cx| chat.composer(target.clone(), event, window, cx),
     )
 }
