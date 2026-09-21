@@ -1,114 +1,53 @@
 # ducktape-sdk — the contract line of the ducktape platform.
 #
-# What lives here: the module contract (`sdk`), the wasm authoring surface
-# (`crates/module-sdk`: the `ducktape:module` WIT world, the bindings/adapter a
-# guest compiles against, and the wasm32 patch crates in `stubs/`), the
-# dev-only test doubles (`sdk-testkit`), every module's `-wire` crate (the
-# types-only payload/query/reply shapes plus their codecs), and the leaf
-# libraries those surfaces are made of.
+# What lives here: the program contract (`abi`, the borsh bytes ABI a wasm
+# program and the host share; `guest`, what a program compiles against), the
+# view contract (`view-wire`, `view-guest`, `design`), and the leaf libraries
+# those surfaces are made of.
 #
 # This workspace depends on NO other ducktape repository. Everything else in
 # the platform depends on it.
 #
-# A MODULE IS ITS OWN API: `identity = { workspace = true }` links the module
-# crate, whose root is its types and codecs plus a `client` of typed functions
-# over `Ctx`; the module logic rides features (`guest`). The kernel, a daemon,
-# a service, a view and a sibling module all link the same crate. (identity and
-# attribution are on this shape; the other system modules still ship `wire`.)
+# The module logic that runs on the abi lives in ducktape-modules; the host
+# that runs it (runtime, state, blobs, host, node, consensus, statesync, the
+# daemon and the CLI) lives in ducktape.
 
 [workspace]
 resolver = "2"
 members = [
-    # kernel — the module contract and the pieces that run one
-    "crates/kernel/sdk",
-    "crates/kernel/sdk-testkit",
+    # kernel — the program contract
+    "crates/kernel/abi",
+    "crates/kernel/guest",
     "crates/kernel/refusal-class",
     "crates/kernel/keyscheme",
-    "crates/kernel/blobstore",
-    "crates/kernel/index-guest",
-    "crates/kernel/module-artifact",
-    "crates/kernel/node-work",
-    "crates/kernel/wasm-host",
 
-    # cross-plane leaf libraries the wire surfaces are made of
+    # cross-plane leaf libraries the surfaces are made of
     "crates/design",
     "crates/duck-address",
     "crates/duckdns",
     "crates/duckfs/core",
-    "crates/duckfs/disk",
     "crates/git-primitives",
     "crates/run-envelope",
     "crates/view-wire",
     "crates/view-guest",
-
-    # the guest componentizer
-    "bin/guest-builder",
-
-    # Independent system guest implementations. Legacy workspace aliases below
-    # still name wire crates; they do not link sibling implementations.
-    "crates/modules/system/acl",
-    "crates/modules/system/attribution",
-    "crates/modules/system/capability",
-    "crates/modules/system/dispatch",
-    "crates/modules/system/gateway",
-    "crates/modules/system/governance",
-    "crates/modules/system/identity",
-    "crates/modules/system/kv",
-    "crates/modules/system/modules",
-    "crates/modules/system/saga",
-    "crates/modules/system/valset",
-
-    # system modules — wire surfaces
-    "crates/modules/system/acl/wire",
-    "crates/modules/system/capability/wire",
-    "crates/modules/system/dispatch/wire",
-    "crates/modules/system/gateway/wire",
-    "crates/modules/system/governance/wire",
-    "crates/modules/system/kv/wire",
-    "crates/modules/system/modules/wire",
-    "crates/modules/system/saga/wire",
-    "crates/modules/system/valset/wire",
-
-    # app modules — wire surfaces only
-]
-# each of these is a standalone workspace with its own Cargo.lock: they compile
-# for wasm32-unknown-unknown only, inside the shell workspace guest-builder
-# synthesizes. Membership here would poison native feature unification.
-exclude = [
-    "crates/module-sdk",
-    "crates/guests",
-    "crates/kernel/index-guest/testmap",
 ]
 
 [workspace.package]
 edition = "2024"
 version = "0.1.0"
 
-# The repository guest-builder reaches this workspace's crates through when it
-# builds a guest out of it (`crates/kernel/index-guest/testmap`, the reference
-# index mapper). Every platform workspace — this one, ducktape, ducktape-modules
-# — names itself here: the URL is hashed into every guest symbol, so it is
-# written in the tree it names rather than read off whatever a checkout calls
-# its remote. See bin/guest-builder/src/main.rs.
-[workspace.metadata.guest-builder]
-platform = "https://github.com/ducktape-industries/ducktape-sdk"
-
 [workspace.dependencies]
 # ---- external
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# borsh — the deterministic store-record and op-row codec (one byte layout, no
+# borsh — the one codec the program abi is written in (one byte layout, no
 # map ordering games).
 borsh = { version = "1", default-features = false, features = ["derive", "std"] }
 sha2 = "0.10"
 # keccak-256 for the EIP-191 personal-message digest.
 sha3 = "0.10"
 base64 = "0.22"
-async-trait = "0.1"
 futures = "0.3"
-tokio = { version = "1", features = ["rt", "macros", "sync", "time"] }
-# the logging facade.
-tracing = "0.1"
 # duckfs path normalization: NFC so visually-identical names collide instead
 # of coexisting (a consensus-determinism requirement, not cosmetics).
 unicode-normalization = "0.1"
@@ -130,99 +69,30 @@ k256 = { version = "0.13", features = ["ecdsa"] }
 # signs the SSHSIG blob directly, never commonware's namespaced preimage.
 ed25519-dalek = "2"
 
-# wasmtime — the frozen-substrate wasm runtime that executes hot-swappable
-# modules inside the host. pinned EXACTLY: the runtime IS the module execution
-# semantics, so it is consensus-affecting and every validator must run the
-# identical build.
-wasmtime = "=46.0.3"
-# wit-bindgen — the guest-side binding generator. Only ever compiled inside
-# guest-builder's synthesized wasm32 workspace.
-wit-bindgen = "0.57"
-
-# fluent-guest — fluent31's wasm32 guest SDK. NEVER a host-side dependency:
-# only the index-guest crate's `guest` feature pulls it, and only
-# guest-builder's synthesized wasm32 shells ever enable that feature. It is
-# compiled INTO every committed index guest, so moving this rev moves their
-# bytes.
-fluent-guest = { git = "https://github.com/ducktape-industries/fluent31", rev = "76ba1867bc0ba9c09bb8387149c07844f1d2395c", default-features = false }
-
 # ---- internal: kernel
-sdk = { path = "crates/kernel/sdk" }
-# the refusal classes as bare `&str` constants, zero-dep: sdk re-exports them
-# as `sdk::refusal::*`; boards-wire and duck-address, which must not link sdk,
-# name them here.
+abi = { path = "crates/kernel/abi" }
+guest = { path = "crates/kernel/guest" }
+# the refusal classes as bare `&str` constants, zero-dep.
 refusal-class = { path = "crates/kernel/refusal-class" }
-# dev-only shared test doubles for the sdk boundary traits (TestCtx + in-memory
-# MerkleStore). MAY ONLY appear in `[dev-dependencies]` of consumers — the
-# Module Rule (modules link only sdk + wire surfaces) is untouched.
-sdk-testkit = { path = "crates/kernel/sdk-testkit" }
 keyscheme = { path = "crates/kernel/keyscheme" }
-blobstore = { path = "crates/kernel/blobstore" }
-# keyed with the underscore ON PURPOSE: module crates declare a feature named
-# `index-guest` (the guest-builder --index contract), and cargo refuses a
-# feature sharing its name with a non-optional dependency key.
-index_guest = { path = "crates/kernel/index-guest", package = "index-guest" }
-module-artifact = { path = "crates/kernel/module-artifact" }
-node-work = { path = "crates/kernel/node-work" }
-wasm-host = { path = "crates/kernel/wasm-host" }
-# the module SDK a guest port compiles against. wasm-only: every module's
-# `guest` feature turns it on, and only guest-builder's shell workspace does.
-ducktape-module-sdk = { path = "crates/module-sdk" }
 
 # ---- internal: cross-plane leaf libraries
 design = { path = "crates/design" }
 # the `duck://` address grammar: one parser for `duck://<chain>/<module>/…`,
-# shared by core's git helper and CLI, the app, and the module wire surfaces
-# that own a tail (forge, pages, chat, files, runs). No sdk on purpose: its one
-# dep is the zero-dep `refusal-class`.
+# shared by the node, the app and every module that owns a tail. Its one dep
+# is the zero-dep `refusal-class`.
 duck-address = { path = "crates/duck-address" }
-# the `.duck` naming library the `gateway` module embeds.
+# the `.duck` naming library.
 duckdns = { path = "crates/duckdns" }
 duckfs-core = { path = "crates/duckfs/core" }
-duckfs-disk = { path = "crates/duckfs/disk" }
-# the plain git read types `wasm_host::OdbBacking` speaks and `forge`'s read
-# policy names — a zero-dep leaf on purpose, so naming it drags in nothing.
+# the plain git read types a forge speaks — a zero-dep leaf on purpose.
 git-primitives = { path = "crates/git-primitives" }
 # the run envelope's magic + headless composer.
 run-envelope = { path = "crates/run-envelope" }
 # the host<->wasm-view wire. `manifest` is host-only (it pulls wasmparser to
 # read a built component's custom section); the guests take it bare.
 view-wire = { path = "crates/view-wire" }
-# the runtime a view is written against (`App`, `Driver`, `export_app!`, the
-# host protocol). Views link it under the name `ducktape-view-guest`; the alias
-# keeps their call sites unchanged. Not a module crate: it pins wit-bindgen
-# 0.61 on its own, apart from the module adapter's 0.57.
 view-guest = { path = "crates/view-guest" }
-ducktape-view-guest = { package = "view-guest", path = "crates/view-guest" }
-
-# ---- internal: module wire surfaces
-acl = { package = "acl-wire", path = "crates/modules/system/acl/wire" }
-acl-wire = { path = "crates/modules/system/acl/wire" }
-attribution = { path = "crates/modules/system/attribution" }
-capability = { package = "capability-wire", path = "crates/modules/system/capability/wire" }
-capability-wire = { path = "crates/modules/system/capability/wire" }
-dispatch = { package = "dispatch-wire", path = "crates/modules/system/dispatch/wire" }
-dispatch-wire = { path = "crates/modules/system/dispatch/wire" }
-gateway = { package = "gateway-wire", path = "crates/modules/system/gateway/wire" }
-gateway-wire = { path = "crates/modules/system/gateway/wire" }
-governance = { package = "governance-wire", path = "crates/modules/system/governance/wire" }
-governance-wire = { path = "crates/modules/system/governance/wire" }
-identity = { path = "crates/modules/system/identity" }
-kv = { package = "kv-wire", path = "crates/modules/system/kv/wire" }
-kv-wire = { path = "crates/modules/system/kv/wire" }
-modules = { package = "modules-wire", path = "crates/modules/system/modules/wire" }
-modules-wire = { path = "crates/modules/system/modules/wire" }
-saga = { package = "saga-wire", path = "crates/modules/system/saga/wire" }
-saga-wire = { path = "crates/modules/system/saga/wire" }
-valset = { package = "valset-wire", path = "crates/modules/system/valset/wire" }
-valset-wire = { path = "crates/modules/system/valset/wire" }
-
-
-# dev/test builds compile wasm guests through cranelift. unoptimized cranelift
-# is 10-30x slower, so the code generator itself is always built optimized.
-# build-time only; artifacts and semantics unchanged.
-[profile.dev.build-override]
-opt-level = 2
 
 [profile.dev.package.design]
 opt-level = 2
