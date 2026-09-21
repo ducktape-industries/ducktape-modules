@@ -10,6 +10,7 @@ fn founding_seats_the_validators_and_every_program_answers() {
             module_registry::PROGRAM,
             valset::PROGRAM,
             identity::PROGRAM,
+            admission::PROGRAM,
             AUTHORITY,
         ] {
             assert!(programs.contains_key(program), "{program} is not rostered");

@@ -21,6 +21,7 @@ store = { workspace = true }
 
 # The founding suite (`tests/system.rs`) drives the built boot set on the host.
 [dev-dependencies]
+admission = { workspace = true }
 identity = { workspace = true }
 valset = { workspace = true }
 commonware-cryptography = { workspace = true }

@@ -108,7 +108,19 @@ struct Net {
 }
 
 impl Net {
+    /// The boot set with the real admission program.
     async fn found(context: Ctx, dir: &std::path::Path) -> Net {
+        let admission = founding(admission::PROGRAM, &program("admission"));
+        Net::found_with(context, dir, admission).await
+    }
+
+    /// The boot set with a puppet at admission's seat: tests that drive
+    /// `valset::Op` directly speak as it.
+    async fn found_with_puppet_admission(context: Ctx, dir: &std::path::Path) -> Net {
+        Net::found_with(context, dir, probe(admission::PROGRAM)).await
+    }
+
+    async fn found_with(context: Ctx, dir: &std::path::Path, admission: Founding) -> Net {
         let genesis = Genesis {
             network: NETWORK.to_vec(),
             module_registry: program("module_registry"),
@@ -116,6 +128,7 @@ impl Net {
             validators: vec![member(1), member(2)],
             programs: vec![
                 founding(identity::PROGRAM, &program("identity")),
+                admission,
                 probe(AUTHORITY),
                 probe("probe"),
             ],
@@ -232,6 +245,10 @@ impl Net {
 
     async fn as_authority<T: BorshSerialize>(&mut self, target: &str, op: &T) -> Receipt {
         self.sent_by(AUTHORITY, target, op).await
+    }
+    /// A valset write as the puppet admission (`found_with_puppet_admission`).
+    async fn as_admission(&mut self, op: &valset::Op) -> Receipt {
+        self.sent_by(admission::PROGRAM, valset::PROGRAM, op).await
     }
 
     /// A query the program refuses.

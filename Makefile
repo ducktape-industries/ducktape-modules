@@ -17,7 +17,7 @@ DUCKTAPE ?= ../core
 # One cargo invocation per program: forge links chat and identity links
 # module-registry, and `-p a -p b --features program` in one call would unify
 # `program` into the other's link (two `alloc`/`call`).
-PROGRAMS := module-registry valset identity chat forge
+PROGRAMS := module-registry valset identity admission chat forge
 
 # Views are wasm32 cdylibs. Chat and Forge ride their own programs;
 # Settings rides the registry.
@@ -35,7 +35,7 @@ view_limit = $(or $(LIMIT_$1),1200000)
 # read their contracts: module-registry's signing deps are dev-only, and `-e
 # normal` below is what says so. Every program crate is linked with `program`
 # off, which is what a plain `-p` build below checks.
-VIEW_LINKABLE := ducklink view-wire view-guest design store module-registry valset identity settings-view chat forge
+VIEW_LINKABLE := ducklink view-wire view-guest design store module-registry valset identity admission settings-view chat forge
 VIEW_FORBIDDEN := blst commonware-cryptography wasm-bindgen js-sys web-sys
 
 # Cargo uses this directory for both workspaces.

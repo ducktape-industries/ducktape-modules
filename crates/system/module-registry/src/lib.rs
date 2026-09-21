@@ -17,7 +17,7 @@ mod tests;
 pub use rules::{execute, init, query};
 pub use store::{Page, PageReply};
 
-/// The program whose frames `valset` and this registry accept as governance.
+/// The program whose frames this registry accepts as governance.
 pub const AUTHORITY: &str = "governance";
 
 use abi::ProgramId;
