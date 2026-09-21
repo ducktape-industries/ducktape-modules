@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "module-registry",
     "valset",
+    "admission",
     "identity",
 ]
 
