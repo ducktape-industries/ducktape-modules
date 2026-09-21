@@ -444,11 +444,13 @@ fn chip(key: &str, name: &str, note: &str, tone: kit::Tone, remove: Option<u32>)
 /// 2026-09-16), so a composer that draws nothing is a placeholder and a
 /// row of controls floating loose on the timeline's own background, which
 /// is what this replaced.
+#[allow(clippy::too_many_arguments)]
 pub fn view<V: 'static>(
     draft: &Draft,
     key: &str,
     hint: &str,
     editable: bool,
+    attach: bool,
     choices: &[MentionChoice],
     cx: &mut Cx<V>,
     handle: impl Fn(&mut V, Event<V>, &mut Cx<V>) + 'static,
@@ -608,13 +610,16 @@ pub fn view<V: 'static>(
     // What the draft can carry, then the one action that sends it. Each
     // mark is a sign rather than a word: five words in a row read as a
     // sentence, five signs read as a toolbar.
-    let mut controls = vec![
-        mark(
+    let mut controls = Vec::new();
+    if attach {
+        controls.push(mark(
             format!("{key}/attach"),
             "+",
             "Attach a file",
             press("attach".into()),
-        ),
+        ));
+    }
+    controls.extend([
         mark(format!("{key}/bold"), "B", "Bold", press("bold".into())),
         mark(
             format!("{key}/italic"),
@@ -629,7 +634,7 @@ pub fn view<V: 'static>(
         mark(format!("{key}/code"), "<>", "Code", press("code".into())),
         mark(format!("{key}/quote"), "”", "Quote", press("quote".into())),
         kit::spacer(),
-    ];
+    ]);
     controls.push(kit::button(
         format!("{key}/send"),
         "Send",
@@ -725,6 +730,7 @@ mod tests {
             draft,
             "c",
             "Message #general",
+            true,
             true,
             &[],
             &mut Cx::<()>::default(),

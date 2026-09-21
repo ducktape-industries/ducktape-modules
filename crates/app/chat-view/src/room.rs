@@ -16,7 +16,7 @@ impl Chat {
     pub(crate) fn choose(&mut self, id: String, cx: &mut Cx<Self>) {
         self.create = None;
         self.search_clear();
-        let link = crate::files::channel_link(self.session.chain(), &id, None);
+        let link = crate::files::channel_link(&self.session.chain, &id, None);
         if !link.is_empty() {
             ducktape_view_guest::host::open_link(&link);
         }

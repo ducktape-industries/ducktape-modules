@@ -12,7 +12,6 @@ use ducktape_view_guest::wire::kit::*;
 pub const AVATAR: f32 = 28.;
 pub const RAIL_GAP: f32 = kit::spacing::MD as f32;
 /// Where a message's text starts, from the row's left edge.
-pub const RAIL: f32 = 16. + AVATAR + RAIL_GAP;
 const PILL_HEIGHT: f32 = 24.;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -122,16 +121,6 @@ fn contents(
     ));
     if message.edited {
         children.push(kit::caption(format!("{key}/edited"), "edited"));
-    }
-    if let Some(run) = crate::client::run_of_message(&message.id) {
-        let run = run.to_owned();
-        let open = cx.on(move |chat, _| chat.open_run(&run));
-        children.push(kit::button(
-            format!("{key}/run"),
-            "View run",
-            Some(open),
-            ButtonPreset::Secondary,
-        ));
     }
     let writable = chat.may_write();
     let mut reactions = Vec::new();

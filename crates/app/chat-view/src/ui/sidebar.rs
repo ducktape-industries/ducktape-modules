@@ -5,7 +5,6 @@ use ducktape_view_guest::view::Cx;
 use ducktape_view_guest::wire::{self, Length, Node, kit, kit::Tone};
 
 use crate::chat::ChannelInfo;
-use crate::client::is_dm_channel;
 use crate::{ChannelCreate, Chat};
 use ducktape_view_guest::wire::kit::*;
 
@@ -84,9 +83,9 @@ pub fn render(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
     let mut dms = Vec::new();
     let mut voice = Vec::new();
     for info in channels {
-        if is_dm_channel(&info.channel.id) {
-            if let (Some(mine), Some(names)) = (mine, chat.names.ready())
-                && let Some(peer) = crate::client::dm_peer_of(mine, &info.channel.id, names)
+        if crate::chat::dm_peers(&info.channel.id).is_some() {
+            if let Some(peer) =
+                mine.and_then(|mine| crate::client::dm_peer_of(mine, &info.channel.id))
             {
                 dms.push((info, peer));
             }
@@ -317,13 +316,13 @@ fn dm_button(
         || format!("account {peer}"),
         |n| n.member_label(&format!("acct:{peer}")),
     );
-    let agent = names.is_some_and(|n| n.is_program(peer));
     let unread = chat.unread(info) && !selected;
     let label = if unread {
         kit::strong(format!("{key}/name"), &name)
     } else {
         kit::text(format!("{key}/name"), &name)
     };
+    let agent = names.is_some_and(|n| n.is_program(peer));
     let tone = if agent { Tone::Agent } else { Tone::Neutral };
     let mut children = vec![
         kit::avatar(format!("{key}/avatar"), kit::initials(&name), tone),
@@ -349,7 +348,7 @@ fn dm_button(
 pub fn dm_peer(chat: &Chat) -> Option<(String, bool)> {
     let room = chat.room.as_ref()?;
     let names = chat.names.ready()?;
-    let peer = crate::client::dm_peer_of(chat.my_account()?, &room.id, names)?;
+    let peer = crate::client::dm_peer_of(chat.my_account()?, &room.id)?;
     Some((
         names.member_label(&format!("acct:{peer}")),
         names.is_program(peer),

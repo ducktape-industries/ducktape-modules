@@ -1,9 +1,9 @@
 //! The host capabilities every view speaks the same way: ids, the clock,
 //! the device (files, clipboard, pictures) and the node's raw surfaces.
 //! What a view says to its own host lives beside the view.
+use crate::capability;
 use crate::host::{Refusal, malformed};
 use crate::view::Capability;
-use crate::{capability, json_module};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -93,7 +93,3 @@ pub struct Clipboard {
     #[serde(default)]
     pub files: Vec<SelectedFile>,
 }
-
-json_module!(Identity, "identity");
-json_module!(Files, "files");
-json_module!(Runs, "runs");

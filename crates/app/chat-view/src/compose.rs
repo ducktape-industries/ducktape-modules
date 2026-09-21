@@ -13,7 +13,7 @@ impl Chat {
     /// The target a dropped file lands in: the open thread, else the room.
     fn drop_target(&self) -> Option<Target> {
         let room = self.room.as_ref()?;
-        if !self.session.connected || !self.may_write() {
+        if !crate::ATTACHMENTS || !self.session.connected || !self.may_write() {
             return None;
         }
         Some(Target::Post {
@@ -103,7 +103,7 @@ impl Chat {
                     draft.seed(&send.body, &choices);
                 }
             }
-            "attach" if matches!(target, Target::Post { .. }) => {
+            "attach" if crate::ATTACHMENTS && matches!(target, Target::Post { .. }) => {
                 cx.spawn(async move {
                     let result = ask::<Pick>(serde_json::json!({})).await;
                     move |chat: &mut Chat, cx: &mut Cx<Chat>| {
@@ -123,7 +123,9 @@ impl Chat {
                                 target: format!("{key}/editor"),
                                 tag: "paste-ready".into(),
                             });
-                            if matches!(target, Target::Post { .. }) && !clipboard.files.is_empty()
+                            if crate::ATTACHMENTS
+                                && matches!(target, Target::Post { .. })
+                                && !clipboard.files.is_empty()
                             {
                                 chat.picked(target, Ok(clipboard.files), cx);
                             }
@@ -173,7 +175,7 @@ impl Chat {
                 return;
             }
         };
-        let chain = self.session.chain().to_owned();
+        let chain = self.session.chain.to_owned();
         for file in files {
             draft.attachments.push(Attachment {
                 token: file.token.clone(),
