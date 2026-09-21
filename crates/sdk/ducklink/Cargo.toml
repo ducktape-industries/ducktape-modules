@@ -1,0 +1,11 @@
+# the `duck://` link: one grammar for naming a thing on a ducktape network,
+# read in one place. Names no program: the first segment is a program the
+# roster knows, and what follows it is that program's to read. Its one
+# dependency is `abi`, for the refusal words.
+[package]
+name = "ducklink"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+abi = { workspace = true }

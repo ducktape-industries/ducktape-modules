@@ -1,0 +1,16 @@
+# chat — RED until it is rewritten as a `guest::Program` on crates/sdk/abi.
+# The old module contract it was written against left with ducktape-sdk; the
+# source stays as the reference for the rewrite (domain rules, wire types,
+# the message grammar, the index key design).
+[package]
+name = "chat"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+borsh = { workspace = true }
+async-trait = { workspace = true }
+unicode-normalization = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }

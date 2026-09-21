@@ -1,65 +1,48 @@
-# ducktape-modules
+# modules
 
-The application consensus modules of Ducktape, and the reference modules that
-show how one is written.
-
-A module is pure logic over a host-owned store. It holds no durable memory
-across dispatches, takes no clock, rng or network import, and ships as a wasm
-component the network admits by hash. Each crate under `crates/modules/apps/`
-implements `sdk::Module`, carries its own guest port (`src/guest.rs` behind the
-`guest` feature) and — where it serves a materialized view — an index guest
-(`src/index_guest.rs` behind `index-guest`).
+The ducktape contract line and the programs written against it, one
+repository.
 
 | Path | What |
 |---|---|
-| `crates/modules/apps/` | chat, pages, agent, runs, tasks, boards, automations, inbox, collaboration |
-| `crates/examples/directory` | the first wasm port of a native module; the template every later one followed |
-| `crates/examples/greeter` | a consumer module, composed purely out of its siblings' wire types |
-| `crates/examples/extension-probe` | module, view and service replacement against fixed native executables (standalone workspaces) |
-| `skills/module-dev/SKILL.md` | the runbook: native crate → guest → committed artifacts |
-| `docs/records/architecture/wasm-module-authoring.md` | the guest contract |
+| `crates/sdk/abi` | the borsh bytes ABI a program and the host share: `GuestCall`, `HostOp`/`HostReply`, `Env`, `Refusal`, the `roster` and `validators` contracts |
+| `crates/sdk/guest` | what a program compiles against: the `Program` trait, `program!`, one typed function per host op |
+| `crates/sdk/ducklink` | the `duck://` link: `duck://<chain>/<program>/<tail…>`, one spelling per name, no program names known here |
+| `crates/sdk/view-wire`, `view-guest`, `design` | the host<->view wire, the runtime a wasm view is written against, the palette |
+| `crates/system/{modules,valset,identity}` | the roster the host reads, the validators it seats, the accounts everything attributes to |
+| `crates/app/chat`, `chat-view` | the reference app module and its view. **Red** until chat is rewritten as a `guest::Program`; the source stays as the reference for that rewrite |
 
-## The artifacts are the product
+A view links its module by path and reads its types. A program is a cdylib
+for wasm32 the host loads by blob id; a view is a cdylib for wasm32 the
+desktop loads from a file. The host (runtime, state, blobs, node, consensus,
+the daemon and the CLI) lives in ducktape.
 
-`component.wasm`, `index.wasm` and `guest.lock` are committed beside each
-module. They are what a network runs: `node init` composes a genesis out of
-them, a member verifies its copy against the descriptor's hashes, and the code
-registry swaps one at a block. A binary never carries them.
+## A program
 
-`guest-builder` (in the platform repository) builds a module ALONE, out of this
-repository at a revision — so push before you build. Bytes move only when
-something the module compiles moves, line numbers included; each `guest.lock`
-records exactly what went in.
+```rust
+use abi::Refusal;
+use guest::Program;
 
-## Repositories
+struct Counter;
 
+impl Program for Counter {
+    fn execute(payload: &[u8]) -> Result<(), Refusal> {
+        let n: u64 = abi::decode(payload)?;
+        guest::set(b"n".to_vec(), abi::encode(&n));
+        Ok(())
+    }
+    fn query(_request: &[u8]) -> Result<(), Refusal> {
+        guest::respond(guest::get(b"n").unwrap_or_default());
+        Ok(())
+    }
+}
+
+guest::program!(Counter);
 ```
-ducktape-sdk ──┬── ducktape ─── ducktape-app
-               ├── ducktape-modules
-               └── ducktape-views
-```
 
-- **ducktape-sdk** — the module contract (`sdk`), the module SDK and its
-  `ducktape:module` WIT world, the index contract, and every module's `-wire`
-  crate: the types and codecs a sibling, a view or a daemon speaks.
-- **ducktape** — the platform: host, consensus, node, the system modules, the
-  CLI and `guest-builder`.
-- **ducktape-modules** — this repository.
-- **ducktape-views** — the desktop views, one per module.
-- **ducktape-app** — the desktop application.
+## Building
 
-## How it is consumed
-
-Nothing links these crates to get a module's format — that is what the `-wire`
-crates in ducktape-sdk are for. A consumer takes the **artifact**: the platform
-CLI packs `component.wasm` (plus an optional mapper and view) into one
-deployment, proposes its hash to governance, and stages the bytes on the blob
-plane; validators verify the hash, check the component's shape and activate at
-an armed height.
-
-Within this workspace a module names a sibling in this repository by path
-(`chat = { path = "../chat", default-features = false }`); everything else
-resolves through `[workspace.dependencies]` in the root `Cargo.toml` to a git
-dependency on `ducktape-sdk` (the contract and the wire crates) or on
-`ducktape` (the host and native system modules a test drives), both tracking
-their `dev` branch.
+`cargo test --workspace --exclude chat --exclude chat-view`, the same for
+clippy, `make program-wasm-check`, `make view-wasm-check`, `make
+wasm-programs` and `make wasm-views` are what CI runs. The toolchain is
+pinned in `rust-toolchain.toml`.
