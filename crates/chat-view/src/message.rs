@@ -310,7 +310,7 @@ pub fn mention_at(chars: &[char], at: usize) -> Option<(Party, usize)> {
     let end = chars[at + 2..].iter().position(|c| *c == '>')? + at + 2;
     let id: String = chars[at + 2..end].iter().collect();
     let party = match id.strip_prefix("key:") {
-        Some(key) => Party::Key(hex_bytes(key)?),
+        Some(key) => Party::Key(crate::chat::unhex(key)?),
         None => {
             let decimal = !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit());
             if !decimal {
@@ -370,20 +370,6 @@ fn fenced(chars: &[char], at: usize, marker: &str) -> Option<(String, usize)> {
         cursor += 1;
     }
     None
-}
-
-/// An even-length all-hex string back to its bytes; anything else is not hex.
-fn hex_bytes(hex: &str) -> Option<Vec<u8>> {
-    let looks_hex = !hex.is_empty()
-        && hex.len().is_multiple_of(2)
-        && hex.bytes().all(|b| b.is_ascii_hexdigit());
-    if !looks_hex {
-        return None;
-    }
-    (0..hex.len())
-        .step_by(2)
-        .map(|at| u8::from_str_radix(&hex[at..at + 2], 16).ok())
-        .collect()
 }
 
 const LINK_SCHEMES: [&str; 3] = ["http://", "https://", "duck://"];

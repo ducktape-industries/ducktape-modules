@@ -5,7 +5,7 @@ use ducktape_view_guest::wire;
 
 use crate::api::{ChatApi, ClipboardRead, ClipboardWrite, Drops, Id, Pick, Release, SelectedFile};
 use crate::chat::{ChatMsg, MsgRow};
-use crate::composer::send::Target;
+use crate::composer::Target;
 use crate::composer::{Attachment, AttachmentState, Event, Outcome, Send};
 use crate::{Chat, Mode, draft_key};
 
@@ -208,7 +208,7 @@ impl Chat {
         cx.spawn(async move {
             let result = async {
                 let id = ask::<Id>("message").await?;
-                let op = crate::composer::send::op(id, &send, &target)?;
+                let op = crate::composer::op(id, &send, &target)?;
                 let pending = pending_row(&op);
                 ask::<Submit<ChatApi>>(op).await.map(|_| pending)
             }

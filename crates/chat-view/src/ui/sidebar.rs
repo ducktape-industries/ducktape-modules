@@ -4,17 +4,16 @@
 use ducktape_view_guest::view::Cx;
 use ducktape_view_guest::wire::{self, Length, Node, kit, kit::Tone};
 
-use super::controls::*;
-use super::gives_way;
 use crate::chat::ChannelInfo;
 use crate::client::is_dm_channel;
 use crate::{ChannelCreate, Chat};
+use ducktape_view_guest::wire::kit::*;
 
 pub fn render(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
     let key = "chat/sidebar";
     let typed = cx.on_value(|chat, text: String, _| chat.search.draft = text);
     let submit = cx.on(|chat, cx| chat.search_submit(cx));
-    let mut search = field(
+    let mut search = text_field(
         format!("{key}/search"),
         "Search messages",
         &chat.search.draft,

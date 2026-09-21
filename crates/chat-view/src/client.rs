@@ -76,8 +76,10 @@ impl NameDirectory {
         } else {
             format!("user:{key_hex}")
         };
-        self.of_handle(&handle)
-            .map_or_else(|| short_label(key_hex), str::to_string)
+        self.of_handle(&handle).map_or_else(
+            || ducktape_view_guest::kit::short_id(key_hex, 8),
+            str::to_string,
+        )
     }
 
     pub fn party_of(&self, key: &[u8]) -> Party {
@@ -409,7 +411,7 @@ fn span_display(span: &Span, names: &NameDirectory) -> String {
 pub fn author_display(author: &str, names: &NameDirectory) -> String {
     names.of_handle(author).map_or_else(
         || match author.split_once(':') {
-            Some(("user", id)) => format!("user {}", short_label(id)),
+            Some(("user", id)) => format!("user {}", ducktape_view_guest::kit::short_id(id, 8)),
             Some(("acct", account)) => format!("account {account}"),
             Some(("module", id)) => id.to_string(),
             _ => "system".into(),
@@ -442,14 +444,6 @@ pub fn is_agent(author: &str, names: &NameDirectory) -> bool {
         Some(("acct", number)) => number.parse().is_ok_and(|n| names.is_program(n)),
         _ => true,
     }
-}
-
-pub fn short_label(id: &str) -> String {
-    let mut label: String = id.chars().take(8).collect();
-    if id.chars().count() > 8 {
-        label.push('…');
-    }
-    label
 }
 
 /// Autocomplete candidates: every named account plus the room's unregistered
@@ -545,26 +539,8 @@ pub fn dm_peer_of(mine: u64, channel_id: &str, names: &NameDirectory) -> Option<
     })
 }
 
-pub fn plural(count: u64, one: &str, many: &str) -> String {
-    let noun = if count == 1 { one } else { many };
-    format!("{count} {noun}")
-}
-
 pub fn height_label(height: u64) -> String {
-    let digits = height.to_string();
-    let mut grouped = String::with_capacity(digits.len() + digits.len() / 3);
-    for (index, digit) in digits.chars().enumerate() {
-        if index > 0 && (digits.len() - index).is_multiple_of(3) {
-            grouped.push(',');
-        }
-        grouped.push(digit);
-    }
-    format!("block {grouped}")
-}
-
-pub fn mmss(seconds: i64) -> String {
-    let seconds = seconds.max(0);
-    format!("{:02}:{:02}", seconds / 60, seconds % 60)
+    format!("block {}", ducktape_view_guest::kit::grouped(height))
 }
 
 pub fn reaction_palette() -> [&'static str; 32] {

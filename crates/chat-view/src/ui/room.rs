@@ -4,12 +4,11 @@
 use ducktape_view_guest::view::{Cx, Loaded};
 use ducktape_view_guest::wire::{self, AlignX, AlignY, Length, Node, kit, kit::Tone};
 
-use super::controls::*;
 use super::message::{self, Plate};
-use super::{gives_way, pane_header};
 use crate::client::ChatMessage;
-use crate::composer::send::Target;
+use crate::composer::Target;
 use crate::{Chat, Mode, Pane};
+use ducktape_view_guest::wire::kit::*;
 
 /// The room around a composer: the timeline's 16px sides, and air under it.
 const COMPOSER_MARGIN: wire::Edges = wire::Edges {
@@ -169,11 +168,7 @@ fn no_room(chat: &Chat, key: &str, cx: &mut Cx<Chat>) -> Node {
                 "No channels yet",
                 "This network has no channel to read. The first one you create is there for everyone on it.",
                 gated(
-                    super::controls::primary(
-                        format!("{key}/create"),
-                        "Create a channel",
-                        Some(open),
-                    ),
+                    kit::primary(format!("{key}/create"), "Create a channel", Some(open)),
                     chat.session.holds_account(),
                     "Create an account to create a channel",
                 ),
@@ -189,7 +184,7 @@ fn huddle(chat: &Chat, key: &str, info: &crate::chat::ChannelInfo, cx: &mut Cx<C
     let key = format!("{key}/huddle");
     let session = &chat.session;
     if session.huddle_joined && session.huddle_channel == info.channel.id {
-        let elapsed = crate::client::mmss(session.huddle_now - session.huddle_joined_at);
+        let elapsed = mmss(session.huddle_now - session.huddle_joined_at);
         let mut children = vec![kit::badge(
             format!("{key}/live"),
             format!("Live {elapsed}"),
@@ -771,7 +766,7 @@ pub fn selection_bar(chat: &Chat, key: &str, cx: &mut Cx<Chat>) -> Node {
                 [
                     fill_width(kit::strong(format!("{key}/count"), label)),
                     subtle(format!("{key}/clear"), "Clear", Some(clear)),
-                    super::controls::primary(format!("{key}/copy"), "Copy", Some(copy)),
+                    kit::primary(format!("{key}/copy"), "Copy", Some(copy)),
                 ],
             ),
             Tone::Accent,

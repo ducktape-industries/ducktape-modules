@@ -3,8 +3,8 @@
 use ducktape_view_guest::view::{Cx, Loaded};
 use ducktape_view_guest::wire::{Length, Node, SurfaceValue, kit, kit::Tone};
 
-use super::controls::*;
 use crate::Chat;
+use ducktape_view_guest::wire::kit::*;
 
 pub fn channel_create(chat: &Chat, cx: &mut Cx<Chat>) -> Option<Node> {
     let create = chat.create.as_ref()?;
@@ -31,7 +31,7 @@ pub fn channel_create(chat: &Chat, cx: &mut Cx<Chat>) -> Option<Node> {
     let cancel = cx.on(|chat, _| chat.create = None);
     let mut children = vec![
         kit::heading(format!("{key}/title"), "Create a channel"),
-        field(
+        text_field(
             format!("{key}/name"),
             "Channel name",
             &create.name,

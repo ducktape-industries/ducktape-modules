@@ -66,7 +66,7 @@ impl Chat {
             let Some(body) = self.edit_body(pane, seq) else {
                 return;
             };
-            let target = crate::composer::send::Target::Edit {
+            let target = crate::composer::Target::Edit {
                 channel: self.room_id(),
                 seq,
                 base_rev: rev,

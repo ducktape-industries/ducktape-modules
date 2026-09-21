@@ -31,7 +31,7 @@ use serde_json::{Value, json};
 
 use api::{ChatApi, Id, Identity, Props, PropsItem, Session, Ticks};
 use composer::Draft;
-use composer::send::Target;
+use composer::Target;
 
 const PAGE: usize = 64;
 const WINDOW: usize = 256;
@@ -358,14 +358,14 @@ impl Chat {
         self.reads.visible = visible;
         self.reads.entering = visible;
         if visible && self.session.connected {
-            room::refresh_into(cx, channels(), |chat, list, _| chat.channels_arrived(list));
+            cx.refresh(channels(), |chat, list, _| chat.channels_arrived(list));
         }
     }
 
     /// Every state change of the chat module: re-read what is on screen,
     /// keeping the rows already there until the fresh ones land.
     fn refresh(&mut self, cx: &mut Cx<Self>) {
-        room::refresh_into(cx, channels(), |chat, list, _| chat.channels_arrived(list));
+        cx.refresh(channels(), |chat, list, _| chat.channels_arrived(list));
         self.refresh_room(cx);
     }
 
@@ -518,7 +518,7 @@ impl Chat {
             move |chat: &mut Chat, cx: &mut Cx<Chat>| match result {
                 Ok(id) => {
                     chat.create = None;
-                    room::refresh_into(cx, channels(), |chat, list, _| chat.channels_arrived(list));
+                    cx.refresh(channels(), |chat, list, _| chat.channels_arrived(list));
                     if !voice {
                         chat.choose(id, cx);
                     }
@@ -569,7 +569,7 @@ impl Chat {
             .await;
             move |chat: &mut Chat, cx: &mut Cx<Chat>| match result {
                 Ok(id) => {
-                    room::refresh_into(cx, channels(), |chat, list, _| chat.channels_arrived(list));
+                    cx.refresh(channels(), |chat, list, _| chat.channels_arrived(list));
                     chat.choose(id, cx);
                 }
                 Err(refusal) => {

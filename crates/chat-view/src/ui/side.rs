@@ -3,11 +3,11 @@
 use ducktape_view_guest::view::{Cx, Loaded};
 use ducktape_view_guest::wire::{self, Length, Node, kit, kit::Tone};
 
-use super::controls::*;
+use super::close_glyph;
 use super::room::{composer, list, loading, selection_bar};
-use super::{close_glyph, gives_way, pane_header};
-use crate::composer::send::Target;
+use crate::composer::Target;
 use crate::{Chat, Pane};
+use ducktape_view_guest::wire::kit::*;
 
 pub fn thread(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
     let key = "chat/thread";
@@ -172,7 +172,7 @@ pub fn details(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
             kit::row(
                 format!("{key}/rename-row"),
                 [
-                    field(
+                    text_field(
                         format!("{key}/name-input"),
                         "Channel name",
                         &details.name_draft,
@@ -209,7 +209,7 @@ pub fn details(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
         kit::row(
             format!("{key}/add-row"),
             [
-                field(
+                text_field(
                     format!("{key}/member-input"),
                     "Member account or public key",
                     &details.member_draft,

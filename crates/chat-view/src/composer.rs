@@ -1,6 +1,6 @@
 //! What a committed draft becomes on the wire: the chat op the view submits.
-use super::Send;
 use crate::chat::{ChatMsg, parse_message};
+pub use ducktape_view_guest::composer::*;
 use ducktape_view_guest::host::Refusal;
 use serde::{Deserialize, Serialize};
 

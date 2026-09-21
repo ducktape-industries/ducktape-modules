@@ -114,13 +114,12 @@ impl Chat {
                 }
             });
         }
-        refresh_into(cx, crate::members(id.clone()), |chat, members, _| {
+        cx.refresh(crate::members(id.clone()), |chat, members, _| {
             room_of(chat).members = Loaded::Ready(members);
         });
         if let Some(thread) = &room.thread {
             let root = thread.root;
-            refresh_into(
-                cx,
+            cx.refresh(
                 crate::thread(id, root, viewer, None),
                 move |chat, page, cx| {
                     let Some(thread) = chat.room.as_mut().and_then(|room| room.thread.as_mut())
@@ -335,20 +334,4 @@ impl Room {
 
 pub(crate) fn room_of(chat: &mut Chat) -> &mut Room {
     chat.room.get_or_insert_default()
-}
-
-/// A re-read that leaves what is on screen in place until fresh data lands.
-pub(crate) fn refresh_into<T: 'static>(
-    cx: &mut Cx<Chat>,
-    work: impl Future<Output = Result<T, Refusal>> + 'static,
-    land: impl FnOnce(&mut Chat, T, &mut Cx<Chat>) + 'static,
-) {
-    cx.spawn(async move {
-        let result = work.await;
-        move |chat: &mut Chat, cx: &mut Cx<Chat>| {
-            if let Ok(value) = result {
-                land(chat, value, cx);
-            }
-        }
-    });
 }

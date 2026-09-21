@@ -3,9 +3,9 @@
 use ducktape_view_guest::view::Cx;
 use ducktape_view_guest::wire::{self, AlignX, ButtonPreset, Length, Node, kit};
 
-use super::controls::*;
 use crate::client::reaction_palette;
 use crate::{Chat, Menu, Mode, Pane};
+use ducktape_view_guest::wire::kit::*;
 
 const MENU_ITEM_HEIGHT: f32 = kit::height::CONTROL as f32;
 const MENU_ITEM_GAP: f32 = 2.;
@@ -43,7 +43,7 @@ pub fn floating(chat: &Chat, cx: &mut Cx<Chat>) -> Option<Node> {
         Mode::Delete => (280., 96.),
         Mode::Toolbar | Mode::Editing => return None,
     };
-    let (x, y) = origin(menu.at, size, chat.layout.viewport);
+    let (x, y) = popup_origin(menu.at, size, chat.layout.viewport);
     let shade = if kit::is_dark() { 0.5 } else { 0.16 };
     Some(Node::Float {
         key: "chat/floating-menu".into(),
@@ -137,7 +137,7 @@ fn message_menu(chat: &Chat, menu: &Menu, cx: &mut Cx<Chat>) -> Node {
             });
         }
         Mode::Editing => {
-            let target = crate::composer::send::Target::Edit {
+            let target = crate::composer::Target::Edit {
                 channel: chat.room_id(),
                 seq,
                 base_rev: rev,
@@ -230,23 +230,6 @@ fn picker_size(count: usize) -> (f32, f32) {
         PICKER_INSET * 2. + columns * PICKER_CELL + (columns - 1.) * PICKER_GAP,
         PICKER_INSET * 2. + rows * PICKER_CELL + (rows - 1.).max(0.) * PICKER_GAP,
     )
-}
-
-/// Where a menu of `size` sits for a press inside `viewport`: its top-left at
-/// the pointer, flipped left or up at an edge, never past the corner.
-pub fn origin(press: (f32, f32), size: (f32, f32), viewport: (f32, f32)) -> (f32, f32) {
-    const GUTTER: f32 = 8.;
-    let x = if press.0 + size.0 + GUTTER <= viewport.0 {
-        press.0
-    } else {
-        press.0 - size.0
-    };
-    let y = if press.1 + size.1 + GUTTER <= viewport.1 {
-        press.1 + 4.
-    } else {
-        press.1 - size.1 - 4.
-    };
-    (x.max(GUTTER), y.max(GUTTER))
 }
 
 /// One row of a dropdown: a glyph, then the words, left-aligned.

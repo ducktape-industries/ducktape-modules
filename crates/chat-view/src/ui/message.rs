@@ -3,9 +3,9 @@
 use ducktape_view_guest::view::Cx;
 use ducktape_view_guest::wire::{self, ButtonPreset, Length, Node, kit, kit::Tone};
 
-use super::controls::*;
-use crate::client::{ChatBlock, ChatMessage, SpanStyle, height_label, plural};
+use crate::client::{ChatBlock, ChatMessage, SpanStyle, height_label};
 use crate::{Chat, Mode, Pane};
+use ducktape_view_guest::wire::kit::*;
 
 /// The avatar plate beside an author's first message, and the gap to the
 /// text. A continuation row keeps the same rail so bodies line up.
@@ -472,7 +472,7 @@ fn pill(
     on_press: Option<u32>,
 ) -> Node {
     let p = kit::palette();
-    let mut parts = vec![kit::nowrap(super::controls::tall_glyph(
+    let mut parts = vec![kit::nowrap(kit::tall_glyph(
         format!("{key}/emoji"),
         emoji,
         kit::type_scale::BODY as f32,

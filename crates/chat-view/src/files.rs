@@ -6,12 +6,12 @@ use std::collections::BTreeMap;
 
 use base64::Engine as _;
 use duck_address::{Address, ChainId, Refused};
+use duckfs_core::objects::{Kind, object_id};
+use duckfs_core::paths::canonical as canonical_path;
+use duckfs_core::{CHUNK_SIZE, Change, Content, FilesMsg, MAX_INLINE_COMMIT_BYTES, encode_putblob};
 use ducktape_view_guest::host::{Refusal, malformed};
 use ducktape_view_guest::view::{Query, ask};
-use serde::Serialize;
 use serde_json::{Value, json};
-use sha2::{Digest as _, Sha256};
-use unicode_normalization::UnicodeNormalization;
 
 use crate::api::{Files, FsRead, Id, PictureLoad, Release, SelectedFile, SubmitBytes};
 
@@ -26,12 +26,7 @@ const PREVIEW_BYTES: usize = 65_536;
 const PREVIEW_DISPLAY_BYTES: usize = 16 << 10;
 pub const BINARY_PLATE: &str = "This file is not text, so there is nothing to show here.";
 
-const CHUNK_SIZE: u64 = 1024 * 1024;
-const MAX_INLINE_COMMIT_BYTES: u64 = 256 * 1024;
 const MAX_UPLOAD: u64 = 64 << 20;
-const MAX_NAME_BYTES: usize = 255;
-const MAX_PATH_BYTES: usize = 4096;
-const MAX_DEPTH: usize = 128;
 
 /// The absolute duckfs path a `duck://<chain>/files/…` link names.
 pub fn address_path(link: &str) -> Result<String, Refused> {
@@ -233,42 +228,6 @@ pub async fn upload(file: SelectedFile, chain: String) -> Result<String, Refusal
     Ok(address)
 }
 
-fn canonical_path(path: &str) -> Result<Vec<String>, String> {
-    if !path.starts_with('/') {
-        return Err("path must be absolute (start with '/')".to_owned());
-    }
-    if path.chars().nfc().collect::<String>() != path {
-        return Err("path is not NFC-normalized".to_owned());
-    }
-    if path.contains('\0') {
-        return Err("path must not contain a NUL byte".to_owned());
-    }
-    if path.len() > MAX_PATH_BYTES {
-        return Err(format!(
-            "path exceeds the {MAX_PATH_BYTES}-byte length limit"
-        ));
-    }
-    if path == "/" {
-        return Ok(Vec::new());
-    }
-    let mut segments = Vec::new();
-    for segment in path[1..].split('/') {
-        if segment.is_empty() || segment == "." || segment == ".." {
-            return Err("path contains an empty or dot segment".to_owned());
-        }
-        if segment.len() > MAX_NAME_BYTES {
-            return Err(format!(
-                "segment name exceeds the {MAX_NAME_BYTES}-byte limit"
-            ));
-        }
-        segments.push(segment.to_owned());
-    }
-    if segments.len() > MAX_DEPTH {
-        return Err(format!("path exceeds the maximum depth of {MAX_DEPTH}"));
-    }
-    Ok(segments)
-}
-
 async fn upload_inner(file: &SelectedFile, path: String) -> Result<(), Refusal> {
     if file.bytes > MAX_UPLOAD {
         return Err(Refusal::new("too_large", "Files must be at most 64 MiB"));
@@ -278,7 +237,7 @@ async fn upload_inner(file: &SelectedFile, path: String) -> Result<(), Refusal> 
     let mut chunks = Vec::new();
     let mut chunk = Vec::new();
     let mut offset = 0u64;
-    let inline = file.bytes <= MAX_INLINE_COMMIT_BYTES;
+    let inline = file.bytes <= MAX_INLINE_COMMIT_BYTES as u64;
     while offset < file.bytes {
         let len = (file.bytes - offset).min(256 << 10) as usize;
         let bytes = ask::<FsRead>(FsRead::request(&file.token, offset, len)).await?;
@@ -293,7 +252,7 @@ async fn upload_inner(file: &SelectedFile, path: String) -> Result<(), Refusal> 
         let chunk_ready = !inline && (chunk.len() as u64 == CHUNK_SIZE || offset == file.bytes);
         if chunk_ready {
             submit_bytes(encode_putblob(&chunk)).await?;
-            chunks.push(crate::chat::hex(&object_id(0, &chunk)));
+            chunks.push(duckfs_core::to_hex(&object_id(Kind::Chunk, &chunk)));
             chunk.clear();
         }
     }
@@ -327,48 +286,6 @@ async fn submit_bytes(bytes: Vec<u8>) -> Result<(), Refusal> {
     }))
     .await
     .map(|_| ())
-}
-
-fn encode_putblob(bytes: &[u8]) -> Vec<u8> {
-    let mut encoded = Vec::with_capacity(bytes.len() + 1);
-    encoded.push(0);
-    encoded.extend_from_slice(bytes);
-    encoded
-}
-
-fn object_id(kind: u8, body: &[u8]) -> [u8; 32] {
-    let mut digest = Sha256::new();
-    digest.update([kind]);
-    digest.update(body);
-    digest.finalize().into()
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "snake_case")]
-enum FilesMsg {
-    Commit {
-        base_snapshot: Option<String>,
-        message: String,
-        changes: Vec<Change>,
-    },
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "snake_case")]
-enum Change {
-    Put {
-        path: String,
-        exec: bool,
-        meta: BTreeMap<String, String>,
-        content: Content,
-    },
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "snake_case")]
-enum Content {
-    Inline { b64: String },
-    Chunks { size: u64, chunks: Vec<String> },
 }
 
 // ---------- duck links ----------
