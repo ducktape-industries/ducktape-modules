@@ -1,8 +1,8 @@
-use abi::{HashKind, Refusal, Scan};
-use guest::Program;
+use abi::{Env, HashKind, Refusal, Scan};
+use guest::{Execute, Program, Query as QueryCtx, Reads};
 use modules::AUTHORITY;
 use modules::module_registry::{CODE_KIND, Change, Entry, Genesis, Op, Query, Reply, Scheduled};
-use modules::program::{conflict, invalid, not_found, u64_key};
+use modules::program::{already_exists, invalid, not_found, u64_key};
 
 const PROGRAM: &str = "p/";
 const SCHEDULE: &str = "s/";
@@ -22,48 +22,46 @@ fn schedule_key(height: u64, program: &str) -> Vec<u8> {
 }
 
 impl Program for Modules {
-    fn init(params: &[u8]) -> Result<(), Refusal> {
+    fn init(ctx: &mut Execute, _env: &Env, params: &[u8]) -> Result<(), Refusal> {
         let genesis: Genesis = abi::decode(params)?;
         for entry in genesis.programs {
-            guest::put(program_key(&entry.program), &entry);
+            ctx.put(program_key(&entry.program), &entry);
         }
-        guest::put(FOLDED, &0u64);
+        ctx.put(FOLDED, &0u64);
         Ok(())
     }
 
-    fn execute(payload: &[u8]) -> Result<(), Refusal> {
-        let env = guest::env();
-        fold(env.height)?;
+    fn execute(ctx: &mut Execute, env: &Env, payload: &[u8]) -> Result<(), Refusal> {
+        fold(ctx, env.height)?;
         match abi::decode(payload)? {
-            Op::Publish { body } => publish(body),
-            Op::Schedule(scheduled) => schedule(&env, scheduled),
-            Op::Cancel { height, program } => cancel(&env, height, &program),
+            Op::Publish { body } => publish(ctx, body),
+            Op::Schedule(scheduled) => schedule(ctx, env, scheduled),
+            Op::Cancel { height, program } => cancel(ctx, env, height, &program),
         }
     }
 
-    fn query(request: &[u8]) -> Result<(), Refusal> {
-        let env = guest::env();
+    fn query(ctx: &mut QueryCtx, env: &Env, request: &[u8]) -> Result<(), Refusal> {
         let reply = match abi::decode(request)? {
-            Query::At(height) => Reply::Programs(at(height)?),
-            Query::Scheduled => Reply::Scheduled(scheduled()?),
+            Query::At(height) => Reply::Programs(at(ctx, height)?),
+            Query::Scheduled => Reply::Scheduled(scheduled(ctx)?),
             Query::Program(program) => Reply::Program(
-                at(env.height)?
+                at(ctx, env.height)?
                     .into_iter()
                     .find(|entry| entry.program == program),
             ),
         };
-        guest::reply(&reply);
+        ctx.reply(&reply);
         Ok(())
     }
 }
 
-fn publish(body: Vec<u8>) -> Result<(), Refusal> {
-    let id = guest::blob_put(HashKind::Sha256, CODE_KIND, body)?;
-    guest::output(abi::encode(&id));
+fn publish(ctx: &mut Execute, body: Vec<u8>) -> Result<(), Refusal> {
+    let id = ctx.blob_put(HashKind::Sha256, CODE_KIND, body)?;
+    ctx.output(abi::encode(&id));
     Ok(())
 }
 
-fn schedule(env: &abi::Env, scheduled: Scheduled) -> Result<(), Refusal> {
+fn schedule(ctx: &mut Execute, env: &Env, scheduled: Scheduled) -> Result<(), Refusal> {
     modules::program::from(env, AUTHORITY)?;
     let in_the_future = scheduled.height > env.height;
     if !in_the_future {
@@ -73,67 +71,68 @@ fn schedule(env: &abi::Env, scheduled: Scheduled) -> Result<(), Refusal> {
         )));
     }
     if let Change::Set(entry) = &scheduled.change {
-        let code_is_here = guest::blob_stat(entry.code).is_some();
+        let code_is_here = ctx.blob_stat(entry.code).is_some();
         if !code_is_here {
             return Err(not_found(format!("code {:?} is not published", entry.code)));
         }
     }
     let key = schedule_key(scheduled.height, scheduled.change.program());
-    let taken = guest::get(&key).is_some();
+    let taken = ctx.get(&key).is_some();
     if taken {
-        return Err(conflict(format!(
+        return Err(already_exists(format!(
             "{} already changes at {}",
             scheduled.change.program(),
             scheduled.height
         )));
     }
-    guest::put(key, &scheduled.change);
+    ctx.put(key, &scheduled.change);
     Ok(())
 }
 
-fn cancel(env: &abi::Env, height: u64, program: &str) -> Result<(), Refusal> {
+fn cancel(ctx: &mut Execute, env: &Env, height: u64, program: &str) -> Result<(), Refusal> {
     modules::program::from(env, AUTHORITY)?;
     let key = schedule_key(height, program);
-    let pending = guest::get(&key).is_some();
+    let pending = ctx.get(&key).is_some();
     if !pending {
         return Err(not_found(format!("{program} does not change at {height}")));
     }
-    guest::delete(key);
+    ctx.delete(key);
     Ok(())
 }
 
-fn fold(height: u64) -> Result<(), Refusal> {
-    let folded: u64 = guest::record(FOLDED)?.unwrap_or(0);
+fn fold(ctx: &mut Execute, height: u64) -> Result<(), Refusal> {
+    let folded: u64 = ctx.record(FOLDED)?.unwrap_or(0);
     let nothing_new = folded >= height;
     if nothing_new {
         return Ok(());
     }
-    for (key, change) in due(height)? {
-        apply(&change);
-        guest::delete(key);
+    for (key, change) in due(ctx, height)? {
+        apply(ctx, &change);
+        ctx.delete(key);
     }
-    guest::put(FOLDED, &height);
+    ctx.put(FOLDED, &height);
     Ok(())
 }
 
-fn apply(change: &Change) {
+fn apply(ctx: &mut Execute, change: &Change) {
     match change {
-        Change::Set(entry) => guest::put(program_key(&entry.program), entry),
-        Change::Remove(program) => guest::delete(program_key(program)),
+        Change::Set(entry) => ctx.put(program_key(&entry.program), entry),
+        Change::Remove(program) => ctx.delete(program_key(program)),
     }
 }
 
-fn due(height: u64) -> Result<Vec<(Vec<u8>, Change)>, Refusal> {
+fn due(ctx: &impl Reads, height: u64) -> Result<Vec<(Vec<u8>, Change)>, Refusal> {
     let past_due = u64_key(SCHEDULE, height + 1);
-    guest::records(Scan::range(SCHEDULE.as_bytes().to_vec(), Some(past_due)))
+    ctx.records(Scan::range(SCHEDULE.as_bytes().to_vec(), Some(past_due)))
 }
 
-fn at(height: u64) -> Result<Vec<Entry>, Refusal> {
-    let mut entries: Vec<Entry> = guest::records::<Entry>(Scan::prefix(PROGRAM))?
+fn at(ctx: &impl Reads, height: u64) -> Result<Vec<Entry>, Refusal> {
+    let mut entries: Vec<Entry> = ctx
+        .records::<Entry>(Scan::prefix(PROGRAM))?
         .into_iter()
         .map(|(_, entry)| entry)
         .collect();
-    for (_, change) in due(height)? {
+    for (_, change) in due(ctx, height)? {
         match change {
             Change::Set(entry) => {
                 entries.retain(|running| running.program != entry.program);
@@ -146,8 +145,8 @@ fn at(height: u64) -> Result<Vec<Entry>, Refusal> {
     Ok(entries)
 }
 
-fn scheduled() -> Result<Vec<Scheduled>, Refusal> {
-    guest::records::<Change>(Scan::prefix(SCHEDULE))?
+fn scheduled(ctx: &impl Reads) -> Result<Vec<Scheduled>, Refusal> {
+    ctx.records::<Change>(Scan::prefix(SCHEDULE))?
         .into_iter()
         .map(|(key, change)| {
             let height = height_of(&key)?;

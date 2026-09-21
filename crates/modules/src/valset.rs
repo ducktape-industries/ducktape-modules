@@ -47,11 +47,11 @@ pub enum Reply {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub fn standing(key: &[u8]) -> Result<Option<Standing>, abi::Refusal> {
-    match guest::ask::<Query, Reply>(PROGRAM, &Query::Membership { key: key.to_vec() })? {
+pub fn standing(ctx: &impl guest::Reads, key: &[u8]) -> Result<Option<Standing>, abi::Refusal> {
+    match ctx.ask::<Query, Reply>(PROGRAM, &Query::Membership { key: key.to_vec() })? {
         Reply::Membership(membership) => Ok(membership.map(|membership| membership.standing)),
         other => Err(abi::Refusal::new(
-            abi::reason::PROTOCOL,
+            abi::reason::UNEXPECTED_REPLY,
             format!("valset answered Membership with {other:?}"),
         )),
     }

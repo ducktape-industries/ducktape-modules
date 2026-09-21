@@ -8,12 +8,6 @@ pub type AccountNumber = u64;
 
 pub const AUTHORITY: &str = "governance";
 
-pub mod reason {
-    pub use abi::reason::*;
-    pub const UNAUTHORIZED: &str = "unauthorized";
-    pub const CONFLICT: &str = "conflict";
-}
-
 #[derive(Clone, Debug, Default, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct Page {
     pub after: Option<Vec<u8>>,
@@ -35,11 +29,8 @@ impl Page {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
 pub mod program {
-    use abi::{Env, Origin, ProgramId, Refusal};
-
-    use crate::reason;
+    use abi::{Env, Origin, ProgramId, Refusal, reason};
 
     pub fn external(env: &Env) -> Result<Vec<u8>, Refusal> {
         match &env.origin {
@@ -94,8 +85,12 @@ pub mod program {
         Refusal::new(reason::INVALID_INPUT, sentence)
     }
 
-    pub fn conflict(sentence: impl Into<String>) -> Refusal {
-        Refusal::new(reason::CONFLICT, sentence)
+    pub fn already_exists(sentence: impl Into<String>) -> Refusal {
+        Refusal::new(reason::ALREADY_EXISTS, sentence)
+    }
+
+    pub fn wrong_state(sentence: impl Into<String>) -> Refusal {
+        Refusal::new(reason::WRONG_STATE, sentence)
     }
 
     pub fn unauthorized(sentence: impl Into<String>) -> Refusal {

@@ -1,7 +1,7 @@
-use abi::{Refusal, Scan};
-use guest::Program;
+use abi::{Env, Refusal, Scan};
+use guest::{Execute, Program, Query as QueryCtx, Reads};
 use modules::AUTHORITY;
-use modules::program::{bytes_key, conflict, invalid};
+use modules::program::{bytes_key, invalid, wrong_state};
 use modules::valset::{Genesis, Membership, Op, Query, Reply, Standing};
 
 const MEMBER: &str = "m/";
@@ -14,7 +14,7 @@ fn key(member: &[u8]) -> Vec<u8> {
 }
 
 impl Program for Valset {
-    fn init(params: &[u8]) -> Result<(), Refusal> {
+    fn init(ctx: &mut Execute, _env: &Env, params: &[u8]) -> Result<(), Refusal> {
         let genesis: Genesis = abi::decode(params)?;
         for member in genesis.validators {
             let membership = Membership {
@@ -22,77 +22,78 @@ impl Program for Valset {
                 address: member.address,
                 standing: Standing::Validator,
             };
-            set(membership)?;
+            set(ctx, membership)?;
         }
         Ok(())
     }
 
-    fn execute(payload: &[u8]) -> Result<(), Refusal> {
-        let env = guest::env();
-        modules::program::from(&env, AUTHORITY)?;
+    fn execute(ctx: &mut Execute, env: &Env, payload: &[u8]) -> Result<(), Refusal> {
+        modules::program::from(env, AUTHORITY)?;
         match abi::decode(payload)? {
-            Op::Set(membership) => set(membership),
-            Op::Remove { key } => remove(&key),
+            Op::Set(membership) => set(ctx, membership),
+            Op::Remove { key } => remove(ctx, &key),
         }
     }
 
-    fn query(request: &[u8]) -> Result<(), Refusal> {
+    fn query(ctx: &mut QueryCtx, _env: &Env, request: &[u8]) -> Result<(), Refusal> {
         let reply = match abi::decode(request)? {
             Query::Validators => Reply::Validators(
-                memberships()?
+                memberships(ctx)?
                     .into_iter()
                     .filter(|membership| membership.standing == Standing::Validator)
                     .map(|membership| membership.key)
                     .collect(),
             ),
             Query::Members => {
-                Reply::Members(memberships()?.iter().map(Membership::member).collect())
+                Reply::Members(memberships(ctx)?.iter().map(Membership::member).collect())
             }
-            Query::Memberships => Reply::Memberships(memberships()?),
-            Query::Membership { key: member } => Reply::Membership(guest::record(key(&member))?),
+            Query::Memberships => Reply::Memberships(memberships(ctx)?),
+            Query::Membership { key: member } => Reply::Membership(ctx.record(key(&member))?),
         };
-        guest::reply(&reply);
+        ctx.reply(&reply);
         Ok(())
     }
 }
 
-fn memberships() -> Result<Vec<Membership>, Refusal> {
-    Ok(guest::records::<Membership>(Scan::prefix(MEMBER))?
+fn memberships(ctx: &impl Reads) -> Result<Vec<Membership>, Refusal> {
+    Ok(ctx
+        .records::<Membership>(Scan::prefix(MEMBER))?
         .into_iter()
         .map(|(_, membership)| membership)
         .collect())
 }
 
-fn set(membership: Membership) -> Result<(), Refusal> {
+fn set(ctx: &mut Execute, membership: Membership) -> Result<(), Refusal> {
     let key_is_ed25519 = membership.key.len() == KEY_LEN;
     if !key_is_ed25519 {
         return Err(invalid("a member key is a 32-byte ed25519 public key"));
     }
     let demotes = membership.standing == Standing::Resident;
     if demotes {
-        unseat(&membership.key)?;
+        unseat(ctx, &membership.key)?;
     }
-    guest::put(key(&membership.key), &membership);
+    ctx.put(key(&membership.key), &membership);
     Ok(())
 }
 
-fn remove(member: &[u8]) -> Result<(), Refusal> {
-    unseat(member)?;
-    guest::delete(key(member));
+fn remove(ctx: &mut Execute, member: &[u8]) -> Result<(), Refusal> {
+    unseat(ctx, member)?;
+    ctx.delete(key(member));
     Ok(())
 }
 
-fn unseat(member: &[u8]) -> Result<(), Refusal> {
-    let seated = guest::record::<Membership>(key(member))?
+fn unseat(ctx: &impl Reads, member: &[u8]) -> Result<(), Refusal> {
+    let seated = ctx
+        .record::<Membership>(key(member))?
         .is_some_and(|membership| membership.standing == Standing::Validator);
     if !seated {
         return Ok(());
     }
-    let other_validators = memberships()?
+    let other_validators = memberships(ctx)?
         .iter()
         .any(|membership| membership.standing == Standing::Validator && membership.key != member);
     if !other_validators {
-        return Err(conflict("the last validator cannot be unseated"));
+        return Err(wrong_state("the last validator cannot be unseated"));
     }
     Ok(())
 }

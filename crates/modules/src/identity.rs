@@ -162,22 +162,28 @@ pub fn account_of_principal(bytes: &[u8]) -> Option<AccountNumber> {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub fn account_of(key: &[u8]) -> Result<Option<AccountNumber>, abi::Refusal> {
-    match guest::ask::<Query, Reply>(PROGRAM, &Query::OfKey { key: key.to_vec() })? {
+pub fn account_of(
+    ctx: &impl guest::Reads,
+    key: &[u8],
+) -> Result<Option<AccountNumber>, abi::Refusal> {
+    match ctx.ask::<Query, Reply>(PROGRAM, &Query::OfKey { key: key.to_vec() })? {
         Reply::Number(number) => Ok(number),
         other => Err(abi::Refusal::new(
-            abi::reason::PROTOCOL,
+            abi::reason::UNEXPECTED_REPLY,
             format!("identity answered OfKey with {other:?}"),
         )),
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-pub fn account(number: AccountNumber) -> Result<Option<Account>, abi::Refusal> {
-    match guest::ask::<Query, Reply>(PROGRAM, &Query::Get { number })? {
+pub fn account(
+    ctx: &impl guest::Reads,
+    number: AccountNumber,
+) -> Result<Option<Account>, abi::Refusal> {
+    match ctx.ask::<Query, Reply>(PROGRAM, &Query::Get { number })? {
         Reply::Account(account) => Ok(account),
         other => Err(abi::Refusal::new(
-            abi::reason::PROTOCOL,
+            abi::reason::UNEXPECTED_REPLY,
             format!("identity answered Get with {other:?}"),
         )),
     }

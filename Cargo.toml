@@ -51,10 +51,11 @@ view-guest = { path = "crates/sdk/view-guest" }
 ducktape-view-guest = { path = "crates/sdk/view-guest", package = "view-guest" }
 modules = { path = "crates/modules" }
 
-# ---- the host the boot set's suite runs on, and the probe fixture it seats
-host = { git = "https://github.com/ducktape-industries/ducktape", rev = "665907ddc65ccada5f3e3ba0a95ae955414bfb3c" }
-fixture-probe = { git = "https://github.com/ducktape-industries/ducktape", rev = "665907ddc65ccada5f3e3ba0a95ae955414bfb3c" }
-keyscheme = { git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "736865710dcfa7c56f9834747287881c1c25d45d", package = "keyscheme" }
+# ---- the host the boot set's suite runs on, the probe fixture it seats and
+# the key schemes it signs with
+host = { git = "https://github.com/ducktape-industries/ducktape", rev = "5d1d1f61d89960164cab919dfbb16a1d8cdb3b36" }
+fixture-probe = { git = "https://github.com/ducktape-industries/ducktape", rev = "5d1d1f61d89960164cab919dfbb16a1d8cdb3b36" }
+keyscheme = { git = "https://github.com/ducktape-industries/ducktape", rev = "5d1d1f61d89960164cab919dfbb16a1d8cdb3b36" }
 commonware-cryptography = "2026.9.0"
 commonware-runtime = "2026.9.0"
 tempfile = "3"

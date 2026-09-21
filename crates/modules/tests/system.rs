@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use abi::reason;
 use abi::{BlobId, HostOp, Message, Origin, Outcome, Scheme};
 use borsh::{BorshDeserialize, BorshSerialize};
 use commonware_cryptography::{Signer as _, ed25519};
@@ -7,7 +8,7 @@ use commonware_runtime::{Runner as _, deterministic};
 use fixture_probe::Step;
 use host::{Applied, Block, BlockId, Founding, Genesis, Host, Layer, Limits, Receipt, Submission};
 use keyscheme::testkit;
-use modules::{AUTHORITY, AccountNumber, Page, identity, module_registry, reason, valset};
+use modules::{AUTHORITY, AccountNumber, Page, identity, module_registry, valset};
 
 macro_rules! program {
     ($name:literal) => {
@@ -343,14 +344,14 @@ fn the_authority_seats_members_and_the_next_epoch_reads_them() {
         let last = net
             .as_authority(valset::PROGRAM, &valset::Op::Remove { key: public(3) })
             .await;
-        assert_eq!(refusal_of(&last), reason::CONFLICT);
+        assert_eq!(refusal_of(&last), reason::WRONG_STATE);
         let demoted = net
             .as_authority(
                 valset::PROGRAM,
                 &valset::Op::Set(membership(3, valset::Standing::Resident)),
             )
             .await;
-        assert_eq!(refusal_of(&demoted), reason::CONFLICT);
+        assert_eq!(refusal_of(&demoted), reason::WRONG_STATE);
         let valset::Reply::Membership(Some(standing)) = net
             .ask(
                 valset::PROGRAM,
@@ -439,7 +440,7 @@ fn a_published_program_is_scheduled_by_the_authority_and_seated_at_its_height() 
                 }),
             )
             .await;
-        assert_eq!(refusal_of(&taken), reason::CONFLICT);
+        assert_eq!(refusal_of(&taken), reason::ALREADY_EXISTS);
         let module_registry::Reply::Scheduled(pending) = net
             .ask(module_registry::PROGRAM, &module_registry::Query::Scheduled)
             .await
@@ -582,7 +583,7 @@ fn identity_founds_accounts_admits_keys_by_consent_and_provisions_programs() {
                 },
             )
             .await;
-        assert_eq!(twice, reason::CONFLICT);
+        assert_eq!(twice, reason::ALREADY_EXISTS);
         let phone = public(11);
         let expires_at = TIME + 600_000;
         net.apply(
@@ -658,7 +659,7 @@ fn identity_founds_accounts_admits_keys_by_consent_and_provisions_programs() {
                 &identity::Op::RemoveKey { key: public(1) },
             )
             .await;
-        assert_eq!(last, reason::CONFLICT);
+        assert_eq!(last, reason::WRONG_STATE);
         let identity::Reply::Generation(generation) = net
             .ask(
                 identity::PROGRAM,
@@ -759,7 +760,7 @@ fn identity_founds_accounts_admits_keys_by_consent_and_provisions_programs() {
                 &identity::Op::TransferControl { account: 2, to: 2 },
             )
             .await;
-        assert_eq!(circular, reason::CONFLICT);
+        assert_eq!(circular, reason::WRONG_STATE);
         let identity::Reply::Resolved(resolved) = net
             .ask(
                 identity::PROGRAM,
