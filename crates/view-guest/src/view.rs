@@ -96,6 +96,39 @@ pub trait Module {
     type ViewReply: DeserializeOwned;
 }
 
+/// A [`Capability`] whose request and reply are both JSON.
+///
+/// `capability!(Pick, "fs.pick", Value, Vec<SelectedFile>);`
+#[macro_export]
+macro_rules! capability {
+    ($name:ident, $kind:literal, $request:ty, $reply:ty) => {
+        pub struct $name;
+        impl $crate::view::Capability for $name {
+            const KIND: &'static str = $kind;
+            type Request = $request;
+            type Reply = $reply;
+        }
+    };
+}
+
+/// A [`Module`] spoken as plain JSON on every surface.
+///
+/// `json_module!(Identity, "identity");`
+#[macro_export]
+macro_rules! json_module {
+    ($name:ident, $target:literal) => {
+        pub struct $name;
+        impl $crate::view::Module for $name {
+            const NAME: &'static str = $target;
+            type Op = ::serde_json::Value;
+            type Query = ::serde_json::Value;
+            type Reply = ::serde_json::Value;
+            type ViewQuery = ::serde_json::Value;
+            type ViewReply = ::serde_json::Value;
+        }
+    };
+}
+
 /// `rpc.view` against `M`.
 pub struct ViewOf<M>(std::marker::PhantomData<M>);
 impl<M: Module> Capability for ViewOf<M> {
@@ -354,6 +387,23 @@ impl<V: 'static> Cx<V> {
         let (task, handle) = Task::perform(work, Effect::once).abortable();
         self.tasks.push(task);
         handle
+    }
+
+    /// A re-read that leaves what is on screen in place until fresh data
+    /// lands; a refusal changes nothing.
+    pub fn refresh<T: 'static>(
+        &mut self,
+        work: impl Future<Output = Result<T, Refusal>> + 'static,
+        land: impl FnOnce(&mut V, T, &mut Cx<V>) + 'static,
+    ) {
+        self.spawn(async move {
+            let result = work.await;
+            move |view: &mut V, cx: &mut Cx<V>| {
+                if let Ok(value) = result {
+                    land(view, value, cx);
+                }
+            }
+        });
     }
 
     /// Starts a load and hands back the `Loading` to put in the slot `at`

@@ -35,6 +35,8 @@ pub mod keyboard;
 mod memo;
 pub mod mouse;
 pub use memo::{invalidate_component, memo_lazy};
+pub mod caps;
+pub mod composer;
 pub mod host;
 pub mod testing;
 pub mod widget;
