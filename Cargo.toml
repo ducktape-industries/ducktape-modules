@@ -45,8 +45,8 @@ version = "0.1.0"
 # module-sdk, identity, attribution, index-guest, keyscheme), which sdk dev no
 # longer carries, so those pin the last rev that did. One pin again when chat
 # is a `guest::Program`.
-abi = { git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "22a0dac8fe0efa1ab3ead84733141361d069afde", package = "abi" }
-guest = { git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "22a0dac8fe0efa1ab3ead84733141361d069afde", package = "guest" }
+abi = { git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "b494425f82f40d88aae8b7c5e85bf7ef78a96822", package = "abi" }
+guest = { git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "b494425f82f40d88aae8b7c5e85bf7ef78a96822", package = "guest" }
 sdk = { git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "429004567723c5342cc438bef8e926c4e925b290", package = "sdk" }
 # the module SDK a guest port compiles against. wasm-only: every module's
 # `guest` feature turns it on, and only guest-builder's shell workspace does.
@@ -67,8 +67,9 @@ index_guest = { git = "https://github.com/ducktape-industries/ducktape-sdk", rev
 identity = { git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "429004567723c5342cc438bef8e926c4e925b290", package = "identity" }
 attribution = { git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "429004567723c5342cc438bef8e926c4e925b290", package = "attribution" }
 
-# the `duck://` address grammar.
-duck-address = { git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "22a0dac8fe0efa1ab3ead84733141361d069afde", package = "duck-address" }
+# the `duck://` link. `duck-address` is its old name, kept at chat's rev.
+ducklink = { git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "b494425f82f40d88aae8b7c5e85bf7ef78a96822", package = "ducklink" }
+duck-address = { git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "429004567723c5342cc438bef8e926c4e925b290", package = "duck-address" }
 
 
 
@@ -83,7 +84,7 @@ async-trait = "0.1"
 futures = "0.3"
 # a view links only the view guest sdk (host protocol + widget kit), never a
 # module's crate: the slice of a module it speaks is copied in-crate.
-ducktape-view-guest = { git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "22a0dac8fe0efa1ab3ead84733141361d069afde", package = "view-guest" }
+ducktape-view-guest = { git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "b494425f82f40d88aae8b7c5e85bf7ef78a96822", package = "view-guest" }
 # duckfs path normalization: NFC so visually-identical names collide instead
 # of coexisting (a consensus-determinism requirement, not cosmetics).
 unicode-normalization = "0.1"
