@@ -60,7 +60,7 @@ pub fn render(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
             Tone::Neutral,
         ));
     }
-    if info.is_some_and(|i| i.members_only()) {
+    if info.is_some_and(crate::chat::members_only) {
         title.push(kit::badge(
             format!("{key}/private"),
             "Members only",

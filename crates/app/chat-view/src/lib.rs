@@ -13,13 +13,15 @@ mod compose;
 mod composer;
 mod files;
 mod live;
-mod message;
 mod room;
 mod ui;
 
 use std::collections::{BTreeMap, HashMap};
 
-use chat::{ChannelInfo, ChatMsg, ChatViewQuery, ChatViewReply, MemberRow, MsgRow, PostPolicy};
+use chat::{
+    ChannelInfo, ChatMsg, ChatViewQuery, ChatViewReply, MemberRow, MessageHits, MsgRow, PostPolicy,
+    TagPage,
+};
 use client::{NameDirectory, dm_channel_id, mention_token};
 use ducktape_view_guest::host::{Refusal, malformed};
 use ducktape_view_guest::view::{
@@ -428,7 +430,7 @@ impl Chat {
         if info.channel.archived {
             return "channel_archived";
         }
-        if info.members_only() {
+        if crate::chat::members_only(info) {
             let me = &self.session.me;
             let seated = self
                 .room
@@ -712,6 +714,7 @@ pub(crate) async fn thread(
             replies,
             has_more,
             next_reply_seq,
+            ..
         } => Ok((sorted(replies), has_more, next_reply_seq)),
         _ => Err(wrong_reply()),
     }
@@ -741,12 +744,12 @@ pub(crate) async fn search_hits(
         },
     };
     match ask::<ViewOf<ChatApi>>(query).await? {
-        ChatViewReply::Hits { hits, capped } => Ok((hits, capped, false, None)),
-        ChatViewReply::TagHits {
+        ChatViewReply::Hits(MessageHits { hits, capped }) => Ok((hits, capped, false, None)),
+        ChatViewReply::TagHits(TagPage {
             hits,
             has_more,
             next_after,
-        } => Ok((hits, false, has_more, next_after)),
+        }) => Ok((hits, false, has_more, next_after)),
         _ => Err(wrong_reply()),
     }
 }

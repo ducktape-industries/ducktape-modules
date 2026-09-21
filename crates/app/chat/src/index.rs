@@ -88,7 +88,7 @@ const FAIL_ASSIGNED_DECODE: i32 = 5;
 
 /// the stored head row of one message — the renderable read-model record
 /// every message view returns (pages, threads, search hits, point lookups).
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MsgRow {
     pub channel_id: String,
     pub seq: u64,

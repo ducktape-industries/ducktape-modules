@@ -17,4 +17,5 @@ serde_json.workspace = true
 sha2.workspace = true
 base64.workspace = true
 ducklink.workspace = true
+chat = { path = "../chat" }
 unicode-normalization.workspace = true
