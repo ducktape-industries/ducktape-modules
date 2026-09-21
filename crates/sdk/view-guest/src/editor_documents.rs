@@ -109,9 +109,8 @@ mod tests {
     impl Render for DocumentApp {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> wire::Node {
             let (_, route) = self.editor.document("app:draft".into(), |update| {
-                let callback: crate::context::Callback<Self> = Rc::new(move |view, _, cx| {
+                let callback: crate::context::Callback<Self> = Rc::new(move |view, _, _| {
                     update.clone().apply(&mut view.editor);
-                    cx.notify();
                 });
                 callback
             });

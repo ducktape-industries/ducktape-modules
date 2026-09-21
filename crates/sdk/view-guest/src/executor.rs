@@ -87,8 +87,10 @@ pub(crate) fn snapshot_ready(tasks: &[Running], host: &crate::Host) -> bool {
             && host.waiting_stream(&Waker::from(task.woken.clone()))
     })
 }
+const MAX_POLLS: usize = 64;
+
 pub(crate) fn poll(tasks: &mut Vec<Running>) -> bool {
-    for _ in 0..64 {
+    for _ in 0..MAX_POLLS {
         let mut polled = false;
         tasks.retain_mut(|task| {
             if !task.woken.0.swap(false, Ordering::SeqCst) {

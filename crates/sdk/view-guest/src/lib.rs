@@ -31,6 +31,8 @@ pub use window::Window;
 pub mod slots;
 use context::Callback;
 
+const MAX_ROUNDS: usize = 8;
+
 pub struct Driver<V: View> {
     app: App,
     entity: Entity<V>,
@@ -93,6 +95,12 @@ impl<V: View> Driver<V> {
         self.busy = false;
         self.settle();
         for event in events {
+            let editor_event = matches!(
+                &event,
+                wire::Event::EditorDocument { .. }
+                    | wire::Event::EditorRequest { .. }
+                    | wire::Event::EditorTransaction { .. }
+            );
             let message = match event {
                 wire::Event::Observation { .. }
                 | wire::Event::Mouse { .. }
@@ -192,9 +200,12 @@ impl<V: View> Driver<V> {
                 }
             };
             if let Some(callback) = message {
-                self.entity
-                    .clone()
-                    .update_app(&mut self.app, |v, w, cx| callback(v, w, cx));
+                self.entity.clone().update_app(&mut self.app, |v, w, cx| {
+                    callback(v, w, cx);
+                    if editor_event {
+                        cx.notify();
+                    }
+                });
                 self.settle();
             }
         }
@@ -265,7 +276,7 @@ impl<V: View> Driver<V> {
     }
 
     fn settle(&mut self) {
-        for _ in 0..8 {
+        for _ in 0..MAX_ROUNDS {
             let mut tasks = std::mem::take(&mut *self.app.inner.tasks.borrow_mut());
             let cut_short = executor::poll(&mut tasks);
             let added = !self.app.inner.tasks.borrow().is_empty();

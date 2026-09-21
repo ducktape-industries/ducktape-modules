@@ -433,3 +433,26 @@ fn patches_reconstruct_the_rendered_tree_and_picture_bytes_are_not_retained() {
     });
     assert_eq!(driver.last_root.as_ref(), Some(&mounted));
 }
+
+#[test]
+fn notifying_during_render_requests_another_frame() {
+    #[derive(Serialize, Deserialize)]
+    struct Again(bool);
+    impl View for Again {
+        fn new(_: &mut Window, _: &mut Context<Self>) -> Self {
+            Self(false)
+        }
+    }
+    impl Render for Again {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> wire::Node {
+            if !self.0 {
+                self.0 = true;
+                cx.notify();
+            }
+            wire::Node::empty()
+        }
+    }
+    let mut driver = Driver::<Again>::new();
+    assert!(driver.tick(vec![]).busy);
+    assert!(!driver.tick(vec![]).busy);
+}
