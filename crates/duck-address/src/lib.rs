@@ -48,7 +48,7 @@
 //!
 //! See ducktape#2616 (design note v3) for why the grammar is this.
 
-use refusal_class::INVALID_INPUT;
+use abi::reason::INVALID_INPUT;
 
 pub mod chat;
 pub mod forge;
@@ -359,7 +359,7 @@ fn named(name: &str, spelling: &str) -> Result<(), Refused> {
 /// refusal that is only prose has to be matched by prose, and the next edit to
 /// the wording breaks the match.
 ///
-/// `reason` names a CLASS and not a site (a [`refusal_class`] constant): every
+/// `reason` names a CLASS and not a site (an [`abi::reason`] constant): every
 /// rule an address breaks, here or in a module's half of the path, refuses as
 /// [`INVALID_INPUT`], because a caller fixes the address whatever rule it
 /// broke. `sentence` is a complete sentence a developer can act on: it names

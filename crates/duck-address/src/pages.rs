@@ -7,7 +7,7 @@
 //! linking this crate alone; `pages-wire` re-exports it.
 
 use crate::{Address, ChainId, Refused};
-use refusal_class::INVALID_INPUT;
+use abi::reason::INVALID_INPUT;
 
 /// pages' path: `duck://<chain>/pages/<page>` or
 /// `duck://<chain>/pages/<page>/block/<block>`.

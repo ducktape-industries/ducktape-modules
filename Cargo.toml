@@ -2,38 +2,20 @@
 #
 # What lives here: the program contract (`abi`, the borsh bytes ABI a wasm
 # program and the host share; `guest`, what a program compiles against), the
-# view contract (`view-wire`, `view-guest`, `design`), and the leaf libraries
-# those surfaces are made of.
+# view contract (`view-wire`, `view-guest`, `design`) and the `duck://`
+# address grammar every plane reads.
 #
 # This workspace depends on NO other ducktape repository. Everything else in
-# the platform depends on it.
-#
-# The three system programs (modules, valset, identity) live here; every
-# other program lives in ducktape-modules. The host
-# that runs it (runtime, state, blobs, host, node, consensus, statesync, the
-# daemon and the CLI) lives in ducktape.
+# the platform depends on it. Program logic lives in ducktape-modules; the
+# host that runs it lives in ducktape.
 
 [workspace]
 resolver = "2"
 members = [
-    # kernel — the program contract
     "crates/kernel/abi",
     "crates/kernel/guest",
-    "crates/kernel/refusal-class",
-    "crates/kernel/keyscheme",
-
-    # the system programs the host reads or every network founds with
-    "crates/modules/system/modules",
-    "crates/modules/system/valset",
-    "crates/modules/system/identity",
-
-    # cross-plane leaf libraries the surfaces are made of
-    "crates/design",
     "crates/duck-address",
-    "crates/duckdns",
-    "crates/duckfs/core",
-    "crates/git-primitives",
-    "crates/run-envelope",
+    "crates/design",
     "crates/view-wire",
     "crates/view-guest",
 ]
@@ -46,62 +28,15 @@ version = "0.1.0"
 # ---- external
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# borsh — the one codec the program abi is written in (one byte layout, no
-# map ordering games).
+# borsh — the one codec the program abi is written in.
 borsh = { version = "1", default-features = false, features = ["derive", "std"] }
-sha2 = "0.10"
-# keccak-256 for the EIP-191 personal-message digest.
-sha3 = "0.10"
-base64 = "0.22"
 futures = "0.3"
-# duckfs path normalization: NFC so visually-identical names collide instead
-# of coexisting (a consensus-determinism requirement, not cosmetics).
-unicode-normalization = "0.1"
-# tests only: isolated on-disk data dirs.
-tempfile = "3"
 
-# commonware — one ecosystem, version-aligned.
-# no default `std`: it carries `bls12381` -> blst, C that never builds for
-# wasm32. every consumer here uses ed25519 only, which is no_std-clean.
-commonware-cryptography = { version = "2026.9.0", default-features = false }
-commonware-codec = "2026.9.0"
-commonware-utils = "2026.9.0"
-
-p256 = "0.13"
-# secp256k1 with public-key RECOVERY: an Ethereum wallet's `personal_sign`
-# proof carries r‖s‖v and no pubkey, so verify = recover + compare.
-k256 = { version = "0.13", features = ["ecdsa"] }
-# raw (un-namespaced) ed25519 for OpenSSH `SSHSIG` verification — an SSH key
-# signs the SSHSIG blob directly, never commonware's namespaced preimage.
-ed25519-dalek = "2"
-
-# ---- internal: kernel
+# ---- internal
 abi = { path = "crates/kernel/abi" }
 guest = { path = "crates/kernel/guest" }
-# the refusal classes as bare `&str` constants, zero-dep.
-refusal-class = { path = "crates/kernel/refusal-class" }
-keyscheme = { path = "crates/kernel/keyscheme" }
-
-# ---- internal: system programs
-modules = { path = "crates/modules/system/modules" }
-valset = { path = "crates/modules/system/valset" }
-identity = { path = "crates/modules/system/identity" }
-
-# ---- internal: cross-plane leaf libraries
-design = { path = "crates/design" }
-# the `duck://` address grammar: one parser for `duck://<chain>/<module>/…`,
-# shared by the node, the app and every module that owns a tail. Its one dep
-# is the zero-dep `refusal-class`.
 duck-address = { path = "crates/duck-address" }
-# the `.duck` naming library.
-duckdns = { path = "crates/duckdns" }
-duckfs-core = { path = "crates/duckfs/core" }
-# the plain git read types a forge speaks — a zero-dep leaf on purpose.
-git-primitives = { path = "crates/git-primitives" }
-# the run envelope's magic + headless composer.
-run-envelope = { path = "crates/run-envelope" }
-# the host<->wasm-view wire. `manifest` is host-only (it pulls wasmparser to
-# read a built component's custom section); the guests take it bare.
+design = { path = "crates/design" }
 view-wire = { path = "crates/view-wire" }
 view-guest = { path = "crates/view-guest" }
 

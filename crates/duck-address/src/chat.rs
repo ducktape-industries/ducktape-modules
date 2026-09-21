@@ -7,7 +7,7 @@
 //! linking this crate alone; `chat-wire` re-exports it.
 
 use crate::{Address, ChainId, Refused, number};
-use refusal_class::INVALID_INPUT;
+use abi::reason::INVALID_INPUT;
 
 /// chat's path: `duck://<chain>/chat/<channel>` or
 /// `duck://<chain>/chat/<channel>/<seq>` — a channel, or one message in it by

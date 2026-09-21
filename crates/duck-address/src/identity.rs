@@ -8,7 +8,7 @@
 //! cannot build; `identity-wire` re-exports it.
 
 use crate::{Address, ChainId, Refused, number};
-use refusal_class::INVALID_INPUT;
+use abi::reason::INVALID_INPUT;
 
 /// identity's path: `duck://<chain>/identity/<account>` — one account by the
 /// number the module assigned it, decimal with no sign and no leading zero.
