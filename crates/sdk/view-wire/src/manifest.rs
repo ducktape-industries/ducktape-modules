@@ -54,18 +54,16 @@ const MAX_DESCRIPTION_BYTES: usize = 256;
 const MAX_CAPABILITIES: usize = 16;
 const MAX_CAPABILITY_BYTES: usize = 32;
 
-/// Extracts exactly one current manifest from a component, including nested modules.
+/// Extracts exactly one current manifest from a view's core module.
 /// Returns `None` for missing, duplicate, malformed, or out-of-bounds metadata.
-/// This parses the binary structure; it does not validate the component ABI or execute it.
+/// This parses the binary structure; it does not validate the exports or execute it.
 #[cfg(feature = "manifest")]
 pub fn read_manifest(bytes: &[u8]) -> Option<Manifest> {
-    // The parser walks into the core modules a component nests, which is
-    // where the app's own sections are.
     let mut payloads = wasmparser::Parser::new(0).parse_all(bytes);
-    // A bare core module — an app built but not yet componentized — is not
-    // something the host can instantiate, so it is not in the catalog.
+    // A view is a core module; a component is not something the host
+    // instantiates, so it is not in the catalog.
     let Some(Ok(wasmparser::Payload::Version {
-        encoding: wasmparser::Encoding::Component,
+        encoding: wasmparser::Encoding::Module,
         ..
     })) = payloads.next()
     else {
@@ -219,7 +217,7 @@ mod tests {
     #[cfg(feature = "manifest")]
     #[test]
     fn extraction_rejects_duplicate_and_truncated_sections() {
-        let mut bytes = b"\0asm\x0d\0\x01\0".to_vec();
+        let mut bytes = b"\0asm\x01\0\0\0".to_vec();
         let text = b"ducktape.view.manifest.v1\nSized\n\n\n640.5,480.25\n1";
         let mut section = vec![
             0,
@@ -249,8 +247,8 @@ mod tests {
             "truncated section accepted"
         );
         assert!(
-            read_manifest(b"\0asm\x01\0\0\0").is_none(),
-            "core module accepted"
+            read_manifest(b"\0asm\x0d\0\x01\0").is_none(),
+            "component accepted"
         );
     }
 

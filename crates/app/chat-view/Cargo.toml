@@ -4,8 +4,8 @@ edition.workspace = true
 version.workspace = true
 publish = false
 
-# A Rust-authored view, exported as a dynamically loaded WASM component by
-# `export_view!`; `unsafe_code` is not forbidden only because the component
+# A Rust-authored view, exported as a dynamically loaded wasm module by
+# `export_view!`; `unsafe_code` is not forbidden only because the module
 # exports need `#[unsafe(export_name)]`.
 [lib]
 crate-type = ["cdylib", "rlib"]
