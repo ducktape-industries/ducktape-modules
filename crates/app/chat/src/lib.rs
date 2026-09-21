@@ -15,8 +15,7 @@ pub mod message;
 
 use std::collections::BTreeSet;
 
-use abi::{Refusal, Scan, reason};
-pub use guest::Store;
+use abi::{Entry, Refusal, Scan, reason};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use unicode_normalization::UnicodeNormalization;
 
@@ -31,8 +30,8 @@ pub const MAX_REACTION_EMOJIS: usize = 64;
 pub const MAX_THREAD_REPLIES: u64 = 4096;
 pub const MAX_HUDDLE_MEMBERS: usize = 32;
 pub const HUDDLE_NODE_KEY_BYTES: usize = 32;
-/// What a node key signs to join a huddle: this namespace, the channel id,
-/// the joining origin key.
+/// The namespace a node key signs under to join a huddle; the message is
+/// the channel id then the joining origin key.
 pub const HUDDLE_JOIN_NS: &[u8] = b"ducktape/huddle-join/v1";
 pub const MAX_TAGS_PER_MESSAGE: usize = 16;
 pub const MAX_TAG_CHARS: usize = 64;
@@ -360,39 +359,51 @@ fn tagc_key(ch: &str, label: &str, seq: u64) -> String {
     format!("tagc/{ch}/{label}/{:016x}", u64::MAX - seq)
 }
 
+// ── the store ───────────────────────────────────────────────────────────────
+
+pub trait Read {
+    fn get(&self, key: &[u8]) -> Option<Vec<u8>>;
+    fn scan(&self, scan: Scan) -> Vec<Entry>;
+}
+
+pub trait Write: Read {
+    fn set(&mut self, key: Vec<u8>, value: Vec<u8>);
+    fn delete(&mut self, key: &[u8]);
+}
+
 // ── store helpers ───────────────────────────────────────────────────────────
 
 fn refuse(reason: &str, sentence: impl Into<String>) -> Refusal {
     Refusal::new(reason, sentence)
 }
 
-fn load<T: DeserializeOwned>(store: &dyn Store, key: &str) -> Result<Option<T>, Refusal> {
+fn load<T: DeserializeOwned>(store: &impl Read, key: &str) -> Result<Option<T>, Refusal> {
     store
         .get(key.as_bytes())
         .map(|b| serde_json::from_slice(&b).map_err(|e| refuse(reason::CORRUPT, e.to_string())))
         .transpose()
 }
 
-fn save<T: Serialize>(store: &mut dyn Store, key: String, value: &T) {
+fn save<T: Serialize>(store: &mut impl Write, key: String, value: &T) {
     store.set(
         key.into_bytes(),
         serde_json::to_vec(value).expect("a chat row serializes"),
     );
 }
 
-fn mark(store: &mut dyn Store, key: String) {
+fn mark(store: &mut impl Write, key: String) {
     store.set(key.into_bytes(), Vec::new());
 }
 
-fn channel(store: &dyn Store, id: &str) -> Result<ChannelRow, Refusal> {
+fn channel(store: &impl Read, id: &str) -> Result<ChannelRow, Refusal> {
     load(store, &chan_key(id))?.ok_or_else(|| refuse(reason::NOT_FOUND, format!("no channel {id}")))
 }
 
-fn head_seq(store: &dyn Store, id: &str) -> u64 {
+fn head_seq(store: &impl Read, id: &str) -> u64 {
     load(store, &seq_key(id)).ok().flatten().unwrap_or(0)
 }
 
-fn row(store: &dyn Store, ch: &str, seq: u64) -> Result<MsgRow, Refusal> {
+fn row(store: &impl Read, ch: &str, seq: u64) -> Result<MsgRow, Refusal> {
     load(store, &msg_key(ch, seq))?
         .ok_or_else(|| refuse(reason::NOT_FOUND, format!("no message {ch}/{seq}")))
 }
@@ -417,7 +428,7 @@ fn checked_name(name: &str) -> Result<(), Refusal> {
     Ok(())
 }
 
-fn writable(store: &dyn Store, ch: &ChannelRow, party: &Party) -> Result<(), Refusal> {
+fn writable(store: &impl Read, ch: &ChannelRow, party: &Party) -> Result<(), Refusal> {
     if ch.archived {
         return Err(refuse(
             reason::WRONG_STATE,
@@ -522,7 +533,7 @@ pub fn tags(blocks: &[Block]) -> Vec<String> {
     out
 }
 
-fn index(store: &mut dyn Store, row: &MsgRow, on: bool) {
+fn index(store: &mut impl Write, row: &MsgRow, on: bool) {
     let posting = serde_json::to_vec(&(&row.channel_id, row.seq)).expect("a posting serializes");
     let mut keys: Vec<String> = tokens(&row.text)
         .iter()
@@ -541,7 +552,7 @@ fn index(store: &mut dyn Store, row: &MsgRow, on: bool) {
     }
 }
 
-fn put_row(store: &mut dyn Store, row: &MsgRow) -> Result<(), Refusal> {
+fn put_row(store: &mut impl Write, row: &MsgRow) -> Result<(), Refusal> {
     let bytes = serde_json::to_vec(row).expect("a chat row serializes");
     if bytes.len() > MAX_MESSAGE_BYTES {
         return Err(refuse(
@@ -555,7 +566,7 @@ fn put_row(store: &mut dyn Store, row: &MsgRow) -> Result<(), Refusal> {
 
 // ── execute ─────────────────────────────────────────────────────────────────
 
-pub fn execute(store: &mut dyn Store, frame: &Frame, msg: ChatMsg) -> Result<(), Refusal> {
+pub fn execute(store: &mut impl Write, frame: &Frame, msg: ChatMsg) -> Result<(), Refusal> {
     let actor = party_handle(&frame.party);
     match msg {
         ChatMsg::CreateChannel {
@@ -780,7 +791,7 @@ pub fn execute(store: &mut dyn Store, frame: &Frame, msg: ChatMsg) -> Result<(),
 }
 
 fn create_channel(
-    store: &mut dyn Store,
+    store: &mut impl Write,
     frame: &Frame,
     id: String,
     name: String,
@@ -809,7 +820,7 @@ fn create_channel(
     Ok(())
 }
 
-fn set_member(store: &mut dyn Store, frame: &Frame, ch: &str, party: &Party, member: bool) {
+fn set_member(store: &mut impl Write, frame: &Frame, ch: &str, party: &Party, member: bool) {
     let key = member_key(ch, &party_handle(party));
     if member {
         let row = MemberRow {
@@ -824,7 +835,7 @@ fn set_member(store: &mut dyn Store, frame: &Frame, ch: &str, party: &Party, mem
 }
 
 fn react(
-    store: &mut dyn Store,
+    store: &mut impl Write,
     frame: &Frame,
     channel_id: &str,
     seq: u64,
@@ -881,7 +892,7 @@ fn page(limit: Option<usize>) -> usize {
 }
 
 /// `limit + 1` entries under `scan`, split into the page and `has_more`.
-fn paged(store: &dyn Store, scan: Scan, limit: usize) -> (Vec<abi::Entry>, bool) {
+fn paged(store: &impl Read, scan: Scan, limit: usize) -> (Vec<Entry>, bool) {
     let mut entries = store.scan(scan.limit(limit as u64 + 1));
     let more = entries.len() > limit;
     entries.truncate(limit);
@@ -889,7 +900,7 @@ fn paged(store: &dyn Store, scan: Scan, limit: usize) -> (Vec<abi::Entry>, bool)
 }
 
 fn rows_at(
-    store: &dyn Store,
+    store: &impl Read,
     keys: impl IntoIterator<Item = String>,
 ) -> Result<Vec<MsgRow>, Refusal> {
     keys.into_iter()
@@ -898,7 +909,7 @@ fn rows_at(
 }
 
 /// A posting's row, by the `(channel, seq)` it names.
-fn posted(store: &dyn Store, entries: &[abi::Entry]) -> Result<Vec<MsgRow>, Refusal> {
+fn posted(store: &impl Read, entries: &[Entry]) -> Result<Vec<MsgRow>, Refusal> {
     let keys = entries
         .iter()
         .filter_map(|e| serde_json::from_slice::<(String, u64)>(&e.value).ok())
@@ -906,7 +917,7 @@ fn posted(store: &dyn Store, entries: &[abi::Entry]) -> Result<Vec<MsgRow>, Refu
     rows_at(store, keys)
 }
 
-fn hydrate(store: &dyn Store, rows: &mut [MsgRow], viewer: &[String]) {
+fn hydrate(store: &impl Read, rows: &mut [MsgRow], viewer: &[String]) {
     for row in rows {
         for r in &mut row.reactions {
             r.reacted_by_me = viewer.iter().any(|h| {
@@ -918,12 +929,12 @@ fn hydrate(store: &dyn Store, rows: &mut [MsgRow], viewer: &[String]) {
     }
 }
 
-fn key_tail(entry: &abi::Entry) -> String {
+fn key_tail(entry: &Entry) -> String {
     let key = String::from_utf8_lossy(&entry.key);
     key.rsplit('/').next().unwrap_or_default().to_string()
 }
 
-pub fn query(store: &dyn Store, q: ChatViewQuery) -> Result<ChatViewReply, Refusal> {
+pub fn query(store: &impl Read, q: ChatViewQuery) -> Result<ChatViewReply, Refusal> {
     Ok(match q {
         ChatViewQuery::Channels { after, limit } => {
             let mut scan = Scan::prefix(b"chan/");
@@ -1114,81 +1125,46 @@ pub fn query(store: &dyn Store, q: ChatViewQuery) -> Result<ChatViewReply, Refus
     })
 }
 
-// ── the program ─────────────────────────────────────────────────────────────
-
-#[cfg(all(target_arch = "wasm32", feature = "program"))]
-mod program {
-    use super::*;
-    use abi::{Origin, Scheme};
-    use guest::{Host, Program};
-
-    fn bad(e: impl ToString) -> Refusal {
-        refuse(reason::INVALID_INPUT, e.to_string())
-    }
-
-    /// An external key is the account `identity` says it holds, else itself.
-    fn party_of(origin: &Origin) -> Result<Party, Refusal> {
-        Ok(match origin {
-            Origin::External(key) if key.is_empty() => {
-                return Err(bad("an external origin carries a key"));
-            }
-            Origin::External(key) => {
-                let ask = abi::encode(&identity::Query::OfKey(key.clone()));
-                match guest::query("identity", ask) {
-                    Ok(reply) => match abi::decode(&reply)? {
-                        identity::Reply::Account(Some(account)) => Party::Account(account.number),
-                        _ => Party::Key(key.clone()),
-                    },
-                    Err(r) if r.reason == reason::UNKNOWN_PROGRAM => Party::Key(key.clone()),
-                    Err(r) => return Err(r),
-                }
-            }
-            Origin::Program(id) => Party::Module(id.clone()),
-            Origin::System => Party::System,
-        })
-    }
-
-    struct Chat;
-    impl Program for Chat {
-        fn execute(payload: &[u8]) -> Result<(), Refusal> {
-            let env = guest::env();
-            let msg: ChatMsg = serde_json::from_slice(payload).map_err(bad)?;
-            if let ChatMsg::JoinHuddle {
-                channel_id,
-                node,
-                node_proof,
-            } = &msg
-            {
-                let Origin::External(key) = &env.origin else {
-                    return Err(refuse(reason::UNAUTHORIZED, "only a key joins a huddle"));
-                };
-                let signed = [HUDDLE_JOIN_NS, channel_id.as_bytes(), key].concat();
-                if !guest::verify(Scheme::Ed25519, node.clone(), signed, node_proof.clone())? {
-                    return Err(bad("the node proof does not verify"));
-                }
-            }
-            let frame = Frame {
-                party: party_of(&env.origin)?,
-                height: env.height,
-                time: env.time,
-            };
-            super::execute(&mut Host, &frame, msg)
-        }
-        fn query(request: &[u8]) -> Result<(), Refusal> {
-            let q: ChatViewQuery = serde_json::from_slice(request).map_err(bad)?;
-            let reply = super::query(&Host, q)?;
-            guest::respond(serde_json::to_vec(&reply).expect("a reply serializes"));
-            Ok(())
-        }
-    }
-
-    guest::program!(Chat);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use guest::Memory;
+    use std::collections::BTreeMap;
+
+    #[derive(Default)]
+    struct Memory(BTreeMap<Vec<u8>, Vec<u8>>);
+
+    impl Read for Memory {
+        fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
+            self.0.get(key).cloned()
+        }
+        fn scan(&self, scan: Scan) -> Vec<Entry> {
+            let mut hits: Vec<Entry> = self
+                .0
+                .iter()
+                .filter(|(key, _)| scan.admits(key))
+                .map(|(key, value)| Entry {
+                    key: key.clone(),
+                    value: value.clone(),
+                })
+                .collect();
+            if scan.reverse {
+                hits.reverse();
+            }
+            if let Some(limit) = scan.limit {
+                hits.truncate(limit as usize);
+            }
+            hits
+        }
+    }
+
+    impl Write for Memory {
+        fn set(&mut self, key: Vec<u8>, value: Vec<u8>) {
+            self.0.insert(key, value);
+        }
+        fn delete(&mut self, key: &[u8]) {
+            self.0.remove(key);
+        }
+    }
 
     fn frame(party: Party) -> Frame {
         Frame {

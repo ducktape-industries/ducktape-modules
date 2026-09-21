@@ -11,8 +11,8 @@ SYSTEM := crates/modules/system
 # from (crates/kernel/fixtures, `make kernel-fixtures` there).
 DUCKTAPE ?= ../ducktape
 
-# The app programs: root members, one cargo run each.
-PROGRAMS := chat
+# The app programs: each its own wasm32 workspace, like the boot set.
+PROGRAMS := crates/app/chat-program
 
 # The views: cdylibs for wasm32-unknown-unknown the desktop loads from a file.
 VIEWS := chat-view
@@ -33,17 +33,19 @@ program-wasm-check:
 	echo "abi and guest build for wasm32"
 
 ## builds the boot set for wasm32 and refreshes its committed bytes, which a
-## founding file names and the `modules` suite loads.
+## founding file names and the `modules` suite loads; then the app programs.
 wasm-programs:
 	$(CARGO) build --manifest-path $(SYSTEM)/Cargo.toml \
 	  --target wasm32-unknown-unknown --release
 	cp $(SYSTEM)/target/wasm32-unknown-unknown/release/*.wasm $(SYSTEM)/wasm/
+	@for p in $(PROGRAMS); do \
+	  $(CARGO) build --manifest-path $$p/Cargo.toml --target wasm32-unknown-unknown --release || exit 1; \
+	done
 
 ## refreshes the probe fixture the `modules` suite seats as the authority,
 ## from the ducktape checkout at $(DUCKTAPE).
 probe-fixture:
 	cp $(DUCKTAPE)/crates/kernel/fixtures/wasm/fixture_probe.wasm crates/modules/tests/
-	@for p in $(PROGRAMS); do $(CARGO) build --release --target wasm32-unknown-unknown -p $$p || exit 1; done
 
 ## builds every view for wasm32 under target/wasm32-unknown-unknown/release/.
 wasm-views:

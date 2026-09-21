@@ -11,7 +11,9 @@
 #                   module-registry, valset and identity, their bytes committed
 #                   under `system/wasm/`) and the suite that drives them on the
 #                   host
-#   crates/app/     the app modules and the view beside each: chat, chat-view
+#   crates/app/     the app modules: chat (its types and rules, which the view
+#                   links), chat-program (the wasm32 program over them) and
+#                   chat-view
 #
 # A view links its module by path and reads its types; a view is a cdylib for
 # wasm32-unknown-unknown on `view-guest`. The host that runs the programs
@@ -34,7 +36,7 @@ members = [
     "crates/app/chat",
     "crates/app/chat-view",
 ]
-exclude = ["crates/modules/system"]
+exclude = ["crates/modules/system", "crates/app/chat-program"]
 
 [workspace.package]
 edition = "2024"
