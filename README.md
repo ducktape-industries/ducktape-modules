@@ -11,6 +11,9 @@ repository.
 | `crates/sdk/view-wire`, `view-guest`, `design` | the host<->view wire, the runtime a wasm view is written against, the palette |
 | `crates/system/{modules,valset,identity}` | the roster the host reads, the validators it seats, the accounts everything attributes to |
 | `crates/app/chat`, `chat-view` | the reference app module and its view. **Red** until chat is rewritten as a `guest::Program`; the source stays as the reference for that rewrite |
+| `crates/app/gitcore` | git as a `no_std` library over one `Objects` trait: objects, packs, walks, diff, merge, and the server side of the wire protocol (receive-pack v1, upload-pack v2) |
+| `crates/app/forge` | the git server as a program: a push is one op whose input is the receive-pack body a client sent, a merge is an op, fetch and the ref advertisement are queries; a git object's blob id is its oid |
+| `crates/app/forge-harness` | a dev rig, not product: runs `forge.wasm` on ducktape's `runtime` over an in-memory host and speaks git smart HTTP, so real `git` pushes to and clones from the program without a network |
 
 A view links its module by path and reads its types. A program is a cdylib
 for wasm32 the host loads by blob id; a view is a cdylib for wasm32 the

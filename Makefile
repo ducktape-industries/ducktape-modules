@@ -6,7 +6,7 @@ PROGRAM_LINKABLE := abi guest
 
 # The programs, by manifest path: chat still pins the old sdk's `identity`, so
 # the bare name is ambiguous until chat is a program.
-PROGRAMS := crates/system/modules crates/system/valset crates/system/identity
+PROGRAMS := crates/system/modules crates/system/valset crates/system/identity crates/app/forge
 
 # The views: cdylibs for wasm32-unknown-unknown the desktop loads from a file.
 VIEWS := chat-view
