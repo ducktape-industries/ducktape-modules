@@ -271,3 +271,67 @@ pub mod host_ops {
 
 #[cfg(target_arch = "wasm32")]
 pub use host_ops::*;
+
+/// What a program reads and writes: the host's state on wasm32 ([`Host`]),
+/// a map in a native test ([`Memory`]). Rules written over `&dyn Store`
+/// run in both.
+pub trait Store {
+    fn get(&self, key: &[u8]) -> Option<Vec<u8>>;
+    fn set(&mut self, key: Vec<u8>, value: Vec<u8>);
+    fn delete(&mut self, key: &[u8]);
+    fn scan(&self, scan: Scan) -> Vec<Entry>;
+}
+
+/// The host's state, behind [`Store`].
+#[cfg(target_arch = "wasm32")]
+pub struct Host;
+
+#[cfg(target_arch = "wasm32")]
+impl Store for Host {
+    fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
+        get(key)
+    }
+    fn set(&mut self, key: Vec<u8>, value: Vec<u8>) {
+        set(key, value)
+    }
+    fn delete(&mut self, key: &[u8]) {
+        delete(key.to_vec())
+    }
+    fn scan(&self, scan: Scan) -> Vec<Entry> {
+        host_ops::scan(scan)
+    }
+}
+
+/// An in-memory [`Store`] with the host's scan order, for native tests.
+#[derive(Clone, Debug, Default)]
+pub struct Memory(pub std::collections::BTreeMap<Vec<u8>, Vec<u8>>);
+
+impl Store for Memory {
+    fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
+        self.0.get(key).cloned()
+    }
+    fn set(&mut self, key: Vec<u8>, value: Vec<u8>) {
+        self.0.insert(key, value);
+    }
+    fn delete(&mut self, key: &[u8]) {
+        self.0.remove(key);
+    }
+    fn scan(&self, scan: Scan) -> Vec<Entry> {
+        let mut hits: Vec<Entry> = self
+            .0
+            .iter()
+            .filter(|(k, _)| scan.admits(k))
+            .map(|(k, v)| Entry {
+                key: k.clone(),
+                value: v.clone(),
+            })
+            .collect();
+        if scan.reverse {
+            hits.reverse();
+        }
+        if let Some(limit) = scan.limit {
+            hits.truncate(limit as usize);
+        }
+        hits
+    }
+}

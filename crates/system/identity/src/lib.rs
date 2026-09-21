@@ -11,6 +11,7 @@
 //! `name/<name>` → number, `next` → the next number.
 use abi::{Refusal, Scan, reason};
 use borsh::{BorshDeserialize, BorshSerialize};
+use guest::Store;
 
 pub type AccountNumber = u64;
 
@@ -48,14 +49,6 @@ pub enum Reply {
 
 pub const MAX_NAME_BYTES: usize = 64;
 pub const MAX_KEYS: usize = 16;
-
-/// What the program reads and writes, so the rules run natively in tests.
-pub trait Store {
-    fn get(&self, key: &[u8]) -> Option<Vec<u8>>;
-    fn set(&mut self, key: Vec<u8>, value: Vec<u8>);
-    fn delete(&mut self, key: &[u8]);
-    fn scan(&self, scan: Scan) -> Vec<abi::Entry>;
-}
 
 pub fn account_key(number: AccountNumber) -> Vec<u8> {
     format!("acct/{number:020}").into_bytes()
@@ -199,26 +192,10 @@ pub fn query(store: &dyn Store, query: Query) -> Result<Reply, Refusal> {
     })
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "program"))]
 mod program {
-    use abi::{Origin, Refusal, Scan, reason};
-    use guest::Program;
-
-    struct Host;
-    impl super::Store for Host {
-        fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
-            guest::get(key)
-        }
-        fn set(&mut self, key: Vec<u8>, value: Vec<u8>) {
-            guest::set(key, value)
-        }
-        fn delete(&mut self, key: &[u8]) {
-            guest::delete(key.to_vec())
-        }
-        fn scan(&self, scan: Scan) -> Vec<abi::Entry> {
-            guest::scan(scan)
-        }
-    }
+    use abi::{Origin, Refusal, reason};
+    use guest::{Host, Program};
 
     struct Identity;
     impl Program for Identity {
@@ -244,39 +221,7 @@ mod program {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeMap;
-
-    #[derive(Default)]
-    struct Mem(BTreeMap<Vec<u8>, Vec<u8>>);
-    impl Store for Mem {
-        fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
-            self.0.get(key).cloned()
-        }
-        fn set(&mut self, key: Vec<u8>, value: Vec<u8>) {
-            self.0.insert(key, value);
-        }
-        fn delete(&mut self, key: &[u8]) {
-            self.0.remove(key);
-        }
-        fn scan(&self, scan: Scan) -> Vec<abi::Entry> {
-            let mut hits: Vec<abi::Entry> = self
-                .0
-                .iter()
-                .filter(|(k, _)| scan.admits(k))
-                .map(|(k, v)| abi::Entry {
-                    key: k.clone(),
-                    value: v.clone(),
-                })
-                .collect();
-            if scan.reverse {
-                hits.reverse();
-            }
-            if let Some(limit) = scan.limit {
-                hits.truncate(limit as usize);
-            }
-            hits
-        }
-    }
+    use guest::Memory as Mem;
 
     #[test]
     fn accounts_are_numbered_keys_move_and_the_last_key_stays() {

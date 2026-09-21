@@ -43,10 +43,6 @@ view-wire = { path = "crates/sdk/view-wire" }
 view-guest = { path = "crates/sdk/view-guest" }
 ducktape-view-guest = { path = "crates/sdk/view-guest", package = "view-guest" }
 
-# `chat` and `chat-view` do not build until chat is a `guest::Program`:
-# the old module contract they were written against is gone with
-# ducktape-sdk. Every other crate builds; CI runs them by path.
-
 # ---- external
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

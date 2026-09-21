@@ -4,9 +4,9 @@ CARGO ?= cargo
 # What a program links: abi and guest build for wasm32 with nothing else.
 PROGRAM_LINKABLE := abi guest
 
-# The programs, by manifest path: chat still pins the old sdk's `identity`, so
-# the bare name is ambiguous until chat is a program.
-PROGRAMS := crates/system/modules crates/system/valset crates/system/identity
+# One cargo run per program: built together, identity's `program` feature would
+# unify into chat (which links identity for its types) and double the exports.
+PROGRAMS := modules valset identity chat
 
 # The views: cdylibs for wasm32-unknown-unknown the desktop loads from a file.
 VIEWS := chat-view
@@ -28,7 +28,7 @@ program-wasm-check:
 
 ## builds every program for wasm32 under target/wasm32-unknown-unknown/release/.
 wasm-programs:
-	@for p in $(PROGRAMS); do $(CARGO) build --release --target wasm32-unknown-unknown --manifest-path $$p/Cargo.toml || exit 1; done
+	@for p in $(PROGRAMS); do $(CARGO) build --release --target wasm32-unknown-unknown -p $$p || exit 1; done
 
 ## builds every view for wasm32 under target/wasm32-unknown-unknown/release/.
 wasm-views:
