@@ -2,7 +2,7 @@
 //! reactions, membership, and hook notifications.
 //!
 //! pure logic over a host-injected [`sdk::MerkleStore`]: the HOST constructs
-//! the concrete store (qmdb today — `statesync::qmdb::QmdbStore`) and hands it
+//! the concrete store and hands it
 //! to [`Chat::new`], so this crate never names a storage crate. the store is
 //! used for what it is — hash-addressable authenticated state, one logical
 //! record per entity, every read a point lookup the DISPATCH path needs:

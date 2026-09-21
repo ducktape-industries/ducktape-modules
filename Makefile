@@ -11,27 +11,12 @@
 GUEST_BUILDER ?= ../ducktape-sdk/target/release/guest-builder
 
 # The consensus components (`guest` feature, `src/guest.rs`).
-BUILDER_MODULES := \
-  crates/chat \
-  crates/pages \
-  crates/agent \
-  crates/runs \
-  crates/tasks \
-  crates/boards \
-  crates/automations \
-  crates/inbox \
-  crates/collaboration \
-  crates/directory
+BUILDER_MODULES := crates/chat
 
 # The modules that additionally ship an index guest (`index-guest` feature,
 # `src/index_guest.rs`). That file IS the declaration — this list must name
 # exactly the crates that carry one.
-INDEX_MODULES := \
-  crates/chat \
-  crates/inbox \
-  crates/pages \
-  crates/runs \
-  crates/tasks
+INDEX_MODULES := crates/chat
 
 # The views: cdylibs for wasm32-unknown-unknown the desktop loads from a file.
 VIEWS := chat-view
