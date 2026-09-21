@@ -24,4 +24,4 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
-refusal-class = { workspace = true }
+abi = { workspace = true }

@@ -20,20 +20,13 @@ depends on it.
   (`guest::get`, `guest::set`, `guest::scan`, `guest::emit`,
   `guest::respond`, …). wasm32 only for the host calls; the types build
   everywhere.
-- **`crates/modules/system/{modules, valset, identity}`** — the system
-  programs: the roster the host reads, the validators it seats, and the
-  accounts (numbered, key-held, named) every other program attributes to.
-  Each is a cdylib for wasm32 and an rlib of its types and rules everywhere.
-- **`crates/kernel/{refusal-class, keyscheme}`** — the refusal words as bare
-  constants, and the key schemes a proof is verified under.
 - **`crates/view-wire`**, **`crates/view-guest`**, **`crates/design`** — the
   host<->view wire, the runtime a wasm view is written against (`View`,
   `Cx`, `export_view!`, the host protocol, the composer, test helpers) and
   the palette they draw from. A view links `view-guest` as
   `ducktape-view-guest`.
-- **`crates/{duck-address, duckdns, duckfs/core, git-primitives,
-  run-envelope}`** — the leaf libraries: the `duck://` grammar, `.duck`
-  names, the duckfs paths/objects/wire, git read types, the run envelope.
+- **`crates/duck-address`** — the `duck://` address grammar every plane
+  reads: node, app, views and programs.
 
 ## A program
 
@@ -74,7 +67,7 @@ loads the `.wasm` by the blob id the `modules` program records for it.
 
 - `ducktape` — the kernel host (runtime, state, blobs, host, node, consensus,
   statesync), the daemon and the CLI.
-- `ducktape-modules` — the programs, and the views that live beside them.
+- `ducktape-modules` — the programs (system ones included), and the views that live beside them.
 - `ducktape-views` — the remaining wasm views the desktop app renders.
 - `ducktape-app` — the native desktop client.
 

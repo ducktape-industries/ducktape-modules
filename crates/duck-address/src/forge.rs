@@ -7,7 +7,7 @@
 //! in one by linking this crate alone; `forge-wire` re-exports it.
 
 use crate::{Address, ChainId, Refused, number};
-use refusal_class::INVALID_INPUT;
+use abi::reason::INVALID_INPUT;
 
 /// forge's path: `duck://<chain>/forge/<owner>/<repo>`.
 ///

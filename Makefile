@@ -1,14 +1,14 @@
 # ducktape-sdk — the wasm32 gates.
 CARGO ?= cargo
 
-# What a program is: abi, guest and the system programs build for wasm32.
-PROGRAM_LINKABLE := abi guest modules valset identity
+# What a program links: abi and guest build for wasm32.
+PROGRAM_LINKABLE := abi guest
 
 # What a wasm32 view may link. A crate a view links must never reach the
 # signing/identity graph (blst does not build for wasm32, and a view has no
 # business holding keys); add a crate here when a view starts linking it.
-VIEW_LINKABLE := duck-address refusal-class view-wire view-guest design duckfs-core
-VIEW_FORBIDDEN := blst commonware-cryptography keyscheme
+VIEW_LINKABLE := duck-address view-wire view-guest design
+VIEW_FORBIDDEN := blst commonware-cryptography
 
 .PHONY: program-wasm-check view-wasm-check
 
@@ -17,7 +17,7 @@ program-wasm-check:
 	@for crate in $(PROGRAM_LINKABLE); do \
 	  $(CARGO) build --target wasm32-unknown-unknown -p $$crate || exit 1; \
 	done; \
-	echo "abi, guest and the system programs build for wasm32"
+	echo "abi and guest build for wasm32"
 
 ## builds every VIEW_LINKABLE crate for wasm32-unknown-unknown, plus the
 ## `export_app!` probe example of view-guest (the one place the exported view

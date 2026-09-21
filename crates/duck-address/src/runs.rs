@@ -7,7 +7,7 @@
 //! alone; `runs-wire` re-exports it.
 
 use crate::{Address, ChainId, Refused};
-use refusal_class::INVALID_INPUT;
+use abi::reason::INVALID_INPUT;
 
 /// runs' path: `duck://<chain>/runs/<digest>`, exactly one segment.
 ///
