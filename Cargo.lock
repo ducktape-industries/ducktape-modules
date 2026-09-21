@@ -265,7 +265,7 @@ dependencies = [
  "borsh",
  "duck-address",
  "ducktape-module-sdk",
- "identity 0.1.0",
+ "identity 0.1.0 (git+https://github.com/ducktape-industries/ducktape-sdk?rev=429004567723c5342cc438bef8e926c4e925b290)",
  "index-guest",
  "keyscheme",
  "sdk",
@@ -1091,6 +1091,15 @@ checksum = "3d3067d79b975e8844ca9eb072e16b31c3c1c36928edf9c6789548c524d0d954"
 [[package]]
 name = "identity"
 version = "0.1.0"
+dependencies = [
+ "abi",
+ "borsh",
+ "guest",
+]
+
+[[package]]
+name = "identity"
+version = "0.1.0"
 source = "git+https://github.com/ducktape-industries/ducktape-sdk?rev=429004567723c5342cc438bef8e926c4e925b290#429004567723c5342cc438bef8e926c4e925b290"
 dependencies = [
  "async-trait",
@@ -1101,15 +1110,6 @@ dependencies = [
  "sdk",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "identity"
-version = "0.2.0"
-dependencies = [
- "abi",
- "borsh",
- "guest",
 ]
 
 [[package]]

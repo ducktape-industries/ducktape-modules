@@ -23,13 +23,15 @@ VIEWS := chat-view
 
 # The programs on the abi: cdylibs for wasm32-unknown-unknown the host loads by
 # blob id.
-PROGRAMS := modules valset identity@0.2.0
+# Named by path, not `-p`: chat still pins the old sdk's `identity`, so the
+# bare name is ambiguous until chat is a program.
+PROGRAMS := crates/system/modules crates/system/valset crates/system/identity
 
 .PHONY: wasm-programs
 
 ## build every program for wasm32 under target/wasm32-unknown-unknown/release/.
 wasm-programs:
-	@for p in $(PROGRAMS); do cargo build --release --target wasm32-unknown-unknown -p $$p || exit 1; done
+	@for p in $(PROGRAMS); do cargo build --release --target wasm32-unknown-unknown --manifest-path $$p/Cargo.toml || exit 1; done
 
 .PHONY: wasm-views
 
