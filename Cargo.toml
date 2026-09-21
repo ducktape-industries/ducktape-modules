@@ -1,96 +1,64 @@
-# ducktape-modules — the reference module and its view: `crates/app/chat` is the
-# consensus module, `crates/app/chat-view` the wasm view the desktop renders for
-# it. Everything else that once lived here comes back one crate at a time,
-# written against this pair.
+# modules — the ducktape contract line and the programs written against it,
+# one repository.
 #
-# A `<name>-view` crate is a cdylib for wasm32-unknown-unknown on
-# `view-guest`, and links no module: the slice of a module it speaks is copied
-# in-crate.
+#   crates/sdk/     the contracts: `abi` (the borsh bytes ABI a program and the
+#                   host share), `guest` (what a program compiles against),
+#                   `ducklink` (the `duck://` grammar), and the view contract
+#                   (`view-wire`, `view-guest`, `design`)
+#   crates/system/  the programs the host reads or every network founds with:
+#                   modules (the roster), valset (the validators), identity
+#   crates/app/     the app modules and the view beside each: chat, chat-view
+#
+# A view links its module by path and reads its types; a view is a cdylib for
+# wasm32-unknown-unknown on `view-guest`. The host that runs the programs
+# (runtime, state, blobs, host, node, consensus, the daemon) lives in ducktape.
 
 [workspace]
 resolver = "2"
 members = [
-    "crates/app/chat",
-    "crates/app/chat-view",
-    # the system programs on the abi: the roster the host reads, the validators
-    # it seats, the accounts everything attributes to
+    "crates/sdk/abi",
+    "crates/sdk/guest",
+    "crates/sdk/ducklink",
+    "crates/sdk/design",
+    "crates/sdk/view-wire",
+    "crates/sdk/view-guest",
     "crates/system/modules",
     "crates/system/valset",
     "crates/system/identity",
+    "crates/app/chat",
+    "crates/app/chat-view",
 ]
-
-# which repository this workspace IS. guest-builder reaches every module
-# through this URL as a git source at the revision it builds, and the URL is
-# part of every symbol hash — so it is written once, here, rather than guessed
-# from a checkout's remote.
-[workspace.metadata.guest-builder]
-platform = "https://github.com/ducktape-industries/ducktape-modules"
 
 [workspace.package]
 edition = "2024"
 version = "0.1.0"
 
 [workspace.dependencies]
-# ---------------------------------------------------------------------------
-# ducktape-sdk — the module contract and the system modules.
-#
-# A SYSTEM MODULE IS ITS OWN API: `identity = { workspace = true }` links the
-# module crate — its types, codecs and a `client` of typed functions over
-# `Ctx` — with the module logic off behind features. An app module here that
-# needs a sibling links it by path (`chat = { path = "../chat" }` in
-# automations and runs).
-# ---------------------------------------------------------------------------
-# Two sdk revs, on purpose and for now. `abi`/`guest` (and the view crates)
-# come from sdk dev; `chat` still speaks the old module contract (sdk,
-# module-sdk, identity, attribution, index-guest, keyscheme), which sdk dev no
-# longer carries, so those pin the last rev that did. One pin again when chat
-# is a `guest::Program`.
-abi = { git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "b494425f82f40d88aae8b7c5e85bf7ef78a96822", package = "abi" }
-guest = { git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "b494425f82f40d88aae8b7c5e85bf7ef78a96822", package = "guest" }
-sdk = { git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "429004567723c5342cc438bef8e926c4e925b290", package = "sdk" }
-# the module SDK a guest port compiles against. wasm-only: every module's
-# `guest` feature turns it on, and only guest-builder's shell workspace does.
-ducktape-module-sdk = { git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "429004567723c5342cc438bef8e926c4e925b290", package = "ducktape-module-sdk" }
-# dev-only shared test doubles for the sdk boundary traits (TestCtx +
-# in-memory MerkleStore). MAY ONLY appear in `[dev-dependencies]`.
-sdk-testkit = { git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "429004567723c5342cc438bef8e926c4e925b290", package = "sdk-testkit" }
-# the closed signature-scheme set + ONE verifier.
-keyscheme = { git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "429004567723c5342cc438bef8e926c4e925b290", package = "keyscheme" }
-# keyed with the underscore ON PURPOSE: module crates declare a feature named
-# `index-guest` (the guest-builder --index contract), and cargo refuses a
-# feature sharing its name with a non-optional dependency key.
-index_guest = { git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "429004567723c5342cc438bef8e926c4e925b290", package = "index-guest" }
+# ---- the contracts, in tree
+abi = { path = "crates/sdk/abi" }
+guest = { path = "crates/sdk/guest" }
+ducklink = { path = "crates/sdk/ducklink" }
+design = { path = "crates/sdk/design" }
+view-wire = { path = "crates/sdk/view-wire" }
+view-guest = { path = "crates/sdk/view-guest" }
+ducktape-view-guest = { path = "crates/sdk/view-guest", package = "view-guest" }
 
-# system modules a module here calls: each crate is its own api (types +
-# codecs + a `client` of typed functions over `Ctx`); the module logic behind
-# it rides the `guest` feature no consumer turns on.
-identity = { git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "429004567723c5342cc438bef8e926c4e925b290", package = "identity" }
-attribution = { git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "429004567723c5342cc438bef8e926c4e925b290", package = "attribution" }
+# `chat` and `chat-view` do not build until chat is a `guest::Program`:
+# the old module contract they were written against is gone with
+# ducktape-sdk. Every other crate builds; CI runs them by path.
 
-# the `duck://` link. `duck-address` is its old name, kept at chat's rev.
-ducklink = { git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "b494425f82f40d88aae8b7c5e85bf7ef78a96822", package = "ducklink" }
-duck-address = { git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "429004567723c5342cc438bef8e926c4e925b290", package = "duck-address" }
-
-
-
-# ---------------------------------------------------------------------------
-# external
-# ---------------------------------------------------------------------------
+# ---- external
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# borsh — the one codec the program abi is written in.
+borsh = { version = "1", default-features = false, features = ["derive", "std"] }
 sha2 = "0.10"
 base64 = "0.22"
 async-trait = "0.1"
 futures = "0.3"
-# a view links only the view guest sdk (host protocol + widget kit), never a
-# module's crate: the slice of a module it speaks is copied in-crate.
-ducktape-view-guest = { git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "b494425f82f40d88aae8b7c5e85bf7ef78a96822", package = "view-guest" }
 # duckfs path normalization: NFC so visually-identical names collide instead
 # of coexisting (a consensus-determinism requirement, not cosmetics).
 unicode-normalization = "0.1"
-# borsh — the deterministic store-record and op-row codec (one byte layout, no
-# map ordering games). `wire` stays sdk::wire.
-borsh = { version = "1", default-features = false, features = ["derive", "std"] }
 
 # proc-macro and build-script crates (serde_derive, async-trait, borsh-derive)
 # are compiled once and then run for every unit below them — unoptimized they
@@ -98,9 +66,11 @@ borsh = { version = "1", default-features = false, features = ["derive", "std"] 
 [profile.dev.build-override]
 opt-level = 2
 
-# a view ships as a cdylib for wasm32-unknown-unknown loaded from a file; the
-# release profile is what its bytes come out of. module guests are built by
-# guest-builder in its own workspace and never see this profile.
+[profile.dev.package.design]
+opt-level = 2
+
+# a view and a program ship as cdylibs for wasm32-unknown-unknown; the release
+# profile is what their bytes come out of.
 [profile.release]
 opt-level = 3
 lto = "fat"
