@@ -3,7 +3,7 @@
 use ducktape_view_guest::view::Cx;
 use ducktape_view_guest::wire::{self, ButtonPreset, Length, Node, kit, kit::Tone};
 
-use super::el::El;
+use super::controls::*;
 use crate::client::{ChatBlock, ChatMessage, SpanStyle, height_label, plural};
 use crate::{Chat, Mode, Pane};
 
@@ -39,27 +39,28 @@ pub fn card(
         kit::space(Some(Length::Fixed(AVATAR)), Some(Length::Fixed(4.)))
     };
     let contents = contents(chat, &key, message, pane, plate, cx);
-    let row = El::row(format!("{key}/row"), [rail, contents])
-        .gap(RAIL_GAP)
-        .pad(wire::Edges {
-            top: if message.show_author {
-                kit::spacing::MD as f32
-            } else {
-                3.
+    let row = aligned_x(
+        kit::padded(
+            kit::spaced(kit::row(format!("{key}/row"), [rail, contents]), RAIL_GAP),
+            wire::Edges {
+                top: if message.show_author {
+                    kit::spacing::MD as f32
+                } else {
+                    3.
+                },
+                right: 16.,
+                bottom: 3.,
+                left: 16.,
             },
-            right: 16.,
-            bottom: 3.,
-            left: 16.,
-        })
-        .align_x(wire::AlignX::Left)
-        .node();
-    let mut card = El::container(key, row).rounded(kit::radius::CONTROL as f32);
-    card = match plate {
+        ),
+        wire::AlignX::Left,
+    );
+    let card = rounded(kit::container(key, row), kit::radius::CONTROL as f32);
+    match plate {
         Plate::Plain => card,
-        Plate::Selected => card.bg(p.accent_soft),
-        Plate::Ranged => card.bg(p.surface_raised),
-    };
-    card.node()
+        Plate::Selected => background(card, p.accent_soft),
+        Plate::Ranged => background(card, p.surface_raised),
+    }
 }
 
 fn contents(
@@ -90,37 +91,35 @@ fn contents(
                 p.faint,
             )));
         }
-        children.push(
-            El::centered_row(format!("{key}/header"), header)
-                .gap(kit::spacing::XS as f32)
-                .node(),
-        );
+        children.push(kit::spaced(
+            kit::centered_row(format!("{key}/header"), header),
+            kit::spacing::XS as f32,
+        ));
     }
     // a press chooses the message (shift grows the copy range)
     let seq = message.seq;
     let press = cx.on(move |chat, _| chat.press_message(pane, seq));
     let on_link = cx.on_value(|chat, link: String, _| chat.open_link(link));
-    children.push(
-        El::mouse_area(
-            format!("{key}/select"),
-            body(
-                chat,
-                format!("{key}/body"),
-                &message.blocks,
-                Some(on_link),
-                cx,
+    children.push(with_press(
+        with_row_role(
+            mouse_area(
+                format!("{key}/select"),
+                body(
+                    chat,
+                    format!("{key}/body"),
+                    &message.blocks,
+                    Some(on_link),
+                    cx,
+                ),
             ),
-        )
-        .row_role(
             format!(
                 "Select message, shows its actions: {}: {}",
                 message.author, message.body
             ),
             plate != Plate::Plain,
-        )
-        .on_press(press)
-        .node(),
-    );
+        ),
+        press,
+    ));
     if message.edited {
         children.push(kit::caption(format!("{key}/edited"), "edited"));
     }
@@ -165,11 +164,10 @@ fn contents(
             false,
             open,
         ));
-        children.push(
-            El(kit::wrapped_row(format!("{key}/reactions"), reactions))
-                .gap(kit::spacing::XXS as f32)
-                .node(),
-        );
+        children.push(kit::spaced(
+            kit::wrapped_row(format!("{key}/reactions"), reactions),
+            kit::spacing::XXS as f32,
+        ));
     }
     // in the timeline the count is the way into the thread; in the thread
     // itself it is the rule between the root and its replies
@@ -183,8 +181,8 @@ fn contents(
                 open,
             ));
         }
-        (true, Pane::Thread) => children.push(
-            El::centered_row(
+        (true, Pane::Thread) => children.push(kit::spaced(
+            kit::centered_row(
                 format!("{key}/thread"),
                 [
                     kit::nowrap(kit::caption(
@@ -196,15 +194,14 @@ fn contents(
                         kit::divider(format!("{key}/thread/rule")),
                     ),
                 ],
-            )
-            .gap(kit::spacing::SM as f32)
-            .node(),
-        ),
+            ),
+            kit::spacing::SM as f32,
+        )),
     }
     if message.pending {
         children.push(kit::caption(format!("{key}/pending"), &message.meta));
     }
-    El::column(key, children).gap(3.).node()
+    kit::spaced(kit::column(key, children), 3.)
 }
 
 pub fn body(
@@ -221,7 +218,7 @@ pub fn body(
         let content = match block.kind.as_str() {
             "divider" => kit::divider(scope),
             "attachment" => match chat.pictures.get(&block.link) {
-                Some(&(w, h)) if w > 0 && h > 0 => picture(scope, block, w, h, cx),
+                Some(&(w, h)) if w > 0 && h > 0 => picture(scope, block, (w, h), cx),
                 _ => attachment_card(scope, block, cx),
             },
             "code" => {
@@ -230,16 +227,24 @@ pub fn body(
                     lines.push(kit::caption(format!("{scope}/language"), &block.lang));
                 }
                 lines.push(plain_line(format!("{scope}/code"), &block.text, true));
-                El::container(
-                    scope.clone(),
-                    El::column(format!("{scope}/code-lines"), lines)
-                        .gap(kit::spacing::XXS as f32)
-                        .node(),
+                padded_all(
+                    bordered(
+                        background(
+                            kit::container(
+                                scope.clone(),
+                                kit::spaced(
+                                    kit::column(format!("{scope}/code-lines"), lines),
+                                    kit::spacing::XXS as f32,
+                                ),
+                            ),
+                            p.surface,
+                        ),
+                        Some(p.border),
+                        Some(1.),
+                        kit::radius::CONTROL as f32,
+                    ),
+                    kit::spacing::MD as f32,
                 )
-                .bg(p.surface)
-                .border(Some(p.border), Some(1.), kit::radius::CONTROL as f32)
-                .pad_all(kit::spacing::MD as f32)
-                .node()
             }
             "quote" | "paragraph" => {
                 let text = if block.rich {
@@ -248,15 +253,16 @@ pub fn body(
                     plain_line(format!("{scope}/text"), &block.text, false)
                 };
                 if block.kind == "quote" {
-                    El::row(
-                        scope.clone(),
-                        [
-                            kit::vertical_divider(format!("{scope}/bar")),
-                            kit::colored(text, p.muted),
-                        ],
+                    kit::spaced(
+                        kit::row(
+                            scope.clone(),
+                            [
+                                kit::vertical_divider(format!("{scope}/bar")),
+                                kit::colored(text, p.muted),
+                            ],
+                        ),
+                        kit::spacing::MD as f32,
                     )
-                    .gap(kit::spacing::MD as f32)
-                    .node()
                 } else {
                     text
                 }
@@ -265,16 +271,14 @@ pub fn body(
         };
         children.push(content);
     }
-    El::column(key, children)
-        .gap(kit::spacing::XS as f32)
-        .node()
+    kit::spaced(kit::column(key, children), kit::spacing::XS as f32)
 }
 
 /// A picture that came with the message, in the flow at thumbnail size with
 /// its name under it; pressing it opens the file.
-fn picture(key: String, block: &ChatBlock, width: i64, height: i64, cx: &mut Cx<Chat>) -> Node {
+fn picture(key: String, block: &ChatBlock, size: (i64, i64), cx: &mut Cx<Chat>) -> Node {
     let p = kit::palette();
-    let (w, h) = crate::files::picture_box(width, height);
+    let (w, h) = crate::files::picture_box(size.0, size.1);
     let surface = Node::Surface {
         key: format!("{key}/picture"),
         name: "picture".into(),
@@ -284,11 +288,18 @@ fn picture(key: String, block: &ChatBlock, width: i64, height: i64, cx: &mut Cx<
         ],
         on_event: None,
     };
-    let frame = El::container(format!("{key}/frame"), surface)
-        .w(Length::Fixed(w))
-        .h(Length::Fixed(h))
-        .border(Some(p.border), Some(1.), kit::radius::CARD as f32)
-        .node();
+    let frame = bordered(
+        height(
+            width(
+                kit::container(format!("{key}/frame"), surface),
+                Length::Fixed(w),
+            ),
+            Length::Fixed(h),
+        ),
+        Some(p.border),
+        Some(1.),
+        kit::radius::CARD as f32,
+    );
     let link = block.link.clone();
     let open = cx.on(move |chat, cx| chat.open_preview(link.clone(), cx));
     let mut open = kit::button_child(
@@ -301,15 +312,16 @@ fn picture(key: String, block: &ChatBlock, width: i64, height: i64, cx: &mut Cx<
         *label = Some(format!("Open {}", block.text));
         *padding = Some(wire::Edges::all(0.));
     }
-    let stack = El::column(
-        format!("{key}/stack"),
-        [
-            kit::row(format!("{key}/hug"), [open]),
-            kit::nowrap(kit::caption(format!("{key}/name"), &block.text)),
-        ],
-    )
-    .gap(3.)
-    .node();
+    let stack = kit::spaced(
+        kit::column(
+            format!("{key}/stack"),
+            [
+                kit::row(format!("{key}/hug"), [open]),
+                kit::nowrap(kit::caption(format!("{key}/name"), &block.text)),
+            ],
+        ),
+        3.,
+    );
     kit::row(key, [stack])
 }
 
@@ -317,26 +329,28 @@ fn picture(key: String, block: &ChatBlock, width: i64, height: i64, cx: &mut Cx<
 /// that opens it.
 fn attachment_card(key: String, block: &ChatBlock, cx: &mut Cx<Chat>) -> Node {
     let p = kit::palette();
-    let content = El::centered_row(
-        format!("{key}/row"),
-        [
-            kit::text(format!("{key}/glyph"), "📄"),
-            El::column(
-                format!("{key}/name"),
-                [
-                    kit::nowrap(kit::strong(format!("{key}/title"), &block.text)),
-                    kit::nowrap(kit::caption(
-                        format!("{key}/kind"),
-                        crate::files::attachment_kind(&block.text),
-                    )),
-                ],
-            )
-            .gap(1.)
-            .node(),
-        ],
-    )
-    .gap(kit::spacing::MD as f32)
-    .node();
+    let content = kit::spaced(
+        kit::centered_row(
+            format!("{key}/row"),
+            [
+                kit::text(format!("{key}/glyph"), "📄"),
+                kit::spaced(
+                    kit::column(
+                        format!("{key}/name"),
+                        [
+                            kit::nowrap(kit::strong(format!("{key}/title"), &block.text)),
+                            kit::nowrap(kit::caption(
+                                format!("{key}/kind"),
+                                crate::files::attachment_kind(&block.text),
+                            )),
+                        ],
+                    ),
+                    1.,
+                ),
+            ],
+        ),
+        kit::spacing::MD as f32,
+    );
     let link = block.link.clone();
     let open = cx.on(move |chat, cx| chat.open_preview(link.clone(), cx));
     let mut card = kit::button_child(
@@ -458,7 +472,7 @@ fn pill(
     on_press: Option<u32>,
 ) -> Node {
     let p = kit::palette();
-    let mut parts = vec![kit::nowrap(super::el::tall_glyph(
+    let mut parts = vec![kit::nowrap(super::controls::tall_glyph(
         format!("{key}/emoji"),
         emoji,
         kit::type_scale::BODY as f32,
@@ -476,9 +490,10 @@ fn pill(
             wire::Weight::Medium,
         )));
     }
-    let content = El::centered_row(format!("{key}/label"), parts)
-        .gap(kit::spacing::XXS as f32)
-        .node();
+    let content = kit::spaced(
+        kit::centered_row(format!("{key}/label"), parts),
+        kit::spacing::XXS as f32,
+    );
     let mut button = kit::button_child(key.clone(), content, on_press, ButtonPreset::Subtle);
     if let Node::Button {
         checked,
@@ -500,36 +515,40 @@ fn pill(
             left: kit::spacing::XS as f32,
         });
     }
-    El::container(format!("{key}/pill"), button)
-        .border(
-            Some(if mine { p.accent } else { p.border }),
-            Some(1.),
-            kit::radius::PILL as f32,
-        )
-        .bg(if mine { p.accent_soft } else { p.surface })
-        .w(Length::Shrink)
-        .node()
+    width(
+        background(
+            bordered(
+                kit::container(format!("{key}/pill"), button),
+                Some(if mine { p.accent } else { p.border }),
+                Some(1.),
+                kit::radius::PILL as f32,
+            ),
+            if mine { p.accent_soft } else { p.surface },
+        ),
+        Length::Shrink,
+    )
 }
 
 /// The way into a message's thread: an outlined chip with the reply count
 /// in the accent and the invitation beside it.
 fn reply_link(key: String, replies: u64, open: u32) -> Node {
     let p = kit::palette();
-    let content = El::centered_row(
-        format!("{key}/row"),
-        [
-            kit::nowrap(kit::weighted(
-                kit::colored(
-                    kit::text(format!("{key}/count"), plural(replies, "reply", "replies")),
-                    p.link,
-                ),
-                wire::Weight::Medium,
-            )),
-            kit::nowrap(kit::caption(format!("{key}/hint"), "View thread ›")),
-        ],
-    )
-    .gap(kit::spacing::SM as f32)
-    .node();
+    let content = kit::spaced(
+        kit::centered_row(
+            format!("{key}/row"),
+            [
+                kit::nowrap(kit::weighted(
+                    kit::colored(
+                        kit::text(format!("{key}/count"), plural(replies, "reply", "replies")),
+                        p.link,
+                    ),
+                    wire::Weight::Medium,
+                )),
+                kit::nowrap(kit::caption(format!("{key}/hint"), "View thread ›")),
+            ],
+        ),
+        kit::spacing::SM as f32,
+    );
     let mut button = kit::button_child(key.clone(), content, Some(open), ButtonPreset::Secondary);
     if let Node::Button {
         label,
@@ -547,14 +566,15 @@ fn reply_link(key: String, replies: u64, open: u32) -> Node {
             left: kit::spacing::MD as f32,
         });
     }
-    El::row(format!("{key}/hug"), [button])
-        .pad(wire::Edges {
+    kit::padded(
+        kit::row(format!("{key}/hug"), [button]),
+        wire::Edges {
             top: 2.,
             right: 0.,
             bottom: 0.,
             left: 0.,
-        })
-        .node()
+        },
+    )
 }
 
 /// The avatar beside a message: the kit's plate grown to the rail's 28px, a

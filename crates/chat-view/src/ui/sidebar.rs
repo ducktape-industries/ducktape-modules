@@ -4,7 +4,7 @@
 use ducktape_view_guest::view::Cx;
 use ducktape_view_guest::wire::{self, Length, Node, kit, kit::Tone};
 
-use super::el::{El, field, gated, glyph, section_row, sidebar_row, unread_dot};
+use super::controls::*;
 use super::gives_way;
 use crate::chat::ChannelInfo;
 use crate::client::is_dm_channel;
@@ -25,7 +25,7 @@ pub fn render(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
     if let Node::Input { placeholder, .. } = &mut search {
         *placeholder = "Search messages…".into();
     }
-    let mut search_row = vec![El(search).fill_w().node()];
+    let mut search_row = vec![fill_width(search)];
     if !chat.search.query.is_empty() || !chat.search.draft.trim().is_empty() {
         let clear = cx.on(|chat, _| chat.search_clear());
         search_row.push(glyph(
@@ -35,10 +35,13 @@ pub fn render(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
             Some(clear),
         ));
     }
-    let top = El::centered_row(format!("{key}/search-row"), search_row)
-        .gap(kit::spacing::XXS as f32)
-        .pad_all(kit::spacing::SM as f32)
-        .node();
+    let top = padded_all(
+        kit::spaced(
+            kit::centered_row(format!("{key}/search-row"), search_row),
+            kit::spacing::XXS as f32,
+        ),
+        kit::spacing::SM as f32,
+    );
 
     let (mark, name) = match chat.create {
         Some(_) => ("✕", "Close"),
@@ -129,22 +132,22 @@ pub fn render(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
     }
     let list = kit::scroll(
         format!("{key}/rooms"),
-        El::column(format!("{key}/room-list"), rows)
-            .gap(2.)
-            .pad(wire::Edges {
+        kit::padded(
+            kit::spaced(kit::column(format!("{key}/room-list"), rows), 2.),
+            wire::Edges {
                 top: kit::spacing::XXS as f32,
                 right: kit::spacing::SM as f32,
                 bottom: kit::spacing::LG as f32,
                 left: kit::spacing::SM as f32,
-            })
-            .node(),
+            },
+        ),
     );
     kit::pane(
         key,
-        El::column(format!("{key}/content"), [top, list])
-            .gap(0.)
-            .fill()
-            .node(),
+        fill(kit::spaced(
+            kit::column(format!("{key}/content"), [top, list]),
+            0.,
+        )),
         Length::Fixed(chat.layout.sidebar),
     )
 }
@@ -199,9 +202,10 @@ fn channel_button(
     }
     let id = info.channel.id.clone();
     let press = (!chat.session.busy).then(|| cx.on(move |chat, cx| chat.choose(id.clone(), cx)));
-    let content = El::centered_row(format!("{key}/row"), children)
-        .gap(kit::spacing::XS as f32)
-        .node();
+    let content = kit::spaced(
+        kit::centered_row(format!("{key}/row"), children),
+        kit::spacing::XS as f32,
+    );
     let row = sidebar_row(
         kit::list_row(key.clone(), content, selected, press),
         &info.channel.name,
@@ -232,9 +236,10 @@ fn voice_button(chat: &Chat, key: &str, info: &ChannelInfo, cx: &mut Cx<Chat>) -
         cx.on(move |_, cx| cx.notify::<crate::api::JoinVoice>(serde_json::json!({"id": id})))
     });
     let joined = chat.session.huddle_joined && chat.session.huddle_channel == info.channel.id;
-    let content = El::centered_row(format!("{key}/row"), children)
-        .gap(kit::spacing::XS as f32)
-        .node();
+    let content = kit::spaced(
+        kit::centered_row(format!("{key}/row"), children),
+        kit::spacing::XS as f32,
+    );
     let row = sidebar_row(
         kit::list_row(key.clone(), content, joined, press),
         &info.channel.name,
@@ -285,21 +290,17 @@ fn with_seats(chat: &Chat, key: &str, row: Node, info: &ChannelInfo) -> Node {
         if !mine.is_empty() {
             children.push(kit::nowrap(kit::caption(format!("{key}/you"), mine)));
         }
-        seats.push(
-            El::centered_row(key, children)
-                .gap(kit::spacing::SM as f32)
-                .pad(wire::Edges {
-                    top: 2.,
-                    right: kit::spacing::SM as f32,
-                    bottom: 2.,
-                    left: 28.,
-                })
-                .node(),
-        );
+        seats.push(kit::padded(
+            kit::spaced(kit::centered_row(key, children), kit::spacing::SM as f32),
+            wire::Edges {
+                top: 2.,
+                right: kit::spacing::SM as f32,
+                bottom: 2.,
+                left: 28.,
+            },
+        ));
     }
-    El::column(format!("{key}/with-huddle"), seats)
-        .gap(2.)
-        .node()
+    kit::spaced(kit::column(format!("{key}/with-huddle"), seats), 2.)
 }
 
 /// A direct message: the peer's avatar and name, an Agent badge on software.
@@ -338,9 +339,10 @@ fn dm_button(
     }
     let id = info.channel.id.clone();
     let press = (!chat.session.busy).then(|| cx.on(move |chat, cx| chat.choose(id.clone(), cx)));
-    let content = El::centered_row(format!("{key}/row"), children)
-        .gap(kit::spacing::SM as f32)
-        .node();
+    let content = kit::spaced(
+        kit::centered_row(format!("{key}/row"), children),
+        kit::spacing::SM as f32,
+    );
     sidebar_row(kit::list_row(key, content, selected, press), &name)
 }
 

@@ -3,7 +3,7 @@
 use ducktape_view_guest::view::{Cx, Loaded};
 use ducktape_view_guest::wire::{Length, Node, SurfaceValue, kit, kit::Tone};
 
-use super::el::{El, action, field, gated, glyph, primary, subtle};
+use super::controls::*;
 use crate::Chat;
 
 pub fn channel_create(chat: &Chat, cx: &mut Cx<Chat>) -> Option<Node> {
@@ -82,11 +82,9 @@ pub fn channel_create(chat: &Chat, cx: &mut Cx<Chat>) -> Option<Node> {
     ));
     let card = kit::card(
         format!("{key}/card"),
-        El::column(key, children)
-            .gap(kit::spacing::SM as f32)
-            .node(),
+        kit::spaced(kit::column(key, children), kit::spacing::SM as f32),
     );
-    Some(El(card).pad_all(20.).w(Length::Fixed(480.)).node())
+    Some(width(padded_all(card, 20.), Length::Fixed(480.)))
 }
 
 /// The file pressed, shown where the reader is: a picture at the size the
@@ -100,25 +98,22 @@ pub fn preview(chat: &Chat, cx: &mut Cx<Chat>) -> Option<Node> {
     let name = path.rsplit('/').next().unwrap_or_default().to_owned();
     let open = cx.on(move |chat, _| chat.open_link(link.clone()));
     let close = cx.on(|chat, _| chat.preview = None);
-    let header = El::centered_row(
-        format!("{key}/header"),
-        [
-            El(kit::nowrap(kit::strong(format!("{key}/name"), &name)))
-                .fill_w()
-                .node(),
-            subtle(format!("{key}/open-in-files"), "Open in Files", Some(open)),
-            glyph(format!("{key}/close"), "✕", "Close preview", Some(close)),
-        ],
-    )
-    .gap(kit::spacing::SM as f32)
-    .node();
+    let header = kit::spaced(
+        kit::centered_row(
+            format!("{key}/header"),
+            [
+                fill_width(kit::nowrap(kit::strong(format!("{key}/name"), &name))),
+                subtle(format!("{key}/open-in-files"), "Open in Files", Some(open)),
+                glyph(format!("{key}/close"), "✕", "Close preview", Some(close)),
+            ],
+        ),
+        kit::spacing::SM as f32,
+    );
     let body = preview_body(chat, key, &path, cx);
-    Some(
-        El::column(key, [header, body])
-            .gap(kit::spacing::MD as f32)
-            .pad_all(14.)
-            .node(),
-    )
+    Some(padded_all(
+        kit::spaced(kit::column(key, [header, body]), kit::spacing::MD as f32),
+        14.,
+    ))
 }
 
 fn preview_body(chat: &Chat, key: &str, path: &str, cx: &mut Cx<Chat>) -> Node {
@@ -138,10 +133,13 @@ fn preview_body(chat: &Chat, key: &str, path: &str, cx: &mut Cx<Chat>) -> Node {
             ],
             on_event: None,
         };
-        return El::container(format!("{key}/frame"), surface)
-            .w(Length::Fixed(bw))
-            .h(Length::Fixed(bh))
-            .node();
+        return height(
+            width(
+                kit::container(format!("{key}/frame"), surface),
+                Length::Fixed(bw),
+            ),
+            Length::Fixed(bh),
+        );
     }
     let (plate_width, plate_height) = crate::files::preview_room(screen);
     let read = match &preview.read {
@@ -195,20 +193,21 @@ fn preview_body(chat: &Chat, key: &str, path: &str, cx: &mut Cx<Chat>) -> Node {
             on_event: None,
         }
     };
-    let mut children = vec![
-        El::container(format!("{key}/plate"), document)
-            .fill()
-            .node(),
-    ];
+    let mut children = vec![fill(kit::container(format!("{key}/plate"), document))];
     if read.clipped {
         children.push(kit::caption(
             format!("{key}/clipped"),
             "Only the beginning is shown here. Open in Files for the whole file.",
         ));
     }
-    El::column(format!("{key}/document"), children)
-        .gap(kit::spacing::XS as f32)
-        .w(Length::Fixed(plate_width))
-        .h(Length::Fixed(plate_height))
-        .node()
+    height(
+        width(
+            kit::spaced(
+                kit::column(format!("{key}/document"), children),
+                kit::spacing::XS as f32,
+            ),
+            Length::Fixed(plate_width),
+        ),
+        Length::Fixed(plate_height),
+    )
 }

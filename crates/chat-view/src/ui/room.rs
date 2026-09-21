@@ -4,7 +4,7 @@
 use ducktape_view_guest::view::{Cx, Effect, Loaded};
 use ducktape_view_guest::wire::{self, AlignX, AlignY, Length, Node, kit, kit::Tone};
 
-use super::el::{El, action, gated, glyph, subtle, with_label};
+use super::controls::*;
 use super::message::{self, Plate};
 use super::{gives_way, pane_header};
 use crate::client::ChatMessage;
@@ -32,17 +32,16 @@ pub fn render(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
     let p = kit::palette();
     let mut title = Vec::new();
     match &dm {
-        Some((peer, agent)) => title.push(
-            El::centered_row(
+        Some((peer, agent)) => title.push(kit::spaced(
+            kit::centered_row(
                 format!("{key}/dm-header"),
                 [
                     message::avatar(format!("{key}/dm-avatar"), &kit::initials(peer), *agent),
                     kit::heading(format!("{key}/dm-name"), peer.clone()),
                 ],
-            )
-            .gap(kit::spacing::SM as f32)
-            .node(),
-        ),
+            ),
+            kit::spacing::SM as f32,
+        )),
         None => {
             title.push(kit::nowrap(kit::colored(
                 kit::heading(format!("{key}/hash"), "#"),
@@ -69,12 +68,10 @@ pub fn render(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
             Tone::Neutral,
         ));
     }
-    let mut header = vec![
-        El::centered_row(format!("{key}/title"), title)
-            .gap(kit::spacing::SM as f32)
-            .fill_w()
-            .node(),
-    ];
+    let mut header = vec![fill_width(kit::spaced(
+        kit::centered_row(format!("{key}/title"), title),
+        kit::spacing::SM as f32,
+    ))];
     header.extend(info.map(|info| huddle(chat, key, info, cx)));
     let details = cx.on(|chat, _| chat.toggle_details());
     header.push(glyph(
@@ -89,28 +86,26 @@ pub fn render(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
     ];
     if !chat.notice.is_empty() {
         let dismiss = cx.on(|chat, _| chat.notice.clear());
-        children.push(
-            El(kit::notice(
+        children.push(padded_all(
+            kit::notice(
                 format!("{key}/error"),
-                El::centered_row(
-                    format!("{key}/error/row"),
-                    [
-                        El(kit::wrapping(kit::text(
-                            format!("{key}/error/text"),
-                            &chat.notice,
-                        )))
-                        .fill_w()
-                        .node(),
-                        subtle(format!("{key}/error/dismiss"), "Dismiss", Some(dismiss)),
-                    ],
-                )
-                .gap(kit::spacing::SM as f32)
-                .node(),
+                kit::spaced(
+                    kit::centered_row(
+                        format!("{key}/error/row"),
+                        [
+                            fill_width(kit::wrapping(kit::text(
+                                format!("{key}/error/text"),
+                                &chat.notice,
+                            ))),
+                            subtle(format!("{key}/error/dismiss"), "Dismiss", Some(dismiss)),
+                        ],
+                    ),
+                    kit::spacing::SM as f32,
+                ),
                 Tone::Danger,
-            ))
-            .pad_all(kit::spacing::LG as f32)
-            .node(),
-        );
+            ),
+            kit::spacing::LG as f32,
+        ));
     }
     if !chat.search.query.is_empty() {
         children.push(search_results(chat, key, cx));
@@ -125,14 +120,13 @@ pub fn render(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
     }
     let refusal = chat.write_refusal();
     if !refusal.is_empty() {
-        children.push(
-            El(gate(chat, key, refusal, cx))
-                .pad(wire::Edges {
-                    top: kit::spacing::SM as f32,
-                    ..COMPOSER_MARGIN
-                })
-                .node(),
-        );
+        children.push(kit::padded(
+            gate(chat, key, refusal, cx),
+            wire::Edges {
+                top: kit::spacing::SM as f32,
+                ..COMPOSER_MARGIN
+            },
+        ));
     } else {
         let target = Target::Post {
             channel: room.id.clone(),
@@ -143,13 +137,12 @@ pub fn render(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
             None => format!("Message #{name}"),
         };
         let editable = !chat.session.loading && chat.session.connected;
-        children.push(
-            El(composer(chat, target, &hint, editable, cx))
-                .pad(COMPOSER_MARGIN)
-                .node(),
-        );
+        children.push(kit::padded(
+            composer(chat, target, &hint, editable, cx),
+            COMPOSER_MARGIN,
+        ));
     }
-    El::column(key, children).gap(0.).fill().node()
+    fill(kit::spaced(kit::column(key, children), 0.))
 }
 
 /// The pane with no room open: nothing here pretends to be one.
@@ -176,14 +169,18 @@ fn no_room(chat: &Chat, key: &str, cx: &mut Cx<Chat>) -> Node {
                 "No channels yet",
                 "This network has no channel to read. The first one you create is there for everyone on it.",
                 gated(
-                    super::el::primary(format!("{key}/create"), "Create a channel", Some(open)),
+                    super::controls::primary(
+                        format!("{key}/create"),
+                        "Create a channel",
+                        Some(open),
+                    ),
                     chat.session.holds_account(),
                     "Create an account to create a channel",
                 ),
             )
         }
     };
-    El(plate).fill().node()
+    fill(plate)
 }
 
 /// The header speaks for THIS room's huddle: seated elsewhere, the room on
@@ -211,10 +208,10 @@ fn huddle(chat: &Chat, key: &str, info: &crate::chat::ChannelInfo, cx: &mut Cx<C
             subtle(format!("{key}/leave"), "Leave", Some(leave)),
             "Leave call",
         ));
-        return El::centered_row(key, children)
-            .gap(kit::spacing::XS as f32)
-            .w(Length::Shrink)
-            .node();
+        return width(
+            kit::spaced(kit::centered_row(key, children), kit::spacing::XS as f32),
+            Length::Shrink,
+        );
     }
     let allowed = session.holds_account() && !info.channel.archived;
     let join = if info.channel.voice {
@@ -264,19 +261,18 @@ fn search_results(chat: &Chat, key: &str, cx: &mut Cx<Chat>) -> Node {
             } else if hits.has_more {
                 summary.push_str(" · more results available");
             }
-            let mut rows = vec![
-                El::container(
+            let mut rows = vec![kit::padded(
+                kit::container(
                     format!("{key}/summary-box"),
                     kit::label(format!("{key}/summary"), summary),
-                )
-                .pad(wire::Edges {
+                ),
+                wire::Edges {
                     top: kit::spacing::SM as f32,
                     right: kit::spacing::SM as f32,
                     bottom: kit::spacing::XXS as f32,
                     left: kit::spacing::SM as f32,
-                })
-                .node(),
-            ];
+                },
+            )];
             let names = chat.names.ready().cloned().unwrap_or_default();
             for hit in &hits.rows {
                 let hit_key = format!("{key}/{}/{}", hit.channel_id, hit.seq);
@@ -291,30 +287,32 @@ fn search_results(chat: &Chat, key: &str, cx: &mut Cx<Chat>) -> Node {
                 };
                 let (channel, seq) = (hit.channel_id.clone(), hit.seq);
                 let open = cx.on(move |chat, cx| chat.open_hit(channel.clone(), seq, cx));
-                let content = El::column(
-                    format!("{hit_key}/content"),
-                    [
-                        El::centered_row(
-                            format!("{hit_key}/byline"),
-                            [
-                                kit::nowrap(kit::strong(
-                                    format!("{hit_key}/author"),
-                                    crate::client::author_display(&hit.author, &names),
-                                )),
-                                kit::nowrap(kit::caption(format!("{hit_key}/room"), room)),
-                                kit::nowrap(kit::caption(
-                                    format!("{hit_key}/meta"),
-                                    format!("message {seq}"),
-                                )),
-                            ],
-                        )
-                        .gap(kit::spacing::XS as f32)
-                        .node(),
-                        kit::wrapping(kit::secondary(format!("{hit_key}/text"), text.clone())),
-                    ],
-                )
-                .gap(2.)
-                .node();
+                let content = kit::spaced(
+                    kit::column(
+                        format!("{hit_key}/content"),
+                        [
+                            kit::spaced(
+                                kit::centered_row(
+                                    format!("{hit_key}/byline"),
+                                    [
+                                        kit::nowrap(kit::strong(
+                                            format!("{hit_key}/author"),
+                                            crate::client::author_display(&hit.author, &names),
+                                        )),
+                                        kit::nowrap(kit::caption(format!("{hit_key}/room"), room)),
+                                        kit::nowrap(kit::caption(
+                                            format!("{hit_key}/meta"),
+                                            format!("message {seq}"),
+                                        )),
+                                    ],
+                                ),
+                                kit::spacing::XS as f32,
+                            ),
+                            kit::wrapping(kit::secondary(format!("{hit_key}/text"), text.clone())),
+                        ],
+                    ),
+                    2.,
+                );
                 let mut button = kit::list_row(hit_key, content, false, Some(open));
                 if let Node::Button { label, padding, .. } = &mut button {
                     *label = Some(text);
@@ -335,21 +333,20 @@ fn search_results(chat: &Chat, key: &str, cx: &mut Cx<Chat>) -> Node {
                 } else {
                     "Load more results"
                 };
-                rows.push(
-                    El(subtle(format!("{key}/load-more"), label, more))
-                        .pad_all(kit::spacing::SM as f32)
-                        .node(),
-                );
+                rows.push(padded_all(
+                    subtle(format!("{key}/load-more"), label, more),
+                    kit::spacing::SM as f32,
+                ));
             }
             rows
         }
     };
     kit::scroll(
         key.clone(),
-        El::column(format!("{key}/rows"), children)
-            .gap(2.)
-            .pad_all(kit::spacing::SM as f32)
-            .node(),
+        padded_all(
+            kit::spaced(kit::column(format!("{key}/rows"), children), 2.),
+            kit::spacing::SM as f32,
+        ),
     )
 }
 
@@ -371,23 +368,26 @@ fn intro(key: &str, name: &str, dm: Option<&str>) -> Node {
             ),
         ),
     };
-    El::column(
-        key,
-        [
-            kit::title(format!("{key}/name"), title),
-            kit::wrapping(kit::secondary(format!("{key}/detail"), detail)),
-            kit::gap(kit::spacing::XXS as f32),
-            kit::divider(format!("{key}/rule")),
-        ],
+    kit::padded(
+        kit::spaced(
+            kit::column(
+                key,
+                [
+                    kit::title(format!("{key}/name"), title),
+                    kit::wrapping(kit::secondary(format!("{key}/detail"), detail)),
+                    kit::gap(kit::spacing::XXS as f32),
+                    kit::divider(format!("{key}/rule")),
+                ],
+            ),
+            kit::spacing::XS as f32,
+        ),
+        wire::Edges {
+            top: kit::spacing::XL as f32,
+            right: 16.,
+            bottom: kit::spacing::SM as f32,
+            left: 16.,
+        },
     )
-    .gap(kit::spacing::XS as f32)
-    .pad(wire::Edges {
-        top: kit::spacing::XL as f32,
-        right: 16.,
-        bottom: kit::spacing::SM as f32,
-        left: 16.,
-    })
-    .node()
 }
 
 /// The stream and what stands around it.
@@ -399,18 +399,17 @@ fn stream(chat: &Chat, key: &str, name: &str, dm: Option<&str>, cx: &mut Cx<Chat
         Loaded::Loading(_) if messages.is_empty() => {
             children.push(loading(format!("{key}/loading")))
         }
-        Loaded::Failed(refusal) => children.push(
-            El(kit::notice(
+        Loaded::Failed(refusal) => children.push(padded_all(
+            kit::notice(
                 format!("{key}/failed"),
                 kit::wrapping(kit::text(
                     format!("{key}/failed/text"),
                     refusal.sentence.clone(),
                 )),
                 Tone::Danger,
-            ))
-            .pad_all(kit::spacing::LG as f32)
-            .node(),
-        ),
+            ),
+            kit::spacing::LG as f32,
+        )),
         Loaded::Ready(_) if messages.is_empty() => {
             // an empty room opens on its beginning, down by the composer
             children.push(kit::space(None, Some(Length::Fill)));
@@ -427,15 +426,16 @@ fn stream(chat: &Chat, key: &str, name: &str, dm: Option<&str>, cx: &mut Cx<Chat
         } else {
             "Load older messages"
         };
-        children.push(
-            El::column(
-                format!("{key}/older-row"),
-                [subtle(format!("{key}/older"), label, older)],
-            )
-            .align_x(AlignX::Center)
-            .pad_all(kit::spacing::SM as f32)
-            .node(),
-        );
+        children.push(padded_all(
+            aligned_x(
+                kit::column(
+                    format!("{key}/older-row"),
+                    [subtle(format!("{key}/older"), label, older)],
+                ),
+                AlignX::Center,
+            ),
+            kit::spacing::SM as f32,
+        ));
     }
     if !messages.is_empty() {
         let whole_history = !room.has_older && !room.landed;
@@ -456,19 +456,21 @@ fn stream(chat: &Chat, key: &str, name: &str, dm: Option<&str>, cx: &mut Cx<Chat
     if !messages.is_empty() && (behind_head || !room.at_tail || room.landed) {
         let id = room.id.clone();
         let latest = cx.on(move |chat, cx| chat.open(id.clone(), cx));
-        children.push(
-            El::column(
-                format!("{key}/latest-row"),
-                [action(
-                    format!("{key}/latest"),
-                    "Jump to latest",
-                    Some(latest),
-                )],
-            )
-            .align_x(AlignX::Center)
-            .pad_xy(16., kit::spacing::XXS as f32)
-            .node(),
-        );
+        children.push(padded_xy(
+            aligned_x(
+                kit::column(
+                    format!("{key}/latest-row"),
+                    [action(
+                        format!("{key}/latest"),
+                        "Jump to latest",
+                        Some(latest),
+                    )],
+                ),
+                AlignX::Center,
+            ),
+            16.,
+            kit::spacing::XXS as f32,
+        ));
     }
     children.extend(super::menu::editing(chat, Pane::Timeline, cx));
     children
@@ -587,13 +589,11 @@ pub fn list(
                 children: vec![card, floating_actions(format!("{scope}/actions"), controls)],
             };
             children.push(hover);
-            let content = El::column(format!("{scope}/content"), children)
-                .gap(0.)
-                .node();
-            rows.push(El::mouse_area(scope, content).on_right_press(more).node());
+            let content = kit::spaced(kit::column(format!("{scope}/content"), children), 0.);
+            rows.push(with_right_press(mouse_area(scope, content), more));
         } else {
             children.push(card);
-            rows.push(El::column(scope, children).gap(0.).node());
+            rows.push(kit::spaced(kit::column(scope, children), 0.));
         }
         let list_key = if message.pending {
             -(index as i64) - 1
@@ -618,22 +618,25 @@ pub fn list(
             let open = cx.on(move |chat, _| chat.open_run(&dispatch));
             let run_id = run.seed.run_id.clone();
             let stop = cx.on(move |chat, cx| chat.cancel_run(run_id.clone(), cx));
-            let actions = El::row(
-                format!("{run_key}/actions"),
-                [
-                    subtle(format!("{run_key}/open"), "View run", Some(open)),
-                    subtle(format!("{run_key}/stop"), "Stop", Some(stop)),
-                ],
-            )
-            .gap(kit::spacing::XS as f32)
-            .pad(wire::Edges {
-                top: 0.,
-                right: 16.,
-                bottom: kit::spacing::XXS as f32,
-                left: message::RAIL,
-            })
-            .node();
-            rows.push(El::column(run_key, [card, actions]).gap(0.).node());
+            let actions = kit::padded(
+                kit::spaced(
+                    kit::row(
+                        format!("{run_key}/actions"),
+                        [
+                            subtle(format!("{run_key}/open"), "View run", Some(open)),
+                            subtle(format!("{run_key}/stop"), "Stop", Some(stop)),
+                        ],
+                    ),
+                    kit::spacing::XS as f32,
+                ),
+                wire::Edges {
+                    top: 0.,
+                    right: 16.,
+                    bottom: kit::spacing::XXS as f32,
+                    left: message::RAIL,
+                },
+            );
+            rows.push(kit::spaced(kit::column(run_key, [card, actions]), 0.));
             let hash = run
                 .seed
                 .run_id
@@ -664,9 +667,7 @@ pub fn list(
         virtual_row: Some(44.),
     };
     let content = match lead {
-        Some(intro) => El::column(format!("{key}/lead"), [intro, list])
-            .gap(0.)
-            .node(),
+        Some(intro) => kit::spaced(kit::column(format!("{key}/lead"), [intro, list]), 0.),
         None => list,
     };
     let mut scroll = kit::scroll(key, content);
@@ -696,24 +697,36 @@ pub fn list(
 /// The bar of quiet actions that floats over a message's top-right.
 fn floating_actions(key: String, controls: Vec<Node>) -> Node {
     let p = kit::palette();
-    let bar = El::row(format!("{key}/bar"), controls)
-        .gap(0.)
-        .bg(p.background)
-        .border(Some(p.border), Some(1.), kit::radius::CONTROL as f32)
-        .pad_all(2.)
-        .w(Length::Shrink)
-        .node();
-    El::container(key, bar)
-        .align_x(AlignX::Right)
-        .align_y(AlignY::Top)
-        .h(Length::Fill)
-        .pad(wire::Edges {
+    let bar = width(
+        padded_all(
+            bordered(
+                background(
+                    kit::spaced(kit::row(format!("{key}/bar"), controls), 0.),
+                    p.background,
+                ),
+                Some(p.border),
+                Some(1.),
+                kit::radius::CONTROL as f32,
+            ),
+            2.,
+        ),
+        Length::Shrink,
+    );
+    kit::padded(
+        height(
+            aligned_y(
+                aligned_x(kit::container(key, bar), AlignX::Right),
+                AlignY::Top,
+            ),
+            Length::Fill,
+        ),
+        wire::Edges {
             top: 0.,
             right: kit::spacing::LG as f32,
             bottom: 0.,
             left: 0.,
-        })
-        .node()
+        },
+    )
 }
 
 fn unread_marker_node(key: String) -> Node {
@@ -722,19 +735,23 @@ fn unread_marker_node(key: String) -> Node {
     if let Node::Rule { color, .. } = &mut rule {
         *color = Some(kit::rgba(p.accent));
     }
-    El::centered_row(
-        key.clone(),
-        [
-            kit::container(format!("{key}/line"), rule),
-            kit::nowrap(kit::colored(
-                kit::caption(format!("{key}/label"), "New messages"),
-                p.accent_foreground,
-            )),
-        ],
+    padded_xy(
+        kit::spaced(
+            kit::centered_row(
+                key.clone(),
+                [
+                    kit::container(format!("{key}/line"), rule),
+                    kit::nowrap(kit::colored(
+                        kit::caption(format!("{key}/label"), "New messages"),
+                        p.accent_foreground,
+                    )),
+                ],
+            ),
+            kit::spacing::SM as f32,
+        ),
+        16.,
+        kit::spacing::XS as f32,
     )
-    .gap(kit::spacing::SM as f32)
-    .pad_xy(16., kit::spacing::XS as f32)
-    .node()
 }
 
 pub fn selection_bar(chat: &Chat, key: &str, cx: &mut Cx<Chat>) -> Node {
@@ -746,23 +763,22 @@ pub fn selection_bar(chat: &Chat, key: &str, cx: &mut Cx<Chat>) -> Node {
     };
     let clear = cx.on(|chat, _| chat.copy = None);
     let copy = cx.on(|chat, cx| chat.copy_range(cx));
-    El(kit::notice(
-        key.clone(),
-        El::centered_row(
-            format!("{key}/row"),
-            [
-                El(kit::strong(format!("{key}/count"), label))
-                    .fill_w()
-                    .node(),
-                subtle(format!("{key}/clear"), "Clear", Some(clear)),
-                super::el::primary(format!("{key}/copy"), "Copy", Some(copy)),
-            ],
-        )
-        .node(),
-        Tone::Accent,
-    ))
-    .pad_xy(16., kit::spacing::XXS as f32)
-    .node()
+    padded_xy(
+        kit::notice(
+            key.clone(),
+            kit::centered_row(
+                format!("{key}/row"),
+                [
+                    fill_width(kit::strong(format!("{key}/count"), label)),
+                    subtle(format!("{key}/clear"), "Clear", Some(clear)),
+                    super::controls::primary(format!("{key}/copy"), "Copy", Some(copy)),
+                ],
+            ),
+            Tone::Accent,
+        ),
+        16.,
+        kit::spacing::XXS as f32,
+    )
 }
 
 /// What stands where the composer would: why the reader may not post here.
@@ -774,20 +790,22 @@ fn gate(chat: &Chat, key: &str, refusal: &str, cx: &mut Cx<Chat>) -> Node {
                 (!chat.session.busy).then(|| cx.on(|chat, cx| chat.set_archived(false, cx)));
             kit::notice(
                 key.clone(),
-                El::centered_row(
-                    format!("{key}/row"),
-                    [
-                        El(kit::wrapping(kit::text(
-                            format!("{key}/text"),
-                            "This channel is archived. It keeps its history and takes no new messages.",
-                        )))
-                        .fill_w()
-                        .node(),
-                        with_label(action(format!("{key}/unarchive"), "Unarchive", reopen), "Unarchive channel"),
-                    ],
-                )
-                .gap(kit::spacing::LG as f32)
-                .node(),
+                kit::spaced(
+                    kit::centered_row(
+                        format!("{key}/row"),
+                        [
+                            fill_width(kit::wrapping(kit::text(
+                                format!("{key}/text"),
+                                "This channel is archived. It keeps its history and takes no new messages.",
+                            ))),
+                            with_label(
+                                action(format!("{key}/unarchive"), "Unarchive", reopen),
+                                "Unarchive channel",
+                            ),
+                        ],
+                    ),
+                    kit::spacing::LG as f32,
+                ),
                 Tone::Neutral,
             )
         }

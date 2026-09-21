@@ -1,8 +1,8 @@
 //! The frame, GPUI-style: one render function per pane reading the state,
 //! handlers registered as closures over the smallest slice of it, nodes
-//! styled through the fluent `El` builder. Nothing here mutates state.
+//! styled with the kit and the helpers in `controls`. Nothing here mutates state.
+pub mod controls;
 pub mod dialogs;
-pub mod el;
 pub mod menu;
 pub mod message;
 pub mod room;
@@ -13,7 +13,7 @@ use ducktape_view_guest::view::Cx;
 use ducktape_view_guest::wire::{self, AlignX, AlignY, Length, Node, kit};
 
 use crate::Chat;
-use el::{El, glyph};
+use controls::*;
 
 pub fn render(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
     let screen = if chat.session.connected {
@@ -28,9 +28,7 @@ pub fn render(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
     // every press reports where it landed before the control under it
     // answers, so a menu opens at the pointer
     let pressed = cx.on_value(|chat, at: (f32, f32), _| chat.layout.press = at);
-    let screen = El::mouse_area("chat/press-area", screen)
-        .on_press_at(pressed)
-        .node();
+    let screen = with_press_at(mouse_area("chat/press-area", screen), pressed);
     let screen = match menu::floating(chat, cx) {
         None => screen,
         Some(menu) => {
@@ -145,7 +143,7 @@ fn connected(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
         }));
         panes.push(side::thread(chat, cx));
     }
-    El::row("chat/panes", panes).gap(0.).fill().node()
+    fill(kit::spaced(kit::row("chat/panes", panes), 0.))
 }
 
 /// A 10px grab strip with the hairline down its middle.
@@ -154,14 +152,19 @@ fn divider(key: &str, cx: &mut Cx<Chat>, drag: impl Fn(&mut Chat, f32) + 'static
         drag(chat, dx as f32);
         chat.layout.clamp();
     });
-    let strip = El(kit::container(
-        format!("{key}/strip"),
-        kit::vertical_divider(format!("{key}/rule")),
-    ))
-    .w(Length::Fixed(10.))
-    .h(Length::Fill)
-    .align_x(AlignX::Center)
-    .node();
+    let strip = aligned_x(
+        height(
+            width(
+                kit::container(
+                    format!("{key}/strip"),
+                    kit::vertical_divider(format!("{key}/rule")),
+                ),
+                Length::Fixed(10.),
+            ),
+            Length::Fill,
+        ),
+        AlignX::Center,
+    );
     Node::ResizeHandle {
         key: key.into(),
         on_press: None,
@@ -174,25 +177,27 @@ fn divider(key: &str, cx: &mut Cx<Chat>, drag: impl Fn(&mut Chat, f32) + 'static
 
 /// A pane's title row: a heading, what stands beside it, and its close.
 pub(crate) fn pane_header(key: &str, children: impl IntoIterator<Item = Node>) -> Node {
-    El::centered_row(key, children)
-        .fill_w()
-        .h(Length::Fixed(40.))
-        .pad(wire::Edges {
+    kit::padded(
+        height(
+            fill_width(kit::centered_row(key, children)),
+            Length::Fixed(40.),
+        ),
+        wire::Edges {
             top: 0.,
             right: kit::spacing::SM as f32,
             bottom: 0.,
             left: 16.,
-        })
-        .node()
+        },
+    )
 }
 
 /// A one-line title that gives way to what stands beside it: a clipped box
 /// sized to its content shrinks to what its row leaves.
 pub(crate) fn gives_way(key: &str, title: Node) -> Node {
-    El(kit::container(key, kit::nowrap(title)))
-        .w(Length::Shrink)
-        .clip()
-        .node()
+    clipped(width(
+        kit::container(key, kit::nowrap(title)),
+        Length::Shrink,
+    ))
 }
 
 pub(crate) fn close_glyph(

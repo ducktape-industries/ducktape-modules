@@ -3,7 +3,7 @@
 use ducktape_view_guest::view::Cx;
 use ducktape_view_guest::wire::{self, AlignX, ButtonPreset, Length, Node, kit};
 
-use super::el::{El, subtle, tall_glyph};
+use super::controls::*;
 use crate::client::reaction_palette;
 use crate::{Chat, Menu, Mode, Pane};
 
@@ -57,11 +57,7 @@ pub fn floating(chat: &Chat, cx: &mut Cx<Chat>) -> Option<Node> {
             blur: Some(16.),
         },
         radius: Some([kit::radius::CARD as f32; 4]),
-        content: Box::new(
-            El(message_menu(chat, menu, cx))
-                .w(Length::Fixed(size.0))
-                .node(),
-        ),
+        content: Box::new(width(message_menu(chat, menu, cx), Length::Fixed(size.0))),
     })
 }
 
@@ -109,11 +105,10 @@ fn message_menu(chat: &Chat, menu: &Menu, cx: &mut Cx<Chat>) -> Node {
                 item(format!("{prefix}edit"), "✎", "Edit message", edit),
                 item(format!("{prefix}delete"), "🗑", "Delete message", delete),
             ]);
-            children.push(
-                El::column(format!("{prefix}menu-actions"), items)
-                    .gap(MENU_ITEM_GAP)
-                    .node(),
-            );
+            children.push(kit::spaced(
+                kit::column(format!("{prefix}menu-actions"), items),
+                MENU_ITEM_GAP,
+            ));
         }
         Mode::Reactions => {
             let cells = reaction_palette()
@@ -155,18 +150,17 @@ fn message_menu(chat: &Chat, menu: &Menu, cx: &mut Cx<Chat>) -> Node {
                 cx,
             ));
             let close = cx.on(|chat, _| chat.close_menu());
-            children.push(
-                El::column(
+            children.push(aligned_x(
+                kit::column(
                     format!("{prefix}close-row"),
                     [subtle(
                         format!("{prefix}close"),
                         "Cancel message edit",
                         Some(close),
                     )],
-                )
-                .align_x(AlignX::Right)
-                .node(),
-            );
+                ),
+                AlignX::Right,
+            ));
         }
         Mode::Delete => {
             let close = cx.on(|chat, _| chat.close_menu());
@@ -179,24 +173,25 @@ fn message_menu(chat: &Chat, menu: &Menu, cx: &mut Cx<Chat>) -> Node {
                 format!("{prefix}confirm-detail"),
                 "It leaves the room for everyone.",
             )));
-            children.push(
-                El::row(
-                    format!("{prefix}confirm-row"),
-                    [
-                        kit::spacer(),
-                        subtle(format!("{prefix}close"), "Cancel", Some(close)),
-                        kit::button(
-                            format!("{prefix}confirm-delete"),
-                            "Delete",
-                            confirm,
-                            ButtonPreset::Danger,
-                        ),
-                    ],
-                )
-                .gap(kit::spacing::XS as f32)
-                .align_x(AlignX::Right)
-                .node(),
-            );
+            children.push(aligned_x(
+                kit::spaced(
+                    kit::row(
+                        format!("{prefix}confirm-row"),
+                        [
+                            kit::spacer(),
+                            subtle(format!("{prefix}close"), "Cancel", Some(close)),
+                            kit::button(
+                                format!("{prefix}confirm-delete"),
+                                "Delete",
+                                confirm,
+                                ButtonPreset::Danger,
+                            ),
+                        ],
+                    ),
+                    kit::spacing::XS as f32,
+                ),
+                AlignX::Right,
+            ));
         }
     }
     let inset = match menu.mode {
@@ -206,15 +201,16 @@ fn message_menu(chat: &Chat, menu: &Menu, cx: &mut Cx<Chat>) -> Node {
     };
     let mut frame = kit::card(
         key,
-        El::column(format!("{prefix}menu"), children)
-            .gap(kit::spacing::SM as f32)
-            .node(),
+        kit::spaced(
+            kit::column(format!("{prefix}menu"), children),
+            kit::spacing::SM as f32,
+        ),
     );
     if let Node::Container { padding, .. } = &mut frame {
         *padding = Some(wire::Edges::all(inset));
     }
     match menu.mode {
-        Mode::Editing => El(frame).pad_xy(16., kit::spacing::XXS as f32).node(),
+        Mode::Editing => padded_xy(frame, 16., kit::spacing::XXS as f32),
         _ => frame,
     }
 }
@@ -255,22 +251,24 @@ pub fn origin(press: (f32, f32), size: (f32, f32), viewport: (f32, f32)) -> (f32
 
 /// One row of a dropdown: a glyph, then the words, left-aligned.
 fn item(key: String, glyph: &str, label: &str, on_press: Option<u32>) -> Node {
-    let content = El::centered_row(
-        format!("{key}/row"),
-        [
-            El(kit::nowrap(tall_glyph(
-                format!("{key}/glyph"),
-                glyph,
-                kit::type_scale::BODY as f32,
-                MENU_ITEM_HEIGHT,
-            )))
-            .w(Length::Fixed(20.))
-            .node(),
-            kit::nowrap(kit::text(format!("{key}/label"), label)),
-        ],
-    )
-    .gap(kit::spacing::SM as f32)
-    .node();
+    let content = kit::spaced(
+        kit::centered_row(
+            format!("{key}/row"),
+            [
+                width(
+                    kit::nowrap(tall_glyph(
+                        format!("{key}/glyph"),
+                        glyph,
+                        kit::type_scale::BODY as f32,
+                        MENU_ITEM_HEIGHT,
+                    )),
+                    Length::Fixed(20.),
+                ),
+                kit::nowrap(kit::text(format!("{key}/label"), label)),
+            ],
+        ),
+        kit::spacing::SM as f32,
+    );
     let mut button = kit::button_child(key, content, on_press, ButtonPreset::Subtle);
     if let Node::Button {
         label: accessible,
