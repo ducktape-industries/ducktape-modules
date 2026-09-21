@@ -100,7 +100,7 @@ fixture-guests-check:
 # the signing/identity graph (blst does not build for wasm32, and a view has no
 # business holding keys); add a crate here when a view starts linking it.
 VIEW_LINKABLE := duck-address refusal-class view-wire view-guest design duckfs-core
-VIEW_FORBIDDEN := blst commonware-cryptography keyscheme identity-wire governance-wire
+VIEW_FORBIDDEN := blst commonware-cryptography keyscheme governance-wire
 
 .PHONY: view-wasm-check
 

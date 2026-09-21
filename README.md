@@ -20,10 +20,12 @@ depends on it.
   `wasm32-unknown-unknown` only.
 - **`crates/kernel/sdk-testkit`** — dev-only test doubles for the `sdk`
   boundary traits. `[dev-dependencies]` only.
-- **`crates/modules/**/wire`** — one wire crate per module: its messages,
-  queries, replies and records, with their codecs, and no module behind them.
-  A module's name resolves to its wire crate, so `identity = { workspace =
-  true }` links `identity-wire` under the name `identity`.
+- **`crates/modules/system/*`** — the system modules. Each crate is its own
+  api: the types and codecs at the root, a `client` of typed functions over
+  `Ctx` for a sibling that calls it, and the module behind a feature
+  (`guest` for the wasm port). `identity = { workspace = true }` links the
+  module crate; nothing links a separate wire crate. (`identity` and
+  `attribution` are on this shape; the rest still ship a `wire` subcrate.)
 - **`crates/kernel/{wasm-host, module-artifact, index-guest, keyscheme,
   blobstore, node-work}`** and the leaf libraries
   (`duckfs/{core,disk}`, `duckdns`, `git-primitives`, `run-envelope`,
@@ -63,7 +65,7 @@ Downstream repositories name it as a cargo git dependency in their
 ```toml
 [workspace.dependencies]
 sdk = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev" }
-identity = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "identity-wire" }
+identity = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "identity" }
 ```
 
 A wasm module pins `ducktape-module-sdk` out of this repository by revision and

@@ -10,10 +10,11 @@
 # This workspace depends on NO other ducktape repository. Everything else in
 # the platform depends on it.
 #
-# A MODULE'S NAME RESOLVES TO ITS WIRE CRATE: `identity = { workspace = true }`
-# links `identity-wire` under the name `identity`, so the kernel, a daemon, a
-# service, a view and a sibling module all speak a module's format without
-# linking the module.
+# A MODULE IS ITS OWN API: `identity = { workspace = true }` links the module
+# crate, whose root is its types and codecs plus a `client` of typed functions
+# over `Ctx`; the module logic rides features (`guest`). The kernel, a daemon,
+# a service, a view and a sibling module all link the same crate. (identity and
+# attribution are on this shape; the other system modules still ship `wire`.)
 
 [workspace]
 resolver = "2"
@@ -59,12 +60,10 @@ members = [
 
     # system modules — wire surfaces
     "crates/modules/system/acl/wire",
-    "crates/modules/system/attribution/wire",
     "crates/modules/system/capability/wire",
     "crates/modules/system/dispatch/wire",
     "crates/modules/system/gateway/wire",
     "crates/modules/system/governance/wire",
-    "crates/modules/system/identity/wire",
     "crates/modules/system/kv/wire",
     "crates/modules/system/modules/wire",
     "crates/modules/system/saga/wire",
@@ -199,8 +198,7 @@ ducktape-view-guest = { package = "view-guest", path = "crates/view-guest" }
 # ---- internal: module wire surfaces
 acl = { package = "acl-wire", path = "crates/modules/system/acl/wire" }
 acl-wire = { path = "crates/modules/system/acl/wire" }
-attribution = { package = "attribution-wire", path = "crates/modules/system/attribution/wire" }
-attribution-wire = { path = "crates/modules/system/attribution/wire" }
+attribution = { path = "crates/modules/system/attribution" }
 capability = { package = "capability-wire", path = "crates/modules/system/capability/wire" }
 capability-wire = { path = "crates/modules/system/capability/wire" }
 dispatch = { package = "dispatch-wire", path = "crates/modules/system/dispatch/wire" }
@@ -209,8 +207,7 @@ gateway = { package = "gateway-wire", path = "crates/modules/system/gateway/wire
 gateway-wire = { path = "crates/modules/system/gateway/wire" }
 governance = { package = "governance-wire", path = "crates/modules/system/governance/wire" }
 governance-wire = { path = "crates/modules/system/governance/wire" }
-identity = { package = "identity-wire", path = "crates/modules/system/identity/wire" }
-identity-wire = { path = "crates/modules/system/identity/wire" }
+identity = { path = "crates/modules/system/identity" }
 kv = { package = "kv-wire", path = "crates/modules/system/kv/wire" }
 kv-wire = { path = "crates/modules/system/kv/wire" }
 modules = { package = "modules-wire", path = "crates/modules/system/modules/wire" }

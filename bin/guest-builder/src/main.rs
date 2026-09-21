@@ -154,12 +154,12 @@ impl GuestKind {
             GuestKind::Component => format!(
                 "module `{name}` declares no `guest` feature — the port lives in the \
                  module crate (a `src/guest.rs` behind `guest = [\"dep:ducktape-module-sdk\"]`); \
-                 see crates/modules/apps/tasks for the shape"
+                 see crates/tasks for the shape"
             ),
             GuestKind::Index => format!(
                 "module `{name}` declares no `index-guest` feature — the index mapper \
                  lives in the module crate (a `src/index_guest.rs` behind \
-                 `index-guest = [\"index_guest/guest\"]`); see crates/modules/apps/tasks \
+                 `index-guest = [\"index_guest/guest\"]`); see crates/tasks \
                  for the shape"
             ),
         }
@@ -1491,7 +1491,7 @@ dependencies = [
                 {
                     "name": "chat",
                     "source": format!("git+{PLATFORM}#abcdef0"),
-                    "manifest_path": "/home/u/.cargo/git/checkouts/ducktape-1234/abcdef0/crates/modules/apps/chat/Cargo.toml",
+                    "manifest_path": "/home/u/.cargo/git/checkouts/ducktape-1234/abcdef0/crates/chat/Cargo.toml",
                 },
                 {
                     "name": "ducktape-module-sdk",
@@ -1543,7 +1543,7 @@ dependencies = [
                 {
                     "name": "chat",
                     "source": format!("git+{PLATFORM}#abcdef0"),
-                    "manifest_path": format!("{checkout}/crates/modules/apps/chat/Cargo.toml"),
+                    "manifest_path": format!("{checkout}/crates/chat/Cargo.toml"),
                 },
                 {
                     "name": "ducktape-module-sdk",
@@ -1553,7 +1553,7 @@ dependencies = [
             ]
         });
         let inputs = platform_inputs(&graph, Path::new(checkout), PLATFORM).expect("inputs");
-        assert!(inputs.contains(Path::new("crates/modules/apps/chat")));
+        assert!(inputs.contains(Path::new("crates/chat")));
         assert!(inputs.contains(Path::new("Cargo.lock")));
         assert!(
             !inputs
@@ -1566,8 +1566,8 @@ dependencies = [
     #[test]
     fn the_checkout_root_is_the_manifest_minus_the_repository_place() {
         let root = checkout_root_of(
-            Path::new("/home/u/.cargo/git/checkouts/ducktape-1234/abcdef0/crates/modules/apps/chat/Cargo.toml"),
-            Path::new("crates/modules/apps/chat"),
+            Path::new("/home/u/.cargo/git/checkouts/ducktape-1234/abcdef0/crates/chat/Cargo.toml"),
+            Path::new("crates/chat"),
         )
         .expect("root");
         assert_eq!(
@@ -1577,7 +1577,7 @@ dependencies = [
 
         let wrong_place = checkout_root_of(
             Path::new("/somewhere/else/tasks/Cargo.toml"),
-            Path::new("crates/modules/apps/chat"),
+            Path::new("crates/chat"),
         );
         assert!(wrong_place.is_err());
     }

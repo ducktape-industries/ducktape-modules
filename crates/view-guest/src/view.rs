@@ -451,6 +451,12 @@ impl<V: View> Shell<V> {
         self.view.borrow()
     }
 
+    /// The state, writable: for a test that puts the view in a position the
+    /// protocol alone reaches slowly. Take effect on the next tick.
+    pub fn state_mut(&self) -> std::cell::RefMut<'_, V> {
+        self.view.borrow_mut()
+    }
+
     pub fn snapshot(&self) -> Result<Vec<u8>, String> {
         serde_json::to_vec(&*self.view.borrow()).map_err(|error| error.to_string())
     }

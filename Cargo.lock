@@ -111,15 +111,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "attribution-wire"
-version = "0.1.0"
-dependencies = [
- "borsh",
- "sdk",
- "serde",
-]
-
-[[package]]
 name = "autocfg"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1589,6 +1580,7 @@ dependencies = [
  "async-trait",
  "borsh",
  "commonware-cryptography",
+ "duck-address",
  "ducktape-module-sdk",
  "futures",
  "k256",
@@ -1598,17 +1590,6 @@ dependencies = [
  "sdk-testkit",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "identity-wire"
-version = "0.1.0"
-dependencies = [
- "borsh",
- "duck-address",
- "keyscheme",
- "sdk",
- "serde",
 ]
 
 [[package]]
