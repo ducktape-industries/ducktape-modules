@@ -8,7 +8,7 @@ use commonware_runtime::{Runner as _, deterministic};
 use fixture_probe::Step;
 use host::{Applied, Block, BlockId, Founding, Genesis, Host, Layer, Limits, Receipt, Submission};
 use keyscheme::testkit;
-use modules::{AUTHORITY, AccountNumber, Page, admission, identity, module_registry, valset};
+use modules::{AUTHORITY, AccountNumber, Page, identity, module_registry, valset};
 
 macro_rules! program {
     ($name:literal) => {
@@ -77,15 +77,6 @@ struct Net {
 
 impl Net {
     async fn found(context: Ctx, dir: &std::path::Path) -> Net {
-        let admission = founding(admission::PROGRAM, program!("admission"));
-        Net::found_with(context, dir, admission).await
-    }
-
-    async fn found_with_puppet_admission(context: Ctx, dir: &std::path::Path) -> Net {
-        Net::found_with(context, dir, probe(admission::PROGRAM)).await
-    }
-
-    async fn found_with(context: Ctx, dir: &std::path::Path, admission: Founding) -> Net {
         let genesis = Genesis {
             network: NETWORK.to_vec(),
             module_registry: program!("module_registry").to_vec(),
@@ -93,7 +84,6 @@ impl Net {
             validators: vec![member(1), member(2)],
             programs: vec![
                 founding(identity::PROGRAM, program!("identity")),
-                admission,
                 probe(AUTHORITY),
                 probe("probe"),
             ],
@@ -212,31 +202,6 @@ impl Net {
         self.sent_by(AUTHORITY, target, op).await
     }
 
-    async fn as_admission(&mut self, op: &valset::Op) -> Receipt {
-        self.sent_by(admission::PROGRAM, valset::PROGRAM, op).await
-    }
-
-    async fn enroll(&mut self, seed: u64, address: &str) -> Receipt {
-        let signer = public(seed);
-        let op = admission::Op::Enroll {
-            address: address.to_owned(),
-        };
-        let submission = self.submission(&signer, admission::PROGRAM, abi::encode(&op));
-        let applied = self.block(vec![submission]).await;
-        self.consumed(&signer, &applied.submissions[0]);
-        match &applied.submissions[0].outcome {
-            Outcome::Applied { .. } => {}
-            Outcome::Rejected(refusal) => panic!("admission rejected the enroll: {refusal}"),
-        }
-        let applied = self.tick().await;
-        applied
-            .deliveries
-            .into_iter()
-            .map(|delivered| delivered.receipt)
-            .find(|receipt| receipt.program == valset::PROGRAM)
-            .unwrap()
-    }
-
     async fn ask<Q: BorshSerialize, R: BorshDeserialize>(&self, program: &str, query: &Q) -> R {
         let answer = self
             .host
@@ -291,7 +256,6 @@ fn founding_seats_the_validators_and_every_program_answers() {
         for program in [
             module_registry::PROGRAM,
             valset::PROGRAM,
-            admission::PROGRAM,
             identity::PROGRAM,
             AUTHORITY,
         ] {
@@ -304,11 +268,10 @@ fn founding_seats_the_validators_and_every_program_answers() {
                 .iter()
                 .all(|membership| membership.standing == valset::Standing::Validator)
         );
-        let seated = net.host.epoch_seating(0).unwrap().unwrap();
-        assert_eq!(seated.validators.len(), 2);
-        assert_eq!(seated.members.len(), 2);
-        assert!(seated.members.contains(&member(1)));
-        assert!(seated.members.contains(&member(2)));
+        let seated = net.host.epoch_members(0).unwrap().unwrap();
+        assert_eq!(seated.len(), 2);
+        assert!(seated.contains(&member(1)));
+        assert!(seated.contains(&member(2)));
         let identity::Reply::Accounts(accounts) = net
             .ask(
                 identity::PROGRAM,
@@ -323,10 +286,10 @@ fn founding_seats_the_validators_and_every_program_answers() {
 }
 
 #[test]
-fn admission_seats_members_and_the_next_epoch_reads_them() {
+fn the_authority_seats_members_and_the_next_epoch_reads_them() {
     deterministic::Runner::default().start(|context| async move {
         let dir = tempfile::tempdir().unwrap();
-        let mut net = Net::found_with_puppet_admission(context, dir.path()).await;
+        let mut net = Net::found(context, dir.path()).await;
         let stranger = net
             .refuse(
                 &public(1),
@@ -336,14 +299,18 @@ fn admission_seats_members_and_the_next_epoch_reads_them() {
             .await;
         assert_eq!(stranger, reason::UNAUTHORIZED);
         let other_program = net
-            .as_authority(
+            .sent_by(
+                "probe",
                 valset::PROGRAM,
                 &valset::Op::Set(membership(3, valset::Standing::Resident)),
             )
             .await;
         assert_eq!(refusal_of(&other_program), reason::UNAUTHORIZED);
         let admitted = net
-            .as_admission(&valset::Op::Set(membership(3, valset::Standing::Resident)))
+            .as_authority(
+                valset::PROGRAM,
+                &valset::Op::Set(membership(3, valset::Standing::Resident)),
+            )
             .await;
         output_of(&admitted);
         assert_eq!(net.memberships().await.len(), 3);
@@ -355,30 +322,34 @@ fn admission_seats_members_and_the_next_epoch_reads_them() {
         };
         assert_eq!(members.len(), 3);
         let promoted = net
-            .as_admission(&valset::Op::Set(membership(3, valset::Standing::Validator)))
+            .as_authority(
+                valset::PROGRAM,
+                &valset::Op::Set(membership(3, valset::Standing::Validator)),
+            )
             .await;
         output_of(&promoted);
         assert_eq!(net.validators().await.len(), 3);
         let epoch = (net.height + EPOCH_LENGTH) / EPOCH_LENGTH;
-        while net.host.epoch_seating(epoch).unwrap().is_none() {
+        while net.host.epoch_members(epoch).unwrap().is_none() {
             net.tick().await;
         }
-        let seating = net.host.epoch_seating(epoch).unwrap().unwrap();
-        assert_eq!(seating.validators.len(), 3);
-        assert_eq!(seating.members.len(), 3);
+        assert_eq!(net.host.epoch_members(epoch).unwrap().unwrap().len(), 3);
         for seed in [1, 2] {
             let removed = net
-                .as_admission(&valset::Op::Remove { key: public(seed) })
+                .as_authority(valset::PROGRAM, &valset::Op::Remove { key: public(seed) })
                 .await;
             output_of(&removed);
         }
         assert_eq!(net.validators().await, vec![public(3)]);
         let last = net
-            .as_admission(&valset::Op::Remove { key: public(3) })
+            .as_authority(valset::PROGRAM, &valset::Op::Remove { key: public(3) })
             .await;
         assert_eq!(refusal_of(&last), reason::WRONG_STATE);
         let demoted = net
-            .as_admission(&valset::Op::Set(membership(3, valset::Standing::Resident)))
+            .as_authority(
+                valset::PROGRAM,
+                &valset::Op::Set(membership(3, valset::Standing::Resident)),
+            )
             .await;
         assert_eq!(refusal_of(&demoted), reason::WRONG_STATE);
         let valset::Reply::Membership(Some(standing)) = net
@@ -391,60 +362,6 @@ fn admission_seats_members_and_the_next_epoch_reads_them() {
             panic!()
         };
         assert_eq!(standing.standing, valset::Standing::Validator);
-    });
-}
-
-#[test]
-fn a_stranger_enrolls_as_a_resident_and_a_validator_keeps_its_seat() {
-    deterministic::Runner::default().start(|context| async move {
-        let dir = tempfile::tempdir().unwrap();
-        let mut net = Net::found(context, dir.path()).await;
-        let from_a_program = net
-            .sent_by(
-                "probe",
-                admission::PROGRAM,
-                &admission::Op::Enroll {
-                    address: "203.0.113.9:9000".to_owned(),
-                },
-            )
-            .await;
-        assert_eq!(refusal_of(&from_a_program), reason::UNAUTHORIZED);
-        let enrolled = net.enroll(3, "203.0.113.9:9000").await;
-        output_of(&enrolled);
-        let valset::Reply::Membership(Some(resident)) = net
-            .ask(
-                valset::PROGRAM,
-                &valset::Query::Membership { key: public(3) },
-            )
-            .await
-        else {
-            panic!()
-        };
-        assert_eq!(resident.standing, valset::Standing::Resident);
-        assert_eq!(resident.address, "203.0.113.9:9000");
-        assert_eq!(net.validators().await.len(), 2);
-        let moved = net.enroll(1, "203.0.113.1:9001").await;
-        output_of(&moved);
-        let valset::Reply::Membership(Some(validator)) = net
-            .ask(
-                valset::PROGRAM,
-                &valset::Query::Membership { key: public(1) },
-            )
-            .await
-        else {
-            panic!()
-        };
-        assert_eq!(validator.standing, valset::Standing::Validator);
-        assert_eq!(validator.address, "203.0.113.1:9001");
-        let epoch = (net.height + EPOCH_LENGTH) / EPOCH_LENGTH;
-        while net.host.epoch_seating(epoch).unwrap().is_none() {
-            net.tick().await;
-        }
-        let seating = net.host.epoch_seating(epoch).unwrap().unwrap();
-        assert_eq!(seating.validators.len(), 2);
-        assert!(!seating.validators.contains(&public(3)));
-        assert_eq!(seating.members.len(), 3);
-        assert!(seating.members.iter().any(|member| member.key == public(3)));
     });
 }
 

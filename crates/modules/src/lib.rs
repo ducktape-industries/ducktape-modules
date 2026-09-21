@@ -1,4 +1,3 @@
-pub mod admission;
 pub mod identity;
 pub mod module_registry;
 pub mod valset;
@@ -96,10 +95,6 @@ pub mod program {
 
     pub fn unauthorized(sentence: impl Into<String>) -> Refusal {
         Refusal::new(reason::UNAUTHORIZED, sentence)
-    }
-
-    pub fn unsupported(sentence: impl Into<String>) -> Refusal {
-        Refusal::new(reason::UNSUPPORTED, sentence)
     }
 }
 

@@ -9,7 +9,7 @@ repository.
 | `crates/sdk/guest` | what a program compiles against: the `Program` trait, the `Execute` and `Query` contexts its entry points receive, `program!` |
 | `crates/sdk/ducklink` | the `duck://` link: `duck://<chain>/<program>/<tail…>`, one spelling per name, no program names known here |
 | `crates/sdk/view-wire`, `view-guest`, `design` | the host<->view wire, the runtime a wasm view is written against, the palette |
-| `crates/modules` | the boot set: the `modules` crate (each program's `Op`, `Query` and `Reply`, `AUTHORITY`, `Page`, the helpers a program builds on), `system/` (the wasm32 workspace of `module-registry`, `valset`, `admission` and `identity`; `make wasm-programs` rebuilds them into `system/wasm/`), and `tests/system.rs`, which founds ducktape's host over the committed bytes and drives every program |
+| `crates/modules` | the boot set: the `modules` crate (each program's `Op`, `Query` and `Reply`, `AUTHORITY`, `Page`, the helpers a program builds on), `system/` (the wasm32 workspace of `module-registry`, `valset` and `identity`; `make wasm-programs` rebuilds them into `system/wasm/`), and `tests/system.rs`, which founds ducktape's host over the committed bytes and drives every program |
 | `crates/app/chat`, `chat-program`, `chat-view` | the reference app module: `chat` is its types and rules over a `Read`/`Write` store (native, tested), `chat-program` the wasm32 program that runs them over the host, `chat-view` the view, which links `chat` for its types and never the program |
 | `crates/app/gitcore` | git as a `no_std` library over one `Objects` trait: objects, packs, walks, diff, merge, and the server side of the wire protocol (receive-pack v1, upload-pack v2) |
 | `crates/app/forge` | the git server as a program: a push is one op whose input is the receive-pack body a client sent, a merge is an op, fetch and the ref advertisement are queries; a git object's blob id is its oid |
@@ -22,10 +22,8 @@ the daemon and the CLI) lives in ducktape; the `modules` suite links it at
 the revision `Cargo.toml` pins, patched to compile against `crates/sdk/abi`
 and `crates/sdk/guest`, so a copy that drifts from the kernel fails to build.
 
-`module-registry` takes its writes from the program named `modules::AUTHORITY`
-(`governance`); no program in this tree implements it. `valset` takes its
-writes from `admission`, which enrolls the signer of any frame as a resident
-at the address it names and never lowers a standing it already holds.
+`valset` and `module-registry` take their writes from the program named
+`modules::AUTHORITY` (`governance`); no program in this tree implements it.
 The eight system modules beyond the boot set are archived at
 `ducktape-industries/ducktape-system-modules-archive`.
 

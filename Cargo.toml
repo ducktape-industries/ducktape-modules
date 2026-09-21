@@ -62,10 +62,10 @@ forge = { path = "crates/app/forge" }
 
 # ---- the host the boot set's suite runs on, the probe fixture it seats, the
 # key schemes it signs with, and the runtime forge's rig drives its wasm on
-host = { git = "https://github.com/ducktape-industries/ducktape", rev = "e29a79a1f863704e7f6b0fe1e4a37249bce19843" }
-fixture-probe = { git = "https://github.com/ducktape-industries/ducktape", rev = "e29a79a1f863704e7f6b0fe1e4a37249bce19843" }
-keyscheme = { git = "https://github.com/ducktape-industries/ducktape", rev = "e29a79a1f863704e7f6b0fe1e4a37249bce19843" }
-runtime = { git = "https://github.com/ducktape-industries/ducktape", rev = "e29a79a1f863704e7f6b0fe1e4a37249bce19843" }
+host = { git = "https://github.com/ducktape-industries/ducktape", rev = "5d1d1f61d89960164cab919dfbb16a1d8cdb3b36" }
+fixture-probe = { git = "https://github.com/ducktape-industries/ducktape", rev = "5d1d1f61d89960164cab919dfbb16a1d8cdb3b36" }
+keyscheme = { git = "https://github.com/ducktape-industries/ducktape", rev = "5d1d1f61d89960164cab919dfbb16a1d8cdb3b36" }
+runtime = { git = "https://github.com/ducktape-industries/ducktape", rev = "5d1d1f61d89960164cab919dfbb16a1d8cdb3b36" }
 commonware-cryptography = "2026.9.0"
 commonware-runtime = "2026.9.0"
 

@@ -1,6 +1,6 @@
 use abi::{Env, Refusal, Scan};
 use guest::{Execute, Program, Query as QueryCtx, Reads};
-use modules::admission;
+use modules::AUTHORITY;
 use modules::program::{bytes_key, invalid, wrong_state};
 use modules::valset::{Genesis, Membership, Op, Query, Reply, Standing};
 
@@ -28,7 +28,7 @@ impl Program for Valset {
     }
 
     fn execute(ctx: &mut Execute, env: &Env, payload: &[u8]) -> Result<(), Refusal> {
-        modules::program::from(env, admission::PROGRAM)?;
+        modules::program::from(env, AUTHORITY)?;
         match abi::decode(payload)? {
             Op::Set(membership) => set(ctx, membership),
             Op::Remove { key } => remove(ctx, &key),
