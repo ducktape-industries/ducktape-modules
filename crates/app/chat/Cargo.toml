@@ -3,19 +3,9 @@ name = "chat"
 version.workspace = true
 edition.workspace = true
 
-[lib]
-crate-type = ["cdylib", "rlib"]
-
 [dependencies]
 abi = { workspace = true }
-guest = { workspace = true }
-identity = { path = "../../system/identity", default-features = false }
 borsh = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 unicode-normalization = { workspace = true }
-
-[features]
-default = ["program"]
-# the wasm exports; off when the view links chat for its types
-program = []
