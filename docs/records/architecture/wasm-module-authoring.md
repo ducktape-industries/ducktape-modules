@@ -246,13 +246,12 @@ crate-type = ["cdylib"]
 [dependencies]
 ducktape-module-sdk = { git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "<sha>" }
 
-# the wasm32 patch set every guest graph needs (the SDK's stubs at the same
-# revision): deterministic getrandom refusals, a C-free blst.
+# the wasm32 patch set every guest graph needs: deterministic getrandom
+# refusals (the SDK's stubs at the same revision).
 [patch.crates-io]
 getrandom-02 = { package = "getrandom", version = "0.2", git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "<sha>" }
 getrandom-03 = { package = "getrandom", version = "0.3", git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "<sha>" }
 getrandom-04 = { package = "getrandom", version = "0.4", git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "<sha>" }
-blst = { git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "<sha>" }
 ```
 
 `src/lib.rs` is the guest itself: `ducktape_module_sdk::store_guest!` (or
