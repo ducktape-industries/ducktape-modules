@@ -183,7 +183,7 @@ fn channel_button(
             p.success,
         )));
     }
-    if info.members_only() {
+    if crate::chat::members_only(info) {
         children.push(kit::nowrap(kit::caption(
             format!("{key}/members-only"),
             "Members only",

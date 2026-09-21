@@ -29,4 +29,5 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo test --locked --workspace --lib --no-fail-fast
       - run: cargo clippy --locked --workspace --tests --no-deps -- -D warnings
-      - run: cargo build --locked --release --target wasm32-unknown-unknown -p chat-view -p modules -p valset -p identity
+      - run: cargo build --locked --release --target wasm32-unknown-unknown -p chat-view
+      - run: make wasm-programs

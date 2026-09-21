@@ -364,7 +364,7 @@ fn shell_channel(info: &crate::chat::ChannelInfo, names: &NameDirectory, key: &s
         "id": info.channel.id,
         "name": info.channel.name,
         "archived": info.channel.archived,
-        "members_only": info.members_only(),
+        "members_only": crate::chat::members_only(info),
         "huddle_count": info.channel.huddle.len(),
         "head_seq": info.head_seq,
         "huddle": huddle,

@@ -48,8 +48,8 @@
 
 pub mod client;
 pub mod index;
-mod message;
-mod wire;
+pub mod message;
+pub mod wire;
 
 pub use message::{inline_spans, parse_message};
 pub use wire::*;
