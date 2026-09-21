@@ -7,7 +7,7 @@ PROGRAM_LINKABLE := abi guest
 # What a wasm32 view may link. A crate a view links must never reach the
 # signing/identity graph (blst does not build for wasm32, and a view has no
 # business holding keys); add a crate here when a view starts linking it.
-VIEW_LINKABLE := duck-address view-wire view-guest design
+VIEW_LINKABLE := ducklink view-wire view-guest design
 VIEW_FORBIDDEN := blst commonware-cryptography
 
 .PHONY: program-wasm-check view-wasm-check

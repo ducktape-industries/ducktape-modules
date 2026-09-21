@@ -25,8 +25,9 @@ depends on it.
   `Cx`, `export_view!`, the host protocol, the composer, test helpers) and
   the palette they draw from. A view links `view-guest` as
   `ducktape-view-guest`.
-- **`crates/duck-address`** — the `duck://` address grammar every plane
-  reads: node, app, views and programs.
+- **`crates/ducklink`** — the `duck://` link: `duck://<chain>/<program>/<tail…>`.
+  Knows no program: the first segment is whatever the roster names, the tail
+  is that program's to read, and this crate keeps one spelling per name.
 
 ## A program
 

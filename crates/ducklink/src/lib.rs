@@ -1,0 +1,479 @@
+//! the `duck://` link: one grammar for naming a thing on a ducktape network,
+//! read in one place.
+//!
+//! ```text
+//! duck://<label>-<salt>/<program>/<tail…>
+//! duck://dognet-b5b6ea90/chat/general/42
+//! ```
+//!
+//! THE AUTHORITY IS THE CHAIN ID. The workspace registry keys a network
+//! `<label>#<salt>` (the salt being hex digits of the genesis digest: 8 today,
+//! any even count from 8 to 64 reads), and `#` starts a URL fragment, so a link
+//! writes the same pair with `-`. The salt is the match key; the label is
+//! display. Whether a label AGREES with the registry is the reader's question,
+//! not this crate's: it reads nothing.
+//!
+//! THE FIRST PATH SEGMENT NAMES A PROGRAM. This crate does not know which
+//! programs exist — the `modules` program's roster does — so it checks only the
+//! spelling (`[a-z0-9_-]`, lowercase) and keeps the tail as decoded segments,
+//! interpreting none of it. What a tail MEANS is the program's to say, and a
+//! view that names one copies that rule beside itself.
+//!
+//! THE TAIL CARRIES ANY NAME, IN EXACTLY ONE SPELLING. A segment may hold any
+//! text but `/`, NUL, `.` and `..`. [`Link::tail`] holds it decoded; `Display`
+//! writes a byte literally iff it is RFC 3986 unreserved (`A-Z a-z 0-9 - . _
+//! ~`) and every other byte as `%XX` in uppercase hex; `parse` refuses every
+//! other spelling of the same name instead of normalising it. Two spellings of
+//! one link would be two cache keys and two registry lookups.
+//!
+//! The chain id and the program segment are lowercase and never encoded, and
+//! nothing here case-folds anything: `A` and `a` in a tail segment are two
+//! names.
+use abi::reason::INVALID_INPUT;
+
+const SCHEME: &str = "duck://";
+
+/// how many hex digits a salt may be: at least 8, so `my-cafe` is a label and
+/// not `my` salted `cafe`; at most the whole 32-byte digest.
+const SALT_HEX: std::ops::RangeInclusive<usize> = 8..=64;
+
+/// the network, as the workspace registry keys it: `<label>#<salt>`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChainId {
+    pub label: String,
+    pub salt: Vec<u8>,
+}
+
+impl ChainId {
+    /// the link spelling of the same pair: `<label>-<salt>`.
+    pub fn authority(&self) -> String {
+        format!("{}-{}", self.label, self.salt_hex())
+    }
+
+    /// the salt's lowercase hex digits, two per byte.
+    pub fn salt_hex(&self) -> String {
+        self.salt.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+}
+
+/// the registry's spelling.
+impl std::fmt::Display for ChainId {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}#{}", self.label, self.salt_hex())
+    }
+}
+
+impl std::str::FromStr for ChainId {
+    type Err = Refused;
+
+    /// either spelling: `<label>#<salt>` as the registry writes it, or
+    /// `<label>-<salt>` as a link writes it. Split from the RIGHT: a label may
+    /// itself contain `-`, so only the LAST separator is the minted one.
+    fn from_str(text: &str) -> Result<Self, Refused> {
+        lowercase(text)?;
+        let split = match text.contains('#') {
+            true => text.rsplit_once('#'),
+            false => text.rsplit_once('-'),
+        };
+        let Some((label, salt)) = split else {
+            return Err(incomplete(text));
+        };
+        let labelled = !label.is_empty()
+            && label
+                .bytes()
+                .all(|byte| matches!(byte, b'a'..=b'z' | b'0'..=b'9' | b'-'));
+        let salted = SALT_HEX.contains(&salt.len())
+            && salt.len() % 2 == 0
+            && salt.bytes().all(|byte| byte.is_ascii_hexdigit());
+        if !labelled || !salted {
+            return Err(incomplete(text));
+        }
+        let Ok(salt) = (0..salt.len())
+            .step_by(2)
+            .map(|at| u8::from_str_radix(&salt[at..at + 2], 16))
+            .collect()
+        else {
+            return Err(incomplete(text));
+        };
+        Ok(ChainId {
+            label: label.to_string(),
+            salt,
+        })
+    }
+}
+
+/// a parsed `duck://` link. `tail` is everything after the program segment,
+/// DECODED, and what it means is the program's question. [`Link::parse`] and
+/// `Display` round-trip: a parsed link prints the string it came from, and
+/// that string is the only one that parses to it.
+///
+/// The fields are public so a reader can take them apart; a struct literal
+/// checks nothing. [`Link::parse`] and [`Link::new`] are the only ways to get
+/// a value that round-trips.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Link {
+    pub chain: ChainId,
+    pub program: String,
+    pub tail: Vec<String>,
+}
+
+impl Link {
+    pub fn parse(text: &str) -> Result<Self, Refused> {
+        let rest = text.strip_prefix(SCHEME).ok_or_else(|| {
+            Refused::new(
+                INVALID_INPUT,
+                format!("A ducktape link starts with `{SCHEME}`, and `{text}` does not."),
+            )
+        })?;
+        if rest.contains('?') || rest.contains('#') {
+            return Err(extra(text));
+        }
+        let Some((authority, path)) = rest.split_once('/') else {
+            return Err(empty(text));
+        };
+        if authority.contains('@') || authority.contains(':') {
+            return Err(extra(text));
+        }
+        if authority.is_empty() || path.is_empty() {
+            return Err(empty(text));
+        }
+        let chain: ChainId = authority.parse()?;
+        let mut segments = Vec::new();
+        for segment in path.split('/') {
+            if segment.is_empty() {
+                return Err(empty(text));
+            }
+            segments.push(segment);
+        }
+        let program = segments.remove(0).to_string();
+        program_segment(&program)?;
+        Ok(Link {
+            chain,
+            program,
+            tail: segments.into_iter().map(decode).collect::<Result<_, _>>()?,
+        })
+    }
+
+    /// a link from its parts, checked by the rules [`Link::parse`] applies —
+    /// the constructor a program's own tail type prints itself through.
+    pub fn new(chain: ChainId, program: &str, tail: Vec<String>) -> Result<Self, Refused> {
+        chain.authority().parse::<ChainId>()?;
+        program_segment(program)?;
+        let link = Link {
+            chain,
+            program: program.to_string(),
+            tail,
+        };
+        if link.tail.iter().any(String::is_empty) {
+            return Err(empty(&link.to_string()));
+        }
+        for segment in &link.tail {
+            named(segment, &encode(segment))?;
+        }
+        Ok(link)
+    }
+}
+
+impl std::fmt::Display for Link {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "{SCHEME}{}/{}",
+            self.chain.authority(),
+            self.program
+        )?;
+        for segment in &self.tail {
+            write!(formatter, "/{}", encode(segment))?;
+        }
+        Ok(())
+    }
+}
+
+/// a tail segment that spells a number: decimal, no sign, no leading zero (`0`
+/// itself aside), within `u64`. One spelling, so `7`, `07` and `+7` are not
+/// three links to one thing; a program that numbers its tail reads it here and
+/// words its own refusal.
+pub fn number(segment: &str) -> Option<u64> {
+    let canonical = !segment.is_empty()
+        && segment.bytes().all(|byte| byte.is_ascii_digit())
+        && (segment == "0" || !segment.starts_with('0'));
+    match canonical {
+        true => segment.parse().ok(),
+        false => None,
+    }
+}
+
+/// the program segment: a program's name as the roster spells it, `[a-z0-9_-]`.
+fn program_segment(program: &str) -> Result<(), Refused> {
+    let spelled = !program.is_empty()
+        && program
+            .bytes()
+            .all(|byte| matches!(byte, b'a'..=b'z' | b'0'..=b'9' | b'_' | b'-'));
+    match spelled {
+        true => Ok(()),
+        false => Err(Refused::new(
+            INVALID_INPUT,
+            format!(
+                "A duck:// program segment is a program's name, [a-z0-9_-], and `{program}` is not one."
+            ),
+        )),
+    }
+}
+
+/// a name's one spelling as a path segment.
+fn encode(name: &str) -> String {
+    let mut spelled = String::with_capacity(name.len());
+    for byte in name.bytes() {
+        match unreserved(byte) {
+            true => spelled.push(byte as char),
+            false => spelled.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    spelled
+}
+
+/// RFC 3986's unreserved bytes: the only ones a path segment writes literally.
+fn unreserved(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~')
+}
+
+/// one tail segment, from its one spelling to the name it carries. Every other
+/// spelling of the same name is refused, never normalised.
+fn decode(segment: &str) -> Result<String, Refused> {
+    let refuse = |rule: &str| {
+        Err(Refused::new(
+            INVALID_INPUT,
+            format!("A duck:// path segment {rule}, and `{segment}` does not."),
+        ))
+    };
+    let mut decoded = Vec::with_capacity(segment.len());
+    let mut bytes = segment.bytes();
+    while let Some(byte) = bytes.next() {
+        if unreserved(byte) {
+            decoded.push(byte);
+            continue;
+        }
+        if byte != b'%' {
+            return refuse("writes only [A-Za-z0-9._~-] literally and every other byte as `%XX`");
+        }
+        let (high, low) = match (bytes.next(), bytes.next()) {
+            (Some(high), Some(low)) if high.is_ascii_hexdigit() && low.is_ascii_hexdigit() => {
+                (high, low)
+            }
+            _ => return refuse("writes `%` only to open a `%XX` escape of two hex digits"),
+        };
+        if high.is_ascii_lowercase() || low.is_ascii_lowercase() {
+            return refuse("writes a `%XX` escape in uppercase hex");
+        }
+        let nibble = |digit: u8| match digit.is_ascii_digit() {
+            true => digit - b'0',
+            false => digit - b'A' + 10,
+        };
+        let escaped = nibble(high) << 4 | nibble(low);
+        if unreserved(escaped) {
+            return refuse("writes [A-Za-z0-9._~-] literally, never as `%XX`");
+        }
+        decoded.push(escaped);
+    }
+    let Ok(decoded) = String::from_utf8(decoded) else {
+        return refuse("decodes to UTF-8 text");
+    };
+    named(&decoded, segment)?;
+    Ok(decoded)
+}
+
+/// the names no tail segment carries, however it was built: one with `/` or
+/// NUL in it, `.` and `..`.
+fn named(name: &str, spelling: &str) -> Result<(), Refused> {
+    let refuse = |rule: &str| {
+        Err(Refused::new(
+            INVALID_INPUT,
+            format!("A duck:// path segment {rule}, and `{spelling}` does not."),
+        ))
+    };
+    if name.contains(['/', '\0']) {
+        return refuse("decodes to a name with no `/` and no NUL in it");
+    }
+    if name == "." || name == ".." {
+        return refuse("names something other than `.` or `..`");
+    }
+    Ok(())
+}
+
+/// why a link was refused: a token to BRANCH on ([`abi::reason`]) and a
+/// sentence to SHOW. Every rule a link breaks refuses as `INVALID_INPUT`,
+/// because a caller fixes the link whatever rule it broke. `new` is public so
+/// a program reading its own tail refuses in the same shape.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Refused {
+    pub reason: &'static str,
+    pub sentence: String,
+}
+
+impl Refused {
+    pub fn new(reason: &'static str, sentence: impl Into<String>) -> Self {
+        Self {
+            reason,
+            sentence: sentence.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.sentence)
+    }
+}
+
+fn lowercase(text: &str) -> Result<(), Refused> {
+    match text.bytes().any(|byte| byte.is_ascii_uppercase()) {
+        true => Err(Refused::new(
+            INVALID_INPUT,
+            format!(
+                "A duck:// chain id and program segment are lowercase and nothing case-folds them, but `{text}` carries an uppercase letter."
+            ),
+        )),
+        false => Ok(()),
+    }
+}
+
+fn incomplete(text: &str) -> Refused {
+    Refused::new(
+        INVALID_INPUT,
+        format!(
+            "A duck:// authority is the whole chain id `<label>-<salt>` (the registry's `<label>#<salt>`), with `<label>` matching [a-z0-9-] and `<salt>` an even count of {} to {} lowercase hex digits; `{text}` is not one.",
+            SALT_HEX.start(),
+            SALT_HEX.end(),
+        ),
+    )
+}
+
+fn extra(text: &str) -> Refused {
+    Refused::new(
+        INVALID_INPUT,
+        format!(
+            "A duck:// link carries no credentials, port, query or fragment — the node and its credential come from the workspace registry — but `{text}` carries one."
+        ),
+    )
+}
+
+fn empty(text: &str) -> Refused {
+    Refused::new(
+        INVALID_INPUT,
+        format!(
+            "A duck:// link is `duck://<label>-<salt>/<program>/…`, with an authority and at least the program segment, none of them empty; `{text}` leaves one empty."
+        ),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn chain() -> ChainId {
+        "dognet-b5b6ea90".parse().expect("a chain id parses")
+    }
+
+    #[test]
+    fn parses_and_round_trips_the_canonical_form() {
+        let link = Link::parse("duck://dognet-b5b6ea90/chat/general/42").expect("parses");
+        assert_eq!(link.chain, chain());
+        assert_eq!(link.chain.salt, [0xb5, 0xb6, 0xea, 0x90]);
+        assert_eq!(link.program, "chat");
+        assert_eq!(link.tail, ["general", "42"]);
+        for text in [
+            "duck://dognet-b5b6ea90/forge/alice/my-crate",
+            "duck://my-long-net-00000000/any_program/alice/my.crate_1",
+            "duck://dognet-b5b6ea90/chat",
+            "duck://dognet-b5b6ea90/files/%EB%B3%B4%EA%B3%A0%EC%84%9C%20Final.pdf",
+        ] {
+            let link = Link::parse(text).expect("parses");
+            assert_eq!(link.to_string(), text);
+            assert_eq!(Link::parse(&link.to_string()), Ok(link));
+        }
+    }
+
+    #[test]
+    fn any_program_name_reads_but_only_one_spelling_of_it() {
+        assert!(Link::parse("duck://dognet-b5b6ea90/a-program_nobody_built/x").is_ok());
+        for text in [
+            "duck://dognet-b5b6ea90/Chat/general",
+            "duck://dognet-b5b6ea90/ch%61t/general",
+            "duck://dognet-b5b6ea90/chat.v2/general",
+        ] {
+            assert!(Link::parse(text).is_err(), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_segment_carries_any_name_in_one_spelling() {
+        let link = Link::new(
+            chain(),
+            "files",
+            vec!["보고서 Final.pdf".into(), "A~b".into()],
+        )
+        .unwrap();
+        assert_eq!(
+            link.to_string(),
+            "duck://dognet-b5b6ea90/files/%EB%B3%B4%EA%B3%A0%EC%84%9C%20Final.pdf/A~b"
+        );
+        assert_eq!(
+            Link::parse(&link.to_string()).unwrap().tail[0],
+            "보고서 Final.pdf"
+        );
+        for (text, rule) in [
+            ("duck://dognet-b5b6ea90/files/a%20b/%2e%2e", "uppercase hex"),
+            ("duck://dognet-b5b6ea90/files/%41", "never as `%XX`"),
+            ("duck://dognet-b5b6ea90/files/a b", "literally"),
+            ("duck://dognet-b5b6ea90/files/..", "`.` or `..`"),
+            ("duck://dognet-b5b6ea90/files/a%2Fb", "no `/`"),
+            ("duck://dognet-b5b6ea90/files//x", "none of them empty"),
+            ("duck://dognet-b5b6ea90/files/x?y", "query or fragment"),
+            ("duck://dognet-b5b6ea90/files/x#7", "query or fragment"),
+            ("duck://user@dognet-b5b6ea90/files/x", "credentials"),
+            ("duck://dognet/files/x", "whole chain id"),
+            ("duck://b5b6ea90/files/x", "whole chain id"),
+            ("https://dognet-b5b6ea90/files/x", "starts with"),
+        ] {
+            let refused = Link::parse(text).expect_err(text).sentence;
+            assert!(refused.contains(rule), "{text}: {refused}");
+        }
+        assert!(Link::new(chain(), "files", vec!["a/b".into()]).is_err());
+        assert!(Link::new(chain(), "files", vec![String::new()]).is_err());
+    }
+
+    #[test]
+    fn a_chain_id_reads_and_prints_both_spellings() {
+        let id: ChainId = "my-long-net#00ff00ff".parse().unwrap();
+        assert_eq!(
+            (id.label.as_str(), id.salt.as_slice()),
+            ("my-long-net", &[0, 255, 0, 255][..])
+        );
+        assert_eq!(id.to_string(), "my-long-net#00ff00ff");
+        assert_eq!(id.authority(), "my-long-net-00ff00ff");
+        assert_eq!(id.authority().parse::<ChainId>().unwrap(), id);
+        assert!("net-abcdef".parse::<ChainId>().is_err(), "salt under 8");
+        assert!("net-abcdef012".parse::<ChainId>().is_err(), "odd salt");
+        assert!(
+            format!("net-{}", "ab".repeat(32))
+                .parse::<ChainId>()
+                .is_ok()
+        );
+        assert!(
+            format!("net-{}", "ab".repeat(33))
+                .parse::<ChainId>()
+                .is_err()
+        );
+        assert!("Net-b5b6ea90".parse::<ChainId>().is_err());
+    }
+
+    #[test]
+    fn a_number_has_one_spelling() {
+        assert_eq!(number("0"), Some(0));
+        assert_eq!(number("42"), Some(42));
+        assert_eq!(number("18446744073709551615"), Some(u64::MAX));
+        for bad in ["", "007", "+7", "-1", "seq", "18446744073709551616"] {
+            assert_eq!(number(bad), None, "{bad}");
+        }
+    }
+}

@@ -2,8 +2,8 @@
 #
 # What lives here: the program contract (`abi`, the borsh bytes ABI a wasm
 # program and the host share; `guest`, what a program compiles against), the
-# view contract (`view-wire`, `view-guest`, `design`) and the `duck://`
-# address grammar every plane reads.
+# view contract (`view-wire`, `view-guest`, `design`) and `ducklink`, the
+# `duck://` grammar every plane reads.
 #
 # This workspace depends on NO other ducktape repository. Everything else in
 # the platform depends on it. Program logic lives in ducktape-modules; the
@@ -14,7 +14,7 @@ resolver = "2"
 members = [
     "crates/kernel/abi",
     "crates/kernel/guest",
-    "crates/duck-address",
+    "crates/ducklink",
     "crates/design",
     "crates/view-wire",
     "crates/view-guest",
@@ -35,7 +35,7 @@ futures = "0.3"
 # ---- internal
 abi = { path = "crates/kernel/abi" }
 guest = { path = "crates/kernel/guest" }
-duck-address = { path = "crates/duck-address" }
+ducklink = { path = "crates/ducklink" }
 design = { path = "crates/design" }
 view-wire = { path = "crates/view-wire" }
 view-guest = { path = "crates/view-guest" }
