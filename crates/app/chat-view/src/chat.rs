@@ -1,6 +1,6 @@
 //! The slice of the chat module's wire this view speaks: the ops it submits,
 //! the index views it asks for and the rows those return. Copied from the
-//! module (`crates/chat`), fields the view reads only — serde skips the rest.
+//! module (`crates/app/chat`), fields the view reads only — serde skips the rest.
 use serde::{Deserialize, Serialize};
 
 pub use crate::message::{Block, Mark, Party, Span, parse_message};

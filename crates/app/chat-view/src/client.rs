@@ -514,7 +514,7 @@ pub fn mention_label(party: &Party, names: &NameDirectory) -> String {
 
 /// The two-party channel id for a pair of accounts, sorted so both ends
 /// derive the same id: `dm-` + sha256(low, 0x1f, high) as hex. Mirrors the
-/// module's derivation (`dm_channel_id` in `crates/chat`).
+/// module's derivation (`dm_channel_id` in `crates/app/chat`).
 pub fn dm_channel_id(a: &str, b: &str) -> String {
     let (low, high) = if a <= b { (a, b) } else { (b, a) };
     let mut digest = Sha256::new();
