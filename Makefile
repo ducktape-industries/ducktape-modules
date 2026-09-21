@@ -21,6 +21,16 @@ INDEX_MODULES := crates/chat
 # The views: cdylibs for wasm32-unknown-unknown the desktop loads from a file.
 VIEWS := chat-view
 
+# The programs on the abi: cdylibs for wasm32-unknown-unknown the host loads by
+# blob id.
+PROGRAMS := modules valset identity
+
+.PHONY: wasm-programs
+
+## build every program for wasm32 under target/wasm32-unknown-unknown/release/.
+wasm-programs:
+	@for p in $(PROGRAMS); do cargo build --release --target wasm32-unknown-unknown -p $$p || exit 1; done
+
 .PHONY: wasm-views
 
 ## build every view for wasm32 under target/wasm32-unknown-unknown/release/.

@@ -1,0 +1,16 @@
+[package]
+name = "identity"
+# 0.2.0, not the workspace version: `chat` still links the old `identity`
+# (0.1.0) from sdk dev's locked rev, and two packages of one name may share a
+# graph only at different versions. Goes back to the workspace version when
+# chat is rewritten.
+version = "0.2.0"
+edition.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+abi = { workspace = true }
+guest = { workspace = true }
+borsh = { workspace = true }

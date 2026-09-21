@@ -12,11 +12,13 @@ pair — and against the program abi in ducktape-sdk (`abi`, `guest`) once
 |---|---|
 | `crates/chat` | the chat module: channels, messages, threads, reactions, huddles; its guest port behind `guest`, its index guest behind `index-guest` |
 | `crates/chat-view` | the chat view on `view-guest`: the whole screen, on the `View` API |
+| `crates/modules`, `crates/valset` | the two programs the host reads: the roster and the validators (`abi::roster`, `abi::validators`) |
+| `crates/identity` | numbered accounts held by keys and named; what every other program attributes to |
 
 ## Building
 
 `cargo test --workspace`, `cargo clippy --workspace --tests -- -D warnings`
-and `make wasm-views` (the view for wasm32) are what CI runs. The module's
+`make wasm-views` and `make wasm-programs` are what CI runs. The module's
 committed `component.wasm` / `index.wasm` / `guest.lock` come out of
 `guest-builder` (`make wasm-modules`), built from a pushed HEAD.
 
