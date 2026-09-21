@@ -3,9 +3,9 @@
 //! the derived DM channel id. Everything is display logic over `chat`.
 use std::collections::{BTreeMap, BTreeSet};
 
-use sha2::{Digest, Sha256};
-
-use crate::chat::{Block, Mark, MsgRow, Party, Span, hex, party_handle, unhex};
+use crate::chat::{
+    AccountRow, Block, Mark, MsgRow, Party, Span, dm_peers, hex, party_handle, unhex,
+};
 
 /// The account bound to a user key: its number (the identity) and its name.
 #[derive(Clone, Debug, PartialEq)]
@@ -15,8 +15,8 @@ pub struct BoundAccount {
 }
 
 /// The network's name directory: the account behind each user key (by key
-/// hex), every account's name, and which accounts are software. Names are
-/// display text, not identity: "the same person" is the account number.
+/// hex) and every account's name. Names are display text, not identity:
+/// "the same person" is the account number.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct NameDirectory {
     accounts: BTreeMap<String, BoundAccount>,
@@ -33,23 +33,22 @@ impl NameDirectory {
         }
     }
 
-    /// From a roster read off the wire: `(number, name, program-controlled,
-    /// key bytes)` per account. Keyless programs are named too.
-    pub fn from_roster(
-        accounts: impl IntoIterator<Item = (u64, String, bool, Vec<Vec<u8>>)>,
-    ) -> Self {
+    /// From the roster chat relays from identity.
+    pub fn from_roster(accounts: impl IntoIterator<Item = AccountRow>) -> Self {
         let mut names = Self::empty();
-        for (number, name, program, keys) in accounts {
-            names.by_account.insert(number, name.clone());
-            if program {
-                names.programs.insert(number);
+        for account in accounts {
+            names
+                .by_account
+                .insert(account.number, account.name.clone());
+            if account.program {
+                names.programs.insert(account.number);
             }
-            for key in keys {
+            for key in account.keys {
                 let bound = BoundAccount {
-                    number,
-                    name: name.clone(),
+                    number: account.number,
+                    name: account.name.clone(),
                 };
-                names.accounts.insert(hex(&key), bound);
+                names.accounts.insert(key, bound);
             }
         }
         names
@@ -57,11 +56,6 @@ impl NameDirectory {
 
     pub fn account_of(&self, key_hex: &str) -> Option<u64> {
         self.accounts.get(key_hex).map(|account| account.number)
-    }
-
-    /// Every named account, by number.
-    pub fn accounts(&self) -> impl Iterator<Item = (&u64, &String)> {
-        self.by_account.iter()
     }
 
     pub fn is_program(&self, account: u64) -> bool {
@@ -172,12 +166,7 @@ pub enum SpanStyle {
     Mention(String),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ChatReaction {
-    pub emoji: String,
-    pub count: u64,
-    pub reacted_by_me: bool,
-}
+pub type ChatReaction = crate::chat::ReactionSummary;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChatMember {
@@ -234,15 +223,7 @@ pub fn chat_message(row: MsgRow, names: &NameDirectory) -> ChatMessage {
         initial: avatar_initial(&row.author, names),
         agent: is_agent(&row.author, names),
         height: row.height,
-        reactions: row
-            .reactions
-            .into_iter()
-            .map(|reaction| ChatReaction {
-                emoji: reaction.emoji,
-                count: reaction.count,
-                reacted_by_me: reaction.reacted_by_me,
-            })
-            .collect(),
+        reactions: row.reactions,
     }
 }
 
@@ -512,31 +493,10 @@ pub fn mention_label(party: &Party, names: &NameDirectory) -> String {
     }
 }
 
-/// The two-party channel id for a pair of accounts, sorted so both ends
-/// derive the same id: `dm-` + sha256(low, 0x1f, high) as hex. Mirrors the
-/// module's derivation (`dm_channel_id` in `crates/app/chat`).
-pub fn dm_channel_id(a: &str, b: &str) -> String {
-    let (low, high) = if a <= b { (a, b) } else { (b, a) };
-    let mut digest = Sha256::new();
-    digest.update(low.as_bytes());
-    digest.update([0x1f]);
-    digest.update(high.as_bytes());
-    format!("dm-{}", hex(&digest.finalize()))
-}
-
-/// A DM channel id as the module mints it: `dm-` and 64 hex.
-pub fn is_dm_channel(id: &str) -> bool {
-    id.strip_prefix("dm-")
-        .is_some_and(|suffix| suffix.len() == 64 && suffix.bytes().all(|b| b.is_ascii_hexdigit()))
-}
-
-/// The DM peers of `mine` among the channels: which account each DM room
-/// is with, found by re-deriving the id per named account.
-pub fn dm_peer_of(mine: u64, channel_id: &str, names: &NameDirectory) -> Option<u64> {
-    names.accounts().find_map(|(peer, _)| {
-        (*peer != mine && dm_channel_id(&mine.to_string(), &peer.to_string()) == channel_id)
-            .then_some(*peer)
-    })
+/// The other account of a dm room `mine` is in.
+pub fn dm_peer_of(mine: u64, channel_id: &str) -> Option<u64> {
+    let (a, b) = dm_peers(channel_id)?;
+    (mine == a).then_some(b).or((mine == b).then_some(a))
 }
 
 pub fn height_label(height: u64) -> String {
@@ -550,16 +510,4 @@ pub fn reaction_palette() -> [&'static str; 32] {
         "🙏", "👏", "💪", "✨", "⚡", "🐛", "📌", "❓", //
         "🦆", "🤝", "😴", "🧠", "➕", "🎯", "🚧", "🏁",
     ]
-}
-
-/// The run a committed message was posted by, off the message id the runs
-/// module mints for a run's replies: `agent/<dispatch_id>[/post/<slot>]`.
-pub fn run_of_message(id: &str) -> Option<&str> {
-    let rest = id.strip_prefix("agent/")?;
-    let dispatch = rest.split_once('/').map_or(rest, |(dispatch, _)| dispatch);
-    (dispatch.len() == 64
-        && dispatch
-            .bytes()
-            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')))
-    .then_some(dispatch)
 }

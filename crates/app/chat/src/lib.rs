@@ -1,1942 +1,1372 @@
-//! qmdb-backed chat module: block-based channels, threads, edits, tombstones,
-//! reactions, membership, and hook notifications.
+//! The `chat` program: channels, messages, threads, reactions, memberships,
+//! huddles. The reference program on the kernel abi.
 //!
-//! pure logic over a host-injected [`sdk::MerkleStore`]: the HOST constructs
-//! the concrete store and hands it
-//! to [`Chat::new`], so this crate never names a storage crate. the store is
-//! used for what it is — hash-addressable authenticated state, one logical
-//! record per entity, every read a point lookup the DISPATCH path needs:
-//! per-channel records, one record per message head, immutable per-edit
-//! revision records, per-emoji reaction sets (plus the bounded per-message
-//! emoji index the caps and tombstone cleanup require), message-id pointers
-//! for global dedup, and membership records for the post policy. no stored
-//! enumeration lists, no stand-in range indexes: everything a human scrolls,
-//! lists, or searches is served by the index guest (`index.rs`) on the
-//! derived tier. the one computed-key iteration that remains — the
-//! `MessagesRange` context window over the gap-free `head_seq` space — exists
-//! because CONSENSUS consumers (runs, automations) read it in `execute()`,
-//! and consensus can never depend on the unverifiable derived tier.
+//! Writes are a [`ChatMsg`] (JSON, externally tagged), reads a
+//! [`ChatViewQuery`] answered by a [`ChatViewReply`] (JSON) — the same
+//! types `chat-view` links. The acting [`Party`] is the frame's origin: an
+//! external key resolved through the `identity` program to its account.
 //!
-//! ## parties
-//!
-//! every write acts as ONE [`Party`], derived from `ctx.env().origin` and
-//! never from a payload: an external key resolves through the identity
-//! sibling to the account holding it, and stays a bare [`Party::Key`] when
-//! identity knows none (a node operating a channel under its own key); a
-//! program origin is its account; a module is itself; the system is the
-//! system. an empty external origin (the pre-consensus default) is rejected.
-//! rosters and relations name parties in that same resolved vocabulary.
-//!
-//! ## attribution
-//!
-//! chat is a SOURCE for the attribution plane: a channel is an object whose
-//! relation set is its owner's ownership, a message one whose set is its
-//! author's authorship plus one mention per mentioned account. every create,
-//! edit and delete of either reports the object's FULL set at a new,
-//! strictly increasing per-object revision (`Channel::revision`,
-//! `MessageHead::revision`) in the same unit as the write, so the write and
-//! its attribution commit or abort together; a delete reports the empty set.
-//! only accounts are recipients: a key, module or system author holds no
-//! relation, though it is still the report's actor.
-//!
-//! like `document` and `kv`, writes are staged in memory during a block and
-//! flushed to the store in one batch at `commit_block`; the module root IS
-//! the store's merkle root. sync belongs to the store, not this module: a
-//! joiner rebuilds the concrete store from a peer (`QmdbStore::sync_from`)
-//! and wraps a fresh `Chat` around it — this module only forwards the trait's
-//! serve surface.
-
-pub mod client;
-pub mod index;
+//! Keys: `chan/<id>` → [`ChannelRow`], `seq/<id>` → head seq,
+//! `msg/<ch>/<seq>` → [`MsgRow`], `root/<ch>/<!seq>` timeline roots newest
+//! first, `thread/<ch>/<root>/<reply>`, `msgid/<id>`, `member/<ch>/<handle>`
+//! → [`MemberRow`], `react/<ch>/<seq>/<emoji>/<handle>`, `tok/<token>/<ch>/<seq>`
+//! and `tag/<label>/<!time>/<ch>/<seq>` + `tagc/<ch>/<label>/<!seq>` postings.
 pub mod message;
-pub mod wire;
 
-pub use message::{inline_spans, parse_message};
-pub use wire::*;
+use std::collections::BTreeSet;
 
-// the owning wire surface is flattened at the crate root for existing module
-// and test callers; it is ordinary internal code, not a shared API crate.
-use client::validate_channel_namespace;
-pub mod contract_golden;
-use sdk::refusal;
+use abi::{Entry, Refusal, Scan, reason};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use unicode_normalization::UnicodeNormalization;
 
-// the wasm-guest port: the dispatch shell that adapts this module to the
-// ducktape:module world. compiled only by the guest-builder's synthesized
-// wasm32 cdylib workspace (feature `guest`), never by the native build.
-#[cfg(feature = "guest")]
-mod guest;
-// everything below is OFF-consensus: none of it touches qmdb or the
-// root-hash, and the index engine's deps (fluent31 IO) cannot cross into the
-// wasm guest — so the consensus state machine above compiles for wasm32
-// without them. (The call media planes live in the `media-service` crate.)
-//
-// The derived-tier materialized view (`index`: the PURE fold + view over
-// index_guest::StateRead) and the CLIENT view model (`client`: rendered row
-// types, composer parsing, optimistic merges, the op-delta fold) are owned
-// by this module beside the consensus records. The engine shell that runs the
-// fold inside the module's index database is `index_guest` below.
+pub use message::{AccountNumber, Block, Mark, Party, Span, parse_message};
 
-// the wasm index-mapper shell: wires the pure core into the fluent31 engine.
-// compiled only by `guest-builder --index`'s synthesized wasm32 workspace
-// (feature `index-guest`), never by the native build.
-#[cfg(feature = "index-guest")]
-mod index_guest;
+pub const MAX_ID_BYTES: usize = 64;
+pub const MAX_NAME_BYTES: usize = 128;
+pub const MAX_MESSAGE_BYTES: usize = 64 * 1024;
+pub const MAX_REVISIONS: u32 = 256;
+pub const MAX_EMOJI_BYTES: usize = 64;
+pub const MAX_REACTION_EMOJIS: usize = 64;
+pub const MAX_THREAD_REPLIES: u64 = 4096;
+pub const MAX_HUDDLE_MEMBERS: usize = 32;
+pub const HUDDLE_NODE_KEY_BYTES: usize = 32;
+/// The namespace a node key signs under to join a huddle; the message is
+/// the channel id then the joining origin key.
+pub const HUDDLE_JOIN_NS: &[u8] = b"ducktape/huddle-join/v1";
+pub const MAX_TAGS_PER_MESSAGE: usize = 16;
+pub const MAX_TAG_CHARS: usize = 64;
+pub const MAX_PAGE: usize = 256;
+pub const DEFAULT_PAGE: usize = 50;
+/// How many postings a search reads before it reports `capped`.
+pub const SEARCH_POSTING_CAP: usize = 1024;
 
-use std::collections::{BTreeMap, BTreeSet};
+// ── wire ────────────────────────────────────────────────────────────────────
 
-use attribution::{Actor, ObjectRef, Reason, Relation};
-use identity::AccountRef;
-use sdk::{
-    AccountNumber, Ctx, Error, KEY_SEP, MerkleStore, Module, ModuleId, Msg, Origin,
-    ResolverSyncTarget, StagedStore, StateRoot, StateSyncHandle, require_non_empty,
-};
-use serde::{Serialize, de::DeserializeOwned};
-
-/// single-component key: prefix + 0 + id. safe because every prefix is a fixed
-/// literal and no prefix is another prefix followed by a 0 byte.
-fn keyed(prefix: &[u8], id: &str) -> Vec<u8> {
-    let mut key = Vec::with_capacity(prefix.len() + 1 + id.len());
-    key.extend_from_slice(prefix);
-    key.push(0);
-    key.extend_from_slice(id.as_bytes());
-    key
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum PostPolicy {
+    Open,
+    MembersOnly,
 }
 
-/// length-prefixed component for multi-part keys — never a 0-byte separator,
-/// so components containing separators cannot collide.
-fn component(key: &mut Vec<u8>, value: &[u8]) {
-    key.extend_from_slice(&(value.len() as u64).to_be_bytes());
-    key.extend_from_slice(value);
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum ChatMsg {
+    CreateChannel {
+        channel_id: String,
+        name: String,
+        post_policy: PostPolicy,
+    },
+    CreateVoiceChannel {
+        channel_id: String,
+        name: String,
+    },
+    /// A members-only room between the actor's account and `counterpart`,
+    /// id `dm-<lower>-<higher>`; creating it twice is a no-op.
+    CreateDmChannel {
+        counterpart: AccountNumber,
+        name: String,
+    },
+    RenameChannel {
+        channel_id: String,
+        name: String,
+    },
+    SetChannelArchived {
+        channel_id: String,
+        archived: bool,
+    },
+    PostMessage {
+        channel_id: String,
+        message_id: String,
+        blocks: Vec<Block>,
+        thread: Option<u64>,
+    },
+    EditMessage {
+        channel_id: String,
+        seq: u64,
+        blocks: Vec<Block>,
+        base_rev: Option<u32>,
+    },
+    DeleteMessage {
+        channel_id: String,
+        seq: u64,
+    },
+    AddReaction {
+        channel_id: String,
+        seq: u64,
+        emoji: String,
+    },
+    RemoveReaction {
+        channel_id: String,
+        seq: u64,
+        emoji: String,
+    },
+    SetMembership {
+        channel_id: String,
+        party: Party,
+        member: bool,
+    },
+    /// `node_proof` is `node`'s signature over [`HUDDLE_JOIN_NS`] + channel
+    /// id + the origin key (verified by the program, not the rules).
+    JoinHuddle {
+        channel_id: String,
+        node: Vec<u8>,
+        node_proof: Vec<u8>,
+    },
+    LeaveHuddle {
+        channel_id: String,
+    },
 }
 
-/// the canonical bytes of a party inside a composite key — borsh, so two
-/// distinct parties never share bytes and a key can never spell an account.
-fn party_bytes(party: &Party) -> Vec<u8> {
-    borsh::to_vec(party).expect("a party is borsh-serializable")
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MsgRow {
+    pub channel_id: String,
+    pub seq: u64,
+    pub message_id: String,
+    /// the author's handle: `acct:<n>`, `user:<hex>`, `module:<id>`, `system`
+    pub author: String,
+    pub height: u64,
+    pub time: u64,
+    pub blocks: Vec<Block>,
+    /// the flattened text search indexes; a tombstone's is empty
+    pub text: String,
+    pub deleted: bool,
+    pub edited: bool,
+    pub rev: u32,
+    pub edited_at: Option<u64>,
+    /// what the last edit claimed to be based on, recorded, never judged
+    pub base_rev: Option<u32>,
+    /// `Some(root_seq)` marks a thread reply
+    pub thread: Option<u64>,
+    pub reply_count: u64,
+    pub last_reply_seq: Option<u64>,
+    pub reactions: Vec<ReactionSummary>,
+    pub tags: Vec<String>,
 }
 
-fn channel_key(channel_id: &str) -> Vec<u8> {
-    keyed(b"channel", channel_id)
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReactionSummary {
+    pub emoji: String,
+    pub count: u64,
+    /// filled per reader from `viewer_handles`
+    pub reacted_by_me: bool,
 }
 
-fn msg_key(channel_id: &str, seq: u64) -> Vec<u8> {
-    let mut key = Vec::with_capacity(3 + 8 + channel_id.len() + 8);
-    key.extend_from_slice(b"msg");
-    component(&mut key, channel_id.as_bytes());
-    key.extend_from_slice(&seq.to_be_bytes());
-    key
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChannelRow {
+    pub id: String,
+    pub name: String,
+    pub created_at: u64,
+    pub post_policy: PostPolicy,
+    pub owner: String,
+    pub archived: bool,
+    pub huddle: Vec<HuddleEntry>,
+    pub voice: bool,
 }
 
-fn rev_key(channel_id: &str, seq: u64, rev: u32) -> Vec<u8> {
-    let mut key = Vec::with_capacity(3 + 8 + channel_id.len() + 12);
-    key.extend_from_slice(b"rev");
-    component(&mut key, channel_id.as_bytes());
-    key.extend_from_slice(&seq.to_be_bytes());
-    key.extend_from_slice(&rev.to_be_bytes());
-    key
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HuddleEntry {
+    pub party: String,
+    /// the node key, hex
+    pub node: String,
+    pub joined_at: u64,
 }
 
-fn react_key(channel_id: &str, seq: u64, emoji: &str) -> Vec<u8> {
-    let mut key = Vec::with_capacity(5 + 16 + channel_id.len() + 8 + emoji.len());
-    key.extend_from_slice(b"react");
-    component(&mut key, channel_id.as_bytes());
-    key.extend_from_slice(&seq.to_be_bytes());
-    component(&mut key, emoji.as_bytes());
-    key
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChannelInfo {
+    #[serde(flatten)]
+    pub channel: ChannelRow,
+    pub head_seq: u64,
 }
 
-/// per-message emoji index: hashed keys cannot enumerate `react/...`, so the
-/// distinct-emoji list (bounded by [`MAX_REACTION_EMOJIS`]) is its own record.
-fn reactidx_key(channel_id: &str, seq: u64) -> Vec<u8> {
-    let mut key = Vec::with_capacity(8 + 8 + channel_id.len() + 8);
-    key.extend_from_slice(b"reactidx");
-    component(&mut key, channel_id.as_bytes());
-    key.extend_from_slice(&seq.to_be_bytes());
-    key
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemberRow {
+    pub party: String,
+    pub height: u64,
+    pub time: u64,
 }
 
-fn msgid_key(message_id: &str) -> Vec<u8> {
-    keyed(b"msgid", message_id)
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MessageHits {
+    pub hits: Vec<MsgRow>,
+    pub capped: bool,
 }
 
-/// The two accounts of a DM channel, stored at its creation: the id is a
-/// digest of them, so nothing else can name the other side of a post.
-fn dm_pair_key(channel_id: &str) -> Vec<u8> {
-    keyed(b"dmpair", channel_id)
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TagPage {
+    pub hits: Vec<MsgRow>,
+    pub has_more: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_after: Option<String>,
 }
 
-fn member_key(channel_id: &str, party: &Party) -> Vec<u8> {
-    let party = party_bytes(party);
-    let mut key = Vec::with_capacity(6 + 16 + channel_id.len() + party.len());
-    key.extend_from_slice(b"member");
-    component(&mut key, channel_id.as_bytes());
-    component(&mut key, &party);
-    key
+/// `viewer_handles` are the reader's handles; they decide `reacted_by_me`.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum ChatViewQuery {
+    Channels {
+        #[serde(default)]
+        after: Option<String>,
+        #[serde(default)]
+        limit: Option<usize>,
+    },
+    Channel {
+        channel_id: String,
+    },
+    /// one page of timeline roots older than `before_seq`, oldest first
+    Roots {
+        channel_id: String,
+        viewer_handles: Vec<String>,
+        #[serde(default)]
+        before_seq: Option<u64>,
+        #[serde(default)]
+        limit: Option<usize>,
+    },
+    /// `limit` messages centred on `seq`
+    MessagesAround {
+        channel_id: String,
+        seq: u64,
+        viewer_handles: Vec<String>,
+        #[serde(default)]
+        limit: Option<usize>,
+    },
+    /// the root plus one page of replies after `after_reply_seq`, post order
+    Thread {
+        channel_id: String,
+        root_seq: u64,
+        viewer_handles: Vec<String>,
+        #[serde(default)]
+        after_reply_seq: Option<u64>,
+        #[serde(default)]
+        limit: Option<usize>,
+    },
+    Members {
+        channel_id: String,
+        #[serde(default)]
+        after: Option<String>,
+        #[serde(default)]
+        limit: Option<usize>,
+    },
+    /// every token of `text`, newest first
+    Search {
+        text: String,
+        viewer_handles: Vec<String>,
+        #[serde(default)]
+        channel_id: Option<String>,
+        #[serde(default)]
+        limit: Option<usize>,
+    },
+    TagSearch {
+        tag: String,
+        viewer_handles: Vec<String>,
+        #[serde(default)]
+        channel_id: Option<String>,
+        #[serde(default)]
+        after: Option<String>,
+        #[serde(default)]
+        limit: Option<usize>,
+    },
+    /// the identity roster, ascending by number: the program asks identity
+    /// so the view links one module
+    Accounts {
+        #[serde(default)]
+        limit: Option<usize>,
+    },
 }
 
-/// one creator's channel-creation counter — what [`MAX_CHANNELS_PER_CREATOR`]
-/// is checked against.
-fn creator_count_key(party: &Party) -> Vec<u8> {
-    let party = party_bytes(party);
-    let mut key = Vec::with_capacity(9 + 8 + party.len());
-    key.extend_from_slice(b"chancount");
-    component(&mut key, &party);
-    key
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AccountRow {
+    pub number: AccountNumber,
+    pub name: String,
+    /// a program-controlled account: an agent, not a person
+    pub program: bool,
+    /// the account's keys, hex
+    pub keys: Vec<String>,
 }
 
-/// an id that names an attribution object (a channel id, a message id):
-/// non-empty and free of the plane's reserved separator, so chat's report of
-/// it can never alias another object's.
-fn validate_object_id(field: &str, value: &str) -> Result<(), Error> {
-    require_non_empty(field, value)?;
-    if value.contains(KEY_SEP) {
-        return Err(Error::Module {
-            reason: refusal::INVALID_INPUT.into(),
-            sentence: format!("{field} must not contain the reserved separator"),
-        });
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum ChatViewReply {
+    Channels {
+        channels: Vec<ChannelInfo>,
+        has_more: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        next_after: Option<String>,
+    },
+    Channel(Option<ChannelInfo>),
+    Roots {
+        roots: Vec<MsgRow>,
+        has_more: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        next_before_seq: Option<u64>,
+    },
+    Messages(Vec<MsgRow>),
+    Thread {
+        root: Option<MsgRow>,
+        replies: Vec<MsgRow>,
+        has_more: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        next_reply_seq: Option<u64>,
+    },
+    Members {
+        members: Vec<MemberRow>,
+        has_more: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        next_after: Option<String>,
+    },
+    Hits(MessageHits),
+    TagHits(TagPage),
+    Accounts(Vec<AccountRow>),
+}
+
+/// The frame a write runs in: who acts, when.
+#[derive(Clone, Debug)]
+pub struct Frame {
+    pub party: Party,
+    pub height: u64,
+    pub time: u64,
+}
+
+pub fn party_handle(party: &Party) -> String {
+    match party {
+        Party::Account(account) => format!("acct:{account}"),
+        Party::Key(key) => format!("user:{}", hex(key)),
+        Party::Module(module) => format!("module:{module}"),
+        Party::System => "system".to_string(),
+    }
+}
+
+/// The room two accounts share: `dm-<lower>-<higher>`.
+pub fn dm_channel_id(a: AccountNumber, b: AccountNumber) -> String {
+    format!("dm-{}-{}", a.min(b), a.max(b))
+}
+
+/// The two accounts of a dm room id, or `None` for any other channel.
+pub fn dm_peers(channel_id: &str) -> Option<(AccountNumber, AccountNumber)> {
+    let (a, b) = channel_id.strip_prefix("dm-")?.split_once('-')?;
+    Some((a.parse().ok()?, b.parse().ok()?))
+}
+
+pub fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+// ── keys ────────────────────────────────────────────────────────────────────
+
+fn chan_key(id: &str) -> String {
+    format!("chan/{id}")
+}
+fn seq_key(id: &str) -> String {
+    format!("seq/{id}")
+}
+fn msg_key(ch: &str, seq: u64) -> String {
+    format!("msg/{ch}/{seq:016x}")
+}
+fn root_key(ch: &str, seq: u64) -> String {
+    format!("root/{ch}/{:016x}", u64::MAX - seq)
+}
+fn msgid_key(id: &str) -> String {
+    format!("msgid/{id}")
+}
+fn thread_key(ch: &str, root: u64, reply: u64) -> String {
+    format!("thread/{ch}/{root:016x}/{reply:016x}")
+}
+fn member_key(ch: &str, handle: &str) -> String {
+    format!("member/{ch}/{handle}")
+}
+fn react_key(ch: &str, seq: u64, emoji: &str, handle: &str) -> String {
+    format!("react/{ch}/{seq:016x}/{emoji}/{handle}")
+}
+fn tok_key(token: &str, ch: &str, seq: u64) -> String {
+    format!("tok/{token}/{ch}/{seq:016x}")
+}
+fn tag_key(label: &str, time: u64, ch: &str, seq: u64) -> String {
+    format!("tag/{label}/{:016x}/{ch}/{seq:016x}", u64::MAX - time)
+}
+fn tagc_key(ch: &str, label: &str, seq: u64) -> String {
+    format!("tagc/{ch}/{label}/{:016x}", u64::MAX - seq)
+}
+
+// ── the store ───────────────────────────────────────────────────────────────
+
+pub trait Read {
+    fn get(&self, key: &[u8]) -> Option<Vec<u8>>;
+    fn scan(&self, scan: Scan) -> Vec<Entry>;
+}
+
+pub trait Write: Read {
+    fn set(&mut self, key: Vec<u8>, value: Vec<u8>);
+    fn delete(&mut self, key: &[u8]);
+}
+
+// ── store helpers ───────────────────────────────────────────────────────────
+
+fn refuse(reason: &str, sentence: impl Into<String>) -> Refusal {
+    Refusal::new(reason, sentence)
+}
+
+fn load<T: DeserializeOwned>(store: &impl Read, key: &str) -> Result<Option<T>, Refusal> {
+    store
+        .get(key.as_bytes())
+        .map(|b| serde_json::from_slice(&b).map_err(|e| refuse(reason::CORRUPT, e.to_string())))
+        .transpose()
+}
+
+fn save<T: Serialize>(store: &mut impl Write, key: String, value: &T) {
+    store.set(
+        key.into_bytes(),
+        serde_json::to_vec(value).expect("a chat row serializes"),
+    );
+}
+
+fn mark(store: &mut impl Write, key: String) {
+    store.set(key.into_bytes(), Vec::new());
+}
+
+fn channel(store: &impl Read, id: &str) -> Result<ChannelRow, Refusal> {
+    load(store, &chan_key(id))?.ok_or_else(|| refuse(reason::NOT_FOUND, format!("no channel {id}")))
+}
+
+fn head_seq(store: &impl Read, id: &str) -> u64 {
+    load(store, &seq_key(id)).ok().flatten().unwrap_or(0)
+}
+
+fn row(store: &impl Read, ch: &str, seq: u64) -> Result<MsgRow, Refusal> {
+    load(store, &msg_key(ch, seq))?
+        .ok_or_else(|| refuse(reason::NOT_FOUND, format!("no message {ch}/{seq}")))
+}
+
+fn checked_id(what: &str, id: &str) -> Result<(), Refusal> {
+    if id.is_empty() || id.len() > MAX_ID_BYTES || id.contains('/') {
+        return Err(refuse(
+            reason::INVALID_INPUT,
+            format!("{what} is 1..={MAX_ID_BYTES} bytes without '/'"),
+        ));
     }
     Ok(())
 }
 
-/// the structured mention parties of message blocks, first occurrence order,
-/// deduplicated — the parties a post NAMES, before resolution.
-fn collect_mentions(blocks: &[Block]) -> Vec<Party> {
-    let mut mentions: Vec<Party> = Vec::new();
+fn checked_name(name: &str) -> Result<(), Refusal> {
+    if name.trim().is_empty() || name.len() > MAX_NAME_BYTES {
+        return Err(refuse(
+            reason::INVALID_INPUT,
+            format!("a name is 1..={MAX_NAME_BYTES} bytes"),
+        ));
+    }
+    Ok(())
+}
+
+fn writable(store: &impl Read, ch: &ChannelRow, party: &Party) -> Result<(), Refusal> {
+    if ch.archived {
+        return Err(refuse(
+            reason::WRONG_STATE,
+            format!("{} is archived", ch.id),
+        ));
+    }
+    let handle = party_handle(party);
+    let allowed = ch.post_policy == PostPolicy::Open
+        || ch.owner == handle
+        || store.get(member_key(&ch.id, &handle).as_bytes()).is_some();
+    if !allowed {
+        return Err(refuse(
+            reason::UNAUTHORIZED,
+            format!("{handle} is not a member of {}", ch.id),
+        ));
+    }
+    Ok(())
+}
+
+fn owned(ch: &ChannelRow, party: &Party) -> Result<(), Refusal> {
+    if ch.owner != party_handle(party) {
+        return Err(refuse(
+            reason::UNAUTHORIZED,
+            format!("only the owner of {} may", ch.id),
+        ));
+    }
+    Ok(())
+}
+
+// ── text: flattening, search tokens, tags ───────────────────────────────────
+
+pub fn plain_text(blocks: &[Block]) -> String {
+    let mut out = String::new();
+    for block in blocks {
+        let piece = match block {
+            Block::Paragraph(spans) | Block::Quote(spans) => spans
+                .iter()
+                .map(|s| s.text.as_str())
+                .collect::<Vec<_>>()
+                .join(" "),
+            Block::Code { text, .. } => text.clone(),
+            Block::Divider => continue,
+        };
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(&piece);
+    }
+    out
+}
+
+/// NFC lowercase alphanumeric runs of two or more chars.
+pub fn tokens(text: &str) -> BTreeSet<String> {
+    text.nfc()
+        .collect::<String>()
+        .to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|t| t.chars().count() >= 2)
+        .map(str::to_string)
+        .collect()
+}
+
+/// `#tag` labels in appearance order: NFC lowercase, `[alnum_-]`, opened at
+/// a word boundary (never `##`, `/#`, `&#`), outside code and links.
+pub fn tags(blocks: &[Block]) -> Vec<String> {
+    let mut out = Vec::new();
     for block in blocks {
         let spans = match block {
             Block::Paragraph(spans) | Block::Quote(spans) => spans,
             Block::Code { .. } | Block::Divider => continue,
         };
         for span in spans {
-            for mark in &span.marks {
-                if let Mark::Mention(party) = mark
-                    && !mentions.contains(party)
-                {
-                    mentions.push(party.clone());
-                }
+            if span.marks.iter().any(|m| matches!(m, Mark::Link(_))) {
+                continue;
             }
-        }
-    }
-    mentions
-}
-
-fn clamp_limit(limit: u64) -> u64 {
-    limit.min(MAX_QUERY_LIMIT)
-}
-
-// ---- the attribution edge ---------------------------------------------------
-// chat's shapes translated into the plane's vocabulary, at this edge only.
-
-/// one attribution report a write produced: the object's FULL relation set at
-/// its new revision. decided by the stage fns beside the write that revises
-/// the object; emitted by `execute` once the unit's writes are staged.
-struct Report {
-    object: ObjectRef,
-    revision: u64,
-    relations: Vec<Relation>,
-}
-
-fn channel_object(channel_id: &str) -> ObjectRef {
-    ObjectRef {
-        kind: OBJECT_KIND_CHANNEL.into(),
-        object: channel_id.into(),
-    }
-}
-
-fn message_object(message_id: &str) -> ObjectRef {
-    ObjectRef {
-        kind: OBJECT_KIND_MESSAGE.into(),
-        object: message_id.into(),
-    }
-}
-
-fn relation(recipient: AccountNumber, reason: Reason) -> Relation {
-    Relation {
-        recipient,
-        reason,
-        detail: Vec::new(),
-    }
-}
-
-/// a channel's relation set: its owner's ownership, when the owner is an
-/// account. a key, module or system owner holds no relation.
-fn channel_relations(owner: &Party) -> Vec<Relation> {
-    owner
-        .account()
-        .map(|account| relation(account, Reason::Ownership))
-        .into_iter()
-        .collect()
-}
-
-/// a live message's relation set: its author's authorship (when the author is
-/// an account) plus one mention per mentioned account, plus the other side
-/// of a DM as one more mention — a DM ADDRESSES ITS OTHER SIDE, so an agent
-/// there is summoned the way an @-mention summons it in a room. `mentions`
-/// is already deduplicated, so no `(recipient, reason)` repeats; the
-/// counterpart is skipped when the post names them outright.
-fn message_relations(
-    author: &Party,
-    mentions: &[AccountNumber],
-    addressed: Option<AccountNumber>,
-) -> Vec<Relation> {
-    let authorship = author
-        .account()
-        .map(|account| relation(account, Reason::Authorship));
-    let addressed = addressed.filter(|account| !mentions.contains(account));
-    authorship
-        .into_iter()
-        .chain(
-            mentions
-                .iter()
-                .map(|account| relation(*account, Reason::Mention)),
-        )
-        .chain(addressed.map(|account| relation(account, Reason::Mention)))
-        .collect()
-}
-
-/// the plane's actor for a chat party — the same four cases, one to one.
-fn actor_of(party: &Party) -> Actor {
-    match party {
-        Party::Account(account) => Actor::Account(*account),
-        Party::Key(key) => Actor::Key(key.clone()),
-        Party::Module(module) => Actor::Module(module.clone()),
-        Party::System => Actor::System,
-    }
-}
-
-/// Account attribution and proof of key ownership are separate facts: joining
-/// an account never transfers an older key-owned record to its other keys.
-struct Authority {
-    party: Party,
-    origin: Origin,
-}
-
-impl Authority {
-    /// Prefer a current account entry; otherwise retain an existing entry
-    /// owned by this exact signing key. Other account keys cannot claim it.
-    fn participant<'a>(&self, parties: impl IntoIterator<Item = &'a Party>) -> Party {
-        let parties: Vec<_> = parties.into_iter().collect();
-        if parties.contains(&&self.party) {
-            return self.party.clone();
-        }
-        let Origin::External(key) = &self.origin else {
-            return self.party.clone();
-        };
-        let historical = Party::Key(key.clone());
-        if parties.contains(&&historical) {
-            return historical;
-        }
-        self.party.clone()
-    }
-}
-
-struct MessageContent {
-    blocks: Vec<Block>,
-    mentions: Vec<AccountNumber>,
-}
-
-struct ResolvedMentions {
-    accounts: Vec<AccountNumber>,
-    key_mentions: Vec<AccountNumber>,
-}
-
-struct Posted {
-    seq: u64,
-    thread_root: Option<u64>,
-    hooks: Vec<String>,
-    report: Report,
-}
-
-/// storage-backed chat module.
-pub struct Chat {
-    id: ModuleId,
-    /// the host-injected authenticated store plus this block's staging overlay
-    /// (logical-key -> staged write; `None` = delete; read-your-writes, folded
-    /// into `root()` at `commit_block`). store key is `sha256(logical_key)`,
-    /// owned by [`StagedStore`].
-    staged: StagedStore,
-    /// the attribution plane every channel and message write reports to (one
-    /// `Attribute` follow-up per revised object, same unit). `None` = no
-    /// plane on this host (tests, minimal registries): nothing is reported.
-    attribution: Option<ModuleId>,
-    /// the identity sibling every external origin resolves through (`OfKey`)
-    /// and every named account is validated against (`Get`). `None` = no
-    /// sibling on this host (tests, minimal registries): such a host knows no
-    /// account, so every external key stays a key and no mention resolves.
-    identity: Option<ModuleId>,
-}
-
-impl Chat {
-    /// wrap the host-constructed store under module identity `id`. sync — the
-    /// store arrives already opened (or already synced to a verified root).
-    pub fn new(id: impl Into<ModuleId>, store: Box<dyn MerkleStore>) -> Self {
-        Self {
-            id: id.into(),
-            staged: StagedStore::new(store),
-            attribution: None,
-            identity: None,
-        }
-    }
-
-    /// report every channel and message revision to `attribution`.
-    pub fn with_attribution(mut self, attribution: impl Into<ModuleId>) -> Self {
-        self.attribution = Some(attribution.into());
-        self
-    }
-
-    /// resolve external keys and validate named accounts through `identity`.
-    pub fn with_identity(mut self, identity: impl Into<ModuleId>) -> Self {
-        self.identity = Some(identity.into());
-        self
-    }
-
-    async fn get_raw(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Error> {
-        self.staged.get(key).await
-    }
-
-    async fn load<T>(&self, key: &[u8]) -> Result<Option<T>, Error>
-    where
-        T: DeserializeOwned,
-    {
-        match self.get_raw(key).await? {
-            Some(bytes) => Ok(Some(serde_json::from_slice(&bytes).map_err(|e| {
-                Error::Module {
-                    reason: refusal::CORRUPT.into(),
-                    sentence: e.to_string(),
-                }
-            })?)),
-            None => Ok(None),
-        }
-    }
-
-    fn store<T>(&mut self, key: Vec<u8>, value: &T)
-    where
-        T: Serialize,
-    {
-        self.staged.stage(
-            key,
-            serde_json::to_vec(value).expect("chat value is serializable"),
-        );
-    }
-
-    /// stage a value only if its serialized size fits `cap` — the write-time
-    /// guard against poison values (the qmdb codec cap is decode-only).
-    fn store_bounded<T>(
-        &mut self,
-        key: Vec<u8>,
-        value: &T,
-        cap: usize,
-        what: &str,
-    ) -> Result<(), Error>
-    where
-        T: Serialize,
-    {
-        let bytes = serde_json::to_vec(value).expect("chat value is serializable");
-        if bytes.len() > cap {
-            return Err(Error::Module {
-                reason: refusal::CAPACITY.into(),
-                sentence: format!("{what} record too large: {} > {cap} bytes", bytes.len()),
-            });
-        }
-        self.staged.stage(key, bytes);
-        Ok(())
-    }
-
-    fn delete(&mut self, key: Vec<u8>) {
-        self.staged.delete(key);
-    }
-
-    async fn channel(&self, channel_id: &str) -> Result<Option<Channel>, Error> {
-        self.load(&channel_key(channel_id)).await
-    }
-
-    async fn require_channel(&self, channel_id: &str) -> Result<Channel, Error> {
-        self.channel(channel_id)
-            .await?
-            .ok_or_else(|| Error::Module {
-                reason: refusal::NOT_FOUND.into(),
-                sentence: format!("unknown channel: {channel_id}"),
-            })
-    }
-
-    fn store_channel(&mut self, channel: &Channel) -> Result<(), Error> {
-        self.store_bounded(
-            channel_key(&channel.id),
-            channel,
-            MAX_CHANNEL_RECORD_BYTES,
-            "channel",
-        )
-    }
-
-    async fn head(&self, channel_id: &str, seq: u64) -> Result<Option<MessageHead>, Error> {
-        self.load(&msg_key(channel_id, seq)).await
-    }
-
-    async fn require_head(&self, channel_id: &str, seq: u64) -> Result<MessageHead, Error> {
-        self.head(channel_id, seq)
-            .await?
-            .ok_or_else(|| Error::Module {
-                reason: refusal::NOT_FOUND.into(),
-                sentence: format!("unknown message: {channel_id}/{seq}"),
-            })
-    }
-
-    fn store_head(&mut self, channel_id: &str, seq: u64, head: &MessageHead) -> Result<(), Error> {
-        self.store_bounded(
-            msg_key(channel_id, seq),
-            head,
-            MAX_MESSAGE_HEAD_BYTES,
-            "message",
-        )
-    }
-
-    async fn is_member(&self, channel_id: &str, party: &Party) -> Result<bool, Error> {
-        Ok(self
-            .get_raw(&member_key(channel_id, party))
-            .await?
-            .is_some())
-    }
-
-    /// The other side of a DM, when `channel_id` is one and `author` is one
-    /// of its two accounts; `None` for a room, or for a poster the pair does
-    /// not name (a module, a key on no account).
-    async fn dm_counterpart(
-        &self,
-        channel_id: &str,
-        author: &Party,
-    ) -> Result<Option<AccountNumber>, Error> {
-        let Some((first, second)) = self
-            .load::<(AccountNumber, AccountNumber)>(&dm_pair_key(channel_id))
-            .await?
-        else {
-            return Ok(None);
-        };
-        let counterpart = match author.account() {
-            Some(account) if account == first => Some(second),
-            Some(account) if account == second => Some(first),
-            _ => None,
-        };
-        Ok(counterpart)
-    }
-
-    // ---- identity ---------------------------------------------------------
-    // the ONE resolver every party and every named account goes through.
-
-    /// the account holding `key`, through identity. `None` when identity
-    /// knows no such key — or when this host wires no identity sibling.
-    async fn account_of_key(
-        &self,
-        ctx: &dyn Ctx,
-        key: &[u8],
-    ) -> Result<Option<AccountNumber>, Error> {
-        let Some(identity) = &self.identity else {
-            return Ok(None);
-        };
-        let account = identity::client::account_of_key(ctx, identity, key).await?;
-        Ok(account.map(|view| view.number))
-    }
-
-    /// whether account `number` exists; a host wiring no identity sibling
-    /// has no accounts.
-    async fn account_exists(&self, ctx: &dyn Ctx, number: AccountNumber) -> Result<bool, Error> {
-        let Some(identity) = &self.identity else {
-            return Ok(false);
-        };
-        Ok(identity::client::account(ctx, identity, number)
-            .await?
-            .is_some())
-    }
-
-    /// the party the dispatch origin acts as — the only authorship path. an
-    /// external key is the account holding it when identity knows one and the
-    /// bare key otherwise; the pre-consensus default `Origin::External(vec![])`
-    /// never passes as an authenticated party.
-    async fn party_of_origin(&self, ctx: &dyn Ctx, origin: &Origin) -> Result<Party, Error> {
-        match origin {
-            Origin::External(key) if key.is_empty() => Err(Error::Module {
-                reason: refusal::INVALID_INPUT.into(),
-                sentence: "external origin must carry a non-empty submitter id".into(),
-            }),
-            Origin::External(key) => Ok(match self.account_of_key(ctx, key).await? {
-                Some(account) => Party::Account(account),
-                None => Party::Key(key.clone()),
-            }),
-            Origin::Module(id) => Ok(Party::Module(id.clone())),
-            Origin::Program(account) => Ok(Party::Account(*account)),
-            Origin::System => Ok(Party::System),
-        }
-    }
-
-    /// the account a mention names, or the rejection: an account must exist,
-    /// a key must hold an account, and a module or the system is no account.
-    async fn resolve_mention_batch(
-        &self,
-        ctx: &dyn Ctx,
-        mentions: &[Party],
-    ) -> Result<Vec<AccountNumber>, Error> {
-        if mentions.is_empty() {
-            return Ok(Vec::new());
-        }
-        let references: Vec<_> = mentions
-            .iter()
-            .filter_map(|mention| match mention {
-                Party::Account(number) => Some(AccountRef::Account(*number)),
-                Party::Key(key) => Some(AccountRef::Key(key.clone())),
-                Party::Module(_) | Party::System => None,
-            })
-            .collect();
-        let numbers = match &self.identity {
-            Some(identity) => identity::client::resolve(ctx, identity, &references).await?,
-            None => vec![None; mentions.len()],
-        };
-        if numbers.len() != mentions.len() {
-            return Err(Error::Module {
-                reason: refusal::UNEXPECTED_REPLY.into(),
-                sentence: format!(
-                    "identity returned {} accounts for {} mentions",
-                    numbers.len(),
-                    mentions.len()
-                ),
-            });
-        }
-        mentions
-            .iter()
-            .zip(numbers)
-            .map(|(mention, number)| {
-                number.ok_or_else(|| {
-                    let (reason, sentence) = match mention {
-                        Party::Account(account) => (
-                            refusal::NOT_FOUND,
-                            format!("a mention names no account: {account}"),
-                        ),
-                        Party::Key(_) => (
-                            refusal::NOT_FOUND,
-                            "a mentioned key belongs to no account".into(),
-                        ),
-                        Party::Module(_) | Party::System => (
-                            refusal::INVALID_INPUT,
-                            "a mention names an account, never a module or the system".into(),
-                        ),
-                    };
-                    Error::Module {
-                        reason: reason.into(),
-                        sentence,
-                    }
-                })
-            })
-            .collect()
-    }
-
-    /// the accounts `blocks` mention, resolved and deduplicated in first
-    /// occurrence order. a mention that resolves to no account rejects the
-    /// whole write.
-    async fn resolve_mentions(
-        &self,
-        ctx: &dyn Ctx,
-        blocks: &mut [Block],
-    ) -> Result<ResolvedMentions, Error> {
-        let mut accounts = Vec::new();
-        let mut key_mentions = Vec::new();
-        let mut resolved = BTreeMap::new();
-        let mentions = collect_mentions(blocks);
-        for chunk in mentions.chunks(identity::MAX_QUERY_LIMIT as usize) {
-            let end = chunk
-                .iter()
-                .position(|party| !party.is_person())
-                .unwrap_or(chunk.len());
-            let numbers = self.resolve_mention_batch(ctx, &chunk[..end]).await?;
-            for (mention, account) in chunk[..end].iter().zip(numbers) {
-                if matches!(mention, Party::Key(_)) {
-                    key_mentions.push(account);
-                }
-                resolved.insert(mention.clone(), account);
-                if !accounts.contains(&account) {
-                    accounts.push(account);
-                }
-            }
-            if end != chunk.len() {
-                return Err(Error::Module {
-                    reason: refusal::INVALID_INPUT.into(),
-                    sentence: "a mention names an account, never a module or the system".into(),
-                });
-            }
-        }
-        for block in blocks {
-            let spans = match block {
-                Block::Paragraph(spans) | Block::Quote(spans) => spans,
-                Block::Code { .. } | Block::Divider => continue,
-            };
-            for span in spans {
-                for mark in &mut span.marks {
-                    if let Mark::Mention(party) = mark {
-                        *party = Party::Account(resolved[party]);
+            let mut prev: Option<char> = None;
+            let mut rest = span.text.as_str();
+            while let Some(at) = rest.find('#') {
+                let before = if at == 0 {
+                    prev
+                } else {
+                    rest[..at].chars().next_back()
+                };
+                let opens =
+                    before.is_none_or(|p| !p.is_alphanumeric() && !matches!(p, '#' | '/' | '&'));
+                let body: String = rest[at + 1..]
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
+                    .collect();
+                if opens && (1..=MAX_TAG_CHARS).contains(&body.chars().count()) {
+                    let label = body.nfc().collect::<String>().to_lowercase();
+                    if !out.contains(&label) {
+                        out.push(label);
                     }
                 }
+                prev = Some(body.chars().next_back().unwrap_or('#'));
+                rest = &rest[at + 1 + body.len()..];
             }
         }
-        Ok(ResolvedMentions {
-            accounts,
-            key_mentions,
-        })
     }
+    out.truncate(MAX_TAGS_PER_MESSAGE);
+    out
+}
 
-    /// a party a roster may name: a person, in the resolved vocabulary every
-    /// poster arrives in — an account that exists, or a key holding none. a
-    /// key that does hold an account is refused (the roster names the
-    /// account, or the member's post would never match), and trusted code is
-    /// never a member because it always may post.
-    async fn validate_member(&self, ctx: &dyn Ctx, party: &Party) -> Result<(), Error> {
-        match party {
-            Party::Account(account) => {
-                if !self.account_exists(ctx, *account).await? {
-                    return Err(Error::Module {
-                        reason: refusal::NOT_FOUND.into(),
-                        sentence: format!("membership names no account: {account}"),
-                    });
-                }
-                Ok(())
-            }
-            Party::Key(key) if key.is_empty() => Err(Error::Module {
-                reason: refusal::INVALID_INPUT.into(),
-                sentence: "a member key must not be empty".into(),
-            }),
-            Party::Key(key) => match self.account_of_key(ctx, key).await? {
-                Some(account) => Err(Error::Module {
-                    reason: refusal::INVALID_INPUT.into(),
-                    sentence: format!("this key belongs to account {account}; name the account"),
-                }),
-                None => Ok(()),
-            },
-            Party::Module(_) | Party::System => Err(Error::Module {
-                reason: refusal::INVALID_INPUT.into(),
-                sentence: "modules and the system are never members; they always may post".into(),
-            }),
+fn index(store: &mut impl Write, row: &MsgRow, on: bool) {
+    let posting = serde_json::to_vec(&(&row.channel_id, row.seq)).expect("a posting serializes");
+    let mut keys: Vec<String> = tokens(&row.text)
+        .iter()
+        .map(|t| tok_key(t, &row.channel_id, row.seq))
+        .collect();
+    for label in &row.tags {
+        keys.push(tag_key(label, row.time, &row.channel_id, row.seq));
+        keys.push(tagc_key(&row.channel_id, label, row.seq));
+    }
+    for key in keys {
+        if on {
+            store.set(key.into_bytes(), posting.clone());
+        } else {
+            store.delete(key.as_bytes());
         }
     }
+}
 
-    // ---- gates ------------------------------------------------------------
-
-    /// gate a post/reaction on the channel policy. module and system parties
-    /// always pass — modules are genesis-fixed trusted code; people need
-    /// membership under `MembersOnly`.
-    async fn check_post_policy(&self, channel: &Channel, party: &Party) -> Result<(), Error> {
-        // an archived channel rejects posts, reactions, and huddle join/sweep:
-        // every posting-class op routes through here, so one guard turns them
-        // all away. edits and deletes deliberately do not call this — redacting
-        // your own message stays possible in a closed channel — and neither do
-        // membership, rename, or unarchive.
-        if channel.archived {
-            return Err(Error::Module {
-                reason: refusal::WRONG_STATE.into(),
-                sentence: format!("channel {} is archived", channel.id),
-            });
-        }
-        let gated_by_roster = channel.post_policy == PostPolicy::MembersOnly && party.is_person();
-        if gated_by_roster && !self.is_member(&channel.id, party).await? {
-            return Err(Error::Module {
-                reason: refusal::UNAUTHORIZED.into(),
-                sentence: format!(
-                    "channel {} is members-only and the author is not a member",
-                    channel.id
-                ),
-            });
-        }
-        Ok(())
+fn put_row(store: &mut impl Write, row: &MsgRow) -> Result<(), Refusal> {
+    let bytes = serde_json::to_vec(row).expect("a chat row serializes");
+    if bytes.len() > MAX_MESSAGE_BYTES {
+        return Err(refuse(
+            reason::CAPACITY,
+            format!("a message is at most {MAX_MESSAGE_BYTES} bytes"),
+        ));
     }
+    store.set(msg_key(&row.channel_id, row.seq).into_bytes(), bytes);
+    Ok(())
+}
 
-    async fn check_authorized_post(
-        &self,
-        channel: &Channel,
-        authority: &Authority,
-    ) -> Result<(), Error> {
-        let error = match self.check_post_policy(channel, &authority.party).await {
-            Ok(()) => return Ok(()),
-            Err(error) => error,
-        };
-        let Origin::External(key) = &authority.origin else {
-            return Err(error);
-        };
-        let key_holds_membership = !channel.archived
-            && self
-                .is_member(&channel.id, &Party::Key(key.clone()))
-                .await?;
-        if key_holds_membership {
-            return Ok(());
-        }
-        Err(error)
-    }
+// ── execute ─────────────────────────────────────────────────────────────────
 
-    /// one party's standing in one channel, answered from chat's own gates —
-    /// [`ChatQuery::Access`]. a module that acts on a person's behalf
-    /// (automations firing that person's rule) asks HERE instead of
-    /// re-deriving the admission rule, because a second copy of it is a
-    /// second rule. an unknown channel answers `false` to both: the caller
-    /// fails closed.
-    async fn channel_access(
-        &self,
-        channel_id: &str,
-        party: &Party,
-    ) -> Result<ChannelAccess, Error> {
-        let Some(channel) = self.channel(channel_id).await? else {
-            return Ok(ChannelAccess {
-                may_read: false,
-                may_post: false,
-            });
-        };
-        // reading is not policied per-message: an OPEN channel is readable by
-        // any authenticated party, a members-only one only by its members.
-        let may_read_without_membership =
-            channel.post_policy == PostPolicy::Open || !party.is_person();
-        let may_read = may_read_without_membership || self.is_member(channel_id, party).await?;
-        // the post answer is the post GATE, run verbatim — archival and policy
-        // included — so the two can never drift apart.
-        let may_post = self.check_post_policy(&channel, party).await.is_ok();
-        Ok(ChannelAccess { may_read, may_post })
-    }
-
-    /// refuse channel creation once a person is at [`MAX_CHANNELS_PER_CREATOR`]
-    /// — there is no `DeleteChannel` op, so this is the only thing bounding
-    /// one party's share of the (permanent) channel set. trusted code is not
-    /// counted.
-    async fn check_creator_cap(&self, party: &Party) -> Result<(), Error> {
-        if !party.is_person() {
-            return Ok(());
-        }
-        let count: u64 = self.load(&creator_count_key(party)).await?.unwrap_or(0);
-        if count as usize >= MAX_CHANNELS_PER_CREATOR {
-            return Err(Error::Module {
-                reason: refusal::CAPACITY.into(),
-                sentence: format!("you already have {MAX_CHANNELS_PER_CREATOR} channels open"),
-            });
-        }
-        Ok(())
-    }
-
-    /// record that a person just created a channel — the counter
-    /// [`Self::check_creator_cap`] reads.
-    async fn bump_creator_count(&mut self, party: &Party) -> Result<(), Error> {
-        if !party.is_person() {
-            return Ok(());
-        }
-        let count: u64 = self.load(&creator_count_key(party)).await?.unwrap_or(0);
-        self.store(creator_count_key(party), &(count + 1));
-        Ok(())
-    }
-
-    // ---- channel writes ---------------------------------------------------
-
-    /// stage a fresh channel record owned by `party` and report its first
-    /// revision.
-    fn stage_new_channel(
-        &mut self,
-        party: &Party,
-        channel_id: String,
-        name: String,
-        post_policy: PostPolicy,
-        voice: bool,
-        created_at: u64,
-    ) -> Result<Report, Error> {
-        let channel = Channel {
-            id: channel_id,
+pub fn execute(store: &mut impl Write, frame: &Frame, msg: ChatMsg) -> Result<(), Refusal> {
+    let actor = party_handle(&frame.party);
+    match msg {
+        ChatMsg::CreateChannel {
+            channel_id,
             name,
-            created_at,
-            head_seq: 0,
             post_policy,
-            hooks: Vec::new(),
-            pinned: Vec::new(),
-            huddle: Vec::new(),
-            voice,
-            owner: party.clone(),
-            archived: false,
-            revision: 1,
-        };
-        self.store_channel(&channel)?;
-        Ok(Report {
-            object: channel_object(&channel.id),
-            revision: channel.revision,
-            relations: channel_relations(&channel.owner),
-        })
-    }
-
-    async fn stage_channel(
-        &mut self,
-        party: &Party,
-        channel_id: String,
-        name: String,
-        post_policy: PostPolicy,
-        voice: bool,
-        created_at: u64,
-    ) -> Result<Report, Error> {
-        validate_object_id("channel_id", &channel_id)?;
-        require_non_empty("name", &name)?;
-        validate_channel_namespace(party, &channel_id)?;
-        // the `dm-` shape is reserved for `CreateDmChannel`, the only op that
-        // derives the id from the creator's OWN account — a plain
-        // `CreateChannel` naming that shape is exactly the squat this gate
-        // closes (see the module doc on `CreateDmChannel`).
-        if client::is_derived_dm_channel(&channel_id) {
-            return Err(Error::Module {
-                reason: refusal::INVALID_INPUT.into(),
-                sentence: "dm- channel ids are reserved; open a DM with CreateDmChannel".into(),
-            });
+        } => create_channel(store, frame, channel_id, name, post_policy, false),
+        ChatMsg::CreateVoiceChannel { channel_id, name } => {
+            create_channel(store, frame, channel_id, name, PostPolicy::Open, true)
         }
-        if self.channel(&channel_id).await?.is_some() {
-            return Err(Error::Module {
-                reason: refusal::ALREADY_EXISTS.into(),
-                sentence: format!("channel already exists: {channel_id}"),
-            });
-        }
-        self.check_creator_cap(party).await?;
-        let report =
-            self.stage_new_channel(party, channel_id, name, post_policy, voice, created_at)?;
-        self.bump_creator_count(party).await?;
-        Ok(report)
-    }
-
-    /// open the two-party DM room with `counterpart`: derive the id from the
-    /// creator's ACCOUNT (the origin's resolved party, never a payload) so
-    /// only one of the pair may ever mint it, require the counterpart to be
-    /// an account that exists, always seat `MembersOnly` regardless of what
-    /// a squatter might otherwise request, and own it by its creator like
-    /// any other person-made channel.
-    async fn stage_dm_channel(
-        &mut self,
-        ctx: &dyn Ctx,
-        party: &Party,
-        counterpart: AccountNumber,
-        name: String,
-        created_at: u64,
-    ) -> Result<(String, Report), Error> {
-        let creator = match party {
-            Party::Account(account) => *account,
-            Party::Key(_) => {
-                return Err(Error::Module {
-                    reason: refusal::NOT_FOUND.into(),
-                    sentence: "this key belongs to no identity account".into(),
-                });
+        ChatMsg::CreateDmChannel { counterpart, name } => {
+            let Party::Account(me) = frame.party else {
+                return Err(refuse(reason::UNAUTHORIZED, "only an account opens a dm"));
+            };
+            if me == counterpart {
+                return Err(refuse(reason::INVALID_INPUT, "a dm needs two accounts"));
             }
-            Party::Module(_) | Party::System => {
-                return Err(Error::Module {
-                    reason: refusal::UNAUTHORIZED.into(),
-                    sentence: "a DM channel must be opened by an account".into(),
-                });
+            let id = dm_channel_id(me, counterpart);
+            if load::<ChannelRow>(store, &chan_key(&id))?.is_some() {
+                return Ok(());
             }
-        };
-        require_non_empty("name", &name)?;
-        if creator == counterpart {
-            return Err(Error::Module {
-                reason: refusal::INVALID_INPUT.into(),
-                sentence: "a DM's two accounts must differ".into(),
-            });
-        }
-        if !self.account_exists(ctx, counterpart).await? {
-            return Err(Error::Module {
-                reason: refusal::NOT_FOUND.into(),
-                sentence: format!("a DM names no account: {counterpart}"),
-            });
-        }
-        let channel_id = client::dm_channel_id(&creator.to_string(), &counterpart.to_string());
-        if self.channel(&channel_id).await?.is_some() {
-            return Err(Error::Module {
-                reason: refusal::ALREADY_EXISTS.into(),
-                sentence: format!("channel already exists: {channel_id}"),
-            });
-        }
-        self.check_creator_cap(party).await?;
-        let report = self.stage_new_channel(
-            party,
-            channel_id.clone(),
-            name,
-            PostPolicy::MembersOnly,
-            false,
-            created_at,
-        )?;
-        self.store(member_key(&channel_id, party), &true);
-        self.store(member_key(&channel_id, &Party::Account(counterpart)), &true);
-        self.store(dm_pair_key(&channel_id), &(creator, counterpart));
-        self.bump_creator_count(party).await?;
-        Ok((channel_id, report))
-    }
-
-    /// stage a revised channel record and report the new revision.
-    fn stage_channel_revision(&mut self, mut channel: Channel) -> Result<Report, Error> {
-        channel.revision = channel
-            .revision
-            .checked_add(1)
-            .ok_or_else(|| Error::Module {
-                reason: refusal::EXHAUSTED.into(),
-                sentence: format!("channel {} has no revision numbers left", channel.id),
-            })?;
-        self.store_channel(&channel)?;
-        Ok(Report {
-            object: channel_object(&channel.id),
-            revision: channel.revision,
-            relations: channel_relations(&channel.owner),
-        })
-    }
-
-    /// rename a channel. any authenticated party renames any channel: a
-    /// channel's owner is attribution, not a gate. reuses `CreateChannel`'s
-    /// name validation (non-empty + the `:` namespace gate — the id is
-    /// unchanged, but the gate still keeps a person off a module-namespaced
-    /// channel) and the record byte cap. a same-name rename stages nothing
-    /// and reports nothing.
-    async fn stage_rename(
-        &mut self,
-        authority: &Authority,
-        channel_id: &str,
-        name: String,
-    ) -> Result<Option<Report>, Error> {
-        let party = &authority.party;
-        require_non_empty("channel_id", channel_id)?;
-        require_non_empty("name", &name)?;
-        validate_channel_namespace(party, channel_id)?;
-        let mut channel = self.require_channel(channel_id).await?;
-        if channel.name == name {
-            // idempotent: a same-name rename stages nothing, so the op log —
-            // and the root — is byte-identical to no write at all.
-            return Ok(None);
-        }
-        channel.name = name;
-        Ok(Some(self.stage_channel_revision(channel)?))
-    }
-
-    /// archive or unarchive a channel. authorization mirrors `stage_rename`
-    /// (the same `:` namespace gate keeps a person off a module-namespaced
-    /// channel — otherwise any person could archive a `forge:<repo>:<n>`
-    /// discussion, and an archived channel rejects the owning module's posts
-    /// too); the flag itself is what `check_post_policy` reads to gate writes.
-    async fn stage_set_archived(
-        &mut self,
-        authority: &Authority,
-        channel_id: &str,
-        archived: bool,
-    ) -> Result<Option<Report>, Error> {
-        let party = &authority.party;
-        require_non_empty("channel_id", channel_id)?;
-        validate_channel_namespace(party, channel_id)?;
-        let mut channel = self.require_channel(channel_id).await?;
-        if channel.archived == archived {
-            return Ok(None);
-        }
-        channel.archived = archived;
-        Ok(Some(self.stage_channel_revision(channel)?))
-    }
-
-    // ---- message writes ---------------------------------------------------
-
-    async fn stage_message(
-        &mut self,
-        authority: &Authority,
-        channel_id: &str,
-        message_id: String,
-        content: MessageContent,
-        thread: Option<u64>,
-        now: u64,
-    ) -> Result<Posted, Error> {
-        let author = authority.party.clone();
-        let MessageContent { blocks, mentions } = content;
-        require_non_empty("channel_id", channel_id)?;
-        validate_object_id("message_id", &message_id)?;
-        if blocks.is_empty() {
-            return Err(Error::Module {
-                reason: refusal::INVALID_INPUT.into(),
-                sentence: "blocks must not be empty".into(),
-            });
-        }
-        let mut channel = self.require_channel(channel_id).await?;
-        self.check_authorized_post(&channel, authority).await?;
-        if self.get_raw(&msgid_key(&message_id)).await?.is_some() {
-            return Err(Error::Module {
-                reason: refusal::ALREADY_EXISTS.into(),
-                sentence: format!("message already exists: {message_id}"),
-            });
-        }
-
-        // the per-channel sequence comes from the head_seq counter — never
-        // from the last element of a list (P3: gap-free, assigned in-state).
-        let seq = channel.head_seq + 1;
-        channel.head_seq = seq;
-
-        if let Some(root_seq) = thread {
-            // a reply is a normal message record with its own channel seq;
-            // the root tracks the summary (`reply_count` is the reply-cap
-            // authority — replies are enumerable from it as the root's
-            // sequence-ordered descendants, so no stored reply list exists).
-            // a tombstoned root still anchors its thread, so replying to it
-            // stays legal.
-            let mut root = self.require_head(channel_id, root_seq).await?;
-            if root.thread.is_some() {
-                return Err(Error::Module {
-                    reason: refusal::INVALID_INPUT.into(),
-                    sentence: format!(
-                        "thread replies cannot start subthreads: {channel_id}/{root_seq}"
-                    ),
-                });
+            create_channel(
+                store,
+                frame,
+                id.clone(),
+                name,
+                PostPolicy::MembersOnly,
+                false,
+            )?;
+            for party in [Party::Account(me), Party::Account(counterpart)] {
+                set_member(store, frame, &id, &party, true);
             }
-            if root.reply_count >= MAX_THREAD_REPLIES as u64 {
-                return Err(Error::Module {
-                    reason: refusal::CAPACITY.into(),
-                    sentence: format!("thread reply cap reached: {channel_id}/{root_seq}"),
-                });
-            }
-            root.reply_count += 1;
-            root.last_reply_seq = Some(seq);
-            self.store_head(channel_id, root_seq, &root)?;
+            Ok(())
         }
-
-        let head = MessageHead {
-            message_id: message_id.clone(),
-            author,
-            origin: authority.origin.clone(),
-            content_origin: authority.origin.clone(),
+        ChatMsg::RenameChannel { channel_id, name } => {
+            checked_name(&name)?;
+            let mut ch = channel(store, &channel_id)?;
+            owned(&ch, &frame.party)?;
+            ch.name = name;
+            save(store, chan_key(&channel_id), &ch);
+            Ok(())
+        }
+        ChatMsg::SetChannelArchived {
+            channel_id,
+            archived,
+        } => {
+            let mut ch = channel(store, &channel_id)?;
+            owned(&ch, &frame.party)?;
+            ch.archived = archived;
+            save(store, chan_key(&channel_id), &ch);
+            Ok(())
+        }
+        ChatMsg::PostMessage {
+            channel_id,
+            message_id,
             blocks,
-            created_at: now,
-            rev: 0,
-            revision: 1,
-            edited_at: None,
-            base_rev: None,
-            deleted: false,
             thread,
-            reply_count: 0,
-            last_reply_seq: None,
-        };
-        self.store_head(channel_id, seq, &head)?;
-        self.store(msgid_key(&message_id), &(channel_id.to_string(), seq));
-        let hooks = channel.hooks.clone();
-        self.store_channel(&channel)?;
-        let addressed = self.dm_counterpart(channel_id, &head.author).await?;
-        Ok(Posted {
-            seq,
-            thread_root: thread,
-            hooks,
-            report: Report {
-                object: message_object(&message_id),
-                revision: head.revision,
-                relations: message_relations(&head.author, &mentions, addressed),
-            },
-        })
-    }
-
-    async fn stage_edit(
-        &mut self,
-        authority: &Authority,
-        channel_id: &str,
-        seq: u64,
-        content: MessageContent,
-        base_rev: Option<u32>,
-        now: u64,
-    ) -> Result<(u32, Report), Error> {
-        let MessageContent { blocks, mentions } = content;
-        require_non_empty("channel_id", channel_id)?;
-        if blocks.is_empty() {
-            return Err(Error::Module {
-                reason: refusal::INVALID_INPUT.into(),
-                sentence: "blocks must not be empty".into(),
-            });
-        }
-        let head = self.require_head(channel_id, seq).await?;
-        if head.deleted {
-            return Err(Error::Module {
-                reason: refusal::WRONG_STATE.into(),
-                sentence: format!("cannot edit a deleted message: {channel_id}/{seq}"),
-            });
-        }
-        if head.rev >= MAX_REVISIONS - 1 {
-            return Err(Error::Module {
-                reason: refusal::CAPACITY.into(),
-                sentence: format!("revision cap reached: {channel_id}/{seq}"),
-            });
-        }
-
-        // head is last-write-wins under the total order; the prior head moves
-        // into the immutable revision history. a stale base_rev is recorded on
-        // the new head (base_rev != prior rev), never rejected: the recorded
-        // base tells a reader which head the edit was written against.
-        self.store(rev_key(channel_id, seq, head.rev), &head);
-        let rev = head.rev + 1;
-        let new_head = MessageHead {
-            content_origin: authority.origin.clone(),
-            blocks,
-            rev,
-            revision: head.revision.checked_add(1).ok_or_else(|| Error::Module {
-                reason: refusal::EXHAUSTED.into(),
-                sentence: format!("message {channel_id}/{seq} has no revision numbers left"),
-            })?,
-            edited_at: Some(now),
-            base_rev,
-            ..head
-        };
-        self.store_head(channel_id, seq, &new_head)?;
-        let addressed = self.dm_counterpart(channel_id, &new_head.author).await?;
-        Ok((
-            rev,
-            Report {
-                object: message_object(&new_head.message_id),
-                revision: new_head.revision,
-                relations: message_relations(&new_head.author, &mentions, addressed),
-            },
-        ))
-    }
-
-    async fn stage_delete(&mut self, channel_id: &str, seq: u64) -> Result<Report, Error> {
-        require_non_empty("channel_id", channel_id)?;
-        let head = self.require_head(channel_id, seq).await?;
-        if head.deleted {
-            return Err(Error::Module {
-                reason: refusal::WRONG_STATE.into(),
-                sentence: format!("message already deleted: {channel_id}/{seq}"),
-            });
-        }
-
-        // clear reactions; the emoji index says which records exist.
-        let emojis: BTreeSet<String> = self
-            .load(&reactidx_key(channel_id, seq))
-            .await?
-            .unwrap_or_default();
-        for emoji in &emojis {
-            self.delete(react_key(channel_id, seq, emoji));
-        }
-        self.delete(reactidx_key(channel_id, seq));
-
-        // tombstone: blocks cleared, skeleton (seq, thread linkage, reply
-        // summary, authorship, revision history) preserved so thread integrity
-        // and the sequence promise survive. the deleted message holds no
-        // relation: its report withdraws every one it had.
-        let tombstone = MessageHead {
-            blocks: Vec::new(),
-            deleted: true,
-            revision: head.revision.checked_add(1).ok_or_else(|| Error::Module {
-                reason: refusal::EXHAUSTED.into(),
-                sentence: format!("message {channel_id}/{seq} has no revision numbers left"),
-            })?,
-            ..head
-        };
-        self.store_head(channel_id, seq, &tombstone)?;
-        Ok(Report {
-            object: message_object(&tombstone.message_id),
-            revision: tombstone.revision,
-            relations: Vec::new(),
-        })
-    }
-
-    /// shared reaction-op prelude: emoji + policy + target-message checks.
-    async fn reaction_target(
-        &self,
-        authority: &Authority,
-        channel_id: &str,
-        seq: u64,
-        emoji: &str,
-    ) -> Result<(), Error> {
-        require_non_empty("channel_id", channel_id)?;
-        require_non_empty("emoji", emoji)?;
-        if emoji.len() > MAX_EMOJI_BYTES {
-            return Err(Error::Module {
-                reason: refusal::CAPACITY.into(),
-                sentence: format!("emoji too long: {} > {MAX_EMOJI_BYTES} bytes", emoji.len()),
-            });
-        }
-        let channel = self.require_channel(channel_id).await?;
-        self.check_authorized_post(&channel, authority).await?;
-        let head = self.require_head(channel_id, seq).await?;
-        if head.deleted {
-            return Err(Error::Module {
-                reason: refusal::WRONG_STATE.into(),
-                sentence: format!("cannot react to a deleted message: {channel_id}/{seq}"),
-            });
-        }
-        Ok(())
-    }
-
-    async fn stage_add_reaction(
-        &mut self,
-        authority: &Authority,
-        channel_id: &str,
-        seq: u64,
-        emoji: &str,
-    ) -> Result<Party, Error> {
-        self.reaction_target(authority, channel_id, seq, emoji)
-            .await?;
-        let mut reactors: BTreeSet<Party> = self
-            .load(&react_key(channel_id, seq, emoji))
-            .await?
-            .unwrap_or_default();
-        let party = authority.participant(&reactors);
-        if reactors.contains(&party) {
-            // idempotent: a duplicate add stages NOTHING, so the qmdb op log —
-            // and therefore the root — is byte-identical to a single add.
-            return Ok(party);
-        }
-        let mut emojis: BTreeSet<String> = self
-            .load(&reactidx_key(channel_id, seq))
-            .await?
-            .unwrap_or_default();
-        if reactors.is_empty() && !emojis.contains(emoji) && emojis.len() >= MAX_REACTION_EMOJIS {
-            return Err(Error::Module {
-                reason: refusal::CAPACITY.into(),
-                sentence: format!("distinct emoji cap reached: {channel_id}/{seq}"),
-            });
-        }
-        reactors.insert(party.clone());
-        if emojis.insert(emoji.to_string()) {
-            self.store(reactidx_key(channel_id, seq), &emojis);
-        }
-        self.store_bounded(
-            react_key(channel_id, seq, emoji),
-            &reactors,
-            MAX_MESSAGE_HEAD_BYTES,
-            "reaction",
-        )?;
-        Ok(party)
-    }
-
-    async fn stage_remove_reaction(
-        &mut self,
-        authority: &Authority,
-        channel_id: &str,
-        seq: u64,
-        emoji: &str,
-    ) -> Result<Party, Error> {
-        self.reaction_target(authority, channel_id, seq, emoji)
-            .await?;
-        let mut reactors: BTreeSet<Party> = self
-            .load(&react_key(channel_id, seq, emoji))
-            .await?
-            .unwrap_or_default();
-        let party = authority.participant(&reactors);
-        if !reactors.remove(&party) {
-            // exact remove: absent (emoji, party) is a deterministic no-op.
-            return Ok(party);
-        }
-        if reactors.is_empty() {
-            self.delete(react_key(channel_id, seq, emoji));
-            let mut emojis: BTreeSet<String> = self
-                .load(&reactidx_key(channel_id, seq))
-                .await?
-                .unwrap_or_default();
-            emojis.remove(emoji);
-            if emojis.is_empty() {
-                self.delete(reactidx_key(channel_id, seq));
+        } => {
+            checked_id("message_id", &message_id)?;
+            let ch = channel(store, &channel_id)?;
+            writable(store, &ch, &frame.party)?;
+            if store.get(msgid_key(&message_id).as_bytes()).is_some() {
+                return Err(refuse(
+                    reason::ALREADY_EXISTS,
+                    format!("message {message_id} exists"),
+                ));
+            }
+            let seq = head_seq(store, &channel_id) + 1;
+            if let Some(root_seq) = thread {
+                let mut root = row(store, &channel_id, root_seq)?;
+                if root.thread.is_some() {
+                    return Err(refuse(
+                        reason::INVALID_INPUT,
+                        "a reply cannot be a thread root",
+                    ));
+                }
+                if root.reply_count >= MAX_THREAD_REPLIES {
+                    return Err(refuse(reason::CAPACITY, "this thread is full"));
+                }
+                root.reply_count += 1;
+                root.last_reply_seq = Some(seq);
+                put_row(store, &root)?;
+                mark(store, thread_key(&channel_id, root_seq, seq));
             } else {
-                self.store(reactidx_key(channel_id, seq), &emojis);
+                mark(store, root_key(&channel_id, seq));
             }
-            return Ok(party);
-        }
-        self.store_bounded(
-            react_key(channel_id, seq, emoji),
-            &reactors,
-            MAX_MESSAGE_HEAD_BYTES,
-            "reaction",
-        )?;
-        Ok(party)
-    }
-
-    // ---- roster writes ----------------------------------------------------
-
-    /// register a hook module on a channel: a standing subscription to
-    /// everything posted there. any authenticated party attaches one to any
-    /// channel; the caller has already checked the module is registered.
-    async fn stage_register_hook(
-        &mut self,
-        channel_id: &str,
-        module_id: String,
-    ) -> Result<(), Error> {
-        require_non_empty("channel_id", channel_id)?;
-        require_non_empty("module_id", &module_id)?;
-        let mut channel = self.require_channel(channel_id).await?;
-        if channel.hooks.contains(&module_id) {
-            // idempotent: registering twice stages nothing.
-            return Ok(());
-        }
-        if channel.hooks.len() >= MAX_HOOKS_PER_CHANNEL {
-            return Err(Error::Module {
-                reason: refusal::CAPACITY.into(),
-                sentence: format!("hook cap reached: {channel_id}"),
-            });
-        }
-        channel.hooks.push(module_id);
-        self.store_channel(&channel)
-    }
-
-    /// unregister a hook module: the one-message off switch for that
-    /// automation on the channel, open to any authenticated party like
-    /// registration. an absent hook stages nothing.
-    async fn stage_unregister_hook(
-        &mut self,
-        channel_id: &str,
-        module_id: &str,
-    ) -> Result<(), Error> {
-        require_non_empty("channel_id", channel_id)?;
-        let mut channel = self.require_channel(channel_id).await?;
-        let before = channel.hooks.len();
-        channel.hooks.retain(|hook| hook != module_id);
-        if channel.hooks.len() == before {
-            return Ok(());
-        }
-        self.store_channel(&channel)
-    }
-
-    /// add/remove a person from the channel roster. the roster is
-    /// `PostPolicy::MembersOnly`'s admission list, and any authenticated
-    /// party writes it: membership is a fact about who posts, not a gate a
-    /// channel's owner holds. the channel must exist; the named party is
-    /// resolved after that.
-    async fn stage_membership(
-        &mut self,
-        ctx: &dyn Ctx,
-        channel_id: &str,
-        member_party: Party,
-        member: bool,
-    ) -> Result<(), Error> {
-        require_non_empty("channel_id", channel_id)?;
-        self.require_channel(channel_id).await?;
-        // idempotent: an unchanged membership stages nothing, so the qmdb op
-        // log — and the root — is byte-identical to no write at all. the point
-        // record is the policy read; the roster VIEW lives on the index tier.
-        let already_member = self.is_member(channel_id, &member_party).await?;
-        if already_member == member {
-            return Ok(());
-        }
-        if member {
-            self.validate_member(ctx, &member_party).await?;
-            self.store(member_key(channel_id, &member_party), &true);
-        } else {
-            self.delete(member_key(channel_id, &member_party));
-        }
-        Ok(())
-    }
-
-    /// join (or start) the channel's huddle. only external users may — the
-    /// roster is a room of people, so module/system origins are rejected —
-    /// and members-only channels gate exactly like posting. `node_proof` must
-    /// verify as `node`'s own signature over this join (proof of possession —
-    /// see [`interface::huddle_join_preimage`]), refused with
-    /// `huddle_node_proof_invalid` otherwise. re-joining with the same node
-    /// key stages nothing (idempotent, byte-identical op log).
-    async fn stage_join_huddle(
-        &mut self,
-        authority: &Authority,
-        channel_id: &str,
-        node: Vec<u8>,
-        node_proof: Vec<u8>,
-        now: u64,
-    ) -> Result<Party, Error> {
-        let party = authority.party.clone();
-        require_non_empty("channel_id", channel_id)?;
-        if !party.is_person() {
-            return Err(Error::Module {
-                reason: refusal::UNAUTHORIZED.into(),
-                sentence: "only people may join a huddle".into(),
-            });
-        }
-        if node.len() != HUDDLE_NODE_KEY_BYTES {
-            return Err(Error::Module {
-                reason: refusal::INVALID_INPUT.into(),
-                sentence: format!(
-                    "huddle node key must be {HUDDLE_NODE_KEY_BYTES} bytes, got {}",
-                    node.len()
-                ),
-            });
-        }
-        let (namespace, preimage) = match &authority.origin {
-            Origin::External(key) => (HUDDLE_JOIN_NS, huddle_join_preimage(channel_id, key)),
-            Origin::Program(account) => (
-                PROGRAM_HUDDLE_JOIN_NS,
-                program_huddle_join_preimage(channel_id, *account),
-            ),
-            Origin::Module(_) | Origin::System => {
-                return Err(Error::Module {
-                    reason: refusal::UNAUTHORIZED.into(),
-                    sentence: "only people may join a huddle".into(),
-                });
-            }
-        };
-        if !keyscheme::KeyScheme::Ed25519.verify(&node, namespace, &preimage, &node_proof) {
-            return Err(Error::Module {
-                reason: refusal::INVALID_INPUT.into(),
-                sentence: format!(
-                    "the node key's proof for joining huddle {channel_id} does not verify"
-                ),
-            });
-        }
-        let mut channel = self.require_channel(channel_id).await?;
-        let party = authority.participant(channel.huddle.iter().map(|member| &member.party));
-        self.check_authorized_post(&channel, authority).await?;
-        if let Some(existing) = channel.huddle.iter_mut().find(|m| m.party == party) {
-            if existing.node == node {
-                return Ok(party);
-            }
-            existing.node = node;
-        } else {
-            if channel.huddle.len() >= MAX_HUDDLE_MEMBERS {
-                return Err(Error::Module {
-                    reason: refusal::CAPACITY.into(),
-                    sentence: format!("huddle is full: {channel_id}"),
-                });
-            }
-            channel.huddle.push(HuddleMember {
-                party: party.clone(),
-                node,
-                joined_at: now,
-            });
-        }
-        self.store_channel(&channel)?;
-        Ok(party)
-    }
-
-    /// leave the channel's huddle. absent participation is a deterministic
-    /// no-op; the last leaver empties the roster (= the huddle ends).
-    async fn stage_leave_huddle(
-        &mut self,
-        authority: &Authority,
-        channel_id: &str,
-    ) -> Result<Party, Error> {
-        let party = &authority.party;
-        require_non_empty("channel_id", channel_id)?;
-        if !party.is_person() {
-            return Err(Error::Module {
-                reason: refusal::UNAUTHORIZED.into(),
-                sentence: "only people may leave a huddle".into(),
-            });
-        }
-        let mut channel = self.require_channel(channel_id).await?;
-        let party = authority.participant(channel.huddle.iter().map(|member| &member.party));
-        let before = channel.huddle.len();
-        channel.huddle.retain(|m| m.party != party);
-        if channel.huddle.len() == before {
-            return Ok(party);
-        }
-        self.store_channel(&channel)?;
-        Ok(party)
-    }
-
-    /// evict `target` from the channel's huddle (staleness cleanup — see
-    /// `ChatMsg::SweepHuddle`). a person naming themself is a leave in
-    /// disguise; naming anyone else evicts them, by any person: `HuddleMember`
-    /// carries only `joined_at`, set once at join and never refreshed on
-    /// liveness, so the module holds no call-presence signal a staleness
-    /// rule could read, and the room's people are its only cleanup. absent
-    /// target = no-op either way.
-    async fn stage_sweep_huddle(
-        &mut self,
-        authority: &Authority,
-        channel_id: &str,
-        target: &Party,
-    ) -> Result<Party, Error> {
-        let party = &authority.party;
-        require_non_empty("channel_id", channel_id)?;
-        if !party.is_person() {
-            return Err(Error::Module {
-                reason: refusal::UNAUTHORIZED.into(),
-                sentence: "only people may sweep a huddle".into(),
-            });
-        }
-        if target == party {
-            return self.stage_leave_huddle(authority, channel_id).await;
-        }
-        let mut channel = self.require_channel(channel_id).await?;
-        let before = channel.huddle.len();
-        channel.huddle.retain(|m| m.party != *target);
-        if channel.huddle.len() == before {
-            return Ok(target.clone());
-        }
-        self.store_channel(&channel)?;
-        Ok(target.clone())
-    }
-
-    /// hand one report to the attribution plane in this unit — the write and
-    /// its attribution commit or abort together. a host wiring no plane
-    /// reports nothing.
-    fn report(&self, ctx: &mut dyn Ctx, actor: &Party, report: Report) {
-        let Some(attribution) = &self.attribution else {
-            return;
-        };
-        attribution::client::attribute(
-            ctx,
-            attribution,
-            report.object,
-            report.revision,
-            actor_of(actor),
-            report.relations,
-            Vec::new(),
-        );
-    }
-
-    // ---- dispatch reads --------------------------------------------------
-    // the three reads other modules' execute() paths consume. everything a
-    // human lists, scrolls, or searches is the index guest's job (index.rs).
-
-    /// point-lookup one page of message views for computed sequences. the
-    /// sequence space is gap-free (P3), so a missing head is a store bug.
-    async fn views(
-        &self,
-        channel_id: &str,
-        seqs: impl Iterator<Item = u64>,
-    ) -> Result<Vec<MessageView>, Error> {
-        let mut views = Vec::new();
-        for seq in seqs {
-            let head = self
-                .require_head(channel_id, seq)
-                .await
-                .map_err(|_| Error::Module {
-                    reason: refusal::CORRUPT.into(),
-                    sentence: format!("missing message record: {channel_id}/{seq}"),
-                })?;
-            views.push(MessageView {
-                channel_id: channel_id.to_string(),
+            let text = plain_text(&blocks);
+            let row = MsgRow {
+                channel_id: channel_id.clone(),
                 seq,
-                head,
-            });
+                message_id: message_id.clone(),
+                author: actor,
+                height: frame.height,
+                time: frame.time,
+                tags: tags(&blocks),
+                blocks,
+                text,
+                thread,
+                ..MsgRow::default()
+            };
+            put_row(store, &row)?;
+            index(store, &row, true);
+            save(store, msgid_key(&message_id), &(&channel_id, seq));
+            save(store, seq_key(&channel_id), &seq);
+            Ok(())
         }
-        Ok(views)
-    }
-
-    async fn messages_range(
-        &self,
-        channel_id: &str,
-        from_seq: u64,
-        limit: u64,
-    ) -> Result<Vec<MessageView>, Error> {
-        let channel = self.require_channel(channel_id).await?;
-        let limit = clamp_limit(limit);
-        let from = from_seq.max(1);
-        if limit == 0 || from > channel.head_seq {
-            return Ok(Vec::new());
-        }
-        let to = channel.head_seq.min(from.saturating_add(limit - 1));
-        self.views(channel_id, from..=to).await
-    }
-
-    async fn message_by_id(&self, message_id: &str) -> Result<Option<MessageView>, Error> {
-        let Some((channel_id, seq)) = self.load::<(String, u64)>(&msgid_key(message_id)).await?
-        else {
-            return Ok(None);
-        };
-        let head = self.require_head(&channel_id, seq).await?;
-        Ok(Some(MessageView {
+        ChatMsg::EditMessage {
             channel_id,
             seq,
-            head,
-        }))
+            blocks,
+            base_rev,
+        } => {
+            let ch = channel(store, &channel_id)?;
+            writable(store, &ch, &frame.party)?;
+            let mut row = row(store, &channel_id, seq)?;
+            if row.author != actor {
+                return Err(refuse(reason::UNAUTHORIZED, "only the author edits"));
+            }
+            if row.deleted {
+                return Err(refuse(reason::WRONG_STATE, "the message is deleted"));
+            }
+            if row.rev >= MAX_REVISIONS {
+                return Err(refuse(
+                    reason::CAPACITY,
+                    "the message has no revisions left",
+                ));
+            }
+            index(store, &row, false);
+            row.text = plain_text(&blocks);
+            row.tags = tags(&blocks);
+            row.blocks = blocks;
+            row.rev += 1;
+            row.edited = true;
+            row.edited_at = Some(frame.time);
+            row.base_rev = base_rev;
+            put_row(store, &row)?;
+            index(store, &row, true);
+            Ok(())
+        }
+        ChatMsg::DeleteMessage { channel_id, seq } => {
+            let ch = channel(store, &channel_id)?;
+            let mut row = row(store, &channel_id, seq)?;
+            if row.author != actor && ch.owner != actor {
+                return Err(refuse(
+                    reason::UNAUTHORIZED,
+                    "only the author or the owner deletes",
+                ));
+            }
+            if row.deleted {
+                return Ok(());
+            }
+            index(store, &row, false);
+            for entry in store.scan(Scan::prefix(react_key(&channel_id, seq, "", ""))) {
+                store.delete(&entry.key);
+            }
+            row = MsgRow {
+                blocks: Vec::new(),
+                text: String::new(),
+                tags: Vec::new(),
+                reactions: Vec::new(),
+                deleted: true,
+                ..row
+            };
+            put_row(store, &row)
+        }
+        ChatMsg::AddReaction {
+            channel_id,
+            seq,
+            emoji,
+        } => react(store, frame, &channel_id, seq, &emoji, true),
+        ChatMsg::RemoveReaction {
+            channel_id,
+            seq,
+            emoji,
+        } => react(store, frame, &channel_id, seq, &emoji, false),
+        ChatMsg::SetMembership {
+            channel_id,
+            party,
+            member,
+        } => {
+            let ch = channel(store, &channel_id)?;
+            owned(&ch, &frame.party)?;
+            set_member(store, frame, &channel_id, &party, member);
+            Ok(())
+        }
+        ChatMsg::JoinHuddle {
+            channel_id, node, ..
+        } => {
+            if !frame.party.is_person() {
+                return Err(refuse(reason::UNAUTHORIZED, "only people join a huddle"));
+            }
+            if node.len() != HUDDLE_NODE_KEY_BYTES {
+                return Err(refuse(
+                    reason::INVALID_INPUT,
+                    format!("a node key is {HUDDLE_NODE_KEY_BYTES} bytes"),
+                ));
+            }
+            let mut ch = channel(store, &channel_id)?;
+            writable(store, &ch, &frame.party)?;
+            let entry = HuddleEntry {
+                party: actor.clone(),
+                node: hex(&node),
+                joined_at: frame.time,
+            };
+            match ch.huddle.iter().position(|e| e.party == actor) {
+                Some(seat) => ch.huddle[seat] = entry,
+                None if ch.huddle.len() >= MAX_HUDDLE_MEMBERS => {
+                    return Err(refuse(reason::CAPACITY, "the huddle is full"));
+                }
+                None => ch.huddle.push(entry),
+            }
+            save(store, chan_key(&channel_id), &ch);
+            Ok(())
+        }
+        ChatMsg::LeaveHuddle { channel_id } => {
+            let mut ch = channel(store, &channel_id)?;
+            ch.huddle.retain(|e| e.party != actor);
+            save(store, chan_key(&channel_id), &ch);
+            Ok(())
+        }
     }
 }
 
-impl Chat {
-    async fn execute_op(&mut self, ctx: &mut dyn Ctx, msg: &Msg) -> Result<(), Error> {
-        let now = ctx.env().consensus_time;
-        // every write op acts as an authenticated party, even ops that do not
-        // store one — the empty demo-default external origin never passes.
-        let origin = ctx.env().origin.clone();
-        let party = self.party_of_origin(&*ctx, &origin).await?;
-        let authority = Authority {
-            party: party.clone(),
-            origin,
+fn create_channel(
+    store: &mut impl Write,
+    frame: &Frame,
+    id: String,
+    name: String,
+    post_policy: PostPolicy,
+    voice: bool,
+) -> Result<(), Refusal> {
+    checked_id("channel_id", &id)?;
+    checked_name(&name)?;
+    if load::<ChannelRow>(store, &chan_key(&id))?.is_some() {
+        return Err(refuse(
+            reason::ALREADY_EXISTS,
+            format!("channel {id} exists"),
+        ));
+    }
+    let ch = ChannelRow {
+        id: id.clone(),
+        name,
+        created_at: frame.time,
+        post_policy,
+        owner: party_handle(&frame.party),
+        archived: false,
+        huddle: Vec::new(),
+        voice,
+    };
+    save(store, chan_key(&id), &ch);
+    Ok(())
+}
+
+fn set_member(store: &mut impl Write, frame: &Frame, ch: &str, party: &Party, member: bool) {
+    let key = member_key(ch, &party_handle(party));
+    if member {
+        let row = MemberRow {
+            party: party_handle(party),
+            height: frame.height,
+            time: frame.time,
         };
-        ctx.set_assigned(encode_assigned(&ChatAssigned::Actor {
-            actor: party.clone(),
-        }));
-        match decode_msg(&msg.payload).map_err(|sentence| Error::Module {
-            reason: refusal::INVALID_INPUT.into(),
-            sentence,
-        })? {
-            ChatMsg::CreateChannel {
-                channel_id,
-                name,
-                post_policy,
-            } => {
-                let report = self
-                    .stage_channel(&party, channel_id, name, post_policy, false, now)
-                    .await?;
-                self.report(ctx, &party, report);
-                Ok(())
+        save(store, key, &row);
+    } else {
+        store.delete(key.as_bytes());
+    }
+}
+
+fn react(
+    store: &mut impl Write,
+    frame: &Frame,
+    channel_id: &str,
+    seq: u64,
+    emoji: &str,
+    on: bool,
+) -> Result<(), Refusal> {
+    if emoji.is_empty() || emoji.len() > MAX_EMOJI_BYTES || emoji.contains('/') {
+        return Err(refuse(reason::INVALID_INPUT, "not an emoji"));
+    }
+    let ch = channel(store, channel_id)?;
+    writable(store, &ch, &frame.party)?;
+    let mut row = row(store, channel_id, seq)?;
+    if row.deleted {
+        return Err(refuse(reason::WRONG_STATE, "the message is deleted"));
+    }
+    let key = react_key(channel_id, seq, emoji, &party_handle(&frame.party));
+    if store.get(key.as_bytes()).is_some() == on {
+        return Ok(());
+    }
+    let at = row.reactions.iter().position(|r| r.emoji == emoji);
+    match (on, at) {
+        (true, Some(i)) => row.reactions[i].count += 1,
+        (true, None) => {
+            if row.reactions.len() >= MAX_REACTION_EMOJIS {
+                return Err(refuse(reason::CAPACITY, "no room for another emoji"));
             }
-            ChatMsg::CreateVoiceChannel { channel_id, name } => {
-                let report = self
-                    .stage_channel(&party, channel_id, name, PostPolicy::Open, true, now)
-                    .await?;
-                self.report(ctx, &party, report);
-                Ok(())
+            row.reactions.push(ReactionSummary {
+                emoji: emoji.to_string(),
+                count: 1,
+                reacted_by_me: false,
+            });
+            row.reactions.sort_by(|a, b| a.emoji.cmp(&b.emoji));
+        }
+        (false, Some(i)) => {
+            row.reactions[i].count -= 1;
+            if row.reactions[i].count == 0 {
+                row.reactions.remove(i);
             }
-            ChatMsg::CreateDmChannel { counterpart, name } => {
-                let (channel_id, report) = self
-                    .stage_dm_channel(&*ctx, &party, counterpart, name, now)
-                    .await?;
-                ctx.set_output(sdk::wire::encode(&channel_id));
-                ctx.set_assigned(encode_assigned(&ChatAssigned::DmChannel {
-                    channel_id,
-                    actor: party.clone(),
-                }));
-                self.report(ctx, &party, report);
-                Ok(())
-            }
-            ChatMsg::RenameChannel { channel_id, name } => {
-                if let Some(report) = self.stage_rename(&authority, &channel_id, name).await? {
-                    self.report(ctx, &party, report);
-                }
-                Ok(())
-            }
-            ChatMsg::SetChannelArchived {
-                channel_id,
-                archived,
-            } => {
-                if let Some(report) = self
-                    .stage_set_archived(&authority, &channel_id, archived)
-                    .await?
-                {
-                    self.report(ctx, &party, report);
-                }
-                Ok(())
-            }
-            ChatMsg::PostMessage {
-                channel_id,
-                message_id,
-                mut blocks,
-                thread,
-            } => {
-                let mentions = self.resolve_mentions(&*ctx, &mut blocks).await?;
-                let posted = self
-                    .stage_message(
-                        &authority,
-                        &channel_id,
-                        message_id.clone(),
-                        MessageContent {
-                            blocks,
-                            mentions: mentions.accounts.clone(),
-                        },
-                        thread,
-                        now,
-                    )
-                    .await?;
-                ctx.set_assigned(encode_assigned(&ChatAssigned::Posted {
-                    seq: posted.seq,
-                    actor: party.clone(),
-                    key_mentions: mentions.key_mentions,
-                }));
-                ctx.set_output(sdk::wire::encode(&serde_json::json!({ "channel_id": channel_id, "message_id": message_id, "seq": posted.seq })));
-                // one follow-up per registered hook, drained in this block —
-                // the message and every notification commit (or abort) as one
-                // atomic unit (P2). chat stays agent-agnostic: any subscriber
-                // module decodes the ChatEvent payload.
-                for hook in posted.hooks {
-                    ctx.emit_msg(Msg {
-                        target: hook,
-                        payload: encode_event(&ChatEvent::MessagePosted {
-                            channel_id: channel_id.clone(),
-                            seq: posted.seq,
-                            thread_root: posted.thread_root,
-                            author: party.clone(),
-                            mentions: mentions.accounts.clone(),
-                        }),
-                    });
-                }
-                self.report(ctx, &party, posted.report);
-                Ok(())
-            }
-            ChatMsg::EditMessage {
-                channel_id,
-                seq,
-                mut blocks,
-                base_rev,
-            } => {
-                let mentions = self.resolve_mentions(&*ctx, &mut blocks).await?;
-                let (rev, report) = self
-                    .stage_edit(
-                        &authority,
-                        &channel_id,
-                        seq,
-                        MessageContent {
-                            blocks,
-                            mentions: mentions.accounts,
-                        },
-                        base_rev,
-                        now,
-                    )
-                    .await?;
-                ctx.set_assigned(encode_assigned(&ChatAssigned::Edited {
-                    rev,
-                    actor: party.clone(),
-                    key_mentions: mentions.key_mentions,
-                }));
-                self.report(ctx, &party, report);
-                Ok(())
-            }
-            ChatMsg::DeleteMessage { channel_id, seq } => {
-                let report = self.stage_delete(&channel_id, seq).await?;
-                self.report(ctx, &party, report);
-                Ok(())
-            }
-            ChatMsg::AddReaction {
-                channel_id,
-                seq,
-                emoji,
-            } => {
-                let participant = self
-                    .stage_add_reaction(&authority, &channel_id, seq, &emoji)
-                    .await?;
-                ctx.set_assigned(encode_assigned(&ChatAssigned::Participant {
-                    actor: party.clone(),
-                    participant,
-                }));
-                Ok(())
-            }
-            ChatMsg::RemoveReaction {
-                channel_id,
-                seq,
-                emoji,
-            } => {
-                let participant = self
-                    .stage_remove_reaction(&authority, &channel_id, seq, &emoji)
-                    .await?;
-                ctx.set_assigned(encode_assigned(&ChatAssigned::Participant {
-                    actor: party.clone(),
-                    participant,
-                }));
-                Ok(())
-            }
-            ChatMsg::RegisterHook {
-                channel_id,
-                module_id,
-            } => {
-                // the target must be a registered module other than chat
-                // itself, or every later post would poison the block; any
-                // authenticated party may attach it.
-                if module_id == self.id {
-                    return Err(Error::Module {
-                        reason: refusal::INVALID_INPUT.into(),
-                        sentence: "a hook must target a module other than chat".into(),
-                    });
-                }
-                if ctx.module_root(&module_id).is_none() {
-                    return Err(Error::Module {
-                        reason: refusal::NOT_FOUND.into(),
-                        sentence: format!("unknown hook module: {module_id}"),
-                    });
-                }
-                self.stage_register_hook(&channel_id, module_id).await
-            }
-            ChatMsg::UnregisterHook {
-                channel_id,
-                module_id,
-            } => self.stage_unregister_hook(&channel_id, &module_id).await,
-            ChatMsg::SetMembership {
-                channel_id,
-                party: member_party,
-                member,
-            } => {
-                self.stage_membership(&*ctx, &channel_id, member_party, member)
-                    .await
-            }
-            ChatMsg::JoinHuddle {
-                channel_id,
-                node,
-                node_proof,
-            } => {
-                let participant = self
-                    .stage_join_huddle(&authority, &channel_id, node, node_proof, now)
-                    .await?;
-                ctx.set_assigned(encode_assigned(&ChatAssigned::Participant {
-                    actor: party.clone(),
-                    participant,
-                }));
-                Ok(())
-            }
-            ChatMsg::LeaveHuddle { channel_id } => {
-                let participant = self.stage_leave_huddle(&authority, &channel_id).await?;
-                ctx.set_assigned(encode_assigned(&ChatAssigned::Participant {
-                    actor: party.clone(),
-                    participant,
-                }));
-                Ok(())
-            }
-            ChatMsg::SweepHuddle {
-                channel_id,
-                party: target,
-            } => {
-                let participant = self
-                    .stage_sweep_huddle(&authority, &channel_id, &target)
-                    .await?;
-                ctx.set_assigned(encode_assigned(&ChatAssigned::Participant {
-                    actor: party.clone(),
-                    participant,
-                }));
-                Ok(())
-            }
+        }
+        (false, None) => return Ok(()),
+    }
+    if on {
+        mark(store, key);
+    } else {
+        store.delete(key.as_bytes());
+    }
+    put_row(store, &row)
+}
+
+// ── query ───────────────────────────────────────────────────────────────────
+
+pub fn page(limit: Option<usize>) -> usize {
+    limit.unwrap_or(DEFAULT_PAGE).clamp(1, MAX_PAGE)
+}
+
+/// `limit + 1` entries under `scan`, split into the page and `has_more`.
+fn paged(store: &impl Read, scan: Scan, limit: usize) -> (Vec<Entry>, bool) {
+    let mut entries = store.scan(scan.limit(limit as u64 + 1));
+    let more = entries.len() > limit;
+    entries.truncate(limit);
+    (entries, more)
+}
+
+fn rows_at(
+    store: &impl Read,
+    keys: impl IntoIterator<Item = String>,
+) -> Result<Vec<MsgRow>, Refusal> {
+    keys.into_iter()
+        .filter_map(|k| load(store, &k).transpose())
+        .collect()
+}
+
+/// A posting's row, by the `(channel, seq)` it names.
+fn posted(store: &impl Read, entries: &[Entry]) -> Result<Vec<MsgRow>, Refusal> {
+    let keys = entries
+        .iter()
+        .filter_map(|e| serde_json::from_slice::<(String, u64)>(&e.value).ok())
+        .map(|(ch, seq)| msg_key(&ch, seq));
+    rows_at(store, keys)
+}
+
+fn hydrate(store: &impl Read, rows: &mut [MsgRow], viewer: &[String]) {
+    for row in rows {
+        for r in &mut row.reactions {
+            r.reacted_by_me = viewer.iter().any(|h| {
+                store
+                    .get(react_key(&row.channel_id, row.seq, &r.emoji, h).as_bytes())
+                    .is_some()
+            });
         }
     }
 }
 
-#[async_trait::async_trait(?Send)]
-impl Module for Chat {
-    fn id(&self) -> ModuleId {
-        self.id.clone()
-    }
+fn key_tail(entry: &Entry) -> String {
+    let key = String::from_utf8_lossy(&entry.key);
+    key.rsplit('/').next().unwrap_or_default().to_string()
+}
 
-    /// the store's merkle root over all committed records, verbatim — the
-    /// staged overlay is invisible here until `commit_block`.
-    fn root(&self) -> StateRoot {
-        self.staged.root()
-    }
-
-    fn state_sync_handle(&self) -> Result<StateSyncHandle, Error> {
-        self.staged.state_sync_handle()
-    }
-
-    /// the network state-sync serve lane: answers the shared qmdb wire requests
-    /// (historical proof-carrying op ranges) from committed state. read-only;
-    /// the joiner's sync engine merkle-verifies every batch.
-    async fn serve_sync(&self, req: &[u8]) -> Result<Vec<u8>, Error> {
-        self.staged.serve_sync(req).await
-    }
-
-    async fn resolver_sync_target(&self) -> Result<ResolverSyncTarget, Error> {
-        self.staged.sync_target().await
-    }
-
-    async fn execute(&mut self, ctx: &mut dyn Ctx, msg: &Msg) -> Result<(), Error> {
-        let checkpoint = self.staged.checkpoint();
-        match self.execute_op(ctx, msg).await {
-            Ok(()) => Ok(()),
-            Err(error) => {
-                self.staged.restore(checkpoint);
-                Err(error)
+pub fn query(store: &impl Read, q: ChatViewQuery) -> Result<ChatViewReply, Refusal> {
+    Ok(match q {
+        ChatViewQuery::Accounts { .. } => {
+            return Err(refuse(
+                reason::UNSUPPORTED,
+                "accounts are identity's, asked by the program",
+            ));
+        }
+        ChatViewQuery::Channels { after, limit } => {
+            let mut scan = Scan::prefix(b"chan/");
+            if let Some(after) = after {
+                scan = scan.after(chan_key(&after));
+            }
+            let (entries, has_more) = paged(store, scan, page(limit));
+            let channels: Vec<ChannelInfo> = entries
+                .iter()
+                .filter_map(|e| serde_json::from_slice::<ChannelRow>(&e.value).ok())
+                .map(|channel| ChannelInfo {
+                    head_seq: head_seq(store, &channel.id),
+                    channel,
+                })
+                .collect();
+            let next_after = has_more
+                .then(|| channels.last().map(|c| c.channel.id.clone()))
+                .flatten();
+            ChatViewReply::Channels {
+                channels,
+                has_more,
+                next_after,
             }
         }
-    }
+        ChatViewQuery::Channel { channel_id } => ChatViewReply::Channel(
+            load::<ChannelRow>(store, &chan_key(&channel_id))?.map(|channel| ChannelInfo {
+                head_seq: head_seq(store, &channel_id),
+                channel,
+            }),
+        ),
+        ChatViewQuery::Roots {
+            channel_id,
+            viewer_handles,
+            before_seq,
+            limit,
+        } => {
+            let mut scan = Scan::prefix(format!("root/{channel_id}/"));
+            if let Some(before) = before_seq {
+                scan.lo = root_key(&channel_id, before.saturating_sub(1)).into_bytes();
+            }
+            let (entries, has_more) = paged(store, scan, page(limit));
+            let seqs: Vec<u64> = entries
+                .iter()
+                .rev()
+                .filter_map(|e| u64::from_str_radix(&key_tail(e), 16).ok())
+                .map(|r| u64::MAX - r)
+                .collect();
+            let mut roots = rows_at(store, seqs.iter().map(|s| msg_key(&channel_id, *s)))?;
+            hydrate(store, &mut roots, &viewer_handles);
+            ChatViewReply::Roots {
+                next_before_seq: has_more.then(|| seqs.first().copied()).flatten(),
+                roots,
+                has_more,
+            }
+        }
+        ChatViewQuery::MessagesAround {
+            channel_id,
+            seq,
+            viewer_handles,
+            limit,
+        } => {
+            let half = (page(limit) / 2) as u64;
+            let lo = msg_key(&channel_id, seq.saturating_sub(half));
+            let hi = msg_key(&channel_id, seq.saturating_add(half + 1));
+            let entries = store.scan(Scan::range(lo, Some(hi.into_bytes())));
+            let mut rows: Vec<MsgRow> = entries
+                .iter()
+                .filter_map(|e| serde_json::from_slice(&e.value).ok())
+                .collect();
+            hydrate(store, &mut rows, &viewer_handles);
+            ChatViewReply::Messages(rows)
+        }
+        ChatViewQuery::Thread {
+            channel_id,
+            root_seq,
+            viewer_handles,
+            after_reply_seq,
+            limit,
+        } => {
+            let mut root = load::<MsgRow>(store, &msg_key(&channel_id, root_seq))?;
+            let mut scan = Scan::prefix(format!("thread/{channel_id}/{root_seq:016x}/"));
+            if let Some(after) = after_reply_seq {
+                scan = scan.after(thread_key(&channel_id, root_seq, after));
+            }
+            let (entries, has_more) = paged(store, scan, page(limit));
+            let seqs: Vec<u64> = entries
+                .iter()
+                .filter_map(|e| u64::from_str_radix(&key_tail(e), 16).ok())
+                .collect();
+            let mut replies = rows_at(store, seqs.iter().map(|s| msg_key(&channel_id, *s)))?;
+            hydrate(store, &mut replies, &viewer_handles);
+            if let Some(root) = root.as_mut() {
+                hydrate(store, std::slice::from_mut(root), &viewer_handles);
+            }
+            ChatViewReply::Thread {
+                root,
+                next_reply_seq: has_more.then(|| seqs.last().copied()).flatten(),
+                replies,
+                has_more,
+            }
+        }
+        ChatViewQuery::Members {
+            channel_id,
+            after,
+            limit,
+        } => {
+            let mut scan = Scan::prefix(member_key(&channel_id, ""));
+            if let Some(after) = after {
+                scan = scan.after(member_key(&channel_id, &after));
+            }
+            let (entries, has_more) = paged(store, scan, page(limit));
+            let members: Vec<MemberRow> = entries
+                .iter()
+                .filter_map(|e| serde_json::from_slice(&e.value).ok())
+                .collect();
+            ChatViewReply::Members {
+                next_after: has_more
+                    .then(|| members.last().map(|m| m.party.clone()))
+                    .flatten(),
+                members,
+                has_more,
+            }
+        }
+        ChatViewQuery::Search {
+            text,
+            viewer_handles,
+            channel_id,
+            limit,
+        } => {
+            let wanted = tokens(&text);
+            let Some(first) = wanted.iter().next() else {
+                return Err(refuse(reason::INVALID_INPUT, "nothing to search for"));
+            };
+            // ponytail: one posting list scanned, the rest filtered on the row;
+            // intersect postings if search volume ever matters.
+            let prefix = match &channel_id {
+                Some(ch) => tok_key(first, ch, 0).replace("0000000000000000", ""),
+                None => format!("tok/{first}/"),
+            };
+            let entries = store.scan(Scan::prefix(prefix).limit(SEARCH_POSTING_CAP as u64 + 1));
+            let capped = entries.len() > SEARCH_POSTING_CAP;
+            let mut hits: Vec<MsgRow> = posted(store, &entries)?
+                .into_iter()
+                .filter(|row| wanted.is_subset(&tokens(&row.text)))
+                .collect();
+            hits.sort_by(|a, b| b.time.cmp(&a.time).then(b.seq.cmp(&a.seq)));
+            let limit = page(limit);
+            let capped = capped || hits.len() > limit;
+            hits.truncate(limit);
+            hydrate(store, &mut hits, &viewer_handles);
+            ChatViewReply::Hits(MessageHits { hits, capped })
+        }
+        ChatViewQuery::TagSearch {
+            tag,
+            viewer_handles,
+            channel_id,
+            after,
+            limit,
+        } => {
+            let label = tag
+                .trim_start_matches('#')
+                .nfc()
+                .collect::<String>()
+                .to_lowercase();
+            let prefix = match &channel_id {
+                Some(ch) => format!("tagc/{ch}/{label}/"),
+                None => format!("tag/{label}/"),
+            };
+            let mut scan = Scan::prefix(&prefix);
+            if let Some(after) = after {
+                scan = scan.after(after);
+            }
+            let (entries, has_more) = paged(store, scan, page(limit));
+            let mut hits = posted(store, &entries)?;
+            hydrate(store, &mut hits, &viewer_handles);
+            ChatViewReply::TagHits(TagPage {
+                hits,
+                has_more,
+                next_after: has_more
+                    .then(|| {
+                        entries
+                            .last()
+                            .map(|e| String::from_utf8_lossy(&e.key).into_owned())
+                    })
+                    .flatten(),
+            })
+        }
+    })
+}
 
-    async fn query(&self, req: &[u8]) -> Result<Vec<u8>, Error> {
-        match decode_query(req).map_err(|sentence| Error::Module {
-            reason: refusal::INVALID_INPUT.into(),
-            sentence,
-        })? {
-            ChatQuery::Channel { channel_id } => Ok(encode_reply(&ChatReply::Channel(
-                self.channel(&channel_id).await?,
-            ))),
-            ChatQuery::MessagesRange {
-                channel_id,
-                from_seq,
-                limit,
-            } => Ok(encode_reply(&ChatReply::Messages(
-                self.messages_range(&channel_id, from_seq, limit).await?,
-            ))),
-            ChatQuery::Message { message_id } => Ok(encode_reply(&ChatReply::Message(
-                self.message_by_id(&message_id).await?,
-            ))),
-            ChatQuery::Access { channel_id, party } => Ok(encode_reply(&ChatReply::Access(
-                self.channel_access(&channel_id, &party).await?,
-            ))),
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    #[derive(Default)]
+    struct Memory(BTreeMap<Vec<u8>, Vec<u8>>);
+
+    impl Read for Memory {
+        fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
+            self.0.get(key).cloned()
+        }
+        fn scan(&self, scan: Scan) -> Vec<Entry> {
+            let mut hits: Vec<Entry> = self
+                .0
+                .iter()
+                .filter(|(key, _)| scan.admits(key))
+                .map(|(key, value)| Entry {
+                    key: key.clone(),
+                    value: value.clone(),
+                })
+                .collect();
+            if scan.reverse {
+                hits.reverse();
+            }
+            if let Some(limit) = scan.limit {
+                hits.truncate(limit as usize);
+            }
+            hits
         }
     }
 
-    /// publish the block's staged writes in ONE store batch. no-op (and no
-    /// root movement) if nothing was staged. BTreeMap iteration keeps the
-    /// write order deterministic across validators, and a staged `None` ships
-    /// as a delete of the hashed key.
-    async fn commit_block(&mut self) -> Result<(), Error> {
-        self.staged.commit().await
+    impl Write for Memory {
+        fn set(&mut self, key: Vec<u8>, value: Vec<u8>) {
+            self.0.insert(key, value);
+        }
+        fn delete(&mut self, key: &[u8]) {
+            self.0.remove(key);
+        }
     }
 
-    async fn abort_block(&mut self) -> Result<(), Error> {
-        self.staged.abort();
-        Ok(())
+    fn frame(party: Party) -> Frame {
+        Frame {
+            party,
+            height: 1,
+            time: 1000,
+        }
+    }
+
+    fn post(
+        store: &mut Memory,
+        who: u64,
+        ch: &str,
+        id: &str,
+        text: &str,
+        thread: Option<u64>,
+    ) -> Result<(), Refusal> {
+        execute(
+            store,
+            &frame(Party::Account(who)),
+            ChatMsg::PostMessage {
+                channel_id: ch.into(),
+                message_id: id.into(),
+                blocks: parse_message(text),
+                thread,
+            },
+        )
+    }
+
+    #[test]
+    fn a_channel_takes_posts_threads_reactions_and_answers_the_view() {
+        let mut store = Memory::default();
+        let ada = frame(Party::Account(1));
+        execute(
+            &mut store,
+            &ada,
+            ChatMsg::CreateChannel {
+                channel_id: "general".into(),
+                name: "General".into(),
+                post_policy: PostPolicy::MembersOnly,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            post(&mut store, 2, "general", "m1", "hi", None)
+                .unwrap_err()
+                .reason,
+            reason::UNAUTHORIZED
+        );
+        execute(
+            &mut store,
+            &ada,
+            ChatMsg::SetMembership {
+                channel_id: "general".into(),
+                party: Party::Account(2),
+                member: true,
+            },
+        )
+        .unwrap();
+        post(&mut store, 2, "general", "m1", "hello #World", None).unwrap();
+        post(&mut store, 1, "general", "m2", "hello back", Some(1)).unwrap();
+        post(&mut store, 1, "general", "m3", "another root", None).unwrap();
+        assert_eq!(
+            post(&mut store, 1, "general", "m3", "dup", None)
+                .unwrap_err()
+                .reason,
+            reason::ALREADY_EXISTS
+        );
+        execute(
+            &mut store,
+            &ada,
+            ChatMsg::AddReaction {
+                channel_id: "general".into(),
+                seq: 1,
+                emoji: "👍".into(),
+            },
+        )
+        .unwrap();
+
+        let ChatViewReply::Roots {
+            roots, has_more, ..
+        } = query(
+            &store,
+            ChatViewQuery::Roots {
+                channel_id: "general".into(),
+                viewer_handles: vec!["acct:1".into()],
+                before_seq: None,
+                limit: Some(10),
+            },
+        )
+        .unwrap()
+        else {
+            panic!()
+        };
+        assert!(!has_more);
+        assert_eq!(roots.iter().map(|r| r.seq).collect::<Vec<_>>(), vec![1, 3]);
+        assert_eq!(roots[0].reply_count, 1);
+        assert_eq!(roots[0].tags, vec!["world"]);
+        assert!(roots[0].reactions[0].reacted_by_me);
+
+        let ChatViewReply::Thread { root, replies, .. } = query(
+            &store,
+            ChatViewQuery::Thread {
+                channel_id: "general".into(),
+                root_seq: 1,
+                viewer_handles: vec![],
+                after_reply_seq: None,
+                limit: None,
+            },
+        )
+        .unwrap() else {
+            panic!()
+        };
+        assert_eq!((root.unwrap().seq, replies[0].seq), (1, 2));
+
+        let ChatViewReply::Hits(hits) = query(
+            &store,
+            ChatViewQuery::Search {
+                text: "hello".into(),
+                viewer_handles: vec![],
+                channel_id: None,
+                limit: None,
+            },
+        )
+        .unwrap() else {
+            panic!()
+        };
+        assert_eq!(
+            hits.hits.iter().map(|r| r.seq).collect::<Vec<_>>(),
+            vec![2, 1]
+        );
+
+        let ChatViewReply::TagHits(tags) = query(
+            &store,
+            ChatViewQuery::TagSearch {
+                tag: "#World".into(),
+                viewer_handles: vec![],
+                channel_id: Some("general".into()),
+                after: None,
+                limit: None,
+            },
+        )
+        .unwrap() else {
+            panic!()
+        };
+        assert_eq!(tags.hits[0].seq, 1);
+
+        execute(
+            &mut store,
+            &frame(Party::Account(2)),
+            ChatMsg::DeleteMessage {
+                channel_id: "general".into(),
+                seq: 1,
+            },
+        )
+        .unwrap();
+        let ChatViewReply::Hits(hits) = query(
+            &store,
+            ChatViewQuery::Search {
+                text: "hello".into(),
+                viewer_handles: vec![],
+                channel_id: Some("general".into()),
+                limit: None,
+            },
+        )
+        .unwrap() else {
+            panic!()
+        };
+        assert_eq!(hits.hits.iter().map(|r| r.seq).collect::<Vec<_>>(), vec![2]);
     }
 }

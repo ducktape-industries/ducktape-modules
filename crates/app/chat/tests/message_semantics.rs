@@ -1,7 +1,7 @@
 //! Emphasis markers follow CommonMark's flanking rule, so an identifier or a
 //! file name in a chat message is never read as italic.
 
-use chat::{Mark, inline_spans};
+use chat::{Mark, message::inline_spans};
 
 /// `(text, [(span text, italic?, bold?)])`
 type Row = (&'static str, &'static [(&'static str, bool, bool)]);

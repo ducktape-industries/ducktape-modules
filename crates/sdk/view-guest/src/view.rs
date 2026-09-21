@@ -111,24 +111,6 @@ macro_rules! capability {
     };
 }
 
-/// A [`Module`] spoken as plain JSON on every surface.
-///
-/// `json_module!(Identity, "identity");`
-#[macro_export]
-macro_rules! json_module {
-    ($name:ident, $target:literal) => {
-        pub struct $name;
-        impl $crate::view::Module for $name {
-            const NAME: &'static str = $target;
-            type Op = ::serde_json::Value;
-            type Query = ::serde_json::Value;
-            type Reply = ::serde_json::Value;
-            type ViewQuery = ::serde_json::Value;
-            type ViewReply = ::serde_json::Value;
-        }
-    };
-}
-
 /// `rpc.view` against `M`.
 pub struct ViewOf<M>(std::marker::PhantomData<M>);
 impl<M: Module> Capability for ViewOf<M> {

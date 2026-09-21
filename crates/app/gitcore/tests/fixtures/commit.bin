@@ -1,0 +1,16 @@
+tree 31a8084f03ba7f5c5c98b41a4d7b67e2e8b2e82d
+parent a0dc56c9a7276b5188d20caee5c828946ce2a024
+parent da3365eb4d9700daf1521ac733318b1df9a67c1c
+author Ada Lovelace <ada@example.com> 1700000200 +0900
+committer Charles Babbage <charles@example.com> 1700000300 -0500
+encoding UTF-8
+gpgsig -----BEGIN PGP SIGNATURE-----
+ 
+ iQEzBAABCAAdFiEEfakefakefakefakefakefakefakefakefakeFAmVRZ2AACgkQ
+ fakefakefakefakefakefakefakefakefakefakefakefakefakefakefakefakeFAKE=
+ =abcd
+ -----END PGP SIGNATURE-----
+
+Merge with a signature
+
+Body line.

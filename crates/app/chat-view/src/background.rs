@@ -8,8 +8,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::api::{Admin, ChatApi};
-use crate::chat::{Block, ChatViewQuery, ChatViewReply, Mark, Party, party_handle, unhex};
-use crate::client::{NameDirectory, author_display, dm_channel_id, message_body};
+use crate::chat::{
+    Block, ChatMsg, ChatViewQuery, ChatViewReply, Mark, Party, dm_peers, party_handle, unhex,
+};
+use crate::client::{NameDirectory, author_display, message_body};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -19,12 +21,6 @@ pub enum Request {
         assigned: Option<Value>,
         key: String,
         names: Value,
-    },
-    RunProgress {
-        runs: Vec<String>,
-    },
-    LiveRuns {
-        labels: std::collections::BTreeMap<String, String>,
     },
     Workspace {
         requested: Option<String>,
@@ -117,11 +113,6 @@ async fn participate(request: Request, names: NameDirectory) -> Outcome {
         Request::Move { from, channel } => move_seat(from, channel)
             .await
             .map(|c| json!({"channel": c})),
-        Request::LiveRuns { mut labels } => {
-            let seeds = crate::live::discover(&mut labels).await.map_err(failed)?;
-            Ok(json!({"records": seeds, "labels": labels}))
-        }
-        Request::RunProgress { runs } => Ok(json!(crate::live::progress(runs).await)),
         Request::Workspace { requested, key } => workspace(requested, &key, &names).await,
         Request::Window { channel, key } => window(channel, &key, &names).await,
         Request::Channel { channel, key, .. } => {
@@ -160,14 +151,21 @@ async fn join(channel: String) -> Result<String, (String, bool)> {
     if node.len() != 32 || signature.len() != 64 {
         return Err(("invalid node participation proof".into(), false));
     }
-    submit(json!({"join_huddle": {"channel_id": channel, "node": node, "node_proof": signature}}))
-        .await?;
+    submit(ChatMsg::JoinHuddle {
+        channel_id: channel.to_owned(),
+        node,
+        node_proof: signature,
+    })
+    .await?;
     Ok(channel.to_owned())
 }
 
 async fn leave(channel: String) -> Result<String, (String, bool)> {
     let channel = participation_channel(&channel)?;
-    submit(json!({"leave_huddle": {"channel_id": channel}})).await?;
+    submit(ChatMsg::LeaveHuddle {
+        channel_id: channel.to_owned(),
+    })
+    .await?;
     Ok(channel.to_owned())
 }
 
@@ -183,23 +181,8 @@ async fn move_seat(from: String, channel: String) -> Result<String, (String, boo
     join(channel).await.map_err(|(message, _)| (message, true))
 }
 
-/// A raw chat op: the huddle ops carry key bytes this view's `ChatMsg`
-/// slice does not spell.
-async fn submit(payload: Value) -> Result<(), (String, bool)> {
-    ask::<Submit<RawChat>>(payload)
-        .await
-        .map(|_| ())
-        .map_err(failed)
-}
-
-struct RawChat;
-impl ducktape_view_guest::view::Module for RawChat {
-    const NAME: &'static str = "chat";
-    type Op = Value;
-    type Query = Value;
-    type Reply = Value;
-    type ViewQuery = Value;
-    type ViewReply = Value;
+async fn submit(op: ChatMsg) -> Result<(), (String, bool)> {
+    ask::<Submit<ChatApi>>(op).await.map(|_| ()).map_err(failed)
 }
 
 // ---------- search ----------
@@ -277,16 +260,12 @@ async fn message_notice(request: NoticeRequest, names: &NameDirectory) -> Option
             }),
             Block::Code { .. } | Block::Divider => false,
         });
-    let mine = match me {
-        Party::Account(number) => Some(number),
+    let dm = match (me, dm_peers(&channel_id)) {
+        (Party::Account(mine), Some((a, b))) if mine == a || mine == b => {
+            Some(names.member_label(&format!("acct:{}", if mine == a { b } else { a })))
+        }
         _ => None,
     };
-    let dm = mine.and_then(|mine| {
-        names.accounts().find_map(|(peer, name)| {
-            (*peer != mine && dm_channel_id(&mine.to_string(), &peer.to_string()) == channel_id)
-                .then(|| name.clone())
-        })
-    });
     let author = author_display(&party_handle(&actor), names);
     let subtitle = match (mentions_me, dm.is_some()) {
         (true, _) => format!("{author} mentioned you"),

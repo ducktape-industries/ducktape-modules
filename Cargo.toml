@@ -5,13 +5,25 @@
 #                   host share), `guest` (what a program compiles against),
 #                   `ducklink` (the `duck://` grammar), and the view contract
 #                   (`view-wire`, `view-guest`, `design`)
-#   crates/system/  the programs the host reads or every network founds with:
-#                   modules (the roster), valset (the validators), identity
-#   crates/app/     the app modules and the view beside each: chat, chat-view
+#   crates/modules/ the boot set: the `modules` crate (the contracts of the
+#                   programs every network founds with and the helpers a
+#                   program builds on), `system/` (the wasm32 workspace of
+#                   module-registry, valset and identity, their bytes committed
+#                   under `system/wasm/`) and the suite that drives them on the
+#                   host
+#   crates/app/     the app modules: chat (its types and rules, which the view
+#                   links), chat-program (the wasm32 program over them) and
+#                   chat-view; forge (the git server as a program), gitcore
+#                   (the git it links) and forge-harness (its rig: the wasm on
+#                   ducktape's runtime, real git as the client)
 #
 # A view links its module by path and reads its types; a view is a cdylib for
 # wasm32-unknown-unknown on `view-guest`. The host that runs the programs
-# (runtime, state, blobs, host, node, consensus, the daemon) lives in ducktape.
+# (runtime, state, blobs, host, node, consensus, the daemon) lives in ducktape,
+# and `crates/sdk/abi` and `crates/sdk/guest` are copies of its
+# `crates/kernel/abi` and `crates/kernel/guest`: the `[patch]` below makes the
+# host the suite links compile against the copies, so a copy that drifts from
+# the kernel fails the build here.
 
 [workspace]
 resolver = "2"
@@ -22,12 +34,14 @@ members = [
     "crates/sdk/design",
     "crates/sdk/view-wire",
     "crates/sdk/view-guest",
-    "crates/system/modules",
-    "crates/system/valset",
-    "crates/system/identity",
+    "crates/modules",
     "crates/app/chat",
     "crates/app/chat-view",
+    "crates/app/gitcore",
+    "crates/app/forge",
+    "crates/app/forge-harness",
 ]
+exclude = ["crates/modules/system", "crates/app/chat-program"]
 
 [workspace.package]
 edition = "2024"
@@ -42,10 +56,18 @@ design = { path = "crates/sdk/design" }
 view-wire = { path = "crates/sdk/view-wire" }
 view-guest = { path = "crates/sdk/view-guest" }
 ducktape-view-guest = { path = "crates/sdk/view-guest", package = "view-guest" }
+modules = { path = "crates/modules" }
+gitcore = { path = "crates/app/gitcore" }
+forge = { path = "crates/app/forge" }
 
-# `chat` and `chat-view` do not build until chat is a `guest::Program`:
-# the old module contract they were written against is gone with
-# ducktape-sdk. Every other crate builds; CI runs them by path.
+# ---- the host the boot set's suite runs on, the probe fixture it seats, the
+# key schemes it signs with, and the runtime forge's rig drives its wasm on
+host = { git = "https://github.com/ducktape-industries/ducktape", rev = "5d1d1f61d89960164cab919dfbb16a1d8cdb3b36" }
+fixture-probe = { git = "https://github.com/ducktape-industries/ducktape", rev = "5d1d1f61d89960164cab919dfbb16a1d8cdb3b36" }
+keyscheme = { git = "https://github.com/ducktape-industries/ducktape", rev = "5d1d1f61d89960164cab919dfbb16a1d8cdb3b36" }
+runtime = { git = "https://github.com/ducktape-industries/ducktape", rev = "5d1d1f61d89960164cab919dfbb16a1d8cdb3b36" }
+commonware-cryptography = "2026.9.0"
+commonware-runtime = "2026.9.0"
 
 # ---- external
 serde = { version = "1", features = ["derive"] }
@@ -53,12 +75,22 @@ serde_json = "1"
 # borsh — the one codec the program abi is written in.
 borsh = { version = "1", default-features = false, features = ["derive", "std"] }
 sha2 = "0.10"
+sha1 = "0.10"
+flate2 = "1"
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync"] }
+tempfile = "3"
+ureq = { version = "3", default-features = false }
 base64 = "0.22"
 async-trait = "0.1"
 futures = "0.3"
 # duckfs path normalization: NFC so visually-identical names collide instead
 # of coexisting (a consensus-determinism requirement, not cosmetics).
 unicode-normalization = "0.1"
+
+[patch."https://github.com/ducktape-industries/ducktape"]
+abi = { path = "crates/sdk/abi" }
+guest = { path = "crates/sdk/guest" }
 
 # proc-macro and build-script crates (serde_derive, async-trait, borsh-derive)
 # are compiled once and then run for every unit below them — unoptimized they

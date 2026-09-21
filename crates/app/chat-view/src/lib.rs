@@ -12,7 +12,6 @@ mod client;
 mod compose;
 mod composer;
 mod files;
-mod live;
 mod room;
 mod ui;
 
@@ -22,22 +21,23 @@ use chat::{
     ChannelInfo, ChatMsg, ChatViewQuery, ChatViewReply, MemberRow, MessageHits, MsgRow, PostPolicy,
     TagPage,
 };
-use client::{NameDirectory, dm_channel_id, mention_token};
+use client::{NameDirectory, mention_token};
 use ducktape_view_guest::host::{Refusal, malformed};
 use ducktape_view_guest::view::{
-    Cx, Live as LiveChanges, Loaded, Query, Submit, View, ViewOf, Visible, Watching, ask,
+    Cx, Live as LiveChanges, Loaded, Submit, View, ViewOf, Visible, Watching, ask,
 };
 use ducktape_view_guest::{export_view, wire};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
 
-use api::{ChatApi, Id, Identity, Props, PropsItem, Session, Ticks};
+use api::{ChatApi, Id, Props, PropsItem, Session};
 use composer::Draft;
 use composer::Target;
 
 const PAGE: usize = 64;
+/// Attachments speak to the files module, which is not in this tree yet:
+/// every way a file gets in is closed until it returns. The code stays.
+pub(crate) const ATTACHMENTS: bool = false;
 const WINDOW: usize = 256;
-const LIVE_POLL_MS: i64 = 2000;
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct Chat {
@@ -63,7 +63,6 @@ pub struct Chat {
     pub(crate) pictures: BTreeMap<String, (i64, i64)>,
     #[serde(skip)]
     pub(crate) uploads: HashMap<String, wire::task::Handle>,
-    pub(crate) live: LiveRuns,
     #[serde(skip)]
     pub(crate) watches: Watches,
 }
@@ -221,25 +220,12 @@ pub struct Preview {
     pub(crate) read: Loaded<files::Preview>,
 }
 
-#[derive(Serialize, Deserialize, Default)]
-pub struct LiveRuns {
-    pub(crate) seeds: Vec<live::Seed>,
-    pub(crate) output: BTreeMap<String, live::Output>,
-    pub(crate) public: BTreeMap<String, String>,
-    #[serde(skip)]
-    pub(crate) labels: BTreeMap<String, String>,
-    #[serde(skip)]
-    pub(crate) polling: bool,
-}
-
 #[derive(Default)]
 pub struct Watches {
     props: Option<Watching>,
     changes: Option<Watching>,
     visible: Option<Watching>,
-    ticks: Option<Watching>,
     pub(crate) drops: Option<Watching>,
-    pub(crate) streams: BTreeMap<String, Watching>,
 }
 
 impl View for Chat {
@@ -278,8 +264,6 @@ impl View for Chat {
                 chat.visibility_changed(visible, cx);
             }
         }));
-        self.watches.ticks =
-            Some(cx.watch::<Ticks>(LIVE_POLL_MS, |chat, _, cx| chat.poll_live(cx)));
         if self.names.is_idle() {
             self.names = cx.load(roster(), |chat| &mut chat.names);
         }
@@ -311,7 +295,7 @@ impl Chat {
         let prev = std::mem::replace(&mut self.session, next);
         let reader_changed = self.session.me != prev.me
             || self.session.endpoint != prev.endpoint
-            || self.session.chain() != prev.chain();
+            || self.session.chain != prev.chain;
         if self.session.names_serial != prev.names_serial || reader_changed {
             self.names = cx.load(roster(), |chat| &mut chat.names);
         }
@@ -321,8 +305,6 @@ impl Chat {
                 draft.retire_device_requests();
             }
             self.reads.cursors.clear();
-            self.live = LiveRuns::default();
-            self.watches.streams.clear();
             self.create = None;
         }
         if !prev.connected && self.session.connected {
@@ -539,7 +521,7 @@ impl Chat {
     /// A direct message with `peer` (an account number): the derived room,
     /// created when the module has none yet.
     pub(crate) fn open_dm(&mut self, peer: &str, cx: &mut Cx<Self>) {
-        let Some(mine) = self.session.me.strip_prefix("acct:") else {
+        let Some(mine) = self.my_account() else {
             self.notice = "This key is on no account; a DM needs one".into();
             return;
         };
@@ -551,7 +533,7 @@ impl Chat {
             || format!("acct:{peer}"),
             |names| names.member_label(&format!("acct:{peer}")),
         );
-        let id = dm_channel_id(mine, &peer.to_string());
+        let id = chat::dm_channel_id(mine, peer);
         self.notice.clear();
         cx.spawn(async move {
             let result = async {
@@ -754,38 +736,11 @@ pub(crate) async fn search_hits(
     }
 }
 
-/// The identity roster, paged, folded into the name directory.
+/// The identity roster, paged through chat, folded into the name directory.
 async fn roster() -> Result<NameDirectory, Refusal> {
-    let mut accounts = Vec::new();
-    let mut from = 0u64;
-    loop {
-        let reply: Value =
-            ask::<Query<Identity>>(json!({"all": {"from": from, "limit": PAGE}})).await?;
-        let page = reply
-            .get("accounts")
-            .and_then(Value::as_array)
-            .ok_or_else(wrong_reply)?;
-        for account in page {
-            let number = account["number"].as_u64().ok_or_else(wrong_reply)?;
-            let keys = account["keys"]
-                .as_array()
-                .map(|keys| {
-                    keys.iter()
-                        .filter_map(|key| serde_json::from_value(key["pubkey"].clone()).ok())
-                        .collect()
-                })
-                .unwrap_or_default();
-            accounts.push((
-                number,
-                account["name"].as_str().unwrap_or_default().to_string(),
-                account["control"].get("program").is_some(),
-                keys,
-            ));
-            from = number + 1;
-        }
-        if page.len() < PAGE {
-            return Ok(NameDirectory::from_roster(accounts));
-        }
+    match ask::<ViewOf<ChatApi>>(ChatViewQuery::Accounts { limit: Some(256) }).await? {
+        ChatViewReply::Accounts(accounts) => Ok(NameDirectory::from_roster(accounts)),
+        _ => Err(wrong_reply()),
     }
 }
 

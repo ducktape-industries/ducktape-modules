@@ -2,6 +2,7 @@ use super::*;
 use ducktape_view_guest::testing::{answer, has_text, item, press, refuse, type_into};
 use ducktape_view_guest::view::Shell;
 use ducktape_view_guest::{Driver, wire};
+use serde_json::{Value, json};
 
 fn request<'a>(frame: &'a wire::Frame, kind: &str) -> impl Iterator<Item = &'a wire::Request> {
     frame
@@ -19,15 +20,15 @@ fn view_request(frame: &wire::Frame, word: &str) -> u64 {
 
 fn roster_page() -> Vec<u8> {
     json!({"accounts": [
-        {"number": 7, "name": "eddy", "control": "keys", "keys": [{"pubkey": [1, 2]}]},
-        {"number": 8, "name": "reviewer", "control": {"program": "x"}, "keys": []}
+        {"number": 7, "name": "eddy", "program": false, "keys": ["0102"]},
+        {"number": 8, "name": "reviewer", "program": true, "keys": []}
     ]})
     .to_string()
     .into_bytes()
 }
 
 fn channel(id: &str, name: &str, head: u64) -> Value {
-    json!({"id": id, "name": name, "created_at": 0, "post_policy": "open", "owner": "acct:7", "archived": false, "hooks": [], "huddle": [], "voice": false, "head_seq": head})
+    json!({"id": id, "name": name, "created_at": 0, "post_policy": "open", "owner": "acct:7", "archived": false, "huddle": [], "voice": false, "head_seq": head})
 }
 
 fn row(seq: u64, author: &str, text: &str) -> Value {
@@ -39,7 +40,7 @@ fn opened() -> (Driver<Shell<Chat>>, wire::Frame) {
     let mut driver = Driver::<Shell<Chat>>::new();
     let frame = driver.tick(vec![]);
     let kinds: Vec<_> = frame.requests.iter().map(|r| r.kind.as_str()).collect();
-    for kind in ["chat.props", "rpc.live", "host.visible", "clock.ticks"] {
+    for kind in ["chat.props", "rpc.live", "host.visible"] {
         assert!(kinds.contains(&kind), "{kinds:?}");
     }
     assert!(has_text(&frame, "Not connected"));
@@ -51,12 +52,19 @@ fn opened() -> (Driver<Shell<Chat>>, wire::Frame) {
         item(props, session.to_string().as_bytes()),
         item(visible, b"true"),
     ]);
-    let names = request(&frame, "rpc.query").next().unwrap().id;
-    let channels = json!({"channels": {"channels": [channel("general", "General", 3), channel(&format!("dm-{}", "a".repeat(64)), "dm", 1)], "has_more": false, "next_after": null}});
+    let channels = json!({"channels": {"channels": [channel("general", "General", 3), channel("dm-7-8", "dm", 1)], "has_more": false, "next_after": null}});
     // the connection coming up and the tab showing both re-read the rooms
-    let mut answers = vec![answer(names, &roster_page())];
-    for id in std::iter::once(rooms).chain(request(&frame, "rpc.view").map(|r| r.id)) {
-        answers.push(answer(id, channels.to_string().as_bytes()));
+    // and the roster; every ask is answered with what it asked for
+    let mut answers = vec![answer(rooms, channels.to_string().as_bytes())];
+    for r in request(&frame, "rpc.view") {
+        let roster = std::str::from_utf8(&r.payload)
+            .unwrap()
+            .contains("\"accounts\"");
+        answers.push(if roster {
+            answer(r.id, &roster_page())
+        } else {
+            answer(r.id, channels.to_string().as_bytes())
+        });
     }
     let frame = driver.tick(answers);
     assert!(has_text(&frame, "General"));

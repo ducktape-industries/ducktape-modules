@@ -2,10 +2,10 @@
 //! channel's details, copying, links, the attachment preview, pictures, the
 //! search and the live-run poll.
 use ducktape_view_guest::host;
-use ducktape_view_guest::view::{Cx, Loaded, ask};
+use ducktape_view_guest::view::{Cx, Loaded};
 use ducktape_view_guest::wire;
 
-use crate::api::{Copy, Stream, copy};
+use crate::api::{Copy, copy};
 use crate::chat::{ChatMsg, party_of};
 use crate::client::{ChatMessage, NameDirectory, chat_message};
 use crate::{Chat, CopyRange, Hits, Menu, Mode, Pane, Preview};
@@ -298,42 +298,24 @@ impl Chat {
     }
 
     pub(crate) fn message_link(&self, seq: u64) -> String {
-        crate::files::channel_link(self.session.chain(), &self.room_id(), Some(seq))
+        crate::files::channel_link(&self.session.chain, &self.room_id(), Some(seq))
     }
 
     pub(crate) fn open_link(&mut self, link: String) {
         self.preview = None;
         self.create = None;
-        let url = crate::files::pressed_link(link, self.session.chain());
+        let url = crate::files::pressed_link(link, &self.session.chain);
         if !url.is_empty() {
             host::open_link(&url);
         }
     }
 
-    pub(crate) fn open_run(&mut self, dispatch: &str) {
-        let link = crate::files::run_link(self.session.chain(), dispatch);
-        if !link.is_empty() {
-            host::open_link(&link);
-        }
-    }
-
-    pub(crate) fn cancel_run(&mut self, run_id: String, cx: &mut Cx<Self>) {
-        cx.spawn(async move {
-            let result = ask::<ducktape_view_guest::view::Submit<crate::api::Runs>>(
-                serde_json::json!({"cancel_run": {"run_id": run_id}}),
-            )
-            .await;
-            move |chat: &mut Chat, _: &mut Cx<Chat>| {
-                if let Err(refusal) = result {
-                    chat.notice = format!("Couldn’t stop the run: {}", refusal.sentence);
-                }
-            }
-        });
-    }
-
     // ---------- attachments ----------
 
     pub(crate) fn open_preview(&mut self, link: String, cx: &mut Cx<Self>) {
+        if !crate::ATTACHMENTS {
+            return self.open_link(link);
+        }
         self.preview = Some(Preview {
             link,
             read: Loaded::Idle,
@@ -360,6 +342,9 @@ impl Chat {
     /// Every picture attachment on screen the host has not been asked for
     /// yet: one decode each, answered into `pictures`.
     pub(crate) fn load_pictures(&mut self, cx: &mut Cx<Self>) {
+        if !crate::ATTACHMENTS {
+            return;
+        }
         let links: Vec<String> = [Pane::Timeline, Pane::Thread]
             .into_iter()
             .flat_map(|pane| self.messages(pane))
@@ -451,98 +436,5 @@ impl Chat {
         self.search_clear();
         self.create = None;
         self.open_at(channel_id, seq, cx);
-    }
-
-    // ---------- live runs ----------
-
-    /// One reading of the runs anchored in chat: which are pending, whose
-    /// output to stream, and the public progress of those this device may
-    /// not read.
-    pub(crate) fn poll_live(&mut self, cx: &mut Cx<Self>) {
-        if !self.session.connected || self.live.polling {
-            return;
-        }
-        self.live.polling = true;
-        let mut labels = std::mem::take(&mut self.live.labels);
-        let public: Vec<String> = self
-            .live
-            .seeds
-            .iter()
-            .filter(|s| {
-                self.live
-                    .output
-                    .get(&s.dispatch_id)
-                    .is_some_and(|o| o.unavailable)
-            })
-            .map(|s| s.run_id.clone())
-            .collect();
-        cx.spawn(async move {
-            let seeds = crate::live::discover(&mut labels).await;
-            let progress = if public.is_empty() {
-                Default::default()
-            } else {
-                crate::live::progress(public).await
-            };
-            move |chat: &mut Chat, cx: &mut Cx<Chat>| {
-                chat.live.polling = false;
-                chat.live.labels = labels;
-                chat.live.public.extend(progress);
-                let Ok(seeds) = seeds else { return };
-                chat.live.seeds = seeds;
-                let pending: Vec<String> = chat
-                    .live
-                    .seeds
-                    .iter()
-                    .map(|s| s.dispatch_id.clone())
-                    .collect();
-                chat.live.output.retain(|d, _| pending.contains(d));
-                chat.watches.streams.retain(|d, _| pending.contains(d));
-                let runs: Vec<String> = chat.live.seeds.iter().map(|s| s.run_id.clone()).collect();
-                chat.live.public.retain(|r, _| runs.contains(r));
-                for dispatch in pending {
-                    let unavailable = chat
-                        .live
-                        .output
-                        .get(&dispatch)
-                        .is_some_and(|o| o.unavailable);
-                    if unavailable || chat.watches.streams.contains_key(&dispatch) {
-                        continue;
-                    }
-                    let topic = format!("run-output:{dispatch}");
-                    let key = dispatch.clone();
-                    let watching = cx.watch::<Stream>(
-                        serde_json::json!({"topic": topic, "params": {"run": dispatch}}),
-                        move |chat, frame, _| {
-                            let item = chat.live.output.entry(key.clone()).or_default();
-                            crate::live::fold_output(item, &topic, frame);
-                            if item.unavailable {
-                                chat.watches.streams.remove(&key);
-                            }
-                        },
-                    );
-                    chat.watches.streams.insert(dispatch, watching);
-                }
-            }
-        });
-    }
-
-    /// The cards for the open room, in anchor order.
-    pub(crate) fn live_runs(&self) -> Vec<crate::live::Run> {
-        let room = self.room_id();
-        let mut runs: Vec<_> = self
-            .live
-            .seeds
-            .iter()
-            .filter(|seed| seed.channel_id == room)
-            .map(|seed| {
-                crate::live::project(
-                    seed,
-                    self.live.output.get(&seed.dispatch_id),
-                    self.live.public.get(&seed.run_id),
-                )
-            })
-            .collect();
-        runs.sort_by_key(|run| run.seed.anchor_seq);
-        runs
     }
 }

@@ -136,7 +136,7 @@ pub fn details(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
             Tone::Neutral,
         ));
     }
-    let link = crate::files::channel_link(chat.session.chain(), &chat.room_id(), None);
+    let link = crate::files::channel_link(&chat.session.chain, &chat.room_id(), None);
     let copy = (!link.is_empty())
         .then(|| cx.on(move |chat, cx| chat.copy_text(link.clone(), "Channel link copied", cx)));
     let about = kit::column(

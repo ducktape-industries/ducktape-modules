@@ -4,9 +4,17 @@ CARGO ?= cargo
 # What a program links: abi and guest build for wasm32 with nothing else.
 PROGRAM_LINKABLE := abi guest
 
-# The programs, by manifest path: chat still pins the old sdk's `identity`, so
-# the bare name is ambiguous until chat is a program.
-PROGRAMS := crates/system/modules crates/system/valset crates/system/identity
+# The boot set: its own wasm32 workspace, its bytes committed beside it.
+SYSTEM := crates/modules/system
+
+# The ducktape checkout the probe fixture the `modules` suite seats is copied
+# from (crates/kernel/fixtures, `make kernel-fixtures` there).
+DUCKTAPE ?= ../ducktape
+
+# The app programs, by manifest path: chat-program is its own wasm32 workspace
+# (the view links `chat`, never a program), forge a root member whose wasm
+# entry is wasm32-gated.
+PROGRAMS := crates/app/chat-program crates/app/forge
 
 # The views: cdylibs for wasm32-unknown-unknown the desktop loads from a file.
 VIEWS := chat-view
@@ -17,7 +25,7 @@ VIEWS := chat-view
 VIEW_LINKABLE := ducklink view-wire view-guest design
 VIEW_FORBIDDEN := blst commonware-cryptography
 
-.PHONY: program-wasm-check wasm-programs wasm-views view-wasm-check
+.PHONY: program-wasm-check wasm-programs probe-fixture wasm-views view-wasm-check
 
 ## builds abi and guest for wasm32-unknown-unknown.
 program-wasm-check:
@@ -26,9 +34,20 @@ program-wasm-check:
 	done; \
 	echo "abi and guest build for wasm32"
 
-## builds every program for wasm32 under target/wasm32-unknown-unknown/release/.
+## builds the boot set for wasm32 and refreshes its committed bytes, which a
+## founding file names and the `modules` suite loads; then the app programs.
 wasm-programs:
-	@for p in $(PROGRAMS); do $(CARGO) build --release --target wasm32-unknown-unknown --manifest-path $$p/Cargo.toml || exit 1; done
+	$(CARGO) build --manifest-path $(SYSTEM)/Cargo.toml \
+	  --target wasm32-unknown-unknown --release
+	cp $(SYSTEM)/target/wasm32-unknown-unknown/release/*.wasm $(SYSTEM)/wasm/
+	@for p in $(PROGRAMS); do \
+	  $(CARGO) build --manifest-path $$p/Cargo.toml --target wasm32-unknown-unknown --release || exit 1; \
+	done
+
+## refreshes the probe fixture the `modules` suite seats as the authority,
+## from the ducktape checkout at $(DUCKTAPE).
+probe-fixture:
+	cp $(DUCKTAPE)/crates/kernel/fixtures/wasm/fixture_probe.wasm crates/modules/tests/
 
 ## builds every view for wasm32 under target/wasm32-unknown-unknown/release/.
 wasm-views:

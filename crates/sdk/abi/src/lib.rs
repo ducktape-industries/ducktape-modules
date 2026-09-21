@@ -109,14 +109,17 @@ impl core::fmt::Display for Refusal {
 
 impl std::error::Error for Refusal {}
 
-/// The classes a refusal's `reason` names. A token names the CLASS of
-/// failure, which is the same as naming how a caller recovers: two refusals
-/// share a token exactly when a caller does the same thing about them.
+/// A refusal's `reason` names the class of failure, which is the same as
+/// naming how a caller recovers: two refusals share a token exactly when a
+/// caller does the same thing about them.
 pub mod reason {
-    // host-reserved
+    /// the host: no program by that id runs on this network.
     pub const UNKNOWN_PROGRAM: &str = "unknown_program";
+    /// the host: the program faulted (a trap, the fuel or memory limit).
     pub const TRAP: &str = "trap";
+    /// the host: bytes that do not decode, or an op the call's kind refuses.
     pub const PROTOCOL: &str = "protocol";
+    /// the host: the frame's sequence is not the signer's next.
     pub const SEQUENCE: &str = "sequence";
     /// naming a thing that exists (id, key, path, account, sibling program).
     pub const NOT_FOUND: &str = "not_found";
@@ -159,6 +162,7 @@ pub enum Cause {
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct Env {
+    pub network: Vec<u8>,
     pub height: u64,
     pub time: u64,
     pub me: ProgramId,
@@ -247,6 +251,7 @@ pub enum CryptoOp {
     Verify {
         scheme: Scheme,
         key: Vec<u8>,
+        namespace: Vec<u8>,
         message: Vec<u8>,
         signature: Vec<u8>,
     },
@@ -260,7 +265,6 @@ pub enum CryptoReply {
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum HostOp {
-    Env,
     Get(Vec<u8>),
     Set {
         key: Vec<u8>,
@@ -296,7 +300,6 @@ pub enum HostOp {
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum HostReply {
-    Env(Env),
     Value(Option<Vec<u8>>),
     Entries(Vec<Entry>),
     Done,
@@ -311,6 +314,12 @@ pub enum HostReply {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+pub struct Invocation {
+    pub env: Env,
+    pub call: GuestCall,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum GuestCall {
     Init(Vec<u8>),
     Execute(Vec<u8>),
@@ -319,10 +328,10 @@ pub enum GuestCall {
 
 pub type GuestReply = Result<(), Refusal>;
 
-pub mod roster {
+pub mod module_registry {
     use super::{BlobId, BorshDeserialize, BorshSerialize, ProgramId};
 
-    pub const PROGRAM: &str = "modules";
+    pub const PROGRAM: &str = "module-registry";
 
     #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
     pub struct Entry {
@@ -347,7 +356,7 @@ pub mod roster {
     }
 }
 
-pub mod validators {
+pub mod valset {
     use super::{BorshDeserialize, BorshSerialize};
 
     pub const PROGRAM: &str = "valset";
@@ -412,6 +421,7 @@ mod tests {
     #[test]
     fn every_envelope_round_trips() {
         let env = Env {
+            network: b"n".to_vec(),
             height: 7,
             time: 9,
             me: "a".into(),
@@ -429,12 +439,18 @@ mod tests {
             request: vec![1, 2],
         };
         let reply = HostReply::Query(Err(Refusal::new("r", "s")));
-        let call = GuestCall::Execute(vec![3]);
+        let invocation = Invocation {
+            env: env.clone(),
+            call: GuestCall::Execute(vec![3]),
+        };
         let guest_reply: GuestReply = Ok(());
         assert_eq!(decode::<Env>(&encode(&env)).unwrap(), env);
         assert_eq!(decode::<HostOp>(&encode(&op)).unwrap(), op);
         assert_eq!(decode::<HostReply>(&encode(&reply)).unwrap(), reply);
-        assert_eq!(decode::<GuestCall>(&encode(&call)).unwrap(), call);
+        assert_eq!(
+            decode::<Invocation>(&encode(&invocation)).unwrap(),
+            invocation
+        );
         assert_eq!(
             decode::<GuestReply>(&encode(&guest_reply)).unwrap(),
             guest_reply

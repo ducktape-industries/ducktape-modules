@@ -493,12 +493,6 @@ pub fn list(
                 .map(|m| m.seq)
         })
         .flatten();
-    let live = chat.live_runs();
-    let thread_root = chat
-        .room
-        .as_ref()
-        .and_then(|r| r.thread.as_ref())
-        .map_or(0, |t| t.root);
     let writable = chat.may_write();
     for (index, message) in messages.iter().enumerate() {
         let scope = format!("{key}/message/{}", message.id);
@@ -516,22 +510,6 @@ pub fn list(
         if unread_marker == Some(message.seq) {
             children.push(unread_marker_node(format!("{scope}/unread")));
         }
-        // a run in flight answers into the thread: the timeline counts it
-        let answering = if thread {
-            0
-        } else {
-            live.iter().filter(|run| run.in_thread(message.seq)).count() as u64
-        };
-        let counted;
-        let message = if answering > 0 {
-            counted = ChatMessage {
-                reply_count: message.reply_count + answering,
-                ..message.clone()
-            };
-            &counted
-        } else {
-            message
-        };
         let card = message::card(chat, message, pane, plate, cx);
         if !message.pending && !message.deleted {
             let (seq, rev) = (message.seq, message.rev);
@@ -596,51 +574,6 @@ pub fn list(
             message.seq as i64
         };
         keys.push(wire::ListKey::from(list_key));
-    }
-    // the runs answering into this thread ride at its tail, once each
-    if thread {
-        for run in live.iter().filter(|run| run.in_thread(thread_root)) {
-            let answered = messages
-                .iter()
-                .any(|m| m.agent && m.author == run.seed.agent && m.seq > run.seed.anchor_seq);
-            if answered {
-                continue;
-            }
-            let live_message = crate::live::run_message(run);
-            let run_key = format!("{key}/run/{}", run.seed.run_id);
-            let card = message::card(chat, &live_message, pane, Plate::Plain, cx);
-            let dispatch = run.seed.dispatch_id.clone();
-            let open = cx.on(move |chat, _| chat.open_run(&dispatch));
-            let run_id = run.seed.run_id.clone();
-            let stop = cx.on(move |chat, cx| chat.cancel_run(run_id.clone(), cx));
-            let actions = kit::padded(
-                kit::spaced(
-                    kit::row(
-                        format!("{run_key}/actions"),
-                        [
-                            subtle(format!("{run_key}/open"), "View run", Some(open)),
-                            subtle(format!("{run_key}/stop"), "Stop", Some(stop)),
-                        ],
-                    ),
-                    kit::spacing::XS as f32,
-                ),
-                wire::Edges {
-                    top: 0.,
-                    right: 16.,
-                    bottom: kit::spacing::XXS as f32,
-                    left: message::RAIL,
-                },
-            );
-            rows.push(kit::spaced(kit::column(run_key, [card, actions]), 0.));
-            let hash = run
-                .seed
-                .run_id
-                .bytes()
-                .fold(0xcbf2_9ce4_8422_2325_u64, |acc, b| {
-                    (acc ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
-                });
-            keys.push(wire::ListKey::from(-((hash >> 1) as i64).max(1)));
-        }
     }
     let list = Node::KeyedColumn {
         key: format!("{key}/rows"),
@@ -841,6 +774,7 @@ pub fn composer(
         &key,
         hint,
         editable,
+        crate::ATTACHMENTS,
         &choices,
         cx,
         move |chat, event, cx| chat.composer(target.clone(), event, cx),

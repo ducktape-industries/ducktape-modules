@@ -25,9 +25,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: rustup show
       - run: cargo fmt --all -- --check
-      # chat and chat-view are red until chat is a program; everything else runs.
-      - run: cargo test --locked --workspace --exclude chat --exclude chat-view --no-fail-fast
-      - run: cargo clippy --locked --workspace --exclude chat --exclude chat-view --tests --no-deps -- -D warnings
+      - run: cargo test --locked --workspace --no-fail-fast
+      - run: cargo clippy --locked --workspace --tests --no-deps -- -D warnings
       - run: make program-wasm-check CARGO="cargo --locked"
       - run: make view-wasm-check CARGO="cargo --locked"
       - run: make wasm-programs CARGO="cargo --locked"
