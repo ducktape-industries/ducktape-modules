@@ -1,9 +1,8 @@
 # ducktape-sdk — the wasm32 gates.
 CARGO ?= cargo
 
-# What a program links: abi and guest must build for wasm32 with nothing
-# else in the tree.
-PROGRAM_LINKABLE := abi guest
+# What a program is: abi, guest and the system programs build for wasm32.
+PROGRAM_LINKABLE := abi guest modules valset identity
 
 # What a wasm32 view may link. A crate a view links must never reach the
 # signing/identity graph (blst does not build for wasm32, and a view has no
@@ -18,7 +17,7 @@ program-wasm-check:
 	@for crate in $(PROGRAM_LINKABLE); do \
 	  $(CARGO) build --target wasm32-unknown-unknown -p $$crate || exit 1; \
 	done; \
-	echo "abi and guest build for wasm32"
+	echo "abi, guest and the system programs build for wasm32"
 
 ## builds every VIEW_LINKABLE crate for wasm32-unknown-unknown, plus the
 ## `export_app!` probe example of view-guest (the one place the exported view

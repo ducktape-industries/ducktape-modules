@@ -8,7 +8,8 @@
 # This workspace depends on NO other ducktape repository. Everything else in
 # the platform depends on it.
 #
-# The module logic that runs on the abi lives in ducktape-modules; the host
+# The three system programs (modules, valset, identity) live here; every
+# other program lives in ducktape-modules. The host
 # that runs it (runtime, state, blobs, host, node, consensus, statesync, the
 # daemon and the CLI) lives in ducktape.
 
@@ -20,6 +21,11 @@ members = [
     "crates/kernel/guest",
     "crates/kernel/refusal-class",
     "crates/kernel/keyscheme",
+
+    # the system programs the host reads or every network founds with
+    "crates/modules/system/modules",
+    "crates/modules/system/valset",
+    "crates/modules/system/identity",
 
     # cross-plane leaf libraries the surfaces are made of
     "crates/design",
@@ -75,6 +81,11 @@ guest = { path = "crates/kernel/guest" }
 # the refusal classes as bare `&str` constants, zero-dep.
 refusal-class = { path = "crates/kernel/refusal-class" }
 keyscheme = { path = "crates/kernel/keyscheme" }
+
+# ---- internal: system programs
+modules = { path = "crates/modules/system/modules" }
+valset = { path = "crates/modules/system/valset" }
+identity = { path = "crates/modules/system/identity" }
 
 # ---- internal: cross-plane leaf libraries
 design = { path = "crates/design" }

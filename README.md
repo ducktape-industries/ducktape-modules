@@ -20,6 +20,10 @@ depends on it.
   (`guest::get`, `guest::set`, `guest::scan`, `guest::emit`,
   `guest::respond`, …). wasm32 only for the host calls; the types build
   everywhere.
+- **`crates/modules/system/{modules, valset, identity}`** — the system
+  programs: the roster the host reads, the validators it seats, and the
+  accounts (numbered, key-held, named) every other program attributes to.
+  Each is a cdylib for wasm32 and an rlib of its types and rules everywhere.
 - **`crates/kernel/{refusal-class, keyscheme}`** — the refusal words as bare
   constants, and the key schemes a proof is verified under.
 - **`crates/view-wire`**, **`crates/view-guest`**, **`crates/design`** — the
