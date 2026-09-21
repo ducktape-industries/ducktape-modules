@@ -10,3 +10,8 @@ crate-type = ["cdylib", "rlib"]
 abi = { workspace = true }
 guest = { workspace = true }
 borsh = { workspace = true }
+
+[features]
+default = ["program"]
+# the wasm exports; off when another program links identity for its types
+program = []

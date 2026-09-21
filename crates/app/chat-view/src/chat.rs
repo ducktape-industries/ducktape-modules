@@ -1,12 +1,10 @@
 //! The module's own types, linked: what the view sends (`ChatMsg`), what
 //! it asks (`ChatViewQuery`) and the rows it draws. One definition site,
 //! in `crates/app/chat`.
-pub use chat::index::{
-    ChannelInfo, ChatViewQuery, ChatViewReply, MemberRow, MessageHits, MsgRow, TagPage,
-    party_handle,
+pub use chat::{
+    Block, ChannelInfo, ChatMsg, ChatViewQuery, ChatViewReply, Mark, MemberRow, MessageHits,
+    MsgRow, Party, PostPolicy, Span, TagPage, hex, parse_message, party_handle,
 };
-pub use chat::message::{Block, Mark, Party, Span, parse_message};
-pub use chat::wire::{ChatMsg, PostPolicy};
 
 pub fn members_only(info: &ChannelInfo) -> bool {
     info.channel.post_policy == PostPolicy::MembersOnly
@@ -23,10 +21,6 @@ pub fn party_of(text: &str) -> Option<Party> {
     }
     let key = text.strip_prefix("user:").unwrap_or(text);
     unhex(key).map(Party::Key)
-}
-
-pub fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 /// An even-length all-hex string back to its bytes; anything else is not hex.
