@@ -14,13 +14,13 @@ set and views using the repository's normal `make wasm-modules` and `make views`
 commands first. Run from the repository root:
 
 ```sh
-python3 crates/examples/extension-probe/check.py
+python3 crates/extension-probe/check.py
 ```
 
 The check compiles the node, desktop, and desktop test executable and records
 their hashes **before** building the example artifacts. It starts three local
 validators, registers the module and view through governance, and installs the
-service using the [application installer](../../../docs/deploy/application-service.md).
+service using the [application installer](../../docs/deploy/application-service.md).
 The installer creates temporary systemd units under a process-specific name;
 the test removes its units and service state when it exits normally or unwinds.
 
@@ -50,7 +50,7 @@ registered-tab, input, and button paths. The standalone desktop executable is
 built and hashed; the check does not launch its main entry point. Native test
 input exercises widget dispatch in the headless test window. Physical input,
 pixel appearance, delayed network replies during replacement, and device quality
-require the [QA app lanes](../../../skills/qa/SKILL.md) or a dedicated network
+require the [QA app lanes](../../skills/qa/SKILL.md) or a dedicated network
 fixture; the file-loaded test does not establish those properties.
 
 The replacement service lowercases its response instead of uppercasing it. The
@@ -62,13 +62,13 @@ reusing a native stream handle. Replacement does not migrate stored data.
 
 ```sh
 cargo build -p guest-builder
-python3 crates/examples/extension-probe/build.py
+python3 crates/extension-probe/build.py
 ```
 
 `artifacts/` contains the original and replacement module, view, and service
 files. The directory is ignored; no native executable embeds those bytes.
 The three packages are independent Cargo workspaces and can be tested using
-`cargo test --manifest-path crates/examples/extension-probe/<package>/Cargo.toml`
+`cargo test --manifest-path crates/extension-probe/<package>/Cargo.toml`
 with `module`, `view`, or `service` substituted for `<package>`.
 
 The service tests cover malformed and oversized input, attested caller headers,

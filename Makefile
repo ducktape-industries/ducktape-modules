@@ -12,26 +12,35 @@ GUEST_BUILDER ?= ../ducktape-sdk/target/release/guest-builder
 
 # The consensus components (`guest` feature, `src/guest.rs`).
 BUILDER_MODULES := \
-  crates/modules/apps/chat \
-  crates/modules/apps/pages \
-  crates/modules/apps/agent \
-  crates/modules/apps/runs \
-  crates/modules/apps/tasks \
-  crates/modules/apps/boards \
-  crates/modules/apps/automations \
-  crates/modules/apps/inbox \
-  crates/modules/apps/collaboration \
-  crates/examples/directory
+  crates/chat \
+  crates/pages \
+  crates/agent \
+  crates/runs \
+  crates/tasks \
+  crates/boards \
+  crates/automations \
+  crates/inbox \
+  crates/collaboration \
+  crates/directory
 
 # The modules that additionally ship an index guest (`index-guest` feature,
 # `src/index_guest.rs`). That file IS the declaration — this list must name
 # exactly the crates that carry one.
 INDEX_MODULES := \
-  crates/modules/apps/chat \
-  crates/modules/apps/inbox \
-  crates/modules/apps/pages \
-  crates/modules/apps/runs \
-  crates/modules/apps/tasks
+  crates/chat \
+  crates/inbox \
+  crates/pages \
+  crates/runs \
+  crates/tasks
+
+# The views: cdylibs for wasm32-unknown-unknown the desktop loads from a file.
+VIEWS := chat-view
+
+.PHONY: wasm-views
+
+## build every view for wasm32 under target/wasm32-unknown-unknown/release/.
+wasm-views:
+	@for v in $(VIEWS); do cargo build --release --target wasm32-unknown-unknown -p $$v || exit 1; done
 
 .PHONY: wasm-modules wasm-modules-check
 

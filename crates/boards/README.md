@@ -54,7 +54,7 @@ The consensus component builds from a committed, pushed revision; the view
 builds with the other network views:
 
 ```sh
-cargo run -p guest-builder -- crates/modules/apps/boards
+cargo run -p guest-builder -- crates/boards
 make views
 ```
 

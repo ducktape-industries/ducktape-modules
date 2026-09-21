@@ -18,8 +18,7 @@ use statesync::qmdb::QmdbStore;
 use wasm_host::WasmModule;
 
 const PAGES: &[u8] = include_bytes!("../component.wasm");
-const ATTRIBUTION: &[u8] =
-    include_bytes!("../../../../../tests/fixtures/attribution.component.wasm");
+const ATTRIBUTION: &[u8] = include_bytes!("../../../tests/fixtures/attribution.component.wasm");
 const CHILDREN: u64 = 1_100;
 
 fn key(number: u64) -> Vec<u8> {
@@ -369,7 +368,7 @@ async fn wasm_mention_host(context: &deterministic::Context) -> Host {
         Box::new(
             WasmModule::with_store(
                 "identity",
-                include_bytes!("../../../../../tests/fixtures/identity.component.wasm"),
+                include_bytes!("../../../tests/fixtures/identity.component.wasm"),
                 Box::new(mention_identity_store(context, "wasm_mentions").await),
             )
             .unwrap(),

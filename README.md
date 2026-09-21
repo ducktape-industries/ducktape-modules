@@ -1,21 +1,23 @@
 # ducktape-modules
 
-The application consensus modules of Ducktape, and the reference modules that
-show how one is written.
+The application modules of Ducktape and the views that draw them, one flat
+crate each (`crates/chat` is the module, `crates/chat-view` its view), and the
+reference modules that show how one is written.
 
 A module is pure logic over a host-owned store. It holds no durable memory
 across dispatches, takes no clock, rng or network import, and ships as a wasm
-component the network admits by hash. Each crate under `crates/modules/apps/`
+component the network admits by hash. Each crate under `crates/`
 implements `sdk::Module`, carries its own guest port (`src/guest.rs` behind the
 `guest` feature) and — where it serves a materialized view — an index guest
 (`src/index_guest.rs` behind `index-guest`).
 
 | Path | What |
 |---|---|
-| `crates/modules/apps/` | chat, pages, agent, runs, tasks, boards, automations, inbox, collaboration |
-| `crates/examples/directory` | the first wasm port of a native module; the template every later one followed |
-| `crates/examples/greeter` | a consumer module, composed purely out of its siblings' wire types |
-| `crates/examples/extension-probe` | module, view and service replacement against fixed native executables (standalone workspaces) |
+| `crates/<module>` | chat, pages, agent, runs, tasks, boards, automations, inbox, collaboration, call |
+| `crates/<module>-view` | the wasm view the desktop renders for a module, on `view-guest`; `chat-view` is the reference, the other views still live in ducktape-views until they move |
+| `crates/directory` | the first wasm port of a native module; the template every later one followed |
+| `crates/greeter` | a consumer module, composed purely out of its siblings' wire types |
+| `crates/extension-probe` | module, view and service replacement against fixed native executables (standalone workspaces) |
 | `skills/module-dev/SKILL.md` | the runbook: native crate → guest → committed artifacts |
 | `docs/records/architecture/wasm-module-authoring.md` | the guest contract |
 

@@ -112,7 +112,7 @@ fn setup(program: Program) -> Host {
     host.register(Box::new(
         WasmModule::with_store(
             "identity",
-            include_bytes!("../../../../../tests/fixtures/identity.component.wasm"),
+            include_bytes!("../../../tests/fixtures/identity.component.wasm"),
             Box::new(store),
         )
         .unwrap(),
@@ -120,11 +120,11 @@ fn setup(program: Program) -> Host {
     for (id, component) in [
         (
             "dispatch",
-            include_bytes!("../../../../../tests/fixtures/dispatch.component.wasm").as_slice(),
+            include_bytes!("../../../tests/fixtures/dispatch.component.wasm").as_slice(),
         ),
         (
             "attribution",
-            include_bytes!("../../../../../tests/fixtures/attribution.component.wasm").as_slice(),
+            include_bytes!("../../../tests/fixtures/attribution.component.wasm").as_slice(),
         ),
         ("agent", include_bytes!("../component.wasm").as_slice()),
     ] {

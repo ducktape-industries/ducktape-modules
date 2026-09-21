@@ -1,41 +1,46 @@
-# ducktape-modules — the application consensus modules and the reference
-# examples, as their own workspace.
+# ducktape-modules — the application modules and their views, one flat
+# `crates/<name>` each: `chat` is the consensus module, `chat-view` the wasm
+# view the desktop renders for it.
 #
-# Every member under crates/modules/apps/ implements `sdk::Module` and carries
-# its own wasm guest port (`src/guest.rs` behind the `guest` feature), plus —
-# where it ships a materialized view — an index guest (`src/index_guest.rs`
-# behind `index-guest`). The committed `component.wasm`, `index.wasm` and
-# `guest.lock` beside each crate are the artifacts a network runs; this is the
-# repository they are built out of.
+# A module crate implements `sdk::Module` and carries its own wasm guest port
+# (`src/guest.rs` behind the `guest` feature), plus — where it ships a
+# materialized view — an index guest (`src/index_guest.rs` behind
+# `index-guest`). The committed `component.wasm`, `index.wasm` and `guest.lock`
+# beside each crate are the artifacts a network runs; this is the repository
+# they are built out of. A `<name>-view` crate is a cdylib for
+# wasm32-unknown-unknown on `view-guest`, and links no module: the slice of a
+# module it speaks is copied in-crate.
 #
-# crates/examples/ holds the reference tenants: `directory` (the first wasm
-# port, the template every later one followed), `greeter` (a consumer module
-# composed purely from sibling wire types) and `extension-probe` (standalone
-# workspaces, excluded from this one — module, view and service replacement
-# against fixed native executables).
+# The reference tenants sit beside them: `directory` (the first wasm port, the
+# template every later one followed), `greeter` (a consumer module composed
+# purely from sibling types) and `extension-probe` (standalone workspaces,
+# excluded from this one — module, view and service replacement against fixed
+# native executables).
 #
 # Nothing here is a kernel: the module contract (`sdk`), the module SDK
-# (`ducktape-module-sdk`), the index contract and every module's wire crate
-# come from ducktape-sdk; the host, statesync and the native system modules a
-# test drives come from ducktape.
+# (`ducktape-module-sdk`), the view SDK (`view-guest`), the index contract and
+# the system modules come from ducktape-sdk; the host, statesync and the native
+# system modules a test drives come from ducktape.
 
 [workspace]
 resolver = "2"
 members = [
     # apps — the product feature modules
-    "crates/modules/apps/agent",
-    "crates/modules/apps/automations",
-    "crates/modules/apps/boards",
-    "crates/modules/apps/call",
-    "crates/modules/apps/chat",
-    "crates/modules/apps/collaboration",
-    "crates/modules/apps/inbox",
-    "crates/modules/apps/pages",
-    "crates/modules/apps/runs",
-    "crates/modules/apps/tasks",
+    "crates/agent",
+    "crates/automations",
+    "crates/boards",
+    "crates/call",
+    "crates/chat",
+    "crates/collaboration",
+    "crates/inbox",
+    "crates/pages",
+    "crates/runs",
+    "crates/tasks",
+    # views — the wasm views the desktop renders, beside the module they draw
+    "crates/chat-view",
     # examples — reference modules, in no genesis set
-    "crates/examples/directory",
-    "crates/examples/greeter",
+    "crates/directory",
+    "crates/greeter",
 ]
 
 # which repository this workspace IS. guest-builder reaches every module
@@ -51,14 +56,13 @@ version = "0.1.0"
 
 [workspace.dependencies]
 # ---------------------------------------------------------------------------
-# ducktape-sdk — the module contract and every module's wire surface.
+# ducktape-sdk — the module contract and the system modules.
 #
-# A MODULE'S NAME RESOLVES TO ITS WIRE CRATE: `identity = { workspace = true }`
-# links `identity-wire` — the types and codecs — under the name `identity`, so
-# a module speaks a sibling's format without linking the sibling. The one
-# exception is a module that lives in THIS repo and is linked by path
-# (`chat = { path = "../chat" }` in automations and runs): there the name is
-# the module crate, on purpose, and the manifest says so with a path.
+# A SYSTEM MODULE IS ITS OWN API: `identity = { workspace = true }` links the
+# module crate — its types, codecs and a `client` of typed functions over
+# `Ctx` — with the module logic off behind features. An app module here that
+# needs a sibling links it by path (`chat = { path = "../chat" }` in
+# automations and runs).
 # ---------------------------------------------------------------------------
 sdk = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "sdk" }
 # the module SDK a guest port compiles against. wasm-only: every module's
@@ -75,12 +79,13 @@ keyscheme = { git = "https://github.com/ducktape-industries/ducktape-sdk", branc
 # feature sharing its name with a non-optional dependency key.
 index_guest = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "index-guest" }
 
-# system-module wire surfaces
+# system modules a module here calls: each crate is its own api (types +
+# codecs + a `client` of typed functions over `Ctx`); the module logic behind
+# it rides the `guest` feature no consumer turns on.
+identity = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "identity" }
+attribution = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "attribution" }
 
-# app-module wire surfaces. The ones whose module crate also lives here are
-# the crate's OWN wire (`chat-wire` under `crates/modules/apps/chat`) or a
-# sibling's format read without linking the sibling (`pages` in chat's tests,
-# `agent` in runs).
+# the `duck://` address grammar.
 duck-address = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "duck-address" }
 
 # ---------------------------------------------------------------------------
@@ -98,8 +103,8 @@ node-work = { git = "https://github.com/ducktape-industries/ducktape-sdk", branc
 # ---------------------------------------------------------------------------
 # internal — the reference modules in this repo
 # ---------------------------------------------------------------------------
-directory = { path = "crates/examples/directory" }
-greeter = { path = "crates/examples/greeter" }
+directory = { path = "crates/directory" }
+greeter = { path = "crates/greeter" }
 
 # ---------------------------------------------------------------------------
 # external
@@ -109,6 +114,10 @@ serde_json = "1"
 sha2 = "0.10"
 async-trait = "0.1"
 futures = "0.3"
+# a view links only the view guest sdk (host protocol + widget kit), never a
+# module's crate: the slice of a module it speaks is copied in-crate.
+ducktape-view-guest = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "view-guest" }
+unicode-segmentation = "1"
 base64 = "0.22"
 tokio = { version = "1", features = ["rt", "macros", "sync", "time"] }
 # duckfs path normalization: NFC so visually-identical names collide instead
@@ -129,3 +138,13 @@ commonware-cryptography = "2026.9.0"
 # dominate a debug build.
 [profile.dev.build-override]
 opt-level = 2
+
+# a view ships as a cdylib for wasm32-unknown-unknown loaded from a file; the
+# release profile is what its bytes come out of. module guests are built by
+# guest-builder in its own workspace and never see this profile.
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true

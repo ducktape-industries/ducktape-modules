@@ -23,7 +23,7 @@
 # meaning ducktape-sdk's default branch.
 set -euo pipefail
 
-MODULE=${MODULE:-crates/examples/directory}
+MODULE=${MODULE:-crates/directory}
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # under target/, not /tmp: /tmp is memory-backed on some dev boxes and each
 # scratch holds its own wasm32 target dir. Wiped on ENTRY, not on exit, so a

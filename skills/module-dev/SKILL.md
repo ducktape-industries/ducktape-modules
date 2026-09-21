@@ -55,7 +55,7 @@ starts fresh and is rebuilt by replay.
 The CLI stages bytes, it never builds them: the component comes from
 `guest-builder` (§2).
 
-## 1. Native crate — `crates/modules/apps/<id>`
+## 1. Native crate — `crates/<id>`
 
 Clone the `tasks` shape:
 - `src/lib.rs` — the struct + `impl sdk::Module` (`root`, `execute`, `query`,
@@ -167,8 +167,8 @@ repository it stands for out of that workspace's root manifest
 So run it from the root of this checkout. One module at a time:
 
 ```
-$GUEST_BUILDER crates/modules/apps/<id>            # the component
-$GUEST_BUILDER --index crates/modules/apps/<id>    # …and its mapper, if it ships one
+$GUEST_BUILDER crates/<id>            # the component
+$GUEST_BUILDER --index crates/<id>    # …and its mapper, if it ships one
 ```
 
 Add `--out <path>` to leave the module directory untouched (the artifact and
@@ -178,7 +178,7 @@ rebuilds the whole set against a clean tree.
 **A guest's bytes move with EVERY crate it compiles in, a deletion included.**
 Five deleted lines shift every panic-path line number below them. Each module's
 `guest.lock` records what it actually compiled, so
-`grep -l 'name = "<crate>"' crates/modules/apps/*/guest.lock crates/examples/*/guest.lock`
+`grep -l 'name = "<crate>"' crates/*/guest.lock crates/*/guest.lock`
 says which guests a crate change moves — check the scope by hand before
 rebuilding anything. A
 module that ships an index guest has ONE lock covering both: the builder's

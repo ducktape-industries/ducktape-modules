@@ -47,7 +47,6 @@
 //! serve surface.
 
 pub mod client;
-mod consumer_wire;
 pub mod index;
 mod message;
 mod wire;
@@ -85,14 +84,8 @@ mod index_guest;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use consumer_wire::attribution::{
-    Actor, AttributionMsg, ObjectRef, Reason, Relation, encode_msg as attribution_encode_msg,
-};
-use consumer_wire::identity;
-use consumer_wire::identity::{
-    IdentityQuery, IdentityReply, decode_reply as identity_decode_reply,
-    encode_query as identity_encode_query,
-};
+use attribution::{Actor, ObjectRef, Reason, Relation};
+use identity::AccountRef;
 use sdk::{
     AccountNumber, Ctx, Error, KEY_SEP, MerkleStore, Module, ModuleId, Msg, Origin,
     ResolverSyncTarget, StagedStore, StateRoot, StateSyncHandle, require_non_empty,
@@ -529,31 +522,8 @@ impl Chat {
     // ---- identity ---------------------------------------------------------
     // the ONE resolver every party and every named account goes through.
 
-    async fn identity_reply(
-        &self,
-        ctx: &dyn Ctx,
-        identity: &ModuleId,
-        query: &IdentityQuery,
-    ) -> Result<Option<AccountNumber>, Error> {
-        let reply = ctx.query(identity, &identity_encode_query(query)).await?;
-        match identity_decode_reply(&reply).map_err(|sentence| Error::Module {
-            reason: refusal::UNEXPECTED_REPLY.into(),
-            sentence,
-        })? {
-            IdentityReply::Account(account) => Ok(account.map(|view| view.number)),
-            IdentityReply::Accounts(_) | IdentityReply::Resolved(_) | IdentityReply::Gen(_) => {
-                Err(Error::Module {
-                    reason: refusal::UNEXPECTED_REPLY.into(),
-                    sentence: "identity answered a key lookup with something other than an account"
-                        .into(),
-                })
-            }
-        }
-    }
-
-    /// the account holding `key`, through identity's `OfKey`. `None` when
-    /// identity knows no such key — or when this host wires no identity
-    /// sibling, which knows no key at all.
+    /// the account holding `key`, through identity. `None` when identity
+    /// knows no such key — or when this host wires no identity sibling.
     async fn account_of_key(
         &self,
         ctx: &dyn Ctx,
@@ -562,23 +532,19 @@ impl Chat {
         let Some(identity) = &self.identity else {
             return Ok(None);
         };
-        self.identity_reply(ctx, identity, &IdentityQuery::OfKey { key: key.to_vec() })
-            .await
+        let account = identity::client::account_of_key(ctx, identity, key).await?;
+        Ok(account.map(|view| view.number))
     }
 
-    /// whether account `number` exists. identity numbers accounts from 1, so
-    /// 0 never exists; a host wiring no identity sibling has no accounts.
+    /// whether account `number` exists; a host wiring no identity sibling
+    /// has no accounts.
     async fn account_exists(&self, ctx: &dyn Ctx, number: AccountNumber) -> Result<bool, Error> {
         let Some(identity) = &self.identity else {
             return Ok(false);
         };
-        if number == 0 {
-            return Ok(false);
-        }
-        let found = self
-            .identity_reply(ctx, identity, &IdentityQuery::Get { number })
-            .await?;
-        Ok(found.is_some())
+        Ok(identity::client::account(ctx, identity, number)
+            .await?
+            .is_some())
     }
 
     /// the party the dispatch origin acts as — the only authorship path. an
@@ -614,32 +580,13 @@ impl Chat {
         let references: Vec<_> = mentions
             .iter()
             .filter_map(|mention| match mention {
-                Party::Account(number) => Some(identity::AccountRef::Account(*number)),
-                Party::Key(key) => Some(identity::AccountRef::Key(key.clone())),
+                Party::Account(number) => Some(AccountRef::Account(*number)),
+                Party::Key(key) => Some(AccountRef::Key(key.clone())),
                 Party::Module(_) | Party::System => None,
             })
             .collect();
         let numbers = match &self.identity {
-            Some(identity) => {
-                let bytes = ctx
-                    .query(
-                        identity,
-                        &identity_encode_query(&IdentityQuery::Resolve { references }),
-                    )
-                    .await?;
-                let IdentityReply::Resolved(numbers) =
-                    identity_decode_reply(&bytes).map_err(|sentence| Error::Module {
-                        reason: refusal::UNEXPECTED_REPLY.into(),
-                        sentence,
-                    })?
-                else {
-                    return Err(Error::Module {
-                        reason: refusal::UNEXPECTED_REPLY.into(),
-                        sentence: "identity answered a mention lookup with something other than resolved accounts".into(),
-                    });
-                };
-                numbers
-            }
+            Some(identity) => identity::client::resolve(ctx, identity, &references).await?,
             None => vec![None; mentions.len()],
         };
         if numbers.len() != mentions.len() {
@@ -1604,16 +1551,15 @@ impl Chat {
         let Some(attribution) = &self.attribution else {
             return;
         };
-        ctx.emit_msg(Msg {
-            target: attribution.clone(),
-            payload: attribution_encode_msg(&AttributionMsg::Attribute {
-                object: report.object,
-                revision: report.revision,
-                actor: actor_of(actor),
-                relations: report.relations,
-                transfers: Vec::new(),
-            }),
-        });
+        attribution::client::attribute(
+            ctx,
+            attribution,
+            report.object,
+            report.revision,
+            actor_of(actor),
+            report.relations,
+            Vec::new(),
+        );
     }
 
     // ---- dispatch reads --------------------------------------------------

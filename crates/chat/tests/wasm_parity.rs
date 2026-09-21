@@ -359,7 +359,7 @@ async fn fanout_wasm_host(context: &deterministic::Context) -> Host {
     host.register(Box::new(
         WasmModule::with_store(
             "identity",
-            include_bytes!("../../../../../tests/fixtures/identity.component.wasm"),
+            include_bytes!("../../../tests/fixtures/identity.component.wasm"),
             Box::new(fanout_identity_store(context).await),
         )
         .unwrap(),

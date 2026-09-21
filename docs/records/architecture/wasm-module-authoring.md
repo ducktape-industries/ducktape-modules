@@ -7,11 +7,11 @@ the `ducktape:module` WIT world, which lives in the module SDK a module pins by
 git revision (`ducktape-module-sdk`, in
 `https://github.com/ducktape-industries/ducktape-sdk`).
 
-The first wasm port of a native module is `crates/examples/directory`
+The first wasm port of a native module is `crates/directory`
 (`src/guest.rs`), bytes-compatible with the native implementation it replaced
 (same root, same snapshot encoding) — the template every later port followed.
 It is in no genesis set: the crate is a test tenant the kernel suites construct
-directly. `crates/examples/greeter` is the other half of the reference pair — a
+directly. `crates/greeter` is the other half of the reference pair — a
 CONSUMER module, composed purely out of its siblings' wire types.
 
 The node binary embeds no component: `node init` composes every wasm tenant's
@@ -136,7 +136,7 @@ Native changes are still required for new storage engines, cryptographic
 schemes, consensus mechanisms, runtime imports, or device/rendering primitives.
 Application policy, query interpretation, service protocols, and screens use
 the existing capabilities. The independent deployment example
-(`crates/examples/extension-probe/README.md`) exercises module, view, and
+(`crates/extension-probe/README.md`) exercises module, view, and
 service replacement with fixed native executables.
 
 ### Sibling reads (`module-root` / `query-module`)
@@ -204,7 +204,7 @@ the builder removes that selector from both manifests and lock source IDs;
 the lock keeps the precise commit, and `cargo build --locked` verifies it.
 A first build has no seed: an old scratch lock is discarded.
 
-One module: `guest-builder crates/modules/apps/<id>` (`--index` for its index
+One module: `guest-builder crates/<id>` (`--index` for its index
 guest, `--rev <sha>` for a revision other than HEAD).
 `ops/wasm-repro-check.sh` builds ONE module twice, in two scratch directories,
 and asserts both that the artifacts are byte-identical and that neither carries
@@ -327,7 +327,7 @@ initial deployments and remains unchanged by later updates.
 
 ## Testing a module
 
-A module's own tests live beside it (`crates/modules/apps/<id>/tests/`) and run
+A module's own tests live beside it (`crates/<id>/tests/`) and run
 natively: the happy path, every rejection, and a `snapshot()` → `install()`
 root round-trip. A store-backed module drives itself the way a host does —
 construct the concrete `QmdbStore` from `statesync` and inject it as
