@@ -1,4 +1,4 @@
-//! The frame, GPUI-style: one render function per pane reading the state,
+//! The frame: one render function per pane reading the state,
 //! handlers registered as closures over the smallest slice of it, nodes
 //! styled with the kit and the helpers in `controls`. Nothing here mutates state.
 pub mod controls;
