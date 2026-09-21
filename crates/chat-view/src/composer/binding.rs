@@ -1,8 +1,9 @@
 //! Guest controls enqueue actions into the same native editor transaction stream.
 use super::{Draft, MentionChoice, editing};
+use ducktape_view_guest::view::{Cx, Effect};
 use ducktape_view_guest::{
     EditorBinding, EditorDocumentUpdate, EditorStateView, EditorTransaction,
-    EditorTransactionEvent, kit, slots, wire,
+    EditorTransactionEvent, kit, wire,
 };
 use std::rc::Rc;
 use wire::keyboard::{Key, Modifiers, Named};
@@ -15,23 +16,30 @@ pub struct Change {
     pub tag: String,
 }
 
+/// What the field and the controls hand the view; `V` is the view the
+/// draft lives in, whose `Cx` registered the handlers.
 #[derive(Clone, Debug)]
-pub enum Event<M> {
+pub enum Event<V> {
     Document(EditorDocumentUpdate),
-    Transaction(EditorTransaction<M>),
+    Transaction(EditorTransaction<Effect<V>>),
     Committed(Change),
     Action(String),
 }
 
-pub enum Outcome<M> {
+/// What handling an event asks of the view.
+pub enum Outcome<V> {
     Updated,
-    Message(M),
+    /// an editor transaction's own follow-up, to run on the view
+    Run(Effect<V>),
     Action(String),
     Enqueue(String),
 }
 
+/// The handler a composer site gives: the view, the event, the runtime.
+pub type Handle<V> = Rc<dyn Fn(&mut V, Event<V>, &mut Cx<V>)>;
+
 impl Draft {
-    pub fn handle<M: 'static>(&mut self, event: Event<M>, choices: &[MentionChoice]) -> Outcome<M> {
+    pub fn handle<V: 'static>(&mut self, event: Event<V>, choices: &[MentionChoice]) -> Outcome<V> {
         match event {
             Event::Document(update) => {
                 update.apply(&mut self.editor);
@@ -39,7 +47,7 @@ impl Draft {
             }
             Event::Transaction(transaction) => transaction
                 .apply(&mut self.editor)
-                .map_or(Outcome::Updated, Outcome::Message),
+                .map_or(Outcome::Updated, Outcome::Run),
             Event::Committed(change) => {
                 self.committed(
                     &change.before,
@@ -137,19 +145,23 @@ fn key_tag(
 /// place on screen presents a different draft as the reader moves between
 /// rooms, so each draft must carry its own document id or the host hands the
 /// new draft the old one's text and drops every transaction after it.
-pub fn editor<M: 'static>(
+pub fn editor<V: 'static>(
     draft: &Draft,
     key: &str,
     document: &str,
     placeholder: &str,
     editable: bool,
     choices: &[MentionChoice],
-    wrap: impl Fn(Event<M>) -> M + 'static,
+    handle: Handle<V>,
 ) -> wire::Node {
-    let wrap: Rc<dyn Fn(Event<M>) -> M> = Rc::new(wrap);
-    let doc_wrap = wrap.clone();
+    let effect = move |event: Event<V>| {
+        let handle = handle.clone();
+        Effect::once(move |view: &mut V, cx: &mut Cx<V>| handle(view, event, cx))
+    };
+    let effect = Rc::new(effect);
+    let doc_effect = effect.clone();
     let (document, on_document) = draft.editor.document(document.into(), move |update| {
-        doc_wrap(Event::Document(update))
+        doc_effect(Event::Document(update))
     });
     let draft = draft.clone();
     let choices = choices.to_vec();
@@ -201,8 +213,8 @@ pub fn editor<M: 'static>(
     let observing = draft.clone();
     let observed_choices = choices.clone();
     let interacting = draft.clone();
-    let on_committed = wrap.clone();
-    let on_transaction = wrap.clone();
+    let on_committed = effect.clone();
+    let on_transaction = effect.clone();
     let binding = EditorBinding::new(
         claims,
         move |request| {
@@ -432,19 +444,20 @@ fn chip(key: &str, name: &str, note: &str, tone: kit::Tone, remove: Option<u32>)
 /// 2026-09-16), so a composer that draws nothing is a placeholder and a
 /// row of controls floating loose on the timeline's own background, which
 /// is what this replaced.
-pub fn view<M: Clone + 'static>(
+pub fn view<V: 'static>(
     draft: &Draft,
     key: &str,
-    document: &str,
     hint: &str,
     editable: bool,
     choices: &[MentionChoice],
-    wrap: impl Fn(Event<M>) -> M + Clone + 'static,
+    cx: &mut Cx<V>,
+    handle: impl Fn(&mut V, Event<V>, &mut Cx<V>) + 'static,
 ) -> wire::Node {
+    let handle: Handle<V> = Rc::new(handle);
     let editor_key = format!("{key}/editor");
-    let press = |tag: String| -> Option<u32> {
-        let wrap = wrap.clone();
-        editable.then(|| slots::message(wrap(Event::Action(tag))))
+    let mut press = |tag: String| -> Option<u32> {
+        let handle = handle.clone();
+        editable.then(|| cx.on(move |view, cx| handle(view, Event::Action(tag.clone()), cx)))
     };
     let text = draft.editor.state_view().text;
     let carries_file = draft
@@ -498,11 +511,11 @@ pub fn view<M: Clone + 'static>(
     rows.push(editor(
         draft,
         &editor_key,
-        document,
+        key,
         hint,
         editable,
         choices,
-        wrap.clone(),
+        handle.clone(),
     ));
     if !draft.attachments.is_empty() {
         let chips: Vec<wire::Node> = draft
@@ -620,7 +633,10 @@ pub fn view<M: Clone + 'static>(
     controls.push(kit::button(
         format!("{key}/send"),
         "Send",
-        sendable.then(|| slots::message(wrap(Event::Action("send".into())))),
+        sendable.then(|| {
+            let handle = handle.clone();
+            cx.on(move |view, cx| handle(view, Event::Action("send".into()), cx))
+        }),
         wire::ButtonPreset::Primary,
     ));
     rows.push(inset(
@@ -708,11 +724,11 @@ mod tests {
         view(
             draft,
             "c",
-            "c",
             "Message #general",
             true,
             &[],
-            |_: Event<()>| (),
+            &mut Cx::<()>::default(),
+            |_: &mut (), _, _| (),
         )
     }
 
@@ -733,7 +749,7 @@ mod tests {
                 "Message",
                 true,
                 &[],
-                |_: Event<()>| (),
+                Rc::new(|_: &mut (), _, _| ()),
             ) else {
                 panic!("the composer's field is an editor node");
             };
@@ -885,7 +901,7 @@ mod tests {
             "Message",
             true,
             &roster(),
-            |_: Event<()>| (),
+            Rc::new(|_: &mut (), _, _| ()),
         );
         let wire::Node::Editor { options, .. } = node else {
             panic!("the composer's field is an editor node");

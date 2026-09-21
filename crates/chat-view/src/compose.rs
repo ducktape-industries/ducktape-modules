@@ -1,6 +1,6 @@
 //! The composer's events for one target, run through its draft: sends,
 //! edits, attachments picked, dropped or pasted, and their uploads.
-use ducktape_view_guest::view::{Cx, Effect, Submit, ask};
+use ducktape_view_guest::view::{Cx, Submit, ask};
 use ducktape_view_guest::wire;
 
 use crate::api::{ChatApi, ClipboardRead, ClipboardWrite, Drops, Id, Pick, Release, SelectedFile};
@@ -37,18 +37,13 @@ impl Chat {
         });
     }
 
-    pub(crate) fn composer(
-        &mut self,
-        target: Target,
-        event: Event<Effect<Self>>,
-        cx: &mut Cx<Self>,
-    ) {
+    pub(crate) fn composer(&mut self, target: Target, event: Event<Self>, cx: &mut Cx<Self>) {
         let choices = self.mention_choices();
         let key = draft_key(&target);
         let draft = self.drafts.entry(key.clone()).or_default();
         match draft.handle(event, &choices) {
             Outcome::Updated => {}
-            Outcome::Message(effect) => effect.run(self, cx),
+            Outcome::Run(effect) => effect.run(self, cx),
             Outcome::Enqueue(tag) => cx.widget(wire::WidgetCommand::EditorAction {
                 target: format!("{key}/editor"),
                 tag,

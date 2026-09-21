@@ -1,7 +1,7 @@
 //! The room pane: its header, the search results or the message stream
 //! (intro, older pages, unread marker, floating actions, copy range, jump to
 //! latest, the edit under it), and the composer or the reason there is none.
-use ducktape_view_guest::view::{Cx, Effect, Loaded};
+use ducktape_view_guest::view::{Cx, Loaded};
 use ducktape_view_guest::wire::{self, AlignX, AlignY, Length, Node, kit, kit::Tone};
 
 use super::controls::*;
@@ -841,9 +841,13 @@ pub fn composer(
     let choices = chat.mention_choices();
     let empty = crate::composer::Draft::default();
     let draft = chat.drafts.get(&key).unwrap_or(&empty);
-    let _ = cx;
-    crate::composer::view(draft, &key, &key, hint, editable, &choices, move |event| {
-        let target = target.clone();
-        Effect::once(move |chat: &mut Chat, cx: &mut Cx<Chat>| chat.composer(target, event, cx))
-    })
+    crate::composer::view(
+        draft,
+        &key,
+        hint,
+        editable,
+        &choices,
+        cx,
+        move |chat, event, cx| chat.composer(target.clone(), event, cx),
+    )
 }
