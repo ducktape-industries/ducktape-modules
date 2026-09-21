@@ -3017,6 +3017,7 @@ dependencies = [
  "futures",
  "serde",
  "serde_json",
+ "unicode-segmentation",
  "view-wire",
  "wit-bindgen 0.61.1",
 ]
