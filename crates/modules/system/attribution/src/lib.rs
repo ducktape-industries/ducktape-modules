@@ -125,6 +125,8 @@
 //! belongs to the store.
 
 mod wire;
+// how a source module reports: a typed function over `Ctx`.
+pub mod client;
 
 // the wire surface belongs to this module. Keep its codec at the crate root
 // so host consumers use the same bytes without an SDK wire crate.

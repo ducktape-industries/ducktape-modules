@@ -21,6 +21,8 @@ serde_json = { workspace = true }
 # envelope the derived tier's fold feed already uses. wire stays sdk::wire.
 borsh = { workspace = true }
 keyscheme = { workspace = true }
+# `AccountAddress`, identity's half of the `duck://` grammar, re-exported.
+duck-address = { workspace = true }
 # the `testkit` feature's ed25519 signing helpers.
 commonware-cryptography = { workspace = true }
 async-trait = { workspace = true }

@@ -113,6 +113,8 @@
 // the wire surface: this module's shared types, flattened at the crate root.
 mod wire;
 pub use wire::*;
+// how a sibling module asks: typed functions over `Ctx`.
+pub mod client;
 
 // the one verifier every consent rides — shared with the kernel frame codec,
 // so an account key and a frame origin are verified identically.

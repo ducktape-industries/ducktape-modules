@@ -45,19 +45,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "agent-wire"
-version = "0.1.0"
-dependencies = [
- "attribution-wire",
- "borsh",
- "dispatch-wire",
- "identity-wire",
- "sdk",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -121,15 +108,6 @@ dependencies = [
  "serde",
  "serde_json",
  "syn 2.0.119",
-]
-
-[[package]]
-name = "attribution-wire"
-version = "0.1.0"
-dependencies = [
- "borsh",
- "sdk",
- "serde",
 ]
 
 [[package]]
@@ -243,18 +221,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "blst"
-version = "0.3.17"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c20659f9bbee16cbbd2f7393e40ab6309f5a98f76a2eb57a995ec508b72387fe"
-dependencies = [
- "cc",
- "glob",
- "threadpool",
- "zeroize",
-]
-
-[[package]]
 name = "borsh"
 version = "1.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -363,30 +329,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "chat-message"
-version = "0.1.0"
-dependencies = [
- "borsh",
- "serde",
-]
-
-[[package]]
-name = "chat-wire"
-version = "0.1.0"
-dependencies = [
- "borsh",
- "chat-message",
- "duck-address",
- "identity-wire",
- "index-guest",
- "sdk",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "unicode-normalization",
-]
-
-[[package]]
 name = "cipher"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -419,15 +361,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fa961b519f0b462e3a3b4a34b64d119eeaca1d59af726fe450bbba07a9fc0a1"
 dependencies = [
  "thiserror 2.0.20",
-]
-
-[[package]]
-name = "collaboration-wire"
-version = "0.1.0"
-dependencies = [
- "chat-wire",
- "sdk",
- "serde",
 ]
 
 [[package]]
@@ -464,10 +397,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df6b593210847c596c6657f2fb033c57ac0ef2f7ce68559c0e79040a34b65b7e"
 dependencies = [
  "ahash",
- "anyhow",
  "aws-lc-rs",
  "blake3",
- "blst",
  "bytes",
  "cfg-if",
  "chacha20poly1305",
@@ -478,7 +409,6 @@ dependencies = [
  "commonware-parallel",
  "commonware-utils",
  "cpufeatures 0.3.1",
- "crc-fast",
  "ctutils",
  "curve25519-dalek 5.0.0",
  "ecdsa 0.17.0",
@@ -486,8 +416,6 @@ dependencies = [
  "getrandom 0.2.17",
  "getrandom 0.4.3",
  "hashbrown 0.17.1",
- "num-rational",
- "num-traits",
  "once_cell",
  "p256 0.14.0",
  "rand 0.10.2",
@@ -554,9 +482,6 @@ checksum = "10bae95b6d977699c212691a996805e241936d8f958c73a1ebff0190376d1260"
 dependencies = [
  "cfg-if",
  "commonware-macros",
- "dashmap",
- "futures",
- "rayon",
 ]
 
 [[package]]
@@ -804,16 +729,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4b3f161aa81ee5dd8d7b0eb8828988f57baf2f78d288e62b6b3714b37aa6d6a1"
 
 [[package]]
-name = "crc-fast"
-version = "1.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e75b2483e97a5a7da73ac68a05b629f9c53cff58d8ed1c77866079e18b00dba5"
-dependencies = [
- "digest 0.10.7",
- "spin",
-]
-
-[[package]]
 name = "crc32fast"
 version = "1.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -867,7 +782,6 @@ checksum = "1a52aa3fcda4e6302a9f48734f234d35d4721b96f8fe07d073f07ce9df4f0271"
 dependencies = [
  "cpubits",
  "ctutils",
- "getrandom 0.4.3",
  "hybrid-array",
  "num-traits",
  "rand_core 0.10.1",
@@ -891,7 +805,6 @@ version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ce6e4c961d6cd6c9a86db418387425e8bdeaf05b3c8bc1411e6dca4c252f1453"
 dependencies = [
- "getrandom 0.4.3",
  "hybrid-array",
  "rand_core 0.10.1",
 ]
@@ -947,20 +860,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
-]
-
-[[package]]
-name = "dashmap"
-version = "6.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6361d5c062261c78a176addb82d4c821ae42bed6089de0e12603cd25de2059c"
-dependencies = [
- "cfg-if",
- "crossbeam-utils",
- "hashbrown 0.14.5",
- "lock_api",
- "once_cell",
- "parking_lot_core",
 ]
 
 [[package]]
@@ -1134,7 +1033,7 @@ dependencies = [
  "elliptic-curve 0.13.8",
  "rfc6979 0.4.0",
  "signature 2.2.0",
- "spki 0.7.3",
+ "spki",
 ]
 
 [[package]]
@@ -1148,7 +1047,6 @@ dependencies = [
  "elliptic-curve 0.14.1",
  "rfc6979 0.6.0",
  "signature 3.0.0",
- "spki 0.8.0",
  "zeroize",
 ]
 
@@ -1158,7 +1056,7 @@ version = "2.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "115531babc129696a58c64a4fef0a8bf9e9698629fb97e9e40767d235cfbcd53"
 dependencies = [
- "pkcs8 0.10.2",
+ "pkcs8",
  "signature 2.2.0",
 ]
 
@@ -1195,7 +1093,7 @@ dependencies = [
  "generic-array",
  "group 0.13.0",
  "pem-rfc7468",
- "pkcs8 0.10.2",
+ "pkcs8",
  "rand_core 0.6.4",
  "sec1 0.7.3",
  "subtle",
@@ -1215,7 +1113,6 @@ dependencies = [
  "ff 0.14.0",
  "group 0.14.0",
  "hybrid-array",
- "pkcs8 0.11.0",
  "rand_core 0.10.1",
  "sec1 0.8.1",
  "subtle",
@@ -1313,15 +1210,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "64cd1e32ddd350061ae6edb1b082d7c54915b5c672c389143b9a63403a109f24"
 
 [[package]]
-name = "files-wire"
-version = "0.1.0"
-dependencies = [
- "duck-address",
- "duckfs-core",
- "refusal-class",
-]
-
-[[package]]
 name = "find-msvc-tools"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1363,17 +1251,6 @@ name = "foldhash"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
-
-[[package]]
-name = "forge-wire"
-version = "0.1.0"
-dependencies = [
- "chat-wire",
- "duck-address",
- "sdk",
- "serde",
- "serde_json",
-]
 
 [[package]]
 name = "fs_extra"
@@ -1582,12 +1459,6 @@ name = "git-primitives"
 version = "0.1.0"
 
 [[package]]
-name = "glob"
-version = "0.3.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
-
-[[package]]
 name = "governance"
 version = "0.1.0"
 dependencies = [
@@ -1646,12 +1517,6 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
-version = "0.14.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
-
-[[package]]
-name = "hashbrown"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
@@ -1672,12 +1537,6 @@ name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
-
-[[package]]
-name = "hermit-abi"
-version = "0.5.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e17592d60ebacc7d5e169f4663c5f84f9161cc90328abcfe8456f41e4dfcb284"
 
 [[package]]
 name = "hmac"
@@ -1721,6 +1580,7 @@ dependencies = [
  "async-trait",
  "borsh",
  "commonware-cryptography",
+ "duck-address",
  "ducktape-module-sdk",
  "futures",
  "k256",
@@ -1730,17 +1590,6 @@ dependencies = [
  "sdk-testkit",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "identity-wire"
-version = "0.1.0"
-dependencies = [
- "borsh",
- "duck-address",
- "keyscheme",
- "sdk",
- "serde",
 ]
 
 [[package]]
@@ -2079,16 +1928,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "num_cpus"
-version = "1.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91df4bbde75afed763b708b7eee1e8e7651e02d97f6d5dd763e89367e957b23b"
-dependencies = [
- "hermit-abi",
- "libc",
-]
-
-[[package]]
 name = "object"
 version = "0.39.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2129,17 +1968,6 @@ dependencies = [
  "primefield",
  "primeorder 0.14.0",
  "sha2 0.11.0",
-]
-
-[[package]]
-name = "pages-wire"
-version = "0.1.0"
-dependencies = [
- "duck-address",
- "index-guest",
- "sdk",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -2223,17 +2051,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f950b2377845cebe5cf8b5165cb3cc1a5e0fa5cfa3e1f7f55707d8fd82e0a7b7"
 dependencies = [
  "der 0.7.10",
- "spki 0.7.3",
-]
-
-[[package]]
-name = "pkcs8"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "451913da69c775a56034ea8d9003d27ee8948e12443eae7c038ba100a4f21cb7"
-dependencies = [
- "der 0.8.2",
- "spki 0.8.0",
+ "spki",
 ]
 
 [[package]]
@@ -2313,9 +2131,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5c9f42978c78a00e3d68f69fc03e57a234debae69da4020a4fb588fcdcd07b06"
 dependencies = [
  "elliptic-curve 0.14.1",
- "once_cell",
  "primefield",
- "serdect",
  "wnaf",
 ]
 
@@ -2564,27 +2380,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "runs-wire"
-version = "0.1.0"
-dependencies = [
- "agent-wire",
- "borsh",
- "chat-wire",
- "collaboration-wire",
- "dispatch-wire",
- "duck-address",
- "governance-wire",
- "node-work",
- "pages-wire",
- "run-envelope",
- "sdk",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tasks-wire",
-]
-
-[[package]]
 name = "rustc-demangle"
 version = "0.1.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2686,7 +2481,7 @@ dependencies = [
  "base16ct 0.2.0",
  "der 0.7.10",
  "generic-array",
- "pkcs8 0.10.2",
+ "pkcs8",
  "subtle",
  "zeroize",
 ]
@@ -2782,16 +2577,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "serdect"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "66cf8fedced2fcf12406bcb34223dffb92eaf34908ede12fed414c82b7f00b3e"
-dependencies = [
- "base16ct 1.0.0",
- "serde",
-]
-
-[[package]]
 name = "sha2"
 version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2871,12 +2656,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "spin"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "023a211cb3138dbc438680b32560ad89f699977624c9f8dbb95a47d5b4c07dd3"
-
-[[package]]
 name = "spki"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2884,16 +2663,6 @@ checksum = "d91ed6c858b01f942cd56b37a94b3e0a1798290327d1236e4d9cf4eaca44d29d"
 dependencies = [
  "base64ct",
  "der 0.7.10",
-]
-
-[[package]]
-name = "spki"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d9efca8738c78ee9484207732f728b1ef517bbb1833d6fc0879ca898a522f6f"
-dependencies = [
- "base64ct",
- "der 0.8.2",
 ]
 
 [[package]]
@@ -2935,15 +2704,6 @@ name = "target-lexicon"
 version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "adb6935a6f5c20170eeceb1a3835a49e12e19d792f6dd344ccc76a985ca5a6ca"
-
-[[package]]
-name = "tasks-wire"
-version = "0.1.0"
-dependencies = [
- "attribution-wire",
- "sdk",
- "serde",
-]
 
 [[package]]
 name = "tempfile"
@@ -3005,15 +2765,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.6",
-]
-
-[[package]]
-name = "threadpool"
-version = "1.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d050e60b33d41c19108b32cea32164033a9013fe3b46cbd4457559bfbf77afaa"
-dependencies = [
- "num_cpus",
 ]
 
 [[package]]
@@ -3264,7 +3015,9 @@ version = "0.1.0"
 dependencies = [
  "design",
  "futures",
+ "serde",
  "serde_json",
+ "unicode-segmentation",
  "view-wire",
  "wit-bindgen 0.61.1",
 ]

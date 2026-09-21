@@ -35,6 +35,8 @@ pub mod keyboard;
 mod memo;
 pub mod mouse;
 pub use memo::{invalidate_component, memo_lazy};
+pub mod caps;
+pub mod composer;
 pub mod host;
 pub mod testing;
 pub mod widget;
@@ -42,6 +44,11 @@ pub mod window;
 
 pub use snapshot::SnapshotApp;
 mod snapshot;
+pub mod view;
+pub use view::{
+    Capability, Cx, Effect, Live, Loaded, Module, Query, Shell, Submit, View, ViewOf, Visible,
+    Watching,
+};
 
 /// The application contract consumed by `export_app!`.
 pub trait App: Sized + 'static {
@@ -83,7 +90,8 @@ struct Running<M> {
 /// one crosses as `unchanged` and a changed one as patches against it.
 pub struct Driver<A: App> {
     slots: slots::Context,
-    app: A,
+    /// The app under test: a `Shell` exposes its view through `state()`.
+    pub app: A,
     tasks: Vec<Running<A::Message>>,
     subscriptions: HashSet<u64>,
     observers: Vec<wire::Observer<A::Message>>,
@@ -543,6 +551,16 @@ macro_rules! export_app {
             fn restore(bytes: &[u8]) -> ::std::result::Result<Self, ::std::string::String> { <$app>::restore(bytes) }
         }
 
+        $crate::export_driver!($app, $name, $description, [$($capability),*]);
+    };
+}
+
+/// The manifest section, the driver cell, the native entry points and the
+/// wasm32 component exports for an `App`. `export_app!` and `export_view!`
+/// both end here; a view invokes one of those, not this.
+#[macro_export]
+macro_rules! export_driver {
+    ($app:ty, $name:expr, $description:expr, [$($capability:literal),* $(,)?]) => {
         const MANIFEST: &str = concat!("ducktape.view.manifest.v1\n", $name, "\n", $description, "\n" $(, $capability, ",")*, "\n");
 
         #[cfg_attr(target_arch = "wasm32", unsafe(link_section = "ducktape.view.manifest"))]

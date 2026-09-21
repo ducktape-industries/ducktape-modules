@@ -10,10 +10,11 @@
 # This workspace depends on NO other ducktape repository. Everything else in
 # the platform depends on it.
 #
-# A MODULE'S NAME RESOLVES TO ITS WIRE CRATE: `identity = { workspace = true }`
-# links `identity-wire` under the name `identity`, so the kernel, a daemon, a
-# service, a view and a sibling module all speak a module's format without
-# linking the module.
+# A MODULE IS ITS OWN API: `identity = { workspace = true }` links the module
+# crate, whose root is its types and codecs plus a `client` of typed functions
+# over `Ctx`; the module logic rides features (`guest`). The kernel, a daemon,
+# a service, a view and a sibling module all link the same crate. (identity and
+# attribution are on this shape; the other system modules still ship `wire`.)
 
 [workspace]
 resolver = "2"
@@ -59,27 +60,16 @@ members = [
 
     # system modules — wire surfaces
     "crates/modules/system/acl/wire",
-    "crates/modules/system/attribution/wire",
     "crates/modules/system/capability/wire",
     "crates/modules/system/dispatch/wire",
     "crates/modules/system/gateway/wire",
     "crates/modules/system/governance/wire",
-    "crates/modules/system/identity/wire",
     "crates/modules/system/kv/wire",
     "crates/modules/system/modules/wire",
     "crates/modules/system/saga/wire",
     "crates/modules/system/valset/wire",
 
     # app modules — wire surfaces only
-    "crates/modules/apps/agent/wire",
-    "crates/modules/apps/chat/message",
-    "crates/modules/apps/chat/wire",
-    "crates/modules/apps/collaboration/wire",
-    "crates/modules/apps/files/wire",
-    "crates/modules/apps/forge/wire",
-    "crates/modules/apps/pages/wire",
-    "crates/modules/apps/runs/wire",
-    "crates/modules/apps/tasks/wire",
 ]
 # each of these is a standalone workspace with its own Cargo.lock: they compile
 # for wasm32-unknown-unknown only, inside the shell workspace guest-builder
@@ -126,7 +116,9 @@ unicode-normalization = "0.1"
 tempfile = "3"
 
 # commonware — one ecosystem, version-aligned.
-commonware-cryptography = "2026.9.0"
+# no default `std`: it carries `bls12381` -> blst, C that never builds for
+# wasm32. every consumer here uses ed25519 only, which is no_std-clean.
+commonware-cryptography = { version = "2026.9.0", default-features = false }
 commonware-codec = "2026.9.0"
 commonware-utils = "2026.9.0"
 
@@ -206,8 +198,7 @@ ducktape-view-guest = { package = "view-guest", path = "crates/view-guest" }
 # ---- internal: module wire surfaces
 acl = { package = "acl-wire", path = "crates/modules/system/acl/wire" }
 acl-wire = { path = "crates/modules/system/acl/wire" }
-attribution = { package = "attribution-wire", path = "crates/modules/system/attribution/wire" }
-attribution-wire = { path = "crates/modules/system/attribution/wire" }
+attribution = { path = "crates/modules/system/attribution" }
 capability = { package = "capability-wire", path = "crates/modules/system/capability/wire" }
 capability-wire = { path = "crates/modules/system/capability/wire" }
 dispatch = { package = "dispatch-wire", path = "crates/modules/system/dispatch/wire" }
@@ -216,8 +207,7 @@ gateway = { package = "gateway-wire", path = "crates/modules/system/gateway/wire
 gateway-wire = { path = "crates/modules/system/gateway/wire" }
 governance = { package = "governance-wire", path = "crates/modules/system/governance/wire" }
 governance-wire = { path = "crates/modules/system/governance/wire" }
-identity = { package = "identity-wire", path = "crates/modules/system/identity/wire" }
-identity-wire = { path = "crates/modules/system/identity/wire" }
+identity = { path = "crates/modules/system/identity" }
 kv = { package = "kv-wire", path = "crates/modules/system/kv/wire" }
 kv-wire = { path = "crates/modules/system/kv/wire" }
 modules = { package = "modules-wire", path = "crates/modules/system/modules/wire" }
@@ -227,23 +217,6 @@ saga-wire = { path = "crates/modules/system/saga/wire" }
 valset = { package = "valset-wire", path = "crates/modules/system/valset/wire" }
 valset-wire = { path = "crates/modules/system/valset/wire" }
 
-agent = { package = "agent-wire", path = "crates/modules/apps/agent/wire" }
-agent-wire = { path = "crates/modules/apps/agent/wire" }
-chat = { package = "chat-wire", path = "crates/modules/apps/chat/wire" }
-chat-wire = { path = "crates/modules/apps/chat/wire" }
-chat-message = { path = "crates/modules/apps/chat/message" }
-collaboration = { package = "collaboration-wire", path = "crates/modules/apps/collaboration/wire" }
-collaboration-wire = { path = "crates/modules/apps/collaboration/wire" }
-files = { package = "files-wire", path = "crates/modules/apps/files/wire" }
-files-wire = { path = "crates/modules/apps/files/wire" }
-forge = { package = "forge-wire", path = "crates/modules/apps/forge/wire" }
-forge-wire = { path = "crates/modules/apps/forge/wire" }
-pages = { package = "pages-wire", path = "crates/modules/apps/pages/wire" }
-pages-wire = { path = "crates/modules/apps/pages/wire" }
-runs = { package = "runs-wire", path = "crates/modules/apps/runs/wire" }
-runs-wire = { path = "crates/modules/apps/runs/wire" }
-tasks = { package = "tasks-wire", path = "crates/modules/apps/tasks/wire" }
-tasks-wire = { path = "crates/modules/apps/tasks/wire" }
 
 # dev/test builds compile wasm guests through cranelift. unoptimized cranelift
 # is 10-30x slower, so the code generator itself is always built optimized.
