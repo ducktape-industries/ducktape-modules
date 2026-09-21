@@ -4,11 +4,6 @@
 # `support/guest` as a rename; a view links it as `ducktape-view-guest`
 # (`package = "view-guest"`, see the root manifest) so call sites keep the
 # name they were written with.
-#
-# `wit-bindgen` is pinned here, not through the workspace: the view WIT
-# world is bound with 0.61 while the module adapter (`crates/module-sdk`)
-# stays on 0.57. The two never share a graph — unifying the pin would move
-# every committed view component's bytes for nothing.
 [package]
 name = "view-guest"
 version = "0.1.0"
@@ -24,7 +19,6 @@ design.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 unicode-segmentation = "1"
-wit-bindgen = "0.61"
 
 # The `export_app!` probe `make view-wasm-check` builds for wasm32.
 [[example]]

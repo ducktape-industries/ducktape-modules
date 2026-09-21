@@ -3,14 +3,14 @@
 # live in this repo — the guests under `crates/views/*` build against it, and
 # `app` + `crates/noded` decode what they emit — so the format is ours and the
 # two halves are only ever built from one copy of it. `WIRE_EPOCH` is what a
-# host checks a `.component.wasm` against before running it.
+# host checks a view's `.wasm` against before running it.
 [package]
 name = "view-wire"
 version = "0.1.0"
 edition = "2024"
 
 [features]
-# Reads the manifest custom section out of a built component: host-only, so the
+# Reads the manifest custom section out of a built view: host-only, so the
 # guests skip `wasmparser` entirely.
 manifest = ["dep:wasmparser"]
 # Derives a view's snapshot layout from its own serde impls. A dev-dependency

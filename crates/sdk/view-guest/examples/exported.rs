@@ -1,7 +1,7 @@
 //! The smallest view that invokes `export_app!` at a crate root. Built as a
-//! wasm32 cdylib by `make view-wasm-check`, so the exported component surface
-//! (`init`/`tick`/`snapshot`/`restore`, the manifest section, the wit-bindgen
-//! runtime path) is compiled in this tree, not only in a view's.
+//! wasm32 cdylib by `make view-wasm-check`, so the exported surface
+//! (`alloc`/`init`/`tick`/`snapshot`/`restore`, the manifest section) is
+//! compiled in this tree, not only in a view's.
 
 use view_guest::{Subscription, Task, wire};
 
