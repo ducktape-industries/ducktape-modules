@@ -1,13 +1,12 @@
-// The slice of the ducktape sandbox forge uses, as one trait; the guest implements it over host calls, MemorySandbox over maps for tests.
+// The slice of the ducktape sandbox forge uses, as one trait; the guest implements it over the call's context, MemorySandbox over maps for tests.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
-use abi::{Blob, BlobHeader, BlobId, Entry, Env, HashKind, Refusal, Scan, reason};
+use abi::{Blob, BlobHeader, BlobId, Entry, HashKind, Refusal, Scan, reason};
 use gitcore::{Kind, Oid, oid_of};
 
 pub trait Sandbox {
-    fn env(&self) -> Env;
     fn get(&self, key: &[u8]) -> Option<Vec<u8>>;
     fn set(&self, key: Vec<u8>, value: Vec<u8>);
     fn delete(&self, key: Vec<u8>);
@@ -19,8 +18,8 @@ pub trait Sandbox {
     fn respond(&self, bytes: Vec<u8>);
 }
 
+#[derive(Default)]
 pub struct MemorySandbox {
-    env: RefCell<Env>,
     state: RefCell<BTreeMap<Vec<u8>, Vec<u8>>>,
     blobs: RefCell<BTreeMap<BlobId, Blob>>,
     output: RefCell<Vec<u8>>,
@@ -28,20 +27,6 @@ pub struct MemorySandbox {
 }
 
 impl MemorySandbox {
-    pub fn new(env: Env) -> MemorySandbox {
-        MemorySandbox {
-            env: RefCell::new(env),
-            state: RefCell::new(BTreeMap::new()),
-            blobs: RefCell::new(BTreeMap::new()),
-            output: RefCell::new(Vec::new()),
-            response: RefCell::new(Vec::new()),
-        }
-    }
-
-    pub fn set_env(&self, env: Env) {
-        *self.env.borrow_mut() = env;
-    }
-
     pub fn take_output(&self) -> Vec<u8> {
         std::mem::take(&mut self.output.borrow_mut())
     }
@@ -60,10 +45,6 @@ impl MemorySandbox {
 }
 
 impl Sandbox for MemorySandbox {
-    fn env(&self) -> Env {
-        self.env.borrow().clone()
-    }
-
     fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
         self.state.borrow().get(key).cloned()
     }

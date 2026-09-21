@@ -17,6 +17,7 @@ const TIME: u64 = 1_700_000_000;
 
 fn env(actor: &[u8]) -> Env {
     Env {
+        network: b"net".to_vec(),
         height: 1,
         time: TIME,
         me: "forge".into(),
@@ -37,14 +38,13 @@ fn bounds() -> Bounds {
 }
 
 fn founded() -> MemorySandbox {
-    let sandbox = MemorySandbox::new(env(OWNER));
+    let sandbox = MemorySandbox::default();
     forge::init(&sandbox, &abi::encode(&bounds())).unwrap();
     sandbox
 }
 
 fn act(sandbox: &MemorySandbox, actor: &[u8], op: &Op) -> Result<Vec<u8>, abi::Refusal> {
-    sandbox.set_env(env(actor));
-    forge::execute(sandbox, &abi::encode(op))?;
+    forge::execute(sandbox, &env(actor), &abi::encode(op))?;
     Ok(sandbox.take_output())
 }
 
@@ -248,17 +248,17 @@ fn ids_in_pack(bytes: &[u8], hash: Hash) -> BTreeSet<Oid> {
 
 #[test]
 fn founding_requires_bounds_and_ops_require_a_signer() {
-    let sandbox = MemorySandbox::new(env(OWNER));
+    let sandbox = MemorySandbox::default();
     let unfounded = forge::init(&sandbox, b"");
     assert_eq!(unfounded.unwrap_err().reason, reason::PROTOCOL);
     forge::init(&sandbox, &abi::encode(&bounds())).unwrap();
 
-    sandbox.set_env(Env {
-        origin: Origin::System,
-        ..env(OWNER)
-    });
     let by_system = forge::execute(
         &sandbox,
+        &Env {
+            origin: Origin::System,
+            ..env(OWNER)
+        },
         &abi::encode(&Op::Create {
             repo: "r".into(),
             hash: HashKind::Sha1,
@@ -553,7 +553,7 @@ fn an_import_arrives_as_fast_forward_steps_and_an_open_pack_is_refused_whole() {
 
 #[test]
 fn a_walk_past_the_bound_asks_for_smaller_steps() {
-    let sandbox = MemorySandbox::new(env(OWNER));
+    let sandbox = MemorySandbox::default();
     forge::init(
         &sandbox,
         &abi::encode(&Bounds {

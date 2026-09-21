@@ -5,7 +5,7 @@ mod server;
 
 use std::sync::Arc;
 
-use abi::{GuestCall, HashKind, Refusal};
+use abi::{GuestCall, HashKind, Invocation, Refusal};
 use forge::{Bounds, Op, Query};
 use runtime::{Code, Fault, Limits, Runtime};
 use tokio::sync::Mutex;
@@ -49,7 +49,13 @@ pub struct Program {
 
 impl Program {
     async fn run(&mut self, call: GuestCall) -> Result<(), Failure> {
-        self.runtime.run(&self.code, call, &mut self.host).await??;
+        let invocation = Invocation {
+            env: self.host.env(),
+            call,
+        };
+        self.runtime
+            .run(&self.code, invocation, &mut self.host)
+            .await??;
         Ok(())
     }
 

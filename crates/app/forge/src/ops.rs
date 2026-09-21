@@ -1,6 +1,6 @@
 // The execute path: repository lifecycle, access, a git push and a merge, each a straight walk over the sandbox.
 
-use abi::{Origin, Refusal};
+use abi::{Env, Origin, Refusal};
 use gitcore::merge::{MergeOutcome, merge_base, merge_trees};
 use gitcore::server::{Policy, RefUpdate};
 use gitcore::{Commit, Error, Kind, Limits, Objects, Oid, Signature, server};
@@ -22,23 +22,22 @@ pub fn init<S: Sandbox>(sandbox: &S, params: &[u8]) -> Result<(), Refusal> {
     Ok(())
 }
 
-pub fn execute<S: Sandbox>(sandbox: &S, payload: &[u8]) -> Result<(), Refusal> {
-    let env = sandbox.env();
-    let Origin::External(actor) = env.origin else {
+pub fn execute<S: Sandbox>(sandbox: &S, env: &Env, payload: &[u8]) -> Result<(), Refusal> {
+    let Origin::External(actor) = &env.origin else {
         return Err(unauthorized("a repository op is signed by a member key"));
     };
     match abi::decode(payload)? {
-        Op::Create { repo, hash } => create(sandbox, &actor, &repo, hash),
-        Op::Configure { repo, settings } => configure(sandbox, &actor, &repo, settings),
-        Op::Grant { repo, key } => grant(sandbox, &actor, &repo, &key),
-        Op::Revoke { repo, key } => revoke(sandbox, &actor, &repo, &key),
-        Op::Push { repo, request } => push(sandbox, &actor, &repo, &request),
+        Op::Create { repo, hash } => create(sandbox, actor, &repo, hash),
+        Op::Configure { repo, settings } => configure(sandbox, actor, &repo, settings),
+        Op::Grant { repo, key } => grant(sandbox, actor, &repo, &key),
+        Op::Revoke { repo, key } => revoke(sandbox, actor, &repo, &key),
+        Op::Push { repo, request } => push(sandbox, actor, &repo, &request),
         Op::Merge {
             repo,
             into,
             from,
             message,
-        } => merge(sandbox, &actor, env.time, &repo, &into, &from, &message),
+        } => merge(sandbox, actor, env.time, &repo, &into, &from, &message),
     }
 }
 

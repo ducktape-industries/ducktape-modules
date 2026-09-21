@@ -8,6 +8,7 @@ use abi::{
 };
 use sha1::Digest as _;
 
+const NETWORK: &[u8] = b"harness";
 const PROGRAM: &str = "forge";
 const TIME: u64 = 1_700_000_000;
 
@@ -44,8 +45,9 @@ impl MemoryHost {
         std::mem::take(&mut self.response)
     }
 
-    fn env(&self) -> Env {
+    pub fn env(&self) -> Env {
         Env {
+            network: NETWORK.to_vec(),
             height: self.height,
             time: TIME,
             me: PROGRAM.into(),
@@ -97,7 +99,6 @@ impl MemoryHost {
 impl runtime::Host for MemoryHost {
     async fn call(&mut self, op: HostOp) -> HostReply {
         match op {
-            HostOp::Env => HostReply::Env(self.env()),
             HostOp::Get(key) | HostOp::CommittedGet(key) => {
                 HostReply::Value(self.state.get(&key).cloned())
             }
@@ -229,9 +230,7 @@ mod tests {
     async fn height_moves_with_the_harness_and_the_actor_signs() {
         let mut host = MemoryHost::new(b"me".to_vec());
         host.advance_height();
-        let HostReply::Env(env) = host.call(HostOp::Env).await else {
-            panic!();
-        };
+        let env = host.env();
         assert_eq!(env.height, 1);
         assert_eq!(env.origin, Origin::External(b"me".to_vec()));
         let refused = host.call(HostOp::Event(Vec::new())).await;
