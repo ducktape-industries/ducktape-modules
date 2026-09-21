@@ -64,7 +64,6 @@ Downstream repositories name it as a cargo git dependency in their
 [workspace.dependencies]
 sdk = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev" }
 identity = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "identity-wire" }
-chat = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "chat-wire" }
 ```
 
 A wasm module pins `ducktape-module-sdk` out of this repository by revision and

@@ -71,15 +71,6 @@ members = [
     "crates/modules/system/valset/wire",
 
     # app modules — wire surfaces only
-    "crates/modules/apps/agent/wire",
-    "crates/modules/apps/chat/message",
-    "crates/modules/apps/chat/wire",
-    "crates/modules/apps/collaboration/wire",
-    "crates/modules/apps/files/wire",
-    "crates/modules/apps/forge/wire",
-    "crates/modules/apps/pages/wire",
-    "crates/modules/apps/runs/wire",
-    "crates/modules/apps/tasks/wire",
 ]
 # each of these is a standalone workspace with its own Cargo.lock: they compile
 # for wasm32-unknown-unknown only, inside the shell workspace guest-builder
@@ -229,23 +220,6 @@ saga-wire = { path = "crates/modules/system/saga/wire" }
 valset = { package = "valset-wire", path = "crates/modules/system/valset/wire" }
 valset-wire = { path = "crates/modules/system/valset/wire" }
 
-agent = { package = "agent-wire", path = "crates/modules/apps/agent/wire" }
-agent-wire = { path = "crates/modules/apps/agent/wire" }
-chat = { package = "chat-wire", path = "crates/modules/apps/chat/wire" }
-chat-wire = { path = "crates/modules/apps/chat/wire" }
-chat-message = { path = "crates/modules/apps/chat/message" }
-collaboration = { package = "collaboration-wire", path = "crates/modules/apps/collaboration/wire" }
-collaboration-wire = { path = "crates/modules/apps/collaboration/wire" }
-files = { package = "files-wire", path = "crates/modules/apps/files/wire" }
-files-wire = { path = "crates/modules/apps/files/wire" }
-forge = { package = "forge-wire", path = "crates/modules/apps/forge/wire" }
-forge-wire = { path = "crates/modules/apps/forge/wire" }
-pages = { package = "pages-wire", path = "crates/modules/apps/pages/wire" }
-pages-wire = { path = "crates/modules/apps/pages/wire" }
-runs = { package = "runs-wire", path = "crates/modules/apps/runs/wire" }
-runs-wire = { path = "crates/modules/apps/runs/wire" }
-tasks = { package = "tasks-wire", path = "crates/modules/apps/tasks/wire" }
-tasks-wire = { path = "crates/modules/apps/tasks/wire" }
 
 # dev/test builds compile wasm guests through cranelift. unoptimized cranelift
 # is 10-30x slower, so the code generator itself is always built optimized.
