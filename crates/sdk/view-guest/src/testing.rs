@@ -5,7 +5,7 @@ use crate::wire::{ButtonContent, Event, Frame, Node};
 
 /// Every text the tree shows, depth first: text nodes, button labels, and
 /// the value or placeholder of an input or editor.
-pub fn texts(frame: &Frame) -> Vec<String> {
+pub(crate) fn texts(frame: &Frame) -> Vec<String> {
     let mut out = Vec::new();
     if let Some(root) = &frame.root {
         collect_texts(root, &mut out);
@@ -99,7 +99,7 @@ fn collect_texts(node: &Node, out: &mut Vec<String>) {
 /// Panics listing each node assistive technology cannot name or place, by
 /// its key path and fault. `ops/build-views.sh` runs every test whose name
 /// holds `accessibility` before it builds a component.
-pub fn assert_accessible(tree: &Node) {
+pub(crate) fn assert_accessible(tree: &Node) {
     let faults = crate::wire::accessibility_faults(tree);
     assert!(
         faults.is_empty(),
@@ -113,12 +113,12 @@ pub fn assert_accessible(tree: &Node) {
     );
 }
 
-pub fn has_text(frame: &Frame, content: &str) -> bool {
+pub(crate) fn has_text(frame: &Frame, content: &str) -> bool {
     texts(frame).iter().any(|text| text == content)
 }
 
 /// The node under `key` (`App/content/count`), if the tree has one.
-pub fn find<'a>(frame: &'a Frame, key: &str) -> Option<&'a Node> {
+pub(crate) fn find<'a>(frame: &'a Frame, key: &str) -> Option<&'a Node> {
     let root = frame.root.as_ref()?;
     find_by(root, &|node| node.key() == Some(key))
 }
@@ -205,7 +205,7 @@ fn input<'a>(frame: &'a Frame, name: &str) -> Option<&'a Node> {
 
 /// The events the host sends when the user presses the button with key or
 /// label `name`.
-pub fn press(frame: &Frame, name: &str) -> Vec<Event> {
+pub(crate) fn press(frame: &Frame, name: &str) -> Vec<Event> {
     let Some(Node::Button { on_press, .. }) = button(frame, name) else {
         panic!("no button {name:?} in {:?}", texts(frame));
     };
@@ -217,7 +217,7 @@ pub fn press(frame: &Frame, name: &str) -> Vec<Event> {
 
 /// The events the host sends when the input with key or placeholder `name`
 /// now reads `text`.
-pub fn type_into(frame: &Frame, name: &str, text: &str) -> Vec<Event> {
+pub(crate) fn type_into(frame: &Frame, name: &str, text: &str) -> Vec<Event> {
     let Some(Node::Input { on_input, .. }) = input(frame, name) else {
         panic!("no input {name:?} in {:?}", texts(frame));
     };
@@ -229,7 +229,7 @@ pub fn type_into(frame: &Frame, name: &str, text: &str) -> Vec<Event> {
 
 /// The events the host sends when the editor with key or placeholder `name`
 /// now reads `text`.
-pub fn edit(frame: &Frame, name: &str, before_text: &str, text: &str) -> Vec<Event> {
+pub(crate) fn edit(frame: &Frame, name: &str, before_text: &str, text: &str) -> Vec<Event> {
     let editor = frame.root.as_ref().and_then(|root| {
         find_by(root, &|node| match node {
             Node::Editor {
@@ -287,7 +287,7 @@ pub fn edit(frame: &Frame, name: &str, before_text: &str, text: &str) -> Vec<Eve
 
 /// The events the host sends when the user submits the input with key or
 /// placeholder `name`.
-pub fn submit(frame: &Frame, name: &str) -> Vec<Event> {
+pub(crate) fn submit(frame: &Frame, name: &str) -> Vec<Event> {
     let Some(Node::Input { on_submit, .. }) = input(frame, name) else {
         panic!("no input {name:?} in {:?}", texts(frame));
     };
@@ -313,7 +313,7 @@ fn control<'a>(frame: &'a Frame, name: &str) -> Option<&'a Node> {
 
 /// The events the host sends when the user flips the checkbox or toggler
 /// with key or label `name` to `on`.
-pub fn toggle(frame: &Frame, name: &str, on: bool) -> Vec<Event> {
+pub(crate) fn toggle(frame: &Frame, name: &str, on: bool) -> Vec<Event> {
     let Some(Node::Toggle { on_toggle, .. }) = control(frame, name) else {
         panic!("no checkbox or toggler {name:?} in {:?}", texts(frame));
     };
@@ -328,7 +328,7 @@ pub fn toggle(frame: &Frame, name: &str, on: bool) -> Vec<Event> {
 
 /// The events the host sends when the user drags the slider with key
 /// `name` to `value`.
-pub fn slide(frame: &Frame, name: &str, value: f32) -> Vec<Event> {
+pub(crate) fn slide(frame: &Frame, name: &str, value: f32) -> Vec<Event> {
     let Some(Node::Slider { on_change, .. }) = control(frame, name) else {
         panic!("no slider {name:?} in {:?}", keys(frame));
     };
@@ -340,7 +340,7 @@ pub fn slide(frame: &Frame, name: &str, value: f32) -> Vec<Event> {
 
 /// The events the host sends when the user picks the option reading
 /// `option` from the pick list with key `name`.
-pub fn pick(frame: &Frame, name: &str, option: &str) -> Vec<Event> {
+pub(crate) fn pick(frame: &Frame, name: &str, option: &str) -> Vec<Event> {
     let Some(
         Node::PickList {
             options, on_select, ..
@@ -365,7 +365,7 @@ pub fn pick(frame: &Frame, name: &str, option: &str) -> Vec<Event> {
 /// child at `width` by `height`: a first measurement is a show, so the
 /// show route hears it, and a sensor with only a resize route hears it
 /// there.
-pub fn measure(frame: &Frame, name: &str, width: f32, height: f32) -> Vec<Event> {
+pub(crate) fn measure(frame: &Frame, name: &str, width: f32, height: f32) -> Vec<Event> {
     let Some(Node::Sensor {
         on_show, on_resize, ..
     }) = find(frame, name)
@@ -383,7 +383,7 @@ pub fn measure(frame: &Frame, name: &str, width: f32, height: f32) -> Vec<Event>
 }
 
 /// The events the host sends when the sensor with key `name` leaves view.
-pub fn hide(frame: &Frame, name: &str) -> Vec<Event> {
+pub(crate) fn hide(frame: &Frame, name: &str) -> Vec<Event> {
     let Some(Node::Sensor { on_hide, .. }) = find(frame, name) else {
         panic!("no sensor {name:?} in {:?}", keys(frame));
     };
@@ -409,7 +409,7 @@ fn mouse_area<'a>(frame: &'a Frame, name: &str) -> &'a Node {
 
 /// The events the host sends when the pointer enters the mouse area with
 /// key `name`.
-pub fn hover(frame: &Frame, name: &str) -> Vec<Event> {
+pub(crate) fn hover(frame: &Frame, name: &str) -> Vec<Event> {
     let Node::MouseArea { on_enter, .. } = mouse_area(frame, name) else {
         unreachable!()
     };
@@ -421,7 +421,7 @@ pub fn hover(frame: &Frame, name: &str) -> Vec<Event> {
 
 /// The events the host sends when the pointer moves to (`x`, `y`) inside
 /// the mouse area with key `name` — the area's own coordinates.
-pub fn move_to(frame: &Frame, name: &str, x: f32, y: f32) -> Vec<Event> {
+pub(crate) fn move_to(frame: &Frame, name: &str, x: f32, y: f32) -> Vec<Event> {
     let Node::MouseArea { on_move, .. } = mouse_area(frame, name) else {
         unreachable!()
     };
@@ -437,7 +437,7 @@ pub fn move_to(frame: &Frame, name: &str, x: f32, y: f32) -> Vec<Event> {
 
 /// The events the host sends when the wheel turns by (`dx`, `dy`) lines
 /// over the mouse area with key `name`.
-pub fn scroll(frame: &Frame, name: &str, dx: f32, dy: f32) -> Vec<Event> {
+pub(crate) fn scroll(frame: &Frame, name: &str, dx: f32, dy: f32) -> Vec<Event> {
     let Node::MouseArea { on_scroll, .. } = mouse_area(frame, name) else {
         unreachable!()
     };
@@ -453,7 +453,7 @@ pub fn scroll(frame: &Frame, name: &str, dx: f32, dy: f32) -> Vec<Event> {
 }
 
 /// Every node key in the tree, depth first.
-pub fn keys(frame: &Frame) -> Vec<String> {
+pub(crate) fn keys(frame: &Frame) -> Vec<String> {
     let mut out = Vec::new();
     if let Some(root) = &frame.root {
         collect_keys(root, &mut out);
@@ -511,29 +511,7 @@ fn collect_keys(node: &Node, out: &mut Vec<String>) {
     }
 }
 
-pub fn answer(id: u64, payload: &[u8]) -> Event {
-    Event::Response {
-        id,
-        result: Ok(payload.to_vec()),
-        done: true,
-    }
-}
-
-pub fn item(id: u64, payload: &[u8]) -> Event {
-    Event::Response {
-        id,
-        result: Ok(payload.to_vec()),
-        done: false,
-    }
-}
-
-/// Refuse a request the way a MODULE refuses one: the reason a view keys on is
-/// `module`, and `message` is the sentence the module wrote. A test that needs
-/// another token builds the [`crate::wire::Refusal`] itself.
-pub fn refuse(id: u64, message: &str) -> Event {
-    Event::Response {
-        id,
-        result: Err(crate::wire::Refusal::new("module", message)),
-        done: true,
-    }
-}
+mod context;
+mod fake_host;
+pub use context::TestAppContext;
+pub use fake_host::{FakeHost, Feed};

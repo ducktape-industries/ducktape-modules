@@ -1,12 +1,12 @@
 //! Guest controls enqueue actions into the same native editor transaction stream.
-use super::{Draft, MentionChoice, editing};
-use crate::view::{Cx, Effect};
-use crate::{
-    EditorBinding, EditorDocumentUpdate, EditorStateView, EditorTransaction,
-    EditorTransactionEvent, kit, wire,
-};
+use super::{Draft, MentionChoice};
+use crate::context::Callback;
+use crate::{Context, Window};
+use crate::{EditorDocumentUpdate, EditorTransaction, kit, wire};
 use std::rc::Rc;
-use wire::keyboard::{Key, Modifiers, Named};
+#[path = "binding_editor.rs"]
+mod editor;
+use editor::{editor, matching_choices};
 
 #[derive(Clone, Debug)]
 pub struct Change {
@@ -17,11 +17,11 @@ pub struct Change {
 }
 
 /// What the field and the controls hand the view; `V` is the view the
-/// draft lives in, whose `Cx` registered the handlers.
+/// draft lives in, whose `Context` registered the handlers.
 #[derive(Clone, Debug)]
 pub enum Event<V> {
     Document(EditorDocumentUpdate),
-    Transaction(EditorTransaction<Effect<V>>),
+    Transaction(EditorTransaction<Callback<V>>),
     Committed(Change),
     Action(String),
 }
@@ -30,13 +30,13 @@ pub enum Event<V> {
 pub enum Outcome<V> {
     Updated,
     /// an editor transaction's own follow-up, to run on the view
-    Run(Effect<V>),
+    Run(Callback<V>),
     Action(String),
     Enqueue(String),
 }
 
 /// The handler a composer site gives: the view, the event, the runtime.
-pub type Handle<V> = Rc<dyn Fn(&mut V, Event<V>, &mut Cx<V>)>;
+pub type Handle<V> = Rc<dyn Fn(&mut V, Event<V>, &mut Window, &mut Context<V>)>;
 
 impl Draft {
     pub fn handle<V: 'static>(&mut self, event: Event<V>, choices: &[MentionChoice]) -> Outcome<V> {
@@ -73,255 +73,6 @@ impl Draft {
             }
             Event::Action(tag) => Outcome::Enqueue(tag),
         }
-    }
-}
-
-fn matching_choices<'a>(choices: &'a [MentionChoice], partial: &str) -> Vec<&'a MentionChoice> {
-    let needle = partial.to_lowercase();
-    choices
-        .iter()
-        .filter(|choice| choice.label.to_lowercase().starts_with(&needle))
-        .take(32)
-        .collect()
-}
-
-fn key_tag(
-    draft: &Draft,
-    choices: &[MentionChoice],
-    state: EditorStateView<'_>,
-    key: &wire::keyboard::KeyState,
-) -> String {
-    let command = key.modifiers.control || key.modifiers.logo;
-    if command {
-        return match (&key.key, key.modifiers.shift) {
-            (Key::Character(key), false) if key == "z" => "undo",
-            (Key::Character(key), true) if key == "z" => "redo",
-            (Key::Character(key), false) if key == "y" => "redo",
-            (Key::Character(key), false) if key == "b" => "bold",
-            (Key::Character(key), false) if key == "i" => "italic",
-            (Key::Character(key), true) if key == "c" => "code",
-            (Key::Character(key), true) if key == "9" => "quote",
-            (Key::Character(key), false) if key == "v" => "paste",
-            (Key::Character(key), false) if key == "c" => "copy",
-            (Key::Character(key), false) if key == "x" => "cut",
-            _ => "",
-        }
-        .into();
-    }
-    match &key.key {
-        Key::Named(Named::Enter | Named::Tab) => {
-            if let Some((_, partial)) = draft.query(state) {
-                let choices = matching_choices(choices, &partial);
-                let selected = draft.menu_index.min(choices.len().saturating_sub(1));
-                if let Some(choice) = choices.get(selected) {
-                    return format!("mention:{}", choice.token);
-                }
-            }
-            if key.key == Key::Named(Named::Enter) {
-                "send".into()
-            } else {
-                String::new()
-            }
-        }
-        Key::Named(Named::ArrowDown) if draft.query(state).is_some() => "menu-next".into(),
-        Key::Named(Named::ArrowUp) if draft.query(state).is_some() => "menu-previous".into(),
-        Key::Named(Named::Escape) if draft.query(state).is_some() => "menu-dismiss".into(),
-        // These three are claimed only while the menu is open (see `editor`),
-        // but a claim is a frame behind the keystroke: if the menu closed in
-        // between, the host still asks this frame. "ignore" is the answer —
-        // never the empty tag, which falls to the catch-all default action,
-        // and an app that knows only Enter/Tab/Backspace as defaults stops
-        // the whole view when it is handed any other key.
-        Key::Named(Named::ArrowUp | Named::ArrowDown | Named::Escape) => "ignore".into(),
-        Key::Named(Named::Backspace) => "backspace".into(),
-        Key::Named(Named::Delete) => "delete".into(),
-        _ => String::new(),
-    }
-}
-
-/// `key` names the NODE — the accessibility tree and every test door address
-/// it. `document` names the DOCUMENT, and the host keys its native editor
-/// state by that, not by the node key. They are not the same identity: one
-/// place on screen presents a different draft as the reader moves between
-/// rooms, so each draft must carry its own document id or the host hands the
-/// new draft the old one's text and drops every transaction after it.
-pub fn editor<V: 'static>(
-    draft: &Draft,
-    key: &str,
-    document: &str,
-    placeholder: &str,
-    editable: bool,
-    choices: &[MentionChoice],
-    handle: Handle<V>,
-) -> wire::Node {
-    let effect = move |event: Event<V>| {
-        let handle = handle.clone();
-        Effect::once(move |view: &mut V, cx: &mut Cx<V>| handle(view, event, cx))
-    };
-    let effect = Rc::new(effect);
-    let doc_effect = effect.clone();
-    let (document, on_document) = draft.editor.document(document.into(), move |update| {
-        doc_effect(Event::Document(update))
-    });
-    let draft = draft.clone();
-    let choices = choices.to_vec();
-    let bare = Modifiers::default();
-    let mut claims = [Named::Enter, Named::Tab, Named::Backspace, Named::Delete]
-        .into_iter()
-        .chain(
-            // An arrow moves the caret, and this view cannot: it has no
-            // layout to move it through. So the arrows are the menu's keys
-            // while the menu is open, and the host's own the rest of the
-            // time — claiming them always is how a plain ArrowUp reached the
-            // guest with nothing to say. Escape rides along: a closed menu
-            // has nothing to dismiss.
-            draft
-                .query(draft.editor.state_view())
-                .is_some()
-                .then_some([Named::ArrowUp, Named::ArrowDown, Named::Escape])
-                .into_iter()
-                .flatten(),
-        )
-        .map(|key| wire::EditorKeyClaim {
-            key: Key::Named(key),
-            modifiers: bare,
-            command: false,
-        })
-        .collect::<Vec<_>>();
-    claims.extend(
-        [
-            ("z", false),
-            ("z", true),
-            ("y", false),
-            ("b", false),
-            ("i", false),
-            ("c", true),
-            ("9", true),
-            ("v", false),
-            ("c", false),
-            ("x", false),
-        ]
-        .into_iter()
-        .map(|(key, shift)| wire::EditorKeyClaim {
-            key: Key::Character(key.into()),
-            modifiers: Modifiers { shift, ..bare },
-            command: true,
-        }),
-    );
-    let deciding = draft.clone();
-    let decide_choices = choices.clone();
-    let observing = draft.clone();
-    let observed_choices = choices.clone();
-    let interacting = draft.clone();
-    let on_committed = effect.clone();
-    let on_transaction = effect.clone();
-    let binding = EditorBinding::new(
-        claims,
-        move |request| {
-            if !editable {
-                return wire::EditorDecision::Noop;
-            }
-            let tag = key_tag(&deciding, &decide_choices, request.state, request.key);
-            if tag == "send" && request.repeat {
-                return wire::EditorDecision::Noop;
-            }
-            deciding.decide(&tag, &decide_choices, request.state)
-        },
-        move |event| match event {
-            EditorTransactionEvent::Commit {
-                before,
-                after,
-                origin,
-                ..
-            } => {
-                let tag = match origin {
-                    Some(wire::EditorRequestInput::Key { key, .. }) => {
-                        key_tag(&observing, &observed_choices, before, key)
-                    }
-                    Some(wire::EditorRequestInput::Interaction {
-                        action: wire::editor_presentation::EditorInteraction::Action { tag },
-                    }) => tag.clone(),
-                    _ => String::new(),
-                };
-                Some(Change {
-                    before: before.text.into(),
-                    after: after.text.into(),
-                    cursor: before.cursor,
-                    tag,
-                })
-            }
-            EditorTransactionEvent::Interaction { .. }
-            | EditorTransactionEvent::Fault { .. }
-            | EditorTransactionEvent::Cancelled { .. } => None,
-        },
-    )
-    .on_interaction(move |request| {
-        if !editable {
-            return wire::EditorDecision::Noop;
-        }
-        match request.action {
-            wire::editor_presentation::EditorInteraction::Action { tag } => {
-                interacting.decide(tag, &choices, request.state)
-            }
-            _ => wire::EditorDecision::Noop,
-        }
-    })
-    .register(
-        move |change| on_committed(Event::Committed(change)),
-        move |transaction| on_transaction(Event::Transaction(transaction)),
-    );
-    // a mention wears the product's accent, the same one a chosen row and a
-    // live dot wear — not a colour of this module's own
-    let mut presentation = wire::editor_presentation::EditorPresentation {
-        formats: vec![wire::editor_presentation::EditorFormat {
-            color: Some(kit::rgba(kit::palette().accent)),
-            ..Default::default()
-        }],
-        ..Default::default()
-    };
-    for mention in &draft.mentions {
-        let start = editing::position(draft.editor.state_view().text, mention.range.start);
-        let end = editing::position(draft.editor.state_view().text, mention.range.end);
-        if start.line == end.line {
-            presentation
-                .spans
-                .push(wire::editor_presentation::EditorSpan {
-                    line: start.line,
-                    start: start.column,
-                    end: end.column,
-                    format: 0,
-                });
-        }
-    }
-    wire::Node::Editor {
-        key: key.into(),
-        document,
-        on_document,
-        editable,
-        placeholder: placeholder.into(),
-        // the field's accessible name is what its placeholder asks for, the
-        // rule `kit::input` keeps for a plain input
-        label: (!placeholder.is_empty()).then(|| placeholder.into()),
-        width: None,
-        height: None,
-        // one row of body text, and room to grow to about eight before the
-        // field scrolls instead of eating the timeline
-        min_height: Some(40.),
-        max_height: Some(200.),
-        options: Box::new(wire::EditorOptions {
-            binding: Some(Box::new(binding)),
-            presentation: Some(Box::new(presentation)),
-            // the body size every view writes at, not a size of its own
-            size: Some(kit::type_scale::BODY as f32),
-            // This IS the draft's text inset — the host pads the field's box
-            // by it and the text control adds nothing of its own, so at 0 the
-            // first letter sits on the plate's border (seen on a live app,
-            // 2026-09-16). Vertically it is also the air above the first row,
-            // which is why `min_height` is exactly one row plus twice this.
-            padding: Some(TEXT_INSET),
-            wrapping: Some(wire::Wrapping::Word),
-            ..Default::default()
-        }),
     }
 }
 
@@ -452,14 +203,19 @@ pub fn view<V: 'static>(
     editable: bool,
     attach: bool,
     choices: &[MentionChoice],
-    cx: &mut Cx<V>,
-    handle: impl Fn(&mut V, Event<V>, &mut Cx<V>) + 'static,
+    cx: &mut Context<V>,
+    handle: impl Fn(&mut V, Event<V>, &mut Window, &mut Context<V>) + 'static,
 ) -> wire::Node {
     let handle: Handle<V> = Rc::new(handle);
     let editor_key = format!("{key}/editor");
-    let mut press = |tag: String| -> Option<u32> {
+    let press = |tag: String| -> Option<u32> {
         let handle = handle.clone();
-        editable.then(|| cx.on(move |view, cx| handle(view, Event::Action(tag.clone()), cx)))
+        editable.then(|| {
+            cx.listener(move |view, _: &(), window, cx| {
+                handle(view, Event::Action(tag.clone()), window, cx);
+                cx.notify();
+            })
+        })
     };
     let text = draft.editor.state_view().text;
     let carries_file = draft
@@ -640,7 +396,10 @@ pub fn view<V: 'static>(
         "Send",
         sendable.then(|| {
             let handle = handle.clone();
-            cx.on(move |view, cx| handle(view, Event::Action("send".into()), cx))
+            cx.listener(move |view, _: &(), window, cx| {
+                handle(view, Event::Action("send".into()), window, cx);
+                cx.notify();
+            })
         }),
         wire::ButtonPreset::Primary,
     ));
@@ -704,362 +463,5 @@ fn inset(node: wire::Node, sides: f32) -> wire::Node {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Every node under `node`, itself first.
-    fn walk(node: &wire::Node, seen: &mut impl FnMut(&wire::Node)) {
-        seen(node);
-        match node {
-            wire::Node::Linear { children, .. } => {
-                for child in children {
-                    walk(child, seen);
-                }
-            }
-            wire::Node::Container { content, .. } => walk(content, seen),
-            wire::Node::Button {
-                content: wire::ButtonContent::Child(child),
-                ..
-            } => walk(child, seen),
-            _ => {}
-        }
-    }
-
-    fn drawn(draft: &Draft) -> wire::Node {
-        view(
-            draft,
-            "c",
-            "Message #general",
-            true,
-            true,
-            &[],
-            &mut Cx::<()>::default(),
-            |_: &mut (), _, _| (),
-        )
-    }
-
-    /// ONE PLACE ON SCREEN, ONE DOCUMENT PER DRAFT. The host keys its native
-    /// editor state by the document id, not by the node key, so two drafts
-    /// presented at the same key under one id are one document to the host:
-    /// it hands the second draft the first's text and then drops every
-    /// transaction, because the guest's `before` never matches. The node key
-    /// is what the accessibility tree and every test door address, so it must
-    /// NOT move when the document does.
-    #[test]
-    fn two_drafts_at_one_key_are_two_documents_the_host_can_tell_apart() {
-        let field = |draft: &Draft, document: &str| {
-            let wire::Node::Editor { key, document, .. } = editor(
-                draft,
-                "c/editor",
-                document,
-                "Message",
-                true,
-                &[],
-                Rc::new(|_: &mut (), _, _| ()),
-            ) else {
-                panic!("the composer's field is an editor node");
-            };
-            (key, document.document)
-        };
-        let (a_key, a_document) = field(&Draft::from_body("room a draft", &[]), "chat\u{1f}room-a");
-        let (b_key, b_document) = field(&Draft::default(), "chat\u{1f}room-b");
-        assert_eq!(a_key, b_key, "the field keeps its place and its name");
-        assert_ne!(
-            a_document, b_document,
-            "two drafts the host must not share text between"
-        );
-        assert_eq!(a_document, "chat\u{1f}room-a");
-        assert_eq!(b_document, "chat\u{1f}room-b");
-    }
-
-    /// The composer's shape is a claim a reader can see at a glance: ONE
-    /// action is the action, and it is dead until there is something to
-    /// send. Six identical buttons in a row is the shape this replaced.
-    #[test]
-    fn the_send_is_the_only_primary_and_is_dead_on_an_empty_draft() {
-        let primaries = |draft: &Draft| {
-            let mut found: Vec<(String, Option<u32>)> = Vec::new();
-            walk(&drawn(draft), &mut |node| {
-                if let wire::Node::Button {
-                    key,
-                    style,
-                    on_press,
-                    ..
-                } = node
-                    && style.preset == wire::ButtonPreset::Primary
-                {
-                    found.push((key.clone(), *on_press));
-                }
-            });
-            found
-        };
-        let empty = primaries(&Draft::default());
-        assert_eq!(empty.len(), 1, "one primary action, not six: {empty:?}");
-        assert_eq!(empty[0].0, "c/send");
-        assert!(empty[0].1.is_none(), "an empty draft cannot be sent");
-        let typed = primaries(&Draft::from_body("hello", &[]));
-        assert!(typed[0].1.is_some(), "a draft with words can be sent");
-    }
-
-    /// The marks are squares of one size. A mark that takes its size from
-    /// its glyph gives a toolbar of five different boxes.
-    #[test]
-    fn every_mark_is_the_same_square_and_the_field_writes_at_body_size() {
-        let mut squares = 0;
-        let mut body_size = None;
-        walk(&drawn(&Draft::default()), &mut |node| match node {
-            wire::Node::Button { width, height, .. }
-                if *width == Some(wire::Length::Fixed(MARK))
-                    && *height == Some(wire::Length::Fixed(MARK)) =>
-            {
-                squares += 1;
-            }
-            wire::Node::Editor { options, .. } => body_size = options.size,
-            _ => {}
-        });
-        // attach, bold, italic, code, quote
-        assert_eq!(squares, 5, "five marks, all one square");
-        assert_eq!(body_size, Some(kit::type_scale::BODY as f32));
-    }
-
-    #[test]
-    fn menu_navigation_commits_before_enter_chooses_a_stable_identity() {
-        let choices = vec![
-            MentionChoice {
-                token: "<@1>".into(),
-                label: "Ada".into(),
-            },
-            MentionChoice {
-                token: "<@2>".into(),
-                label: "Alan".into(),
-            },
-        ];
-        let mut draft = Draft::from_body("@A", &choices);
-        draft.editor.move_to(wire::EditorCursor {
-            position: wire::EditorPosition { line: 0, column: 2 },
-            selection: None,
-        });
-        let cursor = draft.editor.cursor();
-        draft.committed("@A", "@A", cursor, "menu-next", &choices);
-        let key = wire::keyboard::KeyState {
-            key: Key::Named(Named::Enter),
-            modifiers: Modifiers::default(),
-            modified_key: Key::Named(Named::Enter),
-            physical_key: wire::keyboard::Physical::Unidentified(
-                wire::keyboard::NativeCode::Unidentified,
-            ),
-            location: wire::keyboard::Location::Standard,
-        };
-        assert_eq!(
-            key_tag(&draft, &choices, draft.editor.state_view(), &key),
-            "mention:<@2>"
-        );
-        draft.committed("@A", "@A", cursor, "menu-dismiss", &choices);
-        assert_eq!(
-            key_tag(&draft, &choices, draft.editor.state_view(), &key),
-            "send"
-        );
-        draft.observed("@A", "@Al");
-        assert!(!draft.menu_dismissed);
-    }
-
-    fn roster() -> Vec<MentionChoice> {
-        vec![MentionChoice {
-            token: "<@1>".into(),
-            label: "Ada".into(),
-        }]
-    }
-
-    /// The draft `body` reads, with the caret at byte `at` and nothing
-    /// selected — the state a person is in between keystrokes.
-    fn caret(body: &str, at: usize) -> Draft {
-        let choices = roster();
-        let mut draft = Draft::from_body(body, &choices);
-        let text = draft.editor.text();
-        draft.editor.move_to(wire::EditorCursor {
-            position: editing::position(&text, at),
-            selection: None,
-        });
-        draft
-    }
-
-    fn key_state(claim: &wire::EditorKeyClaim) -> wire::keyboard::KeyState {
-        wire::keyboard::KeyState {
-            key: claim.key.clone(),
-            modifiers: Modifiers {
-                control: claim.command,
-                ..claim.modifiers
-            },
-            modified_key: claim.key.clone(),
-            physical_key: wire::keyboard::Physical::Unidentified(
-                wire::keyboard::NativeCode::Unidentified,
-            ),
-            location: wire::keyboard::Location::Standard,
-        }
-    }
-
-    /// The keys this frame's field asks the host to route to the guest.
-    fn claimed(draft: &Draft) -> Vec<wire::EditorKeyClaim> {
-        let node = editor(
-            draft,
-            "c",
-            "c",
-            "Message",
-            true,
-            &roster(),
-            Rc::new(|_: &mut (), _, _| ()),
-        );
-        let wire::Node::Editor { options, .. } = node else {
-            panic!("the composer's field is an editor node");
-        };
-        options
-            .binding
-            .expect("the field carries its binding")
-            .claims
-    }
-
-    fn decision(draft: &Draft, claim: &wire::EditorKeyClaim) -> wire::EditorDecision {
-        let choices = roster();
-        let state = draft.editor.state_view();
-        let tag = key_tag(draft, &choices, state, &key_state(claim));
-        draft.decide(&tag, &choices, state)
-    }
-
-    fn bare(key: Named) -> wire::EditorKeyClaim {
-        wire::EditorKeyClaim {
-            key: Key::Named(key),
-            modifiers: Modifiers::default(),
-            command: false,
-        }
-    }
-
-    /// Escape with no menu open has nothing to dismiss. The host keeps it
-    /// (it is not claimed), and if a stale claim routes it here anyway the
-    /// answer is silence — not the native default, which stops the view.
-    #[test]
-    fn escape_with_no_menu_is_the_hosts_and_says_nothing_if_asked() {
-        let draft = caret("hello", 5);
-        assert!(!claimed(&draft).contains(&bare(Named::Escape)));
-        assert_eq!(
-            key_tag(
-                &draft,
-                &roster(),
-                draft.editor.state_view(),
-                &key_state(&bare(Named::Escape))
-            ),
-            "ignore"
-        );
-        assert!(matches!(
-            decision(&draft, &bare(Named::Escape)),
-            wire::EditorDecision::Noop
-        ));
-    }
-
-    /// Cut with nothing selected cuts nothing — and says so itself, because
-    /// an installed app faults on a cut handed back as its own default.
-    #[test]
-    fn cut_with_nothing_selected_says_nothing() {
-        let draft = caret("hello", 2);
-        let cut = wire::EditorKeyClaim {
-            key: Key::Character("x".into()),
-            modifiers: Modifiers::default(),
-            command: true,
-        };
-        assert_eq!(
-            key_tag(
-                &draft,
-                &roster(),
-                draft.editor.state_view(),
-                &key_state(&cut)
-            ),
-            "cut"
-        );
-        assert!(matches!(decision(&draft, &cut), wire::EditorDecision::Noop));
-    }
-
-    /// Forward delete is the view's own work: one character ahead of the
-    /// caret, a whole mention when the caret sits at its edge (the rule
-    /// `expanded` already keeps for a selection), and nothing at the end.
-    #[test]
-    fn forward_delete_removes_what_is_ahead_of_the_caret() {
-        let removed = |draft: &Draft| {
-            let before = draft.editor.text();
-            match decision(draft, &bare(Named::Delete)) {
-                wire::EditorDecision::Apply {
-                    patches, cursor, ..
-                } => Some(wire::patched_editor_text(&before, &patches, cursor).unwrap()),
-                wire::EditorDecision::Noop => None,
-                other => panic!("a delete never hands the key back: {other:?}"),
-            }
-        };
-        assert_eq!(removed(&caret("hello", 2)).as_deref(), Some("helo"));
-        // a character is not a byte
-        assert_eq!(removed(&caret("héllo", 1)).as_deref(), Some("hllo"));
-        // and what a person sees as one character goes as one
-        assert_eq!(removed(&caret("a👨‍👩‍👧b", 1)).as_deref(), Some("ab"));
-        // at the end there is nothing ahead to remove
-        assert_eq!(removed(&caret("hello", 5)), None);
-        // the mention goes whole, the same as a selection over it would
-        let mut mention = Draft::from_body("Hi <@1> there", &roster());
-        let at = mention.mentions[0].range.start;
-        let text = mention.editor.text();
-        mention.editor.move_to(wire::EditorCursor {
-            position: editing::position(&text, at),
-            selection: None,
-        });
-        assert_eq!(removed(&mention).as_deref(), Some("Hi  there"));
-    }
-
-    /// The arrows need a caret move through a layout this view does not
-    /// have, so they are the menu's keys while the menu is open and the
-    /// host's own the rest of the time.
-    #[test]
-    fn the_arrows_are_claimed_only_while_the_menu_is_open() {
-        let closed = claimed(&caret("hello", 5));
-        for key in [Named::ArrowUp, Named::ArrowDown, Named::Escape] {
-            assert!(
-                !closed.contains(&bare(key)),
-                "{key:?} is the host's while no menu is open"
-            );
-        }
-        let open = claimed(&caret("@A", 2));
-        for key in [Named::ArrowUp, Named::ArrowDown, Named::Escape] {
-            assert!(
-                open.contains(&bare(key)),
-                "{key:?} moves the open menu, so the menu claims it"
-            );
-        }
-    }
-
-    /// The whole defect in one assertion: an app installed today knows only
-    /// Enter, Tab and Backspace as native editor defaults and stops the view
-    /// on any other key handed back. So no claimed key but Tab and Backspace
-    /// may ever answer `DefaultEditorAction` — whatever the draft holds.
-    #[test]
-    fn no_claimed_key_but_tab_and_backspace_asks_the_app_for_its_default() {
-        let drafts = [
-            ("an empty draft", Draft::default()),
-            ("words, nothing selected", caret("hello", 2)),
-            ("the caret at the end", caret("hello", 5)),
-            ("an open mention menu", caret("@A", 2)),
-        ];
-        for (what, draft) in drafts {
-            for claim in claimed(&draft) {
-                let native = matches!(
-                    decision(&draft, &claim),
-                    wire::EditorDecision::DefaultEditorAction
-                );
-                let allowed = !claim.command
-                    && matches!(
-                        claim.key,
-                        Key::Named(Named::Tab) | Key::Named(Named::Backspace)
-                    );
-                assert!(
-                    !native || allowed,
-                    "{:?} on {what} stops every app installed today",
-                    claim.key
-                );
-            }
-        }
-    }
-}
+#[path = "binding_tests.rs"]
+mod tests;

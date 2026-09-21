@@ -1,65 +1,55 @@
-//! Widget operations use the mounted host's scoped request channel.
-use crate::{host, wire};
-
-/// Execute a mutation inside this guest's mounted widget tree.
-pub fn perform<M: 'static>(command: wire::WidgetCommand) -> crate::Task<M> {
-    crate::Task::future(async move {
-        if let Err(error) = host::request("host.widget", &wire::encode(&command)).await {
-            host::log(format!("host.widget: {error}"));
-        }
-    })
-    .discard()
-}
-
-/// Query focus after the host has mounted the requesting frame.
-pub fn is_focused(target: String) -> crate::Task<bool> {
-    crate::Task::future(async move {
-        let command = wire::WidgetCommand::Focused { target };
-        match host::request("host.widget", &wire::encode(&command))
-            .await
-            .and_then(|bytes| wire::decode(&bytes).map_err(host::malformed))
-        {
-            Ok(focused) => focused,
-            Err(error) => {
-                host::log(format!("host.widget focused: {error}"));
-                false
-            }
-        }
-    })
-}
-
+//! Widget commands use the mounted host's scoped request channel.
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{App, Driver};
+    use crate::{Context, Driver, Host, Render, View, Window, host, wire};
+    use serde::{Deserialize, Serialize};
 
-    struct WidgetApp(bool);
-    impl App for WidgetApp {
-        type Message = bool;
-        fn boot() -> (Self, crate::Task<bool>) {
-            (
-                Self(false),
-                perform(wire::WidgetCommand::Focus {
-                    target: "App/draft".into(),
+    async fn perform(host: Host, command: wire::WidgetCommand) -> Result<Vec<u8>, host::Refusal> {
+        host.request("host.widget", &wire::encode(&command)).await
+    }
+
+    #[derive(Serialize, Deserialize)]
+    struct WidgetView(bool);
+    impl View for WidgetView {
+        fn new(_: &mut Window, cx: &mut Context<Self>) -> Self {
+            let host = cx.host();
+            cx.spawn(async move |this, cx| {
+                perform(
+                    host.clone(),
+                    wire::WidgetCommand::Focus {
+                        target: "App/draft".into(),
+                    },
+                )
+                .await
+                .unwrap();
+                let bytes = perform(
+                    host,
+                    wire::WidgetCommand::Focused {
+                        target: "App/draft".into(),
+                    },
+                )
+                .await
+                .unwrap();
+                let focused = wire::decode(&bytes).unwrap();
+                this.update(cx, |view, cx| {
+                    view.0 = focused;
+                    cx.notify();
                 })
-                .chain(is_focused("App/draft".into())),
-            )
+                .unwrap();
+            })
+            .detach();
+            Self(false)
         }
-        fn view(&self) -> wire::Node {
+    }
+    impl Render for WidgetView {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> wire::Node {
             wire::Node::empty()
-        }
-        fn update(&mut self, focused: bool) -> crate::Task<bool> {
-            self.0 = focused;
-            crate::Task::none()
-        }
-        fn subscription(&self) -> crate::Subscription<bool> {
-            crate::Subscription::none()
         }
     }
 
     #[test]
-    fn widget_tasks_wait_for_mutations_before_querying_focus() {
-        let mut driver = Driver::<WidgetApp>::new();
+    fn widget_futures_wait_for_mutations_before_querying_focus() {
+        let mut driver = Driver::<WidgetView>::new();
         let frame = driver.tick(vec![]);
         let [focus] = frame.requests.as_slice() else {
             panic!("one focus request: {:?}", frame.requests)
@@ -73,7 +63,7 @@ mod tests {
         );
         assert!(
             driver.tick(vec![]).requests.is_empty(),
-            "query must wait for focus acknowledgement"
+            "query must wait for focus acknowledgment"
         );
         let frame = driver.tick(vec![wire::Event::Response {
             id: focus.id,
@@ -94,9 +84,25 @@ mod tests {
             result: Ok(wire::encode(&true)),
             done: true,
         }]);
-        assert!(
-            driver.app.0,
-            "host focus reply must reach the guest handler"
-        );
+        driver.entity().read(|view| assert!(view.0));
+    }
+
+    #[test]
+    fn window_dispatch_enqueues_commands_in_order() {
+        let host = Host::default();
+        let mut window = Window::new(false, crate::slots::Context::with_host(false, host.clone()));
+        // Window mutations enqueue synchronously; explicit request futures wait for acknowledgments.
+        window.focus("first");
+        window.focus("second");
+        let requests = host.drain_outbox();
+        assert_eq!(requests.len(), 2);
+        for (request, target) in requests.iter().zip(["first", "second"]) {
+            assert_eq!(
+                wire::decode::<wire::WidgetCommand>(&request.payload).unwrap(),
+                wire::WidgetCommand::Focus {
+                    target: target.into()
+                }
+            );
+        }
     }
 }

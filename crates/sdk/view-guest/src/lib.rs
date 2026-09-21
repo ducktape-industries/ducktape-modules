@@ -1,25 +1,6 @@
 //! Renderer-independent execution of dynamically loaded WASM views.
-//! Semantic slots and document transfer preserve the existing host contract.
-
-use std::future::Future;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::task::{Context, Poll, Wake, Waker};
-use std::time::Duration;
-
 pub use view_wire as wire;
-
-use futures::StreamExt;
-use std::collections::HashSet;
-use task::BoxStream;
-pub mod rev;
-// What a view is written in lives beside the wire it writes (`view_wire::{kit,
-// task, subscription}`), so the desktop that renders for a view takes the same
-// implementation without linking this SDK. Re-exported here because a view
-// names them through this crate.
-pub use view_wire::{Recipe, Subscription, Task};
-pub use view_wire::{kit, task};
-
+pub use view_wire::kit;
 mod editor;
 mod editor_binding;
 mod editor_documents;
@@ -29,11 +10,6 @@ pub use editor_binding::{
     EditorTransaction, EditorTransactionEvent,
 };
 pub use editor_documents::EditorDocumentUpdate;
-pub mod events;
-pub mod keyboard;
-mod memo;
-pub mod mouse;
-pub use memo::{invalidate_component, memo_lazy};
 pub mod caps;
 pub mod composer;
 pub mod host;
@@ -41,155 +17,92 @@ pub mod testing;
 pub mod widget;
 pub mod window;
 
-pub use snapshot::SnapshotApp;
 mod snapshot;
 pub mod view;
-pub use view::{
-    Capability, Cx, Effect, Live, Loaded, Module, Query, Shell, Submit, View, ViewOf, Visible,
-    Watching,
-};
-
-/// The application contract consumed by `export_app!`.
-pub trait App: Sized + 'static {
-    type Message: Clone + 'static;
-    fn boot() -> (Self, Task<Self::Message>);
-    fn view(&self) -> wire::Node;
-    fn update(&mut self, message: Self::Message) -> Task<Self::Message>;
-    fn subscription(&self) -> Subscription<Self::Message>;
-}
-
-/// The per-frame tables a view fills as it builds: a button's `on_press`
-/// is the index its message took here, an input's `on_input` the index of
-/// its `String -> Message` constructor, a checkbox's `on_toggle` that of a
-/// `bool -> Message` one, a slider's `f32`, a pick list's `u32`, a
-/// sensor's and a mouse area's `(f32, f32)` size or position, a mouse
-/// area's `(f32, f32, bool)` scroll, and a resize handle's `(f64, f64)` drag. The host
-/// echoes an index back with the value; the driver looks the handler up in
-/// the table of the frame it echoed and runs it.
-///
-/// The tables are untyped so each guest can use this
-/// crate without naming the app's message type; the driver downcasts, by
-/// argument and message type both, so an index the host sends with the
-/// wrong kind of value finds nothing.
+pub use view::{Loaded, Render, View};
+pub mod capabilities;
+pub use capabilities::*;
+mod context;
+pub use context::{App, AsyncApp, Context, Entity, Released, WeakEntity};
+mod executor;
+pub use executor::Task;
+pub use host::Host;
+pub use window::Window;
 pub mod slots;
+use context::Callback;
 
-/// One running task: its stream, and the flag its waker sets. A task is
-/// polled only when the flag is up — set at spawn, by a host answer
-/// through [`host::fulfill`], by its own yield, or by another task in the
-/// same pass — so a task waiting on the host costs a tick nothing.
-struct Running<M> {
-    /// Tracker runners restart from restored state; ordinary tasks must settle.
-    subscription: Option<u64>,
-    woken: Arc<Woken>,
-    stream: BoxStream<M>,
-}
-
-/// One running app: its state, its in-flight tasks, the streams its
-/// `subscribe` block keeps alive, and the last tree it sent so an identical
-/// one crosses as `unchanged` and a changed one as patches against it.
-pub struct Driver<A: App> {
-    slots: slots::Context,
-    /// The app under test: a `Shell` exposes its view through `state()`.
-    pub app: A,
-    tasks: Vec<Running<A::Message>>,
-    subscriptions: HashSet<u64>,
-    observers: Vec<wire::Observer<A::Message>>,
+pub struct Driver<V: View> {
+    app: App,
+    entity: Entity<V>,
     last_root: Option<wire::Node>,
-    /// The last tick ran out of budget with work still ready: the frame
-    /// asks the host for the next tick at once instead of waiting for an
-    /// event or an answer that may never come.
     busy: bool,
 }
-
-impl<A: App> Default for Driver<A> {
+impl<V: View> Drop for Driver<V> {
+    fn drop(&mut self) {
+        self.app.inner.alive.set(false);
+        self.app.inner.tasks.borrow_mut().clear();
+    }
+}
+impl<V: View> Default for Driver<V> {
     fn default() -> Self {
         Self::new()
     }
 }
-
-/// How many `update` rounds one tick runs before it hands the rest to the
-/// next: a handler that re-emits synchronously forever cannot pin the frame.
-const MAX_ROUNDS: usize = 8;
-
-/// How many times one poll pass revisits the tasks still woken.
-const MAX_POLLS: usize = 64;
-
-impl<A: App> Driver<A> {
+impl<V: View> Driver<V> {
     pub fn new() -> Self {
         Self::with_macos(cfg!(target_os = "macos"))
     }
-
-    /// The host platform selects Command/word-jump semantics before app boot.
     pub fn with_macos(macos: bool) -> Self {
-        Self::initialize(macos, || Ok(A::boot())).expect("ordinary boot is infallible")
+        Self::initialize(macos, None).expect("view initializes")
     }
-
-    fn initialize(
-        macos: bool,
-        boot: impl FnOnce() -> Result<(A, Task<A::Message>), String>,
-    ) -> Result<Self, String> {
-        let slots = slots::Context::with_macos(macos);
-        let _context = slots.enter();
-        let (app, boot) = boot()?;
-        let mut driver = Self {
-            slots,
+    pub(crate) fn initialize(macos: bool, restored: Option<V>) -> Result<Self, String> {
+        let mut app = App::new(macos);
+        let entity = Entity::reserve(&app);
+        let _guard = app.inner.slots.enter();
+        let mut window = app.window();
+        let mut cx = Context {
+            app: &mut app,
+            entity: entity.clone(),
+        };
+        let value = match restored {
+            Some(mut value) => {
+                value.restored(&mut window, &mut cx);
+                value
+            }
+            None => V::new(&mut window, &mut cx),
+        };
+        *entity.value.borrow_mut() = Some(value);
+        Ok(Self {
             app,
-            tasks: Vec::new(),
-            subscriptions: HashSet::new(),
-            observers: Vec::new(),
+            entity,
             last_root: None,
             busy: false,
-        };
-        spawn(&mut driver.tasks, boot);
-        Ok(driver)
+        })
     }
-
-    /// Delivers the host's events and returns the frame they produced.
-    ///
-    /// Events name entries in the tables the LAST view filled, so they are
-    /// dispatched before the tables are reset for this view. An index the
-    /// last frame did not hand out (the host raced a rebuild) is dropped.
-    ///
-    /// The frame always carries the tree, `unchanged` or patched or not, so
-    /// a test can read it; the component export drops a tree the host can
-    /// rebuild before it crosses.
+    pub fn entity(&self) -> Entity<V> {
+        self.entity.clone()
+    }
+    pub fn host(&self) -> Host {
+        self.app.host()
+    }
+    pub(crate) fn app_mut(&mut self) -> &mut App {
+        &mut self.app
+    }
     pub fn tick(&mut self, events: Vec<wire::Event>) -> wire::Frame {
-        let _context = self.slots.enter();
-        for message in slots::take_deferred::<A::Message>() {
-            spawn(&mut self.tasks, self.app.update(message));
-            self.settle();
-        }
+        let _guard = self.app.inner.slots.enter();
+        self.busy = false;
         self.settle();
         for event in events {
             let message = match event {
-                observation @ (wire::Event::Observation { .. }
+                wire::Event::Observation { .. }
                 | wire::Event::Mouse { .. }
-                | wire::Event::Keyboard { .. }) => {
-                    let valid = match &observation {
-                        wire::Event::Observation { event, .. } => event.validate().is_ok(),
-                        wire::Event::Mouse { event, .. } => event.sanitize().is_some(),
-                        wire::Event::Keyboard { .. } => true,
-                        _ => unreachable!(),
-                    };
-                    if valid {
-                        let messages: Vec<_> = self
-                            .observers
-                            .iter()
-                            .filter_map(|observe| observe(&observation))
-                            .collect();
-                        for message in messages {
-                            spawn(&mut self.tasks, self.app.update(message));
-                            self.settle();
-                        }
-                    }
-                    None
-                }
-                wire::Event::Message(index) => slots::take_message::<A::Message>(index),
+                | wire::Event::Keyboard { .. } => None,
+                wire::Event::Message(index) => slots::take_message::<Callback<V>>(index),
                 wire::Event::Surface { handler, value } => {
-                    slots::run_handler::<wire::SurfaceValue, A::Message>(handler, value)
+                    slots::run_handler::<wire::SurfaceValue, Callback<V>>(handler, value)
                 }
                 wire::Event::Input { handler, text } => {
-                    slots::run_handler::<String, A::Message>(handler, text)
+                    slots::run_handler::<String, Callback<V>>(handler, text)
                 }
                 wire::Event::EditorDocument { handler, message } => {
                     use wire::editor_document::EditorDocumentMessage;
@@ -201,12 +114,12 @@ impl<A: App> Driver<A> {
                         slots::finish_editor_transfer(message.id());
                         continue;
                     }
-                    slots::run_handler::<wire::editor_document::EditorDocumentMessage, A::Message>(
+                    slots::run_handler::<wire::editor_document::EditorDocumentMessage, Callback<V>>(
                         handler, message,
                     )
                 }
                 wire::Event::EditorRequest { handler, request } => {
-                    slots::run_handler::<wire::EditorRequest, A::Message>(handler, request)
+                    slots::run_handler::<wire::EditorRequest, Callback<V>>(handler, request)
                 }
                 wire::Event::EditorTransaction { handler, event } => {
                     if let wire::EditorTransactionEvent::Fault { id, .. }
@@ -226,46 +139,46 @@ impl<A: App> Driver<A> {
                         }
                         slots::editor_acknowledge(&event);
                     }
-                    slots::run_handler::<wire::EditorTransactionEvent, A::Message>(handler, event)
+                    slots::run_handler::<wire::EditorTransactionEvent, Callback<V>>(handler, event)
                 }
                 wire::Event::Toggle { handler, on } => {
-                    slots::run_handler::<bool, A::Message>(handler, on)
+                    slots::run_handler::<bool, Callback<V>>(handler, on)
                 }
                 wire::Event::Slide { handler, value } => {
-                    slots::run_handler::<f32, A::Message>(handler, value)
+                    slots::run_handler::<f32, Callback<V>>(handler, value)
                 }
                 wire::Event::Select { handler, index } => {
-                    slots::run_handler::<u32, A::Message>(handler, index)
+                    slots::run_handler::<u32, Callback<V>>(handler, index)
                 }
                 wire::Event::Size {
                     handler,
                     width,
                     height,
-                } => slots::run_handler::<(f32, f32), A::Message>(handler, (width, height)),
+                } => slots::run_handler::<(f32, f32), Callback<V>>(handler, (width, height)),
                 wire::Event::Drag { handler, dx, dy } => {
-                    slots::run_handler::<(f64, f64), A::Message>(handler, (dx, dy))
+                    slots::run_handler::<(f64, f64), Callback<V>>(handler, (dx, dy))
                 }
                 wire::Event::Pointer { handler, x, y } => {
-                    slots::run_handler::<(f32, f32), A::Message>(handler, (x, y))
+                    slots::run_handler::<(f32, f32), Callback<V>>(handler, (x, y))
                 }
                 wire::Event::Scroll {
                     handler,
                     dx,
                     dy,
                     pixels,
-                } => slots::run_handler::<(f32, f32, bool), A::Message>(handler, (dx, dy, pixels)),
+                } => slots::run_handler::<(f32, f32, bool), Callback<V>>(handler, (dx, dy, pixels)),
                 wire::Event::ScrollOffset {
                     handler,
                     x,
                     y,
                     relative_x,
                     relative_y,
-                } => slots::run_handler::<(f32, f32, f32, f32), A::Message>(
+                } => slots::run_handler::<(f32, f32, f32, f32), Callback<V>>(
                     handler,
                     (x, y, relative_x, relative_y),
                 ),
                 wire::Event::Response { id, result, done } => {
-                    host::fulfill(id, result, done);
+                    self.app.host().fulfill(id, result, done);
                     // Response order is semantic: queued hidden data must be
                     // applied before a later visibility notification.
                     self.settle();
@@ -274,32 +187,38 @@ impl<A: App> Driver<A> {
                 // The host dropped the tree the patches build on.
                 wire::Event::Resync => {
                     self.last_root = None;
+                    self.app.notify();
                     None
                 }
             };
-            if let Some(message) = message {
-                spawn(&mut self.tasks, self.app.update(message));
+            if let Some(callback) = message {
+                self.entity
+                    .clone()
+                    .update_app(&mut self.app, |v, w, cx| callback(v, w, cx));
                 self.settle();
             }
         }
-        // A response woke a task without a message of its own to run: poll
-        // once more so what it produced reaches `update` before the view.
         self.settle();
-        slots::reset();
-        if slots::editor_transferring() {
-            memo::invalidate();
-        }
-        let mut root = self.app.view();
-        memo::finish_render();
-        // Synchronous mount pruning can cancel work after the last settle.
-        // Reconcile subscriptions and request another tick to drain woken
-        // tasks; updating here would publish a tree from before that update.
-        self.subscribe();
-        self.busy |= slots::has_deferred()
-            || self
-                .tasks
-                .iter()
-                .any(|task| task.woken.0.load(Ordering::Relaxed));
+        let render = self.app.inner.dirty.replace(false)
+            || self.last_root.is_none()
+            || slots::editor_transferring();
+        let mut root = if render {
+            slots::reset();
+            let mut window = self.app.window();
+            let mut cx = Context {
+                app: &mut self.app,
+                entity: self.entity.clone(),
+            };
+            self.entity
+                .value
+                .borrow_mut()
+                .as_mut()
+                .unwrap()
+                .render(&mut window, &mut cx)
+        } else {
+            self.last_root.clone().expect("rendered tree")
+        };
+        self.busy |= self.app.inner.dirty.get() || executor::ready(&self.app.inner.tasks.borrow());
         let unchanged = self.last_root.as_ref() == Some(&root);
         let mut patches = Vec::new();
         if !unchanged {
@@ -338,144 +257,28 @@ impl<A: App> Driver<A> {
             event_interest: slots::event_interest(),
             root: Some(root),
             patches,
-            requests: host::drain_outbox(),
-            cancels: host::drain_cancels(),
+            requests: self.app.host().drain_outbox(),
+            cancels: self.app.host().drain_cancels(),
             unchanged,
             busy: self.busy,
         }
     }
 
-    /// Brings the subscription in line with the state, polls every woken
-    /// task, and runs what they produced through `update` — whose own tasks
-    /// join the pool and whose state changes move the subscription — until
-    /// a round produces nothing or the round budget is spent. Spent with
-    /// work still ready is what `busy` means.
     fn settle(&mut self) {
-        for _ in 0..MAX_ROUNDS {
-            self.subscribe();
-            let (messages, cut_short) = poll_tasks(&mut self.tasks);
-            self.busy = cut_short;
-            if messages.is_empty() {
+        for _ in 0..8 {
+            let mut tasks = std::mem::take(&mut *self.app.inner.tasks.borrow_mut());
+            let cut_short = executor::poll(&mut tasks);
+            let added = !self.app.inner.tasks.borrow().is_empty();
+            tasks.append(&mut self.app.inner.tasks.borrow_mut());
+            *self.app.inner.tasks.borrow_mut() = tasks;
+            self.busy |= cut_short;
+            if !added {
                 return;
-            }
-            for message in messages {
-                spawn(&mut self.tasks, self.app.update(message));
             }
         }
         self.busy = true;
     }
-
-    fn subscribe(&mut self) {
-        slots::set_mouse_interest(false);
-        slots::clear_event_interest();
-        let (recipes, observers) = self.app.subscription().into_parts();
-        let next: HashSet<_> = recipes.iter().map(|recipe| recipe.key).collect();
-        self.tasks
-            .retain(|task| task.subscription.is_none_or(|key| next.contains(&key)));
-        self.subscriptions.retain(|key| next.contains(key));
-        self.observers = observers;
-        for recipe in recipes {
-            if self.subscriptions.insert(recipe.key) {
-                self.tasks.push(Running {
-                    subscription: Some(recipe.key),
-                    woken: Arc::new(Woken(AtomicBool::new(true))),
-                    stream: (recipe.start)(),
-                });
-            }
-        }
-    }
 }
-
-fn spawn<M: 'static>(tasks: &mut Vec<Running<M>>, task: Task<M>) {
-    if let Some(stream) = task.into_option() {
-        tasks.push(Running {
-            subscription: None,
-            woken: Arc::new(Woken(AtomicBool::new(true))),
-            stream,
-        });
-    }
-}
-struct Woken(AtomicBool);
-impl Wake for Woken {
-    fn wake(self: Arc<Self>) {
-        self.0.store(true, Ordering::SeqCst);
-    }
-}
-fn poll_tasks<M: 'static>(tasks: &mut Vec<Running<M>>) -> (Vec<M>, bool) {
-    let mut messages = Vec::new();
-    for _ in 0..MAX_POLLS {
-        let mut polled = false;
-        tasks.retain_mut(|task| {
-            if !task.woken.0.swap(false, Ordering::SeqCst) {
-                return true;
-            }
-            polled = true;
-            let waker = Waker::from(task.woken.clone());
-            let mut context = Context::from_waker(&waker);
-            match task.stream.as_mut().poll_next(&mut context) {
-                Poll::Ready(Some(message)) => {
-                    messages.push(message);
-                    task.woken.0.store(true, Ordering::SeqCst);
-                    true
-                }
-                Poll::Ready(None) => false,
-                Poll::Pending => true,
-            }
-        });
-        if !polled {
-            return (messages, false);
-        }
-    }
-    (
-        messages,
-        tasks.iter().any(|task| task.woken.0.load(Ordering::SeqCst)),
-    )
-}
-
-/// A periodic guest subscription: a module has no clock, so the period is the
-/// host's `clock.ticks` — which the app's manifest must declare `clock`
-/// for. The route carries no instant, because a guest cannot make one.
-/// A refusal is logged and ends the stream; the recipe hashes by period,
-/// so a `subscribe` that keeps the same `every` keeps the same ticker.
-pub fn every(period: Duration) -> Subscription<()> {
-    Subscription::run_with(period, |period| ticks(*period))
-}
-
-/// Run `f` immediately, then once per host tick.
-pub fn repeat<F, T>(f: fn() -> F, period: Duration) -> Subscription<T>
-where
-    F: Future<Output = T> + 'static,
-    T: 'static,
-{
-    Subscription::run_with((f, period), |(f, period)| {
-        let f = *f;
-        Box::pin(
-            futures::stream::once(std::future::ready(()))
-                .chain(ticks(*period))
-                .then(move |()| f()),
-        )
-    })
-}
-
-/// The bare tick stream behind [`every`] and [`repeat`], for a view that
-/// folds its own state across ticks: those two hand a fresh future per tick
-/// and so cannot carry anything from one to the next, which a poll that
-/// remembers what it already read has to do.
-pub fn ticks(period: Duration) -> BoxStream<()> {
-    let millis = i64::try_from(period.as_millis()).unwrap_or(i64::MAX);
-    Box::pin(
-        host::subscribe("clock.ticks", &millis.to_le_bytes()).filter_map(|answer| {
-            std::future::ready(match answer {
-                Ok(_) => Some(()),
-                Err(message) => {
-                    host::log(format!("`every` needs the host's clock: {message}"));
-                    None
-                }
-            })
-        }),
-    )
-}
-
 /// The most a panic message may carry across the `panicked` import. A host
 /// shows one line of it, and every byte over that is one the host lifts out
 /// of guest memory before it can refuse anything — so the message is cut
@@ -522,40 +325,7 @@ pub const fn manifest_bytes<const N: usize>(text: &str, preferred_size: &str) ->
     out
 }
 
-#[macro_export]
-macro_rules! export_app {
-    ($app:ident, $name:expr, $description:expr, [$($capability:literal),* $(,)?]) => {
-        impl $crate::App for $app {
-            type Message = Message;
-
-            fn boot() -> (Self, $crate::Task<Self::Message>) {
-                <$app>::boot()
-            }
-
-            fn view(&self) -> $crate::wire::Node {
-                <$app>::view(self)
-            }
-
-            fn update(&mut self, message: Self::Message) -> $crate::Task<Self::Message> {
-                <$app>::update(self, message)
-            }
-
-            fn subscription(&self) -> $crate::Subscription<Self::Message> {
-                <$app>::subscription(self)
-            }
-        }
-
-        impl $crate::SnapshotApp for $app {
-            fn snapshot(&self) -> ::std::result::Result<::std::vec::Vec<u8>, ::std::string::String> { <$app>::snapshot(self) }
-            fn restore(bytes: &[u8]) -> ::std::result::Result<Self, ::std::string::String> { <$app>::restore(bytes) }
-        }
-
-        $crate::export_driver!($app, $name, $description, [$($capability),*]);
-    };
-}
-
-/// The manifest section and the wasm32 exports ([`wire::abi`]) for an `App`. `export_app!` and `export_view!`
-/// both end here; a view invokes one of those, not this.
+/// The manifest section and the wasm32 exports ([`wire::abi`]) for a view. `export_view!` invokes this internally.
 #[macro_export]
 macro_rules! export_driver {
     ($app:ty, $name:expr, $description:expr, [$($capability:literal),* $(,)?]) => {
@@ -563,8 +333,8 @@ macro_rules! export_driver {
 
         #[cfg_attr(target_arch = "wasm32", unsafe(link_section = "ducktape.view.manifest"))]
         #[used]
-        static MANIFEST_SECTION: [u8; MANIFEST.len() + <$app>::PREFERRED_WINDOW_SIZE.len() + 2 + $crate::wire::WIRE_EPOCH.ilog10() as usize] =
-            $crate::manifest_bytes(MANIFEST, <$app>::PREFERRED_WINDOW_SIZE);
+        static MANIFEST_SECTION: [u8; MANIFEST.len() + <$app as $crate::View>::PREFERRED_WINDOW_SIZE.len() + 2 + $crate::wire::WIRE_EPOCH.ilog10() as usize] =
+            $crate::manifest_bytes(MANIFEST, <$app as $crate::View>::PREFERRED_WINDOW_SIZE);
 
         #[cfg(target_arch = "wasm32")]
         mod wasm_exports {
@@ -606,7 +376,7 @@ pub mod exports {
     use std::any::Any;
     use std::cell::RefCell;
 
-    use crate::{Driver, SnapshotApp, wire};
+    use crate::{Driver, View, wire};
 
     #[link(wasm_import_module = "ducktape_view")]
     unsafe extern "C" {
@@ -620,7 +390,7 @@ pub mod exports {
         static DRIVER: RefCell<Option<Box<dyn Any>>> = const { RefCell::new(None) };
     }
 
-    fn driver<A: SnapshotApp, R>(run: impl FnOnce(&mut Driver<A>) -> R) -> R {
+    fn driver<A: View, R>(run: impl FnOnce(&mut Driver<A>) -> R) -> R {
         DRIVER.with_borrow_mut(|driver| {
             run(driver
                 .as_mut()
@@ -629,13 +399,13 @@ pub mod exports {
         })
     }
 
-    pub fn init<A: SnapshotApp>(macos: u32) {
+    pub fn init<A: View>(macos: u32) {
         install_panic_hook();
         let driver = Driver::<A>::with_macos(macos != 0);
         DRIVER.set(Some(Box::new(driver)));
     }
 
-    pub fn tick<A: SnapshotApp>(ptr: u32, len: u32) -> u64 {
+    pub fn tick<A: View>(ptr: u32, len: u32) -> u64 {
         let events: Vec<wire::Event> =
             wire::decode(&take(ptr, len)).expect("invalid host event frame");
         let mut frame = driver::<A, _>(|driver| driver.tick(events));
@@ -647,14 +417,14 @@ pub mod exports {
         answer(wire::encode(&frame))
     }
 
-    pub fn snapshot<A: SnapshotApp>() -> u64 {
+    pub fn snapshot<A: View>() -> u64 {
         answer(wire::abi::encode_result(driver::<A, _>(|driver| {
             driver.snapshot()
         })))
     }
 
     /// A refused state leaves the driver that was there in place.
-    pub fn restore<A: SnapshotApp>(ptr: u32, len: u32, macos: u32) -> u64 {
+    pub fn restore<A: View>(ptr: u32, len: u32, macos: u32) -> u64 {
         install_panic_hook();
         let restored = Driver::<A>::from_snapshot(&take(ptr, len), macos != 0).map(|driver| {
             DRIVER.set(Some(Box::new(driver)));
@@ -712,3 +482,6 @@ pub use combo::Combo;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod lifecycle_tests;

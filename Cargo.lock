@@ -414,6 +414,7 @@ dependencies = [
  "base64 0.22.1",
  "chat",
  "ducklink",
+ "futures",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -1444,11 +1445,9 @@ name = "explorer-view"
 version = "0.1.0"
 dependencies = [
  "abi",
- "base64 0.22.1",
- "borsh",
+ "futures",
  "modules",
  "serde",
- "serde_json",
  "view-guest",
 ]
 
@@ -2375,11 +2374,9 @@ name = "members-view"
 version = "0.1.0"
 dependencies = [
  "abi",
- "base64 0.22.1",
- "borsh",
+ "futures",
  "modules",
  "serde",
- "serde_json",
  "view-guest",
 ]
 
@@ -2481,11 +2478,9 @@ name = "node-view"
 version = "0.1.0"
 dependencies = [
  "abi",
- "base64 0.22.1",
- "borsh",
+ "futures",
  "modules",
  "serde",
- "serde_json",
  "view-guest",
 ]
 
