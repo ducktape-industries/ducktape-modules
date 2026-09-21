@@ -1,7 +1,7 @@
 # ducktape-modules
 
-The reference module and its view, one flat crate each: `crates/chat` is the
-consensus module, `crates/chat-view` the wasm view the desktop renders for it.
+The reference module and its view, `crates/app/chat` is the
+consensus module, `crates/app/chat-view` the wasm view the desktop renders for it.
 Everything else that once lived here (pages, agent, runs, tasks, boards,
 automations, inbox, collaboration, call, the reference modules, the remaining
 views in ducktape-views) comes back one crate at a time, written against this
@@ -10,10 +10,10 @@ pair — and against the program abi in ducktape-sdk (`abi`, `guest`) once
 
 | Path | What |
 |---|---|
-| `crates/chat` | the chat module: channels, messages, threads, reactions, huddles; its guest port behind `guest`, its index guest behind `index-guest` |
-| `crates/chat-view` | the chat view on `view-guest`: the whole screen, on the `View` API |
-| `crates/modules`, `crates/valset` | the two programs the host reads: the roster and the validators (`abi::roster`, `abi::validators`) |
-| `crates/identity` | numbered accounts held by keys and named; what every other program attributes to |
+| `crates/app/chat` | the chat module: channels, messages, threads, reactions, huddles; its guest port behind `guest`, its index guest behind `index-guest` |
+| `crates/app/chat-view` | the chat view on `view-guest`: the whole screen, on the `View` API |
+| `crates/system/modules`, `crates/system/valset` | the two programs the host reads: the roster and the validators (`abi::roster`, `abi::validators`) |
+| `crates/system/identity` | numbered accounts held by keys and named; what every other program attributes to |
 
 ## Building
 

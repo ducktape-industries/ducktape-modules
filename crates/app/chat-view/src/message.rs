@@ -1,5 +1,5 @@
 //! The chat module's message vocabulary and its Markdown parser, copied from
-//! the module (crates/modules/apps/chat/src/message.rs in ducktape-modules).
+//! the module (`crates/app/chat/src/message.rs`).
 //! Pinned by `tests::wire_shapes`; a drift there is a drift here.
 use serde::{Deserialize, Serialize};
 

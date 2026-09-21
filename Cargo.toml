@@ -1,5 +1,5 @@
-# ducktape-modules — the reference module and its view: `crates/chat` is the
-# consensus module, `crates/chat-view` the wasm view the desktop renders for
+# ducktape-modules — the reference module and its view: `crates/app/chat` is the
+# consensus module, `crates/app/chat-view` the wasm view the desktop renders for
 # it. Everything else that once lived here comes back one crate at a time,
 # written against this pair.
 #
@@ -10,13 +10,13 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/chat",
-    "crates/chat-view",
+    "crates/app/chat",
+    "crates/app/chat-view",
     # the system programs on the abi: the roster the host reads, the validators
     # it seats, the accounts everything attributes to
-    "crates/modules",
-    "crates/valset",
-    "crates/identity",
+    "crates/system/modules",
+    "crates/system/valset",
+    "crates/system/identity",
 ]
 
 # which repository this workspace IS. guest-builder reaches every module
