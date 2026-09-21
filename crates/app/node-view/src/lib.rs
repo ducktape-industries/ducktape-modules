@@ -9,8 +9,10 @@ use ducktape_view_guest::caps::{Program, QueryBytes};
 use ducktape_view_guest::export_view;
 use ducktape_view_guest::host::{Refusal, malformed};
 use ducktape_view_guest::view::{Live, Loaded};
-use ducktape_view_guest::wire::{Length, Node, kit, kit::Tone};
-use ducktape_view_guest::{Context, Host, Render, Task, View, Window};
+use ducktape_view_guest::{
+    App, Context, ElementId, Host, IntoElement, ParentElement, Render, RenderOnce, Styled, Task,
+    Theme, View, Window, div, px,
+};
 use futures::StreamExt;
 use modules::valset;
 use serde::{Deserialize, Serialize};
@@ -70,16 +72,27 @@ impl View for Nodes {
 }
 
 impl Render for Nodes {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> Node {
-        let key = "nodes";
-        let head = kit::centered_row(
-            format!("{key}/head"),
-            [
-                kit::fill_width(kit::title(format!("{key}/title"), "Nodes")),
-                kit::caption(format!("{key}/count"), self.count()),
-            ],
-        );
-        kit::page(key, [head, self.body(key, cx)])
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.global::<Theme>();
+        div()
+            .id(ElementId::Name("nodes".into()))
+            .flex()
+            .flex_col()
+            .gap_3()
+            .p_5()
+            .size_full()
+            .bg(theme.background)
+            .text_color(theme.foreground)
+            .child(
+                div()
+                    .id(ElementId::Name("nodes-head".into()))
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(div().flex_1().text_lg().child("Nodes"))
+                    .child(div().text_sm().text_color(theme.muted).child(self.count())),
+            )
+            .child(self.body(cx, theme))
     }
 }
 
@@ -98,114 +111,182 @@ impl Nodes {
         match self.set.ready() {
             Some(set) => format!(
                 "{} · {}",
-                kit::plural(set.validators.len() as u64, "validator", "validators"),
-                kit::plural(set.members.len() as u64, "member", "members"),
+                plural(set.validators.len(), "validator", "validators"),
+                plural(set.members.len(), "member", "members"),
             ),
             None => String::new(),
         }
     }
 
     /// The four states of the set: loading, refused, empty, ready.
-    fn body(&self, key: &str, cx: &mut Context<Self>) -> Node {
+    fn body(&self, cx: &mut Context<Self>, theme: &Theme) -> impl IntoElement {
         match &self.set {
-            Loaded::Idle | Loaded::Loading(_) => {
-                kit::secondary(format!("{key}/loading"), "Reading the validator set…")
-            }
+            Loaded::Idle | Loaded::Loading(_) => div()
+                .id(ElementId::Name("nodes-loading".into()))
+                .text_sm()
+                .text_color(theme.muted)
+                .child("Reading the validator set…"),
             Loaded::Failed(refusal) => {
                 let retry = cx.listener(|view, _: &(), _, cx| view.read(cx));
-                kit::notice(
-                    format!("{key}/refused"),
-                    kit::column(
-                        format!("{key}/refused/body"),
-                        [
-                            kit::wrapping(kit::text(
-                                format!("{key}/refused/why"),
-                                refusal.sentence.clone(),
-                            )),
-                            kit::action(format!("{key}/retry"), "Retry", Some(retry)),
-                        ],
-                    ),
-                    Tone::Danger,
-                )
+                div()
+                    .id(ElementId::Name("nodes-refused".into()))
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .p_3()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(theme.danger)
+                    .bg(theme.danger_soft)
+                    .child(refusal.sentence.clone())
+                    .child(
+                        div()
+                            .id(ElementId::Name("nodes-retry".into()))
+                            .px_2()
+                            .py_1()
+                            .rounded_md()
+                            .bg(theme.surface)
+                            .hover(|s| s.bg(theme.surface_raised))
+                            .on_click(retry)
+                            .child("Retry"),
+                    )
             }
             Loaded::Ready(set) if set.members.is_empty() && set.validators.is_empty() => {
-                kit::empty_state(
-                    format!("{key}/empty"),
+                empty_state(
+                    "nodes-empty",
                     "No members",
                     "The validator set of this network is empty.",
+                    theme,
                 )
             }
-            Loaded::Ready(set) => kit::scroll(
-                format!("{key}/list"),
-                kit::column(
-                    format!("{key}/sections"),
-                    [
-                        kit::section_row(&format!("{key}/set-header"), "Validator set", None),
-                        validators(key, &set.validators),
-                        kit::section_row(&format!("{key}/members-header"), "Memberships", None),
-                        members(key, &set.members),
-                    ],
-                ),
-            ),
+            Loaded::Ready(set) => div()
+                .id(ElementId::Name("nodes-list".into()))
+                .flex_1()
+                .overflow_y_scroll()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(section("nodes-set-header", "Validator set", theme))
+                .child(validators(&set.validators, theme))
+                .child(section("nodes-members-header", "Memberships", theme))
+                .child(members(&set.members, theme)),
         }
     }
 }
 
-fn validators(key: &str, validators: &[String]) -> Node {
+fn validators(validators: &[String], theme: &Theme) -> impl IntoElement {
     if validators.is_empty() {
-        return kit::secondary(
-            format!("{key}/no-validators"),
-            "No key validates on this network.",
-        );
+        return div()
+            .text_sm()
+            .text_color(theme.muted)
+            .child("No key validates on this network.");
     }
-    kit::column(
-        format!("{key}/validators"),
-        validators.iter().enumerate().map(|(index, validator)| {
-            kit::centered_row(
-                format!("{key}/validator/{index}"),
-                [
-                    kit::width(
-                        kit::secondary(
-                            format!("{key}/validator/{index}/n"),
-                            format!("{}", index + 1),
-                        ),
-                        Length::Fixed(28.),
-                    ),
-                    kit::fill_width(kit::mono(
-                        format!("{key}/validator/{index}/key"),
-                        kit::short_id(validator, 16),
-                    )),
-                ],
-            )
-        }),
-    )
+    div()
+        .id(ElementId::Name("nodes-validators".into()))
+        .flex()
+        .flex_col()
+        .gap_2()
+        .children(validators.iter().enumerate().map(|(index, validator)| {
+            div()
+                .id(ElementId::named_usize("nodes-validator", index))
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(
+                    div()
+                        .w(px(28.))
+                        .text_sm()
+                        .text_color(theme.muted)
+                        .child((index + 1).to_string()),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .font_family("JetBrains Mono")
+                        .text_sm()
+                        .child(short_id(validator, 16)),
+                )
+        }))
 }
 
-fn members(key: &str, members: &[Member]) -> Node {
-    kit::column(
-        format!("{key}/members"),
-        members.iter().enumerate().map(|(index, member)| {
-            kit::centered_row(
-                format!("{key}/member/{index}"),
-                [
-                    kit::fill_width(kit::mono(
-                        format!("{key}/member/{index}/key"),
-                        kit::short_id(&member.key, 16),
-                    )),
-                    kit::truncated(format!("{key}/member/{index}/address"), &member.address, 28),
-                    kit::badge(
-                        format!("{key}/member/{index}/standing"),
-                        &member.standing,
-                        if member.validator {
-                            Tone::Success
-                        } else {
-                            Tone::Neutral
-                        },
-                    ),
-                ],
-            )
-        }),
-    )
+fn members(members: &[Member], theme: &Theme) -> impl IntoElement {
+    div()
+        .id(ElementId::Name("nodes-members".into()))
+        .flex()
+        .flex_col()
+        .gap_2()
+        .children(members.iter().enumerate().map(|(index, member)| {
+            let (foreground, background) = if member.validator {
+                (theme.success, theme.success_soft)
+            } else {
+                (theme.muted, theme.surface_raised)
+            };
+            div()
+                .id(ElementId::named_usize("nodes-member", index))
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(
+                    div()
+                        .flex_1()
+                        .font_family("JetBrains Mono")
+                        .text_sm()
+                        .child(short_id(&member.key, 16)),
+                )
+                .child(
+                    div()
+                        .max_w(px(220.))
+                        .truncate()
+                        .text_sm()
+                        .child(member.address.clone()),
+                )
+                .child(
+                    div()
+                        .px_1()
+                        .py_0p5()
+                        .rounded_sm()
+                        .bg(background)
+                        .text_color(foreground)
+                        .text_xs()
+                        .child(member.standing.clone()),
+                )
+        }))
+}
+
+fn section(id: &str, label: &str, theme: &Theme) -> impl IntoElement {
+    div()
+        .id(ElementId::Name(id.into()))
+        .h(px(28.))
+        .flex()
+        .items_center()
+        .px_2()
+        .text_sm()
+        .text_color(theme.muted)
+        .child(label)
+}
+
+fn empty_state(id: &str, title: &str, detail: &str, theme: &Theme) -> impl IntoElement {
+    div()
+        .id(ElementId::Name(id.into()))
+        .flex()
+        .flex_col()
+        .gap_1()
+        .p_6()
+        .max_w(px(420.))
+        .child(div().text_base().child(title))
+        .child(div().text_sm().text_color(theme.muted).child(detail))
+}
+
+fn short_id(id: &str, keep: usize) -> String {
+    let mut head: String = id.chars().take(keep).collect();
+    if id.chars().count() > keep {
+        head.push('…');
+    }
+    head
+}
+
+fn plural(count: usize, one: &str, many: &str) -> String {
+    format!("{count} {}", if count == 1 { one } else { many })
 }
 
 /// The set, read twice: the consensus keys the program answers, then every
