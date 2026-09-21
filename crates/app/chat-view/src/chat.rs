@@ -2,8 +2,9 @@
 //! it asks (`ChatViewQuery`) and the rows it draws. One definition site,
 //! in `crates/app/chat`.
 pub use chat::{
-    Block, ChannelInfo, ChatMsg, ChatViewQuery, ChatViewReply, Mark, MemberRow, MessageHits,
-    MsgRow, Party, PostPolicy, Span, TagPage, hex, parse_message, party_handle,
+    AccountRow, Block, ChannelInfo, ChatMsg, ChatViewQuery, ChatViewReply, Mark, MemberRow,
+    MessageHits, MsgRow, Party, PostPolicy, ReactionSummary, Span, TagPage, dm_channel_id,
+    dm_peers, hex, parse_message, party_handle,
 };
 
 pub fn members_only(info: &ChannelInfo) -> bool {

@@ -266,6 +266,22 @@ pub enum ChatViewQuery {
         #[serde(default)]
         limit: Option<usize>,
     },
+    /// the identity roster, ascending by number: the program asks identity
+    /// so the view links one module
+    Accounts {
+        #[serde(default)]
+        limit: Option<usize>,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AccountRow {
+    pub number: AccountNumber,
+    pub name: String,
+    /// a program-controlled account: an agent, not a person
+    pub program: bool,
+    /// the account's keys, hex
+    pub keys: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -300,6 +316,7 @@ pub enum ChatViewReply {
     },
     Hits(MessageHits),
     TagHits(TagPage),
+    Accounts(Vec<AccountRow>),
 }
 
 /// The frame a write runs in: who acts, when.
@@ -317,6 +334,17 @@ pub fn party_handle(party: &Party) -> String {
         Party::Module(module) => format!("module:{module}"),
         Party::System => "system".to_string(),
     }
+}
+
+/// The room two accounts share: `dm-<lower>-<higher>`.
+pub fn dm_channel_id(a: AccountNumber, b: AccountNumber) -> String {
+    format!("dm-{}-{}", a.min(b), a.max(b))
+}
+
+/// The two accounts of a dm room id, or `None` for any other channel.
+pub fn dm_peers(channel_id: &str) -> Option<(AccountNumber, AccountNumber)> {
+    let (a, b) = channel_id.strip_prefix("dm-")?.split_once('-')?;
+    Some((a.parse().ok()?, b.parse().ok()?))
 }
 
 pub fn hex(bytes: &[u8]) -> String {
@@ -584,7 +612,7 @@ pub fn execute(store: &mut impl Write, frame: &Frame, msg: ChatMsg) -> Result<()
             if me == counterpart {
                 return Err(refuse(reason::INVALID_INPUT, "a dm needs two accounts"));
             }
-            let id = format!("dm-{}-{}", me.min(counterpart), me.max(counterpart));
+            let id = dm_channel_id(me, counterpart);
             if load::<ChannelRow>(store, &chan_key(&id))?.is_some() {
                 return Ok(());
             }
@@ -887,7 +915,7 @@ fn react(
 
 // ── query ───────────────────────────────────────────────────────────────────
 
-fn page(limit: Option<usize>) -> usize {
+pub fn page(limit: Option<usize>) -> usize {
     limit.unwrap_or(DEFAULT_PAGE).clamp(1, MAX_PAGE)
 }
 
@@ -936,6 +964,12 @@ fn key_tail(entry: &Entry) -> String {
 
 pub fn query(store: &impl Read, q: ChatViewQuery) -> Result<ChatViewReply, Refusal> {
     Ok(match q {
+        ChatViewQuery::Accounts { .. } => {
+            return Err(refuse(
+                reason::UNSUPPORTED,
+                "accounts are identity's, asked by the program",
+            ));
+        }
         ChatViewQuery::Channels { after, limit } => {
             let mut scan = Scan::prefix(b"chan/");
             if let Some(after) = after {

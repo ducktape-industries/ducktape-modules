@@ -391,11 +391,6 @@ pub fn channel_link(chain: &str, channel: &str, seq: Option<u64>) -> String {
     minted(chain, "chat", tail)
 }
 
-/// `duck://<chain>/runs/<dispatch>`.
-pub fn run_link(chain: &str, dispatch: &str) -> String {
-    minted(chain, "runs", vec![dispatch.to_owned()])
-}
-
 /// A pressed mention (an account number) becomes `duck://<chain>/identity/<n>`,
 /// the link the app opens; any other link is already one and passes through.
 pub fn pressed_link(link: String, chain: &str) -> String {

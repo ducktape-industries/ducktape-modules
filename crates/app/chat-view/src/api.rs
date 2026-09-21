@@ -8,6 +8,17 @@ use ducktape_view_guest::view::{Capability, Module};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// The files module, as attachments still speak to it (JSON, untyped).
+pub struct Files;
+impl Module for Files {
+    const NAME: &'static str = "files";
+    type Op = Value;
+    type Query = Value;
+    type Reply = Value;
+    type ViewQuery = Value;
+    type ViewReply = Value;
+}
+
 pub struct ChatApi;
 impl Module for ChatApi {
     const NAME: &'static str = "chat";
@@ -48,7 +59,6 @@ pub struct Session {
     pub network_name: String,
     /// this view's own network, `<label>#<salt>`, what its links carry
     pub chain: String,
-    pub network_chain_id: String,
     pub status: String,
     pub block_height: i64,
     /// the reader's rendered handle (`acct:7` / `user:<hex>`) and key hex
@@ -76,14 +86,6 @@ pub struct Session {
 }
 
 impl Session {
-    /// This view's own network: the `chain` prop, else the legacy id.
-    pub fn chain(&self) -> &str {
-        if self.chain.is_empty() {
-            &self.network_chain_id
-        } else {
-            &self.chain
-        }
-    }
     /// Every write in chat is authored by an account: a key that holds none
     /// reads and nothing more.
     pub fn holds_account(&self) -> bool {

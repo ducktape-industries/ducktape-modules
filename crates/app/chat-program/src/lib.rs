@@ -1,7 +1,7 @@
 use abi::{Entry, Env, Origin, Refusal, Scan, Scheme, reason};
-use chat::{ChatMsg, ChatViewQuery, Frame, HUDDLE_JOIN_NS, Party};
+use chat::{AccountRow, ChatMsg, ChatViewQuery, ChatViewReply, Frame, HUDDLE_JOIN_NS, Party};
 use guest::{Execute, Program, Query, Reads};
-use modules::identity;
+use modules::{Page, identity};
 
 struct Reader<'a>(&'a Query);
 
@@ -82,6 +82,34 @@ fn node_joins(ctx: &impl Reads, env: &Env, msg: &ChatMsg) -> Result<(), Refusal>
     Ok(())
 }
 
+/// Identity's roster as the view reads it: one door, chat's.
+fn accounts(ctx: &impl Reads, limit: Option<usize>) -> Result<ChatViewReply, Refusal> {
+    // ponytail: one page; page on identity's cursor once modules spells its key.
+    let page = Page {
+        after: None,
+        limit: Some(chat::page(limit) as u64),
+    };
+    let identity::Reply::Accounts(accounts) =
+        ctx.ask::<identity::Query, identity::Reply>(identity::PROGRAM, &identity::Query::List { page })?
+    else {
+        return Err(Refusal::new(
+            reason::UNEXPECTED_REPLY,
+            "identity answered List with something else",
+        ));
+    };
+    Ok(ChatViewReply::Accounts(
+        accounts
+            .into_iter()
+            .map(|a| AccountRow {
+                number: a.number,
+                program: matches!(a.control, identity::Control::Program { .. }),
+                keys: a.keys().iter().map(|k| chat::hex(&k.key)).collect(),
+                name: a.name,
+            })
+            .collect(),
+    ))
+}
+
 struct Chat;
 
 impl Program for Chat {
@@ -98,7 +126,10 @@ impl Program for Chat {
 
     fn query(ctx: &mut Query, _env: &Env, request: &[u8]) -> Result<(), Refusal> {
         let q: ChatViewQuery = serde_json::from_slice(request).map_err(bad)?;
-        let reply = chat::query(&Reader(ctx), q)?;
+        let reply = match q {
+            ChatViewQuery::Accounts { limit } => accounts(ctx, limit)?,
+            q => chat::query(&Reader(ctx), q)?,
+        };
         ctx.respond(serde_json::to_vec(&reply).expect("a reply serializes"));
         Ok(())
     }
