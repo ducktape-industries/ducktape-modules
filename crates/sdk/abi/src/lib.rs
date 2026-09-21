@@ -109,39 +109,14 @@ impl core::fmt::Display for Refusal {
 
 impl std::error::Error for Refusal {}
 
-/// The classes a refusal's `reason` names. A token names the CLASS of
-/// failure, which is the same as naming how a caller recovers: two refusals
-/// share a token exactly when a caller does the same thing about them.
 pub mod reason {
-    // host-reserved
     pub const UNKNOWN_PROGRAM: &str = "unknown_program";
     pub const TRAP: &str = "trap";
     pub const PROTOCOL: &str = "protocol";
-    pub const SEQUENCE: &str = "sequence";
-    /// naming a thing that exists (id, key, path, account, sibling program).
-    pub const NOT_FOUND: &str = "not_found";
-    /// creating under a different id, or treating the create as done.
-    pub const ALREADY_EXISTS: &str = "already_exists";
-    /// re-reading and retrying: what the caller sent is behind the program.
-    pub const STALE: &str = "stale";
-    /// changing the thing's state first: it exists, in a state that refuses this.
-    pub const WRONG_STATE: &str = "wrong_state";
-    /// fixing the request: retrying it unchanged can never succeed.
-    pub const INVALID_INPUT: &str = "invalid_input";
-    /// sending less or removing something: a count, size or work bound is hit.
-    pub const CAPACITY: &str = "capacity";
-    /// waiting: the same request succeeds after a point the sentence names.
-    pub const NOT_YET: &str = "not_yet";
-    /// nothing: a monotonic counter cannot advance again; permanent.
-    pub const EXHAUSTED: &str = "exhausted";
-    /// acting as someone else: the actor may not do this to this thing.
-    pub const UNAUTHORIZED: &str = "unauthorized";
-    /// configuring: the program or this deployment does not provide the op.
     pub const UNSUPPORTED: &str = "unsupported";
-    /// an operator: stored state or an index failed an invariant.
-    pub const CORRUPT: &str = "corrupt";
-    /// an operator: a sibling program answered a shape or value this one refuses.
-    pub const UNEXPECTED_REPLY: &str = "unexpected_reply";
+    pub const INVALID_INPUT: &str = "invalid_input";
+    pub const NOT_FOUND: &str = "not_found";
+    pub const SEQUENCE: &str = "sequence";
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
@@ -159,6 +134,7 @@ pub enum Cause {
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct Env {
+    pub network: Vec<u8>,
     pub height: u64,
     pub time: u64,
     pub me: ProgramId,
@@ -247,6 +223,7 @@ pub enum CryptoOp {
     Verify {
         scheme: Scheme,
         key: Vec<u8>,
+        namespace: Vec<u8>,
         message: Vec<u8>,
         signature: Vec<u8>,
     },
@@ -319,10 +296,10 @@ pub enum GuestCall {
 
 pub type GuestReply = Result<(), Refusal>;
 
-pub mod roster {
+pub mod module_registry {
     use super::{BlobId, BorshDeserialize, BorshSerialize, ProgramId};
 
-    pub const PROGRAM: &str = "modules";
+    pub const PROGRAM: &str = "module-registry";
 
     #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
     pub struct Entry {
@@ -347,7 +324,7 @@ pub mod roster {
     }
 }
 
-pub mod validators {
+pub mod valset {
     use super::{BorshDeserialize, BorshSerialize};
 
     pub const PROGRAM: &str = "valset";
@@ -412,6 +389,7 @@ mod tests {
     #[test]
     fn every_envelope_round_trips() {
         let env = Env {
+            network: b"n".to_vec(),
             height: 7,
             time: 9,
             me: "a".into(),
