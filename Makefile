@@ -23,7 +23,7 @@ VIEWS := chat-view
 
 # The programs on the abi: cdylibs for wasm32-unknown-unknown the host loads by
 # blob id.
-PROGRAMS := modules valset identity
+PROGRAMS := modules valset identity@0.2.0
 
 .PHONY: wasm-programs
 
