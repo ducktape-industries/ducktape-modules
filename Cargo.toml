@@ -87,6 +87,7 @@ attribution = { git = "https://github.com/ducktape-industries/ducktape-sdk", bra
 
 # the `duck://` address grammar.
 duck-address = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "duck-address" }
+design = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "design" }
 
 # ---------------------------------------------------------------------------
 # ducktape — the platform. DEV-ONLY here, except the two pure envelope crates:

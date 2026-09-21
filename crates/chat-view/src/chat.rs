@@ -1,15 +1,14 @@
 //! The slice of the chat module's wire this view speaks: the ops it submits,
 //! the index views it asks for and the rows those return. Copied from the
-//! module (crates/modules/apps/chat in ducktape-modules), fields the view
-//! reads only — serde skips the rest. `tests` drives the view over fixtures
-//! in these shapes.
+//! module (`crates/chat`), fields the view reads only — serde skips the rest.
 use serde::{Deserialize, Serialize};
 
 pub use crate::message::{Block, Mark, Party, Span, parse_message};
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PostPolicy {
+    #[default]
     Open,
     MembersOnly,
 }
@@ -30,6 +29,19 @@ pub enum ChatMsg {
     CreateDmChannel {
         counterpart: u64,
         name: String,
+    },
+    RenameChannel {
+        channel_id: String,
+        name: String,
+    },
+    SetChannelArchived {
+        channel_id: String,
+        archived: bool,
+    },
+    SetMembership {
+        channel_id: String,
+        party: Party,
+        member: bool,
     },
     PostMessage {
         channel_id: String,
@@ -60,18 +72,26 @@ pub enum ChatMsg {
 }
 
 /// One message head as the index serves it.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MsgRow {
+    #[serde(default)]
+    pub channel_id: String,
     /// 0 while the row is this view's own pending send (see `Room::pending`).
     pub seq: u64,
     pub message_id: String,
     /// `user:{hex}`, `acct:{n}`, `module:{id}` or `system`.
     pub author: String,
+    #[serde(default)]
+    pub height: u64,
     pub blocks: Vec<Block>,
+    /// the flat text the index searched; a hit shows it
+    #[serde(default)]
+    pub text: String,
     pub deleted: bool,
     pub rev: u32,
     pub thread: Option<u64>,
     pub reply_count: u64,
+    #[serde(default)]
     pub reactions: Vec<ReactionSummary>,
 }
 
@@ -82,18 +102,25 @@ pub struct ReactionSummary {
     pub reacted_by_me: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChannelRow {
     pub id: String,
     pub name: String,
+    #[serde(default)]
+    pub post_policy: PostPolicy,
     pub archived: bool,
+    #[serde(default)]
     pub huddle: Vec<HuddleEntry>,
+    #[serde(default)]
     pub voice: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HuddleEntry {
     pub party: String,
+    /// the seat's node key hex: what a call peer beacon names
+    #[serde(default)]
+    pub node: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -101,11 +128,17 @@ pub struct MemberRow {
     pub party: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChannelInfo {
     #[serde(flatten)]
     pub channel: ChannelRow,
     pub head_seq: u64,
+}
+
+impl ChannelInfo {
+    pub fn members_only(&self) -> bool {
+        self.channel.post_policy == PostPolicy::MembersOnly
+    }
 }
 
 /// The index views this view asks for (`rpc.view`, target `chat`).
@@ -143,6 +176,19 @@ pub enum ChatViewQuery {
         after: Option<String>,
         limit: Option<usize>,
     },
+    Search {
+        text: String,
+        viewer_handles: Vec<String>,
+        channel_id: Option<String>,
+        limit: Option<usize>,
+    },
+    TagSearch {
+        tag: String,
+        viewer_handles: Vec<String>,
+        channel_id: Option<String>,
+        after: Option<String>,
+        limit: Option<usize>,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -164,9 +210,22 @@ pub enum ChatViewReply {
     Messages(Vec<MsgRow>),
     Thread {
         replies: Vec<MsgRow>,
+        has_more: bool,
+        #[serde(default)]
+        next_reply_seq: Option<u64>,
     },
     Members {
         members: Vec<MemberRow>,
+    },
+    Hits {
+        hits: Vec<MsgRow>,
+        capped: bool,
+    },
+    TagHits {
+        hits: Vec<MsgRow>,
+        has_more: bool,
+        #[serde(default)]
+        next_after: Option<String>,
     },
 }
 
@@ -178,6 +237,19 @@ pub fn party_handle(party: &Party) -> String {
         Party::Module(module) => format!("module:{module}"),
         Party::System => "system".to_string(),
     }
+}
+
+/// A handle or a bare key hex back to the party a membership write names.
+pub fn party_of(text: &str) -> Option<Party> {
+    let text = text.trim();
+    if let Some(number) = text.strip_prefix("acct:") {
+        return number.parse().ok().map(Party::Account);
+    }
+    if let Ok(number) = text.parse::<u64>() {
+        return Some(Party::Account(number));
+    }
+    let key = text.strip_prefix("user:").unwrap_or(text);
+    unhex(key).map(Party::Key)
 }
 
 /// A key as the index renders it: printable bytes verbatim, anything else hex.

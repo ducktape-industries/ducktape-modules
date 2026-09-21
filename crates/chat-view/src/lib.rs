@@ -1,61 +1,243 @@
-//! Chat: channels, direct messages, threads and the room's huddle, on the
-//! view-guest `View` shape. State here, handlers as closures, module data
-//! read through the module's wire (`wire`, a local copy of the slice this
-//! view speaks) and folded to rows at render time.
+//! Chat: channels, direct messages, threads, search and the room's huddle, on
+//! the view-guest `View` shape. State here as one struct per pane, handlers as
+//! closures the frame registers, module data read through the module's wire
+//! (`chat`, a local copy of the slice this view speaks) and folded to rows at
+//! render time. `render` never mutates: what an event changes lands in the
+//! handlers of `room`, `actions` and `compose`.
+mod actions;
 mod api;
+mod background;
 mod chat;
 mod client;
+mod compose;
 mod composer;
+mod files;
+mod live;
 mod message;
+mod room;
 mod ui;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use chat::{ChannelInfo, ChatMsg, ChatViewQuery, ChatViewReply, MemberRow, MsgRow, PostPolicy};
 use client::{NameDirectory, dm_channel_id, mention_token};
 use ducktape_view_guest::host::{Refusal, malformed};
 use ducktape_view_guest::view::{
-    Cx, Effect, Live, Loaded, Query, Submit, View, ViewOf, Watching, ask,
+    Cx, Live as LiveChanges, Loaded, Query, Submit, View, ViewOf, Visible, Watching, ask,
 };
 use ducktape_view_guest::{export_view, wire};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use api::{ChatApi, Id, Identity, Props, Session};
+use api::{ChatApi, Id, Identity, Props, PropsItem, Session, Ticks};
+use composer::Draft;
 use composer::send::Target;
-use composer::{Draft, Event, Outcome};
 
 const PAGE: usize = 64;
 const WINDOW: usize = 256;
+const LIVE_POLL_MS: i64 = 2000;
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct Chat {
-    session: Session,
+    pub(crate) session: Session,
     #[serde(skip)]
-    names: Loaded<NameDirectory>,
-    channels: Loaded<Vec<ChannelInfo>>,
-    room: Option<Room>,
-    drafts: BTreeMap<String, Draft>,
-    channel_name: String,
-    dm_peer: String,
-    notice: String,
+    pub(crate) names: Loaded<NameDirectory>,
+    pub(crate) channels: Loaded<Vec<ChannelInfo>>,
+    pub(crate) room: Option<Room>,
+    pub(crate) drafts: BTreeMap<String, Draft>,
+    /// the banner over the room: the last refusal, until the reader moves on
+    pub(crate) notice: String,
+    pub(crate) search: Search,
+    pub(crate) create: Option<ChannelCreate>,
+    pub(crate) details: Option<Details>,
+    pub(crate) layout: Layout,
+    pub(crate) reads: Reads,
+    pub(crate) menu: Option<Menu>,
+    pub(crate) copy: Option<CopyRange>,
+    pub(crate) preview: Option<Preview>,
+    /// the pictures the host decoded for this view, by link: the drawn
+    /// size, or (0, 0) for one that stays a file card
     #[serde(skip)]
-    props: Option<Watching>,
+    pub(crate) pictures: BTreeMap<String, (i64, i64)>,
     #[serde(skip)]
-    live: Option<Watching>,
+    pub(crate) uploads: HashMap<String, wire::task::Handle>,
+    pub(crate) live: LiveRuns,
+    #[serde(skip)]
+    pub(crate) watches: Watches,
 }
 
 #[derive(Serialize, Deserialize, Default)]
-struct Room {
-    id: String,
-    messages: Loaded<Vec<MsgRow>>,
-    members: Loaded<Vec<MemberRow>>,
-    thread: Option<u64>,
-    replies: Loaded<Vec<MsgRow>>,
-    /// Sends the module accepted that the index has not shown yet; drawn after
-    /// the fetched rows and dropped once a fetched row carries the same id.
+pub struct Room {
+    pub(crate) id: String,
+    pub(crate) messages: Loaded<Vec<MsgRow>>,
+    pub(crate) members: Loaded<Vec<MemberRow>>,
+    pub(crate) thread: Option<Thread>,
+    /// sends the module accepted that the index has not shown yet; drawn
+    /// after the fetched rows and dropped once a fetched row carries the id
     #[serde(skip)]
-    pending: Vec<MsgRow>,
+    pub(crate) pending: Vec<MsgRow>,
+    pub(crate) has_older: bool,
+    #[serde(skip)]
+    pub(crate) older_loading: bool,
+    /// opened around a landing seq: the window may not reach the head
+    pub(crate) landed: bool,
+    pub(crate) reaches_head: bool,
+    pub(crate) at_tail: bool,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+pub struct Thread {
+    pub(crate) root: u64,
+    pub(crate) replies: Loaded<Vec<MsgRow>>,
+    pub(crate) has_more: bool,
+    pub(crate) next: Option<u64>,
+    #[serde(skip)]
+    pub(crate) more_loading: bool,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+pub struct Search {
+    pub(crate) draft: String,
+    /// the query the hits answer; "" while no search stands
+    pub(crate) query: String,
+    pub(crate) hits: Loaded<Hits>,
+    #[serde(skip)]
+    pub(crate) more_loading: bool,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone)]
+pub struct Hits {
+    pub(crate) rows: Vec<MsgRow>,
+    pub(crate) capped: bool,
+    pub(crate) has_more: bool,
+    pub(crate) next_after: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+pub struct ChannelCreate {
+    pub(crate) name: String,
+    pub(crate) voice: bool,
+    pub(crate) members_only: bool,
+    pub(crate) error: String,
+    #[serde(skip)]
+    pub(crate) busy: bool,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+pub struct Details {
+    pub(crate) name_draft: String,
+    pub(crate) member_draft: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Layout {
+    pub(crate) viewport: (f32, f32),
+    pub(crate) sidebar: f32,
+    pub(crate) details: f32,
+    pub(crate) thread: f32,
+    /// where the pointer last pressed: a menu opens there
+    pub(crate) press: (f32, f32),
+}
+
+impl Default for Layout {
+    fn default() -> Self {
+        Self {
+            viewport: (1280., 800.),
+            sidebar: 236.,
+            details: 320.,
+            thread: 330.,
+            press: (0., 0.),
+        }
+    }
+}
+
+impl Layout {
+    pub(crate) fn clamp(&mut self) {
+        let (w, _) = self.viewport;
+        self.sidebar = self.sidebar.clamp(180., (w * 0.5).clamp(180., 420.));
+        let side = w - self.sidebar - 20. - 320.;
+        self.details = self.details.clamp(260., side.clamp(260., 520.));
+        self.thread = self.thread.clamp(280., side.clamp(280., 640.));
+    }
+}
+
+/// What the reader has read: per room, the head seq when she last had it on
+/// screen. `boundary` is the cursor the open room was entered with — the
+/// unread divider's row is the first message past it.
+#[derive(Serialize, Deserialize, Default)]
+pub struct Reads {
+    pub(crate) cursors: BTreeMap<String, u64>,
+    #[serde(skip)]
+    pub(crate) visible: bool,
+    #[serde(skip)]
+    pub(crate) entering: bool,
+    pub(crate) boundary: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Pane {
+    Timeline,
+    Thread,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Mode {
+    /// chosen: the floating actions stay open
+    Toolbar,
+    More,
+    Reactions,
+    Editing,
+    Delete,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Menu {
+    pub(crate) pane: Pane,
+    pub(crate) seq: u64,
+    pub(crate) rev: u32,
+    pub(crate) mode: Mode,
+    pub(crate) at: (f32, f32),
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
+pub struct CopyRange {
+    pub(crate) pane: Pane,
+    pub(crate) anchor: u64,
+    pub(crate) head: u64,
+}
+
+impl CopyRange {
+    pub(crate) fn holds(&self, pane: Pane, seq: u64) -> bool {
+        self.pane == pane && seq >= self.anchor.min(self.head) && seq <= self.anchor.max(self.head)
+    }
+}
+
+#[derive(Serialize, Deserialize, Default)]
+pub struct Preview {
+    pub(crate) link: String,
+    #[serde(skip)]
+    pub(crate) read: Loaded<files::Preview>,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+pub struct LiveRuns {
+    pub(crate) seeds: Vec<live::Seed>,
+    pub(crate) output: BTreeMap<String, live::Output>,
+    pub(crate) public: BTreeMap<String, String>,
+    #[serde(skip)]
+    pub(crate) labels: BTreeMap<String, String>,
+    #[serde(skip)]
+    pub(crate) polling: bool,
+}
+
+#[derive(Default)]
+pub struct Watches {
+    props: Option<Watching>,
+    changes: Option<Watching>,
+    visible: Option<Watching>,
+    ticks: Option<Watching>,
+    pub(crate) drops: Option<Watching>,
+    pub(crate) streams: BTreeMap<String, Watching>,
 }
 
 impl View for Chat {
@@ -73,14 +255,29 @@ impl View for Chat {
         for draft in self.drafts.values_mut() {
             draft.retire_device_requests();
         }
-        self.props = Some(cx.watch::<Props>((), |chat, item, cx| {
-            if let Ok(next) = item
-                && !next.me.is_empty()
-            {
-                chat.session_changed(next, cx);
+        self.menu = None;
+        self.watches.props = Some(cx.watch::<Props>((), |chat, item, cx| match item {
+            Ok(PropsItem::Session(next)) => chat.session_changed(*next, cx),
+            Ok(PropsItem::Background { background }) => {
+                let names = chat.names.ready().cloned().unwrap_or_default();
+                cx.spawn(async move {
+                    background::run(background, names).await;
+                    |_: &mut Chat, _: &mut Cx<Chat>| {}
+                });
+            }
+            Err(refusal) => {
+                chat.notice = format!("Couldn’t read the session: {}", refusal.sentence)
             }
         }));
-        self.live = Some(cx.watch::<Live>("chat".into(), |chat, _, cx| chat.refresh(cx)));
+        self.watches.changes =
+            Some(cx.watch::<LiveChanges>("chat".into(), |chat, _, cx| chat.refresh(cx)));
+        self.watches.visible = Some(cx.watch::<Visible>((), |chat, item, cx| {
+            if let Ok(visible) = item {
+                chat.visibility_changed(visible, cx);
+            }
+        }));
+        self.watches.ticks =
+            Some(cx.watch::<Ticks>(LIVE_POLL_MS, |chat, _, cx| chat.poll_live(cx)));
         if self.names.is_idle() {
             self.names = cx.load(roster(), |chat| &mut chat.names);
         }
@@ -88,15 +285,21 @@ impl View for Chat {
             self.channels = cx.load(channels(), |chat| &mut chat.channels);
         }
         if let Some(room) = &self.room {
-            let (id, thread) = (room.id.clone(), room.thread);
+            let (id, thread) = (room.id.clone(), room.thread.as_ref().map(|t| t.root));
             self.open(id, cx);
             if let Some(root) = thread {
                 self.open_thread(root, cx);
             }
         }
+        if !self.search.query.is_empty() {
+            self.search_now(cx);
+        }
+        self.preview_read(cx);
+        self.watch_drops(cx);
     }
 
     fn render(&mut self, cx: &mut Cx<Self>) -> wire::Node {
+        wire::kit::set_dark(self.session.dark);
         ui::render(self, cx)
     }
 }
@@ -104,74 +307,69 @@ impl View for Chat {
 impl Chat {
     fn session_changed(&mut self, next: Session, cx: &mut Cx<Self>) {
         let prev = std::mem::replace(&mut self.session, next);
-        wire::kit::set_dark(self.session.dark);
-        if self.session.names_serial != prev.names_serial || self.session.me != prev.me {
+        let reader_changed = self.session.me != prev.me
+            || self.session.endpoint != prev.endpoint
+            || self.session.chain() != prev.chain();
+        if self.session.names_serial != prev.names_serial || reader_changed {
             self.names = cx.load(roster(), |chat| &mut chat.names);
         }
-        let steered = self.session.active_channel != prev.active_channel
-            || self.session.land_seq != prev.land_seq;
-        if steered && !self.session.active_channel.is_empty() {
-            self.open(self.session.active_channel.clone(), cx);
+        if reader_changed || (prev.connected && !self.session.connected) {
+            self.uploads.clear();
+            for draft in self.drafts.values_mut() {
+                draft.retire_device_requests();
+            }
+            self.reads.cursors.clear();
+            self.live = LiveRuns::default();
+            self.watches.streams.clear();
+            self.create = None;
+        }
+        if !prev.connected && self.session.connected {
+            self.channels = cx.load(channels(), |chat| &mut chat.channels);
+            self.refresh(cx);
+        }
+        let active = &self.session.active_channel;
+        let steered = !active.is_empty()
+            && (*active != prev.active_channel || self.session.land_seq != prev.land_seq);
+        let already = self
+            .room
+            .as_ref()
+            .is_some_and(|room| room.id == *active && (self.session.land_seq == 0) != room.landed);
+        if steered && !already {
+            let land = u64::try_from(self.session.land_seq).unwrap_or(0);
+            self.open_at(active.clone(), land, cx);
         }
         if self.session.dm_serial != prev.dm_serial && !self.session.dm_peer.is_empty() {
-            self.dm_peer = self.session.dm_peer.clone();
-            self.open_dm(cx);
+            let peer = self.session.dm_peer.clone();
+            self.open_dm(&peer, cx);
+        }
+        if self.session.copy_chord_serial != prev.copy_chord_serial {
+            self.copy_range(cx);
+        }
+        self.watch_drops(cx);
+    }
+
+    fn visibility_changed(&mut self, visible: bool, cx: &mut Cx<Self>) {
+        if !visible {
+            self.create = None;
+        }
+        if self.reads.visible == visible {
+            return;
+        }
+        self.reads.visible = visible;
+        self.reads.entering = visible;
+        if visible && self.session.connected {
+            room::refresh_into(cx, channels(), |chat, list, _| chat.channels_arrived(list));
         }
     }
 
     /// Every state change of the chat module: re-read what is on screen,
     /// keeping the rows already there until the fresh ones land.
     fn refresh(&mut self, cx: &mut Cx<Self>) {
-        refresh_into(cx, channels(), |chat| &mut chat.channels);
-        let Some(room) = &self.room else { return };
-        let (id, viewer) = (room.id.clone(), self.viewer());
-        refresh_into(
-            cx,
-            messages(id.clone(), viewer.clone(), self.session.land_seq),
-            room_slot,
-        );
-        refresh_into(cx, members(id.clone()), |chat| {
-            &mut room_slot_of(chat).members
-        });
-        if let Some(root) = room.thread {
-            refresh_into(cx, thread(id, root, viewer), |chat| {
-                &mut room_slot_of(chat).replies
-            });
-        }
+        room::refresh_into(cx, channels(), |chat, list, _| chat.channels_arrived(list));
+        self.refresh_room(cx);
     }
 
-    fn open(&mut self, id: String, cx: &mut Cx<Self>) {
-        let viewer = self.viewer();
-        let land = self.session.land_seq;
-        let same = self.room.as_ref().is_some_and(|room| room.id == id);
-        let room = self.room.get_or_insert_default();
-        if !same {
-            *room = Room {
-                id: id.clone(),
-                ..Room::default()
-            };
-        }
-        room.messages = cx.load(messages(id.clone(), viewer, land), room_slot);
-        room.members = cx.load(members(id), |chat| &mut room_slot_of(chat).members);
-    }
-
-    fn open_thread(&mut self, root: u64, cx: &mut Cx<Self>) {
-        let viewer = self.viewer();
-        let Some(room) = &mut self.room else { return };
-        room.thread = Some(root);
-        room.replies = cx.load(thread(room.id.clone(), root, viewer), |chat| {
-            &mut room_slot_of(chat).replies
-        });
-    }
-
-    fn close_thread(&mut self) {
-        if let Some(room) = &mut self.room {
-            room.thread = None;
-            room.replies = Loaded::Idle;
-        }
-    }
-
-    fn viewer(&self) -> Vec<String> {
+    pub(crate) fn viewer(&self) -> Vec<String> {
         let me = &self.session.me;
         if me.is_empty() {
             Vec::new()
@@ -180,24 +378,83 @@ impl Chat {
         }
     }
 
-    fn me_key(&self) -> Vec<u8> {
-        let hex = &self.session.me_key;
-        (0..hex.len() / 2)
-            .filter_map(|i| u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).ok())
-            .collect()
+    pub(crate) fn me_key(&self) -> Vec<u8> {
+        chat::unhex(&self.session.me_key).unwrap_or_default()
     }
 
-    fn mention_choices(&self) -> Vec<composer::MentionChoice> {
+    /// The reader's account number, when the key holds one.
+    pub(crate) fn my_account(&self) -> Option<u64> {
+        self.session.me.strip_prefix("acct:")?.parse().ok()
+    }
+
+    pub(crate) fn info(&self, id: &str) -> Option<&ChannelInfo> {
+        self.channels
+            .ready()?
+            .iter()
+            .find(|info| info.channel.id == id)
+    }
+
+    pub(crate) fn room_info(&self) -> Option<&ChannelInfo> {
+        self.info(&self.room.as_ref()?.id)
+    }
+
+    pub(crate) fn members(&self) -> Vec<client::ChatMember> {
         let Some(names) = self.names.ready() else {
             return Vec::new();
         };
-        let members: Vec<_> = self
-            .room
+        self.room
             .as_ref()
             .and_then(|room| room.members.ready())
-            .map(|rows| rows.iter().map(|row| ui::member(row, names)).collect())
-            .unwrap_or_default();
-        client::mention_choices(names, &members)
+            .map(|rows| {
+                rows.iter()
+                    .map(|row| client::ChatMember {
+                        key: row.party.clone(),
+                        label: names.member_label(&row.party),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Why the reader may not write here, as a reason token — "" when she
+    /// may. The account comes first: with none, every write is refused.
+    pub(crate) fn write_refusal(&self) -> &'static str {
+        if !self.session.holds_account() {
+            return "no_account";
+        }
+        let Some(info) = self.room_info() else {
+            return "";
+        };
+        if info.channel.archived {
+            return "channel_archived";
+        }
+        if info.members_only() {
+            let me = &self.session.me;
+            let seated = self
+                .room
+                .as_ref()
+                .and_then(|room| room.members.ready())
+                .is_some_and(|members| {
+                    members
+                        .iter()
+                        .any(|m| m.party == *me || format!("user:{}", m.party) == *me)
+                });
+            if !seated {
+                return "members_only";
+            }
+        }
+        ""
+    }
+
+    pub(crate) fn may_write(&self) -> bool {
+        self.write_refusal().is_empty()
+    }
+
+    pub(crate) fn mention_choices(&self) -> Vec<composer::MentionChoice> {
+        let Some(names) = self.names.ready() else {
+            return Vec::new();
+        };
+        client::mention_choices(names, &self.members())
             .into_iter()
             .map(|choice| composer::MentionChoice {
                 token: mention_token(&choice.party),
@@ -206,23 +463,35 @@ impl Chat {
             .collect()
     }
 
-    fn submit(&mut self, op: ChatMsg, cx: &mut Cx<Self>) {
+    /// One op to the chat module; a refusal lands in the banner.
+    pub(crate) fn submit(&mut self, op: ChatMsg, cx: &mut Cx<Self>) {
+        self.notice.clear();
         cx.spawn(async move {
             let result = ask::<Submit<ChatApi>>(op).await;
             move |chat: &mut Chat, cx: &mut Cx<Chat>| match result {
                 Ok(_) => chat.refresh(cx),
-                Err(refusal) => chat.notice = refusal.sentence,
+                Err(refusal) => {
+                    chat.notice = format!("That didn’t go through: {}", refusal.sentence)
+                }
             }
         });
     }
 
-    fn create_channel(&mut self, voice: bool, cx: &mut Cx<Self>) {
-        let name = self.channel_name.trim().to_string();
-        if name.is_empty() || name.len() > 128 {
-            self.notice = "Enter a channel name of at most 128 bytes".into();
+    pub(crate) fn create_channel(&mut self, cx: &mut Cx<Self>) {
+        let Some(create) = &mut self.create else {
+            return;
+        };
+        if create.busy || !self.session.connected || self.session.busy {
             return;
         }
-        self.channel_name.clear();
+        let name = create.name.trim().to_string();
+        if name.is_empty() || name.len() > 128 || name.contains('\0') {
+            create.error = "Enter a channel name of at most 128 bytes".into();
+            return;
+        }
+        create.error.clear();
+        create.busy = true;
+        let (voice, members_only) = (create.voice, create.members_only);
         cx.spawn(async move {
             let result = async {
                 let channel_id = ask::<Id>("channel").await?;
@@ -235,7 +504,11 @@ impl Chat {
                     ChatMsg::CreateChannel {
                         channel_id: channel_id.clone(),
                         name,
-                        post_policy: PostPolicy::Open,
+                        post_policy: if members_only {
+                            PostPolicy::MembersOnly
+                        } else {
+                            PostPolicy::Open
+                        },
                     }
                 };
                 ask::<Submit<ChatApi>>(op).await?;
@@ -243,18 +516,32 @@ impl Chat {
             }
             .await;
             move |chat: &mut Chat, cx: &mut Cx<Chat>| match result {
-                Ok(id) => chat.open(id, cx),
-                Err(refusal) => chat.notice = refusal.sentence,
+                Ok(id) => {
+                    chat.create = None;
+                    room::refresh_into(cx, channels(), |chat, list, _| chat.channels_arrived(list));
+                    if !voice {
+                        chat.choose(id, cx);
+                    }
+                }
+                Err(refusal) => {
+                    if let Some(create) = &mut chat.create {
+                        create.busy = false;
+                        create.error =
+                            format!("Couldn’t create this channel: {}", refusal.sentence);
+                    }
+                }
             }
         });
     }
 
-    fn open_dm(&mut self, cx: &mut Cx<Self>) {
+    /// A direct message with `peer` (an account number): the derived room,
+    /// created when the module has none yet.
+    pub(crate) fn open_dm(&mut self, peer: &str, cx: &mut Cx<Self>) {
         let Some(mine) = self.session.me.strip_prefix("acct:") else {
             self.notice = "This key is on no account; a DM needs one".into();
             return;
         };
-        let Ok(peer) = self.dm_peer.trim().parse::<u64>() else {
+        let Ok(peer) = peer.trim().parse::<u64>() else {
             self.notice = "A DM peer is an account number".into();
             return;
         };
@@ -263,7 +550,7 @@ impl Chat {
             |names| names.member_label(&format!("acct:{peer}")),
         );
         let id = dm_channel_id(mine, &peer.to_string());
-        self.dm_peer.clear();
+        self.notice.clear();
         cx.spawn(async move {
             let result = async {
                 let existing = ask::<ViewOf<ChatApi>>(ChatViewQuery::Channel {
@@ -281,100 +568,19 @@ impl Chat {
             }
             .await;
             move |chat: &mut Chat, cx: &mut Cx<Chat>| match result {
-                Ok(id) => chat.open(id, cx),
-                Err(refusal) => chat.notice = refusal.sentence,
-            }
-        });
-    }
-
-    /// The composer's events for one target, run through its draft.
-    fn composer(&mut self, target: Target, event: Event<Effect<Self>>, cx: &mut Cx<Self>) {
-        let choices = self.mention_choices();
-        let key = draft_key(&target);
-        let draft = self.drafts.entry(key.clone()).or_default();
-        match draft.handle(event, &choices) {
-            Outcome::Updated => {}
-            Outcome::Message(effect) => effect.run(self, cx),
-            Outcome::Enqueue(tag) => cx.widget(wire::WidgetCommand::EditorAction {
-                target: format!("{key}/editor"),
-                tag,
-            }),
-            Outcome::Action(tag) => match tag.as_str() {
-                "send" => {
-                    if let Some(send) = draft.submitted.take() {
-                        draft.in_flight.push(send.clone());
-                        self.send(key, send, target, cx);
-                    }
+                Ok(id) => {
+                    room::refresh_into(cx, channels(), |chat, list, _| chat.channels_arrived(list));
+                    chat.choose(id, cx);
                 }
-                "restore" => {
-                    if let Some(send) = draft.failed_send.take() {
-                        draft.seed(&send.body, &choices);
-                    }
-                }
-                _ => {}
-            },
-        }
-    }
-
-    fn send(&mut self, key: String, send: composer::Send, target: Target, cx: &mut Cx<Self>) {
-        cx.spawn(async move {
-            let result = async {
-                let id = ask::<Id>("message").await?;
-                let op = composer::send::op(id, &send, &target)?;
-                let pending = pending_row(&op);
-                ask::<Submit<ChatApi>>(op).await.map(|_| pending)
-            }
-            .await;
-            move |chat: &mut Chat, cx: &mut Cx<Chat>| {
-                let draft = chat.drafts.entry(key).or_default();
-                draft.complete_send(&send);
-                match result {
-                    Ok(pending) => {
-                        let me = chat.session.me.clone();
-                        if let (Some(mut row), Some(room)) = (pending, chat.room.as_mut())
-                            && room.id == target.channel()
-                        {
-                            row.author = me;
-                            room.pending.push(row);
-                        }
-                        chat.refresh(cx);
-                    }
-                    Err(refusal) => {
-                        draft.note = refusal.sentence;
-                        draft.failed(send);
-                    }
+                Err(refusal) => {
+                    chat.notice = format!("Couldn’t open this conversation: {}", refusal.sentence)
                 }
             }
         });
     }
 }
 
-/// The row a just-accepted post shows as until the index serves it: the
-/// reader as author, seq 0. An edit shows nothing early.
-fn pending_row(op: &ChatMsg) -> Option<MsgRow> {
-    let ChatMsg::PostMessage {
-        message_id,
-        blocks,
-        thread,
-        ..
-    } = op
-    else {
-        return None;
-    };
-    Some(MsgRow {
-        seq: 0,
-        message_id: message_id.clone(),
-        author: String::new(),
-        blocks: blocks.clone(),
-        deleted: false,
-        rev: 0,
-        thread: *thread,
-        reply_count: 0,
-        reactions: Vec::new(),
-    })
-}
-
-fn draft_key(target: &Target) -> String {
+pub(crate) fn draft_key(target: &Target) -> String {
     match target {
         Target::Post {
             channel,
@@ -388,35 +594,11 @@ fn draft_key(target: &Target) -> String {
     }
 }
 
-fn room_slot_of(chat: &mut Chat) -> &mut Room {
-    chat.room.get_or_insert_default()
-}
-
-fn room_slot(chat: &mut Chat) -> &mut Loaded<Vec<MsgRow>> {
-    &mut room_slot_of(chat).messages
-}
-
-/// A re-read that leaves the slot's rows in place until fresh ones land.
-fn refresh_into<T: 'static>(
-    cx: &mut Cx<Chat>,
-    work: impl Future<Output = Result<T, Refusal>> + 'static,
-    at: impl Fn(&mut Chat) -> &mut Loaded<T> + 'static,
-) {
-    cx.spawn(async move {
-        let result = work.await;
-        move |chat: &mut Chat, _: &mut Cx<Chat>| {
-            if let Ok(value) = result {
-                *at(chat) = Loaded::Ready(value);
-            }
-        }
-    });
-}
-
 fn wrong_reply() -> Refusal {
     malformed("the chat module answered another question".into())
 }
 
-async fn channels() -> Result<Vec<ChannelInfo>, Refusal> {
+pub(crate) async fn channels() -> Result<Vec<ChannelInfo>, Refusal> {
     let mut all = Vec::new();
     let mut after = None;
     loop {
@@ -440,28 +622,16 @@ async fn channels() -> Result<Vec<ChannelInfo>, Refusal> {
     }
 }
 
-/// The room's window: the newest roots up to `WINDOW`, or the rows around
-/// a landing seq, oldest first either way.
-async fn messages(
+/// One page of roots older than `before` (or the newest), oldest first,
+/// with whether older ones remain.
+pub(crate) async fn roots(
     channel_id: String,
     viewer: Vec<String>,
-    land: i64,
-) -> Result<Vec<MsgRow>, Refusal> {
-    if land > 0 {
-        let ChatViewReply::Messages(rows) = ask::<ViewOf<ChatApi>>(ChatViewQuery::MessagesAround {
-            channel_id,
-            seq: land as u64,
-            viewer_handles: viewer,
-            limit: Some(WINDOW / 2),
-        })
-        .await?
-        else {
-            return Err(wrong_reply());
-        };
-        return Ok(sorted(rows));
-    }
+    before: Option<u64>,
+    limit: usize,
+) -> Result<(Vec<MsgRow>, bool), Refusal> {
     let mut all = Vec::new();
-    let mut before_seq = None;
+    let mut before_seq = before;
     loop {
         let ChatViewReply::Roots {
             roots,
@@ -478,19 +648,38 @@ async fn messages(
             return Err(wrong_reply());
         };
         all.extend(roots);
-        if !has_more || next_before_seq.is_none() || all.len() >= WINDOW {
-            return Ok(sorted(all));
+        if !has_more || next_before_seq.is_none() || all.len() >= limit {
+            return Ok((sorted(all), has_more && next_before_seq.is_some()));
         }
         before_seq = next_before_seq;
     }
 }
 
-fn sorted(mut rows: Vec<MsgRow>) -> Vec<MsgRow> {
+/// The rows around a landing seq, oldest first.
+pub(crate) async fn around(
+    channel_id: String,
+    seq: u64,
+    viewer: Vec<String>,
+) -> Result<Vec<MsgRow>, Refusal> {
+    match ask::<ViewOf<ChatApi>>(ChatViewQuery::MessagesAround {
+        channel_id,
+        seq,
+        viewer_handles: viewer,
+        limit: Some(WINDOW / 2),
+    })
+    .await?
+    {
+        ChatViewReply::Messages(rows) => Ok(sorted(rows)),
+        _ => Err(wrong_reply()),
+    }
+}
+
+pub(crate) fn sorted(mut rows: Vec<MsgRow>) -> Vec<MsgRow> {
     rows.sort_by_key(|row| row.seq);
     rows
 }
 
-async fn members(channel_id: String) -> Result<Vec<MemberRow>, Refusal> {
+pub(crate) async fn members(channel_id: String) -> Result<Vec<MemberRow>, Refusal> {
     match ask::<ViewOf<ChatApi>>(ChatViewQuery::Members {
         channel_id,
         after: None,
@@ -503,21 +692,61 @@ async fn members(channel_id: String) -> Result<Vec<MemberRow>, Refusal> {
     }
 }
 
-async fn thread(
+/// One page of a thread's replies after `after`, and how to page on.
+pub(crate) async fn thread(
     channel_id: String,
     root_seq: u64,
     viewer: Vec<String>,
-) -> Result<Vec<MsgRow>, Refusal> {
+    after: Option<u64>,
+) -> Result<(Vec<MsgRow>, bool, Option<u64>), Refusal> {
     match ask::<ViewOf<ChatApi>>(ChatViewQuery::Thread {
         channel_id,
         root_seq,
         viewer_handles: viewer,
-        after_reply_seq: None,
+        after_reply_seq: after,
         limit: Some(WINDOW),
     })
     .await?
     {
-        ChatViewReply::Thread { replies, .. } => Ok(sorted(replies)),
+        ChatViewReply::Thread {
+            replies,
+            has_more,
+            next_reply_seq,
+        } => Ok((sorted(replies), has_more, next_reply_seq)),
+        _ => Err(wrong_reply()),
+    }
+}
+
+/// A search: `#tag` pages through the tag index, anything else is a
+/// full-text search capped by the module.
+pub(crate) async fn search_hits(
+    text: String,
+    channel_id: Option<String>,
+    viewer: Vec<String>,
+    after: Option<String>,
+) -> Result<(Vec<MsgRow>, bool, bool, Option<String>), Refusal> {
+    let query = match text.strip_prefix('#') {
+        Some(tag) if !tag.is_empty() => ChatViewQuery::TagSearch {
+            tag: tag.to_owned(),
+            viewer_handles: viewer,
+            channel_id,
+            after,
+            limit: Some(PAGE),
+        },
+        _ => ChatViewQuery::Search {
+            text,
+            viewer_handles: viewer,
+            channel_id,
+            limit: Some(PAGE),
+        },
+    };
+    match ask::<ViewOf<ChatApi>>(query).await? {
+        ChatViewReply::Hits { hits, capped } => Ok((hits, capped, false, None)),
+        ChatViewReply::TagHits {
+            hits,
+            has_more,
+            next_after,
+        } => Ok((hits, false, has_more, next_after)),
         _ => Err(wrong_reply()),
     }
 }
@@ -560,7 +789,7 @@ async fn roster() -> Result<NameDirectory, Refusal> {
 export_view!(
     Chat,
     "Chat",
-    "Channels, direct messages, threads and the live call of this workspace.",
+    "Channels, direct messages, threads, search and the live call of this workspace.",
     ["chat"]
 );
 

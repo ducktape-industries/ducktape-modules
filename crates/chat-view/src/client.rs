@@ -1,11 +1,11 @@
 //! Naming and folding: the network's name directory, the reader's own keys,
 //! index rows folded into the rows the frame draws, mention candidates and
-//! the derived DM channel id. Everything is display logic over `wire`.
+//! the derived DM channel id. Everything is display logic over `chat`.
 use std::collections::{BTreeMap, BTreeSet};
 
 use sha2::{Digest, Sha256};
 
-use crate::chat::{Block, MsgRow, Party, hex, party_handle, unhex};
+use crate::chat::{Block, Mark, MsgRow, Party, Span, hex, party_handle, unhex};
 
 /// The account bound to a user key: its number (the identity) and its name.
 #[derive(Clone, Debug, PartialEq)]
@@ -59,6 +59,15 @@ impl NameDirectory {
         self.accounts.get(key_hex).map(|account| account.number)
     }
 
+    /// Every named account, by number.
+    pub fn accounts(&self) -> impl Iterator<Item = (&u64, &String)> {
+        self.by_account.iter()
+    }
+
+    pub fn is_program(&self, account: u64) -> bool {
+        self.programs.contains(&account)
+    }
+
     /// A member's label: the bound name, else the shortened key. Takes a
     /// handle (`acct:n`, `user:hex`) or a bare key hex.
     pub fn member_label(&self, key_hex: &str) -> String {
@@ -100,45 +109,65 @@ impl NameDirectory {
     }
 }
 
-/// The reader: the key they sign with (what `by me` hangs on) and the
-/// directory every author is named through.
-#[derive(Clone, Copy, Debug)]
-pub struct ChatReader<'a> {
-    pub key: Option<&'a [u8]>,
-    pub names: &'a NameDirectory,
-}
-
-impl<'a> ChatReader<'a> {
-    pub fn new(key: Option<&'a [u8]>, names: &'a NameDirectory) -> Self {
-        Self { key, names }
-    }
-
-    pub fn is_me(&self, handle: &str) -> bool {
-        self.key
-            .is_some_and(|key| self.names.owns_handle(handle, key))
-    }
-}
-
 /// One message as the frame draws it.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ChatMessage {
+    pub id: String,
+    /// 0 for a pending row
     pub seq: u64,
     pub author: String,
     pub meta: String,
+    /// the message as one run of plain text: the copy range's line
+    pub body: String,
+    /// the editable markdown of the same body, mentions as stable tokens
+    pub edit_body: String,
     pub blocks: Vec<ChatBlock>,
+    pub pending: bool,
+    pub rev: u32,
+    pub edited: bool,
     pub deleted: bool,
     pub reply_count: u64,
+    pub thread: Option<u64>,
     /// Opens a run: the first message, or one whose author differs from the
     /// one above (see [`mark_message_groups`]).
     pub show_author: bool,
+    pub initial: String,
+    pub agent: bool,
+    pub height: u64,
     pub reactions: Vec<ChatReaction>,
 }
 
-/// `kind` is `paragraph` | `code` | `quote` | `divider`; `text` its flat text.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// `kind` is `paragraph` | `code` | `quote` | `divider` | `attachment`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ChatBlock {
     pub kind: String,
+    /// the flat text; a code block's code; an attachment's file name
     pub text: String,
+    pub lang: String,
+    /// spans carry a mark, so the frame draws them rich
+    pub rich: bool,
+    pub spans: Vec<ChatSpan>,
+    /// an attachment's destination: the file link
+    pub link: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChatSpan {
+    pub text: String,
+    pub style: SpanStyle,
+}
+
+/// The one style arm a run renders through: a link outranks every other
+/// mark, a mention outranks emphasis.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SpanStyle {
+    Plain,
+    Bold,
+    Italic,
+    BoldItalic,
+    Link(String),
+    /// the account the mention names, in decimal ("" for a bare key)
+    Mention(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -154,31 +183,55 @@ pub struct ChatMember {
     pub label: String,
 }
 
+/// Where a send puts a message's files; a paragraph that is one link into
+/// it reads as a file card, not a line of text.
+pub const ATTACHMENTS_DIR: &str = "/shared/attachments/";
+
 pub fn chat_message(row: MsgRow, names: &NameDirectory) -> ChatMessage {
-    let meta = match (row.seq, row.rev) {
+    let edited = row.rev > 0;
+    let meta = match (row.seq, edited) {
         (0, _) => "sending…".to_string(),
-        (seq, 0) => format!("#{seq}"),
-        (seq, _) => format!("#{seq} · edited"),
+        (seq, false) => format!("#{seq}"),
+        (seq, true) => format!("#{seq} · edited"),
     };
-    let blocks = if row.deleted {
-        vec![ChatBlock {
-            kind: "paragraph".into(),
-            text: "Message deleted".into(),
-        }]
+    let (body, edit_body, blocks) = if row.deleted {
+        (
+            "Message deleted".to_string(),
+            String::new(),
+            vec![ChatBlock {
+                kind: "paragraph".into(),
+                text: "Message deleted".into(),
+                ..ChatBlock::default()
+            }],
+        )
     } else {
-        row.blocks
-            .iter()
-            .map(|block| block_view(block, names))
-            .collect()
+        (
+            message_body(&row.blocks, names),
+            draft_body(&row.blocks),
+            row.blocks
+                .iter()
+                .map(|block| block_view(block, names))
+                .collect(),
+        )
     };
     ChatMessage {
+        id: row.message_id,
         seq: row.seq,
         author: author_display(&row.author, names),
         meta,
+        body,
+        edit_body,
         blocks,
+        pending: row.seq == 0,
+        rev: row.rev,
+        edited,
         deleted: row.deleted,
         reply_count: row.reply_count,
+        thread: row.thread,
         show_author: true,
+        initial: avatar_initial(&row.author, names),
+        agent: is_agent(&row.author, names),
+        height: row.height,
         reactions: row
             .reactions
             .into_iter()
@@ -202,41 +255,152 @@ pub fn mark_message_groups(messages: &mut [ChatMessage]) {
     }
 }
 
-fn block_view(block: &Block, names: &NameDirectory) -> ChatBlock {
-    let (kind, text) = match block {
-        Block::Paragraph(spans) => ("paragraph", span_text(spans, names)),
-        Block::Quote(spans) => ("quote", span_text(spans, names)),
-        Block::Code { lang, text } => (
-            "code",
-            match lang {
+/// The message as one run of plain text — the copy range's lines and the
+/// search hit's preview. A mention reads as the NAME it addresses.
+pub fn message_body(blocks: &[Block], names: &NameDirectory) -> String {
+    blocks
+        .iter()
+        .map(|block| match block {
+            Block::Paragraph(spans) => span_text(spans, names),
+            Block::Quote(spans) => format!("“{}”", span_text(spans, names)),
+            Block::Code { lang, text } => match lang {
                 Some(lang) => format!("{lang}\n{text}"),
                 None => text.clone(),
             },
-        ),
-        Block::Divider => ("divider", String::new()),
-    };
-    ChatBlock {
-        kind: kind.into(),
-        text,
-    }
+            Block::Divider => "────────".to_owned(),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
-/// Spans to text; a mention plate shows the account's current name.
-fn span_text(spans: &[crate::chat::Span], names: &NameDirectory) -> String {
-    use crate::chat::Mark;
+/// Editable markdown with stable mention identities: a mention keeps its
+/// `<@7>` token rather than the name it renders as today.
+fn draft_body(blocks: &[Block]) -> String {
+    blocks
+        .iter()
+        .map(|block| match block {
+            Block::Paragraph(spans) => draft_spans(spans),
+            Block::Quote(spans) => format!("> {}", draft_spans(spans)),
+            Block::Code { lang, text } => {
+                format!("```{}\n{text}\n```", lang.clone().unwrap_or_default())
+            }
+            Block::Divider => "---".to_owned(),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn draft_spans(spans: &[Span]) -> String {
     spans
         .iter()
         .map(|span| {
             let mention = span.marks.iter().find_map(|mark| match mark {
-                Mark::Mention(party) => Some(party),
+                Mark::Mention(party) => Some(mention_token(party)),
                 _ => None,
             });
-            match mention {
-                Some(party) => mention_label(party, names),
-                None => span.text.clone(),
+            let mut text = mention.unwrap_or_else(|| span.text.clone());
+            for mark in &span.marks {
+                text = match mark {
+                    Mark::Bold => format!("**{text}**"),
+                    Mark::Italic => format!("_{text}_"),
+                    Mark::Link(url) => format!("[{text}]({url})"),
+                    Mark::Mention(_) => text,
+                };
             }
+            text
         })
         .collect()
+}
+
+fn block_view(block: &Block, names: &NameDirectory) -> ChatBlock {
+    match block {
+        Block::Paragraph(spans) => rich_block("paragraph", spans, names),
+        Block::Quote(spans) => rich_block("quote", spans, names),
+        Block::Code { lang, text } => ChatBlock {
+            kind: "code".into(),
+            text: text.clone(),
+            lang: lang.clone().unwrap_or_default(),
+            ..ChatBlock::default()
+        },
+        Block::Divider => ChatBlock {
+            kind: "divider".into(),
+            ..ChatBlock::default()
+        },
+    }
+}
+
+/// A paragraph/quote block: plain runs keep one wrapping text; any inline
+/// mark switches to spans. A paragraph that is exactly one link into the
+/// attachments root is the file card the send's link line becomes.
+fn rich_block(kind: &str, spans: &[Span], names: &NameDirectory) -> ChatBlock {
+    let marked = spans.iter().any(|span| !span.marks.is_empty());
+    let views: Vec<ChatSpan> = if marked {
+        spans
+            .iter()
+            .filter_map(|span| {
+                let text = span_display(span, names);
+                if text.is_empty() {
+                    return None;
+                }
+                let link = span.marks.iter().find_map(|mark| match mark {
+                    Mark::Link(url) => Some(url.clone()),
+                    _ => None,
+                });
+                let mention = span.marks.iter().find_map(|mark| match mark {
+                    Mark::Mention(Party::Account(account)) => Some(account.to_string()),
+                    Mark::Mention(_) => Some(String::new()),
+                    _ => None,
+                });
+                let bold = span.marks.contains(&Mark::Bold);
+                let italic = span.marks.contains(&Mark::Italic);
+                let style = match (link, mention, bold, italic) {
+                    (Some(url), _, _, _) => SpanStyle::Link(url),
+                    (None, Some(account), _, _) => SpanStyle::Mention(account),
+                    (None, None, true, true) => SpanStyle::BoldItalic,
+                    (None, None, true, false) => SpanStyle::Bold,
+                    (None, None, false, true) => SpanStyle::Italic,
+                    (None, None, false, false) => SpanStyle::Plain,
+                };
+                Some(ChatSpan { text, style })
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    if let [only] = views.as_slice()
+        && kind == "paragraph"
+        && let SpanStyle::Link(url) = &only.style
+        && crate::files::address_path(url).is_ok_and(|path| path.starts_with(ATTACHMENTS_DIR))
+    {
+        return ChatBlock {
+            kind: "attachment".into(),
+            text: only.text.clone(),
+            link: url.clone(),
+            ..ChatBlock::default()
+        };
+    }
+    ChatBlock {
+        kind: kind.into(),
+        text: span_text(spans, names),
+        rich: marked,
+        spans: views,
+        ..ChatBlock::default()
+    }
+}
+
+/// Spans to text; a mention plate shows the account's current name.
+fn span_text(spans: &[Span], names: &NameDirectory) -> String {
+    spans.iter().map(|span| span_display(span, names)).collect()
+}
+
+fn span_display(span: &Span, names: &NameDirectory) -> String {
+    span.marks
+        .iter()
+        .find_map(|mark| match mark {
+            Mark::Mention(party) => Some(mention_label(party, names)),
+            _ => None,
+        })
+        .unwrap_or_else(|| span.text.clone())
 }
 
 /// An author handle (`user:{hex}`, `acct:{n}`, `module:{id}`, `system`) as
@@ -252,6 +416,32 @@ pub fn author_display(author: &str, names: &NameDirectory) -> String {
         },
         str::to_string,
     )
+}
+
+pub fn avatar_initial(author: &str, names: &NameDirectory) -> String {
+    let source = match author.split_once(':') {
+        Some(("user", id)) => names.member_label(id),
+        Some(("acct", _)) => author_display(author, names),
+        Some(("module", id)) => id.to_owned(),
+        _ => "system".into(),
+    };
+    source
+        .chars()
+        .find(char::is_ascii_alphanumeric)
+        .map_or_else(
+            || "•".into(),
+            |glyph| glyph.to_ascii_uppercase().to_string(),
+        )
+}
+
+/// A person's key or account is human; a program account (an agent's) and
+/// every module or system author is software.
+pub fn is_agent(author: &str, names: &NameDirectory) -> bool {
+    match author.split_once(':') {
+        Some(("user", _)) => false,
+        Some(("acct", number)) => number.parse().is_ok_and(|n| names.is_program(n)),
+        _ => true,
+    }
 }
 
 pub fn short_label(id: &str) -> String {
@@ -330,7 +520,7 @@ pub fn mention_label(party: &Party, names: &NameDirectory) -> String {
 
 /// The two-party channel id for a pair of accounts, sorted so both ends
 /// derive the same id: `dm-` + sha256(low, 0x1f, high) as hex. Mirrors the
-/// module's derivation (`dm_channel_id` in ducktape-modules).
+/// module's derivation (`dm_channel_id` in `crates/chat`).
 pub fn dm_channel_id(a: &str, b: &str) -> String {
     let (low, high) = if a <= b { (a, b) } else { (b, a) };
     let mut digest = Sha256::new();
@@ -338,4 +528,62 @@ pub fn dm_channel_id(a: &str, b: &str) -> String {
     digest.update([0x1f]);
     digest.update(high.as_bytes());
     format!("dm-{}", hex(&digest.finalize()))
+}
+
+/// A DM channel id as the module mints it: `dm-` and 64 hex.
+pub fn is_dm_channel(id: &str) -> bool {
+    id.strip_prefix("dm-")
+        .is_some_and(|suffix| suffix.len() == 64 && suffix.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
+/// The DM peers of `mine` among the channels: which account each DM room
+/// is with, found by re-deriving the id per named account.
+pub fn dm_peer_of(mine: u64, channel_id: &str, names: &NameDirectory) -> Option<u64> {
+    names.accounts().find_map(|(peer, _)| {
+        (*peer != mine && dm_channel_id(&mine.to_string(), &peer.to_string()) == channel_id)
+            .then_some(*peer)
+    })
+}
+
+pub fn plural(count: u64, one: &str, many: &str) -> String {
+    let noun = if count == 1 { one } else { many };
+    format!("{count} {noun}")
+}
+
+pub fn height_label(height: u64) -> String {
+    let digits = height.to_string();
+    let mut grouped = String::with_capacity(digits.len() + digits.len() / 3);
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            grouped.push(',');
+        }
+        grouped.push(digit);
+    }
+    format!("block {grouped}")
+}
+
+pub fn mmss(seconds: i64) -> String {
+    let seconds = seconds.max(0);
+    format!("{:02}:{:02}", seconds / 60, seconds % 60)
+}
+
+pub fn reaction_palette() -> [&'static str; 32] {
+    [
+        "👍", "❤️", "😄", "😂", "😮", "😢", "🎉", "👀", //
+        "🙌", "🔥", "✅", "❌", "💯", "🚀", "🤔", "😅", //
+        "🙏", "👏", "💪", "✨", "⚡", "🐛", "📌", "❓", //
+        "🦆", "🤝", "😴", "🧠", "➕", "🎯", "🚧", "🏁",
+    ]
+}
+
+/// The run a committed message was posted by, off the message id the runs
+/// module mints for a run's replies: `agent/<dispatch_id>[/post/<slot>]`.
+pub fn run_of_message(id: &str) -> Option<&str> {
+    let rest = id.strip_prefix("agent/")?;
+    let dispatch = rest.split_once('/').map_or(rest, |(dispatch, _)| dispatch);
+    (dispatch.len() == 64
+        && dispatch
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')))
+    .then_some(dispatch)
 }
