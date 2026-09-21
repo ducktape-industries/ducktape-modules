@@ -5,7 +5,7 @@ version = 4
 [[package]]
 name = "abi"
 version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?rev=22a0dac8fe0efa1ab3ead84733141361d069afde#22a0dac8fe0efa1ab3ead84733141361d069afde"
+source = "git+https://github.com/ducktape-industries/ducktape-sdk?rev=b494425f82f40d88aae8b7c5e85bf7ef78a96822#b494425f82f40d88aae8b7c5e85bf7ef78a96822"
 dependencies = [
  "borsh",
 ]
@@ -263,7 +263,7 @@ dependencies = [
  "async-trait",
  "attribution",
  "borsh",
- "duck-address 0.1.0 (git+https://github.com/ducktape-industries/ducktape-sdk?rev=22a0dac8fe0efa1ab3ead84733141361d069afde)",
+ "duck-address",
  "ducktape-module-sdk",
  "identity 0.1.0",
  "index-guest",
@@ -281,7 +281,7 @@ name = "chat-view"
 version = "0.1.0"
 dependencies = [
  "base64",
- "duck-address 0.1.0 (git+https://github.com/ducktape-industries/ducktape-sdk?rev=22a0dac8fe0efa1ab3ead84733141361d069afde)",
+ "ducklink",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -643,7 +643,7 @@ dependencies = [
 [[package]]
 name = "design"
 version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?rev=22a0dac8fe0efa1ab3ead84733141361d069afde#22a0dac8fe0efa1ab3ead84733141361d069afde"
+source = "git+https://github.com/ducktape-industries/ducktape-sdk?rev=b494425f82f40d88aae8b7c5e85bf7ef78a96822#b494425f82f40d88aae8b7c5e85bf7ef78a96822"
 
 [[package]]
 name = "digest"
@@ -672,17 +672,17 @@ dependencies = [
 [[package]]
 name = "duck-address"
 version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?rev=22a0dac8fe0efa1ab3ead84733141361d069afde#22a0dac8fe0efa1ab3ead84733141361d069afde"
-dependencies = [
- "abi",
-]
-
-[[package]]
-name = "duck-address"
-version = "0.1.0"
 source = "git+https://github.com/ducktape-industries/ducktape-sdk?rev=429004567723c5342cc438bef8e926c4e925b290#429004567723c5342cc438bef8e926c4e925b290"
 dependencies = [
  "refusal-class",
+]
+
+[[package]]
+name = "ducklink"
+version = "0.1.0"
+source = "git+https://github.com/ducktape-industries/ducktape-sdk?rev=b494425f82f40d88aae8b7c5e85bf7ef78a96822#b494425f82f40d88aae8b7c5e85bf7ef78a96822"
+dependencies = [
+ "abi",
 ]
 
 [[package]]
@@ -1032,7 +1032,7 @@ dependencies = [
 [[package]]
 name = "guest"
 version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?rev=22a0dac8fe0efa1ab3ead84733141361d069afde#22a0dac8fe0efa1ab3ead84733141361d069afde"
+source = "git+https://github.com/ducktape-industries/ducktape-sdk?rev=b494425f82f40d88aae8b7c5e85bf7ef78a96822#b494425f82f40d88aae8b7c5e85bf7ef78a96822"
 dependencies = [
  "abi",
 ]
@@ -1095,7 +1095,7 @@ dependencies = [
  "async-trait",
  "borsh",
  "commonware-cryptography",
- "duck-address 0.1.0 (git+https://github.com/ducktape-industries/ducktape-sdk?rev=429004567723c5342cc438bef8e926c4e925b290)",
+ "duck-address",
  "keyscheme",
  "sdk",
  "serde",
@@ -2086,7 +2086,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 [[package]]
 name = "view-guest"
 version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?rev=22a0dac8fe0efa1ab3ead84733141361d069afde#22a0dac8fe0efa1ab3ead84733141361d069afde"
+source = "git+https://github.com/ducktape-industries/ducktape-sdk?rev=b494425f82f40d88aae8b7c5e85bf7ef78a96822#b494425f82f40d88aae8b7c5e85bf7ef78a96822"
 dependencies = [
  "design",
  "futures",
@@ -2100,7 +2100,7 @@ dependencies = [
 [[package]]
 name = "view-wire"
 version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?rev=22a0dac8fe0efa1ab3ead84733141361d069afde#22a0dac8fe0efa1ab3ead84733141361d069afde"
+source = "git+https://github.com/ducktape-industries/ducktape-sdk?rev=b494425f82f40d88aae8b7c5e85bf7ef78a96822#b494425f82f40d88aae8b7c5e85bf7ef78a96822"
 dependencies = [
  "bincode",
  "design",

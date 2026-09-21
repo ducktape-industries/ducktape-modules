@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 
 use base64::Engine as _;
-use duck_address::{Address, ChainId, Refused};
+use ducklink::{ChainId, Link, Refused};
 use ducktape_view_guest::host::{Refusal, malformed};
 use ducktape_view_guest::view::{Query, ask};
 use serde::Serialize;
@@ -35,14 +35,14 @@ const MAX_DEPTH: usize = 128;
 
 /// The absolute duckfs path a `duck://<chain>/files/…` link names.
 pub fn address_path(link: &str) -> Result<String, Refused> {
-    let address = Address::parse(link)?;
-    if address.module != "files" || address.path.is_empty() {
+    let address = Link::parse(link)?;
+    if address.program != "files" || address.tail.is_empty() {
         return Err(Refused::new(
             "invalid_input",
             "A file address must name at least one path segment.",
         ));
     }
-    let path = format!("/{}", address.path.join("/"));
+    let path = format!("/{}", address.tail.join("/"));
     canonical_path(&path).map_err(|why| {
         Refused::new(
             "invalid_input",
@@ -67,7 +67,7 @@ pub fn file_address(chain: &str, path: &str) -> Result<String, Refused> {
             format!("A file address names a duckfs path, and `{path}` is not one: {why}."),
         )
     })?;
-    Address::new(chain, "files", segments).map(|address| address.to_string())
+    Link::new(chain, "files", segments).map(|link| link.to_string())
 }
 
 fn extension(name: &str) -> String {
@@ -373,42 +373,34 @@ enum Content {
 
 // ---------- duck links ----------
 
-fn minted(chain: &str, mint: impl FnOnce(ChainId) -> Result<Address, Refused>) -> String {
+/// `duck://<chain>/<program>/<tail…>`, or "" without a chain.
+fn minted(chain: &str, program: &str, tail: Vec<String>) -> String {
     chain
         .parse()
         .ok()
-        .and_then(|chain| mint(chain).ok())
-        .map(|address| address.to_string())
+        .and_then(|chain| Link::new(chain, program, tail).ok())
+        .map(|link| link.to_string())
         .unwrap_or_default()
 }
 
-/// `duck://<chain>/chat/<channel>[/<seq>]`, or "" without a chain.
+/// `duck://<chain>/chat/<channel>[/<seq>]`: chat's own tail, as the module
+/// reads it.
 pub fn channel_link(chain: &str, channel: &str, seq: Option<u64>) -> String {
-    minted(chain, |chain| {
-        duck_address::chat::MessageAddress {
-            channel: channel.to_owned(),
-            seq,
-        }
-        .address(chain)
-    })
+    let mut tail = vec![channel.to_owned()];
+    tail.extend(seq.map(|seq| seq.to_string()));
+    minted(chain, "chat", tail)
 }
 
+/// `duck://<chain>/runs/<dispatch>`.
 pub fn run_link(chain: &str, dispatch: &str) -> String {
-    minted(chain, |chain| {
-        duck_address::runs::RunAddress {
-            digest: dispatch.to_owned(),
-        }
-        .address(chain)
-    })
+    minted(chain, "runs", vec![dispatch.to_owned()])
 }
 
-/// A pressed mention (an account number) becomes the identity address the
-/// app opens; any other link is already an address and passes through.
+/// A pressed mention (an account number) becomes `duck://<chain>/identity/<n>`,
+/// the link the app opens; any other link is already one and passes through.
 pub fn pressed_link(link: String, chain: &str) -> String {
     match link.parse::<u64>() {
-        Ok(account) => minted(chain, |chain| {
-            duck_address::identity::AccountAddress { account }.address(chain)
-        }),
+        Ok(account) => minted(chain, "identity", vec![account.to_string()]),
         Err(_) => link,
     }
 }
