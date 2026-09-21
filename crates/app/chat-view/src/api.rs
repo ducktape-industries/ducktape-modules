@@ -39,6 +39,9 @@ impl Capability for Props {
     fn encode(_: &()) -> Vec<u8> {
         Vec::new()
     }
+    fn decode(bytes: &[u8]) -> Result<PropsItem, ducktape_view_guest::host::Refusal> {
+        ducktape_view_guest::view::json_decode(bytes)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]

@@ -1,0 +1,24 @@
+[package]
+name = "members-view"
+edition.workspace = true
+version.workspace = true
+publish = false
+
+# A Rust-authored view, exported as a dynamically loaded wasm module by
+# `export_view!`; `unsafe_code` is not forbidden only because the module
+# exports need `#[unsafe(export_name)]`.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+ducktape-view-guest.workspace = true
+modules.workspace = true
+serde.workspace = true
+
+# What a test needs to play the node: the borsh replies the two programs
+# would write, and the envelope the host door would open.
+[dev-dependencies]
+abi.workspace = true
+base64.workspace = true
+borsh.workspace = true
+serde_json.workspace = true
