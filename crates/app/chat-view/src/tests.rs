@@ -1,7 +1,7 @@
 use super::*;
-use ducktape_view_guest::{Entity, StyleRefinement, Styled};
 use ducktape_view_guest::testing::TestAppContext;
 use ducktape_view_guest::wire;
+use ducktape_view_guest::{Entity, StyleRefinement, Styled};
 
 fn channel(id: &str, name: &str, head_seq: u64) -> ChannelInfo {
     ChannelInfo {

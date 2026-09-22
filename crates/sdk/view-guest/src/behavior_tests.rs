@@ -130,5 +130,5 @@ fn sensor_style_is_opt_in() {
     let Some(wire::Node::Sensor { style, .. }) = cx.find("default-sensor") else {
         panic!("default sensor")
     };
-    assert_eq!(style, crate::StyleRefinement::default());
+    assert_eq!(*style, crate::StyleRefinement::default());
 }
