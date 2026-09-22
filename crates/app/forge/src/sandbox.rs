@@ -99,7 +99,7 @@ impl MemorySandbox {
                 if m.target != "chat" {
                     return Err(Refusal::new(reason::UNKNOWN_PROGRAM, m.target));
                 }
-                let msg = serde_json::from_slice(&m.payload)
+                let msg = borsh::from_slice(&m.payload)
                     .map_err(|e| Refusal::new(reason::PROTOCOL, e.to_string()))?;
                 self.chat_execute(&frame, msg)
             })
@@ -183,10 +183,10 @@ impl Sandbox for MemorySandbox {
         if target != "chat" {
             return Err(Refusal::new(reason::UNKNOWN_PROGRAM, target));
         }
-        let q = serde_json::from_slice(&request)
+        let q = borsh::from_slice(&request)
             .map_err(|e| Refusal::new(reason::PROTOCOL, e.to_string()))?;
         let reply = self.chat_query(q)?;
-        Ok(serde_json::to_vec(&reply).expect("a chat reply serializes"))
+        Ok(borsh::to_vec(&reply).expect("a chat reply serializes"))
     }
 
     fn output(&self, bytes: Vec<u8>) {

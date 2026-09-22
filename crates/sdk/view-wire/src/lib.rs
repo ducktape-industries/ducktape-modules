@@ -34,11 +34,13 @@
 ///    `Node::MouseArea`; `selected` on `Node::Button`.
 /// 10: the rest of the accessible shape: `heading` and `live` on `Node::Text`,
 ///    `label` on `Node::Overlay`, `role` on `Node::Button`.
-/// 11: GPUI-shaped container/text styles, typed element IDs, and named
-///    MessagePack framing.
-pub const WIRE_EPOCH: u32 = 11;
+/// 1: reset with the two-codec rule — the tree and `Frame` are named
+///    MessagePack, every door in [`doors`] is borsh. Epochs 1–11 of the
+///    development era before it are not honoured.
+pub const WIRE_EPOCH: u32 = 1;
 
 pub mod abi;
+pub mod doors;
 pub mod manifest;
 #[cfg(feature = "schema")]
 pub mod schema;

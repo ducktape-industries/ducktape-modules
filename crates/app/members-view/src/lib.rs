@@ -5,10 +5,11 @@
 //! The contracts are borsh and this view's state is a serde snapshot, so a
 //! reply is folded to [`Row`]s as it lands: nothing the programs speak is
 //! kept across a snapshot, only what the screen shows.
-use ducktape_view_guest::caps::{Program, QueryBytes};
+use ducktape_view_guest::doors::Live;
+use ducktape_view_guest::doors::{Program, Query};
 use ducktape_view_guest::export_view;
 use ducktape_view_guest::host::{Refusal, malformed};
-use ducktape_view_guest::view::{Live, Loaded};
+use ducktape_view_guest::view::Loaded;
 use ducktape_view_guest::{
     App, ClickEvent, Context, ElementId, Host, Input, InteractiveElement, IntoElement,
     ParentElement, Render, RenderOnce, StatefulInteractiveElement, Styled, Task, Theme, View,
@@ -21,16 +22,18 @@ use serde::{Deserialize, Serialize};
 /// The identity program's query surface, as this view reads it.
 struct Identity;
 impl Program for Identity {
-    const PROGRAM: &'static str = identity::PROGRAM;
-    type Request = identity::Query;
+    const NAME: &'static str = identity::PROGRAM;
+    type Op = ();
+    type Query = identity::Query;
     type Reply = identity::Reply;
 }
 
 /// The validator set, read for the standing beside a member.
 struct Valset;
 impl Program for Valset {
-    const PROGRAM: &'static str = valset::PROGRAM;
-    type Request = valset::Query;
+    const NAME: &'static str = valset::PROGRAM;
+    type Op = ();
+    type Query = valset::Query;
     type Reply = valset::Reply;
 }
 
@@ -375,7 +378,7 @@ async fn roster(host: Host) -> Result<Vec<Row>, Refusal> {
     loop {
         let page = Page { after, limit: None };
         let reply = match host
-            .ask::<QueryBytes<Identity>>(identity::Query::List { page })
+            .ask::<Query<Identity>>(identity::Query::List { page })
             .await?
         {
             identity::Reply::Accounts(reply) => reply,
@@ -392,7 +395,7 @@ async fn roster(host: Host) -> Result<Vec<Row>, Refusal> {
     loop {
         let page = Page { after, limit: None };
         let reply = match host
-            .ask::<QueryBytes<Valset>>(valset::Query::Memberships { page })
+            .ask::<Query<Valset>>(valset::Query::Memberships { page })
             .await?
         {
             valset::Reply::Memberships(reply) => reply,

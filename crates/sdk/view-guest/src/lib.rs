@@ -66,7 +66,6 @@ pub use editor_binding::{
 };
 pub use editor_documents::EditorDocumentUpdate;
 pub use editor_element::{EditorElement, EditorElementEvent};
-pub mod caps;
 pub mod composer;
 pub mod host;
 pub mod testing;
@@ -76,8 +75,7 @@ pub mod window;
 mod snapshot;
 pub mod view;
 pub use view::{Loaded, Render, View};
-pub mod capabilities;
-pub use capabilities::*;
+pub use wire::doors;
 mod context;
 pub use context::{App, AsyncApp, Context, Entity, Released, WeakEntity};
 mod executor;

@@ -1,8 +1,8 @@
 //! The `chat` program: channels, messages, threads, reactions, memberships,
 //! huddles. The reference program on the kernel abi.
 //!
-//! Writes are a [`ChatMsg`] (JSON, externally tagged), reads a
-//! [`ChatViewQuery`] answered by a [`ChatViewReply`] (JSON) — the same
+//! Writes are a [`ChatMsg`] (borsh), reads a
+//! [`ChatViewQuery`] answered by a [`ChatViewReply`] (borsh) — the same
 //! types `chat-view` links. The acting [`Party`] is the frame's origin: an
 //! external key resolved through the `identity` program to its account.
 //! The rules run over any [`Read`]/[`Write`] store; the `program` feature

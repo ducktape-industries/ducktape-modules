@@ -121,7 +121,7 @@ struct Chat;
 
 impl Program for Chat {
     fn execute(ctx: &mut Execute, env: &Env, payload: &[u8]) -> Result<(), Refusal> {
-        let msg: ChatMsg = serde_json::from_slice(payload).map_err(bad)?;
+        let msg: ChatMsg = borsh::from_slice(payload).map_err(bad)?;
         node_joins(ctx, env, &msg)?;
         let frame = Frame {
             party: party_of(ctx, &env.origin)?,
@@ -132,7 +132,7 @@ impl Program for Chat {
     }
 
     fn query(ctx: &mut Query, _env: &Env, request: &[u8]) -> Result<(), Refusal> {
-        let q: ChatViewQuery = serde_json::from_slice(request).map_err(bad)?;
+        let q: ChatViewQuery = borsh::from_slice(request).map_err(bad)?;
         let reply = match q {
             ChatViewQuery::Accounts { limit } => accounts(ctx, limit)?,
             ChatViewQuery::ThreadAttention {
@@ -162,7 +162,7 @@ impl Program for Chat {
             }
             q => crate::query(&Reader(ctx), q)?,
         };
-        ctx.respond(serde_json::to_vec(&reply).expect("a reply serializes"));
+        ctx.respond(borsh::to_vec(&reply).expect("a reply serializes"));
         Ok(())
     }
 }

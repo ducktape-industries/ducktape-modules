@@ -1,19 +1,14 @@
-//! Attachments: the file addresses messages carry, the upload that puts a
-//! picked file into the files module, the picture decode and the text
-//! preview the card over the screen reads. Everything here is a future the
-//! view spawns; nothing touches state.
-use std::collections::BTreeMap;
-
-use base64::Engine as _;
-use ducklink::{ChainId, Link, Refused};
-use ducktape_view_guest::host::{Refusal, malformed};
-use ducktape_view_guest::view::Query;
-use serde::Serialize;
-use serde_json::{Value, json};
-use sha2::{Digest as _, Sha256};
+//! Attachments: the file addresses messages carry and the sizes they are
+//! shown at. The upload, the picture decode and the text preview need the
+//! files program, which is not in this tree: until it is, each answers a
+//! refusal that says so (`ATTACHMENTS` keeps every way in closed).
+#[cfg(test)]
+use ducklink::ChainId;
+use ducklink::{Link, Refused};
+use ducktape_view_guest::host::Refusal;
 use unicode_normalization::UnicodeNormalization;
 
-use crate::api::{Files, FsRead, Id, PictureLoad, Release, SelectedFile, SubmitBytes};
+use crate::api::SelectedFile;
 
 /// The host picture slot this view draws into.
 pub const PICTURE_SURFACE: &str = "chat";
@@ -22,13 +17,8 @@ pub const PICTURE_SURFACE: &str = "chat";
 pub const PICTURE_BOX: (f32, f32) = (360., 280.);
 /// The margin the preview card keeps from the screen's edges.
 const PREVIEW_INSET: (f32, f32) = (160., 200.);
-const PREVIEW_BYTES: usize = 65_536;
-const PREVIEW_DISPLAY_BYTES: usize = 16 << 10;
 pub const BINARY_PLATE: &str = "This file is not text, so there is nothing to show here.";
 
-const CHUNK_SIZE: u64 = 1024 * 1024;
-const MAX_INLINE_COMMIT_BYTES: u64 = 256 * 1024;
-const MAX_UPLOAD: u64 = 64 << 20;
 const MAX_NAME_BYTES: usize = 255;
 const MAX_PATH_BYTES: usize = 4096;
 const MAX_DEPTH: usize = 128;
@@ -58,6 +48,7 @@ pub fn attachment_file_path(link: &str) -> String {
 }
 
 /// The duckfs file address for a canonical path on `chain`.
+#[cfg(test)]
 pub fn file_address(chain: &str, path: &str) -> Result<String, Refused> {
     let chain: ChainId = chain.parse()?;
     let path = format!("/{}", path.strip_prefix('/').unwrap_or(path));
@@ -121,19 +112,10 @@ pub fn preview_box(width: i64, height: i64, screen: (f32, f32)) -> (f32, f32) {
     fit(width, height, preview_room(screen))
 }
 
-/// Ask the host to decode a duckfs picture into this view's slot; the
-/// answer is the size it will be drawn at, (0, 0) for one that did not.
-pub async fn picture_load(host: ducktape_view_guest::Host, path: String) -> (i64, i64) {
-    let Ok(drawn) = host
-        .ask::<PictureLoad>(json!({"surface": PICTURE_SURFACE, "path": path}))
-        .await
-    else {
-        return (0, 0);
-    };
-    (
-        drawn["width"].as_i64().unwrap_or(0),
-        drawn["height"].as_i64().unwrap_or(0),
-    )
+/// The size a picture attachment is drawn at; (0, 0) until the files
+/// program is in this tree.
+pub async fn picture_load(_host: ducktape_view_guest::Host, _path: String) -> (i64, i64) {
+    (0, 0)
 }
 
 /// One reading of a non-picture attachment: the head of the file, or why not.
@@ -144,107 +126,29 @@ pub struct Preview {
     pub binary: bool,
 }
 
-async fn files_get(
-    host: ducktape_view_guest::Host,
-    lane: &str,
-    params: Value,
-) -> Result<Value, Refusal> {
-    let reply = host.ask::<Query<Files>>(json!({lane: params})).await?;
-    reply
-        .get(lane)
-        .cloned()
-        .ok_or_else(|| malformed("unexpected Files reply".into()))
-}
-
-/// The head of the file at the head snapshot, branded binary when it does
-/// not read as text.
-pub async fn read_preview(
-    host: ducktape_view_guest::Host,
-    path: String,
-) -> Result<Preview, Refusal> {
-    let refs = files_get(host.clone(), "refs", json!({})).await?;
-    let base = refs["head"]
-        .as_str()
-        .ok_or_else(|| Refusal::new("no_snapshot", "The file has no committed snapshot"))?
-        .to_owned();
-    let reply = files_get(
-        host.clone(),
-        "read",
-        json!({ "path": path, "len": PREVIEW_BYTES, "snapshot": base }),
+fn no_files_program() -> Refusal {
+    Refusal::new(
+        "unavailable",
+        "Attachments need the files program, which is not deployed here",
     )
-    .await?;
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(reply["b64"].as_str().unwrap_or_default())
-        .map_err(|_| malformed("The node's read page is not valid base64".into()))?;
-    let eof = reply["eof"].as_bool().unwrap_or(true);
-    let (text, binary) = readable(bytes, eof);
-    let (text, clipped) = head_within(&text, PREVIEW_DISPLAY_BYTES);
-    Ok(Preview {
-        text,
-        clipped: clipped || !eof,
-        binary,
-    })
 }
 
-/// A file that is text, or the plate that says it is not. A page that ended
-/// before the file did may have cut a multi-byte character in half.
-pub fn readable(mut bytes: Vec<u8>, eof: bool) -> (String, bool) {
-    if let Err(error) = std::str::from_utf8(&bytes)
-        && !eof
-        && error.error_len().is_none()
-    {
-        bytes.truncate(error.valid_up_to());
-    }
-    let Ok(text) = String::from_utf8(bytes) else {
-        return (BINARY_PLATE.into(), true);
-    };
-    let control = text
-        .chars()
-        .any(|c| c.is_control() && !matches!(c, '\n' | '\t' | '\r'));
-    match control {
-        true => (BINARY_PLATE.into(), true),
-        false => (text, false),
-    }
-}
-
-fn head_within(text: &str, limit: usize) -> (String, bool) {
-    if text.len() <= limit {
-        return (text.to_owned(), false);
-    }
-    (text[..text.floor_char_boundary(limit)].to_owned(), true)
-}
-
-/// A name as the attachments directory files it.
-pub fn safe_name(name: &str) -> String {
-    name.chars()
-        .map(|c| {
-            if c.is_whitespace() || matches!(c, '(' | ')' | '[' | ']' | '/') {
-                '_'
-            } else {
-                c
-            }
-        })
-        .collect()
+/// The head of the file at the head snapshot, once the files program answers.
+pub async fn read_preview(
+    _host: ducktape_view_guest::Host,
+    _path: String,
+) -> Result<Preview, Refusal> {
+    Err(no_files_program())
 }
 
 /// Uploads `file` and answers the address every member opens it by, on
-/// `chain`. The address is built FIRST: a name or a chain that has no
-/// address is refused before a byte is stored.
+/// `chain`, once the files program answers.
 pub async fn upload(
-    host: ducktape_view_guest::Host,
-    file: SelectedFile,
-    chain: String,
+    _host: ducktape_view_guest::Host,
+    _file: SelectedFile,
+    _chain: String,
 ) -> Result<String, Refusal> {
-    let attachment_id = host.ask::<Id>("attachment".into()).await?;
-    let path = format!(
-        "/shared/attachments/{attachment_id}/{}",
-        safe_name(&file.name)
-    );
-    let address = file_address(&chain, &path)
-        .map_err(|refused| Refusal::new(refused.reason, refused.sentence))?;
-    upload_inner(host.clone(), &file, path).await?;
-    let _ = host.ask::<Release>(file.token.clone()).await;
-    Ok(address)
+    Err(no_files_program())
 }
 
 fn canonical_path(path: &str) -> Result<Vec<String>, String> {
@@ -281,118 +185,6 @@ fn canonical_path(path: &str) -> Result<Vec<String>, String> {
         return Err(format!("path exceeds the maximum depth of {MAX_DEPTH}"));
     }
     Ok(segments)
-}
-
-async fn upload_inner(
-    host: ducktape_view_guest::Host,
-    file: &SelectedFile,
-    path: String,
-) -> Result<(), Refusal> {
-    if file.bytes > MAX_UPLOAD {
-        return Err(Refusal::new("too_large", "Files must be at most 64 MiB"));
-    }
-    canonical_path(&path).map_err(|said| Refusal::new("invalid_path", said))?;
-    let refs = files_get(host.clone(), "refs", json!({})).await?;
-    let mut chunks = Vec::new();
-    let mut chunk = Vec::new();
-    let mut offset = 0u64;
-    let inline = file.bytes <= MAX_INLINE_COMMIT_BYTES;
-    while offset < file.bytes {
-        let len = (file.bytes - offset).min(256 << 10) as usize;
-        let bytes = host
-            .ask::<FsRead>(FsRead::request(&file.token, offset, len))
-            .await?;
-        if bytes.is_empty() || bytes.len() > len {
-            return Err(Refusal::new(
-                "file_changed",
-                "The selected file changed during its upload",
-            ));
-        }
-        offset += bytes.len() as u64;
-        chunk.extend_from_slice(&bytes);
-        let chunk_ready = !inline && (chunk.len() as u64 == CHUNK_SIZE || offset == file.bytes);
-        if chunk_ready {
-            submit_bytes(host.clone(), encode_putblob(&chunk)).await?;
-            chunks.push(crate::chat::hex(&object_id(0, &chunk)));
-            chunk.clear();
-        }
-    }
-    let content = if inline {
-        Content::Inline {
-            b64: base64::engine::general_purpose::STANDARD.encode(chunk),
-        }
-    } else {
-        Content::Chunks {
-            size: file.bytes,
-            chunks,
-        }
-    };
-    let commit = FilesMsg::Commit {
-        base_snapshot: refs["head"].as_str().map(str::to_owned),
-        message: format!("upload {}", file.name),
-        changes: vec![Change::Put {
-            path,
-            exec: false,
-            meta: BTreeMap::new(),
-            content,
-        }],
-    };
-    submit_bytes(
-        host.clone(),
-        serde_json::to_vec(&commit).expect("files message"),
-    )
-    .await
-}
-
-async fn submit_bytes(host: ducktape_view_guest::Host, bytes: Vec<u8>) -> Result<(), Refusal> {
-    host.ask::<SubmitBytes>(json!({
-        "target": "files",
-        "body_b64": base64::engine::general_purpose::STANDARD.encode(bytes)
-    }))
-    .await
-    .map(|_| ())
-}
-
-fn encode_putblob(bytes: &[u8]) -> Vec<u8> {
-    let mut encoded = Vec::with_capacity(bytes.len() + 1);
-    encoded.push(0);
-    encoded.extend_from_slice(bytes);
-    encoded
-}
-
-fn object_id(kind: u8, body: &[u8]) -> [u8; 32] {
-    let mut digest = Sha256::new();
-    digest.update([kind]);
-    digest.update(body);
-    digest.finalize().into()
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "snake_case")]
-enum FilesMsg {
-    Commit {
-        base_snapshot: Option<String>,
-        message: String,
-        changes: Vec<Change>,
-    },
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "snake_case")]
-enum Change {
-    Put {
-        path: String,
-        exec: bool,
-        meta: BTreeMap<String, String>,
-        content: Content,
-    },
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "snake_case")]
-enum Content {
-    Inline { b64: String },
-    Chunks { size: u64, chunks: Vec<String> },
 }
 
 // ---------- duck links ----------
@@ -451,10 +243,6 @@ mod tests {
             pressed_link("7".into(), "testnet#0a1b2c3d"),
             "duck://testnet-0a1b2c3d/identity/7"
         );
-        assert_eq!(encode_putblob(b"abc"), [0, b'a', b'b', b'c']);
-        let (text, binary) = readable(b"hi\n".to_vec(), true);
-        assert_eq!((text.as_str(), binary), ("hi\n", false));
-        assert!(readable(vec![0, 1, 2], true).1);
         assert_eq!(picture_box(720, 560), (360., 280.));
         assert_eq!(attachment_kind("deck.pdf"), "PDF file");
     }

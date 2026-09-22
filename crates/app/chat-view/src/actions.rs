@@ -5,10 +5,10 @@ use ducktape_view_guest::Context;
 use ducktape_view_guest::view::Loaded;
 use ducktape_view_guest::wire;
 
-use crate::api::{Copy, copy};
+use crate::api::ClipboardWrite;
 use crate::chat::{ChatMsg, party_of};
 use crate::client::{ChatMessage, NameDirectory, chat_message};
-use crate::{Chat, CopyRange, Hits, Menu, Mode, Pane, Preview};
+use crate::{Chat, Hits, Menu, Mode, Pane, Preview};
 
 impl Chat {
     pub(crate) fn room_id(&self) -> String {
@@ -20,30 +20,17 @@ impl Chat {
 
     // ---------- menus ----------
 
-    /// A press on a message's body: chosen (its actions stay open), or with
-    /// shift held the copy range grows to it.
+    /// A press on a message's body: chosen, its actions stay open.
     pub(crate) fn press_message(&mut self, pane: Pane, seq: u64) {
         if seq == 0 {
             return;
         }
-        if !self.session.shift_held {
-            self.menu = Some(Menu {
-                pane,
-                seq,
-                rev: 0,
-                mode: Mode::Toolbar,
-                at: self.layout.press,
-            });
-            return;
-        }
-        let anchor = match self.copy {
-            Some(range) if range.pane == pane => range.anchor,
-            _ => seq,
-        };
-        self.copy = Some(CopyRange {
+        self.menu = Some(Menu {
             pane,
-            anchor,
-            head: seq,
+            seq,
+            rev: 0,
+            mode: Mode::Toolbar,
+            at: self.layout.press,
         });
     }
 
@@ -190,7 +177,7 @@ impl Chat {
 
     pub(crate) fn delete_armed(&mut self, cx: &mut Context<Self>) {
         let Some(menu) = self.menu.take() else { return };
-        if menu.mode != Mode::Delete || self.session.busy {
+        if menu.mode != Mode::Delete {
             return;
         }
         let channel_id = self.room_id();
@@ -206,7 +193,7 @@ impl Chat {
     pub(crate) fn rename(&mut self, cx: &mut Context<Self>) {
         let Some(details) = &self.details else { return };
         let name = details.name_draft.trim().to_owned();
-        if name.is_empty() || self.session.busy {
+        if name.is_empty() {
             return;
         }
         let channel_id = self.room_id();
@@ -215,7 +202,7 @@ impl Chat {
 
     pub(crate) fn set_archived(&mut self, archived: bool, cx: &mut Context<Self>) {
         let channel_id = self.room_id();
-        if channel_id.is_empty() || self.session.busy {
+        if channel_id.is_empty() {
             return;
         }
         self.submit(
@@ -229,7 +216,7 @@ impl Chat {
 
     pub(crate) fn set_member(&mut self, text: &str, member: bool, cx: &mut Context<Self>) {
         let channel_id = self.room_id();
-        if channel_id.is_empty() || self.session.busy {
+        if channel_id.is_empty() {
             return;
         }
         let Some(party) = party_of(text) else {
@@ -267,9 +254,10 @@ impl Chat {
 
     // ---------- copying and links ----------
 
-    pub(crate) fn copy_text(&self, text: String, label: &str, cx: &mut Context<Self>) {
+    pub(crate) fn copy_text(&mut self, text: String, label: &str, cx: &mut Context<Self>) {
         if !text.is_empty() {
-            cx.host().notify::<Copy>(copy(&text, label));
+            cx.host().notify::<ClipboardWrite>(text);
+            self.notice = format!("Copied {label}");
         }
     }
 

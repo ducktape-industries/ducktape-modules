@@ -3,9 +3,7 @@
 //! the derived DM channel id. Everything is display logic over `chat`.
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::chat::{
-    AccountRow, Block, Mark, MsgRow, Party, Span, dm_peers, hex, party_handle, unhex,
-};
+use crate::chat::{AccountRow, Block, Mark, MsgRow, Party, Span, dm_peers, hex, unhex};
 
 /// The account bound to a user key: its number (the identity) and its name.
 #[derive(Clone, Debug, PartialEq)]
@@ -72,23 +70,6 @@ impl NameDirectory {
         };
         self.of_handle(&handle)
             .map_or_else(|| short_id(key_hex, 8), str::to_string)
-    }
-
-    pub fn party_of(&self, key: &[u8]) -> Party {
-        match self.account_of(&hex(key)) {
-            Some(account) => Party::Account(account),
-            None => Party::Key(key.to_vec()),
-        }
-    }
-
-    pub fn handle_of(&self, key: &[u8]) -> String {
-        party_handle(&self.party_of(key))
-    }
-
-    /// An account row belongs to the account's current keys; a key row only
-    /// to that exact key.
-    pub fn owns_handle(&self, handle: &str, key: &[u8]) -> bool {
-        handle == self.handle_of(key) || handle == party_handle(&Party::Key(key.to_vec()))
     }
 
     fn of_handle(&self, handle: &str) -> Option<&str> {

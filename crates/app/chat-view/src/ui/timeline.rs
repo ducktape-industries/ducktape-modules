@@ -80,7 +80,7 @@ pub fn list(chat: &Chat, pane: Pane, cx: &mut Context<Chat>, theme: &Theme) -> i
         } else {
             "Load older messages"
         };
-        let control = if room.older_loading || chat.session.busy {
+        let control = if room.older_loading {
             div()
                 .id("chat-load-older-button")
                 .text_color(theme.muted)

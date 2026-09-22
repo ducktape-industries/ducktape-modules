@@ -3,8 +3,8 @@ use super::{
     ChannelInfo, ChatApi, ChatViewQuery, ChatViewReply, MemberRow, MessageHits, MsgRow,
     NameDirectory, PAGE, TagPage, WINDOW,
 };
+use ducktape_view_guest::doors::Query as ViewOf;
 use ducktape_view_guest::host::{Refusal, malformed};
-use ducktape_view_guest::view::ViewOf;
 
 fn wrong_reply() -> Refusal {
     malformed("the chat module answered another question".into())

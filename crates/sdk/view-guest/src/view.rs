@@ -1,5 +1,5 @@
 //! A serializable root view and small loading conveniences.
-pub use crate::capabilities::*;
+pub use crate::doors::{Door, Program, Query, Submit};
 use crate::host::Refusal;
 use crate::{Context, IntoElement, Task, Window};
 use serde::de::DeserializeOwned;

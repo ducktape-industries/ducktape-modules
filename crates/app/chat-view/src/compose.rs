@@ -31,7 +31,7 @@ impl Chat {
             return;
         }
         self.watches.drops = wants.then(|| {
-            let mut drops = cx.host().subscribe::<Drops>(serde_json::json!({}));
+            let mut drops = cx.host().subscribe::<Drops>(());
             cx.spawn(async move |this, cx| {
                 while let Some(files) = drops.next().await {
                     if this
@@ -124,7 +124,7 @@ impl Chat {
             "attach" if crate::ATTACHMENTS && matches!(target, Target::Post { .. }) => {
                 cx.spawn(async move |this, cx| {
                     let host = cx.host();
-                    let result = host.ask::<Pick>(serde_json::json!({})).await;
+                    let result = host.ask::<Pick>(()).await;
                     let _ = this.update(cx, |chat, cx| {
                         cx.notify();
                         chat.picked(target, result.map_err(|r| r.sentence), cx)
@@ -136,7 +136,7 @@ impl Chat {
                 let key = key.to_owned();
                 cx.spawn(async move |this, cx| {
                     let host = cx.host();
-                    let result = host.ask::<ClipboardRead>(serde_json::json!({})).await;
+                    let result = host.ask::<ClipboardRead>(()).await;
                     let _ = this.update_in(cx, |chat, window, cx| {
                         cx.notify();
                         match result {
@@ -257,7 +257,7 @@ impl Chat {
                 draft.complete_send(&send);
                 match result {
                     Ok(pending) => {
-                        let me = chat.session.me.clone();
+                        let me = chat.session.account.clone();
                         if let (Some(mut row), Some(room)) = (pending, chat.room.as_mut())
                             && room.id == target.channel()
                         {

@@ -4,10 +4,11 @@
 //! The contract is borsh and this view's state is a serde snapshot, so a
 //! reply is folded to rows as it lands.
 use abi::hex;
-use ducktape_view_guest::caps::{Program, QueryBytes};
+use ducktape_view_guest::doors::Live;
+use ducktape_view_guest::doors::{Program, Query};
 use ducktape_view_guest::export_view;
 use ducktape_view_guest::host::{Refusal, malformed};
-use ducktape_view_guest::view::{Live, Loaded};
+use ducktape_view_guest::view::Loaded;
 use ducktape_view_guest::{
     AnyElement, ClickEvent, Context, ElementId, Host, InteractiveElement, IntoElement,
     ParentElement, Render, StatefulInteractiveElement, Styled, Task, Theme, View, Window, div, px,
@@ -21,8 +22,9 @@ use serde::{Deserialize, Serialize};
 /// The registry's query surface, as this view reads it.
 struct Registry;
 impl Program for Registry {
-    const PROGRAM: &'static str = registry::PROGRAM;
-    type Request = registry::Query;
+    const NAME: &'static str = registry::PROGRAM;
+    type Op = ();
+    type Query = registry::Query;
     type Reply = registry::Reply;
 }
 
@@ -312,10 +314,7 @@ fn plural(count: usize, one: &str, many: &str) -> String {
 /// no "as of now" to ask for — the scheduled list below is what is still to
 /// come.
 async fn network(host: Host) -> Result<Network, Refusal> {
-    let programs = match host
-        .ask::<QueryBytes<Registry>>(registry::Query::At(0))
-        .await?
-    {
+    let programs = match host.ask::<Query<Registry>>(registry::Query::At(0)).await? {
         registry::Reply::Programs(programs) => programs,
         other => return Err(unexpected(&other)),
     };
@@ -324,7 +323,7 @@ async fn network(host: Host) -> Result<Network, Refusal> {
     loop {
         let page = module_registry::Page { after, limit: None };
         let reply = match host
-            .ask::<QueryBytes<Registry>>(registry::Query::Scheduled { page })
+            .ask::<Query<Registry>>(registry::Query::Scheduled { page })
             .await?
         {
             registry::Reply::Scheduled(reply) => reply,

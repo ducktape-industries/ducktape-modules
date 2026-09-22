@@ -239,9 +239,7 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
             .bg(theme.surface)
             .hover(|s| s.bg(theme.surface_raised))
             .child("Remove");
-        if !chat.session.busy {
-            remove_button = remove_button.on_click(remove);
-        }
+        remove_button = remove_button.on_click(remove);
         let row = div()
             .id(ElementId::named_usize("chat-details-member", index))
             .flex()

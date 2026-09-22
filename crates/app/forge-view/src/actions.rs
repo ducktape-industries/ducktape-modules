@@ -5,7 +5,7 @@
 //! straight away, keeps saying so while the block that carries it is on its
 //! way, and a refusal replaces it with the reason inline. Nothing is guessed
 //! into the lists — the next query reconciles them.
-use ducktape_view_guest::caps::Id;
+use ducktape_view_guest::doors::Id;
 use ducktape_view_guest::view::Submit;
 use ducktape_view_guest::{Context, Window};
 
@@ -174,7 +174,7 @@ impl Forge {
                     return;
                 };
                 match result {
-                    Ok(()) => op.accepted = true,
+                    Ok(_) => op.accepted = true,
                     Err(refusal) => op.error = refusal.sentence.clone(),
                 }
                 if forge.pending.iter().any(|op| op.id == id && op.accepted) {

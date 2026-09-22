@@ -1,7 +1,7 @@
 use crate::api::{Identity, Valset};
 use ducktape_view_guest::{
     Host,
-    caps::QueryBytes,
+    doors::Query,
     host::{Refusal, malformed},
 };
 
@@ -30,7 +30,7 @@ pub async fn read_account(host: Host, key: String) -> Result<Option<Account>, Re
         .map(|i| u8::from_str_radix(&key[i..i + 2], 16).map_err(|e| malformed(e.to_string())))
         .collect::<Result<Vec<_>, _>>()?;
     let number = match host
-        .ask::<QueryBytes<Identity>>(identity::Query::OfKey { key: key.clone() })
+        .ask::<Query<Identity>>(identity::Query::OfKey { key: key.clone() })
         .await?
     {
         identity::Reply::Number(n) => n,
@@ -44,7 +44,7 @@ pub async fn read_account(host: Host, key: String) -> Result<Option<Account>, Re
         }));
     };
     let account = match host
-        .ask::<QueryBytes<Identity>>(identity::Query::Get { number })
+        .ask::<Query<Identity>>(identity::Query::Get { number })
         .await?
     {
         identity::Reply::Account(a) => a,
@@ -73,7 +73,7 @@ pub async fn read_account(host: Host, key: String) -> Result<Option<Account>, Re
 
 async fn read_key(host: &Host, key: &[u8], label: String) -> Result<Key, Refusal> {
     let membership = match host
-        .ask::<QueryBytes<Valset>>(valset::Query::Membership { key: key.to_vec() })
+        .ask::<Query<Valset>>(valset::Query::Membership { key: key.to_vec() })
         .await?
     {
         valset::Reply::Membership(m) => m,

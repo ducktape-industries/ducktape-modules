@@ -6,7 +6,6 @@
 //! handlers of `room`, `actions` and `compose`.
 mod actions;
 mod api;
-mod background;
 mod chat;
 mod client;
 mod compose;
@@ -26,11 +25,11 @@ use chat::{
 use client::{NameDirectory, mention_token};
 use ducktape_view_guest::Context;
 use ducktape_view_guest::host::Refusal;
-use ducktape_view_guest::view::{Live as LiveChanges, Loaded, Submit, View, ViewOf, Visible};
+use ducktape_view_guest::view::{Loaded, View};
 use ducktape_view_guest::{IntoElement, Render, Window, export_view};
 use futures::StreamExt;
 
-use api::{ChatApi, Id, Props, PropsItem, Session};
+use api::{ChatApi, Id, Live as LiveChanges, Props, Session, Submit, Visible};
 use composer::Draft;
 use composer::Target;
 
@@ -63,14 +62,7 @@ impl View for Chat {
                     .update_in(cx, |chat, window, cx| {
                         cx.notify();
                         match item {
-                            Ok(PropsItem::Session(next)) => chat.session_changed(*next, window, cx),
-                            Ok(PropsItem::Background { background }) => {
-                                let names = chat.names.ready().cloned().unwrap_or_default();
-                                cx.spawn(async move |_, cx| {
-                                    background::run(cx.host(), background, names).await;
-                                })
-                                .detach();
-                            }
+                            Ok(next) => chat.session_changed(next, window, cx),
                             Err(refusal) => {
                                 chat.notice =
                                     format!("Couldn’t read the session: {}", refusal.sentence)
@@ -144,14 +136,14 @@ impl Chat {
     fn session_changed(
         &mut self,
         next: Session,
-        window: &mut ducktape_view_guest::Window,
+        _window: &mut ducktape_view_guest::Window,
         cx: &mut Context<Self>,
     ) {
         let prev = std::mem::replace(&mut self.session, next);
-        let reader_changed = self.session.me != prev.me
+        let reader_changed = self.session.account != prev.account
             || self.session.endpoint != prev.endpoint
             || self.session.chain != prev.chain;
-        if self.session.names_serial != prev.names_serial || reader_changed {
+        if reader_changed {
             self.names = cx.load(roster(cx.host()), |chat| &mut chat.names);
         }
         if reader_changed || (prev.connected && !self.session.connected) {
@@ -165,24 +157,6 @@ impl Chat {
         if !prev.connected && self.session.connected {
             self.channels = cx.load(channels(cx.host()), |chat| &mut chat.channels);
             self.refresh(cx);
-        }
-        let active = &self.session.active_channel;
-        let steered = !active.is_empty()
-            && (*active != prev.active_channel || self.session.land_seq != prev.land_seq);
-        let already = self
-            .room
-            .as_ref()
-            .is_some_and(|room| room.id == *active && (self.session.land_seq == 0) != room.landed);
-        if steered && !already {
-            let land = u64::try_from(self.session.land_seq).unwrap_or(0);
-            self.open_at(active.clone(), land, window, cx);
-        }
-        if self.session.dm_serial != prev.dm_serial && !self.session.dm_peer.is_empty() {
-            let peer = self.session.dm_peer.clone();
-            self.open_dm(&peer, cx);
-        }
-        if self.session.copy_chord_serial != prev.copy_chord_serial {
-            self.copy_range(cx);
         }
         self.watch_drops(cx);
     }
@@ -213,7 +187,7 @@ impl Chat {
     }
 
     pub(crate) fn viewer(&self) -> Vec<String> {
-        let me = &self.session.me;
+        let me = &self.session.account;
         if me.is_empty() {
             Vec::new()
         } else {
@@ -221,13 +195,9 @@ impl Chat {
         }
     }
 
-    pub(crate) fn me_key(&self) -> Vec<u8> {
-        chat::unhex(&self.session.me_key).unwrap_or_default()
-    }
-
-    /// The reader's account number, when the key holds one.
+    /// The reader's account number, when the seated handle carries one.
     pub(crate) fn my_account(&self) -> Option<u64> {
-        self.session.me.strip_prefix("acct:")?.parse().ok()
+        self.session.account.strip_prefix("acct:")?.parse().ok()
     }
 
     pub(crate) fn info(&self, id: &str) -> Option<&ChannelInfo> {
@@ -262,7 +232,7 @@ impl Chat {
     /// Why the reader may not write here, as a reason token — "" when she
     /// may. The account comes first: with none, every write is refused.
     pub(crate) fn write_refusal(&self) -> &'static str {
-        if !self.session.holds_account() {
+        if !crate::api::holds_account(&self.session) {
             return "no_account";
         }
         let Some(info) = self.room_info() else {
@@ -272,7 +242,7 @@ impl Chat {
             return "channel_archived";
         }
         if crate::chat::members_only(info) {
-            let me = &self.session.me;
+            let me = &self.session.account;
             let seated = self
                 .room
                 .as_ref()
@@ -326,13 +296,13 @@ impl Chat {
     }
 
     pub(crate) fn create_channel(&mut self, cx: &mut Context<Self>) {
-        if !self.session.holds_account() {
+        if !crate::api::holds_account(&self.session) {
             return;
         }
         let Some(create) = &mut self.create else {
             return;
         };
-        if create.busy || !self.session.connected || self.session.busy {
+        if create.busy || !self.session.connected {
             return;
         }
         let name = create.name.trim().to_string();
@@ -385,60 +355,6 @@ impl Chat {
                             create.error =
                                 format!("Couldn’t create this channel: {}", refusal.sentence);
                         }
-                    }
-                }
-            });
-        })
-        .detach();
-    }
-
-    /// A direct message with `peer` (an account number): the derived room,
-    /// created when the module has none yet.
-    pub(crate) fn open_dm(&mut self, peer: &str, cx: &mut Context<Self>) {
-        let Some(mine) = self.my_account() else {
-            self.notice = "This key is on no account; a DM needs one".into();
-            return;
-        };
-        let Ok(peer) = peer.trim().parse::<u64>() else {
-            self.notice = "A DM peer is an account number".into();
-            return;
-        };
-        let name = self.names.ready().map_or_else(
-            || format!("acct:{peer}"),
-            |names| names.member_label(&format!("acct:{peer}")),
-        );
-        let id = chat::dm_channel_id(mine, peer);
-        self.notice.clear();
-        cx.spawn(async move |this, cx| {
-            let host = cx.host();
-            let result = async {
-                let existing = host
-                    .ask::<ViewOf<ChatApi>>(ChatViewQuery::Channel {
-                        channel_id: id.clone(),
-                    })
-                    .await?;
-                if !matches!(existing, ChatViewReply::Channel(Some(_))) {
-                    host.ask::<Submit<ChatApi>>(ChatMsg::CreateDmChannel {
-                        counterpart: peer,
-                        name,
-                    })
-                    .await?;
-                }
-                Ok::<_, Refusal>(id)
-            }
-            .await;
-            let _ = this.update_in(cx, |chat, window, cx| {
-                cx.notify();
-                match result {
-                    Ok(id) => {
-                        cx.refresh(channels(cx.host()), |chat, list, _| {
-                            chat.channels_arrived(list)
-                        });
-                        chat.choose(id, window, cx);
-                    }
-                    Err(refusal) => {
-                        chat.notice =
-                            format!("Couldn’t open this conversation: {}", refusal.sentence)
                     }
                 }
             });

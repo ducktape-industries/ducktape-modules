@@ -17,8 +17,9 @@ mod ui;
 
 use std::collections::BTreeSet;
 
+use ducktape_view_guest::doors::{Live, Visible};
 use ducktape_view_guest::host::Refusal;
-use ducktape_view_guest::view::{Live, Loaded, Visible};
+use ducktape_view_guest::view::Loaded;
 use ducktape_view_guest::{Context, IntoElement, Render, View, Window, export_view};
 use futures::StreamExt;
 
@@ -566,7 +567,9 @@ impl Forge {
     /// The reader's signing key, joined from the roster: `host.props` names
     /// an account and forge is keyed by keys.
     pub(crate) fn me_key(&self) -> Option<Vec<u8>> {
-        self.names.ready()?.key_of(self.session.number()?)
+        self.names
+            .ready()?
+            .key_of(crate::api::account_number(&self.session)?)
     }
 
     pub(crate) fn viewer(&self) -> Vec<String> {
