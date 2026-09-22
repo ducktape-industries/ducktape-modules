@@ -92,7 +92,7 @@ fn a_refusal_shows_its_sentence_and_retry_asks_again() {
     cx.run_until_parked();
     assert!(cx.has_text("valset is not running here"));
     respond(&mut cx);
-    cx.simulate_click("nodes/retry");
+    cx.simulate_click("nodes-retry");
     cx.run_until_parked();
     assert!(cx.has_text("10.0.0.1:4000"));
     assert_eq!(cx.host().asked::<QueryBytes<Valset>>().len(), 3);

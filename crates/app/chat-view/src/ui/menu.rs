@@ -185,7 +185,7 @@ fn message_menu(chat: &Chat, menu: &Menu, cx: &mut Context<Chat>, theme: &Theme)
                         .justify_center()
                         .rounded_md()
                         .hover(|s| s.bg(theme.surface_raised))
-                        .on_click(click)
+                        .role(ducktape_view_guest::Role::Button).focusable().on_click(click)
                         .child(emoji),
                 );
             }

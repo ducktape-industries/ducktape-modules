@@ -13,7 +13,7 @@ impl Section {
 }
 impl RenderOnce for Section {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        div().id(self.id).h(px(28.)).flex().items_center().px_2()
+        div().id(self.id).role(Role::Heading).aria_level(2).h(px(28.)).flex().items_center().px_2()
             .text_sm().text_color(cx.global::<Theme>().muted).child(self.label)
     }
 }

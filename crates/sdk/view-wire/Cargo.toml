@@ -23,6 +23,7 @@ serde-reflection = { version = "0.6", optional = true }
 sha2 = { version = "0.10", optional = true }
 serde = { version = "1", features = ["derive"] }
 gpui.workspace = true
+accesskit = { version = "0.24.0", features = ["serde"] }
 rmp-serde = "1"
 slotmap = "1.0.6"
 uuid = "1.1.2"

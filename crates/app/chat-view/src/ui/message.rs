@@ -41,7 +41,7 @@ pub fn card(
             },
         )
         .hover(|s| s.bg(theme.surface_raised))
-        .on_click(press)
+        .role(ducktape_view_guest::Role::Button).focusable().on_click(press)
         .child(
             div()
                 .id(ElementId::Name(
@@ -221,7 +221,7 @@ fn content(
                 .pt_1()
                 .text_sm()
                 .text_color(theme.accent_foreground)
-                .on_click(open)
+                .role(ducktape_view_guest::Role::Button).focusable().on_click(open)
                 .child(format!(
                     "{} · View thread ›",
                     plural(message.reply_count, "reply", "replies")
@@ -278,7 +278,7 @@ fn block_view(
                 .rounded_md()
                 .bg(theme.surface)
                 .hover(|s| s.bg(theme.surface_raised))
-                .on_click(open)
+                .role(ducktape_view_guest::Role::Button).focusable().on_click(open)
                 .child(format!("📄 {}", block.text));
             if let Some(&(width, height)) = chat.pictures.get(&block.link)
                 && width > 0
@@ -303,7 +303,7 @@ fn block_view(
                 let open = cx.listener(move |chat, _: &ClickEvent, _window, cx| {
                     chat.open_link(link.clone(), cx);
                 });
-                text = text.text_color(theme.link).on_click(open);
+                text = text.text_color(theme.link).role(ducktape_view_guest::Role::Button).focusable().on_click(open);
             }
             text.into_any_element()
         }
@@ -331,7 +331,7 @@ fn action_button(
         .rounded_sm()
         .bg(theme.surface)
         .hover(|s| s.bg(theme.surface_raised))
-        .on_click(click)
+        .role(ducktape_view_guest::Role::Button).focusable().on_click(click)
         .text_xs()
         .child(label.into())
 }

@@ -303,7 +303,7 @@ fn search_results(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl In
                         .rounded_md()
                         .bg(theme.surface)
                         .hover(|s| s.bg(theme.surface_raised))
-                        .on_click(open)
+                        .role(ducktape_view_guest::Role::Button).focusable().on_click(open)
                         .child(div().text_sm().child(row.text.clone()))
                         .child(
                             div()

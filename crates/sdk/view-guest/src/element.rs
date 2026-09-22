@@ -7,23 +7,9 @@
 //! data once per frame.
 
 use crate::{App, Window, slots, wire};
-use gpui::{ClickEvent, ElementId, SharedString, StyleRefinement, Styled};
+use crate::interactivity::{ClickListener, Interactivity};
+use gpui::{ElementId, SharedString, StyleRefinement, Styled};
 use std::ops::Range;
-
-type ClickListener = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
-
-/// The explicit state carried by guest interactivity until frame lowering.
-#[derive(Default)]
-pub struct Interactivity {
-    pub base_style: StyleRefinement,
-    pub(crate) id: Option<ElementId>,
-    pub(crate) group: Option<SharedString>,
-    pub(crate) hover: Option<StyleRefinement>,
-    pub(crate) active: Option<StyleRefinement>,
-    pub(crate) group_hover: Option<(SharedString, StyleRefinement)>,
-    pub(crate) group_active: Option<(SharedString, StyleRefinement)>,
-    pub(crate) on_click: Option<ClickListener>,
-}
 
 /// A value that can be lowered into the SDK wire tree.
 pub trait IntoElement: Sized + 'static {
@@ -119,6 +105,9 @@ impl IntoElement for Div {
         let id = self.interactivity.id.map(wire::ElementIdWire::from_gpui);
         let on_click = self.interactivity.on_click.map(|listener| lowering.click(listener));
         let interactivity = wire::Interactivity {
+            role: self.interactivity.role,
+            aria: self.interactivity.aria,
+            focusable: self.interactivity.focusable,
             id: id.clone(),
             group: self.interactivity.group,
             hover: self.interactivity.hover,
@@ -172,115 +161,6 @@ impl ParentElement for Div {
         self.children.extend(elements.into_iter().map(|element| element.0));
     }
 }
-
-/// Add basic group and identity declarations to an element recipe.
-pub trait InteractiveElement: Sized {
-    fn interactivity(&mut self) -> &mut Interactivity;
-
-    fn id(mut self, id: impl Into<ElementId>) -> Stateful<Self> {
-        self.interactivity().id = Some(id.into());
-        Stateful { element: self }
-    }
-
-    fn group(mut self, group: impl Into<SharedString>) -> Self {
-        self.interactivity().group = Some(group.into());
-        self
-    }
-
-    fn hover(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
-        self.interactivity().hover = Some(f(StyleRefinement::default()));
-        self
-    }
-
-    fn group_hover(
-        mut self,
-        group: impl Into<SharedString>,
-        f: impl FnOnce(StyleRefinement) -> StyleRefinement,
-    ) -> Self {
-        self.interactivity().group_hover =
-            Some((group.into(), f(StyleRefinement::default())));
-        self
-    }
-}
-
-impl InteractiveElement for Div {
-    fn interactivity(&mut self) -> &mut Interactivity {
-        &mut self.interactivity
-    }
-}
-
-/// The stateful wrapper returned by [`InteractiveElement::id`].
-pub struct Stateful<E> {
-    pub(crate) element: E,
-}
-
-impl<E: Styled> Styled for Stateful<E> {
-    fn style(&mut self) -> &mut StyleRefinement {
-        self.element.style()
-    }
-}
-
-impl<E: IntoElement> IntoElement for Stateful<E> {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
-    }
-
-    fn into_node(self, lowering: &mut Lowering<'_>) -> wire::Node {
-        self.element.into_node(lowering)
-    }
-}
-
-impl<E: ParentElement> ParentElement for Stateful<E> {
-    fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>) {
-        self.element.extend(elements);
-    }
-}
-
-impl<E: InteractiveElement> InteractiveElement for Stateful<E> {
-    fn interactivity(&mut self) -> &mut Interactivity {
-        self.element.interactivity()
-    }
-}
-
-/// Stateful interaction methods, named to match GPUI's public authoring API.
-pub trait StatefulInteractiveElement: InteractiveElement {
-    fn overflow_scroll(mut self) -> Self {
-        self.interactivity().base_style.overflow.x = Some(gpui::Overflow::Scroll);
-        self.interactivity().base_style.overflow.y = Some(gpui::Overflow::Scroll);
-        self
-    }
-    fn overflow_x_scroll(mut self) -> Self {
-        self.interactivity().base_style.overflow.x = Some(gpui::Overflow::Scroll);
-        self
-    }
-    fn overflow_y_scroll(mut self) -> Self {
-        self.interactivity().base_style.overflow.y = Some(gpui::Overflow::Scroll);
-        self
-    }
-    fn active(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
-        self.interactivity().active = Some(f(StyleRefinement::default()));
-        self
-    }
-
-    fn group_active(
-        mut self,
-        group: impl Into<SharedString>,
-        f: impl FnOnce(StyleRefinement) -> StyleRefinement,
-    ) -> Self {
-        self.interactivity().group_active =
-            Some((group.into(), f(StyleRefinement::default())));
-        self
-    }
-
-    fn on_click(mut self, listener: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> Self {
-        self.interactivity().on_click = Some(Box::new(listener));
-        self
-    }
-}
-
-impl<T: InteractiveElement> StatefulInteractiveElement for Stateful<T> {}
 
 impl IntoElement for wire::Node {
     type Element = Self;
@@ -552,7 +432,6 @@ fn stable_hash(bytes: &[u8]) -> u64 {
 
 impl gpui::prelude::FluentBuilder for Div {}
 impl gpui::prelude::FluentBuilder for AnyElement {}
-impl<E> gpui::prelude::FluentBuilder for Stateful<E> {}
 impl gpui::prelude::FluentBuilder for Img {}
 impl gpui::prelude::FluentBuilder for Svg {}
 impl gpui::prelude::FluentBuilder for Deferred {}

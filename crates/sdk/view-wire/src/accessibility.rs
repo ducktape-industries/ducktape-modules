@@ -91,6 +91,13 @@ fn walk(node: &Node, parent: Option<&Path<'_>>, faults: &mut Vec<Fault>) {
 
 fn fault(node: &Node) -> Option<FaultKind> {
     match node {
+        Node::Container { interactivity, .. } if interactivity.on_click.is_some() => {
+            if interactivity.role.is_none() {
+                return Some(FaultKind::NoRole);
+            }
+            let named = interactivity.aria.label.as_ref().is_some_and(|label| !label.is_empty());
+            (!named && !has_text(node)).then_some(FaultKind::Unnamed)
+        }
         Node::Input { options, .. } => options
             .label
             .is_empty()

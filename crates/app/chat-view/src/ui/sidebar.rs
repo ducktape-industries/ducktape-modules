@@ -39,7 +39,7 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
             div()
                 .id(ElementId::Name("chat-sidebar-clear-search".into()))
                 .px_1()
-                .on_click(clear)
+                .role(ducktape_view_guest::Role::Button).focusable().on_click(clear)
                 .child("✕"),
         );
     }
@@ -76,7 +76,7 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
         .py_0p5()
         .rounded_sm()
         .hover(|s| s.bg(theme.sidebar_raised))
-        .when(!busy || chat.create.is_some(), |el| el.on_click(toggle))
+        .when(!busy || chat.create.is_some(), |el| el.role(ducktape_view_guest::Role::Button).focusable().on_click(toggle))
         .child(if chat.create.is_some() {
             "✕ Close"
         } else {
@@ -219,7 +219,7 @@ fn channel_button(
             theme.sidebar
         })
         .hover(|s| s.bg(theme.sidebar_raised))
-        .on_click(click)
+        .role(ducktape_view_guest::Role::Button).focusable().on_click(click)
         .child(div().text_color(theme.sidebar_muted).child("#"))
         .child(
             div()
@@ -300,7 +300,7 @@ fn voice_button(
             theme.sidebar
         })
         .hover(|s| s.bg(theme.sidebar_raised))
-        .when(!info.channel.archived, |el| el.on_click(click))
+        .when(!info.channel.archived, |el| el.role(ducktape_view_guest::Role::Button).focusable().on_click(click))
         .child("🔊")
         .child(div().flex_1().child(info.channel.name.clone()))
         .when(info.channel.archived, |el| {
@@ -340,7 +340,7 @@ fn dm_button(
             theme.sidebar
         })
         .hover(|s| s.bg(theme.sidebar_raised))
-        .on_click(click)
+        .role(ducktape_view_guest::Role::Button).focusable().on_click(click)
         .child(
             div()
                 .size_6()

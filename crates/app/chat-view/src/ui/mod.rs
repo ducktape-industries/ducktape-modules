@@ -99,7 +99,7 @@ pub(crate) fn button(
         .bg(theme.surface)
         .hover(|s| s.bg(theme.surface_raised))
         .active(|s| s.bg(theme.accent_soft))
-        .on_click(click)
+        .role(ducktape_view_guest::Role::Button).focusable().on_click(click)
         .child(label.into())
 }
 

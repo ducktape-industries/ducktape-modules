@@ -152,7 +152,7 @@ impl Nodes {
                             .rounded_md()
                             .bg(theme.surface)
                             .hover(|s| s.bg(theme.surface_raised))
-                            .on_click(retry)
+                            .role(ducktape_view_guest::Role::Button).focusable().on_click(retry)
                             .child("Retry"),
                     )
                     .into_any_element()

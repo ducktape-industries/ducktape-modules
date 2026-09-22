@@ -83,6 +83,9 @@ impl ElementIdWire {
 /// Declarative interactivity lowered into native GPUI's `Interactivity`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Interactivity {
+    pub role: Option<gpui::Role>,
+    pub aria: crate::Aria,
+    pub focusable: bool,
     pub id: Option<ElementIdWire>,
     pub group: Option<SharedString>,
     pub hover: Option<StyleRefinement>,

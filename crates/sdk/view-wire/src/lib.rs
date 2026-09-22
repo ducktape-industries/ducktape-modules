@@ -76,6 +76,8 @@ mod snapshot;
 pub use snapshot::{MAX_SNAPSHOT_BYTES, Snapshot, SnapshotValue};
 
 pub mod click;
+mod aria;
+pub use aria::Aria;
 mod style;
 mod style_sanitize;
 pub use style::{ElementIdWire, GroupRefinement, Interactivity};
@@ -993,6 +995,7 @@ fn sanitize_node(node: &mut Node, depth: usize, budgets: &mut Budgets, taken: &m
             ..
         } => {
             style_sanitize::sanitize(style);
+            interactivity.aria.sanitize();
             for refinement in [&mut interactivity.hover, &mut interactivity.active].into_iter().flatten() {
                 style_sanitize::sanitize(refinement);
             }

@@ -176,6 +176,13 @@ fn find_by<'a>(node: &'a Node, matches: &dyn Fn(&Node) -> bool) -> Option<&'a No
 fn button<'a>(frame: &'a Frame, name: &str) -> Option<&'a Node> {
     let root = frame.root.as_ref()?;
     find_by(root, &|node| match node {
+        Node::Container { interactivity, .. } if interactivity.on_click.is_some() => {
+            let mut labels = Vec::new();
+            collect_texts(node, &mut labels);
+            node.key() == Some(name)
+                || interactivity.aria.label.as_deref() == Some(name)
+                || labels.iter().any(|label| label == name)
+        }
         Node::Button {
             key,
             content,
@@ -204,13 +211,15 @@ fn input<'a>(frame: &'a Frame, name: &str) -> Option<&'a Node> {
 /// The events the host sends when the user presses the button with key or
 /// label `name`.
 pub(crate) fn press(frame: &Frame, name: &str) -> Vec<Event> {
-    let Some(Node::Button { on_press, .. }) = button(frame, name) else {
-        panic!("no button {name:?} in {:?}", texts(frame));
-    };
-    let Some(message) = on_press else {
-        panic!("button {name:?} is disabled");
-    };
-    vec![Event::Message(*message)]
+    match button(frame, name) {
+        Some(Node::Container { interactivity, .. }) => vec![Event::Click {
+            handler: interactivity.on_click.expect("click route"),
+            event: (&gpui::ClickEvent::default()).into(),
+        }],
+        Some(Node::Button { on_press: Some(message), .. }) => vec![Event::Message(*message)],
+        Some(Node::Button { on_press: None, .. }) => panic!("button {name:?} is disabled"),
+        _ => panic!("no button {name:?} in {:?}", texts(frame)),
+    }
 }
 
 /// The events the host sends when the input with key or placeholder `name`
