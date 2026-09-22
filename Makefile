@@ -16,15 +16,15 @@ DUCKTAPE ?= ../ducktape
 # entry is wasm32-gated.
 PROGRAMS := crates/app/chat-program crates/app/forge
 
-# The views: cdylibs for wasm32-unknown-unknown; chat's is embedded in its program artifact.
-VIEWS := chat-view members-view node-view explorer-view
+# Views are wasm32 cdylibs. Chat rides its program; Settings rides the registry.
+VIEWS := chat-view members-view node-view explorer-view settings-view
 
 # What a wasm32 view may link. A crate a view links must never reach the
 # signing/identity graph (blst does not build for wasm32, and a view has no
 # business holding keys). `modules` is here because the system views read the
 # boot set's contracts: its signing deps are dev-only, and `-e normal` below
 # is what says so.
-VIEW_LINKABLE := ducklink view-wire view-guest design modules
+VIEW_LINKABLE := ducklink view-wire view-guest design modules settings-view
 VIEW_FORBIDDEN := blst commonware-cryptography
 
 .PHONY: program-wasm-check wasm-programs probe-fixture wasm-views view-wasm-check
@@ -56,6 +56,7 @@ wasm-modules-build: wasm-views
 	  cp $(BUILD_TARGET)/wasm32-unknown-unknown/release/$$name.wasm $(PACK_DIR)/$$name.wasm || exit 1; \
 	done
 	$(PACKER) $(PACK_DIR)/chat_program.wasm $(BUILD_TARGET)/wasm32-unknown-unknown/release/chat_view.wasm $(PACK_DIR)/chat_program.wasm
+	$(PACKER) $(PACK_DIR)/module_registry.wasm $(BUILD_TARGET)/wasm32-unknown-unknown/release/settings_view.wasm $(PACK_DIR)/module_registry.wasm
 
 ## Commit these bytes as the founding file's program code, including its view.
 wasm-modules: wasm-modules-build
@@ -72,8 +73,10 @@ wasm-modules-check: wasm-modules-build
 	  name=$${entry%%:*}; file=$${entry#*:}/$$name.wasm; \
 	  if ! cmp -s $(PACK_DIR)/$$name.wasm $$file; then echo "stale: $$file"; stale=1; fi; \
 	done; \
-	$(PACKER) --strip $(PACK_DIR)/chat_program.wasm $(PACK_DIR)/chat_program.stripped.wasm || exit 1; \
-	cmp $(PACK_DIR)/chat_program.stripped.wasm $(BUILD_TARGET)/wasm32-unknown-unknown/release/chat_program.wasm || exit 1; \
+	for name in chat_program module_registry; do \
+	  $(PACKER) --strip $(PACK_DIR)/$$name.wasm $(PACK_DIR)/$$name.stripped.wasm || exit 1; \
+	  cmp $(PACK_DIR)/$$name.stripped.wasm $(BUILD_TARGET)/wasm32-unknown-unknown/release/$$name.wasm || exit 1; \
+	done; \
 	test $$stale -eq 0
 
 ## refreshes the probe fixture the `modules` suite seats as the authority,

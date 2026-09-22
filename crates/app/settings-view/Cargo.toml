@@ -1,0 +1,17 @@
+[package]
+name = "settings-view"
+edition.workspace = true
+version.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+futures.workspace = true
+abi.workspace = true
+borsh.workspace = true
+ducktape-view-guest.workspace = true
+modules.workspace = true
+serde.workspace = true
+serde_json.workspace = true

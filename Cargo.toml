@@ -41,6 +41,7 @@ members = [
     "crates/app/members-view",
     "crates/app/node-view",
     "crates/app/explorer-view",
+    "crates/app/settings-view",
     "crates/app/gitcore",
     "crates/app/forge",
     "crates/app/forge-harness",
