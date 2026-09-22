@@ -34,7 +34,7 @@ pub enum Op {
 pub enum Query {
     Validators,
     Members,
-    Memberships,
+    Memberships { page: crate::Page },
     Membership { key: Vec<u8> },
 }
 
@@ -42,7 +42,7 @@ pub enum Query {
 pub enum Reply {
     Validators(Vec<Vec<u8>>),
     Members(Vec<Member>),
-    Memberships(Vec<Membership>),
+    Memberships(crate::PageReply<Membership>),
     Membership(Option<Membership>),
 }
 

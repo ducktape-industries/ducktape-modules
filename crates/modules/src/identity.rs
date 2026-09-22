@@ -150,7 +150,7 @@ pub enum Reply {
     Number(Option<AccountNumber>),
     Generation(u64),
     Resolved(Vec<Option<AccountNumber>>),
-    Accounts(Vec<Account>),
+    Accounts(crate::PageReply<Account>),
 }
 
 pub fn principal(number: AccountNumber) -> Vec<u8> {

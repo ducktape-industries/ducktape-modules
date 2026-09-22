@@ -43,12 +43,15 @@ impl Program for Modules {
     fn query(ctx: &mut QueryCtx, env: &Env, request: &[u8]) -> Result<(), Refusal> {
         let reply = match abi::decode(request)? {
             Query::At(height) => Reply::Programs(at(ctx, height)?),
-            Query::Scheduled => Reply::Scheduled(scheduled(ctx)?),
-            Query::Program(program) => Reply::Program(
-                at(ctx, env.height)?
+            Query::Scheduled { page } => {
+                Reply::Scheduled(page.reply(env.height, scheduled(ctx, &page)?))
+            }
+            Query::Program(program) => Reply::Program {
+                height: env.height,
+                entry: at(ctx, env.height)?
                     .into_iter()
                     .find(|entry| entry.program == program),
-            ),
+            },
         };
         ctx.reply(&reply);
         Ok(())
@@ -145,12 +148,12 @@ fn at(ctx: &impl Reads, height: u64) -> Result<Vec<Entry>, Refusal> {
     Ok(entries)
 }
 
-fn scheduled(ctx: &impl Reads) -> Result<Vec<Scheduled>, Refusal> {
-    ctx.records::<Change>(Scan::prefix(SCHEDULE))?
+fn scheduled(ctx: &impl Reads, page: &modules::Page) -> Result<Vec<(Vec<u8>, Scheduled)>, Refusal> {
+    ctx.records::<Change>(page.scan_ahead(SCHEDULE.as_bytes()))?
         .into_iter()
         .map(|(key, change)| {
             let height = height_of(&key)?;
-            Ok(Scheduled { height, change })
+            Ok((key, Scheduled { height, change }))
         })
         .collect()
 }
