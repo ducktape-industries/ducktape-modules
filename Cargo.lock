@@ -2217,6 +2217,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "forge-view"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "base64 0.22.1",
+ "borsh",
+ "chat",
+ "futures",
+ "serde",
+ "serde_json",
+ "view-guest",
+]
+
+[[package]]
 name = "form_urlencoded"
 version = "1.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
