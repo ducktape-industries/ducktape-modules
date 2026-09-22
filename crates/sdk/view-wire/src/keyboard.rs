@@ -89,6 +89,7 @@ macro_rules! keys {
         #[cfg(test)]
         impl $name {
             fn assert_derived_serde_parity() {
+                #[allow(clippy::upper_case_acronyms, reason = "mirror authored wire names exactly")]
                 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
                 enum Derived { $($variant),+ }
 

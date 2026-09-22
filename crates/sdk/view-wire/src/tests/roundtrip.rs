@@ -200,6 +200,10 @@ fn encoded_size_matches_named_messagepack_without_a_second_buffer() {
         assert_eq!(bytes, rmp_serde::to_vec_named(&frame).unwrap());
         assert_eq!(encoded_size(&frame), bytes.len() as u64);
         assert_eq!(decode::<Frame>(&bytes).unwrap(), frame);
+        let node = frame.root.as_ref().unwrap();
+        let mut fingerprint = std::hash::DefaultHasher::new();
+        std::hash::Hasher::write(&mut fingerprint, &encode(node));
+        assert_eq!(node.fingerprint(), std::hash::Hasher::finish(&fingerprint));
     }
 }
 

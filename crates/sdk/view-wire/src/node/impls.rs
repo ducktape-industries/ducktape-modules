@@ -24,7 +24,7 @@ impl Node {
             }
         }
         let mut sink = Sink(std::hash::DefaultHasher::new());
-        rmp_serde::encode::write_named(&mut sink, self).expect("node fingerprint sink cannot fail");
+        crate::codec::write(self, &mut sink);
         sink.0.finish()
     }
 

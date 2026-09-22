@@ -80,3 +80,18 @@ The tree vocabulary, manifests, and five-function Wasm ABI are unchanged.
 `cargo test --workspace`, the same for clippy, `make program-wasm-check`, `make view-wasm-check`, `make
 wasm-programs` and `make wasm-views` are what CI runs. The toolchain is
 pinned in `rust-toolchain.toml`.
+
+View releases require `wasm-tools`, Python 3, and
+[Binaryen wasm-opt 132](https://github.com/WebAssembly/binaryen/releases/tag/version_132).
+`make wasm-views` builds, optimizes, and checks the exact guest ABI and decimal
+size limits (1,200,000 bytes for Members/Node/Explorer; 2,500,000 for Chat).
+`WASM_OPT=/path/to/wasm-opt` can select the pinned optimizer. It preserves the
+view manifest and never supplies imports or removes capabilities.
+
+GPUI uses the fork's default-off consumer configuration: `web` is disabled for
+guests and remains default-on in the native app. The root patches select the
+fork's scheduler, logging, and MessagePack crates as well. MessagePack's `typed`
+feature is enabled only for wasm: it follows the wire's Serde shapes and retains
+the existing named encoding. Dynamic/ignored values remain supported. Shared
+writers and table-driven keyboard enums avoid duplicate generated codec code.
+Native and guest roundtrip, limit, and malformed-input tests cover that boundary.

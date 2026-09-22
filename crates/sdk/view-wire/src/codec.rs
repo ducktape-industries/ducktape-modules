@@ -111,10 +111,10 @@ pub fn encode<T: Serialize>(value: &T) -> Vec<u8> {
     bytes
 }
 
-// Share one serializer instantiation for buffers and allocation-free counting.
+// Share one serializer instantiation for buffers, size counting, and subtree fingerprints.
 // Distinct writer types otherwise duplicate the entire node serialization graph.
 #[inline(never)]
-fn write<T: Serialize>(value: &T, writer: &mut dyn std::io::Write) {
+pub(crate) fn write<T: Serialize>(value: &T, writer: &mut dyn std::io::Write) {
     value
         .serialize(&mut rmp_serde::Serializer::new(writer).with_struct_map())
         .expect("wire types are plain data");

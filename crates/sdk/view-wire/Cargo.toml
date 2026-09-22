@@ -32,3 +32,8 @@ futures = "0.3"
 design = { path = "../design" }
 memchr = "2"
 unicode-segmentation = "1"
+
+# Honor the actual Serde shapes in guests without carrying unrelated parser arms.
+# Native hosts retain the full MessagePack deserializer.
+[target.'cfg(target_family = "wasm")'.dependencies]
+rmp-serde = { version = "1", features = ["typed"] }
