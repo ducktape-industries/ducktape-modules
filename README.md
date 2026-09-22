@@ -7,6 +7,7 @@ repository. Only what compiles to wasm lives here, in three folders:
 crates/sdk/     abi guest ducklink view-wire view-guest view-guest-derive design
 crates/system/  module-registry valset identity
 crates/app/     chat chat-view forge forge-view members-view node-view explorer-view settings-view
+crates/lib/     gitcore
 ```
 
 | Path | What |
@@ -18,8 +19,9 @@ crates/app/     chat chat-view forge forge-view members-view node-view explorer-
 | `crates/system/module-registry` | the boot set's root: the registry program (its `Op`, `Query`, `Reply`), `AUTHORITY`, `Page`/`PageReply` and the origin/key/refusal `helpers` every system program links. Its `tests/system.rs` founds ducktape's host over the bytes `make wasm-programs` built and drives every system program |
 | `crates/system/valset`, `identity` | the other two boot programs, the same shape: types always built, the wasm32 program behind `program`, the asks another program makes of them (`identity::account_of`, `valset::standing`) behind `guest` |
 | `crates/app/chat`, `chat-view` | the reference app module: `chat` is one crate whose types and rules over a `Read`/`Write` store are always built (native, tested), and whose wasm32 program over the host sits behind its `program` feature. `chat-view` links `chat` with the feature off: the types, no host import, no program export |
-| `crates/app/forge`, `forge-view` | the git server as a program, the same shape as `chat`: a push is one op whose input is the receive-pack body a client sent, a merge is an op that lands the commit the client built, fetch and the ref advertisement are queries; a git object's blob id is its oid. `forge::git` is the git it needs (objects, packs, walks, diff, the wire's server side) over one `Objects` trait; merging is the client's. The rules run natively over `MemorySandbox`, which is where `fixtures/` comes from; `forge-view` links `forge` with `program` off |
+| `crates/app/forge`, `forge-view` | the git server as a program, the same shape as `chat`: a push is one op whose input is the receive-pack body a client sent, a merge is an op that lands the commit the client built, fetch and the ref advertisement are queries; a git object's blob id is its oid. it links `gitcore` for the git; merging is the client's. The rules run natively over `MemorySandbox`, which is where `fixtures/` comes from; `forge-view` links `forge` with `program` off |
 | `crates/app/members-view`, `node-view`, `explorer-view`, `settings-view` | the system views, which link the system crates with `program` off |
+| `crates/lib/gitcore` | git as a library over one `Objects` trait: objects, packs (read, delta, write), walks, diffs, and the server side of the wire (receive-pack verification, upload-pack); no merging, that is the git client's. `forge` links it into its wasm |
 
 A view links its module by path and reads its types. A program is a cdylib
 for wasm32 the host loads by blob id; a view is a cdylib for wasm32 the

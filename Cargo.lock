@@ -2193,10 +2193,9 @@ dependencies = [
  "abi",
  "borsh",
  "chat",
+ "gitcore",
  "guest",
- "miniz_oxide 0.8.9",
  "serde_json",
- "sha1-checked",
  "sha2 0.10.9",
 ]
 
@@ -2442,6 +2441,15 @@ dependencies = [
  "hashbrown 0.16.1",
  "indexmap",
  "stable_deref_trait",
+]
+
+[[package]]
+name = "gitcore"
+version = "0.1.0"
+dependencies = [
+ "miniz_oxide 0.8.9",
+ "sha1-checked",
+ "sha2 0.10.9",
 ]
 
 [[package]]

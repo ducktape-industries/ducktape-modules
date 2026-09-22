@@ -8,7 +8,7 @@ only. No legacy wire/layout conversion exists. Found this version with its new
 
 ## Decisions in one screen
 
-- `forge::git` reads loose commit/tree/blob objects through the sandbox; queries never
+- `gitcore` reads loose commit/tree/blob objects through the sandbox; queries never
   parse packs. No gix, host Git mirror, or forge-specific host storage is needed.
 - Reads run off consensus. Every change/review mutation is an operation. Merge
   objects are computed and published by the client; `Merge` checks both endpoint
@@ -48,7 +48,7 @@ Repos sort by descending activity height then name. Refs use byte-name order,
 trees use Git entry order, diffs use path-byte order, changes use ascending item
 number, and reviews use submission order. Judgment scans repo then item number.
 Log covers all parents, ordered by descending committer time then OID, matching
-`forge::git`'s walk (not a promise of topological order under clock skew).
+`gitcore`'s walk (not a promise of topological order under clock skew).
 
 ## Queries and examples
 

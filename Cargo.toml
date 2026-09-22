@@ -14,9 +14,9 @@
 #   crates/app/     the app modules: chat and forge (each one crate: types and
 #                   rules always, the wasm32 program behind the `program`
 #                   feature), chat-view and forge-view (which link their
-#                   program crate with the feature off), gitcore (the git forge
-#                   links) and forge-harness (forge's rig: the wasm on
-#                   ducktape's runtime, real git as the client)
+#                   program crate with the feature off) and the system views
+#   crates/lib/     libraries a program links: gitcore (git objects, packs,
+#                   walks, diffs, the wire's server side)
 #
 # A view links its module by path and reads its types; a view is a cdylib for
 # wasm32-unknown-unknown on `view-guest`. The host that runs the programs
@@ -47,6 +47,7 @@ members = [
     "crates/app/explorer-view",
     "crates/app/settings-view",
     "crates/app/forge",
+    "crates/lib/gitcore",
 ]
 
 [workspace.package]
@@ -57,6 +58,7 @@ version = "0.1.0"
 # ---- the contracts, in tree
 abi = { path = "crates/sdk/abi" }
 guest = { path = "crates/sdk/guest" }
+gitcore = { path = "crates/lib/gitcore" }
 ducklink = { path = "crates/sdk/ducklink" }
 design = { path = "crates/sdk/design" }
 view-wire = { path = "crates/sdk/view-wire" }

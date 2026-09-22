@@ -1,8 +1,8 @@
 // The execute path: repository lifecycle, access, a git push and a merge, each a straight walk over the sandbox.
 
-use crate::git::server::{Policy, RefUpdate};
-use crate::git::{Error, Limits, server};
 use abi::{Env, Origin, Refusal};
+use gitcore::server::{Policy, RefUpdate};
+use gitcore::{Error, Limits, server};
 
 use crate::contract::{Bounds, Op, Repo, Settings, valid_repo_name};
 use crate::refuse::{already_exists, capacity, invalid, storage, unauthorized};

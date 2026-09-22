@@ -1,13 +1,13 @@
 //! Object reads over the existing loose-object store; no pack parsing and no persistent writes.
 use crate::Sandbox;
 use crate::contract::*;
-use crate::git::{Commit, Hash, Kind, Mode, Objects, Oid, Signature, Tag, Tree};
 use crate::ops::{cap, refusal_of};
 use crate::paging::Paging;
 use crate::refuse::{invalid, not_found};
 use crate::repo::{load_repo, parse_oid, repo_hash, resolve};
 use crate::store::Store;
 use abi::Refusal;
+use gitcore::{Commit, Hash, Kind, Mode, Objects, Oid, Signature, Tag, Tree};
 use std::collections::BTreeSet;
 
 pub struct Reading<'a, S: Sandbox> {
@@ -16,7 +16,7 @@ pub struct Reading<'a, S: Sandbox> {
     pub bounds: &'a Bounds,
 }
 impl<S: Sandbox> Reading<'_, S> {
-    pub fn result<T>(&self, r: crate::git::Result<T>) -> Result<T, Refusal> {
+    pub fn result<T>(&self, r: gitcore::Result<T>) -> Result<T, Refusal> {
         r.map_err(|e| refusal_of(&self.store, e))
     }
     pub fn oid(&self, s: &str) -> Result<Oid, Refusal> {
@@ -160,7 +160,7 @@ pub fn answer<S: Sandbox>(
         Query::Log { from, .. } => {
             let tip = r.commit_id(resolve(s, name, from, hash)?)?;
             // ponytail: repeat the complete walk up to log_walk; index history if larger repos need it.
-            let ids = r.result(crate::git::walk::commits(
+            let ids = r.result(gitcore::walk::commits(
                 &r.store,
                 &[tip],
                 &[],
@@ -198,7 +198,7 @@ pub fn answer<S: Sandbox>(
                 root
             } else {
                 let entry = r
-                    .result(crate::git::walk::tree_at_path(&r.store, &root, path))?
+                    .result(gitcore::walk::tree_at_path(&r.store, &root, path))?
                     .ok_or_else(|| not_found("no entry at this path"))?;
                 if entry.mode != Mode::Directory {
                     return Err(invalid("tree path names a directory"));
@@ -246,7 +246,7 @@ fn compare<S: Sandbox>(
     into: Oid,
 ) -> Result<Reply, Refusal> {
     let source: BTreeSet<_> = r
-        .result(crate::git::walk::commits(
+        .result(gitcore::walk::commits(
             &r.store,
             &[from],
             &[],
@@ -255,7 +255,7 @@ fn compare<S: Sandbox>(
         .into_iter()
         .collect();
     let target: BTreeSet<_> = r
-        .result(crate::git::walk::commits(
+        .result(gitcore::walk::commits(
             &r.store,
             &[into],
             &[],
@@ -265,7 +265,7 @@ fn compare<S: Sandbox>(
         .collect();
     let ahead = source.difference(&target).count() as u64;
     let behind = target.difference(&source).count() as u64;
-    let base = r.result(crate::git::walk::merge_base(
+    let base = r.result(gitcore::walk::merge_base(
         &r.store,
         &from,
         &into,

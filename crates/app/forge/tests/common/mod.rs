@@ -4,12 +4,12 @@
 pub use std::collections::{BTreeMap, BTreeSet};
 
 pub use abi::{Cause, Env, HashKind, Origin, reason};
-pub use forge::git::wire::pktline::{self, Pkt, Reader};
-pub use forge::git::{
+pub use forge::{Bounds, MemorySandbox, Op, Query, Reply, Sandbox, Service, Settings};
+pub use gitcore::wire::pktline::{self, Pkt, Reader};
+pub use gitcore::{
     Commit, Hash, Kind, Limits, MemoryObjects, Mode, Object, Objects, Oid, Signature, Tree,
     TreeEntry, pack,
 };
-pub use forge::{Bounds, MemorySandbox, Op, Query, Reply, Sandbox, Service, Settings};
 
 pub mod story;
 
