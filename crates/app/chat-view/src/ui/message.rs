@@ -19,8 +19,11 @@ pub fn card(
 ) -> impl IntoElement {
     let id = message.id.clone();
     let seq = message.seq;
-    let press =
-        cx.listener(move |chat, _: &ClickEvent, _window, _cx| chat.press_message(pane, seq));
+    let press = cx.listener(move |chat, event: &ClickEvent, _window, _cx| {
+        let position = event.position();
+        chat.layout.press = (position.x.into(), position.y.into());
+        chat.press_message(pane, seq);
+    });
     let mut card = div()
         .id(ElementId::Name(format!("chat-message-{}", id).into()))
         .relative()
@@ -65,10 +68,14 @@ pub fn card(
     if !message.pending && !message.deleted {
         let seq = message.seq;
         let rev = message.rev;
-        let react = cx.listener(move |chat, _: &ClickEvent, window, cx| {
+        let react = cx.listener(move |chat, event: &ClickEvent, window, cx| {
+            let position = event.position();
+            chat.layout.press = (position.x.into(), position.y.into());
             chat.open_menu(pane, seq, rev, Mode::Reactions, window, cx)
         });
-        let more = cx.listener(move |chat, _: &ClickEvent, window, cx| {
+        let more = cx.listener(move |chat, event: &ClickEvent, window, cx| {
+            let position = event.position();
+            chat.layout.press = (position.x.into(), position.y.into());
             chat.open_menu(pane, seq, rev, Mode::More, window, cx)
         });
         let mut actions = div()
