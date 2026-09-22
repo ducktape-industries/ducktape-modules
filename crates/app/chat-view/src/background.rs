@@ -381,7 +381,7 @@ fn shell_channel(info: &crate::chat::ChannelInfo, names: &NameDirectory, key: &s
             let label = names.member_label(&seat.party);
             json!({
                 "label": label,
-                "initials": ducktape_view_guest::wire::kit::initials(&label),
+                "initials": initials(&label),
                 "is_you": unhex(key).is_some_and(|key| names.owns_handle(&seat.party, &key)),
                 "node": seat.node,
             })
@@ -417,7 +417,7 @@ async fn facts(
             json!({
                 "key": seat.party,
                 "label": label,
-                "initials": ducktape_view_guest::wire::kit::initials(&label),
+                "initials": initials(&label),
                 "is_agent": false,
                 "is_you": unhex(key).is_some_and(|key| names.owns_handle(&seat.party, &key)),
                 "node": seat.node,
@@ -436,6 +436,18 @@ fn workspace_data(channels: Vec<Value>, active: Option<(Value, Value)>) -> Value
         "active_channel_archived": active["archived"].as_bool().unwrap_or_default(),
         "huddle_roster": roster,
     })
+}
+
+fn initials(name: &str) -> String {
+    let mut chars = name
+        .split_whitespace()
+        .filter_map(|word| word.chars().next());
+    let first = chars.next();
+    let second = chars.next();
+    match (first, second) {
+        (Some(first), Some(second)) => format!("{first}{second}").to_uppercase(),
+        _ => name.chars().take(2).collect::<String>().to_uppercase(),
+    }
 }
 
 async fn workspace(

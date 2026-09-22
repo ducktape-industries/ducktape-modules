@@ -9,8 +9,8 @@ use ducktape_view_guest::export_view;
 use ducktape_view_guest::host::{Refusal, malformed};
 use ducktape_view_guest::view::{Live, Loaded};
 use ducktape_view_guest::{
-    Context, ElementId, Host, IntoElement, ParentElement, Render, Styled, Task, Theme, View,
-    Window, div, px,
+    AnyElement, Context, ElementId, Host, IntoElement, ParentElement, Render, Styled, Task, Theme,
+    View, Window, div, px,
 };
 use futures::StreamExt;
 use modules::module_registry as registry;
@@ -124,13 +124,14 @@ impl Explorer {
     }
 
     /// The four states of the registry: loading, refused, empty, ready.
-    fn body(&self, cx: &mut Context<Self>, theme: &Theme) -> impl IntoElement {
+    fn body(&self, cx: &mut Context<Self>, theme: &Theme) -> AnyElement {
         match &self.network {
             Loaded::Idle | Loaded::Loading(_) => div()
                 .id(ElementId::Name("explorer-loading".into()))
                 .text_sm()
                 .text_color(theme.muted)
-                .child("Reading the registry…"),
+                .child("Reading the registry…")
+                .into_any_element(),
             Loaded::Failed(refusal) => {
                 let retry = cx.listener(|view, _: &(), _, cx| view.read(cx));
                 div()
@@ -155,6 +156,7 @@ impl Explorer {
                             .on_click(retry)
                             .child("Retry"),
                     )
+                    .into_any_element()
             }
             Loaded::Ready(network) if network.programs.is_empty() && network.changes.is_empty() => {
                 empty_state(
@@ -163,6 +165,7 @@ impl Explorer {
                     "The registry of this network runs nothing yet.",
                     theme,
                 )
+                .into_any_element()
             }
             Loaded::Ready(network) => div()
                 .id(ElementId::Name("explorer-list".into()))
@@ -174,18 +177,20 @@ impl Explorer {
                 .child(section("explorer-running-header", "Running", theme))
                 .child(programs(&network.programs, theme))
                 .child(section("explorer-scheduled-header", "Scheduled", theme))
-                .child(changes(&network.changes, theme)),
+                .child(changes(&network.changes, theme))
+                .into_any_element(),
         }
     }
 }
 
-fn programs(programs: &[Entry], theme: &Theme) -> impl IntoElement {
+fn programs(programs: &[Entry], theme: &Theme) -> AnyElement {
     if programs.is_empty() {
         return div()
             .id(ElementId::Name("explorer-no-programs".into()))
             .text_sm()
             .text_color(theme.muted)
-            .child("No program runs here yet.");
+            .child("No program runs here yet.")
+            .into_any_element();
     }
     div()
         .id(ElementId::Name("explorer-programs".into()))
@@ -213,15 +218,17 @@ fn programs(programs: &[Entry], theme: &Theme) -> impl IntoElement {
                         .child(short_id(&entry.code, 12)),
                 )
         }))
+        .into_any_element()
 }
 
-fn changes(changes: &[Change], theme: &Theme) -> impl IntoElement {
+fn changes(changes: &[Change], theme: &Theme) -> AnyElement {
     if changes.is_empty() {
         return div()
             .id(ElementId::Name("explorer-no-changes".into()))
             .text_sm()
             .text_color(theme.muted)
-            .child("Nothing is scheduled against the registry.");
+            .child("Nothing is scheduled against the registry.")
+            .into_any_element();
     }
     div()
         .id(ElementId::Name("explorer-changes".into()))
@@ -266,6 +273,7 @@ fn changes(changes: &[Change], theme: &Theme) -> impl IntoElement {
             }
             row
         }))
+        .into_any_element()
 }
 
 fn section(id: &str, label: &str, theme: &Theme) -> impl IntoElement {
@@ -277,7 +285,7 @@ fn section(id: &str, label: &str, theme: &Theme) -> impl IntoElement {
         .px_2()
         .text_sm()
         .text_color(theme.muted)
-        .child(label)
+        .child(label.to_owned())
 }
 
 fn empty_state(id: &str, title: &str, detail: &str, theme: &Theme) -> impl IntoElement {
@@ -288,8 +296,13 @@ fn empty_state(id: &str, title: &str, detail: &str, theme: &Theme) -> impl IntoE
         .gap_1()
         .p_6()
         .max_w(px(420.))
-        .child(div().text_base().child(title))
-        .child(div().text_sm().text_color(theme.muted).child(detail))
+        .child(div().text_base().child(title.to_owned()))
+        .child(
+            div()
+                .text_sm()
+                .text_color(theme.muted)
+                .child(detail.to_owned()),
+        )
 }
 
 fn short_id(id: &str, keep: usize) -> String {

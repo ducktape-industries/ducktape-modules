@@ -10,8 +10,8 @@ use ducktape_view_guest::export_view;
 use ducktape_view_guest::host::{Refusal, malformed};
 use ducktape_view_guest::view::{Live, Loaded};
 use ducktape_view_guest::{
-    App, Context, ElementId, Host, IntoElement, ParentElement, Render, RenderOnce, Styled, Task,
-    Theme, View, Window, div, px,
+    AnyElement, App, Context, ElementId, Host, IntoElement, ParentElement, Render, RenderOnce,
+    Styled, Task, Theme, View, Window, div, px,
 };
 use futures::StreamExt;
 use modules::valset;
@@ -119,13 +119,14 @@ impl Nodes {
     }
 
     /// The four states of the set: loading, refused, empty, ready.
-    fn body(&self, cx: &mut Context<Self>, theme: &Theme) -> impl IntoElement {
+    fn body(&self, cx: &mut Context<Self>, theme: &Theme) -> AnyElement {
         match &self.set {
             Loaded::Idle | Loaded::Loading(_) => div()
                 .id(ElementId::Name("nodes-loading".into()))
                 .text_sm()
                 .text_color(theme.muted)
-                .child("Reading the validator set…"),
+                .child("Reading the validator set…")
+                .into_any_element(),
             Loaded::Failed(refusal) => {
                 let retry = cx.listener(|view, _: &(), _, cx| view.read(cx));
                 div()
@@ -150,6 +151,7 @@ impl Nodes {
                             .on_click(retry)
                             .child("Retry"),
                     )
+                    .into_any_element()
             }
             Loaded::Ready(set) if set.members.is_empty() && set.validators.is_empty() => {
                 empty_state(
@@ -158,6 +160,7 @@ impl Nodes {
                     "The validator set of this network is empty.",
                     theme,
                 )
+                .into_any_element()
             }
             Loaded::Ready(set) => div()
                 .id(ElementId::Name("nodes-list".into()))
@@ -169,17 +172,20 @@ impl Nodes {
                 .child(section("nodes-set-header", "Validator set", theme))
                 .child(validators(&set.validators, theme))
                 .child(section("nodes-members-header", "Memberships", theme))
-                .child(members(&set.members, theme)),
+                .child(members(&set.members, theme))
+                .into_any_element(),
         }
     }
 }
 
-fn validators(validators: &[String], theme: &Theme) -> impl IntoElement {
+fn validators(validators: &[String], theme: &Theme) -> AnyElement {
     if validators.is_empty() {
         return div()
+            .id(ElementId::Name("nodes-no-validators".into()))
             .text_sm()
             .text_color(theme.muted)
-            .child("No key validates on this network.");
+            .child("No key validates on this network.")
+            .into_any_element();
     }
     div()
         .id(ElementId::Name("nodes-validators".into()))
@@ -207,6 +213,7 @@ fn validators(validators: &[String], theme: &Theme) -> impl IntoElement {
                         .child(short_id(validator, 16)),
                 )
         }))
+        .into_any_element()
 }
 
 fn members(members: &[Member], theme: &Theme) -> impl IntoElement {
@@ -262,7 +269,7 @@ fn section(id: &str, label: &str, theme: &Theme) -> impl IntoElement {
         .px_2()
         .text_sm()
         .text_color(theme.muted)
-        .child(label)
+        .child(label.to_owned())
 }
 
 fn empty_state(id: &str, title: &str, detail: &str, theme: &Theme) -> impl IntoElement {
@@ -273,8 +280,13 @@ fn empty_state(id: &str, title: &str, detail: &str, theme: &Theme) -> impl IntoE
         .gap_1()
         .p_6()
         .max_w(px(420.))
-        .child(div().text_base().child(title))
-        .child(div().text_sm().text_color(theme.muted).child(detail))
+        .child(div().text_base().child(title.to_owned()))
+        .child(
+            div()
+                .text_sm()
+                .text_color(theme.muted)
+                .child(detail.to_owned()),
+        )
 }
 
 fn short_id(id: &str, keep: usize) -> String {

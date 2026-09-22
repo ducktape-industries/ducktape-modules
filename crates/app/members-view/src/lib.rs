@@ -120,7 +120,7 @@ impl Render for Members {
                     } else {
                         self.filter.clone()
                     })
-                    .on_key_down(typed),
+                    .on_input(typed),
             )
             .child(body)
     }
@@ -317,7 +317,7 @@ fn empty_state(
         .gap_1()
         .p_6()
         .max_w(px(420.))
-        .child(div().text_base().child(title))
+        .child(div().text_base().child(title.to_owned()))
         .child(div().text_sm().text_color(theme.muted).child(detail.into()))
 }
 

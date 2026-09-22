@@ -1,6 +1,5 @@
-//! The frame: one render function per pane reading the state,
-//! handlers registered as closures over the smallest slice of it, nodes
-//! styled with the kit and the helpers in `controls`. Nothing here mutates state.
+//! Native GPUI composition for Chat. State and module operations stay in the
+//! root view; this module only builds the element tree and installs listeners.
 
 pub mod dialogs;
 pub mod menu;
@@ -10,155 +9,129 @@ pub mod side;
 pub mod sidebar;
 mod timeline;
 
-use ducktape_view_guest::Context;
-use ducktape_view_guest::wire::{AlignX, AlignY, Node, kit};
+use ducktape_view_guest::{
+    ClickEvent, Context, ElementId, IntoElement, ParentElement, StatefulInteractiveElement, Styled,
+    Theme, Window, div, px,
+};
 
 use crate::Chat;
-use ducktape_view_guest::wire::kit::*;
 
-pub fn render(chat: &Chat, cx: &mut Context<Chat>) -> Node {
-    let screen = if chat.session.connected {
-        connected(chat, cx)
-    } else {
-        kit::empty_state(
-            "chat/disconnected",
-            "Not connected",
-            "Choose a network from the sidebar to reconnect.",
+pub fn render(chat: &Chat, cx: &mut Context<Chat>) -> impl IntoElement {
+    let theme = cx.global::<Theme>();
+    let mut screen = div()
+        .id(ElementId::Name("chat-root".into()))
+        .relative()
+        .flex()
+        .size_full()
+        .bg(theme.background)
+        .text_color(theme.foreground)
+        .child(if chat.session.connected {
+            connected(chat, cx, theme).into_any_element()
+        } else {
+            empty_state(
+                ElementId::Name("chat-disconnected".into()),
+                "Not connected",
+                "Choose a network from the sidebar to reconnect.",
+                theme,
+            )
+            .into_any_element()
+        });
+
+    if let Some(menu) = menu::floating(chat, cx, theme) {
+        screen = screen.child(menu);
+    }
+    if let Some(preview) = dialogs::preview(chat, cx, theme) {
+        screen = screen.child(preview);
+    }
+    if let Some(create) = dialogs::channel_create(chat, cx, theme) {
+        screen = screen.child(create);
+    }
+    screen
+}
+
+fn connected(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement {
+    let mut panes = div()
+        .id(ElementId::Name("chat-panes".into()))
+        .flex()
+        .size_full()
+        .child(sidebar::render(chat, cx, theme))
+        .child(
+            div()
+                .id(ElementId::Name("chat-sidebar-resize".into()))
+                .w(px(1.))
+                .bg(theme.border),
         )
-    };
-    // every press reports where it landed before the control under it
-    // answers, so a menu opens at the pointer
-    let pressed = cx.listener(|chat, event: &(f32, f32), _window, cx| {
-        let at = *event;
-        cx.notify();
-        chat.layout.press = at
-    });
-    let screen = with_press_at(mouse_area("chat/press-area", screen), pressed);
-    let screen = match menu::floating(chat, cx) {
-        None => screen,
-        Some(menu) => {
-            let dismiss = cx.listener(|chat, _event: &(), _window, cx| {
-                cx.notify();
-                chat.close_menu()
-            });
-            overlay(
-                "chat/menu-overlay",
-                "Message menu",
-                0.,
-                [0.; 4],
-                AlignX::Left,
-                AlignY::Top,
-                Some(dismiss),
-                screen,
-                menu,
+        .child(room::render(chat, cx, theme));
+    if chat.details.is_some() && chat.room.is_some() {
+        panes = panes
+            .child(
+                div()
+                    .id(ElementId::Name("chat-details-resize".into()))
+                    .w(px(1.))
+                    .bg(theme.border),
             )
-        }
-    };
-    let screen = match dialogs::preview(chat, cx) {
-        None => screen,
-        Some(card) => {
-            let close = cx.listener(|chat, _event: &(), _window, cx| {
-                cx.notify();
-                chat.preview = None
-            });
-            overlay(
-                "chat/preview-overlay",
-                "Attachment preview",
-                30.,
-                [0., 0., 0., 0.55],
-                AlignX::Center,
-                AlignY::Center,
-                Some(close),
-                screen,
-                card,
+            .child(side::details(chat, cx, theme));
+    } else if chat.room.as_ref().is_some_and(|room| room.thread.is_some()) {
+        panes = panes
+            .child(
+                div()
+                    .id(ElementId::Name("chat-thread-resize".into()))
+                    .w(px(1.))
+                    .bg(theme.border),
             )
-        }
-    };
-    let screen = match dialogs::channel_create(chat, cx) {
-        None => screen,
-        Some(card) => {
-            let busy = chat.create.as_ref().is_some_and(|c| c.busy);
-            let close = (!busy).then(|| {
-                cx.listener(|chat, _event: &(), _window, cx| {
-                    cx.notify();
-                    chat.create = None
-                })
-            });
-            overlay(
-                "chat/create-overlay",
-                "Create channel",
-                kit::spacing::XL as f32,
-                [0., 0., 0., 0.55],
-                AlignX::Center,
-                AlignY::Center,
-                close,
-                screen,
-                card,
-            )
-        }
-    };
-    let measured = cx.listener(|chat, event: &(f32, f32), _window, cx| {
-        let size = *event;
-        cx.notify();
-        chat.layout.viewport = size;
-        chat.layout.clamp();
-    });
-    Node::Sensor {
-        key: "chat/viewport".into(),
-        reset: None,
-        on_show: Some(measured),
-        on_resize: Some(measured),
-        on_hide: None,
-        anticipate: None,
-        delay: None,
-        child: Box::new(screen),
+            .child(side::thread(chat, cx, theme));
     }
+    panes
 }
 
-/// Sidebar, room, and one side pane: details in front of a thread when both
-/// are open, so each pane's width is clamped as the only one beside the room.
-fn connected(chat: &Chat, cx: &mut Context<Chat>) -> Node {
-    let mut panes = vec![
-        sidebar::render(chat, cx),
-        divider("chat/sidebar-resize", cx, |chat, dx| {
-            chat.layout.sidebar += dx
-        }),
-        room::render(chat, cx),
-    ];
-    let room_open = chat.room.is_some();
-    if chat.details.is_some() && room_open {
-        panes.push(divider("chat/details-resize", cx, |chat, dx| {
-            chat.layout.details -= dx
-        }));
-        panes.push(side::details(chat, cx));
-    } else if room_open && chat.room.as_ref().is_some_and(|r| r.thread.is_some()) {
-        panes.push(divider("chat/thread-resize", cx, |chat, dx| {
-            chat.layout.thread -= dx
-        }));
-        panes.push(side::thread(chat, cx));
-    }
-    fill(kit::spaced(kit::row("chat/panes", panes), 0.))
+pub(crate) fn button(
+    id: impl Into<ElementId>,
+    label: impl Into<String>,
+    theme: &Theme,
+    click: impl Fn(&ClickEvent, &mut Window, &mut ducktape_view_guest::App) + 'static,
+) -> impl IntoElement {
+    div()
+        .id(id)
+        .px_2()
+        .py_1()
+        .rounded_md()
+        .bg(theme.surface)
+        .hover(|s| s.bg(theme.surface_raised))
+        .active(|s| s.bg(theme.accent_soft))
+        .on_click(click)
+        .child(label.into())
 }
 
-fn divider(key: &str, cx: &mut Context<Chat>, drag: impl Fn(&mut Chat, f32) + 'static) -> Node {
-    let on_drag = cx.listener(move |chat, event: &(f64, f64), _window, cx| {
-        let (dx, _) = *event;
-        cx.notify();
-        drag(chat, dx as f32);
-        chat.layout.clamp();
-    });
-    resize_handle(key, on_drag)
+pub(crate) fn empty_state(
+    id: impl Into<ElementId>,
+    title: impl Into<String>,
+    detail: impl Into<String>,
+    theme: &Theme,
+) -> impl IntoElement {
+    div()
+        .id(id)
+        .flex()
+        .flex_col()
+        .gap_1()
+        .p_6()
+        .max_w(px(420.))
+        .child(div().text_base().child(title.into()))
+        .child(div().text_sm().text_color(theme.muted).child(detail.into()))
 }
 
-pub(crate) fn close_glyph(
-    key: &str,
-    label: &str,
-    cx: &mut Context<Chat>,
-    run: impl Fn(&mut Chat, &mut Context<Chat>) + 'static,
-) -> Node {
-    let press = cx.listener(move |chat, _event: &(), _window, cx| {
-        cx.notify();
-        run(chat, cx)
-    });
-    glyph(key, "✕", label, Some(press))
+pub(crate) fn badge(
+    id: impl Into<ElementId>,
+    label: impl Into<String>,
+    foreground: ducktape_view_guest::Hsla,
+    background: ducktape_view_guest::Hsla,
+) -> impl IntoElement {
+    div()
+        .id(id)
+        .px_1()
+        .py_0p5()
+        .rounded_sm()
+        .bg(background)
+        .text_color(foreground)
+        .text_xs()
+        .child(label.into())
 }
