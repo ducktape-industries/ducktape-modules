@@ -2100,6 +2100,10 @@ fn document_refs(root: &Node) -> Vec<editor_document::EditorDocumentRef> {
 
 fn check_frame(frame: &Frame, ctx: &str) {
     if let Some(root) = &frame.root {
+        assert!(!has_duplicate_typed_siblings(root), "{ctx}: authored identity scope aliases state");
+    }
+
+    if let Some(root) = &frame.root {
         assert!(
             root.count() <= MAX_NODES,
             "{ctx}: {} nodes, over MAX_NODES",
@@ -2119,11 +2123,16 @@ fn check_frame(frame: &Frame, ctx: &str) {
 }
 
 fn has_duplicate_typed_siblings(node: &Node) -> bool {
-    let mut siblings = HashSet::new();
-    node.children().iter().any(|child| {
-        matches!(child.identity(), Some(IdentityKeyRef::Element(id)) if !siblings.insert(id))
-            || has_duplicate_typed_siblings(child)
-    })
+    fn walk<'a>(node: &'a Node, scope: &mut HashSet<&'a ElementIdWire>) -> bool {
+        if let Some(IdentityKeyRef::Element(id)) = node.identity() {
+            if !scope.insert(id) { return true; }
+            let mut child_scope = HashSet::new();
+            node.children().iter().any(|child| walk(child, &mut child_scope))
+        } else {
+            node.children().iter().any(|child| walk(child, scope))
+        }
+    }
+    walk(node, &mut HashSet::new())
 }
 
 // --------------------------------------------------------------- test 1
