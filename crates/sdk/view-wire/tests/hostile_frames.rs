@@ -28,5 +28,7 @@ mod hostile {
     use generation::*;
     mod checks;
     use checks::*;
+    mod styles;
+    use styles::*;
     mod cases;
 }
