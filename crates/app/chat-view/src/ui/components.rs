@@ -3,7 +3,10 @@
 use ducktape_view_guest::prelude::*;
 
 #[derive(IntoElement)]
-pub(crate) struct Button<F> {
+pub(crate) struct Button<F>
+where
+    F: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+{
     id: ElementId,
     label: String,
     theme: Theme,

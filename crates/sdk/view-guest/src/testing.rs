@@ -422,6 +422,20 @@ pub(crate) fn dismiss(frame: &Frame, name: &str) -> Vec<Event> {
     vec![Event::Message(*message)]
 }
 
+/// The event a named host-painted surface returns to its guest listener.
+pub(crate) fn surface(frame: &Frame, name: &str, value: crate::wire::SurfaceValue) -> Vec<Event> {
+    let Some(Node::Surface { on_event, .. }) = find(frame, name) else {
+        panic!("no surface {name:?} in {:?}", keys(frame));
+    };
+    let Some(handler) = on_event else {
+        panic!("surface {name:?} has no event route");
+    };
+    vec![Event::Surface {
+        handler: *handler,
+        value,
+    }]
+}
+
 /// The events the host sends when the sensor with key `name` leaves view.
 pub(crate) fn hide(frame: &Frame, name: &str) -> Vec<Event> {
     let Some(Node::Sensor { on_hide, .. }) = find(frame, name) else {

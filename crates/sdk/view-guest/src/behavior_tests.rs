@@ -1,12 +1,13 @@
 use crate::prelude::*;
 use crate::testing::TestAppContext;
-use crate::{modal_overlay, resize_handle, sensor, wire, View};
+use crate::{modal_overlay, resize_handle, sensor, surface, wire, View};
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 struct BehaviorView {
     measured: (f32, f32),
     dragged: (f64, f64),
     dismissed: bool,
+    surface_event: String,
 }
 
 impl View for BehaviorView {
@@ -29,13 +30,26 @@ impl Render for BehaviorView {
             view.dismissed = true;
             cx.notify();
         });
+        let surface_event = cx.listener(|view, event: &wire::SurfaceValue, _, cx| {
+            if let wire::SurfaceValue::Str(value) = event {
+                view.surface_event = value.clone();
+            }
+            cx.notify();
+        });
         modal_overlay(
             ElementId::Name("behavior-overlay".into()),
             sensor(
                 ElementId::Name("behavior-sensor".into()),
                 resize_handle(
                     ElementId::Name("behavior-resize".into()),
-                    div().child("base"),
+                    div().child("base").child(
+                        surface(
+                            ElementId::Name("behavior-surface".into()),
+                            "test",
+                            vec![wire::SurfaceValue::Bool(true)],
+                        )
+                        .on_event(surface_event),
+                    ),
                 )
                 .on_drag(dragged),
             )
@@ -77,10 +91,12 @@ fn behavior_elements_lower_typed_routes_and_children() {
     ));
     cx.simulate_measure("behavior-sensor", 321., 123.);
     cx.simulate_drag("behavior-resize", 12., -3.);
+    cx.simulate_surface("behavior-surface", wire::SurfaceValue::Str("opened".into()));
     cx.simulate_dismiss("behavior-overlay");
     view.read(|view| {
         assert_eq!(view.measured, (321., 123.));
         assert_eq!(view.dragged, (12., -3.));
+        assert_eq!(view.surface_event, "opened");
         assert!(view.dismissed);
     });
 }

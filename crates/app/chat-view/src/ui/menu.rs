@@ -105,7 +105,8 @@ pub fn editing(
 fn message_menu(chat: &Chat, menu: &Menu, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement {
     let (pane, seq, rev) = (menu.pane, menu.seq, menu.rev);
     let mut content = div()
-        .id(ElementId::Name("chat-message-menu".into()))
+        .id(ElementId::Name(focus_key(pane, menu.mode).into()))
+        .focusable()
         .flex()
         .flex_col()
         .gap_1();
@@ -185,7 +186,9 @@ fn message_menu(chat: &Chat, menu: &Menu, cx: &mut Context<Chat>, theme: &Theme)
                         .justify_center()
                         .rounded_md()
                         .hover(|s| s.bg(theme.surface_raised))
-                        .role(ducktape_view_guest::Role::Button).focusable().on_click(click)
+                        .role(ducktape_view_guest::Role::Button)
+                        .focusable()
+                        .on_click(click)
                         .child(emoji),
                 );
             }

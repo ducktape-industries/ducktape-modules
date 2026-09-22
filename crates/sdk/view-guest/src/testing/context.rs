@@ -167,6 +167,9 @@ impl TestAppContext {
     pub fn simulate_dismiss(&mut self, key: &str) {
         self.dispatch(super::dismiss(&self.frame, key));
     }
+    pub fn simulate_surface(&mut self, key: &str, value: crate::wire::SurfaceValue) {
+        self.dispatch(super::surface(&self.frame, key, value));
+    }
     pub fn simulate_hover(&mut self, key: &str) {
         self.dispatch(super::hover(&self.frame, key));
     }

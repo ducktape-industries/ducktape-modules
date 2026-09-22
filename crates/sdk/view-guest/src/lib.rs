@@ -10,19 +10,21 @@ pub use theme::Theme;
 mod behavior;
 mod element;
 mod interactivity;
+mod surface;
 pub use behavior::{modal_overlay, resize_handle, sensor, ModalOverlay, ResizeHandle, Sensor};
 pub use element::{
     anchored, canvas, deferred, div, img, svg, uniform_list, AnyElement, Anchored, Canvas, Deferred, Div,
     Element, Img, IntoElement, Lowering, ParentElement, RenderOnce, Svg, UniformList,
 };
 pub use interactivity::{InteractiveElement, Interactivity, Stateful, StatefulInteractiveElement};
+pub use surface::{surface, Surface};
 
 /// Traits and primitives used to compose guest GPUI elements.
 pub mod prelude {
     pub use crate::{
         AnyElement, App, ClickEvent, Context, Element, ElementId, FluentBuilder, Global, Hsla, InteractiveElement,
         IntoElement, ParentElement, Render, RenderOnce, Role, SharedString, StatefulInteractiveElement,
-        Styled, Theme, Window, modal_overlay, resize_handle, sensor, anchored, canvas, deferred, div, img, px, rems, rgb, svg, uniform_list,
+        Styled, Theme, Window, surface, modal_overlay, resize_handle, sensor, anchored, canvas, deferred, div, img, px, rems, rgb, svg, uniform_list,
     };
 }
 mod editor;
@@ -146,12 +148,17 @@ impl<V: View> Driver<V> {
                     slots::run_click(&slots, handler, &event.into(), &mut window, &mut self.app);
                     None
                 }
-                wire::Event::Surface { handler, value } => slots::run_handler::<
-                    wire::SurfaceValue,
-                    Callback<V>,
-                >(
-                    &self.app.inner.slots, handler, value
-                ),
+                wire::Event::Surface { handler, value } => {
+                    let slots = self.app.inner.slots.clone();
+                    let mut window = self.app.window();
+                    if slots::run_route(&slots, handler, &value, &mut window, &mut self.app) {
+                        None
+                    } else {
+                        slots::run_handler::<wire::SurfaceValue, Callback<V>>(
+                            &slots, handler, value,
+                        )
+                    }
+                }
                 wire::Event::Input { handler, text } => {
                     slots::run_handler::<String, Callback<V>>(&self.app.inner.slots, handler, text)
                 }

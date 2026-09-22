@@ -24,6 +24,26 @@ fn preferred_window_keeps_the_original_baseline() {
     assert_eq!(<Chat as View>::PREFERRED_WINDOW_SIZE, "1180x760");
 }
 
+#[test]
+fn the_root_tracks_the_shared_theme_and_is_accessible() {
+    let (mut cx, _) = opened();
+    let dark = ducktape_view_guest::Theme::dark();
+    cx.set_global(dark);
+    let Some(wire::Node::Container { style, .. }) = cx.find("chat-root") else {
+        panic!("chat root is a styled container");
+    };
+    assert_eq!(
+        style
+            .background
+            .as_ref()
+            .and_then(|fill| fill.color())
+            .and_then(|background| background.as_solid()),
+        Some(dark.background)
+    );
+    assert_eq!(style.text.color, Some(dark.foreground));
+    cx.assert_accessible();
+}
+
 fn row(seq: u64, author: &str, text: &str) -> MsgRow {
     MsgRow {
         channel_id: "general".into(),
@@ -145,6 +165,11 @@ fn the_room_shows_its_rows_intro_and_actions() {
         assert!(cx.find(&format!("chat-message-m{seq}-block-0")).is_some());
     }
     cx.simulate_click("chat-message-m1-react");
+    assert!(
+        cx.find(&ui::menu::focus_key(Pane::Timeline, Mode::Reactions))
+            .is_some(),
+        "the host focus target must exist in the open menu"
+    );
     assert!(cx.host().asked::<ducktape_view_guest::caps::Widget>().iter().any(|command| {
         matches!(command, wire::WidgetCommand::Focus { target } if target == &ui::menu::focus_key(Pane::Timeline, Mode::Reactions))
     }));
@@ -165,6 +190,10 @@ fn the_room_shows_its_rows_intro_and_actions() {
     );
     view.read(|chat| assert!(chat.menu.is_none()));
     cx.simulate_click("chat-message-m1-more");
+    assert!(
+        cx.find(&ui::menu::focus_key(Pane::Timeline, Mode::More))
+            .is_some()
+    );
     assert!(cx.has_text("Reply in thread") && cx.has_text("Copy link"));
     cx.simulate_click("chat-message-m1-thread");
     cx.run_until_parked();
@@ -278,6 +307,37 @@ fn menus_and_dialogs_are_modal_overlays_with_dismiss_routes() {
     ));
     cx.simulate_dismiss("chat-create-overlay");
     view.read(|chat| assert!(chat.create.is_none()));
+}
+
+#[test]
+fn attachment_preview_keeps_host_surfaces_and_markdown_link_events() {
+    let (mut cx, view) = opened();
+    let link = files::file_address("testnet#0a1b2c3d", "/readme.md").unwrap();
+    view.update(&mut cx, |chat, _, cx| {
+        chat.preview = Some(Preview {
+            link,
+            read: Loaded::Ready(files::Preview {
+                text: "[Open](https://example.test)".into(),
+                clipped: false,
+                binary: false,
+            }),
+        });
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(matches!(
+        cx.find("chat-preview-markdown"),
+        Some(wire::Node::Surface {
+            name,
+            on_event: Some(_),
+            ..
+        }) if name == "markdown"
+    ));
+    cx.simulate_surface(
+        "chat-preview-markdown",
+        wire::SurfaceValue::Str("https://example.test".into()),
+    );
+    assert_eq!(cx.host().opened_links(), vec!["https://example.test"]);
 }
 
 #[test]

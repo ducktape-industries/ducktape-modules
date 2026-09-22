@@ -2,7 +2,8 @@
 
 use ducktape_view_guest::prelude::*;
 use ducktape_view_guest::{
-    AnyElement, ClickEvent, Context, ElementId, ParentElement, Styled, Theme, div, px,
+    AnyElement, ClickEvent, Context, ElementId, ParentElement, Styled, Theme, div, px, surface,
+    wire,
 };
 
 use crate::ui::button;
@@ -157,6 +158,29 @@ pub fn preview(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Option<Any
                     close,
                 )),
         );
+    if let Some(&(width, height)) = chat.pictures.get(&preview.link)
+        && width > 0
+        && height > 0
+    {
+        let (width, height) = crate::files::preview_box(width, height, chat.layout.viewport);
+        return Some(
+            card.child(
+                div()
+                    .id(ElementId::Name("chat-preview-picture-frame".into()))
+                    .w(px(width))
+                    .h(px(height))
+                    .child(surface(
+                        ElementId::Name("chat-preview-picture".into()),
+                        "picture",
+                        vec![
+                            wire::SurfaceValue::Str(crate::files::PICTURE_SURFACE.into()),
+                            wire::SurfaceValue::Str(path),
+                        ],
+                    )),
+            )
+            .into_any_element(),
+        );
+    }
     match &preview.read {
         Loaded::Idle | Loaded::Loading(_) => {
             card = card.child(
@@ -177,23 +201,51 @@ pub fn preview(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Option<Any
             );
         }
         Loaded::Ready(text) => {
-            card = card.child(
-                div()
-                    .flex_1()
-                    .p_3()
-                    .bg(theme.surface)
-                    .font_family("JetBrains Mono")
-                    .child(if text.binary {
-                        "No preview: this file is binary.".to_owned()
-                    } else {
-                        text.text.clone()
-                    })
-                    .when(text.clipped, |el| {
-                        el.child(
+            if text.binary {
+                card = card.child(crate::ui::empty_state(
+                    ElementId::Name("chat-preview-binary".into()),
+                    "No preview",
+                    crate::files::BINARY_PLATE,
+                    theme,
+                ));
+            } else {
+                let (width, height) = crate::files::preview_room(chat.layout.viewport);
+                let document = if crate::files::markdown_path(&path) {
+                    let open = cx.listener(|chat, event: &wire::SurfaceValue, _window, cx| {
+                        if let wire::SurfaceValue::Str(link) = event {
+                            chat.open_link(link.clone(), cx);
+                        }
+                    });
+                    surface(
+                        ElementId::Name("chat-preview-markdown".into()),
+                        "markdown",
+                        vec![
+                            wire::SurfaceValue::Str(text.text.clone()),
+                            wire::SurfaceValue::Str(String::new()),
+                            wire::SurfaceValue::Bool(chat.session.dark),
+                        ],
+                    )
+                    .on_event(open)
+                } else {
+                    surface(
+                        ElementId::Name("chat-preview-code".into()),
+                        "code",
+                        vec![
+                            wire::SurfaceValue::Str(text.text.clone()),
+                            wire::SurfaceValue::Str(path),
+                            wire::SurfaceValue::Bool(chat.session.dark),
+                        ],
+                    )
+                };
+                card = card.child(div().w(px(width)).h(px(height)).child(document).when(
+                    text.clipped,
+                    |element| {
+                        element.child(
                             "Only the beginning is shown here. Open in Files for the whole file.",
                         )
-                    }),
-            );
+                    },
+                ));
+            }
         }
     }
     Some(card.into_any_element())

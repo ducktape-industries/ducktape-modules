@@ -7,6 +7,25 @@ fn preferred_window_keeps_the_original_baseline() {
     assert_eq!(<Explorer as View>::PREFERRED_WINDOW_SIZE, "760x640");
 }
 
+#[test]
+fn the_root_tracks_the_shared_theme() {
+    let mut cx = ready();
+    let dark = ducktape_view_guest::Theme::dark();
+    cx.set_global(dark);
+    let Some(ducktape_view_guest::wire::Node::Container { style, .. }) = cx.find("explorer") else {
+        panic!("explorer root is a styled container");
+    };
+    assert_eq!(
+        style
+            .background
+            .as_ref()
+            .and_then(|fill| fill.color())
+            .and_then(|background| background.as_solid()),
+        Some(dark.background)
+    );
+    assert_eq!(style.text.color, Some(dark.foreground));
+}
+
 fn entry(program: &str, code: u8) -> registry::Entry {
     registry::Entry {
         program: program.into(),
