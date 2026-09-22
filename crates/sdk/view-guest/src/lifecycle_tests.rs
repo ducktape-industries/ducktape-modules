@@ -1,4 +1,4 @@
-use crate::{Context, Driver, Render, Task, View, Window, wire};
+use crate::{wire, Context, Driver, InteractiveElement, ParentElement, Render, Task, View, Window};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 
@@ -35,8 +35,10 @@ impl View for Streams {
     }
 }
 impl Render for Streams {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> wire::Node {
-        wire::kit::text("values", self.values.len().to_string())
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl crate::IntoElement {
+        crate::div()
+            .id("values")
+            .child(self.values.len().to_string())
     }
 }
 

@@ -1,15 +1,71 @@
 //! Renderer-independent execution of dynamically loaded WASM views.
+pub use gpui::prelude::FluentBuilder;
+extern crate self as ducktape_view_guest;
+
+pub use gpui::{
+    hsla, px, rems, rgb, Anchor, AnchoredFitMode, AnchoredPositionMode, ClickEvent, CursorStyle,
+    Edges, ElementId, FileDropEvent, FontStyle, FontWeight, Global, HighlightStyle,
+    HoverListenerMode, Hsla, KeyDownEvent, KeyUpEvent, ListHorizontalSizingBehavior,
+    ListSizingBehavior, ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseExitEvent,
+    MouseMoveEvent, MousePressureEvent, MouseUpEvent, ObjectFit, PinchEvent, Pixels, Point,
+    Resource, Role, ScrollStrategy, ScrollWheelEvent, SharedString, StrikethroughStyle,
+    StyleRefinement, Styled, TextRun, TextStyle, UnderlineStyle, WindowControlArea,
+};
+pub use view_guest_derive::IntoElement;
 pub use view_wire as wire;
-pub use view_wire::kit;
+mod theme;
+pub use theme::Theme;
+mod behavior;
+mod element;
+mod interactivity;
+mod list;
+mod primitives;
+mod rich_text;
+mod surface;
+mod view_element;
+pub use behavior::{modal_overlay, resize_handle, sensor, ModalOverlay, ResizeHandle, Sensor};
+pub use element::{
+    div, uniform_list, AnyElement, Div, Element, Input, IntoElement, Lowering, ParentElement,
+    RenderOnce, UniformList, UniformListScrollHandle,
+};
+pub use interactivity::{
+    FocusHandle, InteractiveElement, Interactivity, Stateful, StatefulInteractiveElement,
+};
+pub use list::{list, FollowMode, List, ListAlignment, ListOffset, ListScrollEvent, ListState};
+pub use primitives::{
+    anchored, canvas, deferred, img, svg, Anchored, Canvas, Deferred, ImageSource, ImageStyle, Img,
+    StyledImage, Svg, Transformation,
+};
+pub use rich_text::{InteractiveText, StyledText};
+pub use surface::{surface, Surface};
+pub use view_element::{AnyView, ViewElement};
+
+/// Traits and primitives used to compose guest GPUI elements.
+pub mod prelude {
+    pub use crate::{
+        anchored, canvas, deferred, div, hsla, img, list, modal_overlay, px, rems, resize_handle,
+        rgb, sensor, surface, svg, uniform_list, AnyElement, AnyView, App, ClickEvent, Context,
+        Element, ElementId, FileDropEvent, FluentBuilder, FocusHandle, FollowMode, Global,
+        HoverListenerMode, Hsla, Input, InteractiveElement, InteractiveText, IntoElement,
+        KeyDownEvent, KeyUpEvent, List, ListAlignment, ListHorizontalSizingBehavior, ListOffset,
+        ListScrollEvent, ListSizingBehavior, ListState, ModifiersChangedEvent, MouseButton,
+        MouseDownEvent, MouseExitEvent, MouseMoveEvent, MousePressureEvent, MouseUpEvent,
+        ParentElement, PinchEvent, Pixels, Render, RenderOnce, Role, ScrollStrategy,
+        ScrollWheelEvent, SharedString, StatefulInteractiveElement, Styled, StyledImage,
+        StyledText, Theme, UniformListScrollHandle, Window, WindowControlArea,
+    };
+}
 mod editor;
 mod editor_binding;
 mod editor_documents;
+mod editor_element;
 pub use editor::Editor;
 pub use editor_binding::{
     EditorBinding, EditorInteractionRequest, EditorKeyRequest, EditorRichRequest, EditorStateView,
     EditorTransaction, EditorTransactionEvent,
 };
 pub use editor_documents::EditorDocumentUpdate;
+pub use editor_element::{EditorElement, EditorElementEvent};
 pub mod caps;
 pub mod composer;
 pub mod host;
@@ -28,268 +84,14 @@ mod executor;
 pub use executor::Task;
 pub use host::Host;
 pub use window::Window;
-pub mod slots;
+#[cfg(test)]
+mod behavior_tests;
+mod slots;
 use context::Callback;
 
-const MAX_ROUNDS: usize = 8;
+mod driver;
+pub use driver::Driver;
 
-pub struct Driver<V: View> {
-    app: App,
-    entity: Entity<V>,
-    last_root: Option<wire::Node>,
-    busy: bool,
-}
-impl<V: View> Drop for Driver<V> {
-    fn drop(&mut self) {
-        self.app.inner.alive.set(false);
-        self.app.inner.tasks.borrow_mut().clear();
-    }
-}
-impl<V: View> Default for Driver<V> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-impl<V: View> Driver<V> {
-    pub fn new() -> Self {
-        Self::with_macos(cfg!(target_os = "macos"))
-    }
-    pub fn with_macos(macos: bool) -> Self {
-        Self::initialize(macos, None).expect("view initializes")
-    }
-    pub(crate) fn initialize(macos: bool, restored: Option<V>) -> Result<Self, String> {
-        let mut app = App::new(macos);
-        let entity = Entity::reserve(&app);
-        let _guard = app.inner.slots.enter();
-        let mut window = app.window();
-        let mut cx = Context {
-            app: &mut app,
-            entity: entity.clone(),
-        };
-        let value = match restored {
-            Some(mut value) => {
-                value.restored(&mut window, &mut cx);
-                value
-            }
-            None => V::new(&mut window, &mut cx),
-        };
-        *entity.value.borrow_mut() = Some(value);
-        Ok(Self {
-            app,
-            entity,
-            last_root: None,
-            busy: false,
-        })
-    }
-    pub fn entity(&self) -> Entity<V> {
-        self.entity.clone()
-    }
-    pub fn host(&self) -> Host {
-        self.app.host()
-    }
-    pub(crate) fn app_mut(&mut self) -> &mut App {
-        &mut self.app
-    }
-    pub fn tick(&mut self, events: Vec<wire::Event>) -> wire::Frame {
-        let _guard = self.app.inner.slots.enter();
-        self.busy = false;
-        self.settle();
-        for event in events {
-            let editor_event = matches!(
-                &event,
-                wire::Event::EditorDocument { .. }
-                    | wire::Event::EditorRequest { .. }
-                    | wire::Event::EditorTransaction { .. }
-            );
-            let message = match event {
-                wire::Event::Observation { .. }
-                | wire::Event::Mouse { .. }
-                | wire::Event::Keyboard { .. } => None,
-                wire::Event::Message(index) => slots::take_message::<Callback<V>>(index),
-                wire::Event::Surface { handler, value } => {
-                    slots::run_handler::<wire::SurfaceValue, Callback<V>>(handler, value)
-                }
-                wire::Event::Input { handler, text } => {
-                    slots::run_handler::<String, Callback<V>>(handler, text)
-                }
-                wire::Event::EditorDocument { handler, message } => {
-                    use wire::editor_document::EditorDocumentMessage;
-                    if matches!(
-                        message,
-                        EditorDocumentMessage::Acknowledged { .. }
-                            | EditorDocumentMessage::Failed { .. }
-                    ) {
-                        slots::finish_editor_transfer(message.id());
-                        continue;
-                    }
-                    slots::run_handler::<wire::editor_document::EditorDocumentMessage, Callback<V>>(
-                        handler, message,
-                    )
-                }
-                wire::Event::EditorRequest { handler, request } => {
-                    slots::run_handler::<wire::EditorRequest, Callback<V>>(handler, request)
-                }
-                wire::Event::EditorTransaction { handler, event } => {
-                    if let wire::EditorTransactionEvent::Fault { id, .. }
-                    | wire::EditorTransactionEvent::Cancelled { id, .. } = &event
-                    {
-                        slots::finish_editor_transfer(&wire::editor_document::EditorTransferId {
-                            instance: id.instance,
-                            document: id.document.clone(),
-                            reset: id.reset,
-                            serial: id.sequence,
-                            attempt: id.attempt,
-                        });
-                    }
-                    if let wire::EditorTransactionEvent::Cancelled { id, .. } = &event {
-                        if !slots::editor_matches_pending(id) {
-                            continue;
-                        }
-                        slots::editor_acknowledge(&event);
-                    }
-                    slots::run_handler::<wire::EditorTransactionEvent, Callback<V>>(handler, event)
-                }
-                wire::Event::Toggle { handler, on } => {
-                    slots::run_handler::<bool, Callback<V>>(handler, on)
-                }
-                wire::Event::Slide { handler, value } => {
-                    slots::run_handler::<f32, Callback<V>>(handler, value)
-                }
-                wire::Event::Select { handler, index } => {
-                    slots::run_handler::<u32, Callback<V>>(handler, index)
-                }
-                wire::Event::Size {
-                    handler,
-                    width,
-                    height,
-                } => slots::run_handler::<(f32, f32), Callback<V>>(handler, (width, height)),
-                wire::Event::Drag { handler, dx, dy } => {
-                    slots::run_handler::<(f64, f64), Callback<V>>(handler, (dx, dy))
-                }
-                wire::Event::Pointer { handler, x, y } => {
-                    slots::run_handler::<(f32, f32), Callback<V>>(handler, (x, y))
-                }
-                wire::Event::Scroll {
-                    handler,
-                    dx,
-                    dy,
-                    pixels,
-                } => slots::run_handler::<(f32, f32, bool), Callback<V>>(handler, (dx, dy, pixels)),
-                wire::Event::ScrollOffset {
-                    handler,
-                    x,
-                    y,
-                    relative_x,
-                    relative_y,
-                } => slots::run_handler::<(f32, f32, f32, f32), Callback<V>>(
-                    handler,
-                    (x, y, relative_x, relative_y),
-                ),
-                wire::Event::Response { id, result, done } => {
-                    self.app.host().fulfill(id, result, done);
-                    // Response order is semantic: queued hidden data must be
-                    // applied before a later visibility notification.
-                    self.settle();
-                    None
-                }
-                // The host dropped the tree the patches build on.
-                wire::Event::Resync => {
-                    self.last_root = None;
-                    self.app.notify();
-                    None
-                }
-            };
-            if let Some(callback) = message {
-                self.entity.clone().update_app(&mut self.app, |v, w, cx| {
-                    callback(v, w, cx);
-                    if editor_event {
-                        cx.notify();
-                    }
-                });
-                self.settle();
-            }
-        }
-        self.settle();
-        let render = self.app.inner.dirty.replace(false)
-            || self.last_root.is_none()
-            || slots::editor_transferring();
-        let mut root = if render {
-            slots::reset();
-            let mut window = self.app.window();
-            let mut cx = Context {
-                app: &mut self.app,
-                entity: self.entity.clone(),
-            };
-            self.entity
-                .value
-                .borrow_mut()
-                .as_mut()
-                .unwrap()
-                .render(&mut window, &mut cx)
-        } else {
-            self.last_root.clone().expect("rendered tree")
-        };
-        self.busy |= self.app.inner.dirty.get() || executor::ready(&self.app.inner.tasks.borrow());
-        let unchanged = self.last_root.as_ref() == Some(&root);
-        let mut patches = Vec::new();
-        if !unchanged {
-            // Patches against the last tree, unless there is none — a first
-            // frame, or one after the host asked to resync — or the patches
-            // would cross bigger than the tree itself.
-            if let Some(last) = &mut self.last_root {
-                patches = wire::diff(last, &mut root);
-                if patches.len() > wire::MAX_PATCHES
-                    || wire::encoded_size(&patches) >= wire::encoded_size(&root)
-                {
-                    patches.clear();
-                }
-            }
-            // Remembered without the picture bytes this frame carried: the
-            // next view names those pictures by hash alone, and that is
-            // the same tree — and the tree the host keeps, which drops the
-            // bytes the same way once it has the pictures.
-            let mut kept = root.clone();
-            kept.for_each_mut(&mut |node| match node {
-                wire::Node::Svg { bytes, .. } => *bytes = None,
-                wire::Node::Image { data, .. } | wire::Node::ImageViewer { data, .. } => {
-                    *data = None
-                }
-                _ => {}
-            });
-            self.last_root = Some(kept);
-        }
-        let editor_decisions = slots::take_editor_responses();
-        self.busy |= slots::editor_responses_ready();
-        wire::Frame {
-            upstream_sanitization: Default::default(),
-            editor_decisions,
-            editor_documents: slots::take_editor_documents(),
-            mouse_interest: slots::mouse_interest(),
-            event_interest: slots::event_interest(),
-            root: Some(root),
-            patches,
-            requests: self.app.host().drain_outbox(),
-            cancels: self.app.host().drain_cancels(),
-            unchanged,
-            busy: self.busy,
-        }
-    }
-
-    fn settle(&mut self) {
-        for _ in 0..MAX_ROUNDS {
-            let mut tasks = std::mem::take(&mut *self.app.inner.tasks.borrow_mut());
-            let cut_short = executor::poll(&mut tasks);
-            let added = !self.app.inner.tasks.borrow().is_empty();
-            tasks.append(&mut self.app.inner.tasks.borrow_mut());
-            *self.app.inner.tasks.borrow_mut() = tasks;
-            self.busy |= cut_short;
-            if !added {
-                return;
-            }
-        }
-        self.busy = true;
-    }
-}
 /// The most a panic message may carry across the `panicked` import. A host
 /// shows one line of it, and every byte over that is one the host lifts out
 /// of guest memory before it can refuse anything — so the message is cut
@@ -387,7 +189,7 @@ pub mod exports {
     use std::any::Any;
     use std::cell::RefCell;
 
-    use crate::{Driver, View, wire};
+    use crate::{wire, Driver, View};
 
     #[link(wasm_import_module = "ducktape_view")]
     unsafe extern "C" {

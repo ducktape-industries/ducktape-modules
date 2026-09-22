@@ -1,15 +1,22 @@
 //! Document delivery is routed through the generated mutable Editor binding.
-use crate::{Editor, slots, wire};
+use crate::{slots, wire, Editor};
 use wire::editor_document::{EditorDocumentMessage, EditorDocumentRef, EditorTransferError};
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct EditorDocumentUpdate {
     document: String,
     message: EditorDocumentMessage,
+    identity: std::sync::Weak<()>,
 }
 
 impl EditorDocumentUpdate {
-    pub fn apply(self, editor: &mut Editor) {
+    pub fn apply(self, editor: &mut Editor, cx: &mut crate::App) {
+        let context = &cx.inner.slots;
+        if !std::sync::Weak::ptr_eq(&self.identity, &context.identity())
+            || self.identity.upgrade().is_none()
+        {
+            return;
+        }
         let id = self.message.id().clone();
         if id.document != self.document {
             return;
@@ -20,18 +27,18 @@ impl EditorDocumentUpdate {
                 if target != current {
                     Err(EditorTransferError::Identity)
                 } else {
-                    slots::start_editor_transfer(id, target)
+                    slots::start_editor_transfer(context, id, target)
                 }
             }
             EditorDocumentMessage::Acknowledged { .. } | EditorDocumentMessage::Failed { .. } => {
-                slots::finish_editor_transfer(&id);
+                slots::finish_editor_transfer(context, &id);
                 Ok(())
             }
             EditorDocumentMessage::Transfer(transfer) => {
-                match slots::receive_editor_mirror(&transfer) {
+                match slots::receive_editor_mirror(context, &transfer) {
                     Ok(Some((text, target))) => {
                         if editor.install_mirror(text, &target) {
-                            slots::acknowledge_editor_mirror(id.clone());
+                            slots::acknowledge_editor_mirror(context, id.clone());
                             Ok(())
                         } else {
                             Err(EditorTransferError::Identity)
@@ -43,7 +50,7 @@ impl EditorDocumentUpdate {
             }
         };
         if let Err(reason) = result {
-            slots::editor_document_failure(id, reason);
+            slots::editor_document_failure(context, id, reason);
         }
     }
 }
@@ -51,19 +58,25 @@ impl EditorDocumentUpdate {
 impl Editor {
     /// Generated code calls this for every projection. The mirror stays owned
     /// by application state; routes and transfer progress retain only identity.
-    pub fn document<M: 'static>(
+    pub(crate) fn document<M: 'static>(
         &self,
+        context: &slots::Context,
         document: String,
         wrap: impl Fn(EditorDocumentUpdate) -> M + 'static,
     ) -> (EditorDocumentRef, u32) {
         let reference = self.document_reference(document.clone());
-        slots::editor_document_frame(&reference, self.text_ref());
-        let handler = slots::handler::<EditorDocumentMessage, M>(Box::new(move |message| {
-            Some(wrap(EditorDocumentUpdate {
-                document: document.clone(),
-                message,
-            }))
-        }));
+        slots::editor_document_frame(context, &reference, self.text_ref());
+        let identity = context.identity();
+        let handler = slots::handler::<EditorDocumentMessage, M>(
+            context,
+            Box::new(move |message| {
+                Some(wrap(EditorDocumentUpdate {
+                    document: document.clone(),
+                    message,
+                    identity: identity.clone(),
+                }))
+            }),
+        );
         (reference, handler)
     }
 }
@@ -71,7 +84,9 @@ impl Editor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Context, Driver, Render, View, Window};
+    use crate::{
+        Context, Driver, EditorBinding, EditorElement, EditorElementEvent, Render, View, Window,
+    };
     use serde::{Deserialize, Serialize};
     use std::rc::Rc;
     use wire::editor_document::{EditorTransfer, EditorTransferId};
@@ -80,8 +95,6 @@ mod tests {
     struct DocumentApp {
         #[serde(with = "editor_snapshot")]
         editor: Editor,
-        #[serde(skip)]
-        route: u32,
     }
     mod editor_snapshot {
         use super::*;
@@ -102,27 +115,56 @@ mod tests {
         fn new(_: &mut Window, _: &mut Context<Self>) -> Self {
             Self {
                 editor: Editor::new("x".repeat(wire::MAX_STRING_BYTES)),
-                route: 0,
             }
         }
     }
     impl Render for DocumentApp {
-        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> wire::Node {
-            let (_, route) = self.editor.document("app:draft".into(), |update| {
-                let callback: crate::context::Callback<Self> = Rc::new(move |view, _, _| {
-                    update.clone().apply(&mut view.editor);
-                });
-                callback
-            });
-            self.route = route;
-            wire::Node::empty()
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl crate::IntoElement {
+            EditorElement::new(
+                "draft",
+                &self.editor,
+                "app:draft",
+                EditorBinding::plain(),
+                |event| -> crate::context::Callback<Self> {
+                    match event {
+                        EditorElementEvent::Document(update) => Rc::new(move |view, _, cx| {
+                            update.clone().apply(&mut view.editor, cx);
+                        }),
+                        EditorElementEvent::Observed(()) => Rc::new(|_, _, _| {}),
+                        EditorElementEvent::Transaction(transaction) => {
+                            Rc::new(move |view, _, cx| {
+                                transaction.clone().apply(&mut view.editor, cx);
+                            })
+                        }
+                    }
+                },
+            )
         }
+    }
+
+    #[test]
+    fn document_routes_do_not_keep_their_driver_alive() {
+        fn is_send<T: Send>() {}
+        is_send::<EditorDocumentUpdate>();
+        let context = slots::Context::default();
+        let identity = context.identity();
+        let editor = Editor::new("document");
+        editor.document(&context, "draft".into(), |update| update);
+        assert!(identity.upgrade().is_some());
+        drop(context);
+        assert!(
+            identity.upgrade().is_none(),
+            "frame closures must not own their callback table"
+        );
     }
 
     #[test]
     fn editor_view_progresses_without_messages_and_waits_for_exact_ack() {
         let mut driver = Driver::<DocumentApp>::new();
-        driver.tick(vec![]);
+        let first = driver.tick(vec![]);
+        let wire::Node::Editor { on_document, .. } = first.root.unwrap() else {
+            panic!("document view must render an editor")
+        };
         let target = driver
             .entity()
             .read(|view| view.editor.document_reference("app:draft".into()));
@@ -134,7 +176,7 @@ mod tests {
             attempt: 0,
         };
         let begin = driver.tick(vec![wire::Event::EditorDocument {
-            handler: driver.entity().read(|view| view.route),
+            handler: on_document,
             message: EditorDocumentMessage::Request {
                 id: id.clone(),
                 target,

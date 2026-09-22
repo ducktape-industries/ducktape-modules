@@ -1,5 +1,6 @@
 # modules — the wasm32 gates.
 CARGO ?= cargo
+WASM_OPT ?= wasm-opt
 
 # What a program links: abi and guest build for wasm32 with nothing else.
 PROGRAM_LINKABLE := abi guest
@@ -25,7 +26,7 @@ VIEWS := chat-view members-view node-view explorer-view settings-view
 # boot set's contracts: its signing deps are dev-only, and `-e normal` below
 # is what says so.
 VIEW_LINKABLE := ducklink view-wire view-guest design modules settings-view
-VIEW_FORBIDDEN := blst commonware-cryptography
+VIEW_FORBIDDEN := blst commonware-cryptography wasm-bindgen js-sys web-sys
 
 .PHONY: program-wasm-check wasm-programs probe-fixture wasm-views view-wasm-check
 
@@ -86,16 +87,26 @@ probe-fixture:
 
 ## builds every view for wasm32 under target/wasm32-unknown-unknown/release/.
 wasm-views:
-	@for v in $(VIEWS); do $(CARGO) build --release --target-dir $(BUILD_TARGET) --target wasm32-unknown-unknown -p $$v || exit 1; done
+	@for v in $(VIEWS); do \
+	  $(CARGO) build --release --target wasm32-unknown-unknown -p $$v || exit 1; \
+	  artifact="$${CARGO_TARGET_DIR:-target}/wasm32-unknown-unknown/release/$$(echo $$v | tr - _).wasm"; \
+	  WASM_OPT="$(WASM_OPT)" tools/optimize-view.sh "$$artifact" || exit 1; \
+	  python3 tools/check-view-abi.py "$$artifact" || exit 1; \
+	  limit=1200000; if [ "$$v" = chat-view ]; then limit=2500000; fi; \
+	  bytes=$$(wc -c < "$$artifact"); \
+	  echo "$$v: $$bytes bytes (limit $$limit)"; \
+	  test "$$bytes" -le "$$limit" || exit 1; \
+	done
 
 ## builds every VIEW_LINKABLE crate for wasm32-unknown-unknown, plus the
 ## exported view probe of view-guest, then fails if the normal wasm32 dependency
-## tree of any of them names a VIEW_FORBIDDEN crate.
+## tree of any of them names a VIEW_FORBIDDEN crate. Omit DWARF from these
+## debug WASM artifacts so the exported probe fits the host module-size limit.
 view-wasm-check:
 	@for crate in $(VIEW_LINKABLE); do \
-	  $(CARGO) build --target wasm32-unknown-unknown -p $$crate || exit 1; \
+	  CARGO_PROFILE_DEV_DEBUG=0 $(CARGO) build --target wasm32-unknown-unknown -p $$crate || exit 1; \
 	done; \
-	$(CARGO) build --target wasm32-unknown-unknown -p view-guest --example exported_view || exit 1; \
+	CARGO_PROFILE_DEV_DEBUG=0 $(CARGO) build --target wasm32-unknown-unknown -p view-guest --example exported_view || exit 1; \
 	reached=""; \
 	for crate in $(VIEW_LINKABLE); do \
 	  tree=$$($(CARGO) tree --target wasm32-unknown-unknown -e normal -p $$crate --prefix none) || exit 1; \
@@ -104,9 +115,9 @@ view-wasm-check:
 	  done; \
 	done; \
 	if [ -z "$$reached" ]; then \
-	  echo "every view-linkable crate builds for wasm32 and stays off the signing/identity graph"; \
+	  echo "every view-linkable crate builds for wasm32 and stays off the signing/identity and JavaScript graphs"; \
 	else \
-	  echo "view-linkable crates reach the signing/identity graph:$$reached"; \
+	  echo "view-linkable crates reach a forbidden dependency:$$reached"; \
 	  exit 1; \
 	fi
 

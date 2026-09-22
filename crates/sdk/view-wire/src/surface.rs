@@ -215,8 +215,10 @@ mod tests {
 
     #[test]
     fn hostile_collection_lengths_fail_before_reading_elements() {
-        let mut bytes = encode(&SurfaceValue::List(vec![]));
-        bytes[4..12].copy_from_slice(&(MAX_SURFACE_VALUES as u64).to_le_bytes());
+        let mut bytes = vec![0x81, 0xa4];
+        bytes.extend_from_slice(b"List");
+        bytes.push(0xdd);
+        bytes.extend_from_slice(&(MAX_SURFACE_VALUES as u32).to_be_bytes());
         assert!(
             decode::<SurfaceValue>(&bytes)
                 .unwrap_err()

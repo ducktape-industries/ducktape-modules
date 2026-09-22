@@ -11,13 +11,13 @@ impl Window {
     pub fn is_macos(&self) -> bool {
         self.macos
     }
-    pub fn focus(&mut self, target: impl Into<String>) {
+    pub fn focus(&mut self, target: impl Into<crate::ElementId>) {
         self.dispatch(wire::WidgetCommand::Focus {
-            target: target.into(),
+            target: vec![wire::ElementIdWire::from_gpui(target.into())
+                .expect("widget focus target must be portable")],
         });
     }
     pub fn dispatch(&mut self, command: wire::WidgetCommand) {
-        let _guard = self.slots.enter();
-        slots::host().notify::<crate::caps::Widget>(command);
+        slots::host(&self.slots).notify::<crate::caps::Widget>(command);
     }
 }

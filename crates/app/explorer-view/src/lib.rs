@@ -8,8 +8,12 @@ use ducktape_view_guest::caps::{Program, QueryBytes};
 use ducktape_view_guest::export_view;
 use ducktape_view_guest::host::{Refusal, malformed};
 use ducktape_view_guest::view::{Live, Loaded};
-use ducktape_view_guest::wire::{Node, kit, kit::Tone};
-use ducktape_view_guest::{Context, Host, Render, Task, View, Window};
+use ducktape_view_guest::{
+    AnyElement, ClickEvent, Context, ElementId, Host, InteractiveElement, IntoElement,
+    ParentElement, Render, StatefulInteractiveElement, Styled, Task, Theme, View, Window, div, px,
+};
+mod components;
+use components::{EmptyState, Section};
 use futures::StreamExt;
 use modules::module_registry as registry;
 use serde::{Deserialize, Serialize};
@@ -55,7 +59,7 @@ struct Change {
 }
 
 impl View for Explorer {
-    const PREFERRED_WINDOW_SIZE: &'static str = "760x640";
+    const PREFERRED_WINDOW_SIZE: &'static str = "760,640";
 
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mut view = Self::default();
@@ -77,16 +81,42 @@ impl View for Explorer {
 }
 
 impl Render for Explorer {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> Node {
-        let key = "explorer";
-        let head = kit::centered_row(
-            format!("{key}/head"),
-            [
-                kit::fill_width(kit::title(format!("{key}/title"), "Programs")),
-                kit::caption(format!("{key}/count"), self.count()),
-            ],
-        );
-        kit::page(key, [head, self.body(key, cx)])
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = *cx.global::<Theme>();
+        div()
+            .id(ElementId::Name("explorer".into()))
+            .flex()
+            .flex_col()
+            .gap_3()
+            .p_5()
+            .size_full()
+            .bg(theme.background)
+            .text_color(theme.foreground)
+            .text_size(px(13.))
+            .child(
+                div()
+                    .id(ElementId::Name("explorer-head".into()))
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .id("explorer-title")
+                            .flex_1()
+                            .text_size(px(16.))
+                            .font_weight(ducktape_view_guest::FontWeight::SEMIBOLD)
+                            .role(ducktape_view_guest::Role::Heading)
+                            .aria_level(1)
+                            .child("Programs"),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(11.))
+                            .text_color(theme.muted)
+                            .child(self.count()),
+                    ),
+            )
+            .child(self.body(cx, &theme))
     }
 }
 
@@ -105,109 +135,176 @@ impl Explorer {
 
     fn count(&self) -> String {
         match self.network.ready() {
-            Some(network) => kit::plural(network.programs.len() as u64, "program", "programs"),
+            Some(network) => plural(network.programs.len(), "program", "programs"),
             None => String::new(),
         }
     }
 
     /// The four states of the registry: loading, refused, empty, ready.
-    fn body(&self, key: &str, cx: &mut Context<Self>) -> Node {
+    fn body(&self, cx: &mut Context<Self>, theme: &Theme) -> AnyElement {
         match &self.network {
-            Loaded::Idle | Loaded::Loading(_) => {
-                kit::secondary(format!("{key}/loading"), "Reading the registry…")
-            }
+            Loaded::Idle | Loaded::Loading(_) => div()
+                .id(ElementId::Name("explorer-loading".into()))
+                .text_size(px(12.))
+                .text_color(theme.muted)
+                .child("Reading the registry…")
+                .into_any_element(),
             Loaded::Failed(refusal) => {
-                let retry = cx.listener(|view, _: &(), _, cx| view.read(cx));
-                kit::notice(
-                    format!("{key}/refused"),
-                    kit::column(
-                        format!("{key}/refused/body"),
-                        [
-                            kit::wrapping(kit::text(
-                                format!("{key}/refused/why"),
-                                refusal.sentence.clone(),
-                            )),
-                            kit::action(format!("{key}/retry"), "Retry", Some(retry)),
-                        ],
-                    ),
-                    Tone::Danger,
-                )
+                let retry = cx.listener(|view, _: &ClickEvent, _, cx| view.read(cx));
+                div()
+                    .id(ElementId::Name("explorer-refused".into()))
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .p_3()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(theme.danger)
+                    .bg(theme.danger_soft)
+                    .child(refusal.sentence.clone())
+                    .child(
+                        div()
+                            .id(ElementId::Name("explorer-retry".into()))
+                            .px_2()
+                            .py_1()
+                            .rounded_md()
+                            .bg(theme.surface)
+                            .hover(|s| s.bg(theme.surface_raised))
+                            .role(ducktape_view_guest::Role::Button)
+                            .focusable()
+                            .on_click(retry)
+                            .child("Retry"),
+                    )
+                    .into_any_element()
             }
             Loaded::Ready(network) if network.programs.is_empty() && network.changes.is_empty() => {
-                kit::empty_state(
-                    format!("{key}/empty"),
+                EmptyState::new(
+                    "explorer-empty",
                     "No programs",
                     "The registry of this network runs nothing yet.",
                 )
+                .into_any_element()
             }
-            Loaded::Ready(network) => kit::scroll(
-                format!("{key}/list"),
-                kit::column(
-                    format!("{key}/sections"),
-                    [
-                        kit::section_row(&format!("{key}/running-header"), "Running", None),
-                        programs(key, &network.programs),
-                        kit::section_row(&format!("{key}/scheduled-header"), "Scheduled", None),
-                        changes(key, &network.changes),
-                    ],
-                ),
-            ),
+            Loaded::Ready(network) => div()
+                .id(ElementId::Name("explorer-list".into()))
+                .flex_1()
+                .overflow_y_scroll()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(Section::new("explorer-running-header", "Running"))
+                .child(programs(&network.programs, theme))
+                .child(Section::new("explorer-scheduled-header", "Scheduled"))
+                .child(changes(&network.changes, theme))
+                .into_any_element(),
         }
     }
 }
 
-fn programs(key: &str, programs: &[Entry]) -> Node {
+fn programs(programs: &[Entry], theme: &Theme) -> AnyElement {
     if programs.is_empty() {
-        return kit::secondary(format!("{key}/no-programs"), "No program runs here yet.");
+        return div()
+            .id(ElementId::Name("explorer-no-programs".into()))
+            .text_size(px(12.))
+            .text_color(theme.muted)
+            .child("No program runs here yet.")
+            .into_any_element();
     }
-    kit::column(
-        format!("{key}/programs"),
-        programs.iter().map(|entry| {
-            let row = format!("{key}/program/{}", entry.program);
-            kit::centered_row(
-                row.clone(),
-                [
-                    kit::fill_width(kit::truncated(format!("{row}/name"), &entry.program, 32)),
-                    kit::caption(
-                        format!("{row}/params"),
-                        kit::plural(entry.params as u64, "param byte", "param bytes"),
-                    ),
-                    kit::mono(format!("{row}/code"), kit::short_id(&entry.code, 12)),
-                ],
-            )
-        }),
-    )
+    div()
+        .id(ElementId::Name("explorer-programs".into()))
+        .flex()
+        .flex_col()
+        .gap_2()
+        .children(programs.iter().map(|entry| {
+            div()
+                .id(ElementId::Name(
+                    format!("explorer-program-{}", entry.program).into(),
+                ))
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(div().flex_1().truncate().child(entry.program.clone()))
+                .child(
+                    div()
+                        .text_size(px(12.))
+                        .text_color(theme.muted)
+                        .child(plural(entry.params, "param byte", "param bytes")),
+                )
+                .child(
+                    div()
+                        .font_family("JetBrains Mono")
+                        .text_size(px(12.))
+                        .child(short_id(&entry.code, 12)),
+                )
+        }))
+        .into_any_element()
 }
 
-fn changes(key: &str, changes: &[Change]) -> Node {
+fn changes(changes: &[Change], theme: &Theme) -> AnyElement {
     if changes.is_empty() {
-        return kit::secondary(
-            format!("{key}/no-changes"),
-            "Nothing is scheduled against the registry.",
-        );
+        return div()
+            .id(ElementId::Name("explorer-no-changes".into()))
+            .text_size(px(12.))
+            .text_color(theme.muted)
+            .child("Nothing is scheduled against the registry.")
+            .into_any_element();
     }
-    kit::column(
-        format!("{key}/changes"),
-        changes.iter().enumerate().map(|(index, change)| {
-            let row = format!("{key}/change/{index}");
-            let mut cells = vec![
-                kit::badge(
-                    format!("{row}/verb"),
-                    &change.verb,
-                    match change.verb.as_str() {
-                        "Remove" => Tone::Danger,
-                        _ => Tone::Accent,
-                    },
-                ),
-                kit::fill_width(kit::truncated(format!("{row}/name"), &change.program, 32)),
-                kit::caption(format!("{row}/height"), format!("at {}", change.height)),
-            ];
+    div()
+        .id(ElementId::Name("explorer-changes".into()))
+        .flex()
+        .flex_col()
+        .gap_2()
+        .children(changes.iter().enumerate().map(|(index, change)| {
+            let (foreground, background) = if change.verb == "Remove" {
+                (theme.danger, theme.danger_soft)
+            } else {
+                (theme.accent_foreground, theme.accent_soft)
+            };
+            let mut row = div()
+                .id(ElementId::named_usize("explorer-change", index))
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(
+                    div()
+                        .px_1()
+                        .py_0p5()
+                        .rounded_sm()
+                        .bg(background)
+                        .text_color(foreground)
+                        .text_size(px(11.))
+                        .child(change.verb.clone()),
+                )
+                .child(div().flex_1().truncate().child(change.program.clone()))
+                .child(
+                    div()
+                        .text_size(px(12.))
+                        .text_color(theme.muted)
+                        .child(format!("at {}", change.height)),
+                );
             if let Some(code) = &change.code {
-                cells.push(kit::mono(format!("{row}/code"), kit::short_id(code, 12)));
+                row = row.child(
+                    div()
+                        .font_family("JetBrains Mono")
+                        .text_size(px(12.))
+                        .child(short_id(code, 12)),
+                );
             }
-            kit::centered_row(row, cells)
-        }),
-    )
+            row
+        }))
+        .into_any_element()
+}
+
+fn short_id(id: &str, keep: usize) -> String {
+    let mut head: String = id.chars().take(keep).collect();
+    if id.chars().count() > keep {
+        head.push('…');
+    }
+    head
+}
+
+fn plural(count: usize, one: &str, many: &str) -> String {
+    format!("{count} {}", if count == 1 { one } else { many })
 }
 
 /// What the registry runs and what it will run.

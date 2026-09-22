@@ -1,8 +1,8 @@
-use super::{FakeHost, assert_accessible, find, texts};
+use super::{assert_accessible, find, texts, FakeHost};
 use crate::{
-    App, Driver, Entity, View,
     host::Host,
     wire::{Event, Frame, Node},
+    App, Driver, Entity, View,
 };
 
 trait TestDriver {
@@ -32,6 +32,7 @@ pub struct TestAppContext {
     host: FakeHost,
     driver: Option<Box<dyn TestDriver>>,
     frame: Frame,
+    globals: crate::context::Globals,
 }
 
 impl TestAppContext {
@@ -45,7 +46,8 @@ impl TestAppContext {
         self.open_with_macos(false)
     }
     pub fn open_with_macos<V: View>(&mut self, macos: bool) -> Entity<V> {
-        let driver = Driver::<V>::with_macos(macos);
+        let driver =
+            Driver::<V>::initialize_in(self.fresh_app(macos), None).expect("view initializes");
         let entity = driver.entity();
         self.host.reset_connection();
         self.driver = Some(Box::new(driver));
@@ -64,7 +66,8 @@ impl TestAppContext {
         bytes: &[u8],
         macos: bool,
     ) -> Result<Entity<V>, String> {
-        let driver = Driver::<V>::from_snapshot(bytes, macos)?;
+        let value = serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
+        let driver = Driver::<V>::initialize_in(self.fresh_app(macos), Some(value))?;
         let entity = driver.entity();
         self.host.reset_connection();
         self.driver = Some(Box::new(driver));
@@ -74,6 +77,25 @@ impl TestAppContext {
     }
     pub(crate) fn app_mut(&mut self) -> &mut App {
         self.driver.as_mut().expect("open a view first").app_mut()
+    }
+    fn fresh_app(&self, macos: bool) -> App {
+        let mut app = App::for_driver(macos);
+        for (kind, value) in &self.globals {
+            app.set_shared_global(*kind, value.clone());
+        }
+        app
+    }
+    /// Set a global before opening a view, or rerender the current view with it.
+    pub fn set_global<G: gpui::Global>(&mut self, global: G) {
+        let kind = std::any::TypeId::of::<G>();
+        let global: std::rc::Rc<dyn std::any::Any> = std::rc::Rc::new(global);
+        self.globals.insert(kind, global.clone());
+        if let Some(driver) = &mut self.driver {
+            let app = driver.app_mut();
+            app.set_shared_global(kind, global);
+            app.notify();
+            self.run_until_parked();
+        }
     }
     pub fn run_until_parked(&mut self) {
         self.dispatch(Vec::new());
@@ -130,6 +152,9 @@ impl TestAppContext {
     pub fn simulate_select(&mut self, key: &str, option: &str) {
         self.dispatch(super::pick(&self.frame, key, option));
     }
+    pub fn simulate_rich_click(&mut self, key: &str, index: usize) {
+        self.dispatch(vec![super::rich_click(&self.frame, key, index)]);
+    }
     pub fn simulate_submit(&mut self, key: &str) {
         self.dispatch(super::submit(&self.frame, key));
     }
@@ -138,6 +163,15 @@ impl TestAppContext {
     }
     pub fn simulate_measure(&mut self, key: &str, width: f32, height: f32) {
         self.dispatch(super::measure(&self.frame, key, width, height));
+    }
+    pub fn simulate_drag(&mut self, key: &str, dx: f64, dy: f64) {
+        self.dispatch(super::drag(&self.frame, key, dx, dy));
+    }
+    pub fn simulate_dismiss(&mut self, key: &str) {
+        self.dispatch(super::dismiss(&self.frame, key));
+    }
+    pub fn simulate_surface(&mut self, key: &str, value: crate::wire::SurfaceValue) {
+        self.dispatch(super::surface(&self.frame, key, value));
     }
     pub fn simulate_hover(&mut self, key: &str) {
         self.dispatch(super::hover(&self.frame, key));
@@ -156,7 +190,7 @@ impl TestAppContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Context, Render, Task, Window, view::Live};
+    use crate::{view::Live, Context, InteractiveElement, ParentElement, Render, Task, Window};
     use futures::StreamExt;
     use serde::{Deserialize, Serialize};
 
@@ -187,8 +221,8 @@ mod tests {
         }
     }
     impl Render for LiveView {
-        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> Node {
-            crate::wire::kit::text("items", self.items.to_string())
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl crate::IntoElement {
+            crate::div().id("items").child(self.items.to_string())
         }
     }
 

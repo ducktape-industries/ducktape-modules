@@ -13,12 +13,14 @@ pub enum ImageData {
     /// A host-issued image key, resolved at paint time rather than cached pixels.
     /// This is neither a filesystem path nor a URL.
     Resource(String),
+    /// A visible refusal produced before a native resource can be accessed.
+    Refusal(String),
 }
 
 impl ImageData {
     pub fn byte_len(&self) -> usize {
         match self {
-            Self::Resource(key) => key.len(),
+            Self::Resource(key) | Self::Refusal(key) => key.len(),
             Self::Encoded(bytes) => bytes.len(),
             Self::Rgba { pixels, .. } => pixels.len(),
         }
@@ -26,7 +28,7 @@ impl ImageData {
 
     pub fn valid_rgba(&self) -> bool {
         match self {
-            Self::Resource(key) => !key.is_empty() && !key.contains('\0'),
+            Self::Resource(key) | Self::Refusal(key) => !key.is_empty() && !key.contains('\0'),
             Self::Encoded(_) => true,
             Self::Rgba {
                 width,
@@ -44,6 +46,10 @@ impl ImageData {
     }
 
     pub(crate) fn sanitize(data: &mut Option<Self>, budgets: &mut crate::Budgets) {
+        if let Some(Self::Refusal(reason)) = data {
+            super::spend_text(reason, budgets);
+            return;
+        }
         if let Some(value) = data {
             if !value.valid_rgba() || value.byte_len() > budgets.pictures {
                 *data = None;
@@ -93,6 +99,7 @@ mod tests {
         for image in [
             ImageData::Encoded(vec![0, 255]),
             ImageData::Resource("image:7".into()),
+            ImageData::Refusal("resource refused".into()),
             ImageData::Rgba {
                 width: 1,
                 height: 1,
@@ -104,8 +111,10 @@ mod tests {
                 image
             );
         }
-        let mut malicious = 0u32.to_le_bytes().to_vec();
-        malicious.extend_from_slice(&u64::MAX.to_le_bytes());
+        let mut malicious = vec![0x81, 0xa7];
+        malicious.extend_from_slice(b"Encoded");
+        malicious.push(0xdd);
+        malicious.extend_from_slice(&((8u32 << 20) + 1).to_be_bytes());
         let error = crate::decode::<ImageData>(&malicious)
             .unwrap_err()
             .to_string();

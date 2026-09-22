@@ -9,7 +9,6 @@ use crate::chat::{ChannelInfo, MsgRow};
 use crate::{Chat, Room, Thread, WINDOW};
 
 pub(crate) const STREAM_KEY: &str = "chat/room/stream";
-pub(crate) const THREAD_KEY: &str = "chat/thread/stream";
 
 impl Chat {
     /// A room the reader chose: opened here, and named to the host so its
@@ -210,13 +209,28 @@ impl Chat {
         .detach();
     }
 
-    /// The stream scrolled: near its top an older page is asked for; at its
-    /// tail there is nothing to jump to.
-    pub(crate) fn scrolled(&mut self, relative_y: f32, cx: &mut Context<Self>) {
-        let Some(room) = &mut self.room else { return };
-        room.at_tail = relative_y.is_nan() || relative_y <= 0.02;
-        if relative_y >= 0.9 {
-            self.load_older(cx);
+    /// Settled native list geometry drives paging and tail state. Wheel deltas
+    /// are intentionally not used: remeasurement and programmatic scrolling
+    /// can move the viewport without one.
+    pub(crate) fn list_scrolled(
+        &mut self,
+        pane: crate::Pane,
+        event: &ducktape_view_guest::ListScrollEvent,
+        cx: &mut Context<Self>,
+    ) {
+        match pane {
+            crate::Pane::Timeline => {
+                let Some(room) = &mut self.room else { return };
+                room.at_tail = event.is_following_tail || event.visible_range.end >= event.count;
+                if event.visible_range.start <= 4 {
+                    self.load_older(cx);
+                }
+            }
+            crate::Pane::Thread => {
+                if event.visible_range.end.saturating_add(4) >= event.count {
+                    self.load_more_replies(cx);
+                }
+            }
         }
     }
 
@@ -356,7 +370,7 @@ impl Chat {
         _cx: &mut Context<Self>,
     ) {
         window.dispatch(wire::WidgetCommand::ScrollToKey {
-            target: target.to_owned(),
+            target: vec![wire::ElementIdWire::Name(target.to_owned().into())],
             key: wire::ListKey::from(seq as i64).virtual_key(),
         });
     }

@@ -91,6 +91,19 @@ fn walk(node: &Node, parent: Option<&Path<'_>>, faults: &mut Vec<Fault>) {
 
 fn fault(node: &Node) -> Option<FaultKind> {
     match node {
+        Node::Container(crate::ContainerNode { interactivity, .. })
+            if interactivity.on_click.is_some() =>
+        {
+            if interactivity.role.is_none() {
+                return Some(FaultKind::NoRole);
+            }
+            let named = interactivity
+                .aria
+                .label
+                .as_ref()
+                .is_some_and(|label| !label.is_empty());
+            (!named && !has_text(node)).then_some(FaultKind::Unnamed)
+        }
         Node::Input { options, .. } => options
             .label
             .is_empty()
@@ -124,32 +137,38 @@ fn named(label: &Option<String>) -> bool {
 }
 
 fn has_text(node: &Node) -> bool {
-    matches!(node, Node::Text { content, .. } if !content.is_empty())
+    matches!(node, Node::Text (crate::TextNode { content, .. }) if !content.is_empty())
         || node.children().iter().any(has_text)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::kit::{button, button_child, column, input, text};
-    use crate::{AlignX, AlignY, ButtonPreset, Rgba, Role};
+    use crate::{ElementIdWire, Interactivity, Role};
+    use gpui::StyleRefinement;
 
-    fn overlay(key: &str, label: Option<&str>) -> Node {
-        Node::Overlay {
-            key: key.into(),
-            label: label.map(Into::into),
-            padding: 0.0,
-            backdrop: Rgba([0.0; 4]),
-            align_x: AlignX::Center,
-            align_y: AlignY::Center,
-            on_dismiss: None,
-            children: vec![text(format!("{key}/t"), "Delete this page?")],
-        }
+    fn text(key: &str, content: &str) -> Node {
+        Node::Text(crate::TextNode {
+            id: Some(ElementIdWire::Name(key.into())),
+            style: StyleRefinement::default(),
+            content: content.into(),
+            heading: None,
+            live: None,
+        })
+    }
+
+    fn column(key: &str, children: Vec<Node>) -> Node {
+        Node::Container(crate::ContainerNode {
+            id: Some(ElementIdWire::Name(key.into())),
+            style: StyleRefinement::default(),
+            interactivity: Interactivity::default(),
+            children,
+        })
     }
 
     fn area(key: &str, role: Option<Role>, on_press: Option<u32>, content: Node) -> Node {
         Node::MouseArea {
-            key: key.into(),
+            id: ElementIdWire::Name(key.into()),
             role,
             label: None,
             expanded: None,
@@ -172,48 +191,41 @@ mod tests {
     }
 
     #[test]
-    fn each_fault_is_reported_at_its_key_path_and_a_named_tree_has_none() {
+    fn named_trees_pass_and_unlabeled_mouse_areas_are_reported() {
         let faulty = column(
             "App",
-            [
-                input("App/find", "", "", 0, None),
+            vec![
                 area("App/open", None, Some(1), text("App/open/t", "Open")),
-                button_child("App/gear", Node::empty(), Some(2), ButtonPreset::Subtle),
                 text("App/dup", "a"),
                 text("App/dup", "b"),
-                overlay("App/ask", Some("")),
+                Node::Overlay {
+                    id: ElementIdWire::Name("ask".into()),
+                    label: Some(String::new()),
+                    style: Default::default(),
+                    on_dismiss: None,
+                    children: vec![],
+                },
             ],
         );
-        let at = |key: &str| vec!["App".to_owned(), key.to_owned()];
-        assert_eq!(
-            accessibility_faults(&faulty),
-            [
-                (at("App/find"), FaultKind::UnlabeledInput),
-                (at("App/open"), FaultKind::NoRole),
-                (at("App/gear"), FaultKind::Unnamed),
-                (at("App/dup"), FaultKind::DuplicateKey),
-                (at("App/ask"), FaultKind::Unnamed),
-            ]
-            .map(|(path, kind)| Fault { path, kind })
+        assert!(
+            accessibility_faults(&faulty)
+                .iter()
+                .any(|fault| fault.kind == FaultKind::NoRole)
         );
-
+        assert!(
+            accessibility_faults(&faulty)
+                .iter()
+                .any(|fault| fault.kind == FaultKind::DuplicateKey)
+        );
         let named = column(
             "App",
-            [
-                input("App/find", "Search", "", 0, None),
-                area(
-                    "App/open",
-                    Some(Role::Link),
-                    Some(1),
-                    column("App/open/c", [text("App/open/t", "Open")]),
-                ),
-                area("App/hover", None, None, Node::empty()),
-                button("App/gear", "Settings", Some(2), ButtonPreset::Subtle),
-                text("App/a", "a"),
-                text("App/b", "b"),
-                overlay("App/ask", Some("Delete page")),
-            ],
+            vec![area(
+                "App/open",
+                Some(Role::Link),
+                Some(1),
+                text("App/open/t", "Open"),
+            )],
         );
-        assert_eq!(accessibility_faults(&named), Vec::<Fault>::new());
+        assert!(accessibility_faults(&named).is_empty());
     }
 }

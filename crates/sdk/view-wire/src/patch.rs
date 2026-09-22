@@ -1,7 +1,7 @@
 //! Patches: the mutation list a guest sends instead of a whole tree, the
 //! host-side [`apply`], and the [`diff`] that produces one.
 
-use crate::*;
+use crate::{identity::same_identity, *};
 use serde::{Deserialize, Serialize};
 
 /// One edit to the tree the host holds. `path` is the child index at every
@@ -203,8 +203,8 @@ fn diff_list(old: &mut [Node], new: &mut [Node], path: &mut Vec<u32>, out: &mut 
         && old
             .iter()
             .zip(new.iter())
-            .all(|(a, b)| match (a.key(), b.key()) {
-                (Some(a), Some(b)) => a == b,
+            .all(|(a, b)| match (a.identity(), b.identity()) {
+                (Some(a), Some(b)) => same_identity(Some(a), Some(b)),
                 (None, None) => std::mem::discriminant(a) == std::mem::discriminant(b),
                 _ => false,
             });
@@ -216,14 +216,14 @@ fn diff_list(old: &mut [Node], new: &mut [Node], path: &mut Vec<u32>, out: &mut 
         }
         return;
     }
-    // A key that appears once on each side is a child that survives; every
-    // other child — unkeyed, or a duplicate the host would rename — is
-    // removed and inserted afresh.
-    let unique = |nodes: &[Node]| -> std::collections::HashMap<String, usize> {
+    // An identity that appears once on each side is a child that survives;
+    // every other child — unkeyed, or a duplicate — is removed and inserted
+    // afresh. Typed GPUI IDs stay typed all the way through this map.
+    let unique = |nodes: &[Node]| -> std::collections::HashMap<IdentityKey, usize> {
         let mut seen = std::collections::HashMap::new();
         for (index, node) in nodes.iter().enumerate() {
-            if let Some(key) = node.key() {
-                seen.entry(key.to_owned())
+            if let Some(identity) = node.identity() {
+                seen.entry(identity.to_owned())
                     .and_modify(|at| *at = usize::MAX)
                     .or_insert(index);
             }
@@ -236,9 +236,10 @@ fn diff_list(old: &mut [Node], new: &mut [Node], path: &mut Vec<u32>, out: &mut 
     // The list as the host has it after the patches so far: old indices.
     let mut live: Vec<usize> = Vec::with_capacity(new.len());
     for (index, node) in old.iter().enumerate() {
-        let survives = node
-            .key()
-            .is_some_and(|key| old_keys.contains_key(key) && new_keys.contains_key(key));
+        let survives = node.identity().is_some_and(|identity| {
+            let owned = identity.to_owned();
+            old_keys.contains_key(&owned) && new_keys.contains_key(&owned)
+        });
         match survives {
             true => live.push(index),
             false => out.push(Patch::Remove {
@@ -248,10 +249,13 @@ fn diff_list(old: &mut [Node], new: &mut [Node], path: &mut Vec<u32>, out: &mut 
         }
     }
     for (index, new_child) in new.iter_mut().enumerate() {
-        let wanted = new_child
-            .key()
-            .filter(|key| new_keys.contains_key(*key))
-            .and_then(|key| old_keys.get(key).copied());
+        let wanted = new_child.identity().and_then(|identity| {
+            let owned = identity.to_owned();
+            new_keys
+                .contains_key(&owned)
+                .then(|| old_keys.get(&owned).copied())
+                .flatten()
+        });
         let Some(wanted) = wanted else {
             out.push(Patch::Insert {
                 path: path.clone(),

@@ -27,7 +27,7 @@ use client::{NameDirectory, mention_token};
 use ducktape_view_guest::Context;
 use ducktape_view_guest::host::Refusal;
 use ducktape_view_guest::view::{Live as LiveChanges, Loaded, Submit, View, ViewOf, Visible};
-use ducktape_view_guest::{Render, Window, export_view, wire};
+use ducktape_view_guest::{IntoElement, Render, Window, export_view};
 use futures::StreamExt;
 
 use api::{ChatApi, Id, Props, PropsItem, Session};
@@ -135,8 +135,7 @@ impl View for Chat {
 }
 
 impl Render for Chat {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> wire::Node {
-        wire::kit::set_dark(self.session.dark);
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         ui::render(self, cx)
     }
 }
@@ -327,6 +326,9 @@ impl Chat {
     }
 
     pub(crate) fn create_channel(&mut self, cx: &mut Context<Self>) {
+        if !self.session.holds_account() {
+            return;
+        }
         let Some(create) = &mut self.create else {
             return;
         };

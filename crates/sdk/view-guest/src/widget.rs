@@ -1,8 +1,12 @@
 //! Widget commands use the mounted host's scoped request channel.
 #[cfg(test)]
 mod tests {
-    use crate::{Context, Driver, Host, Render, View, Window, host, wire};
+    use crate::{host, wire, Context, Driver, ElementId, Host, Input, Render, View, Window};
     use serde::{Deserialize, Serialize};
+
+    fn target(name: &str) -> wire::WidgetTarget {
+        vec![wire::ElementIdWire::Name(name.into())]
+    }
 
     async fn perform(host: Host, command: wire::WidgetCommand) -> Result<Vec<u8>, host::Refusal> {
         host.request("host.widget", &wire::encode(&command)).await
@@ -17,7 +21,7 @@ mod tests {
                 perform(
                     host.clone(),
                     wire::WidgetCommand::Focus {
-                        target: "App/draft".into(),
+                        target: target("App/draft"),
                     },
                 )
                 .await
@@ -25,7 +29,7 @@ mod tests {
                 let bytes = perform(
                     host,
                     wire::WidgetCommand::Focused {
-                        target: "App/draft".into(),
+                        target: target("App/draft"),
                     },
                 )
                 .await
@@ -42,8 +46,10 @@ mod tests {
         }
     }
     impl Render for WidgetView {
-        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> wire::Node {
-            wire::Node::empty()
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl crate::IntoElement {
+            Input::new(ElementId::Name("App/draft".into()))
+                .label("Draft")
+                .on_input(cx.listener(|_, _: &String, _, _| {}))
         }
     }
 
@@ -58,7 +64,7 @@ mod tests {
         assert_eq!(
             wire::decode::<wire::WidgetCommand>(&focus.payload).unwrap(),
             wire::WidgetCommand::Focus {
-                target: "App/draft".into()
+                target: target("App/draft")
             }
         );
         assert!(
@@ -76,7 +82,7 @@ mod tests {
         assert_eq!(
             wire::decode::<wire::WidgetCommand>(&query.payload).unwrap(),
             wire::WidgetCommand::Focused {
-                target: "App/draft".into()
+                target: target("App/draft")
             }
         );
         driver.tick(vec![wire::Event::Response {
@@ -96,13 +102,29 @@ mod tests {
         window.focus("second");
         let requests = host.drain_outbox();
         assert_eq!(requests.len(), 2);
-        for (request, target) in requests.iter().zip(["first", "second"]) {
+        for (request, name) in requests.iter().zip(["first", "second"]) {
             assert_eq!(
                 wire::decode::<wire::WidgetCommand>(&request.payload).unwrap(),
                 wire::WidgetCommand::Focus {
-                    target: target.into()
+                    target: target(name)
                 }
             );
         }
+    }
+
+    #[test]
+    fn focus_handle_schedules_its_opaque_host_command() {
+        let mut app = crate::App::for_driver(false);
+        let handle = app.focus_handle();
+        let mut window = app.window();
+        handle.focus(&mut window, &mut app);
+        let requests = app.host().drain_outbox();
+        let [request] = requests.as_slice() else {
+            panic!("one focus command")
+        };
+        assert_eq!(
+            wire::decode::<wire::WidgetCommand>(&request.payload).unwrap(),
+            wire::WidgetCommand::FocusHandle { handle: 0 }
+        );
     }
 }

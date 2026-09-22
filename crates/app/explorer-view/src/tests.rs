@@ -2,6 +2,33 @@ use super::*;
 use abi::BlobId;
 use ducktape_view_guest::testing::TestAppContext;
 
+#[test]
+fn preferred_window_keeps_the_original_baseline() {
+    assert_eq!(<Explorer as View>::PREFERRED_WINDOW_SIZE, "760,640");
+}
+
+#[test]
+fn the_root_tracks_the_shared_theme() {
+    let mut cx = ready();
+    let dark = ducktape_view_guest::Theme::dark();
+    cx.set_global(dark);
+    let Some(ducktape_view_guest::wire::Node::Container(
+        ducktape_view_guest::wire::ContainerNode { style, .. },
+    )) = cx.find("explorer")
+    else {
+        panic!("explorer root is a styled container");
+    };
+    assert_eq!(
+        style
+            .background
+            .as_ref()
+            .and_then(|fill| fill.color())
+            .and_then(|background| background.as_solid()),
+        Some(dark.background)
+    );
+    assert_eq!(style.text.color, Some(dark.foreground));
+}
+
 fn entry(program: &str, code: u8) -> registry::Entry {
     registry::Entry {
         program: program.into(),
@@ -124,7 +151,7 @@ fn a_refusal_shows_its_sentence_and_retry_asks_again() {
     cx.run_until_parked();
     assert!(cx.has_text("the registry is not running here"));
     respond(&mut cx);
-    cx.simulate_click("explorer/retry");
+    cx.simulate_click("explorer-retry");
     cx.run_until_parked();
     assert!(cx.has_text("identity"));
     assert_eq!(cx.host().asked::<QueryBytes<Registry>>().len(), 3);

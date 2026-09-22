@@ -4,8 +4,8 @@ use futures::future::{AbortHandle, Abortable, LocalBoxFuture};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{
-    Arc,
     atomic::{AtomicBool, Ordering},
+    Arc,
 };
 use std::task::{Context, Poll, Wake, Waker};
 

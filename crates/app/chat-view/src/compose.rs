@@ -61,11 +61,11 @@ impl Chat {
         let choices = self.mention_choices();
         let key = draft_key(&target);
         let draft = self.drafts.entry(key.clone()).or_default();
-        match draft.handle(event, &choices) {
+        match draft.handle(event, &choices, cx) {
             Outcome::Updated => {}
             Outcome::Run(run) => run(self, window, cx),
             Outcome::Enqueue(tag) => window.dispatch(wire::WidgetCommand::EditorAction {
-                target: format!("{key}/editor"),
+                target: vec![wire::ElementIdWire::Name(format!("{key}/editor").into())],
                 tag,
             }),
             Outcome::Action(tag) => self.composer_action(target, &key, &tag, cx),
@@ -144,7 +144,9 @@ impl Chat {
                                 chat.drafts.entry(key.clone()).or_default().paste =
                                     Some(clipboard.text);
                                 window.dispatch(wire::WidgetCommand::EditorAction {
-                                    target: format!("{key}/editor"),
+                                    target: vec![wire::ElementIdWire::Name(
+                                        format!("{key}/editor").into(),
+                                    )],
                                     tag: "paste-ready".into(),
                                 });
                                 if crate::ATTACHMENTS

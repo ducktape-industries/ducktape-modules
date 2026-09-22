@@ -1,8 +1,10 @@
 use super::*;
 use futures::StreamExt;
+use gpui::{Image, ImageFormat};
 use serde::{Deserialize, Serialize};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::Arc;
 
 #[derive(Default, Serialize, Deserialize)]
 struct Probe {
@@ -11,8 +13,6 @@ struct Probe {
     streams: Vec<Task<()>>,
     #[serde(skip)]
     renders: usize,
-    #[serde(skip)]
-    listener: u32,
 }
 impl Probe {
     fn watch(&mut self, cx: &mut Context<Self>, kind: &'static str) {
@@ -45,18 +45,16 @@ impl View for Probe {
     }
 }
 impl Render for Probe {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> wire::Node {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.renders += 1;
-        self.listener = cx.listener(|view, _: &(), _, cx| {
+        let press = cx.listener(|view, _: &ClickEvent, _, cx| {
             view.received.push("press".into());
             cx.notify();
         });
-        wire::kit::button(
-            "press",
-            self.received.len().to_string(),
-            Some(self.listener),
-            Default::default(),
-        )
+        div()
+            .id("press")
+            .on_click(press)
+            .child(self.received.len().to_string())
     }
 }
 fn response(id: u64, done: bool) -> wire::Event {
@@ -151,14 +149,15 @@ fn stream_updates_follow_response_order_instead_of_spawn_order() {
 fn unchanged_frames_preserve_listener_tables_and_resync_renders() {
     let mut driver = Driver::<Probe>::new();
     assert!(driver.tick(vec![]).root.is_some());
-    let (listener, renders) = driver.entity().read(|view| (view.listener, view.renders));
+    let first = driver.tick(vec![]);
+    let renders = driver.entity().read(|view| view.renders);
     for _ in 0..3 {
         assert!(driver.tick(vec![]).unchanged);
     }
     driver
         .entity()
         .read(|view| assert_eq!(view.renders, renders));
-    let frame = driver.tick(vec![wire::Event::Message(listener)]);
+    let frame = driver.tick(crate::testing::press(&first, "press"));
     assert!(!frame.unchanged);
     driver
         .entity()
@@ -226,6 +225,90 @@ fn tasks_are_awaitable_drop_cancels_and_detach_runs() {
     driver.tick(vec![]);
     assert_eq!(futures::executor::block_on(parent), 4);
     assert_eq!(*order.borrow(), vec![1, 3, 5]);
+}
+
+#[derive(Default, Serialize, Deserialize)]
+struct UniformProbe;
+
+impl View for UniformProbe {
+    fn new(_: &mut Window, _: &mut Context<Self>) -> Self {
+        Self
+    }
+}
+
+impl Render for UniformProbe {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        uniform_list("rows", 2_000, |range, _, _| {
+            range
+                .map(|index| {
+                    div()
+                        .id(format!("row-{index}"))
+                        .child(format!("row {index}"))
+                })
+                .collect::<Vec<_>>()
+        })
+    }
+}
+
+#[test]
+fn uniform_list_lowers_only_initial_and_requested_ranges() {
+    let mut driver = Driver::<UniformProbe>::new();
+    let first = driver.tick(vec![]);
+    let (path, route, count, indices) = match first.root.as_ref().unwrap() {
+        wire::Node::UniformList {
+            path,
+            route,
+            count,
+            indices,
+            ..
+        } => (path.clone(), *route, *count, indices.clone()),
+        node => panic!("expected uniform list, got {node:?}"),
+    };
+    assert_eq!(count, 2_000);
+    assert_eq!(indices, [0]);
+
+    let far = driver.tick(vec![wire::Event::UniformListRange {
+        path: path.clone(),
+        route,
+        start: 1_000,
+        end: 1_020,
+    }]);
+    let wire::Node::UniformList {
+        indices, children, ..
+    } = far.root.unwrap()
+    else {
+        panic!("expected uniform list after range request");
+    };
+    assert_eq!(indices.len(), 21);
+    assert_eq!(children.len(), indices.len());
+    assert_eq!(indices.first(), Some(&0));
+    assert_eq!(
+        &indices[1..],
+        (1_000..1_020).map(|index| index as u32).collect::<Vec<_>>()
+    );
+    assert!(far.patches.len() <= wire::MAX_PATCHES);
+
+    let unchanged = driver.tick(vec![wire::Event::UniformListRange {
+        path: path.clone(),
+        route,
+        start: 1_000,
+        end: 1_020,
+    }]);
+    assert!(
+        unchanged.unchanged,
+        "duplicate range requests do not rerender"
+    );
+
+    let bounded = driver.tick(vec![wire::Event::UniformListRange {
+        path,
+        route,
+        start: 0,
+        end: u32::MAX,
+    }]);
+    let wire::Node::UniformList { indices, .. } = bounded.root.unwrap() else {
+        panic!("expected uniform list after bounded request");
+    };
+    assert_eq!(indices.len(), wire::MAX_UNIFORM_LIST_ROWS);
 }
 
 #[test]
@@ -321,25 +404,25 @@ fn listener_guard_detects_missing_notify() {
         }
     }
     impl Render for Silent {
-        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> wire::Node {
-            let press = cx.listener(|view, _: &(), _, _| view.0 = true);
-            wire::kit::button("silent", "Silent", Some(press), Default::default())
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let press = cx.listener(|view, _: &ClickEvent, _, _| view.0 = true);
+            div().id("silent").on_click(press).child("Silent")
         }
     }
     let mut driver = Driver::<Silent>::new();
     let frame = driver.tick(vec![]);
-    driver.tick(crate::testing::press(&frame, "Silent"));
+    driver.tick(crate::testing::press(&frame, "silent"));
 }
 
 #[test]
 fn messages_and_responses_settle_in_input_order() {
     let mut driver = Driver::<Probe>::new();
     let requests = driver.tick(vec![]).requests;
-    let listener = driver.entity().read(|view| view.listener);
+    let first = driver.tick(vec![]);
     driver.tick(vec![
-        wire::Event::Message(listener),
+        crate::testing::press(&first, "press")[0].clone(),
         response(requests[1].id, false),
-        wire::Event::Message(listener),
+        crate::testing::press(&first, "press")[0].clone(),
     ]);
     driver
         .entity()
@@ -382,57 +465,7 @@ fn repeated_spawns_exhaust_the_round_budget_and_resume_next_frame() {
         .read(|view| assert_eq!(view.received.len(), 40));
 }
 
-#[test]
-fn patches_reconstruct_the_rendered_tree_and_picture_bytes_are_not_retained() {
-    #[derive(Serialize, Deserialize)]
-    struct Picture(u32);
-    impl View for Picture {
-        fn new(_: &mut Window, _: &mut Context<Self>) -> Self {
-            Self(0)
-        }
-    }
-    impl Render for Picture {
-        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> wire::Node {
-            let mut children = vec![wire::kit::image_resource("picture", "shared-image")];
-            children.extend((0..20).map(|i| {
-                wire::kit::text(
-                    format!("row/{i}"),
-                    format!("Row {i}: {}", if i == 0 { self.0 } else { 0 }),
-                )
-            }));
-            wire::kit::column("picture-view", children)
-        }
-    }
-    let mut driver = Driver::<Picture>::new();
-    let first = driver.tick(vec![]);
-    let mut mounted = first.root.unwrap();
-    let mut pictures = 0;
-    mounted.for_each_mut(&mut |node| {
-        if let wire::Node::Image { data, .. } = node {
-            assert!(data.is_some());
-            *data = None;
-            pictures += 1;
-        }
-    });
-    assert_eq!(pictures, 1);
-    assert_eq!(driver.last_root.as_ref(), Some(&mounted));
-    assert!(driver.tick(vec![]).unchanged);
-    driver.entity().update_app(driver.app_mut(), |view, _, cx| {
-        view.0 = 1;
-        cx.notify();
-    });
-    let frame = driver.tick(vec![]);
-    assert!(!frame.unchanged);
-    assert!(!frame.patches.is_empty());
-    wire::apply(&mut mounted, frame.patches).unwrap();
-    // The host stores picture data separately after applying a patch.
-    mounted.for_each_mut(&mut |node| {
-        if let wire::Node::Image { data, .. } = node {
-            *data = None;
-        }
-    });
-    assert_eq!(driver.last_root.as_ref(), Some(&mounted));
-}
+mod primitive_tests;
 
 #[test]
 fn notifying_during_render_requests_another_frame() {
@@ -444,12 +477,12 @@ fn notifying_during_render_requests_another_frame() {
         }
     }
     impl Render for Again {
-        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> wire::Node {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
             if !self.0 {
                 self.0 = true;
                 cx.notify();
             }
-            wire::Node::empty()
+            div()
         }
     }
     let mut driver = Driver::<Again>::new();

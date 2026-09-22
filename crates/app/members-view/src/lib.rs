@@ -9,8 +9,11 @@ use ducktape_view_guest::caps::{Program, QueryBytes};
 use ducktape_view_guest::export_view;
 use ducktape_view_guest::host::{Refusal, malformed};
 use ducktape_view_guest::view::{Live, Loaded};
-use ducktape_view_guest::wire::{Length, Node, kit, kit::Tone};
-use ducktape_view_guest::{Context, Host, Render, Task, View, Window};
+use ducktape_view_guest::{
+    App, ClickEvent, Context, ElementId, Host, Input, InteractiveElement, IntoElement,
+    ParentElement, Render, RenderOnce, StatefulInteractiveElement, Styled, Task, Theme, View,
+    Window, div, px,
+};
 use futures::StreamExt;
 use modules::{Page, identity, valset};
 use serde::{Deserialize, Serialize};
@@ -54,7 +57,7 @@ struct Row {
 }
 
 impl View for Members {
-    const PREFERRED_WINDOW_SIZE: &'static str = "720x640";
+    const PREFERRED_WINDOW_SIZE: &'static str = "720,640";
 
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mut view = Self::default();
@@ -76,28 +79,63 @@ impl View for Members {
 }
 
 impl Render for Members {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> Node {
-        let key = "members";
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = *cx.global::<Theme>();
         let typed = cx.listener(|view, text: &String, _, cx| {
             view.filter = text.clone();
             cx.notify();
         });
-        let head = kit::centered_row(
-            format!("{key}/head"),
-            [
-                kit::fill_width(kit::title(format!("{key}/title"), "Members")),
-                kit::caption(format!("{key}/count"), self.count()),
-            ],
-        );
-        let filter = kit::text_field(
-            format!("{key}/filter"),
-            "Filter by name or number",
-            &self.filter,
-            typed,
-            None,
-            false,
-        );
-        kit::page(key, [head, filter, self.body(key, cx)])
+        let body = self.body(cx, &theme);
+        div()
+            .id(ElementId::Name("members".into()))
+            .flex()
+            .flex_col()
+            .gap_3()
+            .p_5()
+            .size_full()
+            .bg(theme.background)
+            .text_color(theme.foreground)
+            .text_size(px(13.))
+            .child(
+                div()
+                    .id(ElementId::Name("members-head".into()))
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .id("members-title")
+                            .flex_1()
+                            .text_size(px(16.))
+                            .font_weight(ducktape_view_guest::FontWeight::SEMIBOLD)
+                            .role(ducktape_view_guest::Role::Heading)
+                            .aria_level(1)
+                            .child("Members"),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(11.))
+                            .text_color(theme.muted)
+                            .child(self.count()),
+                    ),
+            )
+            .child(
+                Input::new(ElementId::Name("members-filter".into()))
+                    .h(px(28.))
+                    .w_full()
+                    .px_2()
+                    .py_1()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(theme.border_strong)
+                    .bg(theme.surface)
+                    .text_color(theme.foreground)
+                    .value(self.filter.clone())
+                    .placeholder("Filter by name or number")
+                    .label("Filter members")
+                    .on_input(typed),
+            )
+            .child(body)
     }
 }
 
@@ -118,57 +156,75 @@ impl Members {
 
     fn count(&self) -> String {
         match self.rows.ready() {
-            Some(rows) => kit::plural(rows.len() as u64, "account", "accounts"),
+            Some(rows) => plural(rows.len(), "account", "accounts"),
             None => String::new(),
         }
     }
 
     /// The four states of the roster: loading, refused, empty, ready.
-    fn body(&self, key: &str, cx: &mut Context<Self>) -> Node {
+    fn body(&self, cx: &mut Context<Self>, theme: &Theme) -> impl IntoElement {
         match &self.rows {
-            Loaded::Idle | Loaded::Loading(_) => {
-                kit::secondary(format!("{key}/loading"), "Reading the roster…")
-            }
+            Loaded::Idle | Loaded::Loading(_) => div()
+                .id(ElementId::Name("members-loading".into()))
+                .text_size(px(12.))
+                .text_color(theme.muted)
+                .child("Reading the roster…")
+                .into_any_element(),
             Loaded::Failed(refusal) => {
-                let retry = cx.listener(|view, _: &(), _, cx| view.read(cx));
-                kit::notice(
-                    format!("{key}/refused"),
-                    kit::column(
-                        format!("{key}/refused/body"),
-                        [
-                            kit::wrapping(kit::text(
-                                format!("{key}/refused/why"),
-                                refusal.sentence.clone(),
-                            )),
-                            kit::action(format!("{key}/retry"), "Retry", Some(retry)),
-                        ],
-                    ),
-                    Tone::Danger,
-                )
+                let retry = cx.listener(|view, _: &ClickEvent, _, cx| view.read(cx));
+                div()
+                    .id(ElementId::Name("members-refused".into()))
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .p_3()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(theme.danger)
+                    .bg(theme.danger_soft)
+                    .child(refusal.sentence.clone())
+                    .child(
+                        div()
+                            .id(ElementId::Name("members-retry".into()))
+                            .px_2()
+                            .py_1()
+                            .rounded_md()
+                            .bg(theme.surface)
+                            .hover(|s| s.bg(theme.surface_raised))
+                            .role(ducktape_view_guest::Role::Button)
+                            .focusable()
+                            .on_click(retry)
+                            .child("Retry"),
+                    )
+                    .into_any_element()
             }
-            Loaded::Ready(rows) if rows.is_empty() => kit::empty_state(
-                format!("{key}/empty"),
+            Loaded::Ready(rows) if rows.is_empty() => empty_state(
+                "members-empty",
                 "No accounts",
                 "The identity program of this network holds no accounts yet.",
-            ),
+                theme,
+            )
+            .into_any_element(),
             Loaded::Ready(rows) => {
                 let shown: Vec<&Row> = rows.iter().filter(|row| self.matches(row)).collect();
                 if shown.is_empty() {
-                    return kit::empty_state(
-                        format!("{key}/no-match"),
+                    return empty_state(
+                        "members-no-match",
                         "Nothing matches",
                         format!("No account reads like “{}”.", self.filter.trim()),
-                    );
+                        theme,
+                    )
+                    .into_any_element();
                 }
-                kit::scroll(
-                    format!("{key}/list"),
-                    kit::column(
-                        format!("{key}/rows"),
-                        shown
-                            .into_iter()
-                            .map(|row| render_row(&format!("{key}/row/{}", row.number), row)),
-                    ),
-                )
+                div()
+                    .id(ElementId::Name("members-list".into()))
+                    .flex_1()
+                    .overflow_y_scroll()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .children(shown.into_iter().map(|row| MemberRow::new(row, theme)))
+                    .into_any_element()
             }
         }
     }
@@ -181,27 +237,126 @@ impl Members {
     }
 }
 
-fn render_row(key: &str, row: &Row) -> Node {
-    let mut cells = vec![
-        kit::width(
-            kit::secondary(format!("{key}/number"), format!("#{}", row.number)),
-            Length::Fixed(56.),
-        ),
-        kit::fill_width(kit::truncated(format!("{key}/name"), &row.name, 40)),
-        kit::badge(format!("{key}/control"), &row.control, Tone::Neutral),
-        kit::caption(
-            format!("{key}/keys"),
-            kit::plural(row.keys as u64, "key", "keys"),
-        ),
-    ];
-    if let Some(standing) = &row.standing {
-        cells.push(kit::badge(
-            format!("{key}/standing"),
-            standing,
-            Tone::Success,
-        ));
+#[derive(IntoElement)]
+struct MemberRow {
+    row: Row,
+    theme: Theme,
+}
+
+impl MemberRow {
+    fn new(row: &Row, theme: &Theme) -> Self {
+        Self {
+            row: row.clone(),
+            theme: *theme,
+        }
     }
-    kit::centered_row(key, cells)
+}
+
+impl RenderOnce for MemberRow {
+    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+        let row = self.row;
+        let theme = self.theme;
+        let mut element = div()
+            .id(ElementId::named_usize("members-row", row.number as usize))
+            .flex()
+            .items_center()
+            .gap_2()
+            .min_h(px(26.))
+            .px_2()
+            .child(
+                div()
+                    .w(px(56.))
+                    .text_size(px(12.))
+                    .text_color(theme.muted)
+                    .child(format!("#{}", row.number)),
+            )
+            .child(div().flex_1().truncate().child(row.name))
+            .child(Badge::new(row.control, theme.muted, theme.surface_raised))
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .text_color(theme.muted)
+                    .child(plural(row.keys, "key", "keys")),
+            );
+        if let Some(standing) = row.standing {
+            element = element.child(Badge::new(standing, theme.success, theme.success_soft));
+        }
+        element
+    }
+}
+
+#[derive(IntoElement)]
+struct Badge {
+    label: String,
+    foreground: ducktape_view_guest::Hsla,
+    background: ducktape_view_guest::Hsla,
+}
+
+impl Badge {
+    fn new(
+        label: impl Into<String>,
+        foreground: ducktape_view_guest::Hsla,
+        background: ducktape_view_guest::Hsla,
+    ) -> Self {
+        Self {
+            label: label.into(),
+            foreground,
+            background,
+        }
+    }
+}
+
+impl RenderOnce for Badge {
+    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+        div()
+            .px_1()
+            .py_0p5()
+            .rounded_sm()
+            .bg(self.background)
+            .text_color(self.foreground)
+            .text_size(px(11.))
+            .child(self.label)
+    }
+}
+
+#[derive(IntoElement)]
+struct EmptyState {
+    id: ElementId,
+    title: String,
+    detail: String,
+    muted: ducktape_view_guest::Hsla,
+}
+
+fn empty_state(id: &str, title: &str, detail: impl Into<String>, theme: &Theme) -> EmptyState {
+    EmptyState {
+        id: ElementId::Name(id.into()),
+        title: title.to_owned(),
+        detail: detail.into(),
+        muted: theme.muted,
+    }
+}
+
+impl RenderOnce for EmptyState {
+    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        div()
+            .id(self.id)
+            .flex()
+            .flex_col()
+            .gap_1()
+            .p_6()
+            .max_w(px(420.))
+            .child(div().text_size(px(13.)).child(self.title))
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .text_color(self.muted)
+                    .child(self.detail),
+            )
+    }
+}
+
+fn plural(count: usize, one: &str, many: &str) -> String {
+    format!("{count} {}", if count == 1 { one } else { many })
 }
 
 /// The roster, with each account's valset standing joined on the keys it

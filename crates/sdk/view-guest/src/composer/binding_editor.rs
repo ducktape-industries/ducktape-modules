@@ -1,6 +1,7 @@
 //! Native editor projection and key decisions for the composer.
-use super::super::editing;
+
 use super::*;
+use crate::wire;
 use crate::{EditorBinding, EditorStateView, EditorTransactionEvent};
 use wire::keyboard::{Key, Modifiers, Named};
 
@@ -16,7 +17,7 @@ pub(super) fn matching_choices<'a>(
         .collect()
 }
 
-pub(super) fn key_tag(
+pub(crate) fn key_tag(
     draft: &Draft,
     choices: &[MentionChoice],
     state: EditorStateView<'_>,
@@ -57,12 +58,6 @@ pub(super) fn key_tag(
         Key::Named(Named::ArrowDown) if draft.query(state).is_some() => "menu-next".into(),
         Key::Named(Named::ArrowUp) if draft.query(state).is_some() => "menu-previous".into(),
         Key::Named(Named::Escape) if draft.query(state).is_some() => "menu-dismiss".into(),
-        // These three are claimed only while the menu is open (see `editor`),
-        // but a claim is a frame behind the keystroke: if the menu closed in
-        // between, the host still asks this frame. "ignore" is the answer —
-        // never the empty tag, which falls to the catch-all default action,
-        // and an app that knows only Enter/Tab/Backspace as defaults stops
-        // the whole view when it is handed any other key.
         Key::Named(Named::ArrowUp | Named::ArrowDown | Named::Escape) => "ignore".into(),
         Key::Named(Named::Backspace) => "backspace".into(),
         Key::Named(Named::Delete) => "delete".into(),
@@ -70,51 +65,37 @@ pub(super) fn key_tag(
     }
 }
 
-/// `key` names the NODE — the accessibility tree and every test door address
-/// it. `document` names the DOCUMENT, and the host keys its native editor
-/// state by that, not by the node key. They are not the same identity: one
-/// place on screen presents a different draft as the reader moves between
-/// rooms, so each draft must carry its own document id or the host hands the
-/// new draft the old one's text and drops every transaction after it.
-pub fn editor<V: 'static>(
+#[expect(
+    clippy::too_many_arguments,
+    reason = "these are the native editor binding's independent authored inputs"
+)]
+pub(super) fn editor<V: 'static>(
     draft: &Draft,
     key: &str,
-    document: &str,
+    document_key: &str,
     placeholder: &str,
     editable: bool,
     choices: &[MentionChoice],
     handle: Handle<V>,
-) -> wire::Node {
+    accent: gpui::Hsla,
+) -> EditorElement<Change, Callback<V>> {
     let effect = move |event: Event<V>| {
         let handle = handle.clone();
-        {
-            let event = std::cell::RefCell::new(Some(event));
-            let callback: Callback<V> = Rc::new(move |view, window, cx| {
+        let event = std::cell::RefCell::new(Some(event));
+        let callback: Callback<V> = Rc::new(
+            move |view: &mut V, window: &mut Window, cx: &mut Context<V>| {
                 if let Some(event) = event.borrow_mut().take() {
-                    handle(view, event, window, cx);
-                    cx.notify();
+                    handle(view, event, window, &mut *cx);
                 }
-            });
-            callback
-        }
+            },
+        );
+        callback
     };
     let effect = Rc::new(effect);
-    let doc_effect = effect.clone();
-    let (document, on_document) = draft.editor.document(document.into(), move |update| {
-        doc_effect(Event::Document(update))
-    });
-    let draft = draft.clone();
     let choices = choices.to_vec();
-    let bare = Modifiers::default();
-    let mut claims = [Named::Enter, Named::Tab, Named::Backspace, Named::Delete]
+    let claims = [Named::Enter, Named::Tab, Named::Backspace, Named::Delete]
         .into_iter()
         .chain(
-            // An arrow moves the caret, and this view cannot: it has no
-            // layout to move it through. So the arrows are the menu's keys
-            // while the menu is open, and the host's own the rest of the
-            // time — claiming them always is how a plain ArrowUp reached the
-            // guest with nothing to say. Escape rides along: a closed menu
-            // has nothing to dismiss.
             draft
                 .query(draft.editor.state_view())
                 .is_some()
@@ -124,38 +105,40 @@ pub fn editor<V: 'static>(
         )
         .map(|key| wire::EditorKeyClaim {
             key: Key::Named(key),
-            modifiers: bare,
+            modifiers: Modifiers::default(),
             command: false,
         })
+        .chain(
+            [
+                ("z", false),
+                ("z", true),
+                ("y", false),
+                ("b", false),
+                ("i", false),
+                ("c", true),
+                ("9", true),
+                ("v", false),
+                ("c", false),
+                ("x", false),
+            ]
+            .into_iter()
+            .map(|(key, shift)| wire::EditorKeyClaim {
+                key: Key::Character(key.into()),
+                modifiers: Modifiers {
+                    shift,
+                    ..Modifiers::default()
+                },
+                command: true,
+            }),
+        )
         .collect::<Vec<_>>();
-    claims.extend(
-        [
-            ("z", false),
-            ("z", true),
-            ("y", false),
-            ("b", false),
-            ("i", false),
-            ("c", true),
-            ("9", true),
-            ("v", false),
-            ("c", false),
-            ("x", false),
-        ]
-        .into_iter()
-        .map(|(key, shift)| wire::EditorKeyClaim {
-            key: Key::Character(key.into()),
-            modifiers: Modifiers { shift, ..bare },
-            command: true,
-        }),
-    );
     let deciding = draft.clone();
-    let decide_choices = choices.clone();
     let observing = draft.clone();
-    let observed_choices = choices.clone();
     let interacting = draft.clone();
-    let on_committed = effect.clone();
-    let on_transaction = effect.clone();
-    let binding = EditorBinding::new(
+    let decide_choices = choices.clone();
+    let observed_choices = choices.clone();
+    let interaction_choices = choices.clone();
+    let binding = EditorBinding::<Change>::new(
         claims,
         move |request| {
             if !editable {
@@ -201,27 +184,23 @@ pub fn editor<V: 'static>(
         }
         match request.action {
             wire::editor_presentation::EditorInteraction::Action { tag } => {
-                interacting.decide(tag, &choices, request.state)
+                interacting.decide(tag, &interaction_choices, request.state)
             }
             _ => wire::EditorDecision::Noop,
         }
-    })
-    .register(
-        move |change| on_committed(Event::Committed(change)),
-        move |transaction| on_transaction(Event::Transaction(transaction)),
-    );
-    // a mention wears the product's accent, the same one a chosen row and a
-    // live dot wear — not a colour of this module's own
+    });
     let mut presentation = wire::editor_presentation::EditorPresentation {
         formats: vec![wire::editor_presentation::EditorFormat {
-            color: Some(kit::rgba(kit::palette().accent)),
+            style: gpui::StyleRefinement::default().text_color(accent),
             ..Default::default()
         }],
         ..Default::default()
     };
     for mention in &draft.mentions {
-        let start = editing::position(draft.editor.state_view().text, mention.range.start);
-        let end = editing::position(draft.editor.state_view().text, mention.range.end);
+        let start =
+            super::super::editing::position(draft.editor.state_view().text, mention.range.start);
+        let end =
+            super::super::editing::position(draft.editor.state_view().text, mention.range.end);
         if start.line == end.line {
             presentation
                 .spans
@@ -233,34 +212,31 @@ pub fn editor<V: 'static>(
                 });
         }
     }
-    wire::Node::Editor {
-        key: key.into(),
-        document,
-        on_document,
-        editable,
-        placeholder: placeholder.into(),
-        // the field's accessible name is what its placeholder asks for, the
-        // rule `kit::input` keeps for a plain input
-        label: (!placeholder.is_empty()).then(|| placeholder.into()),
-        width: None,
-        height: None,
-        // one row of body text, and room to grow to about eight before the
-        // field scrolls instead of eating the timeline
-        min_height: Some(40.),
-        max_height: Some(200.),
-        options: Box::new(wire::EditorOptions {
-            binding: Some(Box::new(binding)),
-            presentation: Some(Box::new(presentation)),
-            // the body size every view writes at, not a size of its own
-            size: Some(kit::type_scale::BODY as f32),
-            // This IS the draft's text inset — the host pads the field's box
-            // by it and the text control adds nothing of its own, so at 0 the
-            // first letter sits on the plate's border (seen on a live app,
-            // 2026-09-16). Vertically it is also the air above the first row,
-            // which is why `min_height` is exactly one row plus twice this.
-            padding: Some(TEXT_INSET),
-            wrapping: Some(wire::Wrapping::Word),
-            ..Default::default()
-        }),
+    let route_effect = effect;
+    let mut editor = EditorElement::new(
+        ElementId::Name(key.into()),
+        &draft.editor,
+        document_key,
+        binding,
+        move |event| {
+            route_effect(match event {
+                EditorElementEvent::Document(update) => Event::Document(update),
+                EditorElementEvent::Observed(change) => Event::Committed(change),
+                EditorElementEvent::Transaction(transaction) => Event::Transaction(transaction),
+            })
+        },
+    )
+    .placeholder(placeholder)
+    .editable(editable)
+    .w_full()
+    .min_h(px(40.))
+    .max_h(px(200.))
+    .p(px(super::TEXT_INSET))
+    .text_size(px(design::type_scale::BODY as f32))
+    .whitespace_normal()
+    .presentation(presentation);
+    if !placeholder.is_empty() {
+        editor = editor.label(placeholder);
     }
+    editor
 }

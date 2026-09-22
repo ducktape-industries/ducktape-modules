@@ -2,6 +2,33 @@ use super::*;
 use abi::Scheme;
 use ducktape_view_guest::testing::TestAppContext;
 
+#[test]
+fn preferred_window_keeps_the_original_baseline() {
+    assert_eq!(<Members as View>::PREFERRED_WINDOW_SIZE, "720,640");
+}
+
+#[test]
+fn the_root_tracks_the_shared_theme() {
+    let mut cx = ready();
+    let dark = ducktape_view_guest::Theme::dark();
+    cx.set_global(dark);
+    let Some(ducktape_view_guest::wire::Node::Container(
+        ducktape_view_guest::wire::ContainerNode { style, .. },
+    )) = cx.find("members")
+    else {
+        panic!("members root is a styled container");
+    };
+    assert_eq!(
+        style
+            .background
+            .as_ref()
+            .and_then(|fill| fill.color())
+            .and_then(|background| background.as_solid()),
+        Some(dark.background)
+    );
+    assert_eq!(style.text.color, Some(dark.foreground));
+}
+
 fn person(number: u64, name: &str, key: &[u8]) -> identity::Account {
     identity::Account {
         number,
@@ -136,7 +163,7 @@ fn a_refusal_shows_its_sentence_and_retry_asks_again() {
     cx.run_until_parked();
     assert!(cx.has_text("identity is not running here"));
     respond(&mut cx);
-    cx.simulate_click("members/retry");
+    cx.simulate_click("members-retry");
     cx.run_until_parked();
     assert!(cx.has_text("eddy"));
     assert_eq!(cx.host().asked::<QueryBytes<Identity>>().len(), 2);
@@ -146,12 +173,12 @@ fn a_refusal_shows_its_sentence_and_retry_asks_again() {
 fn the_filter_narrows_the_list_without_asking_again() {
     let mut cx = ready();
     let reads = cx.host().asked::<QueryBytes<Identity>>().len();
-    cx.simulate_input("members/filter", "ed");
+    cx.simulate_input("members-filter", "ed");
     assert!(cx.has_text("eddy") && !cx.has_text("chat"));
     assert_eq!(cx.host().asked::<QueryBytes<Identity>>().len(), reads);
-    cx.simulate_input("members/filter", "8");
+    cx.simulate_input("members-filter", "8");
     assert!(cx.has_text("chat") && !cx.has_text("eddy"));
-    cx.simulate_input("members/filter", "nobody");
+    cx.simulate_input("members-filter", "nobody");
     assert!(cx.has_text("Nothing matches"));
 }
 
@@ -176,7 +203,7 @@ fn a_live_bump_re_reads_and_a_snapshot_restores_the_screen() {
     feed.push(());
     cx.run_until_parked();
     assert!(cx.has_text("newcomer") && !cx.has_text("eddy"));
-    cx.simulate_input("members/filter", "new");
+    cx.simulate_input("members-filter", "new");
     let bytes = cx.snapshot().unwrap();
     let mut restored = TestAppContext::new();
     restored.host().stream::<Live>();

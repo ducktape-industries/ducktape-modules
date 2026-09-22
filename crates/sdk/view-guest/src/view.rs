@@ -1,13 +1,13 @@
 //! A serializable root view and small loading conveniences.
 pub use crate::capabilities::*;
 use crate::host::Refusal;
-use crate::{Context, Task, Window, wire};
+use crate::{Context, IntoElement, Task, Window};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::future::Future;
 
 pub trait Render: 'static + Sized {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> wire::Node;
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement;
 }
 pub trait View: Render + Serialize + DeserializeOwned {
     const PREFERRED_WINDOW_SIZE: &'static str = "none";

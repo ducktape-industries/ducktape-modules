@@ -52,6 +52,13 @@ impl Capability for Props {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(untagged)]
+#[cfg_attr(
+    target_pointer_width = "64",
+    expect(
+        clippy::large_enum_variant,
+        reason = "the external untagged props schema keeps its established shape"
+    )
+)]
 pub enum PropsItem {
     Background {
         background: crate::background::Request,

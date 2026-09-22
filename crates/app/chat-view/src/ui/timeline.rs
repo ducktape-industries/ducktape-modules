@@ -1,15 +1,281 @@
-//! The room timeline and virtual message lists.
-use super::message::{self, Plate};
-use super::room::{loading, selection_bar};
-use crate::client::ChatMessage;
-use crate::{Chat, Mode, Pane};
-use ducktape_view_guest::Context;
-use ducktape_view_guest::view::Loaded;
-use ducktape_view_guest::wire::kit::*;
-use ducktape_view_guest::wire::{self, AlignX, AlignY, Length, Node, kit, kit::Tone};
+//! Native GPUI message lists. The room and thread use native variable-height lists;
+//! callbacks still call the root view's existing message operations.
 
-/// The room's beginning: its name as a title and what this place is.
-fn intro(key: &str, name: &str, dm: Option<&str>) -> Node {
+use ducktape_view_guest::prelude::*;
+use ducktape_view_guest::{
+    ClickEvent, Context, ElementId, FollowMode, ListAlignment, ListSizingBehavior, ListState,
+    ParentElement, Styled, Theme, div, list as gpui_list, px,
+};
+
+use crate::ui::message;
+use crate::ui::room::selection_bar;
+use crate::{Chat, Loaded, Pane};
+
+pub fn list(chat: &Chat, pane: Pane, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement {
+    let messages = chat.messages(pane);
+    let mut content = div()
+        .id(ElementId::Name(match pane {
+            Pane::Timeline => "chat-timeline".into(),
+            Pane::Thread => "chat-thread-messages".into(),
+        }))
+        .flex_1()
+        .min_h(px(0.))
+        .flex()
+        .flex_col();
+    if messages.is_empty() {
+        let loading = match pane {
+            Pane::Timeline => chat
+                .room
+                .as_ref()
+                .is_some_and(|room| matches!(room.messages, Loaded::Loading(_))),
+            Pane::Thread => chat
+                .room
+                .as_ref()
+                .and_then(|room| room.thread.as_ref())
+                .is_some_and(|thread| matches!(thread.replies, Loaded::Loading(_))),
+        };
+        if loading {
+            return content.child(quiet("Loading messages…", theme));
+        }
+        let failed = match pane {
+            Pane::Timeline => chat
+                .room
+                .as_ref()
+                .and_then(|room| room.messages.failed())
+                .map(|error| error.sentence.clone()),
+            Pane::Thread => chat
+                .room
+                .as_ref()
+                .and_then(|room| room.thread.as_ref())
+                .and_then(|thread| thread.replies.failed())
+                .map(|error| error.sentence.clone()),
+        };
+        if let Some(error) = failed {
+            return content.child(quiet(error, theme));
+        }
+        if let Some(room) = &chat.room {
+            let name = chat
+                .info(&room.id)
+                .map_or_else(|| room.id.clone(), |info| info.channel.name.clone());
+            return content.child(intro(
+                &name,
+                super::sidebar::dm_peer(chat)
+                    .as_ref()
+                    .map(|peer| peer.0.as_str()),
+                theme,
+            ));
+        }
+    }
+    if let Some(room) = &chat.room
+        && matches!(pane, Pane::Timeline)
+        && room.has_older
+        && !room.landed
+    {
+        let older = cx.listener(|chat, _: &ClickEvent, _window, cx| {
+            cx.notify();
+            chat.load_older(cx)
+        });
+        let label = if room.older_loading {
+            "Loading older messages…"
+        } else {
+            "Load older messages"
+        };
+        let control = if room.older_loading || chat.session.busy {
+            div()
+                .id(ElementId::Name("chat-load-older-button".into()))
+                .text_color(theme.muted)
+                .child(label)
+                .into_any_element()
+        } else {
+            super::button(
+                ElementId::Name("chat-load-older-button".into()),
+                label,
+                theme,
+                older,
+            )
+            .into_any_element()
+        };
+        content = content.child(
+            div()
+                .id(ElementId::Name("chat-load-older".into()))
+                .flex()
+                .justify_center()
+                .p_2()
+                .child(control),
+        );
+    }
+    if !messages.is_empty() {
+        let lead = matches!(pane, Pane::Timeline)
+            && chat
+                .room
+                .as_ref()
+                .is_some_and(|room| !room.has_older && !room.landed);
+        let lead_text = lead.then(|| {
+            let room = chat.room.as_ref().expect("timeline room");
+            (
+                chat.info(&room.id)
+                    .map_or_else(|| room.id.clone(), |info| info.channel.name.clone()),
+                super::sidebar::dm_peer(chat).map(|peer| peer.0),
+            )
+        });
+        let keys = lead
+            .then_some("intro".to_owned())
+            .into_iter()
+            .chain(messages.iter().map(|message| message.id.clone()))
+            .collect::<Vec<_>>();
+        let state = list_state(chat, pane, &keys);
+        state.set_follow_mode(if pane == Pane::Timeline {
+            FollowMode::Tail
+        } else {
+            FollowMode::Normal
+        });
+        let observed_pane = pane;
+        state.set_scroll_handler(cx.listener(move |chat, event, _window, cx| {
+            chat.list_scrolled(observed_pane, event, cx);
+        }));
+        let pane_for_items = pane;
+        let list_theme = *theme;
+        let list_messages = messages.clone();
+        let unread_seq = (pane == Pane::Timeline && chat.reads.boundary > 0)
+            .then(|| {
+                list_messages
+                    .iter()
+                    .find(|message| !message.pending && message.seq > chat.reads.boundary)
+                    .map(|message| message.seq)
+            })
+            .flatten();
+        let list = gpui_list(
+            state,
+            cx.processor(move |chat, index: usize, window, cx| {
+                if lead && index == 0 {
+                    let (name, dm) = lead_text.clone().expect("lead row");
+                    return intro(&name, dm.as_deref(), &list_theme).into_any_element();
+                }
+                let message_index = index - usize::from(lead);
+                let Some(message) = list_messages.get(message_index).cloned() else {
+                    return div().into_any_element();
+                };
+                let unread = unread_seq == Some(message.seq);
+                let card = message::card(chat, message, pane_for_items, window, cx, &list_theme);
+                if unread {
+                    div()
+                        .flex()
+                        .flex_col()
+                        .child(unread_marker(&list_theme))
+                        .child(card)
+                        .into_any_element()
+                } else {
+                    card.into_any_element()
+                }
+            }),
+        )
+        .with_sizing_behavior(ListSizingBehavior::Auto)
+        .flex_1()
+        .min_h(px(0.))
+        .w_full();
+        content = content.child(
+            div()
+                .id(ElementId::Name(match pane {
+                    Pane::Timeline => "chat-message-list".into(),
+                    Pane::Thread => "chat-thread-list".into(),
+                }))
+                .flex()
+                .flex_col()
+                .flex_1()
+                .min_h(px(0.))
+                .child(list),
+        );
+    }
+    if matches!(pane, Pane::Timeline) && chat.copy.is_some_and(|copy| copy.pane == pane) {
+        content = content.child(selection_bar(chat, cx, theme));
+    }
+    let behind_head = chat
+        .room
+        .as_ref()
+        .is_some_and(|room| room.landed && !room.reaches_head);
+    let at_tail = chat.room.as_ref().is_some_and(|room| room.at_tail);
+    if matches!(pane, Pane::Timeline)
+        && !messages.is_empty()
+        && (behind_head || !at_tail || chat.room.as_ref().is_some_and(|room| room.landed))
+    {
+        let id = chat
+            .room
+            .as_ref()
+            .map(|room| room.id.clone())
+            .unwrap_or_default();
+        let latest = cx.listener(move |chat, _: &ClickEvent, window, cx| {
+            cx.notify();
+            chat.open(id.clone(), window, cx)
+        });
+        content = content.child(
+            div()
+                .id(ElementId::Name("chat-jump-latest".into()))
+                .flex()
+                .justify_center()
+                .p_2()
+                .child(super::button(
+                    ElementId::Name("chat-jump-latest-button".into()),
+                    "Jump to latest",
+                    theme,
+                    latest,
+                )),
+        );
+    }
+    if let Some(editing) = super::menu::editing(chat, pane, cx, theme) {
+        content = content.child(editing);
+    }
+    content
+}
+
+fn list_state(chat: &Chat, pane: Pane, keys: &[String]) -> ListState {
+    let (slot, remembered, alignment) = match pane {
+        Pane::Timeline => (
+            &chat.timeline_list,
+            &chat.timeline_rows,
+            ListAlignment::Bottom,
+        ),
+        Pane::Thread => (&chat.thread_list, &chat.thread_rows, ListAlignment::Top),
+    };
+    let mut slot = slot.borrow_mut();
+    let mut old = remembered.borrow_mut();
+    if slot.is_none() {
+        let state = ListState::new(keys.len(), alignment, px(160.));
+        *slot = Some(state.clone());
+        *old = keys.to_vec();
+        return state;
+    }
+    let state = slot.as_ref().expect("initialized list state").clone();
+    let prefix = old.iter().zip(keys).take_while(|(a, b)| a == b).count();
+    let suffix = old[prefix..]
+        .iter()
+        .rev()
+        .zip(keys[prefix..].iter().rev())
+        .take_while(|(a, b)| a == b)
+        .count();
+    let old_end = old.len() - suffix;
+    let new_end = keys.len() - suffix;
+    if prefix != old_end || prefix != new_end {
+        state.splice(prefix..old_end, new_end - prefix);
+    }
+    *old = keys.to_vec();
+    state
+}
+
+fn unread_marker(theme: &Theme) -> impl IntoElement {
+    div()
+        .id(ElementId::Name("chat-unread-marker".into()))
+        .flex()
+        .items_center()
+        .gap_2()
+        .px_3()
+        .py_1()
+        .text_size(px(12.))
+        .text_color(theme.accent_foreground)
+        .child(div().h(px(1.)).flex_1().bg(theme.accent))
+        .child("New messages")
+}
+
+fn intro(name: &str, dm: Option<&str>, theme: &Theme) -> impl IntoElement {
     let (title, detail) = match dm {
         Some(peer) => (
             peer.to_owned(),
@@ -22,351 +288,34 @@ fn intro(key: &str, name: &str, dm: Option<&str>) -> Node {
             ),
         ),
     };
-    kit::padded(
-        kit::spaced(
-            kit::column(
-                key,
-                [
-                    kit::title(format!("{key}/name"), title),
-                    kit::wrapping(kit::secondary(format!("{key}/detail"), detail)),
-                    kit::gap(kit::spacing::XXS as f32),
-                    kit::divider(format!("{key}/rule")),
-                ],
-            ),
-            kit::spacing::XS as f32,
-        ),
-        wire::Edges {
-            top: kit::spacing::XL as f32,
-            right: 16.,
-            bottom: kit::spacing::SM as f32,
-            left: 16.,
-        },
-    )
+    div()
+        .id(ElementId::Name("chat-timeline-intro".into()))
+        .p_6()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .child(
+            div()
+                .id("chat-timeline-intro-title")
+                .text_size(px(16.))
+                .font_weight(ducktape_view_guest::FontWeight::SEMIBOLD)
+                .role(Role::Heading)
+                .aria_level(1)
+                .child(title),
+        )
+        .child(
+            div()
+                .text_size(px(12.))
+                .text_color(theme.muted)
+                .child(detail),
+        )
+        .child(div().h(px(1.)).w_full().bg(theme.border))
 }
 
-/// The stream and what stands around it.
-pub(super) fn stream(
-    chat: &Chat,
-    key: &str,
-    name: &str,
-    dm: Option<&str>,
-    cx: &mut Context<Chat>,
-) -> Vec<Node> {
-    let room = chat.room.as_ref().expect("a room");
-    let messages = chat.messages(Pane::Timeline);
-    let mut children = Vec::new();
-    match &room.messages {
-        Loaded::Loading(_) if messages.is_empty() => {
-            children.push(loading(format!("{key}/loading")))
-        }
-        Loaded::Failed(refusal) => children.push(padded_all(
-            kit::notice(
-                format!("{key}/failed"),
-                kit::wrapping(kit::text(
-                    format!("{key}/failed/text"),
-                    refusal.sentence.clone(),
-                )),
-                Tone::Danger,
-            ),
-            kit::spacing::LG as f32,
-        )),
-        Loaded::Ready(_) if messages.is_empty() => {
-            // an empty room opens on its beginning, down by the composer
-            children.push(kit::space(None, Some(Length::Fill)));
-            children.push(intro(&format!("{key}/empty"), name, dm));
-            return children;
-        }
-        _ => {}
-    }
-    if room.has_older && !room.landed {
-        let older = (!room.older_loading && !chat.session.busy).then(|| {
-            cx.listener(|chat, _event: &(), _window, cx| {
-                cx.notify();
-                chat.load_older(cx)
-            })
-        });
-        let label = if room.older_loading {
-            "Loading older messages…"
-        } else {
-            "Load older messages"
-        };
-        children.push(padded_all(
-            aligned_x(
-                kit::column(
-                    format!("{key}/older-row"),
-                    [subtle(format!("{key}/older"), label, older)],
-                ),
-                AlignX::Center,
-            ),
-            kit::spacing::SM as f32,
-        ));
-    }
-    if !messages.is_empty() {
-        let whole_history = !room.has_older && !room.landed;
-        let lead = whole_history.then(|| intro(&format!("{key}/intro"), name, dm));
-        children.push(list(
-            chat,
-            super::super::room::STREAM_KEY,
-            &messages,
-            Pane::Timeline,
-            lead,
-            cx,
-        ));
-    }
-    if chat.copy.is_some_and(|c| c.pane == Pane::Timeline) {
-        children.push(selection_bar(chat, key, cx));
-    }
-    let behind_head = room.landed && !room.reaches_head;
-    if !messages.is_empty() && (behind_head || !room.at_tail || room.landed) {
-        let id = room.id.clone();
-        let latest = cx.listener(move |chat, _event: &(), window, cx| {
-            cx.notify();
-            chat.open(id.clone(), window, cx)
-        });
-        children.push(padded_xy(
-            aligned_x(
-                kit::column(
-                    format!("{key}/latest-row"),
-                    [action(
-                        format!("{key}/latest"),
-                        "Jump to latest",
-                        Some(latest),
-                    )],
-                ),
-                AlignX::Center,
-            ),
-            16.,
-            kit::spacing::XXS as f32,
-        ));
-    }
-    children.extend(super::menu::editing(chat, Pane::Timeline, cx));
-    children
-}
-
-/// The keyed, virtual list of one pane's messages: each row a card under a
-/// hover bar of actions, a right press opening the same menu.
-pub fn list(
-    chat: &Chat,
-    key: &str,
-    messages: &[ChatMessage],
-    pane: Pane,
-    lead: Option<Node>,
-    cx: &mut Context<Chat>,
-) -> Node {
-    let thread = pane == Pane::Thread;
-    let mut keys = Vec::new();
-    let mut rows = Vec::new();
-    let boundary = chat.reads.boundary;
-    let unread_marker = (!thread && boundary > 0)
-        .then(|| {
-            messages
-                .iter()
-                .find(|m| !m.pending && m.seq > boundary)
-                .map(|m| m.seq)
-        })
-        .flatten();
-    let writable = chat.may_write();
-    for (index, message) in messages.iter().enumerate() {
-        let scope = format!("{key}/message/{}", message.id);
-        let ranged = chat.copy.is_some_and(|c| c.holds(pane, message.seq));
-        let chosen = chat
-            .menu
-            .as_ref()
-            .is_some_and(|m| m.pane == pane && m.seq == message.seq && message.seq > 0);
-        let plate = match (message.deleted, chosen, ranged) {
-            (true, _, _) | (false, false, false) => Plate::Plain,
-            (false, true, _) => Plate::Selected,
-            (false, false, true) => Plate::Ranged,
-        };
-        let mut children = Vec::new();
-        if unread_marker == Some(message.seq) {
-            children.push(unread_marker_node(format!("{scope}/unread")));
-        }
-        let card = message::card(chat, message, pane, plate, cx);
-        if !message.pending && !message.deleted {
-            let (seq, rev) = (message.seq, message.rev);
-            let mut controls = Vec::new();
-            if !thread && message.reply_count == 0 {
-                let open = cx.listener(move |chat, _event: &(), _window, cx| {
-                    cx.notify();
-                    chat.open_thread(seq, cx)
-                });
-                controls.push(glyph(
-                    format!("{scope}/thread"),
-                    "💬",
-                    "Open thread",
-                    Some(open),
-                ));
-            }
-            let thumbs = writable.then(|| {
-                cx.listener(move |chat, _event: &(), _window, cx| {
-                    cx.notify();
-                    chat.react(seq, "👍".into(), true, cx)
-                })
-            });
-            controls.push(glyph(
-                format!("{scope}/thumbs-up"),
-                "👍",
-                "React with 👍",
-                thumbs,
-            ));
-            let react = writable.then(|| {
-                cx.listener(move |chat, _event: &(), window, cx| {
-                    cx.notify();
-                    chat.open_menu(pane, seq, rev, Mode::Reactions, window, cx)
-                })
-            });
-            controls.push(glyph(
-                format!("{scope}/react"),
-                "😀",
-                "Manage reactions",
-                react,
-            ));
-            let more = cx.listener(move |chat, _event: &(), window, cx| {
-                cx.notify();
-                chat.open_menu(pane, seq, rev, Mode::More, window, cx)
-            });
-            controls.push(glyph(
-                format!("{scope}/more"),
-                "⋯",
-                "More message actions",
-                Some(more),
-            ));
-            let mut wash = kit::palette().surface_raised;
-            wash[3] = 0.6;
-            let hover = Node::Hover {
-                key: format!("{scope}/hover"),
-                width: Some(Length::Fill),
-                height: None,
-                padding: None,
-                background: None,
-                border: None,
-                tint: (!chosen).then_some(wire::Rgba(wash)),
-                radius: 0.,
-                open: chosen,
-                children: vec![card, floating_actions(format!("{scope}/actions"), controls)],
-            };
-            children.push(hover);
-            let content = kit::spaced(kit::column(format!("{scope}/content"), children), 0.);
-            rows.push(with_right_press(mouse_area(scope, content), more));
-        } else {
-            children.push(card);
-            rows.push(kit::spaced(kit::column(scope, children), 0.));
-        }
-        let list_key = if message.pending {
-            -(index as i64) - 1
-        } else {
-            message.seq as i64
-        };
-        keys.push(wire::ListKey::from(list_key));
-    }
-    let list = Node::KeyedColumn {
-        key: format!("{key}/rows"),
-        keys: Some(keys),
-        children: rows,
-        background: None,
-        border: None,
-        spacing: None,
-        padding: Some(wire::Edges {
-            top: kit::spacing::SM as f32,
-            right: 0.,
-            bottom: kit::spacing::SM as f32,
-            left: 0.,
-        }),
-        width: Some(Length::Fill),
-        height: None,
-        max_width: None,
-        align: None,
-        virtual_row: Some(44.),
-    };
-    let content = match lead {
-        Some(intro) => kit::spaced(kit::column(format!("{key}/lead"), [intro, list]), 0.),
-        None => list,
-    };
-    let mut scroll = kit::scroll(key, content);
-    if let Node::Scroll {
-        virtual_rows,
-        anchor_y,
-        on_scroll,
-        ..
-    } = &mut scroll
-    {
-        *virtual_rows = true;
-        // a room grows upward from its composer; a thread reads down
-        *anchor_y = if thread {
-            wire::ScrollAnchor::Start
-        } else {
-            wire::ScrollAnchor::End
-        };
-        if !thread {
-            *on_scroll = Some(
-                cx.listener(|chat, event: &(f32, f32, f32, f32), _window, cx| {
-                    let (_, _, _, ry) = *event;
-                    cx.notify();
-                    chat.scrolled(ry, cx)
-                }),
-            );
-        }
-    }
-    scroll
-}
-
-/// The bar of quiet actions that floats over a message's top-right.
-fn floating_actions(key: String, controls: Vec<Node>) -> Node {
-    let p = kit::palette();
-    let bar = width(
-        padded_all(
-            bordered(
-                background(
-                    kit::spaced(kit::row(format!("{key}/bar"), controls), 0.),
-                    p.background,
-                ),
-                Some(p.border),
-                Some(1.),
-                kit::radius::CONTROL as f32,
-            ),
-            2.,
-        ),
-        Length::Shrink,
-    );
-    kit::padded(
-        height(
-            aligned_y(
-                aligned_x(kit::container(key, bar), AlignX::Right),
-                AlignY::Top,
-            ),
-            Length::Fill,
-        ),
-        wire::Edges {
-            top: 0.,
-            right: kit::spacing::LG as f32,
-            bottom: 0.,
-            left: 0.,
-        },
-    )
-}
-
-fn unread_marker_node(key: String) -> Node {
-    let p = kit::palette();
-    let mut rule = kit::divider(format!("{key}/rule"));
-    if let Node::Rule { color, .. } = &mut rule {
-        *color = Some(kit::rgba(p.accent));
-    }
-    padded_xy(
-        kit::spaced(
-            kit::centered_row(
-                key.clone(),
-                [
-                    kit::container(format!("{key}/line"), rule),
-                    kit::nowrap(kit::colored(
-                        kit::caption(format!("{key}/label"), "New messages"),
-                        p.accent_foreground,
-                    )),
-                ],
-            ),
-            kit::spacing::SM as f32,
-        ),
-        16.,
-        kit::spacing::XS as f32,
-    )
+fn quiet(text: impl Into<String>, theme: &Theme) -> impl IntoElement {
+    div()
+        .p_4()
+        .text_size(px(12.))
+        .text_color(theme.muted)
+        .child(text.into())
 }

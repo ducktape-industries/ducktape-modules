@@ -1,6 +1,7 @@
 //! State stored by the root view and its panes.
 use super::{ChannelInfo, Draft, Loaded, MemberRow, MsgRow, NameDirectory, Session, files};
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 
 #[derive(Serialize, Deserialize, Default)]
@@ -29,6 +30,14 @@ pub struct Chat {
     pub(crate) uploads: HashMap<String, ducktape_view_guest::Task<()>>,
     #[serde(skip)]
     pub(crate) watches: Watches,
+    #[serde(skip)]
+    pub(crate) timeline_list: RefCell<Option<ducktape_view_guest::ListState>>,
+    #[serde(skip)]
+    pub(crate) thread_list: RefCell<Option<ducktape_view_guest::ListState>>,
+    #[serde(skip)]
+    pub(crate) timeline_rows: RefCell<Vec<String>>,
+    #[serde(skip)]
+    pub(crate) thread_rows: RefCell<Vec<String>>,
 }
 
 #[derive(Serialize, Deserialize, Default)]

@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::capability;
-use crate::host::{Refusal, malformed};
-use crate::view::{Capability, json_encode};
+use crate::host::{malformed, Refusal};
+use crate::view::{json_encode, Capability};
 
 /// `host.id`: a fresh id of the named kind.
 pub struct Id;
