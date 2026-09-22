@@ -2189,8 +2189,11 @@ version = "0.1.0"
 dependencies = [
  "abi",
  "borsh",
+ "chat",
  "gitcore",
  "guest",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -2201,9 +2204,11 @@ dependencies = [
  "async-trait",
  "axum",
  "borsh",
+ "chat",
  "flate2",
  "forge",
  "runtime",
+ "serde_json",
  "sha1",
  "sha2 0.10.9",
  "tempfile",
@@ -5191,6 +5196,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "settings-view"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "borsh",
+ "futures",
+ "modules",
+ "serde",
+ "serde_json",
+ "view-guest",
+]
+
+[[package]]
 name = "sha1"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6349,6 +6367,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "view-pack"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+ "view-wire",
+ "wasm-encoder 0.251.0",
+ "wasmparser 0.251.0",
 ]
 
 [[package]]

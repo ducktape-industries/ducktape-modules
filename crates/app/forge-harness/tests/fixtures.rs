@@ -23,11 +23,12 @@ fn save(name: &str, bytes: &[u8], mut sidecar: Value) {
             bytes,
             "{name} actual program bytes"
         );
-        assert_eq!(
-            std::fs::read_to_string(&metadata).unwrap(),
-            json,
-            "{name} sidecar"
-        );
+        // Key order in the sidecar depends on whether some crate in the build
+        // turned on serde_json's `preserve_order`; the content is the contract.
+        let stored: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&metadata).unwrap()).unwrap();
+        let fresh: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(stored, fresh, "{name} sidecar");
     }
 }
 fn capture(remote: &Remote, name: &str, q: Query) -> Reply {
