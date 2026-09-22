@@ -337,7 +337,7 @@ mod tests {
     fn path(parts: usize) -> CanvasCommand {
         CanvasCommand::Draw {
             shape: CanvasShape::Path(vec![CanvasSegment::Close; parts]),
-            fill: Some(Hsla { h: 0.5, s: 1., l: 1., a: 1. }),
+            fill: Some(gpui::rgb(0x00ffff).into()),
             even_odd: false,
             stroke: None,
         }
