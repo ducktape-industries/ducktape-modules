@@ -1,8 +1,8 @@
 use view_wire::{Frame, Length, Node, decode, encode, sanitize};
 
 #[test]
-fn pin_preserves_local_offsets_and_bounds_untrusted_coordinates() {
-    let pin = |x, y| Node::Pin {
+fn anchored_preserves_local_offsets_and_bounds_untrusted_coordinates() {
+    let anchored = |x, y| Node::Anchored {
         key: "pin".into(),
         x,
         y,
@@ -16,14 +16,14 @@ fn pin_preserves_local_offsets_and_bounds_untrusted_coordinates() {
         (f32::NEG_INFINITY, 9000.0, (-8192.0, 8192.0)),
     ] {
         let mut frame = Frame {
-            root: Some(pin(x, y)),
+            root: Some(anchored(x, y)),
             ..Frame::default()
         };
         sanitize(&mut frame).unwrap();
         let node: Node = decode(&encode(&frame.root.unwrap())).unwrap();
         assert_eq!(node.key(), Some("pin"));
         assert_eq!(node.children().len(), 1);
-        let Node::Pin {
+        let Node::Anchored {
             x,
             y,
             width,
