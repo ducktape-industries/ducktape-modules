@@ -1427,7 +1427,7 @@ fn sanitize_node(
             style_sanitize::sanitize(style);
             sanitize_interactivity(interactivity);
             if let Some(label) = label {
-                truncate_string(label);
+                spend_text(label, budgets);
             }
             let expected = usize::from(*loading) + usize::from(*fallback);
             state_children.truncate(expected);
@@ -1463,7 +1463,7 @@ fn sanitize_node(
             style_sanitize::sanitize(style);
             sanitize_interactivity(interactivity);
             if let Some(label) = label {
-                truncate_string(label);
+                spend_text(label, budgets);
             }
         }
         Node::Input {
@@ -1758,7 +1758,9 @@ fn sanitize_node(
     | Node::Grid { children, .. }
     | Node::Stack { children, .. }
     | Node::KeyedColumn { children, .. }
-    | Node::When { children, .. } = node
+    | Node::When { children, .. }
+    | Node::Anchored { children, .. }
+    | Node::Image { state_children: children, .. } = node
     {
         let mut kept = 0;
         for child in children.iter_mut() {
@@ -1769,6 +1771,13 @@ fn sanitize_node(
             kept += 1;
         }
         children.truncate(kept);
+        if let Node::Image { loading, fallback, state_children, .. } = node {
+            if state_children.len() < usize::from(*loading) + usize::from(*fallback) {
+                *loading = false;
+                *fallback = false;
+                state_children.clear();
+            }
+        }
         if let Node::KeyedColumn {
             keys: Some(keys), ..
         } = node
