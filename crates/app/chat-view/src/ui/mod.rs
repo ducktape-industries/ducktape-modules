@@ -13,8 +13,8 @@ mod timeline;
 pub(crate) use components::{badge, button, empty_state};
 
 use ducktape_view_guest::{
-    Context, ElementId, InteractiveElement, IntoElement, ParentElement,
-    StatefulInteractiveElement, Styled, Theme, div, modal_overlay, px, resize_handle, sensor,
+    Context, ElementId, InteractiveElement, IntoElement, ParentElement, Pixels,
+    StatefulInteractiveElement, Styled, Theme, div, hsla, modal_overlay, px, resize_handle, sensor,
 };
 
 use crate::Chat;
@@ -62,8 +62,10 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>) -> impl IntoElement {
             preview,
         )
         .label("Attachment preview")
-        .centered()
-        .backdrop([0., 0., 0., 0.55])
+        .flex()
+        .items_center()
+        .justify_center()
+        .backdrop(hsla(0., 0., 0., 0.55))
         .on_dismiss(dismiss)
         .into_any_element();
     }
@@ -78,22 +80,24 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>) -> impl IntoElement {
             create,
         )
         .label("Create channel")
-        .centered()
-        .padding(24.)
-        .backdrop([0., 0., 0., 0.55]);
+        .flex()
+        .items_center()
+        .justify_center()
+        .p_6()
+        .backdrop(hsla(0., 0., 0., 0.55));
         screen = if chat.create.as_ref().is_some_and(|create| create.busy) {
             overlay.into_any_element()
         } else {
             overlay.on_dismiss(dismiss).into_any_element()
         };
     }
-    let shown = cx.listener(|chat, size: &(f32, f32), _window, cx| {
-        chat.layout.viewport = *size;
+    let shown = cx.listener(|chat, size: &(Pixels, Pixels), _window, cx| {
+        chat.layout.viewport = (size.0.into(), size.1.into());
         chat.layout.clamp();
         cx.notify();
     });
-    let resized = cx.listener(|chat, size: &(f32, f32), _window, cx| {
-        chat.layout.viewport = *size;
+    let resized = cx.listener(|chat, size: &(Pixels, Pixels), _window, cx| {
+        chat.layout.viewport = (size.0.into(), size.1.into());
         chat.layout.clamp();
         cx.notify();
     });
@@ -134,8 +138,8 @@ fn divider(
     cx: &mut Context<Chat>,
     drag: impl Fn(&mut Chat, f32) + 'static,
 ) -> impl IntoElement {
-    let dragged = cx.listener(move |chat, delta: &(f64, f64), _window, cx| {
-        drag(chat, delta.0 as f32);
+    let dragged = cx.listener(move |chat, delta: &(Pixels, Pixels), _window, cx| {
+        drag(chat, delta.0.into());
         chat.layout.clamp();
         cx.notify();
     });

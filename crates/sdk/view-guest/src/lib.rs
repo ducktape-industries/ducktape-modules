@@ -1,7 +1,8 @@
 //! Renderer-independent execution of dynamically loaded WASM views.
 pub use gpui::prelude::FluentBuilder;
 pub use gpui::{
-    px, rems, rgb, ClickEvent, ElementId, Global, Hsla, Role, SharedString, StyleRefinement, Styled,
+    hsla, px, rems, rgb, ClickEvent, CursorStyle, ElementId, Global, Hsla, Pixels, Role,
+    SharedString, StyleRefinement, Styled,
 };
 pub use view_guest_derive::IntoElement;
 pub use view_wire as wire;
@@ -24,7 +25,7 @@ pub mod prelude {
     pub use crate::{
         AnyElement, App, ClickEvent, Context, Element, ElementId, FluentBuilder, Global, Hsla, InteractiveElement,
         IntoElement, ParentElement, Render, RenderOnce, Role, SharedString, StatefulInteractiveElement,
-        Styled, Theme, Window, surface, modal_overlay, resize_handle, sensor, anchored, canvas, deferred, div, img, px, rems, rgb, svg, uniform_list,
+        Styled, Theme, Window, hsla, Pixels, surface, modal_overlay, resize_handle, sensor, anchored, canvas, deferred, div, img, px, rems, rgb, svg, uniform_list,
     };
 }
 mod editor;
@@ -227,21 +228,23 @@ impl<V: View> Driver<V> {
                     height,
                 } => {
                     let slots = self.app.inner.slots.clone();
-                    let event = (width, height);
+                    let route_event = (px(width), px(height));
                     let mut window = self.app.window();
-                    if slots::run_route(&slots, handler, &event, &mut window, &mut self.app) {
+                    if slots::run_route(&slots, handler, &route_event, &mut window, &mut self.app) {
                         None
                     } else {
+                        let event = (width, height);
                         slots::run_handler::<(f32, f32), Callback<V>>(&slots, handler, event)
                     }
                 }
                 wire::Event::Drag { handler, dx, dy } => {
                     let slots = self.app.inner.slots.clone();
-                    let event = (dx, dy);
+                    let route_event = (px(dx as f32), px(dy as f32));
                     let mut window = self.app.window();
-                    if slots::run_route(&slots, handler, &event, &mut window, &mut self.app) {
+                    if slots::run_route(&slots, handler, &route_event, &mut window, &mut self.app) {
                         None
                     } else {
+                        let event = (dx, dy);
                         slots::run_handler::<(f64, f64), Callback<V>>(&slots, handler, event)
                     }
                 }

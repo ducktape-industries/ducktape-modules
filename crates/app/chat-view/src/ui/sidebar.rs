@@ -209,6 +209,7 @@ fn channel_button(
             format!("chat-sidebar-channel-{}", info.channel.id).into(),
         ))
         .flex()
+        .w_full()
         .items_center()
         .gap_1()
         .min_h(px(28.))
@@ -220,7 +221,10 @@ fn channel_button(
             theme.sidebar
         })
         .hover(|s| s.bg(theme.sidebar_raised))
-        .role(ducktape_view_guest::Role::Button).focusable().on_click(click)
+        .role(ducktape_view_guest::Role::Button)
+        .aria_selected(selected)
+        .focusable()
+        .on_click(click)
         .child(div().text_color(theme.sidebar_muted).child("#"))
         .child(
             div()

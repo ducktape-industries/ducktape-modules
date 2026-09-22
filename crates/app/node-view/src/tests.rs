@@ -78,6 +78,35 @@ fn the_set_shows_its_validators_memberships_and_counts() {
     assert!(cx.has_text("Validator") && cx.has_text("Resident"));
     // a key reaches the screen shortened, never raw
     assert!(texts.iter().any(|text| text == "abcd"), "{texts:?}");
+    let Some(ducktape_view_guest::wire::Node::Container { interactivity, .. }) =
+        cx.find("nodes-set-header")
+    else {
+        panic!("section is a native container");
+    };
+    assert_eq!(interactivity.role, Some(ducktape_view_guest::Role::Heading));
+    assert_eq!(interactivity.aria.level, Some(2));
+    let Some(ducktape_view_guest::wire::Node::Container { children, .. }) = cx.find("nodes-list")
+    else {
+        panic!("section list is a native container");
+    };
+    assert_eq!(children[0].key(), Some("nodes-set-header"));
+    assert_eq!(children[1].key(), Some("nodes-validators"));
+    assert_eq!(children[2].key(), Some("nodes-members-header"));
+    assert_eq!(children[3].key(), Some("nodes-members"));
+}
+
+#[test]
+fn short_ids_cut_on_unicode_boundaries_and_mark_only_a_cut() {
+    for (id, keep, want) in [
+        ("0123456789", 8, "01234567…"),
+        ("01234567", 8, "01234567"),
+        ("abc", 8, "abc"),
+        ("오리테이프", 2, "오리…"),
+        ("abc", 0, "…"),
+        ("", 0, ""),
+    ] {
+        assert_eq!(short_id(id, keep), want, "short_id({id:?}, {keep})");
+    }
 }
 
 #[test]
@@ -115,6 +144,15 @@ fn a_refusal_shows_its_sentence_and_retry_asks_again() {
     cx.open::<Nodes>();
     cx.run_until_parked();
     assert!(cx.has_text("valset is not running here"));
+    let Some(ducktape_view_guest::wire::Node::Container { children, .. }) =
+        cx.find("nodes-refused")
+    else {
+        panic!("refusal is a native container");
+    };
+    assert_eq!(
+        children.last().and_then(|child| child.key()),
+        Some("nodes-retry")
+    );
     respond(&mut cx);
     cx.simulate_click("nodes-retry");
     cx.run_until_parked();

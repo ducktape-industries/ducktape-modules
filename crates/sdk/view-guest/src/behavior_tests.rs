@@ -1,11 +1,11 @@
 use crate::prelude::*;
 use crate::testing::TestAppContext;
-use crate::{modal_overlay, resize_handle, sensor, surface, wire, View};
+use crate::{View, modal_overlay, resize_handle, sensor, surface, wire};
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 struct BehaviorView {
     measured: (f32, f32),
-    dragged: (f64, f64),
+    dragged: (f32, f32),
     dismissed: bool,
     surface_event: String,
 }
@@ -18,12 +18,12 @@ impl View for BehaviorView {
 
 impl Render for BehaviorView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let measured = cx.listener(|view, size: &(f32, f32), _, cx| {
-            view.measured = *size;
+        let measured = cx.listener(|view, size: &(Pixels, Pixels), _, cx| {
+            view.measured = (size.0.into(), size.1.into());
             cx.notify();
         });
-        let dragged = cx.listener(|view, delta: &(f64, f64), _, cx| {
-            view.dragged = *delta;
+        let dragged = cx.listener(|view, delta: &(Pixels, Pixels), _, cx| {
+            view.dragged = (delta.0.into(), delta.1.into());
             cx.notify();
         });
         let dismissed = cx.listener(|view, _: &(), _, cx| {
@@ -57,7 +57,9 @@ impl Render for BehaviorView {
             div().child("modal"),
         )
         .label("Behavior dialog")
-        .centered()
+        .flex()
+        .items_center()
+        .justify_center()
         .on_dismiss(dismissed)
     }
 }

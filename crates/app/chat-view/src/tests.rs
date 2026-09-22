@@ -144,6 +144,21 @@ fn opened() -> (TestAppContext, Entity<Chat>) {
     cx.simulate_click("chat-sidebar-channel-general");
     cx.run_until_parked();
     view.read(|chat| assert_eq!(chat.room.as_ref().unwrap().id, "general"));
+    let Some(wire::Node::Container {
+        style,
+        interactivity,
+        ..
+    }) = cx.find("chat-sidebar-channel-general")
+    else {
+        panic!("channel row is a native container");
+    };
+    assert!(style.size.width.is_some(), "channel rows fill the sidebar");
+    assert_eq!(interactivity.role, Some(ducktape_view_guest::Role::Button));
+    assert_eq!(interactivity.aria.selected, Some(true));
+    assert!(
+        interactivity.on_click.is_some(),
+        "channel rows keep their route"
+    );
     (cx, view)
 }
 
