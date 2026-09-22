@@ -149,7 +149,12 @@ impl<K: KeyCodec> Set<K> {
     }
 
     pub fn scan(&self, store: &impl Reads, scan: Scan) -> Result<Vec<K>, Refusal> {
-        Ok(self.map.scan(store, scan)?.into_iter().map(|(k, ())| k).collect())
+        Ok(self
+            .map
+            .scan(store, scan)?
+            .into_iter()
+            .map(|(k, ())| k)
+            .collect())
     }
 
     pub fn all(&self, store: &impl Reads) -> Result<Vec<K>, Refusal> {
@@ -172,7 +177,10 @@ impl<K: KeyCodec> Set<K> {
         page: &Page,
         height: u64,
     ) -> Result<PageReply<K>, Refusal> {
-        Ok(self.map.range_of(store, head, page, height)?.map(|(k, ())| k))
+        Ok(self
+            .map
+            .range_of(store, head, page, height)?
+            .map(|(k, ())| k))
     }
 
     pub fn prefix(&self) -> &'static str {
@@ -245,7 +253,12 @@ mod tests {
         NUMBERS.put(&mut store, &2, &"two".into());
         assert_eq!(NUMBERS.get(&store, &2).unwrap().as_deref(), Some("two"));
         assert!(NUMBERS.has(&store, &10) && !NUMBERS.has(&store, &3));
-        let keys: Vec<u64> = NUMBERS.all(&store).unwrap().into_iter().map(|(k, _)| k).collect();
+        let keys: Vec<u64> = NUMBERS
+            .all(&store)
+            .unwrap()
+            .into_iter()
+            .map(|(k, _)| k)
+            .collect();
         assert_eq!(keys, [2, 10], "numeric, not lexical");
         NUMBERS.remove(&mut store, &2);
         assert_eq!(NUMBERS.all(&store).unwrap().len(), 1);

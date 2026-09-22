@@ -1,0 +1,327 @@
+// The rules natively over `store::Memory`: what the founding suite checks on the host, without the host.
+
+use abi::{Cause, Env, Origin, Scheme, reason};
+use store::{Memory, Page};
+
+use crate::{Account, Admission, CONSENT_NAMESPACE, Consent, Control, Op, Query, Reply, Standing};
+
+const ALICE: &[u8] = b"alice-key";
+const SECOND: &[u8] = b"alice-second-key";
+const EXECUTOR: &str = "agents";
+
+fn env(origin: Origin, time: u64) -> Env {
+    Env {
+        network: b"net".to_vec(),
+        height: 7,
+        time,
+        me: crate::PROGRAM.into(),
+        origin,
+        cause: Cause::Direct,
+    }
+}
+
+fn signed(key: &[u8]) -> Env {
+    env(Origin::External(key.to_vec()), 100)
+}
+
+fn by_program() -> Env {
+    env(Origin::Program(EXECUTOR.into()), 100)
+}
+
+/// A consent proof, natively: the signature is the preimage itself, and the
+/// verifier checks it names the consenting key.
+fn memory() -> Memory {
+    let mut store = Memory::default();
+    store.verifier = Some(Box::new(|_, key, namespace, message, signature| {
+        namespace == CONSENT_NAMESPACE && message == signature && !key.is_empty()
+    }));
+    store
+}
+
+fn run(store: &mut Memory, env: &Env, op: Op) -> Result<u64, abi::Refusal> {
+    crate::execute(store, env, op)?;
+    let output = store.take_output();
+    Ok(if output.is_empty() {
+        0
+    } else {
+        abi::decode(&output).unwrap()
+    })
+}
+
+fn get(store: &Memory, number: u64) -> Account {
+    match crate::query(store, &signed(ALICE), Query::Get { number }).unwrap() {
+        Reply::Account(account) => account.expect("the account exists"),
+        other => panic!("{other:?}"),
+    }
+}
+
+fn create(store: &mut Memory, key: &[u8], name: &str) -> u64 {
+    run(
+        store,
+        &signed(key),
+        Op::Create {
+            name: name.into(),
+            scheme: Scheme::Ed25519,
+        },
+    )
+    .unwrap()
+}
+
+#[test]
+fn accounts_are_numbered_from_one_and_a_key_holds_one_account() {
+    let mut store = memory();
+    assert_eq!(create(&mut store, ALICE, "  Alice "), 1);
+    assert_eq!(get(&store, 1).name, "Alice");
+    assert_eq!(create(&mut store, b"bob", "Bob"), 2);
+    let again = run(
+        &mut store,
+        &signed(ALICE),
+        Op::Create {
+            name: "Twice".into(),
+            scheme: Scheme::Ed25519,
+        },
+    );
+    assert_eq!(again.unwrap_err().reason, reason::ALREADY_EXISTS);
+    assert_eq!(
+        crate::query(
+            &store,
+            &signed(ALICE),
+            Query::OfKey {
+                key: ALICE.to_vec()
+            }
+        )
+        .unwrap(),
+        Reply::Number(Some(1))
+    );
+    let unsigned = crate::execute(
+        &mut store,
+        &by_program(),
+        Op::Create {
+            name: "x".into(),
+            scheme: Scheme::Ed25519,
+        },
+    );
+    assert_eq!(unsigned.unwrap_err().reason, reason::UNAUTHORIZED);
+}
+
+#[test]
+fn a_key_joins_by_consent_and_leaves_only_junior_to_its_remover() {
+    let mut store = memory();
+    create(&mut store, ALICE, "Alice");
+    let admission = Admission {
+        network: b"net".to_vec(),
+        scheme: Scheme::Ed25519,
+        key: SECOND.to_vec(),
+        generation: 0,
+        account: 1,
+        expires_at: 200,
+    };
+    let consent = |proof: Vec<u8>, expires_at: u64| Consent {
+        key: ALICE.to_vec(),
+        account: 1,
+        expires_at,
+        proof,
+    };
+    let add = |proof: Vec<u8>, expires_at: u64| Op::AddKey {
+        scheme: Scheme::Ed25519,
+        label: Some("laptop".into()),
+        consent: consent(proof, expires_at),
+    };
+    let forged = run(&mut store, &signed(SECOND), add(b"nope".to_vec(), 200));
+    assert_eq!(forged.unwrap_err().reason, reason::UNAUTHORIZED);
+    let expired = run(
+        &mut store,
+        &env(Origin::External(SECOND.to_vec()), 300),
+        add(admission.preimage(), 200),
+    );
+    assert_eq!(expired.unwrap_err().reason, reason::UNAUTHORIZED);
+    run(
+        &mut store,
+        &env(Origin::External(SECOND.to_vec()), 150),
+        add(admission.preimage(), 200),
+    )
+    .unwrap();
+    assert_eq!(get(&store, 1).keys().len(), 2);
+    assert_eq!(
+        crate::query(
+            &store,
+            &signed(ALICE),
+            Query::Generation {
+                key: SECOND.to_vec()
+            }
+        )
+        .unwrap(),
+        Reply::Generation(1)
+    );
+    let senior = run(
+        &mut store,
+        &env(Origin::External(SECOND.to_vec()), 150),
+        Op::RemoveKey {
+            key: ALICE.to_vec(),
+        },
+    );
+    assert_eq!(senior.unwrap_err().reason, reason::UNAUTHORIZED);
+    run(
+        &mut store,
+        &env(Origin::External(ALICE.to_vec()), 150),
+        Op::RemoveKey {
+            key: SECOND.to_vec(),
+        },
+    )
+    .unwrap();
+    assert!(!get(&store, 1).holds(SECOND));
+    let last = run(
+        &mut store,
+        &signed(ALICE),
+        Op::RemoveKey {
+            key: ALICE.to_vec(),
+        },
+    );
+    assert_eq!(last.unwrap_err().reason, reason::WRONG_STATE);
+}
+
+#[test]
+fn a_program_account_is_controlled_transferred_and_revoked_by_its_controller() {
+    let mut store = memory();
+    create(&mut store, ALICE, "Alice");
+    create(&mut store, b"bob", "Bob");
+    let agent = run(
+        &mut store,
+        &by_program(),
+        Op::CreateProgram {
+            name: "Agent".into(),
+            controller: 1,
+        },
+    )
+    .unwrap();
+    assert_eq!(agent, 3);
+    let stranger = run(
+        &mut store,
+        &signed(b"bob"),
+        Op::SetName {
+            account: 3,
+            name: "Mine".into(),
+        },
+    );
+    assert_eq!(stranger.unwrap_err().reason, reason::UNAUTHORIZED);
+    run(
+        &mut store,
+        &by_program(),
+        Op::SetStanding {
+            account: 3,
+            standing: Standing::Suspended,
+        },
+    )
+    .unwrap();
+    assert!(!get(&store, 3).live());
+    let circular = run(
+        &mut store,
+        &signed(ALICE),
+        Op::TransferControl { account: 3, to: 3 },
+    );
+    assert_eq!(circular.unwrap_err().reason, reason::WRONG_STATE);
+    run(
+        &mut store,
+        &signed(ALICE),
+        Op::TransferControl { account: 3, to: 2 },
+    )
+    .unwrap();
+    assert!(matches!(
+        get(&store, 3).control,
+        Control::Program { controller: 2, .. }
+    ));
+    let former = run(&mut store, &signed(ALICE), Op::Revoke { account: 3 });
+    assert_eq!(former.unwrap_err().reason, reason::UNAUTHORIZED);
+    run(&mut store, &signed(b"bob"), Op::Revoke { account: 3 }).unwrap();
+    assert_eq!(get(&store, 3).control, Control::Revoked { controller: 2 });
+}
+
+#[test]
+fn lists_page_in_number_order_and_controlled_lists_one_controller() {
+    let mut store = memory();
+    for n in 0..11u8 {
+        create(&mut store, &[n], &format!("a{n}"));
+    }
+    for _ in 0..3 {
+        run(
+            &mut store,
+            &by_program(),
+            Op::CreateProgram {
+                name: "agent".into(),
+                controller: 2,
+            },
+        )
+        .unwrap();
+    }
+    run(
+        &mut store,
+        &by_program(),
+        Op::CreateProgram {
+            name: "other".into(),
+            controller: 11,
+        },
+    )
+    .unwrap();
+    let list = |query| match crate::query(&store, &signed(ALICE), query).unwrap() {
+        Reply::Accounts(page) => page,
+        other => panic!("{other:?}"),
+    };
+    let first = list(Query::List {
+        page: Page::first(10),
+    });
+    assert_eq!(first.height, 7);
+    assert_eq!(first.items.len(), 10);
+    let rest = list(Query::List {
+        page: Page {
+            after: first.next,
+            limit: Some(10),
+        },
+    });
+    assert_eq!(
+        rest.items.iter().map(|a| a.number).collect::<Vec<_>>(),
+        [11, 12, 13, 14, 15],
+        "numeric order across the ten boundary"
+    );
+    let controlled = list(Query::Controlled {
+        by: 2,
+        page: Page::first(2),
+    });
+    assert_eq!(
+        controlled
+            .items
+            .iter()
+            .map(|a| a.number)
+            .collect::<Vec<_>>(),
+        [12, 13]
+    );
+    let more = list(Query::Controlled {
+        by: 2,
+        page: Page {
+            after: controlled.next,
+            limit: Some(2),
+        },
+    });
+    assert_eq!(
+        (
+            more.items.iter().map(|a| a.number).collect::<Vec<_>>(),
+            more.next
+        ),
+        (vec![14], None),
+        "the page stays under one controller"
+    );
+    assert_eq!(
+        crate::query(
+            &store,
+            &signed(ALICE),
+            Query::Resolve {
+                references: vec![
+                    crate::Reference::Account(15),
+                    crate::Reference::Account(99),
+                    crate::Reference::Key(vec![3]),
+                ],
+            },
+        )
+        .unwrap(),
+        Reply::Resolved(vec![Some(15), None, Some(4)])
+    );
+}

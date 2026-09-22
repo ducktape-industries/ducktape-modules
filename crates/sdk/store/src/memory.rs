@@ -85,22 +85,24 @@ impl Reads for Memory {
                 HostReply::Entries(self.scan_state(scan))
             }
             HostOp::BlobGet(id) => HostReply::Blob(self.blobs.get(id).cloned()),
-            HostOp::BlobStat(id) => HostReply::BlobHeader(self.blobs.get(id).map(|blob| {
-                BlobHeader {
+            HostOp::BlobStat(id) => {
+                HostReply::BlobHeader(self.blobs.get(id).map(|blob| BlobHeader {
                     kind: blob.kind.clone(),
                     len: blob.body.len() as u64,
-                }
-            })),
+                }))
+            }
             HostOp::BlobRead { id, offset, len } => HostReply::Value(self.blobs.get(id).map(|b| {
                 let start = (*offset as usize).min(b.body.len());
                 let end = start.saturating_add(*len as usize).min(b.body.len());
                 b.body[start..end].to_vec()
             })),
             HostOp::Root(_) => HostReply::Root(None),
-            HostOp::Query { program, request } => HostReply::Query(match self.siblings.get(program) {
-                Some(sibling) => sibling(request),
-                None => Err(Refusal::new(reason::UNKNOWN_PROGRAM, program.clone())),
-            }),
+            HostOp::Query { program, request } => {
+                HostReply::Query(match self.siblings.get(program) {
+                    Some(sibling) => sibling(request),
+                    None => Err(Refusal::new(reason::UNKNOWN_PROGRAM, program.clone())),
+                })
+            }
             HostOp::Crypto(CryptoOp::Sha256(bytes)) => {
                 HostReply::Crypto(CryptoReply::Digest(sha2::Sha256::digest(bytes).into()))
             }

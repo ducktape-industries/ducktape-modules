@@ -89,7 +89,9 @@ impl Page {
         if start > values.len() {
             return Err(invalid("cursor past the end of this listing"));
         }
-        let end = start.saturating_add(self.limit() as usize).min(values.len());
+        let end = start
+            .saturating_add(self.limit() as usize)
+            .min(values.len());
         Ok(PageReply {
             height,
             items: values[start..end].to_vec(),
@@ -116,7 +118,10 @@ impl<T> PageReply<T> {
         }
     }
 
-    pub fn try_map<U>(self, f: impl FnMut(T) -> Result<U, Refusal>) -> Result<PageReply<U>, Refusal> {
+    pub fn try_map<U>(
+        self,
+        f: impl FnMut(T) -> Result<U, Refusal>,
+    ) -> Result<PageReply<U>, Refusal> {
         Ok(PageReply {
             height: self.height,
             items: self.items.into_iter().map(f).collect::<Result<_, _>>()?,
@@ -145,7 +150,10 @@ mod tests {
 
     #[test]
     fn pages_are_bounded_round_trip_and_resume_without_duplicates() {
-        let rows: Vec<_> = (0..=255u8).map(|n| (vec![n], n)).chain([(vec![255, 0], 0u8)]).collect();
+        let rows: Vec<_> = (0..=255u8)
+            .map(|n| (vec![n], n))
+            .chain([(vec![255, 0], 0u8)])
+            .collect();
         let total = rows.len();
         for limit in [None, Some(u64::MAX), Some(100), Some(0), Some(1)] {
             let page = Page { after: None, limit };

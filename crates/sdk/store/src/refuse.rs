@@ -41,7 +41,15 @@ pub fn corrupt(table: &str, key: &[u8], what: impl std::fmt::Display) -> Refusal
 
 /// A program's `Op`/`Query` that does not decode, refused as invalid input
 /// naming the program and the shape.
-pub fn decoded<T: BorshDeserialize>(program: &str, shape: &str, bytes: &[u8]) -> Result<T, Refusal> {
-    abi::decode(bytes)
-        .map_err(|fault| invalid(format!("{program}: {shape} did not decode: {}", fault.sentence)))
+pub fn decoded<T: BorshDeserialize>(
+    program: &str,
+    shape: &str,
+    bytes: &[u8],
+) -> Result<T, Refusal> {
+    abi::decode(bytes).map_err(|fault| {
+        invalid(format!(
+            "{program}: {shape} did not decode: {}",
+            fault.sentence
+        ))
+    })
 }
