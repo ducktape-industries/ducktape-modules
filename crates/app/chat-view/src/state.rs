@@ -7,6 +7,9 @@ use std::collections::{BTreeMap, HashMap};
 #[derive(Serialize, Deserialize, Default)]
 pub struct Chat {
     pub(crate) session: Session,
+    /// the account the seated key holds, resolved through identity
+    /// (`None` while unregistered or not yet answered)
+    pub(crate) me: Loaded<Option<u64>>,
     #[serde(skip)]
     pub(crate) names: Loaded<NameDirectory>,
     pub(crate) channels: Loaded<Vec<ChannelInfo>>,
@@ -197,6 +200,7 @@ pub struct Preview {
 pub struct Watches {
     pub(crate) props: Option<ducktape_view_guest::Task<()>>,
     pub(crate) changes: Option<ducktape_view_guest::Task<()>>,
+    pub(crate) identity: Option<ducktape_view_guest::Task<()>>,
     pub(crate) visible: Option<ducktape_view_guest::Task<()>>,
     pub(crate) drops: Option<ducktape_view_guest::Task<()>>,
 }

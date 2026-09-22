@@ -14,6 +14,10 @@ use forge::{LineComment, Query, Reply, Revision, Side, Verdict};
 pub struct Forge {
     pub(crate) nav: Nav,
     pub(crate) session: Session,
+    /// the account the seated key holds, resolved through identity
+    /// (`None` while unregistered or not yet answered)
+    #[serde(skip)]
+    pub(crate) me: Loaded<Option<u64>>,
     pub(crate) filter: Filter,
     /// the repo-list / change-list filter box
     pub(crate) search: String,

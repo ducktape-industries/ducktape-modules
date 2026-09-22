@@ -1,9 +1,12 @@
 //! The `identity` program: accounts, the keys and programs that control them,
 //! and the consent by which a key joins an account. The types are always
 //! built; a view links them with `program` off. The `program` feature adds the
-//! wasm32 program over the host (`program.rs`).
+//! wasm32 program over the host (`program.rs`). The `view` feature adds the
+//! ask a view makes of identity directly (`view.rs`).
 #[cfg(feature = "program")]
 mod program;
+#[cfg(feature = "view")]
+pub mod view;
 
 use abi::{BlobId, ProgramId, Scheme};
 use borsh::{BorshDeserialize, BorshSerialize};

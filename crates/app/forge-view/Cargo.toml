@@ -19,5 +19,6 @@ borsh.workspace = true
 chat.workspace = true
 forge.workspace = true
 futures.workspace = true
+identity = { workspace = true, features = ["view"] }
 serde.workspace = true
 serde_json.workspace = true

@@ -68,7 +68,10 @@ impl View for Forge {
                 }
             }
         }));
-        for module in ["forge", "chat"] {
+        // identity's own block matters too: a key that gains an account
+        // while this view is open (Settings, then back to Forge) writes no
+        // session change of its own, only an identity block.
+        for module in ["forge", "chat", identity::PROGRAM] {
             let mut live = cx.host().subscribe::<Live>(module.into());
             self.watches.push(cx.spawn(async move |this, cx| {
                 while live.next().await.is_some() {
@@ -95,6 +98,9 @@ impl View for Forge {
         }));
         if self.names.is_idle() {
             self.names = cx.load(queries::roster(cx.host()), |forge| &mut forge.names);
+        }
+        if self.me.is_idle() {
+            self.refresh_me(cx);
         }
         self.sync(cx);
     }
@@ -128,10 +134,36 @@ impl Forge {
         self.session = next;
         if reader_changed {
             self.names = cx.load(queries::roster(cx.host()), |forge| &mut forge.names);
+            self.refresh_me(cx);
             self.data.clear();
             self.requests.clear();
         }
         self.sync(cx);
+    }
+
+    /// Re-asks identity for the account the seated key holds now. Called on
+    /// every key change and on identity's own live stream, so a key that
+    /// gains an account while this view stays open re-enables writes
+    /// without a relaunch.
+    fn refresh_me(&mut self, cx: &mut Context<Self>) {
+        let key = self.session.account.clone();
+        self.me = cx.load(queries::resolve_me(cx.host(), key), |forge| &mut forge.me);
+    }
+
+    /// The reader's account number, once identity has answered.
+    pub(crate) fn my_account(&self) -> Option<u64> {
+        self.me.ready().copied().flatten()
+    }
+
+    /// The reader's handle as chat and forge would write it: `acct:<n>`
+    /// once the seated key holds an account, `user:<hex>` while it is
+    /// seated but holds none, "" with no key seated at all.
+    pub(crate) fn my_handle(&self) -> String {
+        match self.my_account() {
+            Some(number) => format!("acct:{number}"),
+            None if self.session.account.is_empty() => String::new(),
+            None => format!("user:{}", self.session.account),
+        }
     }
 
     /// One read, once. Landing it advances whatever depends on it.
@@ -180,9 +212,12 @@ impl Forge {
         self.sync(cx);
     }
 
-    /// A new block landed: retire what it carried, then re-read.
+    /// A new block landed: retire what it carried, then re-read. Cheap
+    /// enough to also cover an identity block, so a gained account is never
+    /// missed for lack of its own dedicated watch.
     pub(crate) fn reconcile(&mut self, cx: &mut Context<Self>) {
         self.pending.retain(|op| !op.accepted);
+        self.refresh_me(cx);
         self.refresh(cx);
     }
 
@@ -567,17 +602,12 @@ impl Forge {
     /// The reader's signing key, joined from the roster: `host.props` names
     /// an account and forge is keyed by keys.
     pub(crate) fn me_key(&self) -> Option<Vec<u8>> {
-        self.names
-            .ready()?
-            .key_of(crate::api::account_number(&self.session)?)
+        self.names.ready()?.key_of(self.my_account()?)
     }
 
     pub(crate) fn viewer(&self) -> Vec<String> {
-        if self.session.account.is_empty() {
-            Vec::new()
-        } else {
-            vec![self.session.account.clone()]
-        }
+        let me = self.my_handle();
+        if me.is_empty() { Vec::new() } else { vec![me] }
     }
 
     /// The hidden chat channel of the open change.
