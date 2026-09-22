@@ -1,11 +1,14 @@
 //! The host capabilities every view speaks the same way: ids, the clock,
 //! the device (files, clipboard, pictures) and the node's raw surfaces.
 //! What a view says to its own host lives beside the view.
-use crate::capability;
-use crate::host::{Refusal, malformed};
-use crate::view::Capability;
+use base64::Engine as _;
+use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+use crate::capability;
+use crate::host::{Refusal, malformed};
+use crate::view::{Capability, json_encode};
 
 /// `host.id`: a fresh id of the named kind.
 pub struct Id;
@@ -44,6 +47,40 @@ capability!(PictureLoad, "picture.load", Value, Value);
 capability!(Admin, "rpc.admin", Value, Value);
 // `rpc.stream`: frames of a node topic, each a JSON value.
 capability!(Stream, "rpc.stream", Value, Value);
+
+/// A borsh program a view reads: its name on the node and the two types its
+/// query surface speaks. Implemented next to the view (a marker type), the
+/// way [`Module`](crate::view::Module) is — the contract crate holds the
+/// types and never links this runtime.
+pub trait Program {
+    const PROGRAM: &'static str;
+    type Request: BorshSerialize;
+    type Reply: BorshDeserialize;
+}
+
+/// `rpc.query_bytes`: one borsh query to `P`. The request rides base64 in the
+/// JSON envelope the host door takes; the answer is the program's own reply,
+/// raw borsh, decoded here. A program that refuses answers with a refusal,
+/// so the four states of a [`Loaded`](crate::view::Loaded) slot are honest.
+pub struct QueryBytes<P>(core::marker::PhantomData<P>);
+
+impl<P: Program> Capability for QueryBytes<P> {
+    const KIND: &'static str = "rpc.query_bytes";
+    type Request = P::Request;
+    type Reply = P::Reply;
+
+    fn encode(request: &P::Request) -> Vec<u8> {
+        let body = borsh::to_vec(request).expect("borsh encodes an in-memory value");
+        json_encode(&serde_json::json!({
+            "target": P::PROGRAM,
+            "body_b64": base64::engine::general_purpose::STANDARD.encode(body),
+        }))
+    }
+
+    fn decode(bytes: &[u8]) -> Result<P::Reply, Refusal> {
+        borsh::from_slice(bytes).map_err(|error| malformed(error.to_string()))
+    }
+}
 
 impl FsRead {
     pub fn request(token: &str, offset: u64, len: usize) -> Value {

@@ -17,12 +17,14 @@ DUCKTAPE ?= ../ducktape
 PROGRAMS := crates/app/chat-program crates/app/forge
 
 # The views: cdylibs for wasm32-unknown-unknown the desktop loads from a file.
-VIEWS := chat-view
+VIEWS := chat-view members-view node-view explorer-view
 
 # What a wasm32 view may link. A crate a view links must never reach the
 # signing/identity graph (blst does not build for wasm32, and a view has no
-# business holding keys).
-VIEW_LINKABLE := ducklink view-wire view-guest design
+# business holding keys). `modules` is here because the system views read the
+# boot set's contracts: its signing deps are dev-only, and `-e normal` below
+# is what says so.
+VIEW_LINKABLE := ducklink view-wire view-guest design modules
 VIEW_FORBIDDEN := blst commonware-cryptography
 
 .PHONY: program-wasm-check wasm-programs probe-fixture wasm-views view-wasm-check

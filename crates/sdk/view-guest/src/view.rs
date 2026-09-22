@@ -68,17 +68,28 @@ impl<V: 'static> Effect<V> {
 
 /// One `kind` a view may ask the host for, with the request and reply it
 /// carries. `KIND` is `<capability>.<operation>`; the host refuses one the
-/// manifest did not declare. JSON both ways unless overridden.
+/// manifest did not declare.
+///
+/// A capability names its own codec, because not every door is JSON: a
+/// binary one ([`caps::QueryBytes`](crate::caps::QueryBytes)) carries borsh
+/// the serde traits never see. [`capability!`] writes the JSON pair for the
+/// ones that are.
 pub trait Capability {
     const KIND: &'static str;
-    type Request: Serialize;
-    type Reply: DeserializeOwned;
-    fn encode(request: &Self::Request) -> Vec<u8> {
-        serde_json::to_vec(request).expect("request encodes")
-    }
-    fn decode(bytes: &[u8]) -> Result<Self::Reply, Refusal> {
-        serde_json::from_slice(bytes).map_err(|error| host::malformed(error.to_string()))
-    }
+    type Request;
+    type Reply;
+    fn encode(request: &Self::Request) -> Vec<u8>;
+    fn decode(bytes: &[u8]) -> Result<Self::Reply, Refusal>;
+}
+
+/// The JSON half of a capability, named once so every JSON door spells it
+/// the same way.
+pub fn json_encode<T: Serialize>(request: &T) -> Vec<u8> {
+    serde_json::to_vec(request).expect("request encodes")
+}
+
+pub fn json_decode<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, Refusal> {
+    serde_json::from_slice(bytes).map_err(|error| host::malformed(error.to_string()))
 }
 
 /// A module a view talks to: its name on the node and the types it speaks.
@@ -107,6 +118,12 @@ macro_rules! capability {
             const KIND: &'static str = $kind;
             type Request = $request;
             type Reply = $reply;
+            fn encode(request: &$request) -> Vec<u8> {
+                $crate::view::json_encode(request)
+            }
+            fn decode(bytes: &[u8]) -> Result<$reply, $crate::host::Refusal> {
+                $crate::view::json_decode(bytes)
+            }
         }
     };
 }
@@ -118,8 +135,10 @@ impl<M: Module> Capability for ViewOf<M> {
     type Request = M::ViewQuery;
     type Reply = M::ViewReply;
     fn encode(request: &Self::Request) -> Vec<u8> {
-        serde_json::to_vec(&serde_json::json!({ "target": M::NAME, "query": request }))
-            .expect("request encodes")
+        json_encode(&serde_json::json!({ "target": M::NAME, "query": request }))
+    }
+    fn decode(bytes: &[u8]) -> Result<Self::Reply, Refusal> {
+        json_decode(bytes)
     }
 }
 
@@ -130,8 +149,10 @@ impl<M: Module> Capability for Query<M> {
     type Request = M::Query;
     type Reply = M::Reply;
     fn encode(request: &Self::Request) -> Vec<u8> {
-        serde_json::to_vec(&serde_json::json!({ "target": M::NAME, "query": request }))
-            .expect("request encodes")
+        json_encode(&serde_json::json!({ "target": M::NAME, "query": request }))
+    }
+    fn decode(bytes: &[u8]) -> Result<Self::Reply, Refusal> {
+        json_decode(bytes)
     }
 }
 
@@ -142,14 +163,13 @@ impl<M: Module> Capability for Submit<M> {
     type Request = M::Op;
     type Reply = serde_json::Value;
     fn encode(request: &Self::Request) -> Vec<u8> {
-        serde_json::to_vec(&serde_json::json!({ "target": M::NAME, "payload": request }))
-            .expect("request encodes")
+        json_encode(&serde_json::json!({ "target": M::NAME, "payload": request }))
     }
     fn decode(bytes: &[u8]) -> Result<Self::Reply, Refusal> {
         if bytes.is_empty() {
             return Ok(serde_json::Value::Null);
         }
-        serde_json::from_slice(bytes).map_err(|error| host::malformed(error.to_string()))
+        json_decode(bytes)
     }
 }
 
@@ -570,12 +590,7 @@ mod tests {
     use crate::Driver;
     use crate::testing;
 
-    struct Echo;
-    impl Capability for Echo {
-        const KIND: &'static str = "test.echo";
-        type Request = u32;
-        type Reply = u32;
-    }
+    crate::capability!(Echo, "test.echo", u32, u32);
 
     #[derive(Serialize, Deserialize, Default)]
     struct Counter {
