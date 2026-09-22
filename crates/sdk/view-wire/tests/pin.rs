@@ -30,7 +30,8 @@ fn anchored_preserves_local_offsets_and_bounds_untrusted_coordinates() {
         let Node::Anchored { position, children, .. } = node else { unreachable!() };
         assert_eq!(position, Some([expected.0, expected.1]));
         let Node::Text { style, .. } = &children[0] else { unreachable!() };
-        assert_eq!(style.size.width, Some(gpui::px(8192.).into()));
+        // Native refinements strip nonfinite dimensions instead of expanding them.
+        assert_eq!(style.size.width, Some(gpui::px(0.).into()));
         assert_eq!(style.size.height, Some(gpui::px(0.).into()));
     }
 }
