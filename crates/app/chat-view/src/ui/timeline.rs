@@ -290,8 +290,21 @@ fn intro(name: &str, dm: Option<&str>, theme: &Theme) -> impl IntoElement {
         .flex()
         .flex_col()
         .gap_1()
-        .child(div().id("chat-timeline-intro-title").text_size(px(16.)).font_semibold().role(Role::Heading).aria_level(1).child(title))
-        .child(div().text_size(px(12.)).text_color(theme.muted).child(detail))
+        .child(
+            div()
+                .id("chat-timeline-intro-title")
+                .text_size(px(16.))
+                .font_semibold()
+                .role(Role::Heading)
+                .aria_level(1)
+                .child(title),
+        )
+        .child(
+            div()
+                .text_size(px(12.))
+                .text_color(theme.muted)
+                .child(detail),
+        )
         .child(div().h(px(1.)).w_full().bg(theme.border))
 }
 

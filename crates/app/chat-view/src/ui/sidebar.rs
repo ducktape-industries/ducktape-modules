@@ -31,7 +31,12 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
         .label("Search messages")
         .on_input(typed)
         .on_submit(submit);
-    let mut search = div().flex().items_center().gap_1().flex_1().child(search_input);
+    let mut search = div()
+        .flex()
+        .items_center()
+        .gap_1()
+        .flex_1()
+        .child(search_input);
     if !chat.search.query.is_empty() || !chat.search.draft.trim().is_empty() {
         let clear = cx.listener(|chat, _: &ClickEvent, _window, cx| {
             chat.search_clear();
@@ -389,7 +394,12 @@ fn with_seats(chat: &Chat, info: &ChannelInfo, row: impl IntoElement, theme: &Th
                 )
                 .child(div().flex_1().text_size(px(11.)).child(label))
                 .when(!note.is_empty(), |el| {
-                    el.child(div().text_size(px(11.)).text_color(theme.sidebar_muted).child(note))
+                    el.child(
+                        div()
+                            .text_size(px(11.))
+                            .text_color(theme.sidebar_muted)
+                            .child(note),
+                    )
                 }),
         );
     }

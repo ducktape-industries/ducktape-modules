@@ -48,7 +48,11 @@ pub fn card(
             } else {
                 theme.surface_raised
             })
-            .text_color(if message.agent { theme.agent } else { theme.muted })
+            .text_color(if message.agent {
+                theme.agent
+            } else {
+                theme.muted
+            })
             .font_semibold()
             .text_size(px(11.5))
             .child(message.initial.clone())
@@ -183,7 +187,12 @@ fn content(
             .flex()
             .items_center()
             .gap_1()
-            .child(div().text_size(px(13.)).font_medium().child(message.author.clone()));
+            .child(
+                div()
+                    .text_size(px(13.))
+                    .font_medium()
+                    .child(message.author.clone()),
+            );
         if message.agent {
             header = header.child(badge(
                 ElementId::Name(format!("chat-message-{}-agent", message.id).into()),
@@ -215,7 +224,12 @@ fn content(
         );
     }
     if message.edited {
-        body = body.child(div().text_size(px(11.)).text_color(theme.muted).child("edited"));
+        body = body.child(
+            div()
+                .text_size(px(11.))
+                .text_color(theme.muted)
+                .child("edited"),
+        );
     }
     if message.pending {
         body = body.child(
@@ -373,16 +387,27 @@ fn block_view(
                 && height > 0
             {
                 let (width, height) = crate::files::picture_box(width, height);
-                card = card.child(div().w(px(width)).h(px(height)).overflow_hidden().border_1().border_color(theme.border).rounded_md().child(surface(
-                    ElementId::Name(
-                        format!("chat-message-{}-block-{index}-picture", message.id).into(),
-                    ),
-                    "picture",
-                    vec![
-                        wire::SurfaceValue::Str(crate::files::PICTURE_SURFACE.into()),
-                        wire::SurfaceValue::Str(crate::files::attachment_file_path(&block.link)),
-                    ],
-                )));
+                card = card.child(
+                    div()
+                        .w(px(width))
+                        .h(px(height))
+                        .overflow_hidden()
+                        .border_1()
+                        .border_color(theme.border)
+                        .rounded_md()
+                        .child(surface(
+                            ElementId::Name(
+                                format!("chat-message-{}-block-{index}-picture", message.id).into(),
+                            ),
+                            "picture",
+                            vec![
+                                wire::SurfaceValue::Str(crate::files::PICTURE_SURFACE.into()),
+                                wire::SurfaceValue::Str(crate::files::attachment_file_path(
+                                    &block.link,
+                                )),
+                            ],
+                        )),
+                );
             }
             card.into_any_element()
         }

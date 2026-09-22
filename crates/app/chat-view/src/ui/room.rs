@@ -95,7 +95,15 @@ fn header(chat: &Chat, room: &Room, cx: &mut Context<Chat>, theme: &Theme) -> im
         .flex()
         .items_center()
         .gap_2()
-        .child(div().id("chat-room-title").text_size(px(13.5)).font_semibold().role(Role::Heading).aria_level(2).child(format!("#{}", name)));
+        .child(
+            div()
+                .id("chat-room-title")
+                .text_size(px(13.5))
+                .font_semibold()
+                .role(Role::Heading)
+                .aria_level(2)
+                .child(format!("#{}", name)),
+        );
     if info.is_some_and(|info| info.channel.archived) {
         title = title.child(badge(
             "chat-room-archived",
@@ -289,12 +297,14 @@ fn search_results(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl In
             ));
         }
         Loaded::Ready(hits) => {
-            content = content.child(div().text_size(px(12.)).text_color(theme.muted).child(format!(
-                "{} result{} for “{}”",
-                hits.rows.len(),
-                if hits.rows.len() == 1 { "" } else { "s" },
-                chat.search.query
-            )));
+            content = content.child(div().text_size(px(12.)).text_color(theme.muted).child(
+                format!(
+                    "{} result{} for “{}”",
+                    hits.rows.len(),
+                    if hits.rows.len() == 1 { "" } else { "s" },
+                    chat.search.query
+                ),
+            ));
             for row in &hits.rows {
                 let id = row.channel_id.clone();
                 let seq = row.seq;
@@ -414,7 +424,10 @@ pub fn composer(
 }
 
 fn quiet(text: impl Into<String>, theme: &Theme) -> impl IntoElement {
-    div().text_size(px(12.)).text_color(theme.muted).child(text.into())
+    div()
+        .text_size(px(12.))
+        .text_color(theme.muted)
+        .child(text.into())
 }
 
 fn short_id(id: &str, keep: usize) -> String {

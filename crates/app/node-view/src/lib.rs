@@ -92,8 +92,22 @@ impl Render for Nodes {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(div().id("nodes-title").flex_1().text_size(px(16.)).font_semibold().role(Role::Heading).aria_level(1).child("Nodes"))
-                    .child(div().text_size(px(11.)).text_color(theme.muted).child(self.count())),
+                    .child(
+                        div()
+                            .id("nodes-title")
+                            .flex_1()
+                            .text_size(px(16.))
+                            .font_semibold()
+                            .role(Role::Heading)
+                            .aria_level(1)
+                            .child("Nodes"),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(11.))
+                            .text_color(theme.muted)
+                            .child(self.count()),
+                    ),
             )
             .child(self.body(cx, &theme))
     }
@@ -151,13 +165,19 @@ impl Nodes {
                             .rounded_md()
                             .bg(theme.surface)
                             .hover(|s| s.bg(theme.surface_raised))
-                            .role(ducktape_view_guest::Role::Button).focusable().on_click(retry)
+                            .role(ducktape_view_guest::Role::Button)
+                            .focusable()
+                            .on_click(retry)
                             .child("Retry"),
                     )
                     .into_any_element()
             }
             Loaded::Ready(set) if set.members.is_empty() && set.validators.is_empty() => {
-                EmptyState::new("nodes-empty", "No members", "The validator set of this network is empty.")
+                EmptyState::new(
+                    "nodes-empty",
+                    "No members",
+                    "The validator set of this network is empty.",
+                )
                 .into_any_element()
             }
             Loaded::Ready(set) => div()

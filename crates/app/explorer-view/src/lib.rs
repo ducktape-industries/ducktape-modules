@@ -99,8 +99,22 @@ impl Render for Explorer {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(div().id("explorer-title").flex_1().text_size(px(16.)).font_semibold().role(Role::Heading).aria_level(1).child("Programs"))
-                    .child(div().text_size(px(11.)).text_color(theme.muted).child(self.count())),
+                    .child(
+                        div()
+                            .id("explorer-title")
+                            .flex_1()
+                            .text_size(px(16.))
+                            .font_semibold()
+                            .role(Role::Heading)
+                            .aria_level(1)
+                            .child("Programs"),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(11.))
+                            .text_color(theme.muted)
+                            .child(self.count()),
+                    ),
             )
             .child(self.body(cx, &theme))
     }
@@ -156,13 +170,19 @@ impl Explorer {
                             .rounded_md()
                             .bg(theme.surface)
                             .hover(|s| s.bg(theme.surface_raised))
-                            .role(ducktape_view_guest::Role::Button).focusable().on_click(retry)
+                            .role(ducktape_view_guest::Role::Button)
+                            .focusable()
+                            .on_click(retry)
                             .child("Retry"),
                     )
                     .into_any_element()
             }
             Loaded::Ready(network) if network.programs.is_empty() && network.changes.is_empty() => {
-                EmptyState::new("explorer-empty", "No programs", "The registry of this network runs nothing yet.")
+                EmptyState::new(
+                    "explorer-empty",
+                    "No programs",
+                    "The registry of this network runs nothing yet.",
+                )
                 .into_any_element()
             }
             Loaded::Ready(network) => div()
@@ -204,11 +224,12 @@ fn programs(programs: &[Entry], theme: &Theme) -> AnyElement {
                 .items_center()
                 .gap_2()
                 .child(div().flex_1().truncate().child(entry.program.clone()))
-                .child(div().text_size(px(12.)).text_color(theme.muted).child(plural(
-                    entry.params,
-                    "param byte",
-                    "param bytes",
-                )))
+                .child(
+                    div()
+                        .text_size(px(12.))
+                        .text_color(theme.muted)
+                        .child(plural(entry.params, "param byte", "param bytes")),
+                )
                 .child(
                     div()
                         .font_family("JetBrains Mono")

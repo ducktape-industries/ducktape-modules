@@ -102,8 +102,22 @@ impl Render for Members {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(div().id("members-title").flex_1().text_size(px(16.)).font_semibold().role(Role::Heading).aria_level(1).child("Members"))
-                    .child(div().text_size(px(11.)).text_color(theme.muted).child(self.count())),
+                    .child(
+                        div()
+                            .id("members-title")
+                            .flex_1()
+                            .text_size(px(16.))
+                            .font_semibold()
+                            .role(Role::Heading)
+                            .aria_level(1)
+                            .child("Members"),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(11.))
+                            .text_color(theme.muted)
+                            .child(self.count()),
+                    ),
             )
             .child(
                 Input::new(ElementId::Name("members-filter".into()))
@@ -177,7 +191,9 @@ impl Members {
                             .rounded_md()
                             .bg(theme.surface)
                             .hover(|s| s.bg(theme.surface_raised))
-                            .role(ducktape_view_guest::Role::Button).focusable().on_click(retry)
+                            .role(ducktape_view_guest::Role::Button)
+                            .focusable()
+                            .on_click(retry)
                             .child("Retry"),
                     )
                     .into_any_element()
@@ -311,12 +327,7 @@ struct EmptyState {
     muted: ducktape_view_guest::Hsla,
 }
 
-fn empty_state(
-    id: &str,
-    title: &str,
-    detail: impl Into<String>,
-    theme: &Theme,
-) -> EmptyState {
+fn empty_state(id: &str, title: &str, detail: impl Into<String>, theme: &Theme) -> EmptyState {
     EmptyState {
         id: ElementId::Name(id.into()),
         title: title.to_owned(),
@@ -335,7 +346,12 @@ impl RenderOnce for EmptyState {
             .p_6()
             .max_w(px(420.))
             .child(div().text_size(px(13.)).child(self.title))
-            .child(div().text_size(px(12.)).text_color(self.muted).child(self.detail))
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .text_color(self.muted)
+                    .child(self.detail),
+            )
     }
 }
 

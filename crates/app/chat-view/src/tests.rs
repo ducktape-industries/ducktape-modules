@@ -532,7 +532,11 @@ fn rich_message_keeps_styles_and_dispatches_each_link_by_value() {
     cx.simulate_rich_click(key, 1);
     assert_eq!(
         cx.host().opened_links(),
-        vec!["duck://testnet-0a1b2c3d/chat/general", "https://one.example", "duck://testnet-0a1b2c3d/identity/8",]
+        vec![
+            "duck://testnet-0a1b2c3d/chat/general",
+            "https://one.example",
+            "duck://testnet-0a1b2c3d/identity/8",
+        ]
     );
 }
 
@@ -573,8 +577,16 @@ fn picture_attachment_keeps_scoped_surface_and_respects_attachment_gate() {
                 ))
     ));
     cx.simulate_click("chat-message-picture-block-0");
-    view.read(|chat| assert!(chat.preview.is_none(), "attachment previews remain disabled"));
-    assert_eq!(cx.host().opened_links(), vec!["duck://testnet-0a1b2c3d/chat/general".to_owned(), link]);
+    view.read(|chat| {
+        assert!(
+            chat.preview.is_none(),
+            "attachment previews remain disabled"
+        )
+    });
+    assert_eq!(
+        cx.host().opened_links(),
+        vec!["duck://testnet-0a1b2c3d/chat/general".to_owned(), link]
+    );
 }
 
 #[test]

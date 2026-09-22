@@ -82,7 +82,12 @@ impl RenderOnce for EmptyState {
             .p_6()
             .max_w(px(420.))
             .child(div().text_size(px(13.5)).font_medium().child(self.title))
-            .child(div().text_size(px(12.)).text_color(self.muted).child(self.detail))
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .text_color(self.muted)
+                    .child(self.detail),
+            )
     }
 }
 
