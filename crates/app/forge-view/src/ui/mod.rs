@@ -7,6 +7,7 @@ pub(crate) mod code;
 pub(crate) mod commits;
 pub(crate) mod components;
 pub(crate) mod diff;
+pub(crate) mod dock;
 pub(crate) mod refs;
 pub(crate) mod repos;
 pub(crate) mod settings;
@@ -238,9 +239,9 @@ fn panel(forge: &Forge, dock: Dock, cx: &mut Context<Forge>, theme: &Theme) -> A
     let close = cx.listener(move |forge, _: &ClickEvent, _, cx| forge.toggle_dock(dock, cx));
     let body: AnyElement = match dock {
         Dock::About => about(forge, theme),
-        Dock::Overview => change::overview(forge, theme),
-        Dock::Comments => change::comments(forge, cx, theme),
-        Dock::MergeStatus => change::merge_status(forge, theme),
+        Dock::Overview => dock::overview(forge, theme),
+        Dock::Comments => dock::comments(forge, cx, theme),
+        Dock::MergeStatus => dock::merge_status(forge, theme),
     };
     div()
         .id(id("forge-dock"))

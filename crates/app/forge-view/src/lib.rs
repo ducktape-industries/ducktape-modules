@@ -13,6 +13,7 @@ mod queries;
 mod state;
 
 mod actions;
+mod review;
 mod ui;
 
 use std::collections::BTreeSet;
