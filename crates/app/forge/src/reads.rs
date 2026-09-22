@@ -7,7 +7,7 @@ use crate::refuse::{invalid, not_found};
 use crate::repo::{load_repo, parse_oid, repo_hash, resolve};
 use crate::store::Store;
 use abi::Refusal;
-use gitcore::{Commit, Hash, Kind, Mode, Objects, Oid, Signature, Tag, Tree};
+use crate::git::{Commit, Hash, Kind, Mode, Objects, Oid, Signature, Tag, Tree};
 use std::collections::BTreeSet;
 
 pub struct Reading<'a, S: Sandbox> {
@@ -16,7 +16,7 @@ pub struct Reading<'a, S: Sandbox> {
     pub bounds: &'a Bounds,
 }
 impl<S: Sandbox> Reading<'_, S> {
-    pub fn result<T>(&self, r: gitcore::Result<T>) -> Result<T, Refusal> {
+    pub fn result<T>(&self, r: crate::git::Result<T>) -> Result<T, Refusal> {
         r.map_err(|e| refusal_of(&self.store, e))
     }
     pub fn oid(&self, s: &str) -> Result<Oid, Refusal> {
@@ -160,7 +160,7 @@ pub fn answer<S: Sandbox>(
         Query::Log { from, .. } => {
             let tip = r.commit_id(resolve(s, name, from, hash)?)?;
             // ponytail: repeat the complete walk up to log_walk; index history if larger repos need it.
-            let ids = r.result(gitcore::walk::commits(
+            let ids = r.result(crate::git::walk::commits(
                 &r.store,
                 &[tip],
                 &[],
@@ -198,7 +198,7 @@ pub fn answer<S: Sandbox>(
                 root
             } else {
                 let entry = r
-                    .result(gitcore::walk::tree_at_path(&r.store, &root, path))?
+                    .result(crate::git::walk::tree_at_path(&r.store, &root, path))?
                     .ok_or_else(|| not_found("no entry at this path"))?;
                 if entry.mode != Mode::Directory {
                     return Err(invalid("tree path names a directory"));
@@ -234,7 +234,7 @@ pub fn answer<S: Sandbox>(
         Query::Compare { from, into, .. } => {
             let from = r.commit_id(resolve(s, name, from, hash)?)?;
             let into = r.commit_id(resolve(s, name, into, hash)?)?;
-            compare(&mut r, height, from, into, page())?
+            compare(&mut r, height, from, into)?
         }
         _ => unreachable!(),
     })
@@ -244,10 +244,9 @@ fn compare<S: Sandbox>(
     height: u64,
     from: Oid,
     into: Oid,
-    p: &Paging,
 ) -> Result<Reply, Refusal> {
     let source: BTreeSet<_> = r
-        .result(gitcore::walk::commits(
+        .result(crate::git::walk::commits(
             &r.store,
             &[from],
             &[],
@@ -256,7 +255,7 @@ fn compare<S: Sandbox>(
         .into_iter()
         .collect();
     let target: BTreeSet<_> = r
-        .result(gitcore::walk::commits(
+        .result(crate::git::walk::commits(
             &r.store,
             &[into],
             &[],
@@ -266,50 +265,19 @@ fn compare<S: Sandbox>(
         .collect();
     let ahead = source.difference(&target).count() as u64;
     let behind = target.difference(&source).count() as u64;
-    let base = r.result(gitcore::merge::merge_base(
+    let base = r.result(crate::git::walk::merge_base(
         &r.store,
         &from,
         &into,
         cap(r.bounds.log_walk),
     ))?;
-    let mut conflicts = Vec::new();
+    // Ancestry facts only: whether the endpoints merge cleanly is the git
+    // client's to find out, so a change is mergeable here when it fast-forwards.
     let mergeability = match base {
         None => Mergeability::Unrelated,
         Some(b) if b == from => Mergeability::UpToDate,
         Some(b) if b == into => Mergeability::FastForward,
-        Some(base) => {
-            let base = r.commit(&base)?.tree;
-            let ours = r.commit(&into)?.tree;
-            let theirs = r.commit(&from)?.tree;
-            let result = gitcore::merge::merge_trees(
-                &mut r.store,
-                Some(&base),
-                &ours,
-                &theirs,
-                cap(r.bounds.merge_cost),
-            );
-            match r.result(result)? {
-                gitcore::merge::MergeOutcome::Clean(_) => Mergeability::Clean,
-                gitcore::merge::MergeOutcome::Conflicts(items) => {
-                    use gitcore::merge::ConflictKind as K;
-                    conflicts = items
-                        .into_iter()
-                        .map(|c| Conflict {
-                            path: c.path,
-                            kind: match c.kind {
-                                K::Content => ConflictKind::Content,
-                                K::AddAdd => ConflictKind::AddAdd,
-                                K::ModifyDelete => ConflictKind::ModifyDelete,
-                                K::ModeConflict => ConflictKind::Mode,
-                                K::TypeConflict => ConflictKind::Type,
-                                K::Submodule => ConflictKind::Submodule,
-                            },
-                        })
-                        .collect();
-                    Mergeability::Conflicts
-                }
-            }
-        }
+        Some(_) => Mergeability::Diverged,
     };
     Ok(Reply::Compare {
         height,
@@ -321,6 +289,5 @@ fn compare<S: Sandbox>(
             behind,
             mergeability,
         },
-        conflicts: p.slice(&conflicts)?,
     })
 }

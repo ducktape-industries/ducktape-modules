@@ -6,7 +6,7 @@ use crate::Forge;
 use crate::ui::changes::revision_name;
 use crate::ui::components::{empty_state, heading, id, path_text, quiet, ref_label, short_oid};
 use crate::ui::{fact, prose};
-use forge::{Mergeability, Reply};
+use forge::Mergeability;
 
 pub(crate) fn overview(forge: &Forge, theme: &Theme) -> AnyElement {
     let Some((change, source, target, _)) = forge.change() else {
@@ -132,8 +132,7 @@ pub(crate) fn merge_status(forge: &Forge, theme: &Theme) -> AnyElement {
         match forge.compare().map(|c| c.mergeability) {
             Some(Mergeability::UpToDate) => "already contained",
             Some(Mergeability::FastForward) => "fast-forward",
-            Some(Mergeability::Clean) => "clean three-way",
-            Some(Mergeability::Conflicts) => "conflicts",
+            Some(Mergeability::Diverged) => "diverged",
             Some(Mergeability::Unrelated) => "unrelated histories",
             None => "comparing…",
         },
@@ -145,16 +144,6 @@ pub(crate) fn merge_status(forge: &Forge, theme: &Theme) -> AnyElement {
             format!("{} ahead · {} behind", comparison.ahead, comparison.behind),
             theme,
         ));
-    }
-    if let Some(Reply::Compare { conflicts, .. }) =
-        forge.compare_query().and_then(|query| forge.ready(&query))
-    {
-        for conflict in &conflicts.items {
-            column = column.child(quiet(
-                format!("conflict: {}", path_text(&conflict.path)),
-                theme,
-            ));
-        }
     }
     column = column.child(heading(
         id("forge-merge-status-title"),

@@ -92,7 +92,7 @@ pub fn path(path: &[u8], root: bool) -> Result<(), Refusal> {
     Ok(())
 }
 fn branch(name: &[u8]) -> Result<(), Refusal> {
-    if !name.starts_with(b"refs/heads/") || !gitcore::server::valid_ref_name(name) {
+    if !name.starts_with(b"refs/heads/") || !crate::git::server::valid_ref_name(name) {
         return Err(invalid(
             "change endpoints must name branches under refs/heads/",
         ));

@@ -306,8 +306,6 @@ impl Forge {
                         repo: repo.clone(),
                         from: Revision::Ref(name),
                         into: Revision::Ref(head.clone()),
-                        cursor: None,
-                        limit: PAGE,
                     });
                 }
             }
@@ -332,8 +330,6 @@ impl Forge {
             repo: repo.to_owned(),
             from: change.from.clone(),
             into: Revision::Ref(change.into.clone()),
-            cursor: None,
-            limit: PAGE,
         });
         if self.nav.change_tab == ChangeTab::Commits {
             wanted.push(Query::Log {
@@ -545,8 +541,6 @@ impl Forge {
             repo: self.nav.repo.clone()?,
             from: change.from.clone(),
             into: Revision::Ref(change.into.clone()),
-            cursor: None,
-            limit: PAGE,
         })
     }
 

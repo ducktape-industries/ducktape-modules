@@ -6,9 +6,9 @@ use crate::repo::{load_bounds, load_refs, load_repo, refs_prefix, repo_hash, wri
 use crate::sandbox::Sandbox;
 use crate::store::Store;
 use abi::{Env, Refusal};
-use gitcore::wire::receive::advertise_refs;
-use gitcore::wire::smart_http_service_header;
-use gitcore::wire::upload::{
+use crate::git::wire::receive::advertise_refs;
+use crate::git::wire::smart_http_service_header;
+use crate::git::wire::upload::{
     Command, capability_advertisement, fetch, ls_refs_response, parse_command,
 };
 const AGENT: &[u8] = b"ducktape-forge";
@@ -86,7 +86,7 @@ fn answer<S: Sandbox>(s: &S, height: u64, q: &Query) -> Result<Reply, Refusal> {
                 .items
                 .into_iter()
                 .map(|e| {
-                    let oid = gitcore::Oid::from_bytes(repo_hash(&record), &e.value)
+                    let oid = crate::git::Oid::from_bytes(repo_hash(&record), &e.value)
                         .map_err(|e| crate::refuse::storage(e.to_string()))?;
                     Ok(RefInfo {
                         name: e.key[prefix.len()..].to_vec(),

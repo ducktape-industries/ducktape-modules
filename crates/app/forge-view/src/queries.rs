@@ -59,11 +59,13 @@ fn next_cursor(reply: &Reply) -> Option<&Cursor> {
         Reply::Log { page, .. } => page.next.as_ref(),
         Reply::Tree { page, .. } => page.next.as_ref(),
         Reply::Diff { page, .. } => page.next.as_ref(),
-        Reply::Compare { conflicts, .. } => conflicts.next.as_ref(),
         Reply::Changes { page, .. } => page.next.as_ref(),
         Reply::Change { reviews, .. } => reviews.next.as_ref(),
         Reply::Judgment { page, .. } => page.next.as_ref(),
-        Reply::Blob { .. } | Reply::Activity { .. } | Reply::Refused { .. } => None,
+        Reply::Compare { .. }
+        | Reply::Blob { .. }
+        | Reply::Activity { .. }
+        | Reply::Refused { .. } => None,
     }
 }
 
@@ -77,11 +79,11 @@ fn with_cursor(query: &Query, next: Cursor) -> Option<Query> {
         | Query::Log { cursor, .. }
         | Query::Tree { cursor, .. }
         | Query::Diff { cursor, .. }
-        | Query::Compare { cursor, .. }
         | Query::Changes { cursor, .. }
         | Query::Change { cursor, .. }
         | Query::Judgment { cursor, .. } => cursor,
-        Query::Blob { .. }
+        Query::Compare { .. }
+        | Query::Blob { .. }
         | Query::Activity { .. }
         | Query::Advertise { .. }
         | Query::Upload { .. } => return None,
@@ -103,12 +105,6 @@ fn extend(into: &mut Reply, more: Reply) {
         (Reply::Log { page, .. }, Reply::Log { page: more, .. }) => absorb(page, more),
         (Reply::Tree { page, .. }, Reply::Tree { page: more, .. }) => absorb(page, more),
         (Reply::Diff { page, .. }, Reply::Diff { page: more, .. }) => absorb(page, more),
-        (
-            Reply::Compare { conflicts, .. },
-            Reply::Compare {
-                conflicts: more, ..
-            },
-        ) => absorb(conflicts, more),
         (Reply::Changes { page, .. }, Reply::Changes { page: more, .. }) => absorb(page, more),
         (Reply::Change { reviews, .. }, Reply::Change { reviews: more, .. }) => {
             absorb(reviews, more)

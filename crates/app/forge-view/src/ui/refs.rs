@@ -3,7 +3,6 @@
 use ducktape_view_guest::prelude::*;
 
 use crate::Forge;
-use crate::queries::PAGE;
 use crate::ui::components::{button, chip, empty_state, id, quiet, ref_label, row, short_oid};
 use crate::ui::{pending, scroller, staged};
 use forge::{Mergeability, Query, Reply, Revision};
@@ -135,16 +134,13 @@ fn standing(forge: &Forge, name: &[u8], head: &[u8], theme: &Theme) -> AnyElemen
         repo: forge.repo_name(),
         from: Revision::Ref(name.to_vec()),
         into: Revision::Ref(head.to_vec()),
-        cursor: None,
-        limit: PAGE,
     };
     match forge.ready(&query) {
         Some(Reply::Compare { comparison, .. }) => {
             let word = match comparison.mergeability {
                 Mergeability::UpToDate => "merged",
                 Mergeability::FastForward => "fast-forward",
-                Mergeability::Clean => "clean merge",
-                Mergeability::Conflicts => "conflicts",
+                Mergeability::Diverged => "diverged",
                 Mergeability::Unrelated => "unrelated",
             };
             quiet(

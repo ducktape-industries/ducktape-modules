@@ -323,8 +323,7 @@ fn replay(tape: &mut Tape) {
     for (name, from, into) in [
         ("compare", "feature", "main"),
         ("compare-up-to-date", "main", "feature"),
-        ("compare-clean", "feature", "clean"),
-        ("compare-conflicts", "feature", "conflict"),
+        ("compare-diverged", "feature", "clean"),
         ("compare-unrelated", "feature", "unrelated"),
     ] {
         tape.capture(&rig, name, compare(from, into));

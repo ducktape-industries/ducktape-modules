@@ -330,10 +330,9 @@ impl Forge {
             None => "Comparing the endpoints…".into(),
             Some(Mergeability::FastForward) => String::new(),
             Some(Mergeability::UpToDate) => "The target already contains this change".into(),
-            Some(Mergeability::Conflicts) => "The endpoints conflict".into(),
             Some(Mergeability::Unrelated) => "The endpoints share no history".into(),
-            Some(Mergeability::Clean) => {
-                "This merge needs a merge commit, which this view cannot build yet".into()
+            Some(Mergeability::Diverged) => {
+                "The endpoints diverged: merge with git and push the result".into()
             }
         }
     }

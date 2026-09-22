@@ -44,8 +44,7 @@ fixtures`; without the variable the test must reproduce the committed bytes.
 | `diff-empty` | `Query` → `Reply` | Identical endpoints produce no files. |
 | `compare` | `Query` → `Reply` | Fast-forward comparison. |
 | `compare-up-to-date` | `Query` → `Reply` | Source already contained in target. |
-| `compare-clean` | `Query` → `Reply` | Clean divergent three-way comparison. |
-| `compare-conflicts` | `Query` → `Reply` | Content conflict with path and kind. |
+| `compare-diverged` | `Query` → `Reply` | Divergent histories: ahead/behind and the base, no merge attempted. |
 | `compare-unrelated` | `Query` → `Reply` | Unrelated histories. |
 | `activity` | `Query` → `Reply` | Repository last activity and answering height. |
 | `advertise-receive` | `Query` → `git smart HTTP` | Raw receive-pack advertisement for a populated repository. |

@@ -123,8 +123,7 @@ pub struct FileDiff {
 pub enum Mergeability {
     UpToDate,
     FastForward,
-    Clean,
-    Conflicts,
+    Diverged,
     Unrelated,
 }
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
@@ -135,18 +134,4 @@ pub struct Comparison {
     pub ahead: u64,
     pub behind: u64,
     pub mergeability: Mergeability,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
-pub enum ConflictKind {
-    Content,
-    AddAdd,
-    ModifyDelete,
-    Mode,
-    Type,
-    Submodule,
-}
-#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
-pub struct Conflict {
-    pub path: Vec<u8>,
-    pub kind: ConflictKind,
 }

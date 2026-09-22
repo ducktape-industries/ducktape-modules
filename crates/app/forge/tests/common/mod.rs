@@ -5,8 +5,8 @@ pub use std::collections::{BTreeMap, BTreeSet};
 
 pub use abi::{Cause, Env, HashKind, Origin, reason};
 pub use forge::{Bounds, MemorySandbox, Op, Query, Reply, Sandbox, Service, Settings};
-pub use gitcore::wire::pktline::{self, Pkt, Reader};
-pub use gitcore::{
+pub use forge::git::wire::pktline::{self, Pkt, Reader};
+pub use forge::git::{
     Commit, Hash, Kind, Limits, MemoryObjects, Mode, Object, Objects, Oid, Signature, Tree,
     TreeEntry, pack,
 };

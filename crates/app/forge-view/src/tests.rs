@@ -61,7 +61,7 @@ fn answer(query: &Query, mode: &str) -> Reply {
         Query::Log { .. } => reply("log-next"),
         Query::Diff { .. } if mode == "binary" => reply("diff-binary"),
         Query::Diff { .. } => reply("diff-text"),
-        Query::Compare { .. } if mode == "conflicts" => reply("compare-conflicts"),
+        Query::Compare { .. } if mode == "diverged" => reply("compare-diverged"),
         Query::Compare { .. } => reply("compare"),
         Query::Changes {
             filter:

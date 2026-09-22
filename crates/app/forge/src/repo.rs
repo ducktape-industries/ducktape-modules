@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use abi::{Refusal, Scan, reason};
-use gitcore::{Hash, Oid};
+use crate::git::{Hash, Oid};
 
 use crate::contract::{Bounds, Repo, valid_repo_name};
 use crate::sandbox::{Sandbox, hash_of};
@@ -153,7 +153,7 @@ pub fn resolve<S: Sandbox>(
     match revision {
         crate::Revision::Oid(hex) => parse_oid(hash, hex),
         crate::Revision::Ref(reference) => {
-            if !gitcore::server::valid_ref_name(reference) {
+            if !crate::git::server::valid_ref_name(reference) {
                 return Err(crate::refuse::invalid("revision must name a full ref"));
             }
             load_ref(sandbox, name, reference, hash)?

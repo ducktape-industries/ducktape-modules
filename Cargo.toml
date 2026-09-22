@@ -47,7 +47,6 @@ members = [
     "crates/app/node-view",
     "crates/app/explorer-view",
     "crates/app/settings-view",
-    "crates/app/gitcore",
     "crates/app/forge",
     "crates/app/forge-harness",
 ]
@@ -69,7 +68,6 @@ gpui = { package = "gpui-pre", git = "https://github.com/ducktape-industries/gpu
 module-registry = { path = "crates/system/module-registry" }
 valset = { path = "crates/system/valset" }
 identity = { path = "crates/system/identity" }
-gitcore = { path = "crates/app/gitcore" }
 chat = { path = "crates/app/chat" }
 forge = { path = "crates/app/forge" }
 
