@@ -29,7 +29,9 @@ fn the_root_tracks_the_shared_theme_and_is_accessible() {
     let (mut cx, _) = opened();
     let dark = ducktape_view_guest::Theme::dark();
     cx.set_global(dark);
-    let Some(wire::Node::Container { style, .. }) = cx.find("chat-root") else {
+    let Some(wire::Node::Container(ducktape_view_guest::wire::ContainerNode { style, .. })) =
+        cx.find("chat-root")
+    else {
         panic!("chat root is a styled container");
     };
     assert_eq!(
@@ -144,11 +146,11 @@ fn opened() -> (TestAppContext, Entity<Chat>) {
     cx.simulate_click("chat-sidebar-channel-general");
     cx.run_until_parked();
     view.read(|chat| assert_eq!(chat.room.as_ref().unwrap().id, "general"));
-    let Some(wire::Node::Container {
+    let Some(wire::Node::Container(ducktape_view_guest::wire::ContainerNode {
         style,
         interactivity,
         ..
-    }) = cx.find("chat-sidebar-channel-general")
+    })) = cx.find("chat-sidebar-channel-general")
     else {
         panic!("channel row is a native container");
     };
@@ -282,7 +284,9 @@ fn viewport_and_pane_dividers_keep_their_behavior_routes() {
 #[test]
 fn timeline_retains_virtual_tail_anchoring_and_scroll_feedback() {
     let (cx, _) = opened();
-    let Some(wire::Node::Container { children, .. }) = cx.find("chat-message-list") else {
+    let Some(wire::Node::Container(ducktape_view_guest::wire::ContainerNode { children, .. })) =
+        cx.find("chat-message-list")
+    else {
         panic!("message list keeps its authored container identity")
     };
     assert!(matches!(children.as_slice(), [wire::Node::List {
@@ -345,7 +349,11 @@ fn message_menu_preserves_disabled_actions_and_executes_enabled_routes() {
         "chat-menu-edit",
         "chat-menu-delete",
     ] {
-        let Some(wire::Node::Container { interactivity, .. }) = cx.find(id) else {
+        let Some(wire::Node::Container(ducktape_view_guest::wire::ContainerNode {
+            interactivity,
+            ..
+        })) = cx.find(id)
+        else {
             panic!("{id} remains a visible native menu row");
         };
         assert_eq!(interactivity.aria.disabled, Some(true));
@@ -365,7 +373,9 @@ fn message_menu_preserves_disabled_actions_and_executes_enabled_routes() {
         cx.notify();
     });
     cx.run_until_parked();
-    let Some(wire::Node::Container { interactivity, .. }) = cx.find("chat-menu-confirm-delete")
+    let Some(wire::Node::Container(ducktape_view_guest::wire::ContainerNode {
+        interactivity, ..
+    })) = cx.find("chat-menu-confirm-delete")
     else {
         panic!("busy delete confirmation remains visible");
     };
@@ -397,7 +407,10 @@ fn reaction_picker_keeps_labels_and_its_stable_action_id() {
         cx.notify();
     });
     cx.run_until_parked();
-    let Some(wire::Node::Container { interactivity, .. }) = cx.find("chat-reaction-🔥") else {
+    let Some(wire::Node::Container(ducktape_view_guest::wire::ContainerNode {
+        interactivity, ..
+    })) = cx.find("chat-reaction-🔥")
+    else {
         panic!("reaction is a native cell");
     };
     assert_eq!(interactivity.aria.label.as_deref(), Some("Add reaction"));

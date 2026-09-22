@@ -361,12 +361,12 @@ fn a_diff_applied_to_the_old_tree_is_the_new_tree_for_random_pairs() {
 #[test]
 fn a_length_prefix_bomb_is_refused_without_the_allocation() {
     let frame = |children| Frame {
-        root: Some(Node::Container {
+        root: Some(Node::Container(view_wire::ContainerNode {
             id: None,
             style: gpui::StyleRefinement::default(),
             interactivity: Interactivity::default(),
             children,
-        }),
+        })),
         ..Default::default()
     };
     let empty = encode(&frame(vec![]));

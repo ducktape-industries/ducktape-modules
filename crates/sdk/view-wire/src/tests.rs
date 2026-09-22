@@ -1,13 +1,13 @@
 use super::*;
 
 fn text(content: &str) -> Node {
-    Node::Text {
+    Node::Text(crate::TextNode {
         id: None,
         style: gpui::StyleRefinement::default(),
         content: content.into(),
         heading: None,
         live: None,
-    }
+    })
 }
 
 fn document_reference(document: &str, byte_len: u32) -> editor_document::EditorDocumentRef {
@@ -45,24 +45,24 @@ fn sanitized_root(root: Node) -> Node {
 }
 
 fn sanitized_children(root: Node) -> Vec<Node> {
-    let Node::Container { children, .. } = sanitized_root(root) else {
+    let Node::Container(crate::ContainerNode { children, .. }) = sanitized_root(root) else {
         panic!("a sanitized column is still a column")
     };
     children
 }
 
 fn column(children: Vec<Node>) -> Node {
-    Node::Container {
+    Node::Container(crate::ContainerNode {
         id: None,
         style: gpui::StyleRefinement::default(),
         interactivity: Interactivity::default(),
         children,
-    }
+    })
 }
 
 fn keyed(key: &str, content: &str) -> Node {
     let mut node = text(content);
-    let Node::Text { id, .. } = &mut node else {
+    let Node::Text(crate::TextNode { id, .. }) = &mut node else {
         unreachable!()
     };
     *id = Some(ElementIdWire::Name(key.into()));

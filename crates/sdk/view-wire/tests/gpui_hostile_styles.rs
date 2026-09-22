@@ -264,7 +264,7 @@ fn bounded(style: &StyleRefinement) {
 }
 
 fn node(random: &mut Random) -> Node {
-    Node::Container {
+    Node::Container(view_wire::ContainerNode {
         id: Some(view_wire::ElementIdWire::Integer(42)),
         style: random.style(),
         interactivity: Interactivity {
@@ -281,13 +281,13 @@ fn node(random: &mut Random) -> Node {
             ..Default::default()
         },
         children: vec![
-            Node::Text {
+            Node::Text(view_wire::TextNode {
                 id: None,
                 style: random.style(),
                 content: "kept".into(),
                 heading: None,
                 live: None,
-            },
+            }),
             Node::Editor {
                 id: view_wire::ElementIdWire::Integer(7),
                 style: random.style(),
@@ -306,15 +306,15 @@ fn node(random: &mut Random) -> Node {
                 editable: true,
             },
         ],
-    }
+    })
 }
 fn check(node: &Node) {
-    let Node::Container {
+    let Node::Container(view_wire::ContainerNode {
         style,
         interactivity,
         children,
         ..
-    } = node
+    }) = node
     else {
         panic!("container")
     };
@@ -327,7 +327,7 @@ fn check(node: &Node) {
     ] {
         bounded(style);
     }
-    let Node::Text { style, content, .. } = &children[0] else {
+    let Node::Text(view_wire::TextNode { style, content, .. }) = &children[0] else {
         panic!("text")
     };
     assert_eq!(content, "kept");

@@ -2,12 +2,12 @@ use gpui::{StyleRefinement, Styled, px};
 use view_wire::{Frame, Interactivity, Node, Tooltip, WindowControlArea};
 
 fn container(interactivity: Interactivity, children: Vec<Node>) -> Node {
-    Node::Container {
+    Node::Container(view_wire::ContainerNode {
         id: None,
         style: StyleRefinement::default(),
         interactivity,
         children,
-    }
+    })
 }
 
 #[test]
@@ -42,15 +42,16 @@ fn window_controls_and_focus_refinements_are_bounded_inside_tooltips() {
             ..Default::default()
         };
         view_wire::sanitize(&mut frame).unwrap();
-        let Node::Container { interactivity, .. } = frame.root.unwrap() else {
+        let Node::Container(view_wire::ContainerNode { interactivity, .. }) = frame.root.unwrap()
+        else {
             unreachable!()
         };
         let tooltip = interactivity.tooltip.as_ref().unwrap();
         assert_eq!(tooltip.delay_ms, 60_000);
-        let Node::Container {
+        let Node::Container(view_wire::ContainerNode {
             interactivity: nested,
             ..
-        } = tooltip.content.as_deref().unwrap()
+        }) = tooltip.content.as_deref().unwrap()
         else {
             unreachable!()
         };
@@ -96,7 +97,7 @@ fn tooltip_content_and_regular_children_share_one_node_budget() {
     };
     view_wire::sanitize(&mut frame).unwrap();
     let root = frame.root.unwrap();
-    let Node::Container { interactivity, .. } = &root else {
+    let Node::Container(view_wire::ContainerNode { interactivity, .. }) = &root else {
         unreachable!()
     };
     let tooltip_nodes = interactivity

@@ -1,5 +1,5 @@
 //! GPUI-shaped rich text recipes lowered into one native host paragraph.
-use crate::{App, Element, ElementId, IntoElement, Lowering, Window, wire};
+use crate::{wire, App, Element, ElementId, IntoElement, Lowering, Window};
 use gpui::{
     HighlightStyle, MouseMoveEvent, SharedString, StyleRefinement, Styled, TextRun, TextStyle,
 };

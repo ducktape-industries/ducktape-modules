@@ -10,23 +10,23 @@ fn a_diff_applied_to_the_old_tree_is_the_new_tree() {
         keyed("a", "one"),
         keyed("b", "two"),
         keyed("c", "three"),
-        Node::Container {
+        Node::Container(crate::ContainerNode {
             id: Some(ElementIdWire::Name("box".into())),
             style: gpui::StyleRefinement::default(),
             interactivity: Interactivity::default(),
             children: vec![keyed("inner", "deep")],
-        },
+        }),
     ]);
     let mut new = column(vec![
         keyed("c", "three"),
         keyed("a", "one!"),
         keyed("d", "four"),
-        Node::Container {
+        Node::Container(crate::ContainerNode {
             id: Some(ElementIdWire::Name("box".into())),
             style: gpui::StyleRefinement::default(),
             interactivity: Interactivity::default(),
             children: vec![Node::empty()],
-        },
+        }),
     ]);
     let mut applied = old.clone();
     let patches = diff(&mut applied.clone(), &mut new.clone());
@@ -132,19 +132,19 @@ fn an_applied_patch_frame_is_a_sanitized_tree() {
     )
     .unwrap();
     assert!(tree.count() <= MAX_NODES, "{}", tree.count());
-    let Node::Container { children, .. } = &tree else {
+    let Node::Container(crate::ContainerNode { children, .. }) = &tree else {
         panic!()
     };
     // A new typed ID leaves every existing sibling identity unchanged.
     assert_eq!(children[0].key(), Some("inserted"));
     assert_eq!(children[2].key(), Some("1"));
-    let Node::Text { content, .. } = &children[0] else {
+    let Node::Text(crate::TextNode { content, .. }) = &children[0] else {
         panic!()
     };
     assert_eq!(content.len(), MAX_STRING_BYTES);
     let mut depth = 0;
     let mut node = &children[1];
-    while let Node::Container { children, .. } = node {
+    while let Node::Container(crate::ContainerNode { children, .. }) = node {
         depth += 1;
         node = &children[0];
     }
@@ -173,7 +173,7 @@ fn a_frame_past_the_text_budget_keeps_its_head_and_loses_its_tail() {
     let shaped: Vec<usize> = children
         .iter()
         .map(|child| match child {
-            Node::Text { content, .. } => content.len(),
+            Node::Text(crate::TextNode { content, .. }) => content.len(),
             other => panic!("{other:?}"),
         })
         .collect();
@@ -202,7 +202,7 @@ fn display_truncation_shortens_a_placeholder_and_never_a_document_reference() {
             display_text_truncated: true
         })
     );
-    let Some(Node::Container { children, .. }) = &frame.root else {
+    let Some(Node::Container(crate::ContainerNode { children, .. })) = &frame.root else {
         panic!()
     };
     let Node::Editor {
@@ -336,23 +336,23 @@ fn a_hostile_frame_is_pulled_into_range() {
     }
     let wide = column((0..MAX_NODES + 5).map(|_| text("x")).collect());
     let root = sanitized_root(column(vec![
-        Node::Text {
+        Node::Text(crate::TextNode {
             id: Some(ElementIdWire::Name("k".repeat(MAX_STRING_BYTES).into())),
             style: gpui::StyleRefinement::default(),
             content: "é".repeat(MAX_STRING_BYTES),
             heading: None,
             live: None,
-        },
+        }),
         deep,
         wide,
     ]));
     // A container whose child fell past the budget keeps an empty
     // stand-in, one per level at most.
     assert!(root.count() <= MAX_NODES + MAX_DEPTH, "{}", root.count());
-    let Node::Container { children, .. } = &root else {
+    let Node::Container(crate::ContainerNode { children, .. }) = &root else {
         panic!()
     };
-    let Node::Text { id, content, .. } = &children[0] else {
+    let Node::Text(crate::TextNode { id, content, .. }) = &children[0] else {
         panic!("{:?}", children[0])
     };
     assert_eq!(
@@ -383,7 +383,7 @@ fn depth_is_cut_before_the_host_recurses_into_it() {
     let root = sanitized_root(deep);
     let mut depth = 0;
     let mut node = &root;
-    while let Node::Container { children, .. } = node {
+    while let Node::Container(crate::ContainerNode { children, .. }) = node {
         depth += 1;
         node = &children[0];
     }

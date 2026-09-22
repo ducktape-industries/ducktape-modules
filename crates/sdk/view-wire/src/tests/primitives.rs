@@ -19,7 +19,7 @@ fn sensor_reset_values_share_the_frame_budget() {
         ..Frame::default()
     };
     sanitize(&mut frame).unwrap();
-    let Some(Node::Container { children, .. }) = &frame.root else {
+    let Some(Node::Container(crate::ContainerNode { children, .. })) = &frame.root else {
         panic!("column retained")
     };
     for (index, node) in children.iter().enumerate() {
@@ -40,7 +40,9 @@ fn sensor_reset_values_share_the_frame_budget() {
         );
         assert_eq!(id.name(), Some(if index == 0 { "first" } else { "second" }));
         assert_eq!(*on_show, Some(3));
-        assert!(matches!(&**child, Node::Text { content, .. } if content == "child"));
+        assert!(
+            matches!(&**child, Node::Text (crate::TextNode { content, .. }) if content == "child")
+        );
     }
     assert!(
         decode::<Frame>(&encode(&frame)).is_ok(),
@@ -151,13 +153,13 @@ fn form_controls_are_pulled_into_range() {
 /// stood in for.
 #[test]
 fn a_container_is_pulled_into_range_and_cut_like_a_layout() {
-    let root = sanitized_root(Node::Container {
+    let root = sanitized_root(Node::Container(crate::ContainerNode {
         id: Some(ElementIdWire::Name("App/cells".into())),
         style: gpui::StyleRefinement::default(),
         interactivity: Interactivity::default(),
         children: (0..MAX_NODES + 5).map(|_| text("x")).collect(),
-    });
-    let Node::Container { children, .. } = &root else {
+    }));
+    let Node::Container(crate::ContainerNode { children, .. }) = &root else {
         panic!()
     };
     assert_eq!(children.len(), MAX_NODES - 1);
@@ -324,12 +326,12 @@ fn a_frame_past_the_picture_budget_drops_whole_pictures_from_its_tail() {
 
 #[test]
 fn gpui_text_keeps_style_refinement_on_the_wire() {
-    let text = Node::Text {
+    let text = Node::Text(crate::TextNode {
         id: Some(ElementIdWire::Name("text".into())),
         style: gpui::StyleRefinement::default(),
         content: "huge".into(),
         heading: None,
         live: None,
-    };
+    });
     assert_eq!(decode::<Node>(&encode(&text)).unwrap(), text);
 }

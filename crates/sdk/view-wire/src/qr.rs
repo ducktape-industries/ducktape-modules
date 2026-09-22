@@ -115,7 +115,7 @@ mod tests {
                 MAX_TEXT_BYTES_PER_FRAME / MAX_QR_PAYLOAD_BYTES,
             ),
         ] {
-            let root = Node::Container {
+            let root = Node::Container(crate::ContainerNode {
                 id: Some(ElementIdWire::Name("codes".into())),
                 style: gpui::StyleRefinement::default(),
                 interactivity: Interactivity::default(),
@@ -129,7 +129,7 @@ mod tests {
                         },
                     })
                     .collect(),
-            };
+            });
             let mut frame: Frame = decode(&encode(&Frame {
                 root: Some(root),
                 ..Default::default()

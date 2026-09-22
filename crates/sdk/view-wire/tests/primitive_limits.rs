@@ -1,13 +1,13 @@
 use view_wire::*;
 
 fn text() -> Node {
-    Node::Text {
+    Node::Text(view_wire::TextNode {
         id: None,
         style: Default::default(),
         content: "row".into(),
         heading: None,
         live: None,
-    }
+    })
 }
 fn anchored(children: Vec<Node>) -> Node {
     Node::Anchored {

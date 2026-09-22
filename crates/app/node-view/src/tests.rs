@@ -11,7 +11,10 @@ fn the_root_tracks_the_shared_theme() {
     let mut cx = ready();
     let dark = ducktape_view_guest::Theme::dark();
     cx.set_global(dark);
-    let Some(ducktape_view_guest::wire::Node::Container { style, .. }) = cx.find("nodes") else {
+    let Some(ducktape_view_guest::wire::Node::Container(
+        ducktape_view_guest::wire::ContainerNode { style, .. },
+    )) = cx.find("nodes")
+    else {
         panic!("nodes root is a styled container");
     };
     assert_eq!(
@@ -78,14 +81,17 @@ fn the_set_shows_its_validators_memberships_and_counts() {
     assert!(cx.has_text("Validator") && cx.has_text("Resident"));
     // a key reaches the screen shortened, never raw
     assert!(texts.iter().any(|text| text == "abcd"), "{texts:?}");
-    let Some(ducktape_view_guest::wire::Node::Container { interactivity, .. }) =
-        cx.find("nodes-set-header")
+    let Some(ducktape_view_guest::wire::Node::Container(
+        ducktape_view_guest::wire::ContainerNode { interactivity, .. },
+    )) = cx.find("nodes-set-header")
     else {
         panic!("section is a native container");
     };
     assert_eq!(interactivity.role, Some(ducktape_view_guest::Role::Heading));
     assert_eq!(interactivity.aria.level, Some(2));
-    let Some(ducktape_view_guest::wire::Node::Container { children, .. }) = cx.find("nodes-list")
+    let Some(ducktape_view_guest::wire::Node::Container(
+        ducktape_view_guest::wire::ContainerNode { children, .. },
+    )) = cx.find("nodes-list")
     else {
         panic!("section list is a native container");
     };
@@ -144,8 +150,9 @@ fn a_refusal_shows_its_sentence_and_retry_asks_again() {
     cx.open::<Nodes>();
     cx.run_until_parked();
     assert!(cx.has_text("valset is not running here"));
-    let Some(ducktape_view_guest::wire::Node::Container { children, .. }) =
-        cx.find("nodes-refused")
+    let Some(ducktape_view_guest::wire::Node::Container(
+        ducktape_view_guest::wire::ContainerNode { children, .. },
+    )) = cx.find("nodes-refused")
     else {
         panic!("refusal is a native container");
     };

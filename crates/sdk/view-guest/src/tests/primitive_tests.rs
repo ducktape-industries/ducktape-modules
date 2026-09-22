@@ -117,7 +117,7 @@ fn primitive_sources_fallbacks_transformations_and_typed_ids_survive_lowering() 
     assert!(matches!(data, Some(wire::ImageData::Refusal(reason)) if reason.contains("no frames")));
     assert!(*fallback);
     assert!(
-        matches!(&state_children[0], wire::Node::Text { content, .. } if content == "fallback")
+        matches!(&state_children[0], wire::Node::Text (crate::wire::TextNode { content, .. }) if content == "fallback")
     );
     let wire::Node::Svg {
         id,

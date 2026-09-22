@@ -15,7 +15,7 @@ pub(crate) fn texts(frame: &Frame) -> Vec<String> {
 
 fn collect_texts(node: &Node, out: &mut Vec<String>) {
     match node {
-        Node::Container { children, .. } => {
+        Node::Container(crate::wire::ContainerNode { children, .. }) => {
             children.iter().for_each(|child| collect_texts(child, out))
         }
         Node::Sensor { child: content, .. }
@@ -35,7 +35,7 @@ fn collect_texts(node: &Node, out: &mut Vec<String>) {
             children.iter().for_each(|child| collect_texts(child, out))
         }
         Node::RichText { text, .. } => out.push(text.clone()),
-        Node::Text { content, .. } => out.push(content.clone()),
+        Node::Text(crate::wire::TextNode { content, .. }) => out.push(content.clone()),
         Node::Input {
             value: text,
             placeholder,
@@ -145,7 +145,7 @@ fn find_by<'a>(node: &'a Node, matches: &dyn Fn(&Node) -> bool) -> Option<&'a No
         return Some(node);
     }
     match node {
-        Node::Container { children, .. } => {
+        Node::Container(crate::wire::ContainerNode { children, .. }) => {
             children.iter().find_map(|child| find_by(child, matches))
         }
         Node::Sensor { child: content, .. }
@@ -169,7 +169,7 @@ fn find_by<'a>(node: &'a Node, matches: &dyn Fn(&Node) -> bool) -> Option<&'a No
         } => find_by(child, matches),
         Node::Button { .. }
         | Node::RichText { .. }
-        | Node::Text { .. }
+        | Node::Text(crate::wire::TextNode { .. })
         | Node::Qr { .. }
         | Node::Svg { .. }
         | Node::Image { .. }
@@ -193,7 +193,9 @@ fn find_by<'a>(node: &'a Node, matches: &dyn Fn(&Node) -> bool) -> Option<&'a No
 fn button<'a>(frame: &'a Frame, name: &str) -> Option<&'a Node> {
     let root = frame.root.as_ref()?;
     find_by(root, &|node| match node {
-        Node::Container { interactivity, .. } if interactivity.on_click.is_some() => {
+        Node::Container(crate::wire::ContainerNode { interactivity, .. })
+            if interactivity.on_click.is_some() =>
+        {
             let mut labels = Vec::new();
             collect_texts(node, &mut labels);
             node.key() == Some(name)
@@ -226,10 +228,12 @@ fn input<'a>(frame: &'a Frame, name: &str) -> Option<&'a Node> {
 /// label `name`.
 pub(crate) fn press(frame: &Frame, name: &str) -> Vec<Event> {
     match button(frame, name) {
-        Some(Node::Container { interactivity, .. }) => vec![Event::Click {
-            handler: interactivity.on_click.expect("click route"),
-            event: (&gpui::ClickEvent::default()).into(),
-        }],
+        Some(Node::Container(crate::wire::ContainerNode { interactivity, .. })) => {
+            vec![Event::Click {
+                handler: interactivity.on_click.expect("click route"),
+                event: (&gpui::ClickEvent::default()).into(),
+            }]
+        }
         Some(Node::Button {
             on_press: Some(message),
             ..
@@ -528,7 +532,7 @@ fn collect_keys(node: &Node, out: &mut Vec<String>) {
         out.push(key.to_string());
     }
     match node {
-        Node::Container { children, .. } => {
+        Node::Container(crate::wire::ContainerNode { children, .. }) => {
             children.iter().for_each(|child| collect_keys(child, out))
         }
         Node::Sensor { child: content, .. }
@@ -552,7 +556,7 @@ fn collect_keys(node: &Node, out: &mut Vec<String>) {
         } => collect_keys(child, out),
         Node::Button { .. }
         | Node::RichText { .. }
-        | Node::Text { .. }
+        | Node::Text(crate::wire::TextNode { .. })
         | Node::Qr { .. }
         | Node::Svg { .. }
         | Node::Image { .. }

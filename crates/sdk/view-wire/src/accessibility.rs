@@ -91,7 +91,9 @@ fn walk(node: &Node, parent: Option<&Path<'_>>, faults: &mut Vec<Fault>) {
 
 fn fault(node: &Node) -> Option<FaultKind> {
     match node {
-        Node::Container { interactivity, .. } if interactivity.on_click.is_some() => {
+        Node::Container(crate::ContainerNode { interactivity, .. })
+            if interactivity.on_click.is_some() =>
+        {
             if interactivity.role.is_none() {
                 return Some(FaultKind::NoRole);
             }
@@ -135,7 +137,7 @@ fn named(label: &Option<String>) -> bool {
 }
 
 fn has_text(node: &Node) -> bool {
-    matches!(node, Node::Text { content, .. } if !content.is_empty())
+    matches!(node, Node::Text (crate::TextNode { content, .. }) if !content.is_empty())
         || node.children().iter().any(has_text)
 }
 
@@ -146,22 +148,22 @@ mod tests {
     use gpui::StyleRefinement;
 
     fn text(key: &str, content: &str) -> Node {
-        Node::Text {
+        Node::Text(crate::TextNode {
             id: Some(ElementIdWire::Name(key.into())),
             style: StyleRefinement::default(),
             content: content.into(),
             heading: None,
             live: None,
-        }
+        })
     }
 
     fn column(key: &str, children: Vec<Node>) -> Node {
-        Node::Container {
+        Node::Container(crate::ContainerNode {
             id: Some(ElementIdWire::Name(key.into())),
             style: StyleRefinement::default(),
             interactivity: Interactivity::default(),
             children,
-        }
+        })
     }
 
     fn area(key: &str, role: Option<Role>, on_press: Option<u32>, content: Node) -> Node {

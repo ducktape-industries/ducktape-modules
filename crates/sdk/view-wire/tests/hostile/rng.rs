@@ -209,7 +209,7 @@ pub(super) fn gen_rule(rng: &mut Rng) -> Node {
 }
 
 pub(super) fn gen_text(rng: &mut Rng) -> Node {
-    Node::Text {
+    Node::Text(view_wire::TextNode {
         id: None,
         style: gpui::StyleRefinement::default(),
         content: gen_string(rng),
@@ -218,7 +218,7 @@ pub(super) fn gen_text(rng: &mut Rng) -> Node {
         live: rng
             .next_bool()
             .then(|| *rng.choose(&[Live::Polite, Live::Assertive])),
-    }
+    })
 }
 
 /// A picture whose bytes cross about half the time, and about one time in
@@ -443,12 +443,12 @@ pub(super) fn gen_leaf(rng: &mut Rng) -> Node {
 /// ever got a chance to refuse anything.
 /// A current wire node holding a child list, around `children`.
 pub(super) fn gen_container(_rng: &mut Rng, children: Vec<Node>) -> Node {
-    Node::Container {
+    Node::Container(view_wire::ContainerNode {
         id: None,
         style: gpui::StyleRefinement::default(),
         interactivity: Interactivity::default(),
         children,
-    }
+    })
 }
 
 pub(super) fn gen_list(rng: &mut Rng, children: Vec<Node>) -> Node {

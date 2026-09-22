@@ -38,7 +38,9 @@ impl Render for Form {
 }
 
 fn input(frame: &wire::Frame) -> (&wire::ElementIdWire, u32, u32, &gpui::StyleRefinement) {
-    let wire::Node::Container { children, .. } = frame.root.as_ref().expect("root") else {
+    let wire::Node::Container(view_guest::wire::ContainerNode { children, .. }) =
+        frame.root.as_ref().expect("root")
+    else {
         panic!("root container")
     };
     let wire::Node::Input {

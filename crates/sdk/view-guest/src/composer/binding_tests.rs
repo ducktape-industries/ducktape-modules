@@ -105,7 +105,9 @@ fn node<'a>(root: &'a wire::Node, key: &str) -> Option<&'a wire::Node> {
 }
 
 fn clickable(root: &wire::Node, key: &str) -> Option<u32> {
-    let Some(wire::Node::Container { interactivity, .. }) = node(root, key) else {
+    let Some(wire::Node::Container(crate::wire::ContainerNode { interactivity, .. })) =
+        node(root, key)
+    else {
         return None;
     };
     interactivity.on_click
@@ -192,11 +194,11 @@ fn every_mark_is_the_same_square_and_the_field_writes_at_body_size() {
     let mut body_size = None;
     let mut editor_bounds = None;
     walk(&root, &mut |node| match node {
-        wire::Node::Container {
+        wire::Node::Container(crate::wire::ContainerNode {
             style,
             interactivity,
             ..
-        } if interactivity.role == Some(Role::Button) => {
+        }) if interactivity.role == Some(Role::Button) => {
             if style.size.width == Some(gpui::px(24.).into())
                 && style.size.height == Some(gpui::px(24.).into())
             {
@@ -284,13 +286,17 @@ fn toolbar_attachment_mention_and_restore_actions_have_reachable_aria_routes() {
         ("c/attachment/file-1/retry", "Retry"),
         ("c/restore", "Restore"),
     ] {
-        let Some(wire::Node::Container { interactivity, .. }) = node(&root, key) else {
+        let Some(wire::Node::Container(crate::wire::ContainerNode { interactivity, .. })) =
+            node(&root, key)
+        else {
             panic!("missing composer action {key}");
         };
         assert!(interactivity.on_click.is_some(), "{key} has no route");
         assert_eq!(interactivity.aria.label.as_deref(), Some(label));
     }
-    let Some(wire::Node::Container { interactivity, .. }) = node(&root, "c/mention/<@1>") else {
+    let Some(wire::Node::Container(crate::wire::ContainerNode { interactivity, .. })) =
+        node(&root, "c/mention/<@1>")
+    else {
         panic!("missing mention action");
     };
     assert!(interactivity.on_click.is_some());

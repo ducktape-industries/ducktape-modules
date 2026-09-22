@@ -98,7 +98,7 @@ pub(crate) fn text_amounts(root: &Node) -> Result<(usize, usize), &'static str> 
     while let Some(node) = pending.pop() {
         let mut add = |text: &str| display = display.saturating_add(text.len());
         match node {
-            Node::Text { content, .. } => add(content),
+            Node::Text(crate::TextNode { content, .. }) => add(content),
             Node::RichText { text, .. } => add(text),
             Node::Input {
                 value,

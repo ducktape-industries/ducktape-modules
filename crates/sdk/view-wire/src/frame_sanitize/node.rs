@@ -22,7 +22,7 @@ pub(super) fn sanitize_node(
     if let Some(id) = typed_id {
         authored_path.push(id);
     }
-    if let Node::Container { interactivity, .. }
+    if let Node::Container(crate::ContainerNode { interactivity, .. })
     | Node::UniformList { interactivity, .. }
     | Node::Image { interactivity, .. }
     | Node::Svg { interactivity, .. } = node
@@ -44,7 +44,7 @@ pub(super) fn sanitize_node(
         }
     }
     match node {
-        Node::Container { id, style, .. } => {
+        Node::Container(crate::ContainerNode { id, style, .. }) => {
             if let Some(id) = id {
                 id.validate_host()?;
             }
@@ -288,13 +288,13 @@ pub(super) fn sanitize_node(
                 )?;
             }
         }
-        Node::Text {
+        Node::Text(crate::TextNode {
             id,
             style,
             content,
             heading,
             ..
-        } => {
+        }) => {
             if let Some(id) = id {
                 id.validate_host()?;
             }
@@ -570,7 +570,7 @@ pub(super) fn sanitize_node(
     // Children past the budget are dropped, not stood in for: a layout of
     // ten thousand rows becomes its first rows, which is what a host can
     // lay out, rather than ten thousand empty nodes it still has to walk.
-    if let Node::Container { children, .. }
+    if let Node::Container(crate::ContainerNode { children, .. })
     | Node::List { children, .. }
     | Node::When { children, .. }
     | Node::Tooltip { children, .. }

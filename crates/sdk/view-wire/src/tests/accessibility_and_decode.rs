@@ -164,13 +164,13 @@ fn a_buttons_role_round_trips() {
 #[test]
 fn a_texts_heading_and_live_region_round_trip() {
     let mut title = text("Inbox");
-    let Node::Text { heading, live, .. } = &mut title else {
+    let Node::Text(crate::TextNode { heading, live, .. }) = &mut title else {
         unreachable!()
     };
     *heading = Some(1);
     *live = Some(Live::Assertive);
     let mut status = text("3 new");
-    let Node::Text { live, .. } = &mut status else {
+    let Node::Text(crate::TextNode { live, .. }) = &mut status else {
         unreachable!()
     };
     *live = Some(Live::Polite);
@@ -206,11 +206,11 @@ fn a_heading_level_outside_1_to_6_is_no_heading() {
         (255, None),
     ] {
         let mut node = text("Title");
-        let Node::Text { heading, .. } = &mut node else {
+        let Node::Text(crate::TextNode { heading, .. }) = &mut node else {
             unreachable!()
         };
         *heading = Some(level);
-        let Node::Text { heading, .. } = sanitized_root(node) else {
+        let Node::Text(crate::TextNode { heading, .. }) = sanitized_root(node) else {
             panic!("still text")
         };
         assert_eq!(heading, kept, "level {level}");
@@ -317,17 +317,18 @@ fn uniform_list_path_must_match_its_typed_tree_ancestry() {
     let parent = ElementIdWire::Integer(7);
     let list = ElementIdWire::Name("list".into());
     let mut valid = Frame {
-        root: Some(Node::Container {
+        root: Some(Node::Container(crate::ContainerNode {
             id: Some(parent.clone()),
             style: gpui::StyleRefinement::default(),
             interactivity: Interactivity::default(),
             children: vec![uniform(vec![parent.clone(), list.clone()])],
-        }),
+        })),
         ..Default::default()
     };
     sanitize(&mut valid).unwrap();
 
-    let Node::Container { children, .. } = valid.root.as_mut().unwrap() else {
+    let Node::Container(crate::ContainerNode { children, .. }) = valid.root.as_mut().unwrap()
+    else {
         unreachable!()
     };
     let Node::UniformList { path, .. } = &mut children[0] else {

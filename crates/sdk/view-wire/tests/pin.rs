@@ -11,7 +11,7 @@ fn anchored_preserves_local_offsets_and_bounds_untrusted_coordinates() {
         position: Some([x, y]),
         position_mode: AnchoredPositionMode::Local,
         offset: Some([0.; 2]),
-        children: vec![Node::Text {
+        children: vec![Node::Text(view_wire::TextNode {
             id: None,
             style: gpui::StyleRefinement::default()
                 .w(gpui::px(f32::INFINITY))
@@ -19,7 +19,7 @@ fn anchored_preserves_local_offsets_and_bounds_untrusted_coordinates() {
             content: String::new(),
             heading: None,
             live: None,
-        }],
+        })],
     };
     for (x, y, expected) in [
         (-4.0, 6.0, (-4.0, 6.0)),
@@ -40,7 +40,7 @@ fn anchored_preserves_local_offsets_and_bounds_untrusted_coordinates() {
             unreachable!()
         };
         assert_eq!(position, Some([expected.0, expected.1]));
-        let Node::Text { style, .. } = &children[0] else {
+        let Node::Text(view_wire::TextNode { style, .. }) = &children[0] else {
             unreachable!()
         };
         // Native refinements strip nonfinite dimensions instead of expanding them.

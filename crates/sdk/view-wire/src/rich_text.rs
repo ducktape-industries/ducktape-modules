@@ -259,12 +259,12 @@ mod tests {
             tooltip: None,
         };
         let mut duplicate = Frame {
-            root: Some(Node::Container {
+            root: Some(Node::Container(crate::ContainerNode {
                 id: Some(ElementIdWire::Name("root".into())),
                 style: gpui::StyleRefinement::default(),
                 interactivity: Interactivity::default(),
                 children: vec![rich(), rich()],
-            }),
+            })),
             ..Default::default()
         };
         assert_eq!(
@@ -272,19 +272,21 @@ mod tests {
             Err("duplicate typed element identity among siblings")
         );
 
-        let parent = |name: &str| Node::Container {
-            id: Some(ElementIdWire::Name(name.into())),
-            style: gpui::StyleRefinement::default(),
-            interactivity: Interactivity::default(),
-            children: vec![rich()],
+        let parent = |name: &str| {
+            Node::Container(crate::ContainerNode {
+                id: Some(ElementIdWire::Name(name.into())),
+                style: gpui::StyleRefinement::default(),
+                interactivity: Interactivity::default(),
+                children: vec![rich()],
+            })
         };
         let mut separate = Frame {
-            root: Some(Node::Container {
+            root: Some(Node::Container(crate::ContainerNode {
                 id: Some(ElementIdWire::Name("root".into())),
                 style: gpui::StyleRefinement::default(),
                 interactivity: Interactivity::default(),
                 children: vec![parent("left"), parent("right")],
-            }),
+            })),
             ..Default::default()
         };
         assert!(crate::sanitize(&mut separate).is_ok());

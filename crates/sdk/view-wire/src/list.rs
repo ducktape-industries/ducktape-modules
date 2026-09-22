@@ -251,12 +251,12 @@ mod variable_tests {
     #[test]
     fn sibling_lists_share_the_native_item_allocation_budget() {
         let mut frame = Frame {
-            root: Some(Node::Container {
+            root: Some(Node::Container(crate::ContainerNode {
                 id: None,
                 style: Default::default(),
                 interactivity: Default::default(),
                 children: vec![node(Vec::new(), 0), node(Vec::new(), 0)],
-            }),
+            })),
             ..Default::default()
         };
         sanitize(&mut frame).unwrap();

@@ -119,6 +119,8 @@ pub use widget::{WidgetCommand, WidgetTarget};
 mod surface;
 pub use surface::{MAX_SURFACE_DEPTH, MAX_SURFACE_VALUES, SurfaceValue, sanitize_surface_event};
 
+mod styled_nodes;
+pub use styled_nodes::{ContainerNode, TextNode};
 mod node;
 pub use node::{
     Anchor, AnchoredFitMode, AnchoredPositionMode, ButtonContent, ImageObjectFit, ImageStyle, Live,
@@ -133,7 +135,9 @@ pub mod events;
 pub mod interactivity;
 pub mod keyboard;
 pub mod mouse;
-pub use interactivity::{DispatchPhase, HoverListenerMode, KeyContext, RichTextTooltip, Tooltip, TooltipResponse};
+pub use interactivity::{
+    DispatchPhase, HoverListenerMode, KeyContext, RichTextTooltip, Tooltip, TooltipResponse,
+};
 
 mod protocol;
 pub use protocol::*;

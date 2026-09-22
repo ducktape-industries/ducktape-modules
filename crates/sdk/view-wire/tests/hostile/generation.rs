@@ -181,7 +181,7 @@ pub(super) fn gen_patch_tree(rng: &mut Rng) -> Node {
 pub(super) fn is_list_node(node: &Node) -> bool {
     matches!(
         node,
-        Node::Container { .. }
+        Node::Container(view_wire::ContainerNode { .. })
             | Node::Tooltip { .. }
             | Node::Overlay { .. }
             | Node::When { .. }
@@ -240,7 +240,7 @@ pub(super) fn gen_patch(rng: &mut Rng, root: &Node, hostile: bool) -> Patch {
             for child in fresh.children_mut() {
                 *child = Node::empty();
             }
-            if let Node::Container { children, .. } = &mut fresh {
+            if let Node::Container(view_wire::ContainerNode { children, .. }) = &mut fresh {
                 children.clear();
             }
             Patch::Props { path, node: fresh }

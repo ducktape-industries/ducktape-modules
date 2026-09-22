@@ -44,7 +44,7 @@ impl Element for PathProbe {
         self.paths
             .borrow_mut()
             .push(lowering.current_path().to_vec());
-        wire::Node::Text {
+        wire::Node::Text(crate::wire::TextNode {
             id: self
                 .id
                 .map(|id| wire::ElementIdWire::from_gpui(id).unwrap()),
@@ -52,7 +52,7 @@ impl Element for PathProbe {
             content: "probe".into(),
             heading: None,
             live: None,
-        }
+        })
     }
 }
 

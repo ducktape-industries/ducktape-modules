@@ -7,7 +7,7 @@
 //! data once per frame.
 
 use crate::interactivity::{ClickListener, Interactivity};
-use crate::{App, Window, slots, wire};
+use crate::{slots, wire, App, Window};
 use gpui::{
     ElementId, ListHorizontalSizingBehavior, ListSizingBehavior, Overflow, ScrollStrategy,
     SharedString, StyleRefinement, Styled,
@@ -227,12 +227,12 @@ impl Element for Div {
             .into_iter()
             .map(|child| lowering.lower_element(child))
             .collect();
-        wire::Node::Container {
+        wire::Node::Container(crate::wire::ContainerNode {
             id,
             style,
             interactivity: wire_interactivity,
             children,
-        }
+        })
     }
 }
 
@@ -382,13 +382,13 @@ impl ParentElement for Div {
 
 impl Element for SharedString {
     fn lower(self: Box<Self>, _lowering: &mut Lowering<'_>) -> wire::Node {
-        wire::Node::Text {
+        wire::Node::Text(crate::wire::TextNode {
             id: None,
             style: StyleRefinement::default(),
             content: self.to_string(),
             heading: None,
             live: None,
-        }
+        })
     }
 }
 

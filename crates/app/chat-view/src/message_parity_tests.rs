@@ -4,11 +4,11 @@ use ducktape_view_guest::{StyleRefinement, Styled};
 #[test]
 fn action_strip_uses_native_group_visibility_and_is_not_inside_selection_target() {
     let (cx, _) = opened();
-    let Some(wire::Node::Container {
+    let Some(wire::Node::Container(ducktape_view_guest::wire::ContainerNode {
         style,
         interactivity,
         ..
-    }) = cx.find("chat-message-m1-actions")
+    })) = cx.find("chat-message-m1-actions")
     else {
         panic!("action strip")
     };
@@ -43,7 +43,9 @@ fn copy_range_keeps_its_distinct_message_plate() {
         cx.notify();
     });
     cx.run_until_parked();
-    let Some(wire::Node::Container { style, .. }) = cx.find("chat-message-m1") else {
+    let Some(wire::Node::Container(ducktape_view_guest::wire::ContainerNode { style, .. })) =
+        cx.find("chat-message-m1")
+    else {
         panic!("message card")
     };
     assert_eq!(

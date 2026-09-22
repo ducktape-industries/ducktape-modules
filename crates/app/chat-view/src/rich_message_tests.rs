@@ -112,7 +112,7 @@ fn rich_message_keeps_styles_and_dispatches_each_link_by_value() {
     assert!(cx.has_text("quoted"));
     assert!(matches!(
         cx.find("chat-message-rich-more"),
-        Some(wire::Node::Container { interactivity, .. })
+        Some(wire::Node::Container (ducktape_view_guest::wire::ContainerNode { interactivity, .. }))
             if interactivity.aria.label.as_deref() == Some("More message actions")
     ));
 
@@ -203,6 +203,6 @@ fn file_attachment_keeps_type_caption_and_grouped_block_number() {
     assert!(cx.has_text("block 12,345"));
     assert!(cx.has_text("PDF file"));
     assert!(matches!(cx.find("chat-message-file-block-0"),
-        Some(wire::Node::Container { interactivity, .. })
+        Some(wire::Node::Container (ducktape_view_guest::wire::ContainerNode { interactivity, .. }))
             if interactivity.aria.label.as_deref() == Some("Open deck.pdf")));
 }

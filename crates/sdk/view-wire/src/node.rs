@@ -175,15 +175,7 @@ pub enum Node {
         #[serde(deserialize_with = "decode_children")]
         children: Vec<Node>,
     },
-    Container {
-        /// Native GPUI identity, retained as a tagged adapter on the wire.
-        id: Option<ElementIdWire>,
-        /// The real GPUI style refinement, applied by the host's native Div.
-        style: gpui::StyleRefinement,
-        interactivity: Interactivity,
-        #[serde(deserialize_with = "decode_children")]
-        children: Vec<Node>,
-    },
+    Container(ContainerNode),
     /// A grabbed divider: local movement deltas and native cursor; one child.
     ResizeHandle {
         id: ElementIdWire,
@@ -301,15 +293,7 @@ pub enum Node {
         #[serde(deserialize_with = "decode_child")]
         content: Box<Node>,
     },
-    Text {
-        id: Option<ElementIdWire>,
-        style: gpui::StyleRefinement,
-        content: String,
-        /// A heading's level, 1 to 6; the sanitizer makes any other `None`.
-        heading: Option<u8>,
-        /// `None` is text whose changes are not announced.
-        live: Option<Live>,
-    },
+    Text(TextNode),
     /// A raster picture sent once per typed content hash.
     Image {
         id: Option<ElementIdWire>,

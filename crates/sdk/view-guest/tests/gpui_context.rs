@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use view_guest::prelude::*;
-use view_guest::{Driver, View, testing::TestAppContext, wire};
+use view_guest::{testing::TestAppContext, wire, Driver, View};
 
 #[derive(Default, Serialize, Deserialize)]
 struct Counter {
@@ -23,7 +23,9 @@ impl Render for Counter {
     }
 }
 fn route(frame: &wire::Frame) -> u32 {
-    let wire::Node::Container { interactivity, .. } = frame.root.as_ref().unwrap() else {
+    let wire::Node::Container(view_guest::wire::ContainerNode { interactivity, .. }) =
+        frame.root.as_ref().unwrap()
+    else {
         panic!("a container")
     };
     interactivity.on_click.unwrap()
@@ -66,11 +68,15 @@ fn pointer_listener_preserves_payload_and_routes_after_frame_reset() {
     let mut other = Driver::<PointerSurface>::new();
     let first = driver.tick(vec![]);
     let other_frame = other.tick(vec![]);
-    let wire::Node::Container { interactivity, .. } = first.root.as_ref().unwrap() else {
+    let wire::Node::Container(view_guest::wire::ContainerNode { interactivity, .. }) =
+        first.root.as_ref().unwrap()
+    else {
         panic!("a container")
     };
     let handler = interactivity.on_mouse_down.expect("mouse route");
-    let wire::Node::Container { interactivity, .. } = other_frame.root.as_ref().unwrap() else {
+    let wire::Node::Container(view_guest::wire::ContainerNode { interactivity, .. }) =
+        other_frame.root.as_ref().unwrap()
+    else {
         panic!("a container")
     };
     assert_eq!(interactivity.on_mouse_down, Some(handler));
@@ -98,7 +104,9 @@ fn pointer_listener_preserves_payload_and_routes_after_frame_reset() {
         event,
     }]);
     other.entity().read(|view| assert!(view.seen.is_empty()));
-    let wire::Node::Container { interactivity, .. } = next.root.as_ref().unwrap() else {
+    let wire::Node::Container(view_guest::wire::ContainerNode { interactivity, .. }) =
+        next.root.as_ref().unwrap()
+    else {
         panic!("a container")
     };
     assert_eq!(interactivity.on_mouse_down, Some(handler));
@@ -138,7 +146,9 @@ impl Render for TooltipContent {
 fn tooltip_delay_is_order_independent_and_builder_runs_only_after_request() {
     let mut driver = Driver::<TooltipSurface>::new();
     let frame = driver.tick(vec![]);
-    let wire::Node::Container { interactivity, .. } = frame.root.as_ref().unwrap() else {
+    let wire::Node::Container(view_guest::wire::ContainerNode { interactivity, .. }) =
+        frame.root.as_ref().unwrap()
+    else {
         panic!("a container")
     };
     let tooltip = interactivity.tooltip.as_ref().expect("tooltip recipe");
@@ -164,7 +174,8 @@ fn tooltip_delay_is_order_independent_and_builder_runs_only_after_request() {
     let Some(content) = response.content.as_deref() else {
         panic!("ordinary tooltip has content")
     };
-    let wire::Node::Container { id, children, .. } = content else {
+    let wire::Node::Container(view_guest::wire::ContainerNode { id, children, .. }) = content
+    else {
         panic!("tooltip content is a lowered container")
     };
     assert_eq!(id, &Some(wire::ElementIdWire::Name("tip".into())));
@@ -240,13 +251,17 @@ impl Render for FocusSurface {
 #[test]
 fn opaque_focus_allocations_share_only_through_clone() {
     let frame = Driver::<FocusSurface>::new().tick(vec![]);
-    let wire::Node::Container { children, .. } = frame.root.unwrap() else {
+    let wire::Node::Container(view_guest::wire::ContainerNode { children, .. }) =
+        frame.root.unwrap()
+    else {
         panic!("root container")
     };
     let ids: Vec<_> = children
         .iter()
         .map(|node| match node {
-            wire::Node::Container { interactivity, .. } => interactivity.focus_handle.unwrap(),
+            wire::Node::Container(view_guest::wire::ContainerNode { interactivity, .. }) => {
+                interactivity.focus_handle.unwrap()
+            }
             _ => panic!("focus container"),
         })
         .collect();
@@ -368,7 +383,7 @@ fn host_theme_events_update_the_global_and_emit_style_patches() {
         [wire::Patch::Props { .. }]
     ));
     wire::apply(&mut root, changed.patches).unwrap();
-    let wire::Node::Container { ref style, .. } = root else {
+    let wire::Node::Container(view_guest::wire::ContainerNode { ref style, .. }) = root else {
         panic!("container")
     };
     assert_eq!(style.background, Some(Theme::dark().surface.into()));
@@ -380,7 +395,7 @@ fn host_theme_events_update_the_global_and_emit_style_patches() {
         [wire::Patch::Props { .. }]
     ));
     wire::apply(&mut root, changed.patches).unwrap();
-    let wire::Node::Container { ref style, .. } = root else {
+    let wire::Node::Container(view_guest::wire::ContainerNode { ref style, .. }) = root else {
         panic!("container")
     };
     assert_eq!(style.background, Some(Theme::light().surface.into()));

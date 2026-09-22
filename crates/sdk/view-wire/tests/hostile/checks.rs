@@ -15,7 +15,7 @@ pub(super) fn tree_depth(node: &Node) -> usize {
         | Node::Responsive { content, .. }
         | Node::Lazy { content, .. }
         | Node::Scroll { content, .. } => 1 + tree_depth(content),
-        Node::Container { children, .. }
+        Node::Container(view_wire::ContainerNode { children, .. })
         | Node::Anchored { children, .. }
         | Node::Image {
             state_children: children,
@@ -91,7 +91,8 @@ pub(super) fn check_bounds(
         }
     }
     match node {
-        Node::Container { children, .. } | Node::UniformList { children, .. } => {
+        Node::Container(view_wire::ContainerNode { children, .. })
+        | Node::UniformList { children, .. } => {
             for child in children {
                 check_bounds(child, depth + 1, keys, svg_bytes, ctx);
             }
@@ -223,9 +224,9 @@ pub(super) fn check_bounds(
             assert!(font_family_overrides.iter().all(|(range, _)| valid(range)));
             assert!(clickable_ranges.iter().all(valid));
         }
-        Node::Text {
+        Node::Text(view_wire::TextNode {
             content, heading, ..
-        } => {
+        }) => {
             check_string(content, ctx, "text content");
             assert!(
                 heading.is_none_or(|level| (1..=6).contains(&level)),

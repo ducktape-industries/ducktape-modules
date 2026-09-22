@@ -2,18 +2,18 @@ use gpui::{StyleRefinement, Styled, px};
 use view_wire::{Frame, GroupRefinement, Interactivity, Node, Patch};
 
 fn container(style: StyleRefinement) -> Node {
-    Node::Container {
+    Node::Container(view_wire::ContainerNode {
         id: None,
         style,
         interactivity: Interactivity::default(),
-        children: vec![Node::Text {
+        children: vec![Node::Text(view_wire::TextNode {
             id: None,
             style: StyleRefinement::default(),
             content: "stable child".into(),
             heading: None,
             live: None,
-        }],
-    }
+        })],
+    })
 }
 
 #[test]
@@ -23,7 +23,7 @@ fn whole_frames_bound_base_and_every_conditional_style() {
         .m(px(-900.))
         .opacity(7.);
     let mut root = container(hostile.clone());
-    let Node::Container { interactivity, .. } = &mut root else {
+    let Node::Container(view_wire::ContainerNode { interactivity, .. }) = &mut root else {
         unreachable!()
     };
     interactivity.hover = Some(hostile.clone());
@@ -41,11 +41,11 @@ fn whole_frames_bound_base_and_every_conditional_style() {
         ..Default::default()
     };
     view_wire::sanitize(&mut frame).unwrap();
-    let Node::Container {
+    let Node::Container(view_wire::ContainerNode {
         style,
         interactivity,
         ..
-    } = frame.root.unwrap()
+    }) = frame.root.unwrap()
     else {
         unreachable!()
     };
@@ -71,30 +71,32 @@ fn style_changes_are_props_and_patches_receive_the_same_bounds() {
     let encoded = view_wire::encode(&patches);
     let patches = view_wire::decode(&encoded).unwrap();
     view_wire::apply(&mut old, patches).unwrap();
-    let Node::Container {
+    let Node::Container(view_wire::ContainerNode {
         style, children, ..
-    } = old
+    }) = old
     else {
         unreachable!()
     };
     assert_eq!(style.size.width, Some(px(8192.).into()));
-    assert!(matches!(&children[0], Node::Text { content, .. } if content == "stable child"));
+    assert!(
+        matches!(&children[0], Node::Text (view_wire::TextNode { content, .. }) if content == "stable child")
+    );
 }
 
 #[test]
 fn text_styles_are_bounded_in_the_same_walk() {
     let mut frame = Frame {
-        root: Some(Node::Text {
+        root: Some(Node::Text(view_wire::TextNode {
             id: None,
             style: StyleRefinement::default().text_size(px(1e20)).w(px(1e20)),
             content: "text".into(),
             heading: None,
             live: None,
-        }),
+        })),
         ..Default::default()
     };
     view_wire::sanitize(&mut frame).unwrap();
-    let Node::Text { style, .. } = frame.root.unwrap() else {
+    let Node::Text(view_wire::TextNode { style, .. }) = frame.root.unwrap() else {
         unreachable!()
     };
     assert_eq!(style.size.width, Some(px(8192.).into()));

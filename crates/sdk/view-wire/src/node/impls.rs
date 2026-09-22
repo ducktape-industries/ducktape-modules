@@ -30,8 +30,8 @@ impl Node {
 
     pub fn key(&self) -> Option<&str> {
         match self {
-            Self::Container { id, .. }
-            | Self::Text { id, .. }
+            Self::Container(crate::ContainerNode { id, .. })
+            | Self::Text(crate::TextNode { id, .. })
             | Self::Image { id, .. }
             | Self::Svg { id, .. }
             | Self::RichText { id, .. } => id.as_ref().and_then(ElementIdWire::name),
@@ -70,8 +70,8 @@ impl Node {
     /// The node's identity without reducing a typed GPUI ID to text.
     pub fn identity(&self) -> Option<IdentityKeyRef<'_>> {
         match self {
-            Self::Container { id, .. }
-            | Self::Text { id, .. }
+            Self::Container(crate::ContainerNode { id, .. })
+            | Self::Text(crate::TextNode { id, .. })
             | Self::Image { id, .. }
             | Self::Svg { id, .. }
             | Self::RichText { id, .. } => id.as_ref().map(IdentityKeyRef::Element),
@@ -113,7 +113,7 @@ impl Node {
     /// variant is a new arm in each and nothing else.
     pub fn children(&self) -> &[Node] {
         match self {
-            Self::Container { children, .. }
+            Self::Container(crate::ContainerNode { children, .. })
             | Self::Tooltip { children, .. }
             | Self::Overlay { children, .. }
             | Self::List { children, .. }
@@ -139,7 +139,7 @@ impl Node {
             Self::Button { .. }
             | Self::Qr { .. }
             | Self::RichText { .. }
-            | Self::Text { .. }
+            | Self::Text(crate::TextNode { .. })
             | Self::Svg { .. }
             | Self::ImageViewer { .. }
             | Self::Input { .. }
@@ -167,7 +167,7 @@ impl Node {
 
     pub fn children_mut(&mut self) -> &mut [Node] {
         match self {
-            Self::Container { children, .. }
+            Self::Container(crate::ContainerNode { children, .. })
             | Self::Tooltip { children, .. }
             | Self::Overlay { children, .. }
             | Self::List { children, .. }
@@ -193,7 +193,7 @@ impl Node {
             Self::Button { .. }
             | Self::Qr { .. }
             | Self::RichText { .. }
-            | Self::Text { .. }
+            | Self::Text(crate::TextNode { .. })
             | Self::Input { .. }
             | Self::Editor { .. }
             | Self::Space { .. }
@@ -216,7 +216,7 @@ impl Node {
     /// none, and no patch may insert into, remove from or move within it.
     pub fn child_list_mut(&mut self) -> Option<&mut Vec<Node>> {
         match self {
-            Self::Container { children, .. }
+            Self::Container(crate::ContainerNode { children, .. })
             | Self::List { children, .. }
             | Self::UniformList { children, .. }
             | Self::When { children, .. }
@@ -238,7 +238,7 @@ impl Node {
             | Self::Button { .. }
             | Self::Qr { .. }
             | Self::RichText { .. }
-            | Self::Text { .. }
+            | Self::Text(crate::TextNode { .. })
             | Self::Input { .. }
             | Self::Editor { .. }
             | Self::Space { .. }

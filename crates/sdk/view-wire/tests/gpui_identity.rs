@@ -3,31 +3,31 @@ mod identity_tests {
     use view_wire::{ElementIdWire, Frame, Interactivity, Node, apply, diff, sanitize};
 
     fn text(id: ElementIdWire, content: &str) -> Node {
-        Node::Text {
+        Node::Text(view_wire::TextNode {
             id: Some(id),
             style: gpui::StyleRefinement::default(),
             content: content.into(),
             heading: None,
             live: None,
-        }
+        })
     }
 
     fn container(children: Vec<Node>) -> Node {
-        Node::Container {
+        Node::Container(view_wire::ContainerNode {
             id: None,
             style: gpui::StyleRefinement::default(),
             interactivity: Interactivity::default(),
             children,
-        }
+        })
     }
 
     fn identified_container(id: ElementIdWire, children: Vec<Node>) -> Node {
-        Node::Container {
+        Node::Container(view_wire::ContainerNode {
             id: Some(id),
             style: gpui::StyleRefinement::default(),
             interactivity: Interactivity::default(),
             children,
-        }
+        })
     }
 
     #[test]
