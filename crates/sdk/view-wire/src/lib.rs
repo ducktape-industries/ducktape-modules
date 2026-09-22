@@ -231,6 +231,21 @@ pub enum Event {
         relative_x: f32,
         relative_y: f32,
     },
+    /// The native uniform-list viewport needs these rows on the next guest
+    /// frame. The route fences a stale request from an older list instance.
+    UniformListRange {
+        path: Vec<ElementIdWire>,
+        route: u32,
+        start: u32,
+        end: u32,
+    },
+    UniformListState {
+        path: Vec<ElementIdWire>,
+        route: u32,
+        top_index: u32,
+        scrollable: bool,
+        scrolled_to_end: Option<bool>,
+    },
     /// One answer to a [`Request`]. A one-shot request gets exactly one with
     /// `done`; a subscription gets many, the last one `done`.
     Response {
@@ -695,6 +710,11 @@ pub const MAX_PICTURE_BYTES_PER_FRAME: usize = 1 << 20;
 /// Each option is shaped text and spends the frame's text budget too.
 pub const MAX_OPTIONS: usize = 256;
 
+/// A uniform list may describe a large logical list without allocating rows.
+pub const MAX_UNIFORM_LIST_COUNT: usize = 65_536;
+/// A frame and one host range request carry at most this many uniform rows.
+pub const MAX_UNIFORM_LIST_ROWS: usize = 256;
+
 /// Maximum positional values supplied to one host surface.
 pub const MAX_SURFACE_ARGS: usize = 256;
 /// Text and spacing sizes are pixels; nothing on a screen needs more.
@@ -1091,6 +1111,53 @@ fn sanitize_node(
                 keys.truncate(count);
             }
             children.truncate(count);
+        }
+        Node::UniformList {
+            id,
+            style,
+            interactivity,
+            count,
+            indices,
+            children,
+            ..
+        } => {
+            style_sanitize::sanitize(style);
+            claim_id_value(id, taken);
+            interactivity.aria.sanitize();
+            for refinement in [&mut interactivity.hover, &mut interactivity.active]
+                .into_iter()
+                .flatten()
+            {
+                style_sanitize::sanitize(refinement);
+            }
+            for refinement in [&mut interactivity.group_hover, &mut interactivity.group_active]
+                .into_iter()
+                .flatten()
+            {
+                style_sanitize::sanitize(&mut refinement.style);
+                let mut group = refinement.group.to_string();
+                truncate_string(&mut group);
+                refinement.group = group.into();
+            }
+            if let Some(group) = &mut interactivity.group {
+                let mut name = group.to_string();
+                truncate_string(&mut name);
+                *group = name.into();
+            }
+            if let Some(interactivity_id) = &mut interactivity.id {
+                claim_id_value(interactivity_id, taken);
+            }
+            *count = (*count).min(MAX_UNIFORM_LIST_COUNT);
+            let mut kept_indices = Vec::with_capacity(indices.len().min(MAX_UNIFORM_LIST_ROWS));
+            let mut kept_children = Vec::with_capacity(children.len().min(MAX_UNIFORM_LIST_ROWS));
+            for (index, child) in indices.drain(..).zip(children.drain(..)) {
+                if (index as usize) < *count && kept_indices.len() < MAX_UNIFORM_LIST_ROWS {
+                    kept_indices.push(index);
+                    kept_children.push(child);
+                }
+            }
+            *indices = kept_indices;
+            *children = kept_children;
         }
         Node::Grid {
             key,
@@ -1689,6 +1756,7 @@ fn lengths_mut(node: &mut Node) -> Vec<&mut Length> {
         | Node::PickList { width, .. }
         | Node::ComboBox { width, .. } => vec![width],
         Node::Container { .. }
+        | Node::UniformList { .. }
         | Node::Text { .. }
         | Node::Input { .. }
         | Node::Editor { .. }

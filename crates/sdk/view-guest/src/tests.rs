@@ -225,6 +225,81 @@ fn tasks_are_awaitable_drop_cancels_and_detach_runs() {
     assert_eq!(*order.borrow(), vec![1, 3, 5]);
 }
 
+#[derive(Default, Serialize, Deserialize)]
+struct UniformProbe;
+
+impl View for UniformProbe {
+    fn new(_: &mut Window, _: &mut Context<Self>) -> Self {
+        Self
+    }
+}
+
+impl Render for UniformProbe {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        uniform_list("rows", 2_000, |range, _, _| {
+            range
+                .map(|index| {
+                    div()
+                        .id(format!("row-{index}"))
+                        .child(format!("row {index}"))
+                })
+                .collect::<Vec<_>>()
+        })
+    }
+}
+
+#[test]
+fn uniform_list_lowers_only_initial_and_requested_ranges() {
+    let mut driver = Driver::<UniformProbe>::new();
+    let first = driver.tick(vec![]);
+    let (path, route, count, indices) = match first.root.as_ref().unwrap() {
+        wire::Node::UniformList {
+            path,
+            route,
+            count,
+            indices,
+            ..
+        } => (path.clone(), *route, *count, indices.clone()),
+        node => panic!("expected uniform list, got {node:?}"),
+    };
+    assert_eq!(count, 2_000);
+    assert_eq!(indices, [0]);
+
+    let far = driver.tick(vec![wire::Event::UniformListRange {
+        path: path.clone(),
+        route,
+        start: 1_000,
+        end: 1_020,
+    }]);
+    let wire::Node::UniformList { indices, children, .. } = far.root.unwrap() else {
+        panic!("expected uniform list after range request");
+    };
+    assert_eq!(indices.len(), 21);
+    assert_eq!(children.len(), indices.len());
+    assert_eq!(indices.first(), Some(&0));
+    assert_eq!(&indices[1..], (1_000..1_020).map(|index| index as u32).collect::<Vec<_>>());
+    assert!(far.patches.len() <= wire::MAX_PATCHES);
+
+    let unchanged = driver.tick(vec![wire::Event::UniformListRange {
+        path: path.clone(),
+        route,
+        start: 1_000,
+        end: 1_020,
+    }]);
+    assert!(unchanged.unchanged, "duplicate range requests do not rerender");
+
+    let bounded = driver.tick(vec![wire::Event::UniformListRange {
+        path,
+        route,
+        start: 0,
+        end: u32::MAX,
+    }]);
+    let wire::Node::UniformList { indices, .. } = bounded.root.unwrap() else {
+        panic!("expected uniform list after bounded request");
+    };
+    assert_eq!(indices.len(), wire::MAX_UNIFORM_LIST_ROWS);
+}
+
 #[test]
 fn spawning_from_an_entity_update_settles_without_borrowing_the_view() {
     let mut driver = Driver::<Probe>::new();

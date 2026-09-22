@@ -95,6 +95,25 @@ pub enum Node {
         #[serde(deserialize_with = "decode_children")]
         children: Vec<Node>,
     },
+    /// A GPUI uniform-height list. The host owns the native viewport; the
+    /// guest carries only the row indices the host has requested.
+    UniformList {
+        id: ElementIdWire,
+        path: Vec<ElementIdWire>,
+        route: u32,
+        style: gpui::StyleRefinement,
+        interactivity: Interactivity,
+        count: usize,
+        measure_index: usize,
+        sizing: crate::list::UniformListSizing,
+        horizontal_sizing: crate::list::UniformListHorizontalSizing,
+        y_flipped: bool,
+        scroll_request: Option<crate::list::UniformListScrollRequest>,
+        #[serde(deserialize_with = "list::decode_indices")]
+        indices: Vec<u32>,
+        #[serde(deserialize_with = "decode_children")]
+        children: Vec<Node>,
+    },
     Container {
         /// Native GPUI identity, retained as a tagged adapter on the wire.
         id: Option<ElementIdWire>,
@@ -588,6 +607,7 @@ impl Node {
             | Self::Tooltip { key, .. }
             | Self::Canvas { key, .. }
             | Self::Surface { key, .. } => Some(key),
+            Self::UniformList { id, .. } => id.name(),
             Self::Space { .. } => None,
         }
     }
@@ -648,6 +668,7 @@ impl Node {
             | Self::Tooltip { children, .. }
             | Self::Overlay { children, .. }
             | Self::KeyedColumn { children, .. }
+            | Self::UniformList { children, .. }
             | Self::When { children, .. } => children,
             Self::Pin { content, .. }
             | Self::Float { content, .. }
@@ -701,6 +722,7 @@ impl Node {
             | Self::Tooltip { children, .. }
             | Self::Overlay { children, .. }
             | Self::KeyedColumn { children, .. }
+            | Self::UniformList { children, .. }
             | Self::When { children, .. } => children,
             Self::Pin { content, .. }
             | Self::Float { content, .. }
@@ -745,6 +767,7 @@ impl Node {
             | Self::Linear { children, .. }
             | Self::Grid { children, .. }
             | Self::KeyedColumn { children, .. }
+            | Self::UniformList { children, .. }
             | Self::Stack { children, .. }
             | Self::When { children, .. }
             | Self::Hover { children, .. }

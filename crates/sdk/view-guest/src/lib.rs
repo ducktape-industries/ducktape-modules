@@ -3,8 +3,9 @@ pub use gpui::prelude::FluentBuilder;
 extern crate self as ducktape_view_guest;
 
 pub use gpui::{
-    hsla, px, rems, rgb, ClickEvent, CursorStyle, ElementId, Global, Hsla, Pixels, Role,
-    SharedString, StyleRefinement, Styled,
+    hsla, px, rems, rgb, ClickEvent, CursorStyle, ElementId, Global, Hsla,
+    ListHorizontalSizingBehavior, ListSizingBehavior, Pixels, Role, ScrollStrategy, SharedString,
+    StyleRefinement, Styled,
 };
 pub use view_guest_derive::IntoElement;
 pub use view_wire as wire;
@@ -19,6 +20,7 @@ pub use behavior::{modal_overlay, resize_handle, sensor, ModalOverlay, ResizeHan
 pub use element::{
     anchored, canvas, deferred, div, img, svg, uniform_list, AnyElement, Anchored, Canvas, Deferred, Div,
     Element, Img, Input, IntoElement, Lowering, ParentElement, RenderOnce, Svg, UniformList,
+    UniformListScrollHandle,
 };
 pub use interactivity::{InteractiveElement, Interactivity, Stateful, StatefulInteractiveElement};
 pub use surface::{surface, Surface};
@@ -28,8 +30,10 @@ pub use view_element::ViewElement;
 pub mod prelude {
     pub use crate::{
         AnyElement, App, ClickEvent, Context, Element, ElementId, FluentBuilder, Global, Hsla, Input, InteractiveElement,
-        IntoElement, ParentElement, Render, RenderOnce, Role, SharedString, StatefulInteractiveElement,
-        Styled, Theme, Window, hsla, Pixels, surface, modal_overlay, resize_handle, sensor, anchored, canvas, deferred, div, img, px, rems, rgb, svg, uniform_list,
+        IntoElement, ListHorizontalSizingBehavior, ListSizingBehavior, ParentElement, Render,
+        RenderOnce, Role, ScrollStrategy, SharedString, StatefulInteractiveElement, Styled, Theme,
+        UniformListScrollHandle, Window, hsla, Pixels, surface, modal_overlay, resize_handle,
+        sensor, anchored, canvas, deferred, div, img, px, rems, rgb, svg, uniform_list,
     };
 }
 mod editor;
@@ -291,6 +295,38 @@ impl<V: View> Driver<V> {
                     handler,
                     (x, y, relative_x, relative_y),
                 ),
+                wire::Event::UniformListRange {
+                    path,
+                    route,
+                    start,
+                    end,
+                } => {
+                    if self.app.request_uniform_list_range(
+                        path,
+                        route,
+                        start as usize,
+                        end as usize,
+                    ) {
+                        self.app.notify();
+                    }
+                    None
+                }
+                wire::Event::UniformListState {
+                    path,
+                    route,
+                    top_index,
+                    scrollable,
+                    scrolled_to_end,
+                } => {
+                    self.app.update_uniform_list_state(
+                        &path,
+                        route,
+                        top_index as usize,
+                        scrollable,
+                        scrolled_to_end,
+                    );
+                    None
+                }
                 wire::Event::Theme { dark } => {
                     self.app
                         .set_global(if dark { Theme::dark() } else { Theme::light() });

@@ -2,12 +2,24 @@
 use crate::{Host, Task, View, Window, executor, slots};
 use std::any::{Any, TypeId};
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
+use std::ops::Range;
 use std::ops::{Deref, DerefMut};
 use std::rc::{Rc, Weak};
 
 pub(crate) type Callback<V> = Rc<dyn Fn(&mut V, &mut Window, &mut Context<V>)>;
 
 pub(crate) type Globals = std::collections::HashMap<TypeId, Rc<dyn Any>>;
+
+const MAX_UNIFORM_LISTS: usize = 128;
+
+struct UniformListRoute {
+    route: u32,
+    count: usize,
+    measure_index: usize,
+    ranges: Vec<Range<usize>>,
+    scroll: Option<std::rc::Weak<RefCell<crate::element::UniformListScrollState>>>,
+}
 
 pub struct App {
     pub(crate) inner: Rc<AppState>,
@@ -22,6 +34,8 @@ pub(crate) struct AppState {
     pub macos: bool,
     pub alive: Cell<bool>,
     pub globals: RefCell<Rc<Globals>>,
+    uniform_lists: RefCell<HashMap<Vec<crate::wire::ElementIdWire>, UniformListRoute>>,
+    next_uniform_route: Cell<u32>,
 }
 impl App {
     pub(crate) fn new(macos: bool) -> Self {
@@ -41,6 +55,8 @@ impl App {
                 macos,
                 alive: Cell::new(true),
                 globals: RefCell::new(globals),
+                uniform_lists: RefCell::default(),
+                next_uniform_route: Cell::new(1),
             }),
         }
     }
@@ -84,6 +100,104 @@ impl App {
             .get(&TypeId::of::<G>())
             .and_then(|global| global.downcast_ref::<G>())
             .expect("global is not initialized")
+    }
+
+    pub(crate) fn uniform_list_route(
+        &self,
+        path: &[crate::wire::ElementIdWire],
+        count: usize,
+        measure_index: usize,
+        scroll: Option<&Rc<RefCell<crate::element::UniformListScrollState>>>,
+    ) -> (u32, Vec<Range<usize>>) {
+        let count = count.min(crate::wire::MAX_UNIFORM_LIST_COUNT);
+        let mut lists = self.inner.uniform_lists.borrow_mut();
+        if !lists.contains_key(path) {
+            if lists.len() == MAX_UNIFORM_LISTS {
+                if let Some(old) = lists.keys().next().cloned() {
+                    lists.remove(&old);
+                }
+            }
+            let route = self.inner.next_uniform_route.get();
+            self.inner.next_uniform_route.set(route.wrapping_add(1).max(1));
+            let measure_index = measure_index.min(count.saturating_sub(1));
+            lists.insert(
+                path.to_vec(),
+                UniformListRoute {
+                    route,
+                    count,
+                    measure_index,
+                    ranges: (count > 0)
+                        .then_some(measure_index..measure_index + 1)
+                        .into_iter()
+                        .collect(),
+                    scroll: scroll.map(Rc::downgrade),
+                },
+            );
+        }
+        let state = lists.get_mut(path).expect("uniform-list route inserted");
+        state.count = count;
+        state.measure_index = measure_index.min(count.saturating_sub(1));
+        state.scroll = scroll.map(Rc::downgrade);
+        state.ranges.retain_mut(|range| {
+            range.start = range.start.min(count);
+            range.end = range.end.min(count);
+            range.start < range.end
+        });
+        let measurement = state.measure_index..state.measure_index.saturating_add(1).min(count);
+        if count > 0 && !state.ranges.iter().any(|range| range == &measurement) {
+            state.ranges.insert(0, measurement);
+        }
+        (state.route, state.ranges.clone())
+    }
+
+    pub(crate) fn request_uniform_list_range(
+        &self,
+        path: Vec<crate::wire::ElementIdWire>,
+        route: u32,
+        start: usize,
+        end: usize,
+    ) -> bool {
+        let mut lists = self.inner.uniform_lists.borrow_mut();
+        let Some(state) = lists.get_mut(&path) else {
+            return false;
+        };
+        if state.route != route || start >= end || start >= state.count {
+            return false;
+        }
+        let end = end
+            .min(state.count)
+            .min(start.saturating_add(crate::wire::MAX_UNIFORM_LIST_ROWS));
+        if end <= start {
+            return false;
+        }
+        let next = if start == 0 { 0..end } else { start..end };
+        let changed = !state.ranges.iter().any(|range| range == &next);
+        if changed {
+            let measurement = state.measure_index..state.measure_index + 1;
+            state.ranges.retain(|range| range == &measurement);
+            state.ranges.push(next);
+        }
+        changed
+    }
+
+    pub(crate) fn update_uniform_list_state(
+        &self,
+        path: &[crate::wire::ElementIdWire],
+        route: u32,
+        top_index: usize,
+        scrollable: bool,
+        scrolled_to_end: Option<bool>,
+    ) {
+        let lists = self.inner.uniform_lists.borrow();
+        let Some(state) = lists.get(path).filter(|state| state.route == route) else {
+            return;
+        };
+        if let Some(scroll) = state.scroll.as_ref().and_then(std::rc::Weak::upgrade) {
+            let mut scroll = scroll.borrow_mut();
+            scroll.top_index = top_index;
+            scroll.scrollable = scrollable;
+            scroll.scrolled_to_end = scrolled_to_end;
+        }
     }
 }
 #[derive(Clone)]
