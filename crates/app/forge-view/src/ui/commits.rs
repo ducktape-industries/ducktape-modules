@@ -74,43 +74,35 @@ pub(crate) fn log(
     let open: crate::ui::diff::Route<String> =
         Rc::new(cx.listener(|forge, oid: &String, _, cx| forge.open_commit(Some(oid.clone()), cx)));
     let handle = forge.log_scroll.clone();
-    uniform_list(id(element_id.to_owned()), count, move |range, _, _| {
-        range
-            .map(|index| {
-                let (oid, summary, author, time, parents) = rows[index].clone();
-                let open = open.clone();
-                let clicked = oid.clone();
-                let mut row = crate::ui::components::row(id(format!("forge-commit-{oid}")), &theme)
-                    .on_click(move |_: &ClickEvent, window: &mut Window, app: &mut App| {
-                        open(&clicked, window, app)
-                    })
-                    .cell(
-                        div()
-                            .w(px(72.))
-                            .font_family("monospace")
-                            .text_size(px(12.))
-                            .text_color(theme.muted)
-                            .child(short_oid(&oid)),
-                    )
-                    .cell(div().flex_1().truncate().child(summary))
-                    .cell(quiet(author, &theme))
-                    .cell(quiet(format!("t{time}"), &theme));
-                if parents > 1 {
-                    row = row.cell(chip(
-                        id(format!("forge-commit-merge-{oid}")),
-                        format!("{parents} parents"),
-                        theme.accent_foreground,
-                        theme.accent_soft,
-                    ));
-                }
-                row
+    crate::ui::components::rows(element_id, count, None, Some(&handle), move |index| {
+        let (oid, summary, author, time, parents) = rows[index].clone();
+        let open = open.clone();
+        let clicked = oid.clone();
+        let mut row = crate::ui::components::row(id(format!("forge-commit-{oid}")), &theme)
+            .on_click(move |_: &ClickEvent, window: &mut Window, app: &mut App| {
+                open(&clicked, window, app)
             })
-            .collect::<Vec<_>>()
+            .cell(
+                div()
+                    .w(px(72.))
+                    .font_family("monospace")
+                    .text_size(px(12.))
+                    .text_color(theme.muted)
+                    .child(short_oid(&oid)),
+            )
+            .cell(div().flex_1().truncate().child(summary))
+            .cell(quiet(author, &theme))
+            .cell(quiet(format!("t{time}"), &theme));
+        if parents > 1 {
+            row = row.cell(chip(
+                id(format!("forge-commit-merge-{oid}")),
+                format!("{parents} parents"),
+                theme.accent_foreground,
+                theme.accent_soft,
+            ));
+        }
+        row.into_any_element()
     })
-    .track_scroll(&handle)
-    .flex_1()
-    .min_h(px(0.))
-    .into_any_element()
 }
 
 fn summary(commit: &CommitInfo) -> String {

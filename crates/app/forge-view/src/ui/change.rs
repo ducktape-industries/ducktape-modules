@@ -9,7 +9,7 @@ use crate::ui::changes::{revision_name, state_chip};
 use crate::ui::components::{
     button, chip, empty_state, heading, id, path_text, quiet, ref_label, row, short_oid,
 };
-use crate::ui::{commits, diff, markdown, pending, scroller, staged};
+use crate::ui::{commits, diff, pending, prose, scroller, staged};
 
 pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
     let Some(query) = forge.change_query() else {
@@ -167,11 +167,7 @@ fn conversation(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyEle
                 .p_2()
                 .rounded_md()
                 .bg(theme.surface)
-                .child(markdown(
-                    "forge-change-body-text",
-                    &change.body,
-                    forge.session.dark,
-                )),
+                .child(prose("forge-change-body-text", &change.body)),
         );
     }
     let names = forge.names.ready();

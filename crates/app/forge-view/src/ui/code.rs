@@ -7,7 +7,7 @@ use crate::Forge;
 use crate::contract::{Content, EntryKind, Query, Reply, TreeInfo};
 use crate::queries::PAGE;
 use crate::ui::components::{button, empty_state, heading, id, mono, path_text, quiet, row};
-use crate::ui::{markdown, scroller, staged};
+use crate::ui::{prose, scroller, staged};
 
 pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
     let mut columns = div().id(id("forge-code")).flex().flex_1().min_h(px(0.));
@@ -304,7 +304,7 @@ fn readme(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
             theme,
         ))
         .child(if matches!(blob.content, Content::Text) {
-            markdown("forge-readme-body", &text, forge.session.dark)
+            prose("forge-readme-body", &text)
         } else {
             quiet("This README is not text.", theme).into_any_element()
         })
@@ -319,29 +319,23 @@ fn lines(bytes: &[u8], theme: &Theme) -> AnyElement {
     let count = rows.len();
     let muted = theme.muted;
     let foreground = theme.foreground;
-    uniform_list(id("forge-blob-lines"), count, move |range, _, _| {
-        range
-            .map(|index| {
+    crate::ui::components::rows("forge-blob-lines", count, None, None, move |index| {
+        div()
+            .id(id(format!("forge-blob-line-{}", index + 1)))
+            .flex()
+            .gap_2()
+            .px_2()
+            .child(
                 div()
-                    .id(id(format!("forge-blob-line-{}", index + 1)))
-                    .flex()
-                    .gap_2()
-                    .px_2()
-                    .child(
-                        div()
-                            .w(px(48.))
-                            .font_family("monospace")
-                            .text_size(px(12.))
-                            .text_color(muted)
-                            .child((index + 1).to_string()),
-                    )
-                    .child(mono(rows[index].clone(), foreground))
-            })
-            .collect::<Vec<_>>()
+                    .w(px(48.))
+                    .font_family("monospace")
+                    .text_size(px(12.))
+                    .text_color(muted)
+                    .child((index + 1).to_string()),
+            )
+            .child(mono(rows[index].clone(), foreground))
+            .into_any_element()
     })
-    .flex_1()
-    .min_h(px(0.))
-    .into_any_element()
 }
 
 /// The full path of an entry inside the directory on screen.

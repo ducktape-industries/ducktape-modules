@@ -5,7 +5,9 @@ use ducktape_view_guest::prelude::*;
 use crate::Forge;
 use crate::contract::{Query, Reply, RepoInfo};
 use crate::queries::PAGE;
-use crate::ui::components::{button, chip, empty_state, heading, id, quiet, ref_label, row};
+use crate::ui::components::{
+    button, chip, empty_state, heading, heading_in, id, quiet, ref_label, row,
+};
 use crate::ui::{pending, scroller, staged};
 
 fn query() -> Query {
@@ -121,9 +123,53 @@ pub(crate) fn rail(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> Any
                 .gap_2()
                 .px_3()
                 .py_2()
-                .child(heading(id("forge-rail-title"), "Forge", 1, theme))
+                .bg(theme.sidebar_raised)
+                .border_b_1()
+                .border_color(theme.sidebar_border)
+                .text_color(theme.sidebar_foreground)
+                .child(heading_in(
+                    id("forge-rail-title"),
+                    "Forge",
+                    1,
+                    theme.sidebar_foreground,
+                ))
                 .child(div().flex_1())
-                .child(button(id("forge-rail-home"), "All", theme, home)),
+                .child(
+                    // The rail is ink: its controls wear the sidebar tones,
+                    // never the surface ones the content column uses.
+                    div()
+                        .id(id("forge-rail-home"))
+                        .px_1()
+                        .py_0p5()
+                        .rounded_sm()
+                        .text_size(px(12.))
+                        .text_color(theme.sidebar_muted)
+                        .hover(|style| style.bg(theme.sidebar))
+                        .role(Role::Button)
+                        .focusable()
+                        .on_click(home)
+                        .child("All"),
+                ),
+        )
+        .child(
+            Input::new(id("forge-rail-search"))
+                .h(px(28.))
+                .mx_2()
+                .my_1()
+                .px_2()
+                .py_1()
+                .rounded_md()
+                .border_1()
+                .border_color(theme.sidebar_border)
+                .bg(theme.sidebar_raised)
+                .text_color(theme.sidebar_foreground)
+                .value(forge.search.clone())
+                .placeholder("Search repositories…")
+                .label("Search repositories")
+                .on_input(cx.listener(|forge, text: &String, _, cx| {
+                    forge.search = text.clone();
+                    cx.notify();
+                })),
         );
     let reply = match staged(
         forge,
@@ -146,6 +192,7 @@ pub(crate) fn rail(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> Any
         list = list.child(
             row(id(format!("forge-rail-repo-{name}")), theme)
                 .on_click(open)
+                .sidebar(true)
                 .selected(forge.nav().repo.as_deref() == Some(name.as_str()))
                 .cell(div().flex_1().truncate().child(name)),
         );

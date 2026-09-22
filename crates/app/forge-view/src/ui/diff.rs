@@ -97,15 +97,10 @@ pub(crate) fn render(
             forge.open_comment(at.0.clone(), at.1, at.2, cx)
         }));
     let handle = forge.diff_scroll.clone();
-    let list = uniform_list(id(element_id.to_owned()), count, move |range, _, _| {
-        range
-            .map(|index| paint_row(&rows[index], index, reviewable, &comment, &theme))
-            .collect::<Vec<_>>()
-    })
-    .with_width_from_item(widest)
-    .track_scroll(&handle)
-    .flex_1()
-    .min_h(px(0.));
+    let list =
+        crate::ui::components::rows(element_id, count, widest, Some(&handle), move |index| {
+            paint_row(&rows[index], index, reviewable, &comment, &theme)
+        });
     let Some(strip) = strip else {
         return list.into_any_element();
     };

@@ -1,8 +1,10 @@
 //! The repeated shapes of this view, in chat's visual language: the same
 //! Theme tokens, the same row height, the same button, chip and empty state.
 //! They live here because the crate boundary forbids reaching into chat-view.
+use std::ops::Range;
+
 use ducktape_view_guest::prelude::*;
-use ducktape_view_guest::{FontWeight, Hsla};
+use ducktape_view_guest::{FontWeight, Hsla, UniformListScrollHandle};
 
 pub(crate) fn id(text: impl Into<String>) -> ElementId {
     ElementId::Name(text.into().into())
@@ -114,6 +116,8 @@ where
     id: ElementId,
     theme: Theme,
     selected: bool,
+    /// on the ink rail a row wears the sidebar tones, not the surface ones
+    sidebar: bool,
     children: Vec<AnyElement>,
     click: Option<F>,
 }
@@ -126,6 +130,7 @@ where
         id: id.into(),
         theme: *theme,
         selected: false,
+        sidebar: false,
         children: Vec::new(),
         click: None,
     }
@@ -141,6 +146,10 @@ where
     }
     pub fn selected(mut self, selected: bool) -> Self {
         self.selected = selected;
+        self
+    }
+    pub fn sidebar(mut self, sidebar: bool) -> Self {
+        self.sidebar = sidebar;
         self
     }
     pub fn cell(mut self, child: impl IntoElement) -> Self {
@@ -165,12 +174,17 @@ where
             .px_2()
             .rounded_md()
             .children(self.children);
+        let (chosen, hovered) = if self.sidebar {
+            (theme.sidebar_raised, theme.sidebar_raised)
+        } else {
+            (theme.accent_soft, theme.hover)
+        };
         if self.selected {
-            element = element.bg(theme.accent_soft).aria_selected(true);
+            element = element.bg(chosen).aria_selected(true);
         }
         if let Some(click) = self.click {
             element = element
-                .hover(|style| style.bg(theme.hover))
+                .hover(move |style| style.bg(hovered))
                 .role(Role::Button)
                 .focusable()
                 .on_click(click);
@@ -347,15 +361,67 @@ pub(crate) fn heading(
     level: usize,
     theme: &Theme,
 ) -> AnyElement {
+    heading_in(element_id, text, level, theme.foreground)
+}
+
+/// The same heading in a chosen tone — the ink rail reads its own.
+pub(crate) fn heading_in(
+    element_id: impl Into<ElementId>,
+    text: impl Into<String>,
+    level: usize,
+    color: Hsla,
+) -> AnyElement {
     div()
         .id(element_id.into())
         .text_size(px(if level == 1 { 16. } else { 13. }))
         .font_weight(FontWeight::SEMIBOLD)
-        .text_color(theme.foreground)
+        .text_color(color)
         .role(Role::Heading)
         .aria_level(level)
         .child(text.into())
         .into_any_element()
+}
+
+/// Under this many rows a list is drawn whole. Virtualization buys nothing
+/// at that size, and a renderer that has not sent a visible range yet — a
+/// headless screenshot, a first frame — still gets the screen.
+pub(crate) const VIRTUALIZE_ABOVE: usize = 200;
+
+/// A scrolling list of `count` rows. Over [`VIRTUALIZE_ABOVE`] it is virtual;
+/// at or under it the rows are drawn whole, because virtualization buys
+/// nothing at that size and a renderer that has not asked for a visible range
+/// yet — a first frame, a headless screenshot — would otherwise be handed the
+/// single measured row instead of the screen.
+pub(crate) fn rows(
+    element_id: &str,
+    count: usize,
+    widest: Option<usize>,
+    scroll: Option<&UniformListScrollHandle>,
+    paint: impl Fn(usize) -> AnyElement + 'static,
+) -> AnyElement {
+    if count <= VIRTUALIZE_ABOVE {
+        let mut column = div()
+            .id(id(element_id.to_owned()))
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h(px(0.))
+            .overflow_y_scroll();
+        for index in 0..count {
+            column = column.child(paint(index));
+        }
+        return column.into_any_element();
+    }
+    let mut list = uniform_list(
+        id(element_id.to_owned()),
+        count,
+        move |range: Range<usize>, _, _| range.map(&paint).collect::<Vec<_>>(),
+    )
+    .with_width_from_item(widest);
+    if let Some(scroll) = scroll {
+        list = list.track_scroll(scroll);
+    }
+    list.flex_1().min_h(px(0.)).into_any_element()
 }
 
 pub(crate) fn quiet(text: impl Into<String>, theme: &Theme) -> AnyElement {

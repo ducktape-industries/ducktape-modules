@@ -179,16 +179,26 @@ fn the_files_tab_marks_comments_and_viewed_files_and_can_show_one() {
 fn the_diff_draws_typed_lines_and_believes_the_program_about_a_literal_plus_plus() {
     let (cx, _view) = change_screen("reviewed", ChangeTab::Files);
     assert!(cx.find("forge-diff").is_some());
-    // The list measures its widest source line, so that row is the one a
-    // headless render draws; the rest arrive with the host's visible range.
+    // A diff this small is drawn whole, so the screen carries every row of
+    // the hunk and not only the one the list would have measured.
     assert!(
-        cx.has_text("added"),
-        "the widest line is rendered: {:?}",
+        cx.find("forge-diff-hunk-1").is_some(),
+        "the hunk header is a row: {:?}",
         cx.texts()
     );
+    for line in ["one", "keep", "old", "++ x", "end", "added"] {
+        assert!(cx.has_text(line), "{line} is drawn: {:?}", cx.texts());
+    }
+    for gutter in [
+        "forge-gutter-src/lib.rs-old-1",
+        "forge-gutter-src/lib.rs-new-1",
+        "forge-gutter-src/lib.rs-new-5",
+    ] {
+        assert!(cx.find(gutter).is_some(), "{gutter} carries its number");
+    }
     assert!(
-        cx.has_text("5") && cx.has_text("+"),
-        "its gutter and marker"
+        cx.has_text("+") && cx.has_text("\u{2212}"),
+        "an added and a removed marker"
     );
     let Some(ducktape_view_guest::wire::Node::Container(gutter)) =
         cx.find("forge-gutter-src/lib.rs-new-5")

@@ -6,7 +6,7 @@ use crate::Forge;
 use crate::contract::{Mergeability, Reply};
 use crate::ui::changes::revision_name;
 use crate::ui::components::{empty_state, heading, id, path_text, quiet, ref_label, short_oid};
-use crate::ui::{fact, markdown};
+use crate::ui::{fact, prose};
 
 pub(crate) fn overview(forge: &Forge, theme: &Theme) -> AnyElement {
     let Some((change, source, target, _)) = forge.change() else {
@@ -33,11 +33,7 @@ pub(crate) fn overview(forge: &Forge, theme: &Theme) -> AnyElement {
         .child(fact("Reviews", change.review_count.to_string(), theme))
         .child(fact("Comments", change.comment_count.to_string(), theme))
         .child(fact("Channel", change.channel.clone(), theme))
-        .child(markdown(
-            "forge-overview-body",
-            &change.body,
-            forge.session.dark,
-        ))
+        .child(prose("forge-overview-body", &change.body))
         .into_any_element()
 }
 

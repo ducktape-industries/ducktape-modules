@@ -13,7 +13,7 @@ pub(crate) mod repos;
 pub(crate) mod settings;
 
 use ducktape_view_guest::prelude::*;
-use ducktape_view_guest::{Div, FontWeight, Stateful, wire};
+use ducktape_view_guest::{Div, FontWeight, Stateful};
 
 use crate::state::{Dock, RepoTab};
 use crate::{Forge, contract::Reply};
@@ -446,16 +446,27 @@ pub(crate) fn bold(text: impl Into<String>) -> AnyElement {
         .into_any_element()
 }
 
-/// A host-painted markdown body — README, change bodies, review bodies.
-pub(crate) fn markdown(name: &str, text: &str, dark: bool) -> AnyElement {
-    ducktape_view_guest::surface(
-        id(name.to_owned()),
-        "markdown",
-        vec![
-            wire::SurfaceValue::Str(text.to_owned()),
-            wire::SurfaceValue::Str(String::new()),
-            wire::SurfaceValue::Bool(dark),
-        ],
-    )
-    .into_any_element()
+/// A prose body — README, change bodies, change overview. The host paints no
+/// markdown surface (forge-view.asks.md), so the source is shown as it was
+/// written: paragraphs split on blank lines, nothing swallowed.
+pub(crate) fn prose(name: &str, text: &str) -> AnyElement {
+    let mut column = div()
+        .id(id(name.to_owned()))
+        .flex()
+        .flex_col()
+        .gap_2()
+        .text_size(px(13.));
+    for (at, paragraph) in text
+        .split("\n\n")
+        .map(str::trim)
+        .filter(|paragraph| !paragraph.is_empty())
+        .enumerate()
+    {
+        column = column.child(
+            div()
+                .id(id(format!("{name}-{at}")))
+                .child(paragraph.to_owned()),
+        );
+    }
+    column.into_any_element()
 }
