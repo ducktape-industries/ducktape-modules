@@ -988,6 +988,7 @@ pub(crate) struct Budgets {
     pub(crate) surface_values: usize,
     pub(crate) text: usize,
     pub(crate) pictures: usize,
+    pub(crate) list_items: usize,
 }
 
 impl Budgets {
@@ -996,6 +997,7 @@ impl Budgets {
             nodes: MAX_NODES,
             text: MAX_TEXT_BYTES_PER_FRAME,
             pictures: MAX_PICTURE_BYTES_PER_FRAME,
+            list_items: MAX_LIST_ITEMS,
             surface_values: MAX_SURFACE_VALUES,
             canvas_parts: MAX_CANVAS_PARTS,
             qr_codes: MAX_QR_CODES,
@@ -1159,7 +1161,8 @@ fn sanitize_node(
             for id in path.iter() {
                 id.validate_host()?;
             }
-            *item_count = (*item_count).min(MAX_LIST_ITEMS);
+            *item_count = (*item_count).min(budgets.list_items);
+            budgets.list_items -= *item_count;
             *overdraw = bounded(*overdraw).min(4096.0);
             style_sanitize::sanitize(style);
             commands.truncate(MAX_LIST_COMMANDS);

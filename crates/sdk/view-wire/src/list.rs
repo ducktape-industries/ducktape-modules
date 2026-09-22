@@ -276,6 +276,22 @@ mod variable_tests {
     }
 
     #[test]
+    fn sibling_lists_share_the_native_item_allocation_budget() {
+        let mut frame = Frame {
+            root: Some(Node::Container {
+                id: None, style: Default::default(), interactivity: Default::default(),
+                children: vec![node(Vec::new(), 0), node(Vec::new(), 0)],
+            }), ..Default::default()
+        };
+        sanitize(&mut frame).unwrap();
+        let counts: Vec<_> = frame.root.unwrap().children().iter().map(|child| {
+            let Node::List { item_count, .. } = child else { unreachable!() };
+            *item_count
+        }).collect();
+        assert_eq!(counts, vec![MAX_LIST_ITEMS, 0]);
+    }
+
+    #[test]
     fn a_list_cannot_address_another_authored_ancestor() {
         let mut root = node(Vec::new(), 0);
         let Node::List { path, .. } = &mut root else { unreachable!() };
