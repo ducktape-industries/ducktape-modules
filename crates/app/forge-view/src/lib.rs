@@ -585,7 +585,7 @@ export_view!(
     Forge,
     "Forge",
     "Repositories, code, commits and the changes waiting on your judgment.",
-    ["rpc", "chat"]
+    ["rpc", "op", "host"]
 );
 
 #[cfg(test)]

@@ -371,7 +371,7 @@ export_view!(
     Explorer,
     "Explorer",
     "The programs this network runs and the changes scheduled against them.",
-    ["rpc"]
+    ["rpc", "host"]
 );
 
 #[cfg(test)]

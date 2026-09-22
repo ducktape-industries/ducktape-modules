@@ -1,4 +1,5 @@
-# GPUI-shaped guest contexts, host IO, editor primitives and typed tests.
+# The guest half of the view wire: gpui-shaped contexts, host doors, editor
+# primitives and typed tests. The host half lives in the app repo.
 [package]
 name = "view-guest"
 version = "0.1.0"

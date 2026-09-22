@@ -6378,6 +6378,7 @@ dependencies = [
 name = "view-wire"
 version = "0.1.0"
 dependencies = [
+ "abi",
  "accesskit",
  "borsh",
  "design",
@@ -6387,6 +6388,7 @@ dependencies = [
  "rmp-serde",
  "serde",
  "serde-reflection",
+ "serde_json",
  "sha2 0.10.9",
  "slotmap",
  "unicode-segmentation",

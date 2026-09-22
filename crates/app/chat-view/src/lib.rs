@@ -380,7 +380,7 @@ export_view!(
     Chat,
     "Chat",
     "Channels, direct messages, threads, search and the live call of this workspace.",
-    ["chat"]
+    ["rpc", "op", "host", "fs", "clipboard"]
 );
 
 #[cfg(test)]
