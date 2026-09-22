@@ -460,7 +460,7 @@ fn gen_rule(rng: &mut Rng) -> Node {
 
 fn gen_text(rng: &mut Rng) -> Node {
     Node::Text {
-        id: Some(ElementIdWire::Name(gen_key(rng).into())),
+        id: None,
         style: gpui::StyleRefinement::default(),
         content: gen_string(rng),
         // 0 and 7 are outside 1..=6, for the sanitizer to drop.
@@ -630,7 +630,7 @@ fn gen_progress(rng: &mut Rng) -> Node {
     }
 }
 
-/// A leaf with no children, for filling out a wide `Linear`: every leaf
+/// A leaf with no children, for filling out a wide container: every leaf
 /// variant except `Space` carries a string, a colour or a number worth
 /// pulling into range.
 fn gen_surface(rng: &mut Rng) -> Node {
@@ -672,43 +672,23 @@ fn gen_leaf(rng: &mut Rng) -> Node {
 /// (`deep_chain_bytes` in `lib.rs`) builds a deep chain the same way,
 /// because a recursive builder would blow its own stack before `decode`
 /// ever got a chance to refuse anything.
-/// Either of the two nodes holding a child list, around `children`.
+/// A current wire node holding a child list, around `children`.
+fn gen_container(_rng: &mut Rng, children: Vec<Node>) -> Node {
+    Node::Container {
+        id: None,
+        style: gpui::StyleRefinement::default(),
+        interactivity: Interactivity::default(),
+        children,
+    }
+}
+
 fn gen_list(rng: &mut Rng, children: Vec<Node>) -> Node {
     if rng.next_range(3) == 0 {
-        let count = children.len();
-        return Node::KeyedColumn {
-            background: gen_opt_color(rng),
-            border: gen_opt_border(rng),
-            key: gen_key(rng),
-            keys: Some(
-                (0..count)
-                    .map(|i| view_wire::ListKey::Integer(i as i64))
-                    .collect(),
-            ),
-            spacing: gen_opt_f32(rng),
-            padding: gen_opt_edges(rng),
-            width: gen_opt_length(rng),
-            height: gen_opt_length(rng),
-            max_width: gen_opt_f32(rng),
-            align: gen_opt_align_x(rng),
-            virtual_row: gen_opt_f32(rng),
-            children,
-        };
+        return gen_container(rng, children);
     }
     match rng.next_range(5) {
         0 => {
-            return Node::Hover {
-                key: gen_key(rng),
-                width: gen_opt_length(rng),
-                height: gen_opt_length(rng),
-                padding: gen_opt_edges(rng),
-                background: gen_opt_color(rng),
-                border: gen_opt_border(rng),
-                tint: gen_opt_color(rng),
-                radius: gen_f32(rng),
-                open: rng.next_bool(),
-                children,
-            };
+            return gen_container(rng, children);
         }
         1 => {
             return Node::Overlay {
@@ -724,52 +704,7 @@ fn gen_list(rng: &mut Rng, children: Vec<Node>) -> Node {
         }
         _ => {}
     }
-    if rng.next_range(3) == 0 {
-        return Node::Stack {
-            key: gen_key(rng),
-            width: gen_opt_length(rng),
-            height: gen_opt_length(rng),
-            padding: gen_opt_edges(rng),
-            background: gen_opt_color(rng),
-            border: gen_opt_border(rng),
-            clip: rng.next_bool(),
-            under: rng.next_u64() as u32,
-            children,
-        };
-    }
-    if rng.next_bool() {
-        return Node::Linear {
-            max_width: gen_opt_f32(rng),
-            clip: rng.next_bool(),
-            wrap: rng.next_bool().then(|| Wrap {
-                spacing: gen_opt_f32(rng),
-                align: gen_opt_align_x(rng),
-            }),
-            key: gen_key(rng),
-            axis: gen_axis(rng),
-            spacing: gen_opt_f32(rng),
-            padding: gen_opt_edges(rng),
-            width: gen_opt_length(rng),
-            height: gen_opt_length(rng),
-            align: gen_opt_align_x(rng),
-            background: gen_opt_color(rng),
-            border: gen_opt_border(rng),
-            children,
-        };
-    }
-    Node::Grid {
-        key: gen_key(rng),
-        columns: rng.next_bool().then(|| rng.next_u64() as u32),
-        fluid: gen_opt_f32(rng),
-        spacing: gen_opt_f32(rng),
-        padding: gen_opt_edges(rng),
-        width: gen_opt_length(rng),
-        height: gen_opt_length(rng),
-        aspect: gen_opt_f32(rng),
-        background: gen_opt_color(rng),
-        border: gen_opt_border(rng),
-        children,
-    }
+    gen_container(rng, children)
 }
 
 fn gen_tree(rng: &mut Rng, depth: usize, width: usize) -> Node {
@@ -844,12 +779,7 @@ fn gen_tree(rng: &mut Rng, depth: usize, width: usize) -> Node {
                 on_scroll: rng.next_bool().then(|| rng.next_u64() as u32),
                 content: Box::new(node),
             },
-            0 => Node::Container {
-                id: Some(ElementIdWire::Name(gen_key(rng).into())),
-                style: gpui::StyleRefinement::default(),
-                interactivity: Interactivity::default(),
-                children: vec![node],
-            },
+            0 => gen_container(rng, vec![node]),
             1 => gen_list(rng, vec![node]),
             2 => Node::Scroll {
                 on_scroll: Some(7),
@@ -975,13 +905,7 @@ fn gen_patch_tree(rng: &mut Rng) -> Node {
 fn is_list_node(node: &Node) -> bool {
     matches!(
         node,
-        Node::Container { .. }
-            | Node::Linear { .. }
-            | Node::Grid { .. }
-            | Node::KeyedColumn { .. }
-            | Node::Stack { .. }
-            | Node::Hover { .. }
-            | Node::Overlay { .. }
+        Node::Container { .. } | Node::Tooltip { .. } | Node::Overlay { .. } | Node::When { .. } | Node::Anchored { .. } | Node::Image { .. } | Node::UniformList { .. }
     )
 }
 
@@ -1034,7 +958,7 @@ fn gen_patch(rng: &mut Rng, root: &Node, hostile: bool) -> Patch {
             for child in fresh.children_mut() {
                 *child = Node::empty();
             }
-            if let Node::Linear { children, .. } = &mut fresh {
+            if let Node::Container { children, .. } = &mut fresh {
                 children.clear();
             }
             Patch::Props { path, node: fresh }
@@ -1142,25 +1066,21 @@ fn build_and_encode_bounded(seed: u64) -> (Frame, Vec<u8>) {
 // -------------------------------------------------------- bound assertions
 
 /// The nesting depth `sanitize` would count for this node (root is 0, each
-/// `Container`/`Scroll`/`Linear`/`Grid`/`Button` child adds one) — the same metric
+/// container-like or one-child node adds one) — the same metric
 /// `decode`'s own depth budget counts, so it doubles as "was this tree
 /// really over the door" evidence when `decode` refuses one.
 fn tree_depth(node: &Node) -> usize {
     match node {
-        Node::Container { children, .. } => 1 + children.iter().map(tree_depth).max().unwrap_or(0),
         Node::Sensor { child: content, .. }
         | Node::MouseArea { content, .. }
         | Node::ResizeHandle { content, .. }
-        | Node::Pin { content, .. }
         | Node::Float { content, .. }
         | Node::Responsive { content, .. }
         | Node::Lazy { content, .. }
         | Node::Scroll { content, .. } => 1 + tree_depth(content),
-        Node::Linear { children, .. }
-        | Node::Grid { children, .. }
-        | Node::KeyedColumn { children, .. }
-        | Node::Stack { children, .. }
-        | Node::Hover { children, .. }
+        Node::Container { children, .. }
+        | Node::Anchored { children, .. }
+        | Node::Image { state_children: children, .. }
         | Node::Tooltip { children, .. }
         | Node::Overlay { children, .. }
         | Node::When { children, .. } => 1 + children.iter().map(tree_depth).max().unwrap_or(0),
@@ -1367,20 +1287,6 @@ fn check_bounds(
             }
             check_bounds(content, depth + 1, keys, svg_bytes, ctx);
         }
-        Node::Pin {
-            x,
-            y,
-            width,
-            height,
-            content,
-            ..
-        } => {
-            assert!(x.is_finite() && x.abs() <= PIXEL_BOUND);
-            assert!(y.is_finite() && y.abs() <= PIXEL_BOUND);
-            check_length(width, ctx);
-            check_length(height, ctx);
-            check_bounds(content, depth + 1, keys, svg_bytes, ctx);
-        }
         Node::Tooltip {
             gap,
             padding,
@@ -1401,108 +1307,6 @@ fn check_bounds(
                 assert!(value.is_finite() && value.abs() <= PIXEL_BOUND);
             }
             assert!(children.len() <= 2);
-            for child in children {
-                check_bounds(child, depth + 1, keys, svg_bytes, ctx);
-            }
-        }
-        Node::Linear {
-            max_width,
-            wrap,
-            spacing,
-            padding,
-            width,
-            height,
-            background,
-            border,
-            children,
-            ..
-        } => {
-            check_pixels(max_width, ctx, "linear max width");
-            if let Some(Wrap { spacing: gap, .. }) = wrap {
-                check_pixels(gap, ctx, "linear wrap spacing");
-            }
-            check_pixels(spacing, ctx, "spacing");
-            check_edges(padding, ctx);
-            check_length(width, ctx);
-            check_length(height, ctx);
-            check_color(background, ctx);
-            check_border(border, ctx);
-            for child in children {
-                check_bounds(child, depth + 1, keys, svg_bytes, ctx);
-            }
-        }
-        Node::KeyedColumn {
-            keys: row_keys,
-            spacing,
-            padding,
-            width,
-            height,
-            max_width,
-            virtual_row,
-            children,
-            ..
-        } => {
-            if let Some(row_keys) = row_keys {
-                assert_eq!(row_keys.len(), children.len(), "{ctx}: keyed cardinality");
-            }
-            check_pixels(spacing, ctx, "spacing");
-            check_pixels(max_width, ctx, "max width");
-            check_pixels(virtual_row, ctx, "virtual row");
-            if let Some(estimate) = virtual_row {
-                assert!(*estimate >= 1.0);
-            }
-            check_edges(padding, ctx);
-            check_length(width, ctx);
-            check_length(height, ctx);
-            for child in children {
-                check_bounds(child, depth + 1, keys, svg_bytes, ctx);
-            }
-        }
-        Node::UniformList {
-            id,
-            path,
-            count,
-            measure_index,
-            indices,
-            children,
-            ..
-        } => {
-            id.validate_host().expect("sanitized list identity");
-            assert!(!path.is_empty() && path.len() <= 64);
-            assert_eq!(path.last(), Some(id));
-            assert!(*count <= view_wire::MAX_UNIFORM_LIST_COUNT);
-            assert!(*measure_index <= count.saturating_sub(1));
-            assert_eq!(indices.len(), children.len());
-            assert!(indices.len() <= view_wire::MAX_UNIFORM_LIST_ROWS);
-            assert!(indices.iter().all(|index| (*index as usize) < *count));
-            for child in children {
-                check_bounds(child, depth + 1, keys, svg_bytes, ctx);
-            }
-        }
-        Node::Grid {
-            fluid,
-            spacing,
-            padding,
-            width,
-            height,
-            aspect,
-            background,
-            border,
-            children,
-            ..
-        } => {
-            for (name, value) in [
-                ("grid fluid", fluid),
-                ("grid spacing", spacing),
-                ("grid aspect", aspect),
-            ] {
-                check_pixels(value, ctx, name);
-            }
-            check_edges(padding, ctx);
-            check_length(width, ctx);
-            check_length(height, ctx);
-            check_color(background, ctx);
-            check_border(border, ctx);
             for child in children {
                 check_bounds(child, depth + 1, keys, svg_bytes, ctx);
             }
@@ -1909,49 +1713,6 @@ fn check_bounds(
             check_color(bar, ctx);
             check_border(border, ctx);
         }
-        Node::Stack {
-            width,
-            height,
-            padding,
-            background,
-            border,
-            children,
-            under,
-            ..
-        } => {
-            check_length(width, ctx);
-            check_length(height, ctx);
-            check_edges(padding, ctx);
-            check_color(background, ctx);
-            check_border(border, ctx);
-            assert!(*under <= MAX_NODES as u32, "{ctx}: under budget");
-            for child in children {
-                check_bounds(child, depth + 1, keys, svg_bytes, ctx);
-            }
-        }
-        Node::Hover {
-            width,
-            height,
-            padding,
-            background,
-            border,
-            children,
-            tint,
-            radius,
-            ..
-        } => {
-            check_length(width, ctx);
-            check_length(height, ctx);
-            check_edges(padding, ctx);
-            check_color(background, ctx);
-            check_border(border, ctx);
-            check_color(tint, ctx);
-            check_pixels(&Some(*radius), ctx, "hover radius");
-            assert!(children.len() <= 2, "{ctx}: hover child count");
-            for child in children {
-                check_bounds(child, depth + 1, keys, svg_bytes, ctx);
-            }
-        }
         Node::Overlay {
             label,
             padding,
@@ -1970,9 +1731,8 @@ fn check_bounds(
             }
         }
         Node::Lazy { content, .. } => check_bounds(content, depth + 1, keys, svg_bytes, ctx),
-        Node::Responsive { width, height, .. } => {
-            check_length(width, ctx);
-            check_length(height, ctx);
+        Node::Responsive { content, .. } => {
+            check_bounds(content, depth + 1, keys, svg_bytes, ctx);
         }
         Node::When { condition, .. } => {
             assert!(
