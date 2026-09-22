@@ -1561,8 +1561,11 @@ version = "0.1.0"
 dependencies = [
  "abi",
  "borsh",
+ "chat",
  "gitcore",
  "guest",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1573,9 +1576,11 @@ dependencies = [
  "async-trait",
  "axum",
  "borsh",
+ "chat",
  "flate2",
  "forge",
  "runtime",
+ "serde_json",
  "sha1",
  "sha2 0.10.9",
  "tempfile",

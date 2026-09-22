@@ -1,54 +1,116 @@
-// The query path: listings for a UI, and the two git smart-HTTP bodies a client reads, streamed through the sandbox's response.
-
-use abi::{Refusal, Scan};
+//! UI queries produce one height-bearing Borsh reply. Git protocol queries stream Git bytes.
+use crate::contract::*;
+use crate::ops::{cap, refusal_of};
+use crate::paging::Paging;
+use crate::repo::{load_bounds, load_refs, load_repo, refs_prefix, repo_hash, writers_prefix};
+use crate::sandbox::Sandbox;
+use crate::store::Store;
+use abi::{Env, Refusal};
 use gitcore::wire::receive::advertise_refs;
 use gitcore::wire::smart_http_service_header;
 use gitcore::wire::upload::{
     Command, capability_advertisement, fetch, ls_refs_response, parse_command,
 };
-
-use crate::contract::{Query, RefInfo, Reply, RepoInfo, Service};
-use crate::ops::{cap, refusal_of};
-use crate::repo::{load_bounds, load_refs, load_repo, repo_hash, repo_name, repos_prefix};
-use crate::sandbox::Sandbox;
-use crate::store::Store;
-
 const AGENT: &[u8] = b"ducktape-forge";
 
-pub fn query<S: Sandbox>(sandbox: &S, request: &[u8]) -> Result<(), Refusal> {
-    match abi::decode(request)? {
-        Query::Repos => repos(sandbox),
-        Query::Refs { repo } => refs(sandbox, &repo),
-        Query::Advertise { repo, service } => advertise(sandbox, &repo, service),
-        Query::Upload { repo, request } => upload(sandbox, &repo, &request),
+pub fn query<S: Sandbox>(sandbox: &S, env: &Env, request: &[u8]) -> Result<(), Refusal> {
+    let query: Query = abi::decode(request)?;
+    match &query {
+        Query::Advertise { repo, service } => return advertise(sandbox, repo, *service),
+        Query::Upload { repo, request } => return upload(sandbox, repo, request),
+        _ => {}
     }
-}
-
-fn repos<S: Sandbox>(sandbox: &S) -> Result<(), Refusal> {
-    let listed = sandbox
-        .scan(Scan::prefix(repos_prefix()))
-        .into_iter()
-        .filter_map(|entry| {
-            let name = repo_name(&entry.key)?;
-            let repo = abi::decode(&entry.value).ok()?;
-            Some(RepoInfo { name, repo })
-        })
-        .collect();
-    sandbox.respond(abi::encode(&Reply::Repos(listed)));
+    let height = env.height;
+    let reply = answer(sandbox, height, &query).unwrap_or_else(|r| Reply::Refused {
+        height,
+        reason: r.reason,
+        sentence: r.sentence,
+    });
+    sandbox.respond(abi::encode(&reply));
     Ok(())
 }
-
-fn refs<S: Sandbox>(sandbox: &S, name: &str) -> Result<(), Refusal> {
-    let repo = load_repo(sandbox, name)?;
-    let listed = load_refs(sandbox, name, repo_hash(&repo))?
-        .into_iter()
-        .map(|(reference, target)| RefInfo {
-            name: reference,
-            target: target.to_hex(),
-        })
-        .collect();
-    sandbox.respond(abi::encode(&Reply::Refs(listed)));
-    Ok(())
+fn answer<S: Sandbox>(s: &S, height: u64, q: &Query) -> Result<Reply, Refusal> {
+    let bounds = load_bounds(s)?;
+    let paging = Paging::for_query(height, &bounds, q)?;
+    let p = || paging.as_ref().expect("this query has pagination");
+    Ok(match q {
+        Query::Repos { .. } => {
+            let entries = p().entries(s, b"a/")?;
+            let items = entries
+                .items
+                .into_iter()
+                .map(|e| {
+                    let name = String::from_utf8(e.value)
+                        .map_err(|_| crate::refuse::storage("bad repo activity index"))?;
+                    Ok(RepoInfo {
+                        repo: load_repo(s, &name)?,
+                        name,
+                    })
+                })
+                .collect::<Result<_, Refusal>>()?;
+            Reply::Repos {
+                height,
+                page: Page {
+                    items,
+                    next: entries.next,
+                },
+            }
+        }
+        Query::Repo { repo, .. } => {
+            let record = load_repo(s, repo)?;
+            let prefix = writers_prefix(repo);
+            let entries = p().entries(s, &prefix)?;
+            let items = entries
+                .items
+                .into_iter()
+                .map(|e| e.key[prefix.len()..].to_vec())
+                .collect();
+            Reply::Repo {
+                height,
+                repo: RepoInfo {
+                    name: repo.clone(),
+                    repo: record,
+                },
+                bounds,
+                writers: Page {
+                    items,
+                    next: entries.next,
+                },
+            }
+        }
+        Query::Refs { repo, .. } => {
+            let record = load_repo(s, repo)?;
+            let prefix = refs_prefix(repo);
+            let entries = p().entries(s, &prefix)?;
+            let items = entries
+                .items
+                .into_iter()
+                .map(|e| {
+                    let oid = gitcore::Oid::from_bytes(repo_hash(&record), &e.value)
+                        .map_err(|e| crate::refuse::storage(e.to_string()))?;
+                    Ok(RefInfo {
+                        name: e.key[prefix.len()..].to_vec(),
+                        target: oid.to_hex(),
+                    })
+                })
+                .collect::<Result<_, Refusal>>()?;
+            Reply::Refs {
+                height,
+                page: Page {
+                    items,
+                    next: entries.next,
+                },
+            }
+        }
+        Query::Activity { repo } => Reply::Activity {
+            height,
+            last_height: load_repo(s, repo)?.last_activity,
+        },
+        Query::Changes { .. } | Query::Change { .. } | Query::Judgment { .. } => {
+            crate::change_queries::answer(s, height, q, p())?
+        }
+        _ => crate::reads::answer(s, height, q, &bounds, paging.as_ref())?,
+    })
 }
 
 fn advertise<S: Sandbox>(sandbox: &S, name: &str, service: Service) -> Result<(), Refusal> {

@@ -29,3 +29,15 @@ pub fn capacity(sentence: impl Into<String>) -> Refusal {
 pub fn storage(sentence: impl Into<String>) -> Refusal {
     Refusal::new(reason::PROTOCOL, sentence)
 }
+
+/// A different serving node or object replication can satisfy this query.
+pub const OBJECT_NOT_HELD: &str = "object_not_held";
+pub fn object_not_held(oid: impl std::fmt::Display) -> Refusal {
+    Refusal::new(
+        OBJECT_NOT_HELD,
+        format!("object {oid} is not held by this node"),
+    )
+}
+pub fn stale(sentence: impl Into<String>) -> Refusal {
+    Refusal::new(reason::STALE, sentence)
+}

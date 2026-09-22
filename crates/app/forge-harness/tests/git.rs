@@ -1,171 +1,5 @@
-// Real git as the client: pushes to and clones from forge.wasm on the ducktape runtime through the harness. Skips without git on PATH.
-
-use std::io::Write as _;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
-use std::sync::OnceLock;
-
-use abi::HashKind;
-use forge::{Bounds, Op, Settings};
-use forge_harness::{Failure, Harness};
-use tempfile::TempDir;
-
-const REPO: &str = "project";
-
-fn skipped() -> bool {
-    let git_on_path = Command::new("which")
-        .arg("git")
-        .output()
-        .is_ok_and(|output| output.status.success());
-    if !git_on_path {
-        println!("skipping: git is not on PATH");
-    }
-    !git_on_path
-}
-
-fn wasm() -> &'static [u8] {
-    static WASM: OnceLock<Vec<u8>> = OnceLock::new();
-    WASM.get_or_init(|| {
-        let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let target = std::env::var_os("CARGO_TARGET_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| workspace.join("target"));
-        let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-        let built = Command::new(cargo)
-            .current_dir(&workspace)
-            .env("CARGO_TARGET_DIR", &target)
-            .args([
-                "build",
-                "-p",
-                "forge",
-                "--target",
-                "wasm32-unknown-unknown",
-                "--release",
-            ])
-            .status()
-            .expect("cargo runs");
-        assert!(built.success(), "forge.wasm builds");
-        std::fs::read(target.join("wasm32-unknown-unknown/release/forge.wasm")).expect("forge.wasm")
-    })
-}
-
-struct Remote {
-    rt: tokio::runtime::Runtime,
-    harness: Harness,
-    base: String,
-    url: String,
-}
-
-impl Remote {
-    fn start(bounds: Bounds, hash: HashKind) -> Remote {
-        let rt = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .expect("a tokio runtime");
-        let harness = rt
-            .block_on(Harness::new(wasm(), bounds, b"tester".to_vec()))
-            .expect("the program founds");
-        rt.block_on(harness.create_repo(REPO, hash))
-            .expect("the repository is created");
-        let listener = rt
-            .block_on(tokio::net::TcpListener::bind("127.0.0.1:0"))
-            .expect("a free port");
-        let address = listener.local_addr().expect("a bound address");
-        rt.spawn(harness.serve(listener));
-        Remote {
-            rt,
-            harness,
-            base: format!("http://{address}"),
-            url: format!("http://{address}/{REPO}"),
-        }
-    }
-
-    fn execute(&self, op: &Op) -> Result<Vec<u8>, Failure> {
-        self.rt.block_on(self.harness.execute(op))
-    }
-}
-
-fn git_in(dir: &Path, args: &[&str], traced: bool) -> Output {
-    let trace = if traced { "1" } else { "0" };
-    Command::new("git")
-        .current_dir(dir)
-        .args([
-            "-c",
-            "protocol.version=2",
-            "-c",
-            "user.name=Ada",
-            "-c",
-            "user.email=ada@example.com",
-        ])
-        .args(args)
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GIT_AUTHOR_NAME", "Ada")
-        .env("GIT_AUTHOR_EMAIL", "ada@example.com")
-        .env("GIT_COMMITTER_NAME", "Ada")
-        .env("GIT_COMMITTER_EMAIL", "ada@example.com")
-        .env("GIT_TRACE_CURL", trace)
-        .output()
-        .expect("git runs")
-}
-
-fn git(dir: &Path, args: &[&str]) -> String {
-    let output = git_in(dir, args, false);
-    assert!(
-        output.status.success(),
-        "git {args:?} failed:\n{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8(output.stdout).expect("git prints text")
-}
-
-fn git_fails(dir: &Path, args: &[&str]) -> String {
-    let output = git_in(dir, args, false);
-    assert!(!output.status.success(), "git {args:?} succeeded");
-    String::from_utf8_lossy(&output.stderr).into_owned()
-}
-
-fn commit_file(dir: &Path, name: &str, content: &str) {
-    std::fs::write(dir.join(name), content).expect("the file is written");
-    git(dir, &["add", name]);
-    git(dir, &["commit", "-q", "-m", name]);
-}
-
-fn source_with(commits: usize) -> TempDir {
-    let source = tempfile::tempdir().expect("a temp dir");
-    git(source.path(), &["init", "-q", "-b", "main"]);
-    for index in 0..commits {
-        commit_file(
-            source.path(),
-            &format!("file-{index}"),
-            &format!("{index}\n"),
-        );
-    }
-    source
-}
-
-fn clone(remote: &Remote, args: &[&str]) -> TempDir {
-    let parent = tempfile::tempdir().expect("a temp dir");
-    let mut all = vec!["clone", "-q"];
-    all.extend_from_slice(args);
-    all.push(&remote.url);
-    all.push("clone");
-    git(parent.path(), &all);
-    parent
-}
-
-fn clone_path(parent: &TempDir) -> PathBuf {
-    parent.path().join("clone")
-}
-
-fn head(dir: &Path) -> String {
-    git(dir, &["rev-parse", "HEAD"]).trim().to_owned()
-}
-
-fn log(dir: &Path) -> String {
-    git(dir, &["log", "--format=%H"])
-}
+mod common;
+use common::*;
 
 #[test]
 fn push_then_clone() {
@@ -309,6 +143,33 @@ fn sha256_repository() {
     let cloned = clone(&remote, &[]);
     let cloned = clone_path(&cloned);
     let cloned_head = head(&cloned);
+    let forge::Reply::Log { page, .. } = remote.query(&forge::Query::Log {
+        repo: REPO.into(),
+        from: forge::Revision::Ref(b"refs/heads/main".to_vec()),
+        cursor: None,
+        limit: 1,
+    }) else {
+        panic!();
+    };
+    assert_eq!(page.items[0].oid, cloned_head);
+    let forge::Reply::Tree { page, .. } = remote.query(&forge::Query::Tree {
+        repo: REPO.into(),
+        at: cloned_head.clone(),
+        path: Vec::new(),
+        cursor: None,
+        limit: 1,
+    }) else {
+        panic!();
+    };
+    assert_eq!(page.items[0].oid.len(), 64);
+    let forge::Reply::Blob { blob, .. } = remote.query(&forge::Query::Blob {
+        repo: REPO.into(),
+        oid: page.items[0].oid.clone(),
+        range: None,
+    }) else {
+        panic!();
+    };
+    assert_eq!(blob.bytes, b"0\n");
     assert_eq!(cloned_head.len(), 64);
     assert_eq!(cloned_head, head(source.path()));
     assert_eq!(
@@ -347,8 +208,27 @@ fn gzip_request_bodies() {
     let trace = String::from_utf8_lossy(&fetched.stderr);
     assert!(fetched.status.success(), "{trace}");
     assert!(trace.contains("Content-Encoding: gzip"), "{trace}");
-    let branches = git(&cloned, &["branch", "-r"]);
-    assert_eq!(branches.lines().count(), 31, "{branches}");
+    let branches = git(
+        &cloned,
+        &[
+            "for-each-ref",
+            "--format=%(refname) %(symref)",
+            "refs/remotes/origin",
+        ],
+    );
+    let mut expected: Vec<String> = (0..30)
+        .map(|n| format!("refs/remotes/origin/branch-{n} "))
+        .collect();
+    expected.extend([
+        "refs/remotes/origin/main ".into(),
+        "refs/remotes/origin/HEAD refs/remotes/origin/main".into(),
+    ]);
+    expected.sort();
+    assert_eq!(
+        branches.lines().collect::<Vec<_>>(),
+        expected,
+        "every fetched branch plus the clone's symbolic HEAD"
+    );
 
     let mut request = Vec::new();
     for line in ["command=ls-refs\n", "object-format=sha1\n"] {
@@ -413,9 +293,4 @@ fn upload_advertisement_requires_protocol_v2() {
     .call()
     .expect("the harness answers");
     assert_eq!(missing.status().as_u16(), 404);
-}
-
-fn pkt(out: &mut Vec<u8>, line: &str) {
-    out.extend_from_slice(format!("{:04x}", line.len() + 4).as_bytes());
-    out.extend_from_slice(line.as_bytes());
 }

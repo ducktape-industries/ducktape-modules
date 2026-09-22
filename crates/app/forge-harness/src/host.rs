@@ -12,6 +12,7 @@ const NETWORK: &[u8] = b"harness";
 const PROGRAM: &str = "forge";
 const TIME: u64 = 1_700_000_000;
 
+#[derive(Clone)]
 pub struct MemoryHost {
     actor: Vec<u8>,
     height: u64,
@@ -19,6 +20,9 @@ pub struct MemoryHost {
     blobs: BTreeMap<BlobId, Blob>,
     output: Vec<u8>,
     response: Vec<u8>,
+    pub(crate) chat: ChatStore,
+    pending: Vec<abi::Message>,
+    next_item: u64,
 }
 
 impl MemoryHost {
@@ -30,7 +34,69 @@ impl MemoryHost {
             blobs: BTreeMap::new(),
             output: Vec::new(),
             response: Vec::new(),
+            chat: ChatStore::default(),
+            pending: Vec::new(),
+            next_item: 0,
         }
+    }
+
+    pub fn set_actor(&mut self, actor: Vec<u8>) {
+        self.actor = actor;
+    }
+    pub fn height(&self) -> u64 {
+        self.height
+    }
+    pub fn state_snapshot(&self) -> BTreeMap<Vec<u8>, Vec<u8>> {
+        self.state.clone()
+    }
+    pub fn blob_count(&self) -> usize {
+        self.blobs.len()
+    }
+    pub fn remove_blob(&mut self, id: &BlobId) {
+        self.blobs.remove(id);
+    }
+    pub fn pending(&self) -> &[abi::Message] {
+        &self.pending
+    }
+    /// Just as the kernel does, deliver the previous block's queue, not newly emitted messages.
+    pub fn deliver(&mut self) -> Vec<Result<(), Refusal>> {
+        std::mem::take(&mut self.pending)
+            .into_iter()
+            .map(|m| {
+                if m.target != "chat" {
+                    return Err(Refusal::new(reason::UNKNOWN_PROGRAM, m.target));
+                }
+                let msg = serde_json::from_slice(&m.payload)
+                    .map_err(|e| Refusal::new(reason::PROTOCOL, e.to_string()))?;
+                let frame = chat::Frame {
+                    party: chat::Party::Module(PROGRAM.into()),
+                    height: self.height,
+                    time: TIME,
+                };
+                let before = self.chat.clone();
+                let result = chat::execute(&mut self.chat, &frame, msg);
+                if result.is_err() {
+                    self.chat = before;
+                }
+                result
+            })
+            .collect()
+    }
+    pub fn chat_execute(&mut self, party: chat::Party, msg: chat::ChatMsg) -> Result<(), Refusal> {
+        let before = self.chat.clone();
+        let frame = chat::Frame {
+            party,
+            height: self.height,
+            time: TIME,
+        };
+        let result = chat::execute(&mut self.chat, &frame, msg);
+        if result.is_err() {
+            self.chat = before;
+        }
+        result
+    }
+    pub fn chat_query(&self, q: chat::ChatViewQuery) -> Result<chat::ChatViewReply, Refusal> {
+        chat::query(&self.chat, q)
     }
 
     pub fn advance_height(&mut self) {
@@ -132,14 +198,29 @@ impl runtime::Host for MemoryHost {
                 self.response.extend_from_slice(&bytes);
                 HostReply::Done
             }
-            HostOp::Root(_)
-            | HostOp::Query { .. }
-            | HostOp::Emit(_)
-            | HostOp::Event(_)
-            | HostOp::Crypto(_) => HostReply::Refused(Refusal::new(
-                reason::UNSUPPORTED,
-                "the harness host answers state, blobs, output and response only",
-            )),
+            HostOp::Emit(message) => {
+                let item = abi::ItemRef {
+                    source: PROGRAM.into(),
+                    item: self.next_item,
+                };
+                self.next_item += 1;
+                self.pending.push(message);
+                HostReply::Item(item)
+            }
+            HostOp::Query { program, request } => HostReply::Query(if program == "chat" {
+                serde_json::from_slice(&request)
+                    .map_err(|e| Refusal::new(reason::PROTOCOL, e.to_string()))
+                    .and_then(|q| self.chat_query(q))
+                    .map(|r| serde_json::to_vec(&r).expect("chat reply"))
+            } else {
+                Err(Refusal::new(reason::UNKNOWN_PROGRAM, program))
+            }),
+            HostOp::Root(_) | HostOp::Event(_) | HostOp::Crypto(_) => {
+                HostReply::Refused(Refusal::new(
+                    reason::UNSUPPORTED,
+                    "the harness host answers state, blobs, output and response only",
+                ))
+            }
         }
     }
 }
@@ -235,5 +316,39 @@ mod tests {
         assert_eq!(env.origin, Origin::External(b"me".to_vec()));
         let refused = host.call(HostOp::Event(Vec::new())).await;
         assert!(matches!(refused, HostReply::Refused(_)));
+    }
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct ChatStore(BTreeMap<Vec<u8>, Vec<u8>>);
+impl chat::Read for ChatStore {
+    fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
+        self.0.get(key).cloned()
+    }
+    fn scan(&self, scan: Scan) -> Vec<Entry> {
+        let mut rows: Vec<_> = self
+            .0
+            .iter()
+            .filter(|(k, _)| scan.admits(k))
+            .map(|(k, v)| Entry {
+                key: k.clone(),
+                value: v.clone(),
+            })
+            .collect();
+        if scan.reverse {
+            rows.reverse();
+        }
+        if let Some(n) = scan.limit {
+            rows.truncate(n as usize);
+        }
+        rows
+    }
+}
+impl chat::Write for ChatStore {
+    fn set(&mut self, key: Vec<u8>, value: Vec<u8>) {
+        self.0.insert(key, value);
+    }
+    fn delete(&mut self, key: &[u8]) {
+        self.0.remove(key);
     }
 }

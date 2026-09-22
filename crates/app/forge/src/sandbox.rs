@@ -14,6 +14,8 @@ pub trait Sandbox {
     fn blob_put(&self, hash: HashKind, kind: &str, body: Vec<u8>) -> Result<BlobId, Refusal>;
     fn blob_get(&self, id: BlobId) -> Option<Blob>;
     fn blob_stat(&self, id: BlobId) -> Option<BlobHeader>;
+    fn emit(&self, target: &str, payload: Vec<u8>);
+    fn query(&self, target: &str, request: Vec<u8>) -> Result<Vec<u8>, Refusal>;
     fn output(&self, bytes: Vec<u8>);
     fn respond(&self, bytes: Vec<u8>);
 }
@@ -24,9 +26,14 @@ pub struct MemorySandbox {
     blobs: RefCell<BTreeMap<BlobId, Blob>>,
     output: RefCell<Vec<u8>>,
     response: RefCell<Vec<u8>>,
+    emissions: RefCell<Vec<abi::Message>>,
 }
 
 impl MemorySandbox {
+    pub fn take_emissions(&self) -> Vec<abi::Message> {
+        std::mem::take(&mut self.emissions.borrow_mut())
+    }
+
     pub fn take_output(&self) -> Vec<u8> {
         std::mem::take(&mut self.output.borrow_mut())
     }
@@ -106,6 +113,21 @@ impl Sandbox for MemorySandbox {
             kind: blob.kind.clone(),
             len: blob.body.len() as u64,
         })
+    }
+
+    fn emit(&self, target: &str, payload: Vec<u8>) {
+        self.emissions.borrow_mut().push(abi::Message {
+            target: target.into(),
+            payload,
+            reply: false,
+        });
+    }
+
+    fn query(&self, _target: &str, _request: Vec<u8>) -> Result<Vec<u8>, Refusal> {
+        Err(Refusal::new(
+            reason::UNKNOWN_PROGRAM,
+            "memory sandbox has no sibling programs",
+        ))
     }
 
     fn output(&self, bytes: Vec<u8>) {

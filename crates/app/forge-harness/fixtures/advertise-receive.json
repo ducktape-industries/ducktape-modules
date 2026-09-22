@@ -1,0 +1,1 @@
+{"bytes":524,"codec":"git","height":3,"request":{"Advertise":{"repo":"project","service":"ReceivePack"}},"request_borsh_hex":"030700000070726f6a65637400","sha256":"b2f72d35d7a181ff2129d276177457c55f3265bda9a161f3fb2c7820e5c0269f","wire_type":"git smart HTTP"}

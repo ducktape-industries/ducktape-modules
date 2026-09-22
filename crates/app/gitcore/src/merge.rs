@@ -190,6 +190,12 @@ pub fn merge_lines(base: &[u8], ours: &[u8], theirs: &[u8], max_cost: usize) -> 
     if theirs_unchanged {
         return Ok(Merged::Clean(ours.to_vec()));
     }
+    if [base, ours, theirs]
+        .iter()
+        .any(|text| text.contains(&0) || core::str::from_utf8(text).is_err())
+    {
+        return Ok(Merged::Conflict);
+    }
     let base_lines = crate::diff::split_lines(base);
     let our_lines = crate::diff::split_lines(ours);
     let their_lines = crate::diff::split_lines(theirs);
