@@ -66,10 +66,10 @@ fn editor_node(root: &wire::Node) -> &wire::Node {
 fn clickable(root: &wire::Node, key: &str) -> Option<u32> {
     let mut result = None;
     walk(root, &mut |node| {
-        if node.key() == Some(key)
-            && let wire::Node::Container { interactivity, .. } = node
-        {
-            result = interactivity.on_click;
+        if node.key() == Some(key) {
+            if let wire::Node::Container { interactivity, .. } = node {
+                result = interactivity.on_click;
+            }
         }
     });
     result

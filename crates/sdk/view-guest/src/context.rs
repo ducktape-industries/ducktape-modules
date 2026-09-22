@@ -265,18 +265,6 @@ impl<V: View + 'static> Context<'_, V> {
             entity.update_in_window(app, window, |view, window, cx| f(view, event, window, cx))
         }
     }
-    pub(crate) fn handler<E: 'static>(
-        &self,
-        f: impl Fn(&mut V, &E, &mut Window, &mut Context<V>) + 'static,
-    ) -> u32 {
-        let f = Rc::new(f);
-        slots::handler::<E, Callback<V>>(&self.app.inner.slots, Box::new(move |event| {
-            let f = f.clone();
-            Some(Rc::new(move |view, window, cx| {
-                f(view, &event, window, cx);
-            }))
-        }))
-    }
     pub fn spawn<R: 'static>(
         &self,
         f: impl AsyncFnOnce(WeakEntity<V>, &mut AsyncApp) -> R + 'static,
