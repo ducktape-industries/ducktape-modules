@@ -888,7 +888,14 @@ fn sanitize_tree(root: &mut Node) -> Result<SanitizeReport, &'static str> {
     let (documents, before) = text_amounts(root)?;
     let mut budgets = Budgets::frame();
     let mut taken = Taken::new();
-    sanitize_node(root, 0, &mut budgets, &mut taken)?;
+    let mut identity_scopes = vec![std::collections::HashSet::new()];
+    sanitize_node(
+        root,
+        0,
+        &mut budgets,
+        &mut taken,
+        &mut identity_scopes,
+    )?;
     let (after_documents, after) = text_amounts(root)?;
     if after_documents != documents {
         return Err("frame budget would remove an editor document projection");
@@ -905,17 +912,32 @@ fn sanitize_tree(root: &mut Node) -> Result<SanitizeReport, &'static str> {
 /// send — took nine seconds of the window thread that way.
 type Taken = std::collections::HashMap<String, usize>;
 
-fn reject_duplicate_typed_siblings(children: &[Node]) -> Result<(), &'static str> {
-    let mut seen = std::collections::HashSet::new();
-    for child in children {
-        let Some(IdentityKeyRef::Element(id)) = child.identity() else {
-            continue;
-        };
-        if !seen.insert(id) {
-            return Err("duplicate typed element identity among siblings");
-        }
+/// Typed IDs are unique among the children of the first containing element
+/// with an ID. An id-less wrapper is transparent to that GPUI scope; an
+/// identified node starts a fresh scope for its descendants.
+type IdentityScopes = Vec<std::collections::HashSet<IdentityKey>>;
+
+fn claim_typed_scope(
+    node: &Node,
+    scopes: &mut IdentityScopes,
+) -> Result<bool, &'static str> {
+    let Some(IdentityKeyRef::Element(id)) = node.identity() else {
+        return Ok(false);
+    };
+    let scope = scopes
+        .last_mut()
+        .expect("the root identity scope is always present");
+    if !scope.insert(IdentityKey::Element(id.clone())) {
+        return Err("duplicate typed element identity among siblings");
     }
-    Ok(())
+    scopes.push(std::collections::HashSet::new());
+    Ok(true)
+}
+
+fn finish_typed_scope(scopes: &mut IdentityScopes, started: bool) {
+    if started {
+        scopes.pop();
+    }
 }
 
 /// A key already used in this tree, made unique. A key is the node's
@@ -985,6 +1007,7 @@ fn sanitize_node(
     depth: usize,
     budgets: &mut Budgets,
     taken: &mut Taken,
+    identity_scopes: &mut IdentityScopes,
 ) -> Result<(), &'static str> {
     // The caller guarantees one node of budget; a node too deep spends it
     // on the empty node that stands in for it.
@@ -993,7 +1016,7 @@ fn sanitize_node(
         *node = Node::empty();
         return Ok(());
     }
-    reject_duplicate_typed_siblings(node.children())?;
+    let typed_scope_started = claim_typed_scope(node, identity_scopes)?;
     match node {
         Node::Container {
             id,
@@ -1656,7 +1679,7 @@ fn sanitize_node(
             if budgets.nodes == 0 {
                 break;
             }
-            sanitize_node(child, depth + 1, budgets, taken)?;
+            sanitize_node(child, depth + 1, budgets, taken, identity_scopes)?;
             kept += 1;
         }
         children.truncate(kept);
@@ -1666,6 +1689,7 @@ fn sanitize_node(
         {
             keys.truncate(kept);
         }
+        finish_typed_scope(identity_scopes, typed_scope_started);
         return Ok(());
     }
     for child in node.children_mut() {
@@ -1673,8 +1697,9 @@ fn sanitize_node(
             *child = Node::empty();
             continue;
         }
-        sanitize_node(child, depth + 1, budgets, taken)?;
+        sanitize_node(child, depth + 1, budgets, taken, identity_scopes)?;
     }
+    finish_typed_scope(identity_scopes, typed_scope_started);
     Ok(())
 }
 

@@ -21,6 +21,15 @@ mod identity_tests {
         }
     }
 
+    fn identified_container(id: ElementIdWire, children: Vec<Node>) -> Node {
+        Node::Container {
+            id: Some(id),
+            style: gpui::StyleRefinement::default(),
+            interactivity: Interactivity::default(),
+            children,
+        }
+    }
+
     #[test]
     fn typed_ids_drive_keyed_patch_moves_without_stringification() {
         let old = container(vec![
@@ -56,13 +65,75 @@ mod identity_tests {
             Err("duplicate typed element identity among siblings")
         );
     }
+
+    #[test]
+    fn duplicate_ids_through_anonymous_wrappers_share_the_parent_scope() {
+        let mut frame = Frame {
+            root: Some(container(vec![
+                container(vec![text(ElementIdWire::Name("same".into()), "one")]),
+                text(ElementIdWire::Name("same".into()), "two"),
+            ])),
+            ..Frame::default()
+        };
+        assert_eq!(
+            sanitize(&mut frame),
+            Err("duplicate typed element identity among siblings")
+        );
+    }
+
+    #[test]
+    fn equal_local_ids_under_distinct_identified_parents_are_allowed() {
+        let mut frame = Frame {
+            root: Some(container(vec![
+                identified_container(
+                    ElementIdWire::Name("left".into()),
+                    vec![text(ElementIdWire::Name("child".into()), "left")],
+                ),
+                identified_container(
+                    ElementIdWire::Name("right".into()),
+                    vec![text(ElementIdWire::Name("child".into()), "right")],
+                ),
+            ])),
+            ..Frame::default()
+        };
+        assert!(sanitize(&mut frame).is_ok());
+    }
+
+    #[test]
+    fn numeric_and_name_ids_remain_distinct_in_one_scope() {
+        let mut frame = Frame {
+            root: Some(container(vec![
+                text(ElementIdWire::Integer(1), "number"),
+                text(ElementIdWire::Name("1".into()), "name"),
+            ])),
+            ..Frame::default()
+        };
+        assert!(sanitize(&mut frame).is_ok());
+    }
+
+    #[test]
+    fn patch_inserting_a_collision_hidden_by_a_wrapper_is_refused() {
+        let mut root = container(vec![text(ElementIdWire::Name("same".into()), "one")]);
+        let result = apply(
+            &mut root,
+            vec![view_wire::Patch::Insert {
+                path: vec![],
+                index: 1,
+                node: container(vec![text(ElementIdWire::Name("same".into()), "two")]),
+            }],
+        );
+        assert_eq!(
+            result,
+            Err("duplicate typed element identity among siblings")
+        );
+    }
 }
 
 #[cfg(test)]
 mod style_tests {
     use gpui::{ElementId, SharedString};
     use std::sync::Arc;
-    use view_wire::{ElementIdWire, ElementIdAtom, MAX_ELEMENT_ID_DEPTH};
+    use view_wire::{ElementIdAtom, ElementIdWire, MAX_ELEMENT_ID_DEPTH};
 
     #[test]
     fn named_child_is_flattened_and_round_trips() {
@@ -96,15 +167,13 @@ mod style_tests {
     #[test]
     fn unsupported_or_invalid_ids_are_rejected_without_fallbacks() {
         assert!(ElementIdWire::FocusHandle(1).to_gpui().is_err());
-        assert!(
-            ElementIdWire::CodeLocation {
-                file: "view.rs".into(),
-                line: 1,
-                column: 1,
-            }
-            .to_gpui()
-            .is_err()
-        );
+        assert!(ElementIdWire::CodeLocation {
+            file: "view.rs".into(),
+            line: 1,
+            column: 1,
+        }
+        .to_gpui()
+        .is_err());
         assert!(ElementIdWire::Path(vec![0xff]).to_gpui().is_err());
     }
 }
