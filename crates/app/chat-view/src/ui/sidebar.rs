@@ -60,7 +60,7 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
         };
         cx.notify();
     });
-    let mut content = div()
+    let content = div()
         .id(ElementId::Name("chat-sidebar".into()))
         .flex()
         .flex_col()
@@ -333,7 +333,7 @@ fn voice_button(
 }
 
 fn with_seats(chat: &Chat, info: &ChannelInfo, row: impl IntoElement, theme: &Theme) -> AnyElement {
-    let mut content = div()
+    let content = div()
         .id(ElementId::Name(
             format!("chat-sidebar-seats-{}", info.channel.id).into(),
         ))

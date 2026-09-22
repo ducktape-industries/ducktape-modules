@@ -225,11 +225,11 @@ fn huddle(
             theme.accent_foreground,
             theme.accent_soft,
         ));
-        let show = cx.listener(|chat, _: &ClickEvent, _window, cx| {
+        let show = cx.listener(|_chat, _: &ClickEvent, _window, cx| {
             cx.host().notify::<crate::api::ShowHuddle>(());
             cx.notify();
         });
-        let leave = cx.listener(|chat, _: &ClickEvent, _window, cx| {
+        let leave = cx.listener(|_chat, _: &ClickEvent, _window, cx| {
             cx.host().notify::<crate::api::LeaveHuddle>(());
             cx.notify();
         });
@@ -249,7 +249,7 @@ fn huddle(
     } else {
         let channel = info.channel.id.clone();
         let voice = info.channel.voice;
-        let join = cx.listener(move |chat, _: &ClickEvent, _window, cx| {
+        let join = cx.listener(move |_chat, _: &ClickEvent, _window, cx| {
             if voice {
                 cx.host()
                     .notify::<crate::api::JoinVoice>(serde_json::json!({"id": channel}));
@@ -360,7 +360,7 @@ fn search_results(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl In
     ))
 }
 
-fn gate(chat: &Chat, refusal: &str, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement {
+fn gate(_chat: &Chat, refusal: &str, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement {
     let mut notice = div()
         .id(ElementId::Name("chat-room-write-refusal".into()))
         .mx_3()
@@ -438,13 +438,6 @@ fn short_id(id: &str, keep: usize) -> String {
     head
 }
 
-pub fn loading(key: String) -> impl IntoElement {
-    div()
-        .id(ElementId::Name(key.into()))
-        .p_6()
-        .child("Loading messages…")
-}
-
 pub fn selection_bar(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement {
     let count = chat.copy_count();
     if count == 0 {
@@ -474,6 +467,3 @@ pub fn selection_bar(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl
         .into_any_element()
 }
 
-pub fn composer_key(target: &Target) -> String {
-    crate::draft_key(target)
-}

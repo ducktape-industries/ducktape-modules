@@ -9,7 +9,6 @@ use crate::chat::{ChannelInfo, MsgRow};
 use crate::{Chat, Room, Thread, WINDOW};
 
 pub(crate) const STREAM_KEY: &str = "chat/room/stream";
-pub(crate) const THREAD_KEY: &str = "chat/thread/stream";
 
 impl Chat {
     /// A room the reader chose: opened here, and named to the host so its
@@ -208,16 +207,6 @@ impl Chat {
             });
         })
         .detach();
-    }
-
-    /// The stream scrolled: near its top an older page is asked for; at its
-    /// tail there is nothing to jump to.
-    pub(crate) fn scrolled(&mut self, relative_y: f32, cx: &mut Context<Self>) {
-        let Some(room) = &mut self.room else { return };
-        room.at_tail = relative_y.is_nan() || relative_y <= 0.02;
-        if relative_y >= 0.9 {
-            self.load_older(cx);
-        }
     }
 
     /// Settled native list geometry drives paging and tail state. Wheel deltas
