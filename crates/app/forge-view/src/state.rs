@@ -8,7 +8,7 @@ use ducktape_view_guest::{Task, UniformListScrollHandle};
 use serde::{Deserialize, Serialize};
 
 use crate::api::Session;
-use crate::contract::{LineComment, Query, Reply, Revision, Side, Verdict};
+use forge::{LineComment, Query, Reply, Revision, Side, Verdict};
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct Forge {

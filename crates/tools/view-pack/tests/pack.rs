@@ -73,8 +73,10 @@ fn built_chat_blob_satisfies_host_reader_and_manifest_contract() {
             "--release",
             "--target",
             "wasm32-unknown-unknown",
-            "--manifest-path",
-            "crates/app/chat-program/Cargo.toml",
+            "-p",
+            "chat",
+            "--features",
+            "program",
         ],
     );
     build(
@@ -91,12 +93,12 @@ fn built_chat_blob_satisfies_host_reader_and_manifest_contract() {
         ],
     );
     let release = target.join("wasm32-unknown-unknown/release");
-    let program = fs::read(release.join("chat_program.wasm")).unwrap();
+    let program = fs::read(release.join("chat.wasm")).unwrap();
     let view = fs::read(release.join("chat_view.wasm")).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let blob = dir.path().join("chat.wasm");
     let status = Command::new(env!("CARGO_BIN_EXE_view-pack"))
-        .arg(release.join("chat_program.wasm"))
+        .arg(release.join("chat.wasm"))
         .arg(release.join("chat_view.wasm"))
         .arg(&blob)
         .status()

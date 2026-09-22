@@ -10,9 +10,9 @@ repository.
 | `crates/sdk/ducklink` | the `duck://` link: `duck://<chain>/<program>/<tail…>`, one spelling per name, no program names known here |
 | `crates/sdk/view-wire`, `view-guest`, `design` | the host<->view wire, the runtime a wasm view is written against, the palette |
 | `crates/modules` | the boot set: the `modules` crate (each program's `Op`, `Query` and `Reply`, `AUTHORITY`, `Page`, the helpers a program builds on), `system/` (the wasm32 workspace of `module-registry`, `valset` and `identity`; `make wasm-programs` rebuilds them into `system/wasm/`), and `tests/system.rs`, which founds ducktape's host over the committed bytes and drives every program |
-| `crates/app/chat`, `chat-program`, `chat-view` | the reference app module: `chat` is its types and rules over a `Read`/`Write` store (native, tested), `chat-program` the wasm32 program that runs them over the host, `chat-view` the view, which links `chat` for its types and never the program |
+| `crates/app/chat`, `chat-view` | the reference app module: `chat` is one crate whose types and rules over a `Read`/`Write` store are always built (native, tested), and whose wasm32 program over the host sits behind its `program` feature. `chat-view` links `chat` with the feature off: the types, no host import, no program export |
 | `crates/app/gitcore` | git as a `no_std` library over one `Objects` trait: objects, packs, walks, diff, merge, and the server side of the wire protocol (receive-pack v1, upload-pack v2) |
-| `crates/app/forge` | the git server as a program: a push is one op whose input is the receive-pack body a client sent, a merge is an op, fetch and the ref advertisement are queries; a git object's blob id is its oid |
+| `crates/app/forge`, `forge-view` | the git server as a program, the same shape as `chat`: a push is one op whose input is the receive-pack body a client sent, a merge is an op, fetch and the ref advertisement are queries; a git object's blob id is its oid. The rules run natively over `MemorySandbox`, which is where `fixtures/` comes from; `forge-view` links `forge` with `program` off |
 | `crates/app/forge-harness` | a dev rig, not product: runs `forge.wasm` on ducktape's `runtime` over an in-memory host and speaks git smart HTTP, so real `git` pushes to and clones from the program without a network |
 
 A view links its module by path and reads its types. A program is a cdylib
@@ -53,6 +53,12 @@ guest::program!(Counter);
 An entry point receives the context (`Execute` writes, sends and sets
 output; `Query` responds; both read through `Reads`) and the `Env` of the
 call; nothing reaches the host by any other path.
+
+An app program is one crate: its types and rules are always built, and the
+glue above (`guest`, `program!`) sits behind a cargo feature `program`, off by
+default. `make wasm-programs` builds the crate with `--features program`; its
+view links the same crate with the feature off and gets the types with no
+host import and no export, which `make wasm-views` checks.
 
 ## A view
 

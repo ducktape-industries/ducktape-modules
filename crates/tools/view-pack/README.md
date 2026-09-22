@@ -17,13 +17,14 @@ the view from the program code blob and passes that view to
 
 `make wasm-modules` builds the system programs, app programs, and views, then
 refreshes `crates/modules/system/wasm/*.wasm` and `crates/app/wasm/*.wasm`.
-Currently `chat_program.wasm` embeds `chat_view.wasm`; Forge and the system
-programs have no view. A founding file must name the packaged program artifact
-as its code. The kernel stores those complete bytes in its code blob.
+`chat.wasm` embeds `chat_view.wasm`, `forge.wasm` embeds `forge_view.wasm`
+and `module_registry.wasm` embeds `settings_view.wasm`. A founding file must
+name the packaged program artifact as its code. The kernel stores those
+complete bytes in its code blob.
 
 `make wasm-modules-check` rebuilds into `target/pack/rebuilt`, reports every
 stale committed artifact, and verifies stripping restores the built program.
-Both targets honor `CARGO_TARGET_DIR` across all three Cargo workspaces.
+Both targets honor `CARGO_TARGET_DIR` across both Cargo workspaces.
 The integration test builds Chat and its view, invokes the CLI, and verifies
 the app's section-reader contract and actual manifest parser. Its nested Cargo
 build logs are saved under `target/pack/test-{program,view}.log`.

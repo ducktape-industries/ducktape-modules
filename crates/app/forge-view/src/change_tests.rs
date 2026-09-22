@@ -2,9 +2,9 @@
 //! reviewer's Files tab, and the one operation a review becomes.
 use super::{change_screen, opened};
 use crate::api::{ChatApi, SubmitForge};
-use crate::contract::{LineComment, Op, Side, Verdict};
 use crate::state::ChangeTab;
 use ducktape_view_guest::view::Submit;
+use forge::{LineComment, Op, Side, Verdict};
 
 #[test]
 fn the_change_list_shows_the_plans_row_and_its_filters() {

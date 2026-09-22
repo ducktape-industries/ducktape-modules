@@ -2,8 +2,8 @@
 //! it all becomes. A refusal keeps every draft.
 use ducktape_view_guest::Context;
 
-use crate::contract::{Op, ReviewDraft, Verdict};
 use crate::state::{Forge, PendingComment, ReviewSession, change_key};
+use forge::{Op, ReviewDraft, Verdict};
 
 impl Forge {
     // -------------------------------------------------------- the review
@@ -86,14 +86,14 @@ impl Forge {
         };
         if open.body.trim().is_empty() {
             review.comments.retain(|staged| !staged.anchors(&open));
-        } else if review.comments.len() >= crate::contract::MAX_REVIEW_COMMENTS
+        } else if review.comments.len() >= forge::MAX_REVIEW_COMMENTS
             && review
                 .staged(&open.path, open.new_side, open.line)
                 .is_none()
         {
             review.error = format!(
                 "A review carries at most {} line comments",
-                crate::contract::MAX_REVIEW_COMMENTS
+                forge::MAX_REVIEW_COMMENTS
             );
             review.open = Some(open);
         } else {

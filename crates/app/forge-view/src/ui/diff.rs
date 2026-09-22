@@ -8,9 +8,9 @@ use std::rc::Rc;
 use ducktape_view_guest::prelude::*;
 
 use crate::Forge;
-use crate::contract::{Content, FileDiff, FileStatus, LineKind, Query, Reply, Side};
 use crate::ui::components::{chip, empty_state, id, mono, path_text, quiet};
 use crate::ui::staged;
+use forge::{Content, FileDiff, FileStatus, LineKind, Query, Reply, Side};
 
 /// A route an event of a virtual row takes back into the view.
 pub(crate) type Route<E> = Rc<dyn Fn(&E, &mut Window, &mut App)>;

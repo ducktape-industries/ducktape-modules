@@ -1,12 +1,11 @@
-//! Borsh is the program contract. Serde is only for human-readable fixture sidecars.
+//! Borsh is the program contract; the view links these types as they are.
 use abi::HashKind;
 use borsh::{BorshDeserialize, BorshSerialize};
-use serde::Serialize;
 
 pub use crate::read_contract::*;
 pub use crate::review_contract::*;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct Bounds {
     pub max_objects: u64,
     pub max_delta_depth: u64,
@@ -28,7 +27,7 @@ pub struct Bounds {
     pub record_bytes: u64,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct Settings {
     pub head: Vec<u8>,
     pub allow_force: bool,
@@ -43,27 +42,19 @@ impl Default for Settings {
         }
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct Repo {
-    #[serde(serialize_with = "serialize_hash")]
     pub hash: HashKind,
     pub owner: Vec<u8>,
     pub settings: Settings,
     pub refs_count: u64,
     pub last_activity: u64,
 }
-fn serialize_hash<S: serde::Serializer>(hash: &HashKind, s: S) -> Result<S::Ok, S::Error> {
-    s.serialize_str(match hash {
-        HashKind::Sha1 => "sha1",
-        HashKind::Sha256 => "sha256",
-    })
-}
 
-#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Op {
     Create {
         repo: String,
-        #[serde(serialize_with = "serialize_hash")]
         hash: HashKind,
     },
     Configure {
@@ -118,13 +109,13 @@ pub enum Op {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Service {
     ReceivePack,
     UploadPack,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Query {
     Repos {
         cursor: Option<Cursor>,
@@ -205,18 +196,18 @@ pub enum Query {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct RepoInfo {
     pub name: String,
     pub repo: Repo,
 }
-#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct RefInfo {
     pub name: Vec<u8>,
     pub target: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Reply {
     Repos {
         height: u64,
@@ -284,7 +275,7 @@ pub enum Reply {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum OpReply {
     Change {
         height: u64,

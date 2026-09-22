@@ -12,10 +12,13 @@ SYSTEM := crates/modules/system
 # from (crates/kernel/fixtures, `make kernel-fixtures` there).
 DUCKTAPE ?= ../ducktape
 
-# The app programs, by manifest path: chat-program is its own wasm32 workspace
-# (the view links `chat`, never a program), forge a root member whose wasm
-# entry is wasm32-gated.
-PROGRAMS := crates/app/chat-program crates/app/forge
+# The app programs: root members whose program ABI (the guest glue, the
+# `alloc`/`call` exports, the `ducktape.*` imports) sits behind their `program`
+# feature. Their views link the same crates with the feature off. One cargo
+# invocation per program: forge links chat, and `-p chat -p forge --features
+# program` in one call would unify `chat/program` into forge's link (two
+# `alloc`/`call`).
+PROGRAMS := chat forge
 
 # Views are wasm32 cdylibs. Chat and Forge ride their own programs;
 # Settings rides the registry.
@@ -25,8 +28,9 @@ VIEWS := chat-view members-view node-view explorer-view settings-view forge-view
 # signing/identity graph (blst does not build for wasm32, and a view has no
 # business holding keys). `modules` is here because the system views read the
 # boot set's contracts: its signing deps are dev-only, and `-e normal` below
-# is what says so.
-VIEW_LINKABLE := ducklink view-wire view-guest design modules settings-view
+# is what says so. `chat` and `forge` are linked with `program` off, which is
+# what a plain `-p` build below checks.
+VIEW_LINKABLE := ducklink view-wire view-guest design modules settings-view chat forge
 VIEW_FORBIDDEN := blst commonware-cryptography wasm-bindgen js-sys web-sys
 
 .PHONY: program-wasm-check wasm-programs probe-fixture wasm-views view-wasm-check
@@ -51,13 +55,13 @@ wasm-modules-build: wasm-views
 	$(CARGO) build --manifest-path $(SYSTEM)/Cargo.toml \
 	  --target-dir $(BUILD_TARGET) --target wasm32-unknown-unknown --release
 	@for p in $(PROGRAMS); do \
-	  $(CARGO) build --manifest-path $$p/Cargo.toml --target-dir $(BUILD_TARGET) --target wasm32-unknown-unknown --release || exit 1; \
+	  $(CARGO) build -p $$p --features program --target-dir $(BUILD_TARGET) --target wasm32-unknown-unknown --release || exit 1; \
 	done
 	@mkdir -p $(PACK_DIR)
-	@for name in module_registry valset identity chat_program forge; do \
+	@for name in module_registry valset identity chat forge; do \
 	  cp $(BUILD_TARGET)/wasm32-unknown-unknown/release/$$name.wasm $(PACK_DIR)/$$name.wasm || exit 1; \
 	done
-	$(PACKER) $(PACK_DIR)/chat_program.wasm $(BUILD_TARGET)/wasm32-unknown-unknown/release/chat_view.wasm $(PACK_DIR)/chat_program.wasm
+	$(PACKER) $(PACK_DIR)/chat.wasm $(BUILD_TARGET)/wasm32-unknown-unknown/release/chat_view.wasm $(PACK_DIR)/chat.wasm
 	$(PACKER) $(PACK_DIR)/module_registry.wasm $(BUILD_TARGET)/wasm32-unknown-unknown/release/settings_view.wasm $(PACK_DIR)/module_registry.wasm
 	$(PACKER) $(PACK_DIR)/forge.wasm $(BUILD_TARGET)/wasm32-unknown-unknown/release/forge_view.wasm $(PACK_DIR)/forge.wasm
 
@@ -65,18 +69,18 @@ wasm-modules-build: wasm-views
 wasm-modules: wasm-modules-build
 	@mkdir -p crates/app/wasm
 	@for name in module_registry valset identity; do cp $(PACK_DIR)/$$name.wasm $(SYSTEM)/wasm/$$name.wasm || exit 1; done
-	@for name in chat_program forge; do cp $(PACK_DIR)/$$name.wasm crates/app/wasm/$$name.wasm || exit 1; done
+	@for name in chat forge; do cp $(PACK_DIR)/$$name.wasm crates/app/wasm/$$name.wasm || exit 1; done
 
 wasm-programs: wasm-modules
 
 ## Report every stale artifact in one run, including program-only drift.
 wasm-modules-check: wasm-modules-build
 	@stale=0; \
-	for entry in module_registry:$(SYSTEM)/wasm valset:$(SYSTEM)/wasm identity:$(SYSTEM)/wasm chat_program:crates/app/wasm forge:crates/app/wasm; do \
+	for entry in module_registry:$(SYSTEM)/wasm valset:$(SYSTEM)/wasm identity:$(SYSTEM)/wasm chat:crates/app/wasm forge:crates/app/wasm; do \
 	  name=$${entry%%:*}; file=$${entry#*:}/$$name.wasm; \
 	  if ! cmp -s $(PACK_DIR)/$$name.wasm $$file; then echo "stale: $$file"; stale=1; fi; \
 	done; \
-	for name in chat_program module_registry forge; do \
+	for name in chat module_registry forge; do \
 	  $(PACKER) --strip $(PACK_DIR)/$$name.wasm $(PACK_DIR)/$$name.stripped.wasm || exit 1; \
 	  cmp $(PACK_DIR)/$$name.stripped.wasm $(BUILD_TARGET)/wasm32-unknown-unknown/release/$$name.wasm || exit 1; \
 	done; \
@@ -123,7 +127,7 @@ view-wasm-check:
 	  exit 1; \
 	fi
 
-# The forge harness and contract gate need only this app program.
+# The forge harness needs only this app program.
 .PHONY: forge-wasm
 forge-wasm:
-	$(CARGO) build -p forge --target wasm32-unknown-unknown --release
+	$(CARGO) build -p forge --features program --target wasm32-unknown-unknown --release

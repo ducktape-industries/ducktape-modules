@@ -11,10 +11,11 @@
 #                   module-registry, valset and identity, their bytes committed
 #                   under `system/wasm/`) and the suite that drives them on the
 #                   host
-#   crates/app/     the app modules: chat (its types and rules, which the view
-#                   links), chat-program (the wasm32 program over them) and
-#                   chat-view; forge (the git server as a program), gitcore
-#                   (the git it links) and forge-harness (its rig: the wasm on
+#   crates/app/     the app modules: chat and forge (each one crate: types and
+#                   rules always, the wasm32 program behind the `program`
+#                   feature), chat-view and forge-view (which link their
+#                   program crate with the feature off), gitcore (the git forge
+#                   links) and forge-harness (forge's rig: the wasm on
 #                   ducktape's runtime, real git as the client)
 #
 # A view links its module by path and reads its types; a view is a cdylib for
@@ -48,7 +49,7 @@ members = [
     "crates/app/forge",
     "crates/app/forge-harness",
 ]
-exclude = ["crates/modules/system", "crates/app/chat-program"]
+exclude = ["crates/modules/system"]
 
 [workspace.package]
 edition = "2024"
@@ -66,6 +67,7 @@ ducktape-view-guest = { path = "crates/sdk/view-guest", package = "view-guest" }
 gpui = { package = "gpui-pre", git = "https://github.com/ducktape-industries/gpui-pre", rev = "5545e0156ec81ef772c2af8c12283c67f646bd14", default-features = false }
 modules = { path = "crates/modules" }
 gitcore = { path = "crates/app/gitcore" }
+chat = { path = "crates/app/chat" }
 forge = { path = "crates/app/forge" }
 
 # ---- the host the boot set's suite runs on, the probe fixture it seats, the

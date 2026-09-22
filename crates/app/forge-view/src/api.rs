@@ -7,7 +7,7 @@ use ducktape_view_guest::view::{Capability, Module, json_encode};
 use ducktape_view_guest::{capability, caps::QueryBytes};
 use serde::{Deserialize, Serialize};
 
-use crate::contract::{Op, Query, Reply};
+use forge::{Op, Query, Reply};
 
 /// `rpc.query_bytes` to forge: [`QueryBytes<ForgeProgram>`].
 pub struct ForgeProgram;

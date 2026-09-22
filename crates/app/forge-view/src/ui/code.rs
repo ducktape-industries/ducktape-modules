@@ -4,10 +4,10 @@
 use ducktape_view_guest::prelude::*;
 
 use crate::Forge;
-use crate::contract::{Content, EntryKind, Query, Reply, TreeInfo};
 use crate::queries::PAGE;
 use crate::ui::components::{button, empty_state, heading, id, mono, path_text, quiet, row};
 use crate::ui::{prose, scroller, staged};
+use forge::{Content, EntryKind, Query, Reply, TreeInfo};
 
 pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
     let mut columns = div().id(id("forge-code")).flex().flex_1().min_h(px(0.));

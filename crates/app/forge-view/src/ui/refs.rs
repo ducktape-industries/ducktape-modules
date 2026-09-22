@@ -3,10 +3,10 @@
 use ducktape_view_guest::prelude::*;
 
 use crate::Forge;
-use crate::contract::{Mergeability, Query, Reply, Revision};
 use crate::queries::PAGE;
 use crate::ui::components::{button, chip, empty_state, id, quiet, ref_label, row, short_oid};
 use crate::ui::{pending, scroller, staged};
+use forge::{Mergeability, Query, Reply, Revision};
 
 pub(crate) fn render(
     forge: &Forge,

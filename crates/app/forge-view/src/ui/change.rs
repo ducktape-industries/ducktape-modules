@@ -3,13 +3,13 @@
 use ducktape_view_guest::prelude::*;
 
 use crate::Forge;
-use crate::contract::{ChangeState, Query, Reply, Verdict};
 use crate::state::{ChangeTab, Dock, verdict_label};
 use crate::ui::changes::{revision_name, state_chip};
 use crate::ui::components::{
     button, chip, empty_state, heading, id, path_text, quiet, ref_label, row, short_oid,
 };
 use crate::ui::{commits, diff, pending, prose, scroller, staged};
+use forge::{ChangeState, Query, Reply, Verdict};
 
 pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
     let Some(query) = forge.change_query() else {

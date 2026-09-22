@@ -3,10 +3,10 @@
 use ducktape_view_guest::prelude::*;
 
 use crate::Forge;
-use crate::contract::{ChangeState, ChangeSummary, Judgment, Reply, ReviewCounts};
 use crate::state::{ChangeForm, Filter};
 use crate::ui::components::{button, chip, empty_state, heading, id, quiet, ref_label, row};
 use crate::ui::{pending, scroller, staged};
+use forge::{ChangeState, ChangeSummary, Judgment, Reply, ReviewCounts};
 
 pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
     let mut column = div()
@@ -122,10 +122,10 @@ pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
     column.child(list).into_any_element()
 }
 
-pub(crate) fn revision_name(revision: &crate::contract::Revision) -> Vec<u8> {
+pub(crate) fn revision_name(revision: &forge::Revision) -> Vec<u8> {
     match revision {
-        crate::contract::Revision::Ref(name) => name.clone(),
-        crate::contract::Revision::Oid(oid) => oid.clone().into_bytes(),
+        forge::Revision::Ref(name) => name.clone(),
+        forge::Revision::Oid(oid) => oid.clone().into_bytes(),
     }
 }
 
@@ -344,7 +344,7 @@ fn reviewers(
                 if let Some(form) = &mut forge.form {
                     if let Some(at) = form.reviewers.iter().position(|held| *held == key) {
                         form.reviewers.remove(at);
-                    } else if form.reviewers.len() < crate::contract::MAX_REVIEWERS {
+                    } else if form.reviewers.len() < forge::MAX_REVIEWERS {
                         form.reviewers.push(key.clone());
                     }
                 }

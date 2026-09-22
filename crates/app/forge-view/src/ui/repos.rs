@@ -3,12 +3,12 @@
 use ducktape_view_guest::prelude::*;
 
 use crate::Forge;
-use crate::contract::{Query, Reply, RepoInfo};
 use crate::queries::PAGE;
 use crate::ui::components::{
     button, chip, empty_state, heading, heading_in, id, quiet, ref_label, row,
 };
 use crate::ui::{pending, scroller, staged};
+use forge::{Query, Reply, RepoInfo};
 
 fn query() -> Query {
     Query::Repos {

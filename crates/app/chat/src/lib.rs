@@ -5,6 +5,9 @@
 //! [`ChatViewQuery`] answered by a [`ChatViewReply`] (JSON) — the same
 //! types `chat-view` links. The acting [`Party`] is the frame's origin: an
 //! external key resolved through the `identity` program to its account.
+//! The rules run over any [`Read`]/[`Write`] store; the `program` feature
+//! adds the wasm32 program over the host (`program.rs`), which a view never
+//! enables.
 //!
 //! Keys: `chan/<id>` → [`ChannelRow`], `seq/<id>` → head seq,
 //! `msg/<ch>/<seq>` → [`MsgRow`], `root/<ch>/<!seq>` timeline roots newest
@@ -294,6 +297,8 @@ fn put_row(store: &mut impl Write, row: &MsgRow) -> Result<(), Refusal> {
 }
 
 mod ops;
+#[cfg(feature = "program")]
+mod program;
 mod queries;
 mod wire;
 pub use ops::execute;

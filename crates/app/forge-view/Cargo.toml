@@ -5,10 +5,9 @@ version.workspace = true
 publish = false
 
 # A Rust-authored view, exported as a dynamically loaded wasm module by
-# `export_view!`. It links `chat` for the conversation wire and `abi` for
-# borsh and hex — never the `forge` program, which carries gitcore and the
-# program ABI; its wire is mirrored in `src/contract.rs` and pinned by
-# `tests/contract.rs` against the program's own fixtures.
+# `export_view!`. It links `forge` for its wire and `chat` for the
+# conversation wire, both with their `program` feature off: the types and
+# rules, no host import and no program export.
 [lib]
 crate-type = ["cdylib", "rlib"]
 
@@ -17,7 +16,8 @@ ducktape-view-guest.workspace = true
 abi.workspace = true
 base64.workspace = true
 borsh.workspace = true
-chat = { path = "../chat" }
+chat.workspace = true
+forge.workspace = true
 futures.workspace = true
 serde.workspace = true
 serde_json.workspace = true

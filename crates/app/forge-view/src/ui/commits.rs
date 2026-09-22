@@ -5,12 +5,12 @@ use std::rc::Rc;
 use ducktape_view_guest::prelude::*;
 
 use crate::Forge;
-use crate::contract::{CommitInfo, Query, Reply};
 use crate::queries::PAGE;
 use crate::ui::components::{button, chip, empty_state, heading, id, quiet, short_oid};
 use crate::ui::{diff, fact, staged};
+use forge::{CommitInfo, Query, Reply};
 
-pub(crate) fn query(forge: &Forge, from: crate::contract::Revision) -> Query {
+pub(crate) fn query(forge: &Forge, from: forge::Revision) -> Query {
     Query::Log {
         repo: forge.repo_name(),
         from,

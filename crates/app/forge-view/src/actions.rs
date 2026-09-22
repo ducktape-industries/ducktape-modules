@@ -10,11 +10,11 @@ use ducktape_view_guest::view::Submit;
 use ducktape_view_guest::{Context, Window};
 
 use crate::api::{ChatApi, SubmitForge};
-use crate::contract::{Mergeability, Op, Revision, Settings, valid_repo_name};
 use crate::state::{
     ChangeForm, ChangeTab, Dock, Filter, Forge, NewRepo, Pending, RepoTab, SettingsForm,
     change_key, unhex,
 };
+use forge::{Mergeability, Op, Revision, Settings, valid_repo_name};
 
 impl Forge {
     // --------------------------------------------------------- navigation
@@ -320,7 +320,7 @@ impl Forge {
         let Some((change, source, target, _)) = self.change() else {
             return "This change has not loaded yet".into();
         };
-        if !matches!(change.state, crate::contract::ChangeState::Open) {
+        if !matches!(change.state, forge::ChangeState::Open) {
             return "This change is no longer open".into();
         }
         if source.is_none() || target.is_none() {

@@ -3,10 +3,10 @@
 use ducktape_view_guest::prelude::*;
 
 use crate::Forge;
-use crate::contract::{Mergeability, Reply};
 use crate::ui::changes::revision_name;
 use crate::ui::components::{empty_state, heading, id, path_text, quiet, ref_label, short_oid};
 use crate::ui::{fact, prose};
+use forge::{Mergeability, Reply};
 
 pub(crate) fn overview(forge: &Forge, theme: &Theme) -> AnyElement {
     let Some((change, source, target, _)) = forge.change() else {

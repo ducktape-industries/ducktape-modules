@@ -1,11 +1,15 @@
+// The wasm32 program over the rules: guest contexts as the store, the origin resolved through identity, the huddle node proof checked, then `execute`/`query`.
+
+use crate::{
+    AccountRow, ChatMsg, ChatViewQuery, ChatViewReply, Frame, HUDDLE_JOIN_NS, MsgRow, Party,
+};
 use abi::{Entry, Env, Origin, Refusal, Scan, Scheme, reason};
-use chat::{AccountRow, ChatMsg, ChatViewQuery, ChatViewReply, Frame, HUDDLE_JOIN_NS, Party};
 use guest::{Execute, Program, Query, Reads};
 use modules::{Page, identity};
 
 struct Reader<'a>(&'a Query);
 
-impl chat::Read for Reader<'_> {
+impl crate::Read for Reader<'_> {
     fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
         self.0.get(key)
     }
@@ -16,7 +20,7 @@ impl chat::Read for Reader<'_> {
 
 struct Writer<'a>(&'a mut Execute);
 
-impl chat::Read for Writer<'_> {
+impl crate::Read for Writer<'_> {
     fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
         self.0.get(key)
     }
@@ -25,7 +29,7 @@ impl chat::Read for Writer<'_> {
     }
 }
 
-impl chat::Write for Writer<'_> {
+impl crate::Write for Writer<'_> {
     fn set(&mut self, key: Vec<u8>, value: Vec<u8>) {
         self.0.set(key, value)
     }
@@ -87,7 +91,7 @@ fn accounts(ctx: &impl Reads, limit: Option<usize>) -> Result<ChatViewReply, Ref
     // The chat roster asks for one bounded page.
     let page = Page {
         after: None,
-        limit: Some(chat::page(limit) as u64),
+        limit: Some(crate::page(limit) as u64),
     };
     let identity::Reply::Accounts(accounts) = ctx.ask::<identity::Query, identity::Reply>(
         identity::PROGRAM,
@@ -106,7 +110,7 @@ fn accounts(ctx: &impl Reads, limit: Option<usize>) -> Result<ChatViewReply, Ref
             .map(|a| AccountRow {
                 number: a.number,
                 program: matches!(a.control, identity::Control::Program { .. }),
-                keys: a.keys().iter().map(|k| chat::hex(&k.key)).collect(),
+                keys: a.keys().iter().map(|k| crate::hex(&k.key)).collect(),
                 name: a.name,
             })
             .collect(),
@@ -124,7 +128,7 @@ impl Program for Chat {
             height: env.height,
             time: env.time,
         };
-        chat::execute(&mut Writer(ctx), &frame, msg)
+        crate::execute(&mut Writer(ctx), &frame, msg)
     }
 
     fn query(ctx: &mut Query, _env: &Env, request: &[u8]) -> Result<(), Refusal> {
@@ -139,7 +143,7 @@ impl Program for Chat {
                 let resolved = party_of(ctx, &Origin::External(key.clone()))?;
                 let mut newest = None;
                 for author in [Party::Key(key), resolved] {
-                    let reply = chat::query(
+                    let reply = crate::query(
                         &Reader(ctx),
                         ChatViewQuery::ThreadAttention {
                             channel_id: channel_id.clone(),
@@ -147,16 +151,16 @@ impl Program for Chat {
                         },
                     )?;
                     if let ChatViewReply::Attention(Some(row)) = reply
-                        && newest.as_ref().is_none_or(|old: &chat::MsgRow| {
-                            old.last_reply_seq < row.last_reply_seq
-                        })
+                        && newest
+                            .as_ref()
+                            .is_none_or(|old: &MsgRow| old.last_reply_seq < row.last_reply_seq)
                     {
                         newest = Some(row);
                     }
                 }
                 ChatViewReply::Attention(newest)
             }
-            q => chat::query(&Reader(ctx), q)?,
+            q => crate::query(&Reader(ctx), q)?,
         };
         ctx.respond(serde_json::to_vec(&reply).expect("a reply serializes"));
         Ok(())

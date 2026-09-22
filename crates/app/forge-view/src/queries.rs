@@ -7,8 +7,8 @@ use ducktape_view_guest::host::{Refusal, malformed};
 use ducktape_view_guest::view::ViewOf;
 
 use crate::api::{Ask, ChatApi};
-use crate::contract::{Cursor, Page, Query, Reply};
 use crate::state::Names;
+use forge::{Cursor, Page, Query, Reply};
 
 /// What one page asks for. Every founded `Bounds.page_size` seen so far is
 /// at least this, and a limit above it is refused rather than clamped.

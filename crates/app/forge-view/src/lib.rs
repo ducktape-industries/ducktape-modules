@@ -8,7 +8,6 @@
 //! the reader has navigated away from. `render` never mutates — what an event
 //! changes lands in `actions`.
 mod api;
-pub mod contract;
 mod queries;
 mod state;
 
@@ -24,7 +23,7 @@ use ducktape_view_guest::{Context, IntoElement, Render, View, Window, export_vie
 use futures::StreamExt;
 
 use api::Props;
-use contract::{
+use forge::{
     Bounds, Change, ChangeFilter, ChangeState, Comparison, Page, Query, RefInfo, Reply, RepoInfo,
     Review, Revision,
 };

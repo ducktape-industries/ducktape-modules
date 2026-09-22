@@ -3,9 +3,9 @@
 use ducktape_view_guest::prelude::*;
 
 use crate::Forge;
-use crate::contract::Reply;
 use crate::ui::components::{button, empty_state, heading, id, quiet, ref_label, row};
 use crate::ui::{pending, scroller, staged};
+use forge::Reply;
 
 pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
     let mut column = scroller("forge-settings").child(pending(forge, "settings", theme));

@@ -42,6 +42,8 @@ pub fn wasm() -> &'static [u8] {
                     "build",
                     "-p",
                     "forge",
+                    "--features",
+                    "program",
                     "--target",
                     "wasm32-unknown-unknown",
                     "--release",

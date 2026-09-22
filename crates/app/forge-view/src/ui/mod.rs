@@ -15,9 +15,10 @@ pub(crate) mod settings;
 use ducktape_view_guest::prelude::*;
 use ducktape_view_guest::{Div, FontWeight, Stateful};
 
+use crate::Forge;
 use crate::state::{Dock, RepoTab};
-use crate::{Forge, contract::Reply};
 use components::{button, chip, heading, id, quiet};
+use forge::Reply;
 
 pub(crate) fn render(forge: &mut Forge, cx: &mut Context<Forge>) -> impl IntoElement {
     let theme = *cx.global::<Theme>();
@@ -183,7 +184,7 @@ fn ref_picker(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyEleme
     let Some(refs) = forge.refs() else {
         return quiet("Reading refs…", theme);
     };
-    let mut ordered: Vec<&crate::contract::RefInfo> = refs.iter().collect();
+    let mut ordered: Vec<&forge::RefInfo> = refs.iter().collect();
     ordered.sort_by_key(|info| (info.name != default, info.name.clone()));
     let mut picker = div()
         .id(id("forge-ref-picker"))
@@ -398,7 +399,7 @@ pub(crate) fn pending(forge: &Forge, scope: &str, theme: &Theme) -> AnyElement {
 /// The `Reply` a read landed, or the loading/refused state in its place.
 pub(crate) fn staged<'a>(
     forge: &'a Forge,
-    query: &crate::contract::Query,
+    query: &forge::Query,
     element_id: &str,
     loading_text: &str,
     cx: &mut Context<Forge>,

@@ -6,12 +6,12 @@
 //! screen that reads a field the program does not send cannot compile.
 use super::*;
 use crate::api::{Ask, Props, Session, SubmitForge};
-use crate::contract::{ChangeFilter, ChangeState, Op, Query, Reply};
 use crate::state::{ChangeTab, Filter, RepoTab};
 use ducktape_view_guest::caps::Id;
 use ducktape_view_guest::testing::TestAppContext;
 use ducktape_view_guest::view::{Submit, ViewOf};
 use ducktape_view_guest::{Entity, Theme, wire};
+use forge::{ChangeFilter, ChangeState, Op, Query, Reply};
 
 use crate::api::ChatApi;
 
@@ -557,9 +557,6 @@ pub(crate) fn change_screen(mode: &'static str, tab: ChangeTab) -> (TestAppConte
 
 #[path = "change_tests.rs"]
 mod change_tests;
-
-#[path = "contract_tests.rs"]
-mod contract_tests;
 
 #[path = "screen_tests.rs"]
 mod screen_tests;
