@@ -78,6 +78,7 @@ fn fixture(state: &str, dark: bool) -> TestAppContext {
         }
         _ => {}
     }
+    cx.set_global(if dark { Theme::dark() } else { Theme::light() });
     cx.open::<Settings>();
     props.push(Session {
         account: if state == "empty" {
