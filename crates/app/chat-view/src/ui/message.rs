@@ -386,31 +386,80 @@ fn block_view(
                 && height > 0
             {
                 let (width, height) = crate::files::picture_box(width, height);
-                div().flex().flex_col().gap(px(3.))
-                    .child(div().flex().child(card.child(
-                        div().w(px(width)).h(px(height)).overflow_hidden()
-                            .border_1().border_color(theme.border).rounded_md()
-                            .child(surface(
-                                ElementId::Name(format!("chat-message-{}-block-{index}-picture", message.id).into()),
-                                "picture",
-                                vec![
-                                    wire::SurfaceValue::Str(crate::files::PICTURE_SURFACE.into()),
-                                    wire::SurfaceValue::Str(crate::files::attachment_file_path(&block.link)),
-                                ],
-                            )),
-                    )))
-                    .child(div().text_size(px(11.)).text_color(theme.muted).child(block.text.clone()))
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(3.))
+                    .child(
+                        div().flex().child(
+                            card.child(
+                                div()
+                                    .w(px(width))
+                                    .h(px(height))
+                                    .overflow_hidden()
+                                    .border_1()
+                                    .border_color(theme.border)
+                                    .rounded_md()
+                                    .child(surface(
+                                        ElementId::Name(
+                                            format!(
+                                                "chat-message-{}-block-{index}-picture",
+                                                message.id
+                                            )
+                                            .into(),
+                                        ),
+                                        "picture",
+                                        vec![
+                                            wire::SurfaceValue::Str(
+                                                crate::files::PICTURE_SURFACE.into(),
+                                            ),
+                                            wire::SurfaceValue::Str(
+                                                crate::files::attachment_file_path(&block.link),
+                                            ),
+                                        ],
+                                    )),
+                            ),
+                        ),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(11.))
+                            .text_color(theme.muted)
+                            .child(block.text.clone()),
+                    )
                     .into_any_element()
             } else {
-                div().flex().child(card
-                    .flex().items_center().gap(px(12.))
-                    .py(px(8.)).pl(px(16.)).pr(px(14.))
-                    .bg(theme.surface).border_1().border_color(theme.border)
-                    .child("📄")
-                    .child(div().flex().flex_col().gap(px(1.))
-                        .child(div().font_weight(FontWeight::MEDIUM).child(block.text.clone()))
-                        .child(div().text_size(px(11.)).text_color(theme.muted)
-                            .child(crate::files::attachment_kind(&block.text)))))
+                div()
+                    .flex()
+                    .child(
+                        card.flex()
+                            .items_center()
+                            .gap(px(12.))
+                            .py(px(8.))
+                            .pl(px(16.))
+                            .pr(px(14.))
+                            .bg(theme.surface)
+                            .border_1()
+                            .border_color(theme.border)
+                            .child("📄")
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(1.))
+                                    .child(
+                                        div()
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .child(block.text.clone()),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(px(11.))
+                                            .text_color(theme.muted)
+                                            .child(crate::files::attachment_kind(&block.text)),
+                                    ),
+                            ),
+                    )
                     .into_any_element()
             }
         }

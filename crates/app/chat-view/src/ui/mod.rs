@@ -12,8 +12,8 @@ mod timeline;
 
 pub(crate) use components::{badge, button, empty_state};
 use ducktape_view_guest::{
-    Context, ElementId, InteractiveElement, IntoElement, ParentElement, Pixels,
-    Styled, Theme, div, hsla, modal_overlay, px, resize_handle, sensor,
+    Context, ElementId, InteractiveElement, IntoElement, ParentElement, Pixels, Styled, Theme, div,
+    hsla, modal_overlay, px, resize_handle, sensor,
 };
 
 use crate::Chat;

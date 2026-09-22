@@ -466,4 +466,3 @@ pub fn selection_bar(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl
         ))
         .into_any_element()
 }
-

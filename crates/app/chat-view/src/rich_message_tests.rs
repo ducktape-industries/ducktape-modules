@@ -177,3 +177,31 @@ fn picture_attachment_keeps_scoped_surface_and_respects_attachment_gate() {
     );
 }
 
+#[test]
+fn file_attachment_keeps_type_caption_and_grouped_block_number() {
+    let (mut cx, view) = opened();
+    let link = files::file_address("testnet#0a1b2c3d", "/shared/attachments/deck.pdf").unwrap();
+    view.update(&mut cx, |chat, _, cx| {
+        let mut file = row(3, "acct:8", "deck.pdf");
+        file.message_id = "file".into();
+        file.height = 12_345;
+        file.blocks = vec![chat::Block::Paragraph(vec![chat::Span {
+            text: "deck.pdf".into(),
+            marks: vec![chat::Mark::Link(link)],
+        }])];
+        chat.room
+            .as_mut()
+            .unwrap()
+            .messages
+            .ready_mut()
+            .unwrap()
+            .push(file);
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(cx.has_text("block 12,345"));
+    assert!(cx.has_text("PDF file"));
+    assert!(matches!(cx.find("chat-message-file-block-0"),
+        Some(wire::Node::Container { interactivity, .. })
+            if interactivity.aria.label.as_deref() == Some("Open deck.pdf")));
+}
