@@ -29,15 +29,6 @@ pub fn derive_into_element(input: TokenStream) -> TokenStream {
         }
 
         impl #impl_generics ::ducktape_view_guest::FluentBuilder for #name #ty_generics #where_clause {}
-
-        impl #impl_generics ::ducktape_view_guest::Element for #name #ty_generics #where_clause {
-            fn lower(
-                self: ::std::boxed::Box<Self>,
-                lowering: &mut ::ducktape_view_guest::Lowering<'_>,
-            ) -> ::ducktape_view_guest::wire::Node {
-                lowering.render_once(*self)
-            }
-        }
     }
     .into()
 }
