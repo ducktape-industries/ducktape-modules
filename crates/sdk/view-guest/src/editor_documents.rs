@@ -6,11 +6,17 @@ use wire::editor_document::{EditorDocumentMessage, EditorDocumentRef, EditorTran
 pub struct EditorDocumentUpdate {
     document: String,
     message: EditorDocumentMessage,
-    context: slots::Context,
+    identity: std::sync::Weak<()>,
 }
 
 impl EditorDocumentUpdate {
-    pub fn apply(self, editor: &mut Editor) {
+    pub fn apply(self, editor: &mut Editor, cx: &mut crate::App) {
+        let context = &cx.inner.slots;
+        if !std::sync::Weak::ptr_eq(&self.identity, &context.identity())
+            || self.identity.upgrade().is_none()
+        {
+            return;
+        }
         let id = self.message.id().clone();
         if id.document != self.document {
             return;
@@ -21,18 +27,18 @@ impl EditorDocumentUpdate {
                 if target != current {
                     Err(EditorTransferError::Identity)
                 } else {
-                    slots::start_editor_transfer(&self.context, id, target)
+                    slots::start_editor_transfer(context, id, target)
                 }
             }
             EditorDocumentMessage::Acknowledged { .. } | EditorDocumentMessage::Failed { .. } => {
-                slots::finish_editor_transfer(&self.context, &id);
+                slots::finish_editor_transfer(context, &id);
                 Ok(())
             }
             EditorDocumentMessage::Transfer(transfer) => {
-                match slots::receive_editor_mirror(&self.context, &transfer) {
+                match slots::receive_editor_mirror(context, &transfer) {
                     Ok(Some((text, target))) => {
                         if editor.install_mirror(text, &target) {
-                            slots::acknowledge_editor_mirror(&self.context, id.clone());
+                            slots::acknowledge_editor_mirror(context, id.clone());
                             Ok(())
                         } else {
                             Err(EditorTransferError::Identity)
@@ -44,7 +50,7 @@ impl EditorDocumentUpdate {
             }
         };
         if let Err(reason) = result {
-            slots::editor_document_failure(&self.context, id, reason);
+            slots::editor_document_failure(context, id, reason);
         }
     }
 }
@@ -60,15 +66,14 @@ impl Editor {
     ) -> (EditorDocumentRef, u32) {
         let reference = self.document_reference(document.clone());
         slots::editor_document_frame(context, &reference, self.text_ref());
-        let context = context.clone();
-        let route_context = context.clone();
+        let identity = context.identity();
         let handler = slots::handler::<EditorDocumentMessage, M>(
-            &route_context,
+            context,
             Box::new(move |message| {
                 Some(wrap(EditorDocumentUpdate {
                     document: document.clone(),
                     message,
-                    context: context.clone(),
+                    identity: identity.clone(),
                 }))
             }),
         );
@@ -122,8 +127,8 @@ mod tests {
                 EditorBinding::plain(),
                 |event| -> crate::context::Callback<Self> {
                     match event {
-                        EditorElementEvent::Document(update) => Rc::new(move |view, _, _| {
-                            update.clone().apply(&mut view.editor);
+                        EditorElementEvent::Document(update) => Rc::new(move |view, _, cx| {
+                            update.clone().apply(&mut view.editor, cx);
                         }),
                         EditorElementEvent::Observed(()) => Rc::new(|_, _, _| {}),
                         EditorElementEvent::Transaction(transaction) => {
@@ -135,6 +140,22 @@ mod tests {
                 },
             )
         }
+    }
+
+    #[test]
+    fn document_routes_do_not_keep_their_driver_alive() {
+        fn is_send<T: Send>() {}
+        is_send::<EditorDocumentUpdate>();
+        let context = slots::Context::default();
+        let identity = context.identity();
+        let editor = Editor::new("document");
+        editor.document(&context, "draft".into(), |update| update);
+        assert!(identity.upgrade().is_some());
+        drop(context);
+        assert!(
+            identity.upgrade().is_none(),
+            "frame closures must not own their callback table"
+        );
     }
 
     #[test]

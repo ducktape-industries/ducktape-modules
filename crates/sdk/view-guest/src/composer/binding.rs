@@ -112,7 +112,7 @@ impl Draft {
     ) -> Outcome<V> {
         match event {
             Event::Document(update) => {
-                update.apply(&mut self.editor);
+                update.apply(&mut self.editor, cx);
                 Outcome::Updated
             }
             Event::Transaction(transaction) => transaction
