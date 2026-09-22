@@ -102,6 +102,12 @@ pub fn card(
             .flex()
             .gap_1()
             .bg(theme.background)
+            // GPUI dispatches a click to every interactive element whose
+            // hitbox contains it, not just the topmost one: without this,
+            // a click on a button here also lands on `card`'s row-select
+            // handler beneath it, which clobbers whatever this row just
+            // set (e.g. `open_menu`'s mode) back to `Mode::Toolbar`.
+            .occlude()
             .invisible()
             .group_hover(group, |style| style.visible());
         if chosen {

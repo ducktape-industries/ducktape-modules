@@ -383,6 +383,21 @@ fn message_menu_preserves_disabled_actions_and_executes_enabled_routes() {
     cx.run_until_parked();
     cx.simulate_click("chat-menu-delete");
     assert!(cx.has_text("Delete this message?"));
+    // Anchored near the row it opened from, this popup can overlap the
+    // message card beneath it; without occlude, a click on "Delete" here
+    // also fires the card's row-select handler, which resets `chat.menu`
+    // to `Mode::Toolbar` before `delete_armed` reads it, so the delete is
+    // silently dropped (no submit, no error).
+    let Some(wire::Node::Container(ducktape_view_guest::wire::ContainerNode {
+        interactivity, ..
+    })) = cx.find(&ui::menu::focus_key(Pane::Timeline, Mode::Delete))
+    else {
+        panic!("delete confirmation frame")
+    };
+    assert!(
+        interactivity.occlude,
+        "delete confirmation popup must occlude so its clicks don't also fire the row beneath"
+    );
     cx.simulate_click("chat-menu-confirm-delete");
     cx.run_until_parked();
     assert!(cx.host().asked::<Submit<ChatApi>>().iter().any(|op| {
