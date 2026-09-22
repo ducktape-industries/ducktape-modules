@@ -8,10 +8,19 @@ mod theme;
 pub use theme::Theme;
 mod element;
 pub use element::{
-    anchored, canvas, deferred, div, img, svg, uniform_list, Anchored, Canvas, Deferred, Div,
-    Img, InteractiveElement, IntoElement, Lowering, ParentElement, RenderOnce, Stateful,
+    anchored, canvas, deferred, div, img, svg, uniform_list, AnyElement, Anchored, Canvas, Deferred, Div,
+    Img, Interactivity, InteractiveElement, IntoElement, Lowering, ParentElement, RenderOnce, Stateful,
     StatefulInteractiveElement, Svg, UniformList,
 };
+
+/// Traits and primitives used to compose guest GPUI elements.
+pub mod prelude {
+    pub use crate::{
+        AnyElement, App, ClickEvent, Context, ElementId, Global, Hsla, InteractiveElement,
+        IntoElement, ParentElement, Render, RenderOnce, SharedString, StatefulInteractiveElement,
+        Styled, Theme, Window, anchored, canvas, deferred, div, img, px, rems, rgb, svg, uniform_list,
+    };
+}
 mod editor;
 mod editor_binding;
 mod editor_documents;
@@ -39,7 +48,7 @@ mod executor;
 pub use executor::Task;
 pub use host::Host;
 pub use window::Window;
-pub mod slots;
+mod slots;
 use context::Callback;
 
 const MAX_ROUNDS: usize = 8;

@@ -265,7 +265,7 @@ impl<V: View + 'static> Context<'_, V> {
             entity.update_in_window(app, window, |view, window, cx| f(view, event, window, cx))
         }
     }
-    pub fn handler<E: 'static>(
+    pub(crate) fn handler<E: 'static>(
         &self,
         f: impl Fn(&mut V, &E, &mut Window, &mut Context<V>) + 'static,
     ) -> u32 {

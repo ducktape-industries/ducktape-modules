@@ -25,8 +25,7 @@ pub fn derive_into_element(input: TokenStream) -> TokenStream {
                 self,
                 lowering: &mut ::ducktape_view_guest::Lowering<'_>,
             ) -> ::ducktape_view_guest::wire::Node {
-                use ::ducktape_view_guest::RenderOnce as _;
-                self.render(lowering.window(), lowering.app()).into_node(lowering)
+                lowering.render_once(self)
             }
         }
     }

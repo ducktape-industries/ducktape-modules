@@ -9,6 +9,7 @@ use ducktape_view_guest::caps::{Program, QueryBytes};
 use ducktape_view_guest::export_view;
 use ducktape_view_guest::host::{Refusal, malformed};
 use ducktape_view_guest::view::{Live, Loaded};
+use ducktape_view_guest::{ClickEvent, InteractiveElement};
 use ducktape_view_guest::{
     App, Context, ElementId, Host, IntoElement, ParentElement, Render, RenderOnce,
     StatefulInteractiveElement, Styled, Task, Theme, View, Window, div, px,
@@ -79,7 +80,8 @@ impl View for Members {
 
 impl Render for Members {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.global::<Theme>();
+        let theme = *cx.global::<Theme>();
+        let theme = &theme;
         let typed = cx.listener(|view, text: &String, _, cx| {
             view.filter = text.clone();
             cx.notify();
@@ -158,7 +160,7 @@ impl Members {
                 .child("Reading the roster…")
                 .into_any_element(),
             Loaded::Failed(refusal) => {
-                let retry = cx.listener(|view, _: &(), _, cx| view.read(cx));
+                let retry = cx.listener(|view, _: &ClickEvent, _, cx| view.read(cx));
                 div()
                     .id(ElementId::Name("members-refused".into()))
                     .flex()

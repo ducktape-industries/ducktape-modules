@@ -9,6 +9,7 @@ pub mod side;
 pub mod sidebar;
 mod timeline;
 
+use ducktape_view_guest::InteractiveElement;
 use ducktape_view_guest::{
     ClickEvent, Context, ElementId, IntoElement, ParentElement, StatefulInteractiveElement, Styled,
     Theme, Window, div, px,

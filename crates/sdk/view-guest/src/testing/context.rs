@@ -75,6 +75,13 @@ impl TestAppContext {
     pub(crate) fn app_mut(&mut self) -> &mut App {
         self.driver.as_mut().expect("open a view first").app_mut()
     }
+    /// Replace a global in the open view and render its new appearance.
+    pub fn set_global<G: gpui::Global>(&mut self, global: G) {
+        let app = self.app_mut();
+        app.set_global(global);
+        app.notify();
+        self.run_until_parked();
+    }
     pub fn run_until_parked(&mut self) {
         self.dispatch(Vec::new());
     }

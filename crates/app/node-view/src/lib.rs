@@ -9,6 +9,7 @@ use ducktape_view_guest::caps::{Program, QueryBytes};
 use ducktape_view_guest::export_view;
 use ducktape_view_guest::host::{Refusal, malformed};
 use ducktape_view_guest::view::{Live, Loaded};
+use ducktape_view_guest::{ClickEvent, InteractiveElement, StatefulInteractiveElement};
 use ducktape_view_guest::{
     AnyElement, App, Context, ElementId, Host, IntoElement, ParentElement, Render, RenderOnce,
     Styled, Task, Theme, View, Window, div, px,
@@ -73,7 +74,8 @@ impl View for Nodes {
 
 impl Render for Nodes {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.global::<Theme>();
+        let theme = *cx.global::<Theme>();
+        let theme = &theme;
         div()
             .id(ElementId::Name("nodes".into()))
             .flex()
@@ -128,7 +130,7 @@ impl Nodes {
                 .child("Reading the validator set…")
                 .into_any_element(),
             Loaded::Failed(refusal) => {
-                let retry = cx.listener(|view, _: &(), _, cx| view.read(cx));
+                let retry = cx.listener(|view, _: &ClickEvent, _, cx| view.read(cx));
                 div()
                     .id(ElementId::Name("nodes-refused".into()))
                     .flex()

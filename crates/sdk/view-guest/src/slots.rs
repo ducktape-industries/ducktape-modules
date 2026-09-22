@@ -86,6 +86,7 @@ pub(crate) fn reset(context: &Context) {
         (
             std::mem::take(&mut tables.messages),
             std::mem::take(&mut tables.handlers),
+            std::mem::take(&mut tables.clicks),
         )
     };
     drop(old);

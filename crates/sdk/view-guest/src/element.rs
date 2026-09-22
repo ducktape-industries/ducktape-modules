@@ -14,7 +14,8 @@ type ClickListener = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
 /// The explicit state carried by guest interactivity until frame lowering.
 #[derive(Default)]
-pub struct InteractiveState {
+pub struct Interactivity {
+    pub base_style: StyleRefinement,
     pub(crate) id: Option<ElementId>,
     pub(crate) group: Option<SharedString>,
     pub(crate) hover: Option<StyleRefinement>,
@@ -30,6 +31,10 @@ pub trait IntoElement: Sized + 'static {
 
     fn into_element(self) -> Self::Element;
 
+    fn into_any_element(self) -> AnyElement {
+        AnyElement(Box::new(self))
+    }
+
     fn into_node(self, lowering: &mut Lowering<'_>) -> wire::Node;
 }
 
@@ -40,6 +45,16 @@ trait ErasedElement {
 impl<T: IntoElement> ErasedElement for T {
     fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
         (*self).into_node(lowering)
+    }
+}
+
+/// A type-erased guest element, used for conditional children and components.
+pub struct AnyElement(Box<dyn ErasedElement>);
+impl IntoElement for AnyElement {
+    type Element = Self;
+    fn into_element(self) -> Self { self }
+    fn into_node(self, lowering: &mut Lowering<'_>) -> wire::Node {
+        self.0.lower(lowering)
     }
 }
 
@@ -62,6 +77,11 @@ impl<'a> Lowering<'a> {
         self.app
     }
 
+    #[doc(hidden)]
+    pub fn render_once(&mut self, component: impl RenderOnce) -> wire::Node {
+        component.render(self.window, self.app).into_node(self)
+    }
+
     fn click(&mut self, listener: ClickListener) -> u32 {
         slots::click(&self.app.inner.slots, listener)
     }
@@ -69,16 +89,14 @@ impl<'a> Lowering<'a> {
 
 /// A guest container backed by a real GPUI style refinement.
 pub struct Div {
-    pub(crate) style: StyleRefinement,
-    pub(crate) interactivity: InteractiveState,
+    pub(crate) interactivity: Interactivity,
     children: Vec<Box<dyn ErasedElement>>,
 }
 
 impl Default for Div {
     fn default() -> Self {
         Self {
-            style: StyleRefinement::default(),
-            interactivity: InteractiveState::default(),
+            interactivity: Interactivity::default(),
             children: Vec::new(),
         }
     }
@@ -86,7 +104,7 @@ impl Default for Div {
 
 impl Styled for Div {
     fn style(&mut self) -> &mut StyleRefinement {
-        &mut self.style
+        &mut self.interactivity.base_style
     }
 }
 
@@ -122,7 +140,7 @@ impl IntoElement for Div {
             .collect();
         wire::Node::Container {
             id,
-            style: self.style,
+            style: self.interactivity.base_style,
             interactivity,
             children,
         }
@@ -135,41 +153,42 @@ pub fn div() -> Div {
 }
 
 /// Add children to an element recipe.
-pub trait ParentElement: Sized {
-    fn child(self, child: impl IntoElement) -> Self;
+pub trait ParentElement {
+    fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>);
 
-    fn children(self, children: impl IntoIterator<Item = impl IntoElement>) -> Self;
-}
-
-impl ParentElement for Div {
-    fn child(mut self, child: impl IntoElement) -> Self {
-        self.children.push(Box::new(child));
+    fn child(mut self, child: impl IntoElement) -> Self where Self: Sized {
+        self.extend(std::iter::once(child.into_any_element()));
         self
     }
 
-    fn children(mut self, children: impl IntoIterator<Item = impl IntoElement>) -> Self {
-        self.children
-            .extend(children.into_iter().map(|child| Box::new(child) as Box<dyn ErasedElement>));
+    fn children(mut self, children: impl IntoIterator<Item = impl IntoElement>) -> Self where Self: Sized {
+        self.extend(children.into_iter().map(IntoElement::into_any_element));
         self
+    }
+}
+
+impl ParentElement for Div {
+    fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>) {
+        self.children.extend(elements.into_iter().map(|element| element.0));
     }
 }
 
 /// Add basic group and identity declarations to an element recipe.
 pub trait InteractiveElement: Sized {
-    fn interactive_state(&mut self) -> &mut InteractiveState;
+    fn interactivity(&mut self) -> &mut Interactivity;
 
     fn id(mut self, id: impl Into<ElementId>) -> Stateful<Self> {
-        self.interactive_state().id = Some(id.into());
+        self.interactivity().id = Some(id.into());
         Stateful { element: self }
     }
 
     fn group(mut self, group: impl Into<SharedString>) -> Self {
-        self.interactive_state().group = Some(group.into());
+        self.interactivity().group = Some(group.into());
         self
     }
 
     fn hover(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
-        self.interactive_state().hover = Some(f(StyleRefinement::default()));
+        self.interactivity().hover = Some(f(StyleRefinement::default()));
         self
     }
 
@@ -178,14 +197,14 @@ pub trait InteractiveElement: Sized {
         group: impl Into<SharedString>,
         f: impl FnOnce(StyleRefinement) -> StyleRefinement,
     ) -> Self {
-        self.interactive_state().group_hover =
+        self.interactivity().group_hover =
             Some((group.into(), f(StyleRefinement::default())));
         self
     }
 }
 
 impl InteractiveElement for Div {
-    fn interactive_state(&mut self) -> &mut InteractiveState {
+    fn interactivity(&mut self) -> &mut Interactivity {
         &mut self.interactivity
     }
 }
@@ -214,29 +233,34 @@ impl<E: IntoElement> IntoElement for Stateful<E> {
 }
 
 impl<E: ParentElement> ParentElement for Stateful<E> {
-    fn child(self, child: impl IntoElement) -> Self {
-        Self {
-            element: self.element.child(child),
-        }
-    }
-
-    fn children(self, children: impl IntoIterator<Item = impl IntoElement>) -> Self {
-        Self {
-            element: self.element.children(children),
-        }
+    fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>) {
+        self.element.extend(elements);
     }
 }
 
 impl<E: InteractiveElement> InteractiveElement for Stateful<E> {
-    fn interactive_state(&mut self) -> &mut InteractiveState {
-        self.element.interactive_state()
+    fn interactivity(&mut self) -> &mut Interactivity {
+        self.element.interactivity()
     }
 }
 
 /// Stateful interaction methods, named to match GPUI's public authoring API.
 pub trait StatefulInteractiveElement: InteractiveElement {
+    fn overflow_scroll(mut self) -> Self {
+        self.interactivity().base_style.overflow.x = Some(gpui::Overflow::Scroll);
+        self.interactivity().base_style.overflow.y = Some(gpui::Overflow::Scroll);
+        self
+    }
+    fn overflow_x_scroll(mut self) -> Self {
+        self.interactivity().base_style.overflow.x = Some(gpui::Overflow::Scroll);
+        self
+    }
+    fn overflow_y_scroll(mut self) -> Self {
+        self.interactivity().base_style.overflow.y = Some(gpui::Overflow::Scroll);
+        self
+    }
     fn active(mut self, f: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
-        self.interactive_state().active = Some(f(StyleRefinement::default()));
+        self.interactivity().active = Some(f(StyleRefinement::default()));
         self
     }
 
@@ -245,18 +269,18 @@ pub trait StatefulInteractiveElement: InteractiveElement {
         group: impl Into<SharedString>,
         f: impl FnOnce(StyleRefinement) -> StyleRefinement,
     ) -> Self {
-        self.interactive_state().group_active =
+        self.interactivity().group_active =
             Some((group.into(), f(StyleRefinement::default())));
         self
     }
 
     fn on_click(mut self, listener: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> Self {
-        self.interactive_state().on_click = Some(Box::new(listener));
+        self.interactivity().on_click = Some(Box::new(listener));
         self
     }
 }
 
-impl<T: InteractiveElement> StatefulInteractiveElement for T {}
+impl<T: InteractiveElement> StatefulInteractiveElement for Stateful<T> {}
 
 impl IntoElement for wire::Node {
     type Element = Self;
