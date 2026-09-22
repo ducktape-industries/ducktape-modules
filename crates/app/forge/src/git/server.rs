@@ -5,8 +5,8 @@ use crate::git::object::{Commit, Kind, Mode, Object, Tag, Tree};
 use crate::git::oid::{Hash, Oid};
 use crate::git::pack::{self, Limits};
 use crate::git::store::Objects;
-use crate::git::walk::{is_ancestor, Verdict};
-use crate::git::wire::receive::{parse_request, report_status, RefCommand};
+use crate::git::walk::{Verdict, is_ancestor};
+use crate::git::wire::receive::{RefCommand, parse_request, report_status};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub fn admit_pack<S: Objects + ?Sized>(

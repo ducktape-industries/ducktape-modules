@@ -7,8 +7,8 @@ use commonware_cryptography::{Signer as _, ed25519};
 use commonware_runtime::{Runner as _, deterministic};
 use fixture_probe::Step;
 use host::{Applied, Block, BlockId, Founding, Genesis, Host, Layer, Limits, Receipt, Submission};
-use keyscheme::testkit;
 use identity::AccountNumber;
+use keyscheme::testkit;
 use module_registry::{AUTHORITY, Page};
 
 /// Where `make wasm-programs` left the boot set: the bytes are a build

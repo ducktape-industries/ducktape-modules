@@ -5,8 +5,8 @@ mod common;
 
 use common::{fixture, oid_text, sha1};
 use forge::git::{
-    oid_of, Commit, Error, Hash, Kind, MemoryObjects, Mode, Object, Objects, Oid, Signature, Tag,
-    Tree, TreeEntry,
+    Commit, Error, Hash, Kind, MemoryObjects, Mode, Object, Objects, Oid, Signature, Tag, Tree,
+    TreeEntry, oid_of,
 };
 
 #[test]
@@ -60,9 +60,11 @@ fn commit_with_gpgsig_round_trips_byte_exact() {
     assert_eq!(commit.extra.len(), 2);
     assert_eq!(commit.extra[0].0, b"encoding");
     assert_eq!(commit.extra[1].0, b"gpgsig");
-    assert!(commit.extra[1]
-        .1
-        .starts_with(b"-----BEGIN PGP SIGNATURE-----\n\niQEz"));
+    assert!(
+        commit.extra[1]
+            .1
+            .starts_with(b"-----BEGIN PGP SIGNATURE-----\n\niQEz")
+    );
     assert_eq!(commit.message, b"Merge with a signature\n\nBody line.\n");
     assert_eq!(commit.serialize(), bytes);
 }

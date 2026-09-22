@@ -47,10 +47,12 @@ fn base_pack_reads_to_the_oids_git_listed() {
     let base = oid_text(fixture!("base.oid"), Hash::Sha1);
     let commit = objects.iter().find(|(id, _)| *id == base).unwrap();
     assert_eq!(commit.1.kind, Kind::Commit);
-    assert!(Commit::parse(&commit.1.body, Hash::Sha1)
-        .unwrap()
-        .parents
-        .is_empty());
+    assert!(
+        Commit::parse(&commit.1.body, Hash::Sha1)
+            .unwrap()
+            .parents
+            .is_empty()
+    );
 }
 
 #[test]
@@ -209,9 +211,11 @@ fn write_then_read_gives_identical_objects() {
     assert_eq!(again, original);
     let empty = pack::write(Vec::new(), Hash::Sha1).unwrap();
     assert_eq!(empty.len(), 12 + 20);
-    assert!(pack::read(&empty, Hash::Sha1, &Limits::generous(), no_base)
-        .unwrap()
-        .is_empty());
+    assert!(
+        pack::read(&empty, Hash::Sha1, &Limits::generous(), no_base)
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]

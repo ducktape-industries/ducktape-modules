@@ -3,8 +3,8 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
-use abi::{Blob, BlobHeader, BlobId, Entry, HashKind, Refusal, Scan, reason};
 use crate::git::{Kind, Oid, oid_of};
+use abi::{Blob, BlobHeader, BlobId, Entry, HashKind, Refusal, Scan, reason};
 
 pub trait Sandbox {
     fn get(&self, key: &[u8]) -> Option<Vec<u8>>;

@@ -9,7 +9,7 @@ pub use tag::Tag;
 pub use tree::{Mode, Tree, TreeEntry};
 
 use crate::git::error::{Error, Result};
-use crate::git::oid::{object_header, Hash, Oid};
+use crate::git::oid::{Hash, Oid, object_header};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Kind {

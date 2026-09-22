@@ -7,10 +7,10 @@ use common::{fixture, oid_list, oid_text, sha1};
 use forge::git::server::admit_pack;
 use forge::git::wire::pktline::{self, Pkt, Reader};
 use forge::git::wire::upload::{
-    acknowledgments, capability_advertisement, fetch, ls_refs_response, parse_command, Command,
-    Fetch, LsRefs,
+    Command, Fetch, LsRefs, acknowledgments, capability_advertisement, fetch, ls_refs_response,
+    parse_command,
 };
-use forge::git::{pack, Error, Hash, Kind, Limits, MemoryObjects, Objects, Oid};
+use forge::git::{Error, Hash, Kind, Limits, MemoryObjects, Objects, Oid, pack};
 use std::collections::{BTreeMap, BTreeSet};
 
 fn repo() -> (MemoryObjects, BTreeMap<Vec<u8>, Oid>, Oid, Oid, Oid) {
@@ -79,8 +79,10 @@ fn capability_advertisement_golden() {
             "<flush>"
         ]
     );
-    assert!(lines(&capability_advertisement(Hash::Sha256, b"x"))
-        .contains(&"object-format=sha256".to_string()));
+    assert!(
+        lines(&capability_advertisement(Hash::Sha256, b"x"))
+            .contains(&"object-format=sha256".to_string())
+    );
 }
 
 #[test]
@@ -462,12 +464,14 @@ fn fetch_pack_is_valid_for_git() {
     let dir = std::env::temp_dir().join(format!("forge-git-fetch-{}", std::process::id()));
     std::fs::remove_dir_all(&dir).ok();
     std::fs::create_dir_all(&dir).unwrap();
-    assert!(std::process::Command::new(&git)
-        .args(["init", "-q"])
-        .current_dir(&dir)
-        .status()
-        .unwrap()
-        .success());
+    assert!(
+        std::process::Command::new(&git)
+            .args(["init", "-q"])
+            .current_dir(&dir)
+            .status()
+            .unwrap()
+            .success()
+    );
     let mut child = std::process::Command::new(&git)
         .args(["index-pack", "--stdin", "--strict"])
         .current_dir(&dir)

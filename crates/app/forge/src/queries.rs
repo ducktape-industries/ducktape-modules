@@ -1,16 +1,16 @@
 //! UI queries produce one height-bearing Borsh reply. Git protocol queries stream Git bytes.
 use crate::contract::*;
+use crate::git::wire::receive::advertise_refs;
+use crate::git::wire::smart_http_service_header;
+use crate::git::wire::upload::{
+    Command, capability_advertisement, fetch, ls_refs_response, parse_command,
+};
 use crate::ops::{cap, refusal_of};
 use crate::paging::Paging;
 use crate::repo::{load_bounds, load_refs, load_repo, refs_prefix, repo_hash, writers_prefix};
 use crate::sandbox::Sandbox;
 use crate::store::Store;
 use abi::{Env, Refusal};
-use crate::git::wire::receive::advertise_refs;
-use crate::git::wire::smart_http_service_header;
-use crate::git::wire::upload::{
-    Command, capability_advertisement, fetch, ls_refs_response, parse_command,
-};
 const AGENT: &[u8] = b"ducktape-forge";
 
 pub fn query<S: Sandbox>(sandbox: &S, env: &Env, request: &[u8]) -> Result<(), Refusal> {

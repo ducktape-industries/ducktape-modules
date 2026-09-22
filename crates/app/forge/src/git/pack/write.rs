@@ -1,6 +1,6 @@
 // Pack writing without deltas: PackWriter streams to a sink, write collects into a Vec.
 
-use super::{kind_code, SIGNATURE};
+use super::{SIGNATURE, kind_code};
 use crate::git::error::{Error, Result};
 use crate::git::object::Object;
 use crate::git::oid::{Hash, Hasher, Oid};

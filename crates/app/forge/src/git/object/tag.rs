@@ -1,6 +1,6 @@
 // Annotated tag objects: parse and serialize.
 
-use super::{push_header, split_headers, Kind, Signature};
+use super::{Kind, Signature, push_header, split_headers};
 use crate::git::error::{Error, Result};
 use crate::git::oid::{Hash, Oid};
 

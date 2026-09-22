@@ -3,9 +3,9 @@
 use super::error::{Error, Result};
 use crate::git::object::{Commit, Kind, Tree, TreeEntry};
 use crate::git::oid::Oid;
-use crate::git::store::{load_kind, Objects};
-use std::collections::{BTreeMap, BTreeSet, BinaryHeap, VecDeque};
+use crate::git::store::{Objects, load_kind};
 use std::cmp::Reverse;
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap, VecDeque};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Verdict {

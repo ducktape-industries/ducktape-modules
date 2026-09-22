@@ -12,6 +12,6 @@ pub mod wire;
 
 pub use error::{Error, Result};
 pub use object::{Commit, Kind, Mode, Object, Signature, Tag, Tree, TreeEntry};
-pub use oid::{oid_of, Hash, Oid};
+pub use oid::{Hash, Oid, oid_of};
 pub use pack::Limits;
 pub use store::{MemoryObjects, Objects};

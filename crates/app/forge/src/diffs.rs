@@ -1,11 +1,11 @@
 //! Structured hunks are built from git::diff's edit ranges, never parsed from patch text.
 use crate::Sandbox;
 use crate::contract::*;
+use crate::git::{Mode, Oid, diff};
 use crate::ops::cap;
 use crate::paging::Paging;
 use crate::reads::{Reading, entry_kind};
 use abi::Refusal;
-use crate::git::{Mode, Oid, diff};
 
 pub fn query<S: Sandbox>(
     r: &Reading<'_, S>,

@@ -2,7 +2,7 @@
 
 use crate::git::error::{Error, Result};
 use crate::git::object::{Mode, TreeEntry};
-use crate::git::oid::{push_decimal, Oid};
+use crate::git::oid::{Oid, push_decimal};
 use crate::git::store::Objects;
 use crate::git::walk::tree_of;
 use std::collections::{BTreeMap, BTreeSet};

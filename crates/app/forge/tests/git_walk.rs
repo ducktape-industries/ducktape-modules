@@ -4,7 +4,7 @@
 mod common;
 
 use common::{blob, commit, file_tree, tree};
-use forge::git::walk::{commits, is_ancestor, reachable_objects, tree_at_path, Verdict};
+use forge::git::walk::{Verdict, commits, is_ancestor, reachable_objects, tree_at_path};
 use forge::git::{Error, Hash, MemoryObjects, Mode, Oid};
 use std::collections::BTreeSet;
 
@@ -144,9 +144,11 @@ fn reachable_trees_and_blobs() {
     assert_eq!(objects, expected);
 
     let seen: BTreeSet<Oid> = [d.trees[3]].into_iter().collect();
-    assert!(reachable_objects(&d.store, &[d.merge], &seen)
-        .unwrap()
-        .is_empty());
+    assert!(
+        reachable_objects(&d.store, &[d.merge], &seen)
+            .unwrap()
+            .is_empty()
+    );
 
     let both = reachable_objects(&d.store, &[d.a, d.b], &BTreeSet::new()).unwrap();
     assert_eq!(both.len(), 4);
@@ -179,11 +181,15 @@ fn nested_reachability_and_path_lookup() {
         inner
     );
     assert!(tree_at_path(&store, &root, b"dir/nope").unwrap().is_none());
-    assert!(tree_at_path(&store, &root, b"dir/leaf.txt/deeper")
-        .unwrap()
-        .is_none());
+    assert!(
+        tree_at_path(&store, &root, b"dir/leaf.txt/deeper")
+            .unwrap()
+            .is_none()
+    );
     assert!(tree_at_path(&store, &root, b"").unwrap().is_none());
-    assert!(tree_at_path(&store, &root, b"dir//leaf.txt")
-        .unwrap()
-        .is_none());
+    assert!(
+        tree_at_path(&store, &root, b"dir//leaf.txt")
+            .unwrap()
+            .is_none()
+    );
 }

@@ -1,13 +1,13 @@
 //! Object reads over the existing loose-object store; no pack parsing and no persistent writes.
 use crate::Sandbox;
 use crate::contract::*;
+use crate::git::{Commit, Hash, Kind, Mode, Objects, Oid, Signature, Tag, Tree};
 use crate::ops::{cap, refusal_of};
 use crate::paging::Paging;
 use crate::refuse::{invalid, not_found};
 use crate::repo::{load_repo, parse_oid, repo_hash, resolve};
 use crate::store::Store;
 use abi::Refusal;
-use crate::git::{Commit, Hash, Kind, Mode, Objects, Oid, Signature, Tag, Tree};
 use std::collections::BTreeSet;
 
 pub struct Reading<'a, S: Sandbox> {

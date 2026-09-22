@@ -1,15 +1,15 @@
 // Pack reading: header, entry headers, inflate, delta resolution (ofs, ref, thin) and checksum.
 
-use super::{delta, kind_from_code, Limits, SIGNATURE};
+use super::{Limits, SIGNATURE, delta, kind_from_code};
 use crate::git::error::{Error, Result};
 use crate::git::object::{Kind, Object};
 use crate::git::oid::{Hash, Hasher, Oid};
-use std::collections::BTreeMap;
+use miniz_oxide::inflate::TINFLStatus;
 use miniz_oxide::inflate::core::inflate_flags::{
     TINFL_FLAG_PARSE_ZLIB_HEADER, TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF,
 };
-use miniz_oxide::inflate::core::{decompress, DecompressorOxide};
-use miniz_oxide::inflate::TINFLStatus;
+use miniz_oxide::inflate::core::{DecompressorOxide, decompress};
+use std::collections::BTreeMap;
 
 const OFS_DELTA: u8 = 6;
 const REF_DELTA: u8 = 7;

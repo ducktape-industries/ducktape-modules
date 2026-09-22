@@ -5,7 +5,7 @@ mod read;
 mod write;
 
 pub use read::read;
-pub use write::{write, PackWriter};
+pub use write::{PackWriter, write};
 
 use crate::git::object::Kind;
 

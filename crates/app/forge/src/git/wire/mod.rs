@@ -5,7 +5,6 @@ pub mod receive;
 pub mod sideband;
 pub mod upload;
 
-
 pub fn smart_http_service_header(service: &[u8]) -> Vec<u8> {
     let mut line = b"# service=".to_vec();
     line.extend_from_slice(service);

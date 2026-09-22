@@ -5,9 +5,9 @@ use crate::git::error::{Error, Result};
 use crate::git::object::{Kind, Tag};
 use crate::git::oid::{Hash, Oid};
 use crate::git::pack::PackWriter;
-use crate::git::store::{load, Objects};
+use crate::git::store::{Objects, load};
 use crate::git::walk::{
-    commit_of, commits, is_ancestor, reachable_from_trees, reachable_objects, Verdict,
+    Verdict, commit_of, commits, is_ancestor, reachable_from_trees, reachable_objects,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -226,11 +226,11 @@ pub fn ls_refs_response<S: Objects + ?Sized>(
         let mut line = id.to_hex().into_bytes();
         line.push(b' ');
         line.extend_from_slice(name);
-        if command.peel {
-            if let Some(target) = peel_tag(store, id, cap)? {
-                line.extend_from_slice(b" peeled:");
-                line.extend_from_slice(target.to_hex().as_bytes());
-            }
+        if command.peel
+            && let Some(target) = peel_tag(store, id, cap)?
+        {
+            line.extend_from_slice(b" peeled:");
+            line.extend_from_slice(target.to_hex().as_bytes());
         }
         pktline::push_line(&mut out, &line);
     }

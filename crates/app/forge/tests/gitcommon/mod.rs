@@ -2,7 +2,9 @@
 
 #![allow(dead_code, unused_macros, unused_imports)]
 
-use forge::git::{Commit, Hash, Kind, MemoryObjects, Mode, Objects, Oid, Signature, Tree, TreeEntry};
+use forge::git::{
+    Commit, Hash, Kind, MemoryObjects, Mode, Objects, Oid, Signature, Tree, TreeEntry,
+};
 
 macro_rules! fixture {
     ($name:literal) => {

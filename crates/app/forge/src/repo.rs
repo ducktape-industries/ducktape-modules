@@ -2,8 +2,8 @@
 
 use std::collections::BTreeMap;
 
-use abi::{Refusal, Scan, reason};
 use crate::git::{Hash, Oid};
+use abi::{Refusal, Scan, reason};
 
 use crate::contract::{Bounds, Repo, valid_repo_name};
 use crate::sandbox::{Sandbox, hash_of};

@@ -2,8 +2,8 @@
 
 use std::cell::Cell;
 
-use abi::{BlobHeader, Refusal};
 use crate::git::{Error, Hash, Kind, Object, Objects, Oid};
+use abi::{BlobHeader, Refusal};
 
 use crate::sandbox::{Sandbox, blob_id_of, hash_kind_of, oid_of_blob};
 

@@ -2,7 +2,7 @@
 
 use crate::git::error::{Error, Result};
 use crate::git::object::{Kind, Object};
-use crate::git::oid::{oid_of, Hash, Oid};
+use crate::git::oid::{Hash, Oid, oid_of};
 use std::collections::BTreeMap;
 
 pub trait Objects {

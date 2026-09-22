@@ -1,9 +1,9 @@
 // The wasm32 program over the contract: guest contexts as the store, the schedule folded at each block, then the ops and queries.
 
-use abi::{Env, HashKind, Refusal, Scan};
-use guest::{Execute, Program, Query as QueryCtx, Reads};
 use crate::helpers::{already_exists, invalid, not_found, u64_key};
 use crate::{AUTHORITY, CODE_KIND, Change, Entry, Genesis, Op, Page, Query, Reply, Scheduled};
+use abi::{Env, HashKind, Refusal, Scan};
+use guest::{Execute, Program, Query as QueryCtx, Reads};
 
 const PROGRAM: &str = "p/";
 const SCHEDULE: &str = "s/";

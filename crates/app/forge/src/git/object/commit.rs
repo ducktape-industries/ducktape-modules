@@ -2,7 +2,7 @@
 
 use super::{push_header, split_headers};
 use crate::git::error::{Error, Result};
-use crate::git::oid::{push_decimal, Hash, Oid};
+use crate::git::oid::{Hash, Oid, push_decimal};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Signature {

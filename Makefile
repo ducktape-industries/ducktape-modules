@@ -35,6 +35,8 @@ VIEW_FORBIDDEN := blst commonware-cryptography wasm-bindgen js-sys web-sys
 # Cargo uses this directory for both workspaces.
 BUILD_TARGET := $(abspath $(or $(CARGO_TARGET_DIR),target))
 RELEASE := $(BUILD_TARGET)/wasm32-unknown-unknown/release
+# The artifacts wasm-modules leaves there (the target dir may hold others).
+ARTIFACTS := $(foreach a,$(PROGRAMS) $(VIEWS),$(subst -,_,$(a)).wasm)
 
 # A wasm artifact must be the same bytes from any checkout on any machine:
 # panic locations would otherwise carry this checkout's, cargo's and the
@@ -70,18 +72,18 @@ test: wasm-programs
 ## a view into its program is genesis's job: qa's `make pack` runs view-pack
 ## over these outputs.
 wasm-modules: wasm-programs wasm-views
-	@ls -l $(RELEASE)/*.wasm
+	@cd $(RELEASE) && ls -l $(ARTIFACTS)
 
 ## builds every program and view twice, the second time from a fresh target
 ## directory, and requires the same sha256 for every artifact and no absolute
 ## path of this checkout or this home inside any of them.
 wasm-reproducible:
 	$(MAKE) wasm-modules
-	@cd $(RELEASE) && sha256sum *.wasm > first.sha256 && cat first.sha256
+	@cd $(RELEASE) && sha256sum $(ARTIFACTS) > first.sha256 && cat first.sha256
 	$(MAKE) wasm-modules CARGO_TARGET_DIR=$(BUILD_TARGET)/repro
-	@cd $(BUILD_TARGET)/repro/wasm32-unknown-unknown/release && sha256sum *.wasm > second.sha256 && cat second.sha256
+	@cd $(BUILD_TARGET)/repro/wasm32-unknown-unknown/release && sha256sum $(ARTIFACTS) > second.sha256 && cat second.sha256
 	@diff $(RELEASE)/first.sha256 $(BUILD_TARGET)/repro/wasm32-unknown-unknown/release/second.sha256 && echo "every program and view rebuilds to the same bytes"
-	@for f in $(RELEASE)/*.wasm; do \
+	@for a in $(ARTIFACTS); do f=$(RELEASE)/$$a; \
 	  if strings $$f | grep -qE "$(CURDIR)|$(HOME)"; then echo "$$f embeds an absolute path"; strings $$f | grep -E "$(CURDIR)|$(HOME)" | head -3; exit 1; fi; \
 	done; echo "no program or view embeds a path of this checkout or home"
 

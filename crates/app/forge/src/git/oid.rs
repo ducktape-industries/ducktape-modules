@@ -2,8 +2,8 @@
 
 use crate::git::error::{Error, Result};
 use crate::git::object::Kind;
-use std::fmt;
 use sha1_checked::Digest as _;
+use std::fmt;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Hash {

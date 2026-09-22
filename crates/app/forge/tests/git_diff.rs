@@ -4,7 +4,7 @@
 mod common;
 
 use common::{blob, tree};
-use forge::git::diff::{lines, tree_diff, unified, ChangeKind, Hunk, Op};
+use forge::git::diff::{ChangeKind, Hunk, Op, lines, tree_diff, unified};
 use forge::git::{Error, Hash, MemoryObjects, Mode};
 
 #[test]
@@ -116,9 +116,11 @@ fn tree_diff_recurses_sorts_and_skips_identical_subtrees() {
             ),
         ]
     );
-    assert!(tree_diff(&store, Some(&old), Some(&old))
-        .unwrap()
-        .is_empty());
+    assert!(
+        tree_diff(&store, Some(&old), Some(&old))
+            .unwrap()
+            .is_empty()
+    );
     let from_nothing = tree_diff(&store, None, Some(&same_sub)).unwrap();
     assert_eq!(from_nothing.len(), 1);
     assert_eq!(from_nothing[0].path, b"deep");
