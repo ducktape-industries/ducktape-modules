@@ -88,6 +88,10 @@ impl<P, M> Styled for EditorElement<P, M> {
 }
 
 impl<P: 'static, M: 'static> Element for EditorElement<P, M> {
+    fn id(&self) -> Option<ElementId> {
+        Some(self.id.clone())
+    }
+
     fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
         let Self {
             id,

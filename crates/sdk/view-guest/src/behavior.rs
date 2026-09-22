@@ -61,6 +61,10 @@ impl IntoElement for Sensor {
 }
 
 impl Element for Sensor {
+    fn id(&self) -> Option<ElementId> {
+        Some(self.id.clone())
+    }
+
     fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
         wire::Node::Sensor {
             key: key(self.id),
@@ -114,6 +118,10 @@ impl IntoElement for ResizeHandle {
 }
 
 impl Element for ResizeHandle {
+    fn id(&self) -> Option<ElementId> {
+        Some(self.id.clone())
+    }
+
     fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
         wire::Node::ResizeHandle {
             key: key(self.id),
@@ -175,6 +183,10 @@ impl IntoElement for ModalOverlay {
 }
 
 impl Element for ModalOverlay {
+    fn id(&self) -> Option<ElementId> {
+        Some(self.id.clone())
+    }
+
     fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
         wire::Node::Overlay {
             key: key(self.id),

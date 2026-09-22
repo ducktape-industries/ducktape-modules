@@ -44,6 +44,10 @@ impl IntoElement for Surface {
 }
 
 impl Element for Surface {
+    fn id(&self) -> Option<ElementId> {
+        Some(self.id.clone())
+    }
+
     fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
         let key = wire::ElementIdWire::from_gpui(self.id)
             .expect("element ID must be portable across the view boundary")
