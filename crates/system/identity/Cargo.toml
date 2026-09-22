@@ -6,16 +6,21 @@ edition.workspace = true
 # The types are always built; a view links them with `program` off. `guest`
 # adds the asks another program makes of identity (`account_of`, `account`);
 # `program` adds the wasm32 program over the host: `guest`'s contexts, the
-# `alloc`/`call` exports and the `ducktape.*` imports.
+# `alloc`/`call` exports and the `ducktape.*` imports. `view` adds the one ask
+# a view makes of identity directly: the seated key resolved to the account
+# it holds, through `host.rpc.query` — chat-view and forge-view both gate
+# writes on it, so it lives once here.
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [features]
 guest = ["dep:guest"]
 program = ["guest"]
+view = ["dep:ducktape-view-guest"]
 
 [dependencies]
 abi = { workspace = true }
 borsh = { workspace = true }
 guest = { workspace = true, optional = true }
 module-registry = { workspace = true }
+ducktape-view-guest = { workspace = true, optional = true }

@@ -673,6 +673,7 @@ dependencies = [
  "chat",
  "ducklink",
  "futures",
+ "identity",
  "serde",
  "serde_json",
  "unicode-normalization",
@@ -2207,6 +2208,7 @@ dependencies = [
  "chat",
  "forge",
  "futures",
+ "identity",
  "serde",
  "serde_json",
  "view-guest",
@@ -3067,6 +3069,7 @@ dependencies = [
  "borsh",
  "guest",
  "module-registry",
+ "view-guest",
 ]
 
 [[package]]

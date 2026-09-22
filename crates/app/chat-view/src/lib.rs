@@ -14,7 +14,7 @@ mod files;
 mod queries;
 mod room;
 mod state;
-use queries::{around, channels, members, roots, roster, search_hits, thread};
+use queries::{around, channels, members, resolve_me, roots, roster, search_hits, thread};
 pub use state::*;
 mod ui;
 
@@ -105,11 +105,31 @@ impl View for Chat {
                 }
             }
         }));
+        // identity is program-agnostic: a key that gains an account while
+        // this view is open (Settings, then back to Chat) writes no session
+        // change of its own, only an identity block. Re-resolve on it too.
+        let mut identity_live = cx.host().subscribe::<LiveChanges>(identity::PROGRAM.into());
+        self.watches.identity = Some(cx.spawn(async move |this, cx| {
+            while identity_live.next().await.is_some() {
+                if this
+                    .update(cx, |chat, cx| {
+                        cx.notify();
+                        chat.refresh_me(cx);
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        }));
         if self.names.is_idle() {
             self.names = cx.load(roster(cx.host()), |chat| &mut chat.names);
         }
         if self.channels.is_idle() {
             self.channels = cx.load(channels(cx.host()), |chat| &mut chat.channels);
+        }
+        if self.me.is_idle() {
+            self.refresh_me(cx);
         }
         if let Some(room) = &self.room {
             let (id, thread) = (room.id.clone(), room.thread.as_ref().map(|t| t.root));
@@ -145,6 +165,7 @@ impl Chat {
             || self.session.chain != prev.chain;
         if reader_changed {
             self.names = cx.load(roster(cx.host()), |chat| &mut chat.names);
+            self.refresh_me(cx);
         }
         if reader_changed || (prev.connected && !self.session.connected) {
             self.uploads.clear();
@@ -187,17 +208,39 @@ impl Chat {
     }
 
     pub(crate) fn viewer(&self) -> Vec<String> {
-        let me = &self.session.account;
-        if me.is_empty() {
-            Vec::new()
-        } else {
-            vec![me.clone()]
+        let me = self.my_handle();
+        if me.is_empty() { Vec::new() } else { vec![me] }
+    }
+
+    /// Re-asks identity for the account the seated key holds now. Called on
+    /// every key change and on identity's own live stream, so a key that
+    /// gains an account while this view stays open (Settings, then back to
+    /// Chat) re-enables writes without a relaunch.
+    fn refresh_me(&mut self, cx: &mut Context<Self>) {
+        let key = self.session.account.clone();
+        self.me = cx.load(resolve_me(cx.host(), key), |chat| &mut chat.me);
+    }
+
+    /// The reader's account number, once identity has answered.
+    pub(crate) fn my_account(&self) -> Option<u64> {
+        self.me.ready().copied().flatten()
+    }
+
+    /// The reader's handle as chat itself would write it: `acct:<n>` once
+    /// the seated key holds an account, `user:<hex>` while it is seated but
+    /// holds none, "" with no key seated at all.
+    pub(crate) fn my_handle(&self) -> String {
+        match self.my_account() {
+            Some(number) => format!("acct:{number}"),
+            None if self.session.account.is_empty() => String::new(),
+            None => format!("user:{}", self.session.account),
         }
     }
 
-    /// The reader's account number, when the seated handle carries one.
-    pub(crate) fn my_account(&self) -> Option<u64> {
-        self.session.account.strip_prefix("acct:")?.parse().ok()
+    /// Every write in chat is authored by an account: a key that holds none
+    /// reads and nothing more.
+    pub(crate) fn holds_account(&self) -> bool {
+        self.my_account().is_some()
     }
 
     pub(crate) fn info(&self, id: &str) -> Option<&ChannelInfo> {
@@ -232,7 +275,7 @@ impl Chat {
     /// Why the reader may not write here, as a reason token — "" when she
     /// may. The account comes first: with none, every write is refused.
     pub(crate) fn write_refusal(&self) -> &'static str {
-        if !crate::api::holds_account(&self.session) {
+        if !self.holds_account() {
             return "no_account";
         }
         let Some(info) = self.room_info() else {
@@ -242,16 +285,12 @@ impl Chat {
             return "channel_archived";
         }
         if crate::chat::members_only(info) {
-            let me = &self.session.account;
+            let me = self.my_handle();
             let seated = self
                 .room
                 .as_ref()
                 .and_then(|room| room.members.ready())
-                .is_some_and(|members| {
-                    members
-                        .iter()
-                        .any(|m| m.party == *me || format!("user:{}", m.party) == *me)
-                });
+                .is_some_and(|members| members.iter().any(|m| m.party == me));
             if !seated {
                 return "members_only";
             }
@@ -296,7 +335,7 @@ impl Chat {
     }
 
     pub(crate) fn create_channel(&mut self, cx: &mut Context<Self>) {
-        if !crate::api::holds_account(&self.session) {
+        if !self.holds_account() {
             return;
         }
         let Some(create) = &mut self.create else {

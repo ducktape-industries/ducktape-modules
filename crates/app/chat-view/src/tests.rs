@@ -119,6 +119,19 @@ fn configure(cx: &mut TestAppContext) {
     });
     cx.host().never::<LiveChanges>();
     cx.host().handle::<Submit<ChatApi>>(|_| Ok(Vec::new()));
+    // The host hands every view the seated key as raw hex, never a handle:
+    // resolve it the way identity itself would. "0102" is account 7's own
+    // key, matching the roster above; any other key holds no account.
+    cx.host()
+        .handle::<ViewOf<identity::view::Identity>>(|query| {
+            Ok(match query {
+                identity::Query::OfKey { key } if key == [0x01, 0x02] => {
+                    identity::Reply::Number(Some(7))
+                }
+                identity::Query::OfKey { .. } => identity::Reply::Number(None),
+                query => panic!("unexpected identity query: {query:?}"),
+            })
+        });
 }
 
 /// Boots, seats a reader, lists rooms and opens `general` with two rows.
@@ -131,7 +144,7 @@ fn opened() -> (TestAppContext, Entity<Chat>) {
     cx.run_until_parked();
     assert!(cx.has_text("Not connected"));
     props.push(Session {
-        account: "acct:7".into(),
+        account: "0102".into(),
         connected: true,
         chain: "testnet#0a1b2c3d".into(),
         ..Session::default()
@@ -342,7 +355,7 @@ fn message_menu_preserves_disabled_actions_and_executes_enabled_routes() {
             mode: Mode::More,
             at: (611., 455.),
         });
-        chat.session.account.clear();
+        chat.me = Loaded::Ready(None);
         cx.notify();
     });
     cx.run_until_parked();
@@ -364,7 +377,7 @@ fn message_menu_preserves_disabled_actions_and_executes_enabled_routes() {
     assert!(cx.has_text("😀") && cx.has_text("✎") && cx.has_text("🗑"));
 
     view.update(&mut cx, |chat, _, cx| {
-        chat.session.account = "acct:7".into();
+        chat.me = Loaded::Ready(Some(7));
         cx.notify();
     });
     cx.run_until_parked();
@@ -506,7 +519,7 @@ fn channel_create_preserves_busy_account_and_voice_gates() {
         let create = chat.create.as_mut().unwrap();
         create.busy = false;
         create.voice = true;
-        chat.session.account = "user:0102".into();
+        chat.me = Loaded::Ready(None);
         cx.notify();
     });
     cx.run_until_parked();
@@ -520,7 +533,7 @@ fn channel_create_preserves_busy_account_and_voice_gates() {
     assert_eq!(cx.host().asked::<Submit<ChatApi>>().len(), submitted);
 
     view.update(&mut cx, |chat, _, cx| {
-        chat.session.account = "acct:7".into();
+        chat.me = Loaded::Ready(Some(7));
         chat.session.connected = false;
         cx.notify();
     });
@@ -556,6 +569,86 @@ fn unread_rooms_carry_a_dot_and_the_open_room_a_divider() {
     });
     cx.run_until_parked();
     assert!(cx.has_text("New messages"));
+}
+
+#[test]
+fn session_key_resolves_to_its_account() {
+    let (_cx, view) = opened();
+    view.read(|chat| {
+        assert_eq!(chat.my_account(), Some(7));
+        assert!(chat.holds_account());
+        assert_eq!(chat.my_handle(), "acct:7");
+    });
+}
+
+#[test]
+fn an_unregistered_key_stays_read_only() {
+    let mut cx = TestAppContext::new();
+    configure(&mut cx);
+    let props = cx.host().stream::<Props>();
+    let visible = cx.host().stream::<Visible>();
+    let view = cx.open::<Chat>();
+    cx.run_until_parked();
+    props.push(Session {
+        account: "ffff".into(),
+        connected: true,
+        chain: "testnet#0a1b2c3d".into(),
+        ..Session::default()
+    });
+    visible.push(true);
+    cx.run_until_parked();
+    view.read(|chat| {
+        assert_eq!(chat.my_account(), None);
+        assert!(!chat.holds_account());
+        assert_eq!(chat.write_refusal(), "no_account");
+    });
+    cx.simulate_click("chat-sidebar-new-channel");
+    cx.run_until_parked();
+    assert!(cx.has_text("Create an account to create a channel"));
+}
+
+/// The reader creates the account in Settings, then switches to Chat: the
+/// seated key never changes, only identity's own state does, so this has to
+/// arrive over identity's live stream — not the session's.
+#[test]
+fn an_account_gained_later_re_enables_create_channel() {
+    let registered = std::rc::Rc::new(std::cell::Cell::new(false));
+    let mut cx = TestAppContext::new();
+    configure(&mut cx);
+    let reply = registered.clone();
+    cx.host()
+        .handle::<ViewOf<identity::view::Identity>>(move |query| {
+            Ok(match query {
+                identity::Query::OfKey { key } if key == [0x01, 0x02] => {
+                    identity::Reply::Number(reply.get().then_some(7))
+                }
+                identity::Query::OfKey { .. } => identity::Reply::Number(None),
+                query => panic!("unexpected identity query: {query:?}"),
+            })
+        });
+    let props = cx.host().stream::<Props>();
+    let visible = cx.host().stream::<Visible>();
+    let live = cx.host().stream::<LiveChanges>();
+    let view = cx.open::<Chat>();
+    cx.run_until_parked();
+    props.push(Session {
+        account: "0102".into(),
+        connected: true,
+        chain: "testnet#0a1b2c3d".into(),
+        ..Session::default()
+    });
+    visible.push(true);
+    cx.run_until_parked();
+    cx.simulate_click("chat-sidebar-new-channel");
+    cx.run_until_parked();
+    assert!(cx.has_text("Create an account to create a channel"));
+
+    registered.set(true);
+    live.push(Some(1));
+    cx.run_until_parked();
+
+    assert!(!cx.has_text("Create an account to create a channel"));
+    view.read(|chat| assert_eq!(chat.my_account(), Some(7)));
 }
 
 mod message;

@@ -14,9 +14,3 @@ impl Program for ChatApi {
     type Query = ChatViewQuery;
     type Reply = ChatViewReply;
 }
-
-/// Every write in chat is authored by an account: a key that holds none
-/// reads and nothing more.
-pub fn holds_account(session: &Session) -> bool {
-    session.account.starts_with("acct:")
-}
