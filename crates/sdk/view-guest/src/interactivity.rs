@@ -70,7 +70,7 @@ pub struct Interactivity {
     pub(crate) focus: Option<StyleRefinement>,
     pub(crate) in_focus: Option<StyleRefinement>,
     pub(crate) focus_visible: Option<StyleRefinement>,
-    pub(crate) key_context: Option<SharedString>,
+    pub(crate) key_context: Option<wire::KeyContext>,
     pub(crate) focus_handle: Option<FocusHandle>,
     pub(crate) group: Option<SharedString>,
     pub(crate) hover: Option<StyleRefinement>,
@@ -150,7 +150,7 @@ pub trait InteractiveElement: Sized {
         E: std::fmt::Display,
     {
         if let Ok(key_context) = key_context.try_into() {
-            self.interactivity().key_context = Some(format!("{key_context:?}").into());
+            self.interactivity().key_context = Some(wire::KeyContext::from_gpui(&key_context));
         }
         self
     }

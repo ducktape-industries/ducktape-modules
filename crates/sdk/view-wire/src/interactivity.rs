@@ -8,6 +8,47 @@ use crate::{click, keyboard, mouse};
 use gpui::{Bounds, Pixels, Point};
 use serde::{Deserialize, Serialize};
 
+pub const MAX_KEY_CONTEXT_ENTRIES: usize = 64;
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KeyContext {
+    pub entries: Vec<KeyContextEntry>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KeyContextEntry {
+    pub key: gpui::SharedString,
+    pub value: Option<gpui::SharedString>,
+}
+
+impl KeyContext {
+    pub fn from_gpui(context: &gpui::KeyContext) -> Self {
+        Self {
+            entries: context
+                .primary()
+                .into_iter()
+                .chain(context.secondary())
+                .map(|entry| KeyContextEntry {
+                    key: entry.key.clone(),
+                    value: entry.value.clone(),
+                })
+                .collect(),
+        }
+    }
+
+    pub fn to_gpui(&self) -> gpui::KeyContext {
+        let mut context = gpui::KeyContext::default();
+        for entry in &self.entries {
+            if let Some(value) = &entry.value {
+                context.set(entry.key.clone(), value.clone());
+            } else {
+                context.add(entry.key.clone());
+            }
+        }
+        context
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DispatchPhase {
     Capture,

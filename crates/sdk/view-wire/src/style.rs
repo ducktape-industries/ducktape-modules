@@ -324,7 +324,7 @@ pub struct Interactivity {
     pub focus: Option<StyleRefinement>,
     pub in_focus: Option<StyleRefinement>,
     pub focus_visible: Option<StyleRefinement>,
-    pub key_context: Option<SharedString>,
+    pub key_context: Option<crate::interactivity::KeyContext>,
     /// Guest-app-local opaque focus allocation. It is never an authored element ID.
     pub focus_handle: Option<u64>,
     pub occlude: bool,

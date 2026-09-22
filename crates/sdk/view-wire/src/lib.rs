@@ -140,7 +140,7 @@ pub mod events;
 pub mod interactivity;
 pub mod keyboard;
 pub mod mouse;
-pub use interactivity::{DispatchPhase, HoverListenerMode, Tooltip, TooltipResponse};
+pub use interactivity::{DispatchPhase, HoverListenerMode, KeyContext, Tooltip, TooltipResponse};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RichTextHover {
@@ -1212,9 +1212,19 @@ fn sanitize_node(
                 *group = name.into();
             }
             if let Some(context) = &mut interactivity.key_context {
-                let mut value = context.to_string();
-                truncate_string(&mut value);
-                *context = value.into();
+                context
+                    .entries
+                    .truncate(interactivity::MAX_KEY_CONTEXT_ENTRIES);
+                for entry in &mut context.entries {
+                    let mut key = entry.key.to_string();
+                    truncate_string(&mut key);
+                    entry.key = key.into();
+                    if let Some(value) = &mut entry.value {
+                        let mut bounded = value.to_string();
+                        truncate_string(&mut bounded);
+                        *value = bounded.into();
+                    }
+                }
             }
             if let Some(tooltip) = &mut interactivity.tooltip {
                 tooltip.delay_ms = tooltip.delay_ms.min(60_000);
