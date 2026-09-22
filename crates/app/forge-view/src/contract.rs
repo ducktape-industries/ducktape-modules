@@ -583,8 +583,15 @@ pub enum Reply {
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum OpReply {
-    Change { height: u64, n: u64 },
-    Review { height: u64, n: u64, id: u64 },
+    Change {
+        height: u64,
+        n: u64,
+    },
+    Review {
+        height: u64,
+        n: u64,
+        id: u64,
+    },
     Merged {
         height: u64,
         oid: String,

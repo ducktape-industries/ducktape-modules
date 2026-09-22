@@ -44,9 +44,7 @@ pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
     let needle = forge.search.trim().to_lowercase();
     let shown: Vec<&(ChangeSummary, Option<&Judgment>)> = rows
         .iter()
-        .filter(|(summary, _)| {
-            needle.is_empty() || summary.title.to_lowercase().contains(&needle)
-        })
+        .filter(|(summary, _)| needle.is_empty() || summary.title.to_lowercase().contains(&needle))
         .collect();
     if shown.is_empty() {
         return column
@@ -83,7 +81,12 @@ pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
                     .text_color(theme.muted)
                     .child(format!("#{n}")),
             )
-            .cell(div().flex_1().truncate().child(crate::ui::bold(summary.title.clone())))
+            .cell(
+                div()
+                    .flex_1()
+                    .truncate()
+                    .child(crate::ui::bold(summary.title.clone())),
+            )
             .cell(state_chip(summary.state, n, theme))
             .cell(quiet(
                 format!(
@@ -180,9 +183,12 @@ fn filters(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement 
                 pick,
             )
             .selected(forge.filter == filter)
-            .enabled(filter == Filter::Open || filter == Filter::Merged
-                || filter == Filter::Closed
-                || forge.me_key().is_some()),
+            .enabled(
+                filter == Filter::Open
+                    || filter == Filter::Merged
+                    || filter == Filter::Closed
+                    || forge.me_key().is_some(),
+            ),
         );
     }
     bar.child(div().flex_1())
@@ -247,11 +253,7 @@ pub(crate) fn form(
             theme,
         ))
         .child(quiet(
-            format!(
-                "{} → {}",
-                ref_label(&form.from),
-                ref_label(&form.into)
-            ),
+            format!("{} → {}", ref_label(&form.from), ref_label(&form.into)),
             theme,
         ))
         .child(

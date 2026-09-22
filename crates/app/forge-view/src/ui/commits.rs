@@ -23,7 +23,13 @@ pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
     if let Some(oid) = forge.nav().commit.clone() {
         return detail(forge, &oid, cx, theme);
     }
-    log(forge, &query(forge, forge.revision()), "forge-log", cx, theme)
+    log(
+        forge,
+        &query(forge, forge.revision()),
+        "forge-log",
+        cx,
+        theme,
+    )
 }
 
 /// One page-following log, virtualized.

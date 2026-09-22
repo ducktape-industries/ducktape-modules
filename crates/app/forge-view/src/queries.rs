@@ -81,7 +81,9 @@ fn with_cursor(query: &Query, next: Cursor) -> Option<Query> {
         | Query::Changes { cursor, .. }
         | Query::Change { cursor, .. }
         | Query::Judgment { cursor, .. } => cursor,
-        Query::Blob { .. } | Query::Activity { .. } | Query::Advertise { .. }
+        Query::Blob { .. }
+        | Query::Activity { .. }
+        | Query::Advertise { .. }
         | Query::Upload { .. } => return None,
     };
     *slot = Some(next);
@@ -101,9 +103,12 @@ fn extend(into: &mut Reply, more: Reply) {
         (Reply::Log { page, .. }, Reply::Log { page: more, .. }) => absorb(page, more),
         (Reply::Tree { page, .. }, Reply::Tree { page: more, .. }) => absorb(page, more),
         (Reply::Diff { page, .. }, Reply::Diff { page: more, .. }) => absorb(page, more),
-        (Reply::Compare { conflicts, .. }, Reply::Compare { conflicts: more, .. }) => {
-            absorb(conflicts, more)
-        }
+        (
+            Reply::Compare { conflicts, .. },
+            Reply::Compare {
+                conflicts: more, ..
+            },
+        ) => absorb(conflicts, more),
         (Reply::Changes { page, .. }, Reply::Changes { page: more, .. }) => absorb(page, more),
         (Reply::Change { reviews, .. }, Reply::Change { reviews: more, .. }) => {
             absorb(reviews, more)

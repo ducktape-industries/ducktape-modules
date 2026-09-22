@@ -26,7 +26,11 @@ pub(crate) fn render(forge: &mut Forge, cx: &mut Context<Forge>) -> impl IntoEle
     let shown = cx.listener(|forge, size: &(Pixels, Pixels), _, cx| {
         forge.measured(f32::from(size.0), f32::from(size.1), cx)
     });
-    let mut columns = div().id(id("forge-columns")).flex().size_full().min_h(px(0.));
+    let mut columns = div()
+        .id(id("forge-columns"))
+        .flex()
+        .size_full()
+        .min_h(px(0.));
     if forge.layout.tree_visible() {
         columns = columns.child(repos::rail(forge, cx, &theme));
     }
@@ -282,7 +286,11 @@ fn about(forge: &Forge, theme: &Theme) -> AnyElement {
         .flex()
         .flex_col()
         .gap_2()
-        .child(fact("Default head", components::ref_label(&info.repo.settings.head), theme))
+        .child(fact(
+            "Default head",
+            components::ref_label(&info.repo.settings.head),
+            theme,
+        ))
         .child(fact(
             "Hash",
             match info.repo.hash {
@@ -326,7 +334,12 @@ pub(crate) fn fact(label: &str, value: impl Into<String>, theme: &Theme) -> AnyE
         .flex()
         .gap_2()
         .text_size(px(12.))
-        .child(div().w(px(120.)).text_color(theme.muted).child(label.to_owned()))
+        .child(
+            div()
+                .w(px(120.))
+                .text_color(theme.muted)
+                .child(label.to_owned()),
+        )
         .child(div().flex_1().child(value.into()))
         .into_any_element()
 }
@@ -394,13 +407,15 @@ pub(crate) fn staged<'a>(
         )),
         crate::Stage::Failed(refusal) => {
             let query = query.clone();
-            let retry = cx.listener(move |forge, _: &ClickEvent, _, cx| {
-                forge.retry(query.clone(), cx)
-            });
-            Err(
-                components::refused(id(element_id.to_owned()), refusal.sentence.clone(), theme, retry)
-                    .into_any_element(),
+            let retry =
+                cx.listener(move |forge, _: &ClickEvent, _, cx| forge.retry(query.clone(), cx));
+            Err(components::refused(
+                id(element_id.to_owned()),
+                refusal.sentence.clone(),
+                theme,
+                retry,
             )
+            .into_any_element())
         }
     }
 }

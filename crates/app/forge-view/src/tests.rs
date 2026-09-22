@@ -47,7 +47,9 @@ fn answer(query: &Query, mode: &str) -> Reply {
         Query::Refs { cursor: None, .. } => reply("refs"),
         Query::Refs { .. } => reply("refs-empty"),
         Query::Activity { .. } => reply("activity"),
-        Query::Tree { cursor: None, path, .. } if path.is_empty() => reply("tree"),
+        Query::Tree {
+            cursor: None, path, ..
+        } if path.is_empty() => reply("tree"),
         Query::Tree { .. } => reply("tree-directory"),
         Query::Blob { oid, .. } => match oid.as_str() {
             "95d586e774a04676a07a142f0e2f97a4f32562cb" => reply("blob-binary"),
@@ -138,7 +140,8 @@ pub(crate) fn configure(cx: &mut TestAppContext, mode: &'static str) {
             other => panic!("unexpected chat query: {other:?}"),
         })
     });
-    cx.host().handle::<Submit<ChatApi>>(|_| Ok(serde_json::Value::Null));
+    cx.host()
+        .handle::<Submit<ChatApi>>(|_| Ok(serde_json::Value::Null));
     cx.host().handle::<SubmitForge>(|_| Ok(()));
     cx.host().handle::<Id>(|kind| Ok(format!("{kind}-1")));
     cx.host().never::<Live>();
@@ -225,23 +228,19 @@ fn a_refused_read_keeps_its_reason_and_offers_one_retry() {
     let mut cx = TestAppContext::new();
     cx.host()
         .handle::<Ask>(|_| Ok(reply("refused-object-not-held")));
-    cx.host().handle::<ViewOf<ChatApi>>(|_| {
-        Ok(chat::ChatViewReply::Accounts(accounts()))
-    });
+    cx.host()
+        .handle::<ViewOf<ChatApi>>(|_| Ok(chat::ChatViewReply::Accounts(accounts())));
     cx.host().never::<Live>();
     cx.host().never::<Visible>();
     cx.host().never::<Props>();
     cx.open::<Forge>();
     cx.run_until_parked();
-    assert!(
-        cx.has_text("object ffffffffffffffffffffffffffffffffffffffff is not held by this node"),
-        "{:?}",
-        cx.texts()
-    );
+    let sentence = "object ffffffffffffffffffffffffffffffffffffffff is not held by this node";
+    assert!(cx.has_text(sentence), "{:?}", cx.texts());
     assert!(cx.find("forge-repos-list-retry").is_some());
     cx.simulate_click("forge-repos-list-retry");
     cx.run_until_parked();
-    assert!(cx.has_text("is not held by this node"));
+    assert!(cx.has_text(sentence));
 }
 
 #[test]
@@ -252,7 +251,11 @@ fn creating_a_repository_validates_its_name_then_shows_the_submission() {
     cx.simulate_input("forge-new-repo-name", "not a name");
     cx.simulate_click("forge-new-repo-submit");
     cx.run_until_parked();
-    assert!(cx.has_text("A repository name is 1–37 bytes"), "{:?}", cx.texts());
+    assert!(
+        cx.has_text("A repository name is 1–37 bytes of letters, digits, dot, dash or underscore"),
+        "{:?}",
+        cx.texts()
+    );
     assert!(cx.host().asked::<SubmitForge>().is_empty());
     cx.simulate_input("forge-new-repo-name", "ledger");
     cx.simulate_click("forge-new-repo-sha256");
@@ -301,7 +304,10 @@ fn code_reads_the_tree_then_one_file_and_says_what_it_cannot_show() {
     assert!(cx.find("forge-readme-body").is_some());
     cx.simulate_input("forge-tree-search", "empty");
     cx.run_until_parked();
-    assert!(!cx.has_text("README.md"));
+    assert!(
+        cx.find("forge-tree-README.md").is_none(),
+        "the filter drops the row"
+    );
     cx.simulate_input("forge-tree-search", "");
     cx.simulate_click("forge-tree-README.md");
     cx.run_until_parked();
@@ -347,20 +353,22 @@ fn commits_follows_the_cursor_and_opens_one_commit_with_its_diff() {
     // `log` carries a next cursor; the second page is the root commit.
     let asked = cx.host().asked::<Ask>();
     assert!(
-        asked
-            .iter()
-            .any(|query| matches!(query, Query::Log { cursor: Some(_), .. })),
+        asked.iter().any(|query| matches!(
+            query,
+            Query::Log {
+                cursor: Some(_),
+                ..
+            }
+        )),
         "the log follows its cursor"
     );
     view.read(|forge| {
-        let Some(Reply::Log { page, .. }) =
-            forge.ready(&Query::Log {
-                repo: "project".into(),
-                from: forge.revision(),
-                cursor: None,
-                limit: crate::queries::PAGE,
-            })
-        else {
+        let Some(Reply::Log { page, .. }) = forge.ready(&Query::Log {
+            repo: "project".into(),
+            from: forge.revision(),
+            cursor: None,
+            limit: crate::queries::PAGE,
+        }) else {
             panic!("the log landed");
         };
         assert_eq!(page.items.len(), 2, "both pages are one list");
@@ -369,8 +377,16 @@ fn commits_follows_the_cursor_and_opens_one_commit_with_its_diff() {
     assert!(cx.has_text("Feature"), "{:?}", cx.texts());
     cx.simulate_click("forge-commit-26607f522099476177a45a8058a93108fba5a84d");
     cx.run_until_parked();
-    assert!(cx.has_text("Review these bytes."), "{:?}", cx.texts());
+    assert!(
+        cx.has_text("Feature\n\nReview these bytes.\n"),
+        "{:?}",
+        cx.texts()
+    );
     assert!(cx.has_text("ebfb8b62"), "the parent is named");
+    assert!(
+        cx.find("forge-commit-diff-file-src/lib.rs").is_some(),
+        "a commit's diff names its files above the rows"
+    );
     assert!(cx.find("forge-commit-diff").is_some());
     cx.simulate_click("forge-commit-close");
     cx.run_until_parked();
@@ -638,10 +654,7 @@ fn screen(state: &str) -> TestAppContext {
 }
 
 /// Opens change #1 of `project` on one of its tabs.
-pub(crate) fn change_screen(
-    mode: &'static str,
-    tab: ChangeTab,
-) -> (TestAppContext, Entity<Forge>) {
+pub(crate) fn change_screen(mode: &'static str, tab: ChangeTab) -> (TestAppContext, Entity<Forge>) {
     let (mut cx, view) = opened(mode);
     cx.simulate_click("forge-tab-changes");
     cx.run_until_parked();

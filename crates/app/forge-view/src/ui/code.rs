@@ -10,11 +10,7 @@ use crate::ui::components::{button, empty_state, heading, id, mono, path_text, q
 use crate::ui::{markdown, scroller, staged};
 
 pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
-    let mut columns = div()
-        .id(id("forge-code"))
-        .flex()
-        .flex_1()
-        .min_h(px(0.));
+    let mut columns = div().id(id("forge-code")).flex().flex_1().min_h(px(0.));
     if forge.layout.tree_visible() || forge.nav().blob.is_none() {
         columns = columns.child(tree(forge, cx, theme));
     }
@@ -73,7 +69,14 @@ fn tree(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
             .child(quiet("Resolving the ref…", theme))
             .into_any_element();
     };
-    let reply = match staged(forge, &query, "forge-tree-list", "Reading the tree…", cx, theme) {
+    let reply = match staged(
+        forge,
+        &query,
+        "forge-tree-list",
+        "Reading the tree…",
+        cx,
+        theme,
+    ) {
         Ok(reply) => reply,
         Err(state) => return column.child(state).into_any_element(),
     };
@@ -84,7 +87,9 @@ fn tree(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
     let shown: Vec<&TreeInfo> = page
         .items
         .iter()
-        .filter(|entry| needle.is_empty() || path_text(&entry.name).to_lowercase().contains(&needle))
+        .filter(|entry| {
+            needle.is_empty() || path_text(&entry.name).to_lowercase().contains(&needle)
+        })
         .collect();
     if shown.is_empty() {
         return column
@@ -156,7 +161,8 @@ fn breadcrumb(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyEleme
         }
         walked.extend_from_slice(segment);
         let here = walked.clone();
-        let open = cx.listener(move |forge, _: &ClickEvent, _, cx| forge.open_dir(here.clone(), cx));
+        let open =
+            cx.listener(move |forge, _: &ClickEvent, _, cx| forge.open_dir(here.clone(), cx));
         bar = bar.child(button(
             id(format!("forge-crumb-{}", path_text(&walked))),
             path_text(segment),
@@ -267,7 +273,14 @@ fn readme(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
         oid,
         range: None,
     };
-    let reply = match staged(forge, &query, "forge-readme", "Reading the README…", cx, theme) {
+    let reply = match staged(
+        forge,
+        &query,
+        "forge-readme",
+        "Reading the README…",
+        cx,
+        theme,
+    ) {
         Ok(reply) => reply,
         Err(state) => return state,
     };
@@ -284,7 +297,12 @@ fn readme(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
         .min_h(px(0.))
         .p_3()
         .gap_2()
-        .child(heading(id("forge-readme-title"), path_text(&name), 2, theme))
+        .child(heading(
+            id("forge-readme-title"),
+            path_text(&name),
+            2,
+            theme,
+        ))
         .child(if matches!(blob.content, Content::Text) {
             markdown("forge-readme-body", &text, forge.session.dark)
         } else {

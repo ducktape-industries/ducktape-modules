@@ -384,7 +384,10 @@ impl Names {
     }
     /// What a chat handle (`acct:7`, `user:<hex>`, `system`) is called.
     pub fn handle(&self, handle: &str) -> String {
-        if let Some(number) = handle.strip_prefix("acct:").and_then(|n| n.parse::<u64>().ok()) {
+        if let Some(number) = handle
+            .strip_prefix("acct:")
+            .and_then(|n| n.parse::<u64>().ok())
+        {
             return self
                 .rows
                 .iter()

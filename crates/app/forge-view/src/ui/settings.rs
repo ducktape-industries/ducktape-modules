@@ -75,8 +75,13 @@ pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
                 .flex()
                 .gap_2()
                 .child(
-                    button(id("forge-settings-force"), "Allow force pushes", theme, force)
-                        .selected(form.allow_force),
+                    button(
+                        id("forge-settings-force"),
+                        "Allow force pushes",
+                        theme,
+                        force,
+                    )
+                    .selected(form.allow_force),
                 )
                 .child(
                     button(
@@ -94,7 +99,12 @@ pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
                         .enabled(forge.session.connected),
                 ),
         )
-        .child(heading(id("forge-settings-access-title"), "Access", 3, theme));
+        .child(heading(
+            id("forge-settings-access-title"),
+            "Access",
+            3,
+            theme,
+        ));
     let typed = cx.listener(|forge, text: &String, _, cx| {
         if let Some(form) = &mut forge.repo_settings {
             form.grant = text.clone();

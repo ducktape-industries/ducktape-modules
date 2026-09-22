@@ -92,15 +92,9 @@ pub(crate) fn overview(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) ->
                     theme.surface_raised,
                 ))
                 .cell(div().w(px(140.)).truncate().child(quiet(owner, theme)))
-                .cell(quiet(
-                    format!("{} refs", info.repo.refs_count),
-                    theme,
-                ))
+                .cell(quiet(format!("{} refs", info.repo.refs_count), theme))
                 .cell(div().flex_1())
-                .cell(quiet(
-                    format!("height {}", info.repo.last_activity),
-                    theme,
-                )),
+                .cell(quiet(format!("height {}", info.repo.last_activity), theme)),
         );
     }
     column.child(list).into_any_element()
@@ -159,12 +153,7 @@ pub(crate) fn rail(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> Any
     column.child(list).into_any_element()
 }
 
-fn header(
-    forge: &Forge,
-    cx: &mut Context<Forge>,
-    theme: &Theme,
-    search_id: &str,
-) -> AnyElement {
+fn header(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme, search_id: &str) -> AnyElement {
     let typed = cx.listener(|forge, text: &String, _, cx| {
         forge.search = text.clone();
         cx.notify();
@@ -203,11 +192,7 @@ fn header(
         .into_any_element()
 }
 
-fn dialog(
-    form: &crate::state::NewRepo,
-    cx: &mut Context<Forge>,
-    theme: &Theme,
-) -> AnyElement {
+fn dialog(form: &crate::state::NewRepo, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
     let typed = cx.listener(|forge, text: &String, _, cx| {
         if let Some(form) = &mut forge.new_repo {
             form.name = text.clone();
@@ -234,7 +219,12 @@ fn dialog(
         .border_1()
         .border_color(theme.border_strong)
         .bg(theme.surface)
-        .child(heading(id("forge-new-repo-title"), "New repository", 2, theme))
+        .child(heading(
+            id("forge-new-repo-title"),
+            "New repository",
+            2,
+            theme,
+        ))
         .child(
             Input::new(id("forge-new-repo-name"))
                 .h(px(28.))

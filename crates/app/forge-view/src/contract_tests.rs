@@ -70,7 +70,10 @@ fn every_committed_reply_and_receipt_round_trips_through_the_mirror() {
             replies += 1;
         }
     }
-    assert!(replies > 40 && receipts >= 8, "{replies} replies, {receipts} receipts");
+    assert!(
+        replies > 40 && receipts >= 8,
+        "{replies} replies, {receipts} receipts"
+    );
 }
 
 #[test]

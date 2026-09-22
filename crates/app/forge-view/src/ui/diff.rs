@@ -78,6 +78,9 @@ pub(crate) fn render(
         )
         .into_any_element();
     }
+    // A screen with no file tree beside it (a commit's own diff) carries the
+    // file headers above the virtual list, where they stay in view.
+    let strip = (!reviewable).then(|| file_strip(&files, element_id, cx, theme));
     let rows = paint(forge, &files, reviewable);
     let count = rows.len();
     // A diff's width is set by its longest source line, so that row is the
@@ -94,7 +97,7 @@ pub(crate) fn render(
             forge.open_comment(at.0.clone(), at.1, at.2, cx)
         }));
     let handle = forge.diff_scroll.clone();
-    uniform_list(id(element_id.to_owned()), count, move |range, _, _| {
+    let list = uniform_list(id(element_id.to_owned()), count, move |range, _, _| {
         range
             .map(|index| paint_row(&rows[index], index, reviewable, &comment, &theme))
             .collect::<Vec<_>>()
@@ -102,8 +105,63 @@ pub(crate) fn render(
     .with_width_from_item(widest)
     .track_scroll(&handle)
     .flex_1()
-    .min_h(px(0.))
-    .into_any_element()
+    .min_h(px(0.));
+    let Some(strip) = strip else {
+        return list.into_any_element();
+    };
+    div()
+        .id(id(format!("{element_id}-pane")))
+        .flex()
+        .flex_col()
+        .flex_1()
+        .min_h(px(0.))
+        .child(strip)
+        .child(list)
+        .into_any_element()
+}
+
+/// Which files this diff touches, above the rows themselves. Each one
+/// narrows the list to itself.
+fn file_strip(
+    files: &[&FileDiff],
+    element_id: &str,
+    cx: &mut Context<Forge>,
+    theme: &Theme,
+) -> AnyElement {
+    let mut strip = div()
+        .id(id(format!("{element_id}-files")))
+        .flex()
+        .flex_col()
+        .gap_0p5()
+        .px_2()
+        .py_1()
+        .border_b_1()
+        .border_color(theme.border);
+    for file in files {
+        let Some(path) = path_of(file) else { continue };
+        let label = path_text(&path);
+        let pick = cx.listener({
+            let path = path.clone();
+            move |forge, _: &ClickEvent, _, cx| forge.single_file(Some(path.clone()), cx)
+        });
+        strip = strip.child(
+            div()
+                .id(id(format!("{element_id}-file-{label}")))
+                .flex()
+                .gap_2()
+                .text_size(px(12.))
+                .role(Role::Button)
+                .focusable()
+                .on_click(pick)
+                .child(crate::ui::bold(label))
+                .child(quiet(status_label(file.status), theme))
+                .child(quiet(
+                    format!("+{} −{}", file.additions, file.deletions),
+                    theme,
+                )),
+        );
+    }
+    strip.into_any_element()
 }
 
 pub(crate) fn path_of(file: &FileDiff) -> Option<Vec<u8>> {

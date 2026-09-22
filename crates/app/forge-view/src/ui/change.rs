@@ -15,7 +15,14 @@ pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
     let Some(query) = forge.change_query() else {
         return div().into_any_element();
     };
-    let reply = match staged(forge, &query, "forge-change", "Reading this change…", cx, theme) {
+    let reply = match staged(
+        forge,
+        &query,
+        "forge-change",
+        "Reading this change…",
+        cx,
+        theme,
+    ) {
         Ok(reply) => reply,
         Err(state) => return state,
     };
@@ -134,7 +141,7 @@ fn header(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
         .border_b_1()
         .border_color(theme.border)
         .child(top);
-    if !refusal.is_empty() && open {
+    if !refusal.is_empty() {
         column = column.child(
             div()
                 .id(id("forge-merge-refusal"))
@@ -244,7 +251,8 @@ fn messages(forge: &Forge, theme: &Theme) -> AnyElement {
     };
     let names = forge.names.ready();
     match forge.messages.get(&change.channel) {
-        None | Some(ducktape_view_guest::view::Loaded::Idle)
+        None
+        | Some(ducktape_view_guest::view::Loaded::Idle)
         | Some(ducktape_view_guest::view::Loaded::Loading(_)) => {
             quiet("Reading the conversation…", theme)
         }
@@ -352,24 +360,12 @@ fn files(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
         .min_h(px(0.))
         .child(review_bar(forge, cx, theme))
         .child(diff::composer(forge, cx, theme))
-        .child(diff::render(
-            forge,
-            &query,
-            "forge-diff",
-            true,
-            cx,
-            theme,
-        ));
+        .child(diff::render(forge, &query, "forge-diff", true, cx, theme));
     columns.child(pane).into_any_element()
 }
 
 /// The reviewer's file list: comment and viewed markers, single-file mode.
-fn file_tree(
-    forge: &Forge,
-    query: &Query,
-    cx: &mut Context<Forge>,
-    theme: &Theme,
-) -> AnyElement {
+fn file_tree(forge: &Forge, query: &Query, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
     let all = cx.listener(|forge, _: &ClickEvent, _, cx| forge.single_file(None, cx));
     let column = div()
         .id(id("forge-file-tree"))
@@ -440,7 +436,10 @@ fn file_tree(
             .on_click(pick)
             .selected(forge.nav().diff_path.as_deref() == Some(path.as_slice()))
             .cell(div().flex_1().truncate().child(label.clone()))
-            .cell(quiet(format!("+{} −{}", file.additions, file.deletions), theme));
+            .cell(quiet(
+                format!("+{} −{}", file.additions, file.deletions),
+                theme,
+            ));
         if drafts + landed > 0 {
             line = line.cell(chip(
                 id(format!("forge-file-comments-{label}")),
@@ -532,7 +531,8 @@ fn review_bar(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyEleme
     if !review.finishing {
         return bar.into_any_element();
     }
-    let typed = cx.listener(|forge, text: &String, _, cx| forge.typed_review_body(text.clone(), cx));
+    let typed =
+        cx.listener(|forge, text: &String, _, cx| forge.typed_review_body(text.clone(), cx));
     let mut verdicts = div().id(id("forge-verdicts")).flex().gap_2().items_center();
     for verdict in [Verdict::Approve, Verdict::RequestChanges, Verdict::Comment] {
         let submit =
@@ -585,11 +585,7 @@ pub(crate) fn overview(forge: &Forge, theme: &Theme) -> AnyElement {
         .flex_col()
         .gap_2()
         .child(fact("Number", format!("#{}", change.n), theme))
-        .child(fact(
-            "From",
-            ref_label(&revision_name(&change.from)),
-            theme,
-        ))
+        .child(fact("From", ref_label(&revision_name(&change.from)), theme))
         .child(fact("Into", ref_label(&change.into), theme))
         .child(fact(
             "Source head",
@@ -701,11 +697,7 @@ pub(crate) fn merge_status(forge: &Forge, theme: &Theme) -> AnyElement {
             change.verdicts.request_changes.to_string(),
             theme,
         ))
-        .child(fact(
-            "Comments",
-            change.verdicts.comment.to_string(),
-            theme,
-        ));
+        .child(fact("Comments", change.verdicts.comment.to_string(), theme));
     column = column.child(fact(
         "Mergeability",
         match forge.compare().map(|c| c.mergeability) {
@@ -735,7 +727,12 @@ pub(crate) fn merge_status(forge: &Forge, theme: &Theme) -> AnyElement {
             ));
         }
     }
-    column = column.child(heading(id("forge-merge-status-title"), "Still to review", 3, theme));
+    column = column.child(heading(
+        id("forge-merge-status-title"),
+        "Still to review",
+        3,
+        theme,
+    ));
     if change.reviewers.is_empty() {
         column = column.child(quiet("Nobody was asked by name.", theme));
     }

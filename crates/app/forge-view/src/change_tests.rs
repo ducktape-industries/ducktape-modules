@@ -13,7 +13,8 @@ fn the_change_list_shows_the_plans_row_and_its_filters() {
     cx.run_until_parked();
     for filter in crate::state::Filter::ALL {
         assert!(
-            cx.find(&format!("forge-filter-{}", filter.slug())).is_some(),
+            cx.find(&format!("forge-filter-{}", filter.slug()))
+                .is_some(),
             "{} filter",
             filter.label()
         );
@@ -103,13 +104,20 @@ fn an_operation_shows_its_submission_then_a_refusal_reverts_it_with_the_reason()
 fn a_merged_change_wears_its_state_and_offers_nothing_more() {
     let (cx, _view) = change_screen("merged", ChangeTab::Conversation);
     assert!(cx.has_text("merged"), "{:?}", cx.texts());
-    assert!(cx.has_text("This change is no longer open"));
+    assert!(
+        cx.has_text("This change is no longer open"),
+        "{:?}",
+        cx.texts()
+    );
 }
 
 #[test]
 fn the_conversation_is_the_hidden_chat_channel_and_the_forge_body() {
     let (mut cx, view) = change_screen("reviewed", ChangeTab::Conversation);
-    assert!(cx.find("forge-change-body-text").is_some(), "the body is markdown");
+    assert!(
+        cx.find("forge-change-body-text").is_some(),
+        "the body is markdown"
+    );
     assert!(cx.has_text("Ada opened this change"), "{:?}", cx.texts());
     assert!(cx.has_text("Reading it now"));
     assert!(cx.has_text("Rae"), "a chat handle resolves to a name");
@@ -123,10 +131,15 @@ fn the_conversation_is_the_hidden_chat_channel_and_the_forge_body() {
     cx.simulate_input("forge-reply", "looks right to me");
     cx.simulate_click("forge-reply-send");
     cx.run_until_parked();
-    assert!(cx.host().asked::<Submit<ChatApi>>().iter().any(|op| matches!(
-        op,
-        chat::ChatMsg::PostMessage { channel_id, .. } if channel_id == "forge:project:1"
-    )));
+    assert!(
+        cx.host()
+            .asked::<Submit<ChatApi>>()
+            .iter()
+            .any(|op| matches!(
+                op,
+                chat::ChatMsg::PostMessage { channel_id, .. } if channel_id == "forge:project:1"
+            ))
+    );
     view.read(|forge| assert!(forge.reply.is_empty()));
 }
 
@@ -152,7 +165,10 @@ fn the_files_tab_marks_comments_and_viewed_files_and_can_show_one() {
     cx.simulate_click("forge-file-src/lib.rs");
     cx.run_until_parked();
     view.read(|forge| {
-        assert_eq!(forge.nav().diff_path.as_deref(), Some(b"src/lib.rs".as_slice()))
+        assert_eq!(
+            forge.nav().diff_path.as_deref(),
+            Some(b"src/lib.rs".as_slice())
+        )
     });
     cx.simulate_click("forge-files-all");
     cx.run_until_parked();
@@ -163,17 +179,27 @@ fn the_files_tab_marks_comments_and_viewed_files_and_can_show_one() {
 fn the_diff_draws_typed_lines_and_believes_the_program_about_a_literal_plus_plus() {
     let (cx, _view) = change_screen("reviewed", ChangeTab::Files);
     assert!(cx.find("forge-diff").is_some());
-    assert!(
-        cx.has_text("src/lib.rs · modified · +2 −1"),
-        "{:?}",
-        cx.texts()
-    );
-    // The list measures its widest source line, which is drawn headless.
+    // The list measures its widest source line, so that row is the one a
+    // headless render draws; the rest arrive with the host's visible range.
     assert!(
         cx.has_text("added"),
         "the widest line is rendered: {:?}",
         cx.texts()
     );
+    assert!(
+        cx.has_text("5") && cx.has_text("+"),
+        "its gutter and marker"
+    );
+    let Some(ducktape_view_guest::wire::Node::Container(gutter)) =
+        cx.find("forge-gutter-src/lib.rs-new-5")
+    else {
+        panic!("the gutter number is the comment button");
+    };
+    assert_eq!(
+        gutter.interactivity.aria.label.as_deref(),
+        Some("Comment on this line")
+    );
+    assert!(gutter.interactivity.on_click.is_some());
 }
 
 #[test]
@@ -181,7 +207,11 @@ fn the_gutter_of_a_drawn_line_is_the_comment_button() {
     let (mut cx, view) = change_screen("reviewed", ChangeTab::Files);
     cx.simulate_click("forge-start-review");
     cx.run_until_parked();
-    assert!(cx.has_text("Review pinned at 26607f52"), "{:?}", cx.texts());
+    assert!(
+        cx.has_text("Review pinned at 26607f52 · 0 pending"),
+        "{:?}",
+        cx.texts()
+    );
     cx.simulate_click("forge-gutter-src/lib.rs-new-5");
     cx.run_until_parked();
     view.read(|forge| {
@@ -237,8 +267,7 @@ fn a_review_batches_every_anchor_into_exactly_one_operation() {
     assert_eq!(review.verdict, Verdict::RequestChanges);
     assert_eq!(review.body, "one batch, one op");
     assert_eq!(
-        review.commit_oid,
-        "26607f522099476177a45a8058a93108fba5a84d",
+        review.commit_oid, "26607f522099476177a45a8058a93108fba5a84d",
         "the pin is the head the reader read"
     );
     assert_eq!(
@@ -331,11 +360,18 @@ fn the_docked_panels_show_one_at_a_time_and_jump_to_a_line() {
     );
     cx.simulate_click("forge-dock-comments");
     cx.run_until_parked();
-    assert!(cx.has_text("Context is commentable"), "{:?}", cx.texts());
+    assert!(
+        cx.has_text("Rae · src/lib.rs:2 — Context is commentable"),
+        "{:?}",
+        cx.texts()
+    );
     cx.simulate_click("forge-comment-1-src/lib.rs-2");
     cx.run_until_parked();
     view.read(|forge| {
-        assert_eq!(forge.nav().diff_path.as_deref(), Some(b"src/lib.rs".as_slice()))
+        assert_eq!(
+            forge.nav().diff_path.as_deref(),
+            Some(b"src/lib.rs".as_slice())
+        )
     });
     cx.simulate_click("forge-dock-comments");
     cx.run_until_parked();

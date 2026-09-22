@@ -71,7 +71,7 @@ impl View for Forge {
             let mut live = cx.host().subscribe::<Live>(module.into());
             self.watches.push(cx.spawn(async move |this, cx| {
                 while live.next().await.is_some() {
-                    if this.update(cx, |forge, cx| forge.refresh(cx)).is_err() {
+                    if this.update(cx, |forge, cx| forge.reconcile(cx)).is_err() {
                         break;
                     }
                 }
@@ -104,6 +104,15 @@ impl Render for Forge {
         ui::render(self, cx)
     }
 }
+
+/// The open change, as its screens read it: the record, its two current
+/// endpoints (either can be gone) and the reviews landed so far.
+pub(crate) type OpenChange<'a> = (
+    &'a Change,
+    &'a Option<String>,
+    &'a Option<String>,
+    &'a Page<Review>,
+);
 
 /// A read, in the three states a screen draws.
 pub(crate) enum Stage<'a> {
@@ -157,7 +166,6 @@ impl Forge {
                 forge.data.insert(key.clone(), Loaded::Ready(reply));
             });
         }
-        self.pending.retain(|op| !op.accepted);
         for channel in self.messages.keys().cloned().collect::<Vec<_>>() {
             let viewer = self.viewer();
             cx.refresh(
@@ -169,6 +177,12 @@ impl Forge {
         }
         cx.notify();
         self.sync(cx);
+    }
+
+    /// A new block landed: retire what it carried, then re-read.
+    pub(crate) fn reconcile(&mut self, cx: &mut Context<Self>) {
+        self.pending.retain(|op| !op.accepted);
+        self.refresh(cx);
     }
 
     /// Retry one read the reader asked to retry.
@@ -329,17 +343,17 @@ impl Forge {
                 limit: PAGE,
             });
         }
-        if self.nav.change_tab == ChangeTab::Files {
-            if let (Some(head), Some(comparison)) = (source_head.clone(), self.compare()) {
-                wanted.push(Query::Diff {
-                    repo: repo.to_owned(),
-                    base: comparison.base.clone(),
-                    head,
-                    path: None,
-                    cursor: None,
-                    limit: PAGE,
-                });
-            }
+        if let (ChangeTab::Files, Some(head), Some(comparison)) =
+            (self.nav.change_tab, source_head.clone(), self.compare())
+        {
+            wanted.push(Query::Diff {
+                repo: repo.to_owned(),
+                base: comparison.base.clone(),
+                head,
+                path: None,
+                cursor: None,
+                limit: PAGE,
+            });
         }
         wanted
     }
@@ -512,7 +526,7 @@ impl Forge {
         })
     }
 
-    pub(crate) fn change(&self) -> Option<(&Change, &Option<String>, &Option<String>, &Page<Review>)> {
+    pub(crate) fn change(&self) -> Option<OpenChange<'_>> {
         match self.ready(&self.change_query()?)? {
             Reply::Change {
                 change,
@@ -576,10 +590,8 @@ impl Forge {
     }
 
     pub(crate) fn review(&self) -> Option<&state::ReviewSession> {
-        self.reviews.get(&change_key(
-            self.nav.repo.as_deref()?,
-            self.nav.change?,
-        ))
+        self.reviews
+            .get(&change_key(self.nav.repo.as_deref()?, self.nav.change?))
     }
 
     pub(crate) fn pending_in(&self, scope: &str) -> Vec<&state::Pending> {

@@ -74,7 +74,12 @@ pub(crate) fn render(
         let mut line = row(id(format!("forge-ref-row-{label}")), theme)
             .on_click(pick)
             .selected(name == forge.head_name())
-            .cell(div().w(px(200.)).truncate().child(crate::ui::bold(label.clone())))
+            .cell(
+                div()
+                    .w(px(200.))
+                    .truncate()
+                    .child(crate::ui::bold(label.clone())),
+            )
             .cell(chip(
                 id(format!("forge-ref-kind-{label}")),
                 if tag { "tag" } else { "branch" },

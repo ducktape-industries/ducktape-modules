@@ -194,7 +194,8 @@ impl Forge {
         let name = form.name.trim().to_owned();
         if !valid_repo_name(&name) {
             form.error =
-                "A repository name is 1–37 bytes of letters, digits, dot, dash or underscore".into();
+                "A repository name is 1–37 bytes of letters, digits, dot, dash or underscore"
+                    .into();
             cx.notify();
             return;
         }
@@ -372,10 +373,7 @@ impl Forge {
     // -------------------------------------------------------- the review
 
     fn review_key(&self) -> Option<String> {
-        Some(change_key(
-            self.nav().repo.as_deref()?,
-            self.nav().change?,
-        ))
+        Some(change_key(self.nav().repo.as_deref()?, self.nav().change?))
     }
 
     /// Start a review pinned at the endpoints on screen. Later pushes make
@@ -453,7 +451,9 @@ impl Forge {
         if open.body.trim().is_empty() {
             review.comments.retain(|staged| !staged.anchors(&open));
         } else if review.comments.len() >= crate::contract::MAX_REVIEW_COMMENTS
-            && review.staged(&open.path, open.new_side, open.line).is_none()
+            && review
+                .staged(&open.path, open.new_side, open.line)
+                .is_none()
         {
             review.error = format!(
                 "A review carries at most {} line comments",
@@ -501,7 +501,9 @@ impl Forge {
             return;
         };
         let comments = review.line_comments();
-        if matches!(verdict, Verdict::Comment) && review.body.trim().is_empty() && comments.is_empty()
+        if matches!(verdict, Verdict::Comment)
+            && review.body.trim().is_empty()
+            && comments.is_empty()
         {
             if let Some(review) = self.reviews.get_mut(&key) {
                 review.error = "A comment review needs a body or a line comment".into();
