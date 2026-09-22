@@ -1,7 +1,7 @@
 //! Event routes and sent pictures belong to one running driver.
 use std::any::Any;
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::rc::Rc;
 
 #[derive(Default)]
@@ -15,99 +15,12 @@ struct Tables {
         crate::wire::editor_document::EditorTransferReceiver,
     )>,
     editor_pending: Vec<crate::wire::EditorTransactionId>,
-    macos: bool,
+    host: crate::Host,
     mouse_interest: bool,
     event_interest: crate::wire::events::Interest,
-    deferred: Vec<Box<dyn Any>>,
     messages: Vec<Rc<dyn Any>>,
     handlers: Vec<Rc<dyn Any>>,
     pictures: HashSet<(bool, u64)>,
-    cached_messages: HashMap<u32, Rc<dyn Any>>,
-    cached_handlers: HashMap<u32, Rc<dyn Any>>,
-    next_cached: u32,
-    captures: Vec<SavedRoutes>,
-    components: HashSet<ComponentScope>,
-    component_stack: Vec<ComponentScope>,
-    memo: Rc<RefCell<crate::memo::Cache>>,
-}
-
-const CACHED: u32 = 1 << 31;
-
-/// The callables owned by one cached subtree, including nested cache hits.
-#[derive(Clone, Default)]
-pub(crate) struct SavedRoutes {
-    messages: Vec<(u32, Rc<dyn Any>)>,
-    handlers: Vec<(u32, Rc<dyn Any>)>,
-    pub(crate) components: HashSet<ComponentScope>,
-}
-
-impl SavedRoutes {
-    pub(crate) fn restore(&self) {
-        let tables = tables();
-        let mut tables = tables.borrow_mut();
-        tables.cached_messages.extend(self.messages.iter().cloned());
-        tables.cached_handlers.extend(self.handlers.iter().cloned());
-        tables.components.extend(self.components.iter().cloned());
-        for capture in &mut tables.captures {
-            capture.messages.extend(self.messages.iter().cloned());
-            capture.handlers.extend(self.handlers.iter().cloned());
-            capture.components.extend(self.components.iter().cloned());
-        }
-    }
-}
-
-struct Capture {
-    tables: Rc<RefCell<Tables>>,
-    depth: usize,
-    finished: bool,
-}
-
-impl Drop for Capture {
-    fn drop(&mut self) {
-        if !self.finished {
-            let abandoned = self.tables.borrow_mut().captures.split_off(self.depth);
-            drop(abandoned);
-        }
-    }
-}
-
-pub(crate) fn capture<R>(build: impl FnOnce() -> R) -> (R, SavedRoutes) {
-    let tables = tables();
-    let depth = tables.borrow().captures.len();
-    {
-        let mut tables = tables.borrow_mut();
-        let components = tables.component_stack.iter().cloned().collect();
-        tables.captures.push(SavedRoutes {
-            components,
-            ..SavedRoutes::default()
-        });
-    }
-    let mut guard = Capture {
-        tables,
-        depth,
-        finished: false,
-    };
-    let result = build();
-    let routes = guard
-        .tables
-        .borrow_mut()
-        .captures
-        .pop()
-        .expect("active route capture");
-    guard.finished = true;
-    (result, routes)
-}
-
-impl Tables {
-    fn cached_id(&mut self) -> u32 {
-        assert!(
-            self.next_cached < CACHED,
-            "cached route identifiers exhausted"
-        );
-        let id = CACHED | self.next_cached;
-        self.next_cached += 1;
-        id
-    }
 }
 
 #[derive(Clone, Default)]
@@ -118,11 +31,16 @@ thread_local! {
 }
 
 impl Context {
-    pub(crate) fn with_macos(macos: bool) -> Self {
+    pub(crate) fn with_macos(_macos: bool) -> Self {
         Self(Rc::new(RefCell::new(Tables {
-            macos,
             ..Tables::default()
         })))
+    }
+
+    pub(crate) fn with_host(macos: bool, host: crate::Host) -> Self {
+        let context = Self::with_macos(macos);
+        context.0.borrow_mut().host = host;
+        context
     }
 
     pub(crate) fn enter(&self) -> Guard {
@@ -143,95 +61,6 @@ fn tables() -> Rc<RefCell<Tables>> {
     CURRENT.with_borrow(|current| current.0.clone())
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-pub(crate) struct ComponentScope {
-    pub component: &'static str,
-    pub scope: String,
-    pub mounted: bool,
-}
-
-/// A component's enclosing identity belongs to every cache built inside it.
-pub struct ComponentGuard {
-    tables: Rc<RefCell<Tables>>,
-    depth: usize,
-}
-impl Drop for ComponentGuard {
-    fn drop(&mut self) {
-        self.tables
-            .borrow_mut()
-            .component_stack
-            .truncate(self.depth);
-    }
-}
-
-/// Records generated component ownership and captures nested cache dependencies.
-pub fn component(component: &'static str, scope: &str, mounted: bool) -> ComponentGuard {
-    let context = tables();
-    let depth = {
-        let mut tables = context.borrow_mut();
-        let sighting = ComponentScope {
-            component,
-            scope: scope.to_owned(),
-            mounted,
-        };
-        tables.components.insert(sighting.clone());
-        for capture in &mut tables.captures {
-            capture.components.insert(sighting.clone());
-        }
-        let depth = tables.component_stack.len();
-        tables.component_stack.push(sighting);
-        depth
-    };
-    ComponentGuard {
-        tables: context,
-        depth,
-    }
-}
-
-/// Includes mounted sightings replayed by cached subtrees in this driver's view.
-pub fn mounted_scopes(component: &'static str) -> Vec<String> {
-    tables()
-        .borrow()
-        .components
-        .iter()
-        .filter(|entry| entry.mounted && entry.component == component)
-        .map(|entry| entry.scope.clone())
-        .collect()
-}
-
-pub(crate) fn components_now() -> HashSet<ComponentScope> {
-    tables().borrow().components.clone()
-}
-
-/// First-render component messages run on the next driver tick, before input.
-pub fn defer<M: 'static>(messages: Vec<M>) {
-    tables().borrow_mut().deferred.extend(
-        messages
-            .into_iter()
-            .map(|message| Box::new(message) as Box<dyn Any>),
-    );
-}
-
-pub(crate) fn take_deferred<M: 'static>() -> Vec<M> {
-    let messages = std::mem::take(&mut tables().borrow_mut().deferred);
-    messages
-        .into_iter()
-        .map(|message| {
-            *message
-                .downcast::<M>()
-                .expect("deferred message belongs to the active driver")
-        })
-        .collect()
-}
-
-pub(crate) fn has_deferred() -> bool {
-    !tables().borrow().deferred.is_empty()
-}
-
-pub(crate) fn memo_cache() -> Rc<RefCell<crate::memo::Cache>> {
-    tables().borrow().memo.clone()
-}
-
 /// Returns a picture hash and its bytes the first time this driver sends it.
 pub fn picture(bytes: impl AsRef<[u8]>) -> (u64, Option<Vec<u8>>) {
     use std::hash::{Hash, Hasher};
@@ -248,16 +77,7 @@ pub fn message<M: 'static>(message: M) -> u32 {
     let tables = tables();
     let mut tables = tables.borrow_mut();
     let message: Rc<dyn Any> = Rc::new(message);
-    if !tables.captures.is_empty() {
-        let id = tables.cached_id();
-        tables.cached_messages.insert(id, message.clone());
-        for capture in &mut tables.captures {
-            capture.messages.push((id, message.clone()));
-        }
-        return id;
-    }
     let index = u32::try_from(tables.messages.len()).expect("too many message routes");
-    assert!(index < CACHED, "too many ordinary message routes");
     tables.messages.push(message);
     index
 }
@@ -267,16 +87,7 @@ pub fn handler<A: 'static, M: 'static>(handler: Box<dyn Fn(A) -> Option<M>>) -> 
     let tables = tables();
     let mut tables = tables.borrow_mut();
     let handler: Rc<dyn Any> = Rc::new(handler);
-    if !tables.captures.is_empty() {
-        let id = tables.cached_id();
-        tables.cached_handlers.insert(id, handler.clone());
-        for capture in &mut tables.captures {
-            capture.handlers.push((id, handler.clone()));
-        }
-        return id;
-    }
     let index = u32::try_from(tables.handlers.len()).expect("too many handler routes");
-    assert!(index < CACHED, "too many ordinary handler routes");
     tables.handlers.push(handler);
     index
 }
@@ -288,9 +99,6 @@ pub(crate) fn reset() {
         (
             std::mem::take(&mut tables.messages),
             std::mem::take(&mut tables.handlers),
-            std::mem::take(&mut tables.cached_messages),
-            std::mem::take(&mut tables.cached_handlers),
-            std::mem::take(&mut tables.components),
         )
     };
     drop(old);
@@ -300,12 +108,7 @@ pub(crate) fn take_message<M: Clone + 'static>(index: u32) -> Option<M> {
     let tables = tables();
     let message = {
         let tables = tables.borrow();
-        if index & CACHED != 0 {
-            tables.cached_messages.get(&index)
-        } else {
-            tables.messages.get(index as usize)
-        }
-        .cloned()?
+        tables.messages.get(index as usize).cloned()?
     };
     message.downcast_ref::<M>().cloned()
 }
@@ -314,34 +117,13 @@ pub(crate) fn run_handler<A: 'static, M: 'static>(index: u32, value: A) -> Optio
     let tables = tables();
     let handler = {
         let tables = tables.borrow();
-        if index & CACHED != 0 {
-            tables.cached_handlers.get(&index)
-        } else {
-            tables.handlers.get(index as usize)
-        }
-        .cloned()?
+        tables.handlers.get(index as usize).cloned()?
     };
     handler.downcast_ref::<Box<dyn Fn(A) -> Option<M>>>()?(value)
 }
 
-pub(crate) fn macos() -> bool {
-    tables().borrow().macos
-}
-
-pub(crate) fn include_event_interest(interest: crate::wire::events::Interest) {
-    tables().borrow_mut().event_interest.include(interest);
-}
-
-pub(crate) fn clear_event_interest() {
-    tables().borrow_mut().event_interest = Default::default();
-}
-
 pub(crate) fn event_interest() -> crate::wire::events::Interest {
     tables().borrow().event_interest
-}
-
-pub(crate) fn set_mouse_interest(interested: bool) {
-    tables().borrow_mut().mouse_interest = interested;
 }
 
 pub(crate) fn mouse_interest() -> bool {
@@ -628,52 +410,6 @@ mod tests {
             "returning to the first driver preserves its picture history"
         );
     }
-    #[test]
-    fn cached_routes_replay_independently_of_ordinary_slots_and_expire() {
-        let context = Context::default();
-        let _context = context.enter();
-        let ordinary = message("before".to_owned());
-        let ((press, edit), saved) = capture(|| {
-            (
-                message("cached".to_owned()),
-                handler::<String, String>(Box::new(|text| Some(format!("cached:{text}")))),
-            )
-        });
-        assert_eq!(ordinary, 0);
-        reset();
-        for text in ["moved", "new", "surrounding"] {
-            message(text.to_owned());
-        }
-        saved.restore();
-        assert_eq!(take_message::<String>(press).as_deref(), Some("cached"));
-        assert_eq!(
-            run_handler::<String, String>(edit, "typed".into()).as_deref(),
-            Some("cached:typed")
-        );
-        assert_eq!(take_message::<String>(0).as_deref(), Some("moved"));
-        assert!(run_handler::<bool, String>(edit, true).is_none());
-        reset();
-        assert!(take_message::<String>(press).is_none());
-        assert!(run_handler::<String, String>(edit, "stale".into()).is_none());
-        let (fresh, _) = capture(|| message("replacement".to_owned()));
-        assert_ne!(fresh, press, "rebuilt caches cannot alias stale IDs");
-    }
-
-    #[test]
-    fn outer_capture_keeps_nested_hits_and_nested_misses() {
-        let context = Context::default();
-        let _context = context.enter();
-        let (hit, inner) = capture(|| message(7u32));
-        reset();
-        let (miss, outer) = capture(|| {
-            inner.restore();
-            capture(|| message(9u32)).0
-        });
-        reset();
-        outer.restore();
-        assert_eq!(take_message::<u32>(hit), Some(7));
-        assert_eq!(take_message::<u32>(miss), Some(9));
-    }
 }
 
 #[cfg(test)]
@@ -732,4 +468,8 @@ mod response_budget_tests {
         }
         assert!(take_editor_responses().is_empty());
     }
+}
+
+pub(crate) fn host() -> crate::Host {
+    tables().borrow().host.clone()
 }

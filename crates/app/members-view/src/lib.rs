@@ -8,8 +8,10 @@
 use ducktape_view_guest::caps::{Program, QueryBytes};
 use ducktape_view_guest::export_view;
 use ducktape_view_guest::host::{Refusal, malformed};
-use ducktape_view_guest::view::{Cx, Live, Loaded, View, Watching, ask};
+use ducktape_view_guest::view::{Live, Loaded};
 use ducktape_view_guest::wire::{Length, Node, kit, kit::Tone};
+use ducktape_view_guest::{Context, Host, Render, Task, View, Window};
+use futures::StreamExt;
 use modules::{Page, identity, valset};
 use serde::{Deserialize, Serialize};
 
@@ -36,7 +38,7 @@ pub struct Members {
     /// for it, since the program has no search
     filter: String,
     #[serde(skip)]
-    live: Option<Watching>,
+    live: Option<Task<()>>,
 }
 
 /// One account as this screen shows it.
@@ -54,20 +56,32 @@ struct Row {
 impl View for Members {
     const PREFERRED_WINDOW_SIZE: &'static str = "720x640";
 
-    fn boot(cx: &mut Cx<Self>) -> Self {
+    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mut view = Self::default();
-        view.restored(cx);
+        view.restored(window, cx);
         view
     }
 
-    fn restored(&mut self, cx: &mut Cx<Self>) {
-        self.live = Some(cx.watch::<Live>(identity::PROGRAM.into(), |view, _, cx| view.read(cx)));
+    fn restored(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        let mut stream = cx.host().subscribe::<Live>(identity::PROGRAM.into());
+        self.live = Some(cx.spawn(async move |this, cx| {
+            while stream.next().await.is_some() {
+                if this.update(cx, |view, cx| view.read(cx)).is_err() {
+                    break;
+                }
+            }
+        }));
         self.read(cx);
     }
+}
 
-    fn render(&mut self, cx: &mut Cx<Self>) -> Node {
+impl Render for Members {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> Node {
         let key = "members";
-        let typed = cx.on_value(|view, text: String, _| view.filter = text);
+        let typed = cx.listener(|view, text: &String, _, cx| {
+            view.filter = text.clone();
+            cx.notify();
+        });
         let head = kit::centered_row(
             format!("{key}/head"),
             [
@@ -92,11 +106,14 @@ impl Members {
     /// bump. Rows already on screen stay there while it runs, so a bump
     /// never blinks the list back to "Loading"; an empty or refused slot
     /// says it is loading, because it has nothing else to say.
-    fn read(&mut self, cx: &mut Cx<Self>) {
+    fn read(&mut self, cx: &mut Context<Self>) {
         match self.rows.ready() {
-            Some(_) => cx.refresh(roster(), |view, rows, _| view.rows = Loaded::Ready(rows)),
-            None => self.rows = cx.load(roster(), |view| &mut view.rows),
+            Some(_) => cx.refresh(roster(cx.host()), |view, rows, _| {
+                view.rows = Loaded::Ready(rows)
+            }),
+            None => self.rows = cx.load(roster(cx.host()), |view| &mut view.rows),
         }
+        cx.notify();
     }
 
     fn count(&self) -> String {
@@ -107,13 +124,13 @@ impl Members {
     }
 
     /// The four states of the roster: loading, refused, empty, ready.
-    fn body(&self, key: &str, cx: &mut Cx<Self>) -> Node {
+    fn body(&self, key: &str, cx: &mut Context<Self>) -> Node {
         match &self.rows {
             Loaded::Idle | Loaded::Loading(_) => {
                 kit::secondary(format!("{key}/loading"), "Reading the roster…")
             }
             Loaded::Failed(refusal) => {
-                let retry = cx.on(|view, cx| view.read(cx));
+                let retry = cx.listener(|view, _: &(), _, cx| view.read(cx));
                 kit::notice(
                     format!("{key}/refused"),
                     kit::column(
@@ -193,13 +210,18 @@ fn render_row(key: &str, row: &Row) -> Node {
 /// `identity::Reply::Accounts` carries no cursor back, so a view cannot ask
 /// for the next page: `Page::all()` is the only honest ask, and how much
 /// comes back is the program's call.
-async fn roster() -> Result<Vec<Row>, Refusal> {
-    let accounts =
-        match ask::<QueryBytes<Identity>>(identity::Query::List { page: Page::all() }).await? {
-            identity::Reply::Accounts(accounts) => accounts,
-            other => return Err(unexpected(identity::PROGRAM, &other)),
-        };
-    let members = match ask::<QueryBytes<Valset>>(valset::Query::Memberships).await? {
+async fn roster(host: Host) -> Result<Vec<Row>, Refusal> {
+    let accounts = match host
+        .ask::<QueryBytes<Identity>>(identity::Query::List { page: Page::all() })
+        .await?
+    {
+        identity::Reply::Accounts(accounts) => accounts,
+        other => return Err(unexpected(identity::PROGRAM, &other)),
+    };
+    let members = match host
+        .ask::<QueryBytes<Valset>>(valset::Query::Memberships)
+        .await?
+    {
         valset::Reply::Memberships(members) => members,
         other => return Err(unexpected(valset::PROGRAM, &other)),
     };

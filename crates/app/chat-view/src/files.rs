@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use base64::Engine as _;
 use ducklink::{ChainId, Link, Refused};
 use ducktape_view_guest::host::{Refusal, malformed};
-use ducktape_view_guest::view::{Query, ask};
+use ducktape_view_guest::view::Query;
 use serde::Serialize;
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
@@ -123,8 +123,10 @@ pub fn preview_box(width: i64, height: i64, screen: (f32, f32)) -> (f32, f32) {
 
 /// Ask the host to decode a duckfs picture into this view's slot; the
 /// answer is the size it will be drawn at, (0, 0) for one that did not.
-pub async fn picture_load(path: String) -> (i64, i64) {
-    let Ok(drawn) = ask::<PictureLoad>(json!({"surface": PICTURE_SURFACE, "path": path})).await
+pub async fn picture_load(host: ducktape_view_guest::Host, path: String) -> (i64, i64) {
+    let Ok(drawn) = host
+        .ask::<PictureLoad>(json!({"surface": PICTURE_SURFACE, "path": path}))
+        .await
     else {
         return (0, 0);
     };
@@ -142,8 +144,12 @@ pub struct Preview {
     pub binary: bool,
 }
 
-async fn files_get(lane: &str, params: Value) -> Result<Value, Refusal> {
-    let reply = ask::<Query<Files>>(json!({lane: params})).await?;
+async fn files_get(
+    host: ducktape_view_guest::Host,
+    lane: &str,
+    params: Value,
+) -> Result<Value, Refusal> {
+    let reply = host.ask::<Query<Files>>(json!({lane: params})).await?;
     reply
         .get(lane)
         .cloned()
@@ -152,13 +158,17 @@ async fn files_get(lane: &str, params: Value) -> Result<Value, Refusal> {
 
 /// The head of the file at the head snapshot, branded binary when it does
 /// not read as text.
-pub async fn read_preview(path: String) -> Result<Preview, Refusal> {
-    let refs = files_get("refs", json!({})).await?;
+pub async fn read_preview(
+    host: ducktape_view_guest::Host,
+    path: String,
+) -> Result<Preview, Refusal> {
+    let refs = files_get(host.clone(), "refs", json!({})).await?;
     let base = refs["head"]
         .as_str()
         .ok_or_else(|| Refusal::new("no_snapshot", "The file has no committed snapshot"))?
         .to_owned();
     let reply = files_get(
+        host.clone(),
         "read",
         json!({ "path": path, "len": PREVIEW_BYTES, "snapshot": base }),
     )
@@ -220,16 +230,20 @@ pub fn safe_name(name: &str) -> String {
 /// Uploads `file` and answers the address every member opens it by, on
 /// `chain`. The address is built FIRST: a name or a chain that has no
 /// address is refused before a byte is stored.
-pub async fn upload(file: SelectedFile, chain: String) -> Result<String, Refusal> {
-    let attachment_id = ask::<Id>("attachment").await?;
+pub async fn upload(
+    host: ducktape_view_guest::Host,
+    file: SelectedFile,
+    chain: String,
+) -> Result<String, Refusal> {
+    let attachment_id = host.ask::<Id>("attachment".into()).await?;
     let path = format!(
         "/shared/attachments/{attachment_id}/{}",
         safe_name(&file.name)
     );
     let address = file_address(&chain, &path)
         .map_err(|refused| Refusal::new(refused.reason, refused.sentence))?;
-    upload_inner(&file, path).await?;
-    let _ = ask::<Release>(file.token.clone()).await;
+    upload_inner(host.clone(), &file, path).await?;
+    let _ = host.ask::<Release>(file.token.clone()).await;
     Ok(address)
 }
 
@@ -269,19 +283,25 @@ fn canonical_path(path: &str) -> Result<Vec<String>, String> {
     Ok(segments)
 }
 
-async fn upload_inner(file: &SelectedFile, path: String) -> Result<(), Refusal> {
+async fn upload_inner(
+    host: ducktape_view_guest::Host,
+    file: &SelectedFile,
+    path: String,
+) -> Result<(), Refusal> {
     if file.bytes > MAX_UPLOAD {
         return Err(Refusal::new("too_large", "Files must be at most 64 MiB"));
     }
     canonical_path(&path).map_err(|said| Refusal::new("invalid_path", said))?;
-    let refs = files_get("refs", json!({})).await?;
+    let refs = files_get(host.clone(), "refs", json!({})).await?;
     let mut chunks = Vec::new();
     let mut chunk = Vec::new();
     let mut offset = 0u64;
     let inline = file.bytes <= MAX_INLINE_COMMIT_BYTES;
     while offset < file.bytes {
         let len = (file.bytes - offset).min(256 << 10) as usize;
-        let bytes = ask::<FsRead>(FsRead::request(&file.token, offset, len)).await?;
+        let bytes = host
+            .ask::<FsRead>(FsRead::request(&file.token, offset, len))
+            .await?;
         if bytes.is_empty() || bytes.len() > len {
             return Err(Refusal::new(
                 "file_changed",
@@ -292,7 +312,7 @@ async fn upload_inner(file: &SelectedFile, path: String) -> Result<(), Refusal> 
         chunk.extend_from_slice(&bytes);
         let chunk_ready = !inline && (chunk.len() as u64 == CHUNK_SIZE || offset == file.bytes);
         if chunk_ready {
-            submit_bytes(encode_putblob(&chunk)).await?;
+            submit_bytes(host.clone(), encode_putblob(&chunk)).await?;
             chunks.push(crate::chat::hex(&object_id(0, &chunk)));
             chunk.clear();
         }
@@ -317,11 +337,15 @@ async fn upload_inner(file: &SelectedFile, path: String) -> Result<(), Refusal> 
             content,
         }],
     };
-    submit_bytes(serde_json::to_vec(&commit).expect("files message")).await
+    submit_bytes(
+        host.clone(),
+        serde_json::to_vec(&commit).expect("files message"),
+    )
+    .await
 }
 
-async fn submit_bytes(bytes: Vec<u8>) -> Result<(), Refusal> {
-    ask::<SubmitBytes>(json!({
+async fn submit_bytes(host: ducktape_view_guest::Host, bytes: Vec<u8>) -> Result<(), Refusal> {
+    host.ask::<SubmitBytes>(json!({
         "target": "files",
         "body_b64": base64::engine::general_purpose::STANDARD.encode(bytes)
     }))

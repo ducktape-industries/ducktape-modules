@@ -1,6 +1,6 @@
 //! One message: the avatar rail, the byline, the body's blocks (rich text,
 //! code, quotes, attachments), its reactions and the way into its thread.
-use ducktape_view_guest::view::Cx;
+use ducktape_view_guest::Context;
 use ducktape_view_guest::wire::{self, ButtonPreset, Length, Node, kit, kit::Tone};
 
 use crate::client::{ChatBlock, ChatMessage, SpanStyle, height_label};
@@ -28,7 +28,7 @@ pub fn card(
     message: &ChatMessage,
     pane: Pane,
     plate: Plate,
-    cx: &mut Cx<Chat>,
+    cx: &mut Context<Chat>,
 ) -> Node {
     let key = format!("message/{pane:?}/{}", message.id);
     let p = kit::palette();
@@ -68,7 +68,7 @@ fn contents(
     message: &ChatMessage,
     pane: Pane,
     plate: Plate,
-    cx: &mut Cx<Chat>,
+    cx: &mut Context<Chat>,
 ) -> Node {
     let key = format!("{key}/contents");
     let p = kit::palette();
@@ -97,8 +97,15 @@ fn contents(
     }
     // a press chooses the message (shift grows the copy range)
     let seq = message.seq;
-    let press = cx.on(move |chat, _| chat.press_message(pane, seq));
-    let on_link = cx.on_value(|chat, link: String, _| chat.open_link(link));
+    let press = cx.listener(move |chat, _event: &(), _window, cx| {
+        cx.notify();
+        chat.press_message(pane, seq)
+    });
+    let on_link = cx.listener(|chat, event: &String, _window, cx| {
+        let link = event.clone();
+        cx.notify();
+        chat.open_link(link, cx)
+    });
     children.push(with_press(
         with_row_role(
             mouse_area(
@@ -126,8 +133,12 @@ fn contents(
     let mut reactions = Vec::new();
     for reaction in &message.reactions {
         let (emoji, mine) = (reaction.emoji.clone(), reaction.reacted_by_me);
-        let press =
-            writable.then(|| cx.on(move |chat, cx| chat.react(seq, emoji.clone(), !mine, cx)));
+        let press = writable.then(|| {
+            cx.listener(move |chat, _event: &(), _window, cx| {
+                cx.notify();
+                chat.react(seq, emoji.clone(), !mine, cx)
+            })
+        });
         reactions.push(pill(
             format!("{key}/reaction/{}", reaction.emoji),
             &reaction.emoji,
@@ -143,8 +154,12 @@ fn contents(
     }
     if !reactions.is_empty() {
         let rev = message.rev;
-        let open = writable
-            .then(|| cx.on(move |chat, cx| chat.open_menu(pane, seq, rev, Mode::Reactions, cx)));
+        let open = writable.then(|| {
+            cx.listener(move |chat, _event: &(), window, cx| {
+                cx.notify();
+                chat.open_menu(pane, seq, rev, Mode::Reactions, window, cx)
+            })
+        });
         reactions.push(pill(
             format!("{key}/reaction/add"),
             "+",
@@ -163,7 +178,10 @@ fn contents(
     match (message.reply_count > 0, pane) {
         (false, _) => {}
         (true, Pane::Timeline) => {
-            let open = cx.on(move |chat, cx| chat.open_thread(seq, cx));
+            let open = cx.listener(move |chat, _event: &(), _window, cx| {
+                cx.notify();
+                chat.open_thread(seq, cx)
+            });
             children.push(reply_link(
                 format!("{key}/thread"),
                 message.reply_count,
@@ -198,7 +216,7 @@ pub fn body(
     key: String,
     blocks: &[ChatBlock],
     on_link: Option<u32>,
-    cx: &mut Cx<Chat>,
+    cx: &mut Context<Chat>,
 ) -> Node {
     let p = kit::palette();
     let mut children = Vec::new();
@@ -265,7 +283,7 @@ pub fn body(
 
 /// A picture that came with the message, in the flow at thumbnail size with
 /// its name under it; pressing it opens the file.
-fn picture(key: String, block: &ChatBlock, size: (i64, i64), cx: &mut Cx<Chat>) -> Node {
+fn picture(key: String, block: &ChatBlock, size: (i64, i64), cx: &mut Context<Chat>) -> Node {
     let p = kit::palette();
     let (w, h) = crate::files::picture_box(size.0, size.1);
     let surface = Node::Surface {
@@ -290,7 +308,10 @@ fn picture(key: String, block: &ChatBlock, size: (i64, i64), cx: &mut Cx<Chat>) 
         kit::radius::CARD as f32,
     );
     let link = block.link.clone();
-    let open = cx.on(move |chat, cx| chat.open_preview(link.clone(), cx));
+    let open = cx.listener(move |chat, _event: &(), _window, cx| {
+        cx.notify();
+        chat.open_preview(link.clone(), cx)
+    });
     let mut open = kit::button_child(
         format!("{key}/open"),
         frame,
@@ -316,7 +337,7 @@ fn picture(key: String, block: &ChatBlock, size: (i64, i64), cx: &mut Cx<Chat>) 
 
 /// A file that came with the message: its name over what it is, in a plate
 /// that opens it.
-fn attachment_card(key: String, block: &ChatBlock, cx: &mut Cx<Chat>) -> Node {
+fn attachment_card(key: String, block: &ChatBlock, cx: &mut Context<Chat>) -> Node {
     let p = kit::palette();
     let content = kit::spaced(
         kit::centered_row(
@@ -341,7 +362,10 @@ fn attachment_card(key: String, block: &ChatBlock, cx: &mut Cx<Chat>) -> Node {
         kit::spacing::MD as f32,
     );
     let link = block.link.clone();
-    let open = cx.on(move |chat, cx| chat.open_preview(link.clone(), cx));
+    let open = cx.listener(move |chat, _event: &(), _window, cx| {
+        cx.notify();
+        chat.open_preview(link.clone(), cx)
+    });
     let mut card = kit::button_child(
         format!("{key}/card"),
         content,

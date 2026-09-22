@@ -1,37 +1,6 @@
-use abi::BlobId;
-use base64::Engine as _;
-use borsh::BorshDeserialize;
-use ducktape_view_guest::testing::{answer, assert_accessible, has_text, item, press, refuse};
-use ducktape_view_guest::view::Shell;
-use ducktape_view_guest::{Driver, wire};
-
 use super::*;
-
-/// The queries this view sent, read the way the host door reads one: the
-/// JSON envelope, the base64 body, the program's own borsh query.
-fn asked(frame: &wire::Frame) -> Vec<(u64, registry::Query)> {
-    frame
-        .requests
-        .iter()
-        .filter(|request| request.kind == "rpc.query_bytes")
-        .filter_map(|request| {
-            let envelope: serde_json::Value = serde_json::from_slice(&request.payload).unwrap();
-            (envelope["target"] == registry::PROGRAM).then(|| {
-                let body = base64::engine::general_purpose::STANDARD
-                    .decode(envelope["body_b64"].as_str().unwrap())
-                    .unwrap();
-                (request.id, registry::Query::try_from_slice(&body).unwrap())
-            })
-        })
-        .collect()
-}
-
-fn one(frame: &wire::Frame, expected: registry::Query) -> u64 {
-    let asked = asked(frame);
-    assert_eq!(asked.len(), 1, "one query per step");
-    assert_eq!(asked[0].1, expected);
-    asked[0].0
-}
+use abi::BlobId;
+use ducktape_view_guest::testing::TestAppContext;
 
 fn entry(program: &str, code: u8) -> registry::Entry {
     registry::Entry {
@@ -41,15 +10,12 @@ fn entry(program: &str, code: u8) -> registry::Entry {
     }
 }
 
-fn programs() -> Vec<u8> {
-    abi::encode(&registry::Reply::Programs(vec![
-        entry("identity", 0xab),
-        entry("valset", 0xcd),
-    ]))
+fn programs() -> registry::Reply {
+    registry::Reply::Programs(vec![entry("identity", 0xab), entry("valset", 0xcd)])
 }
 
-fn scheduled() -> Vec<u8> {
-    abi::encode(&registry::Reply::Scheduled(vec![
+fn scheduled() -> registry::Reply {
+    registry::Reply::Scheduled(vec![
         registry::Scheduled {
             height: 120,
             change: registry::Change::Set(entry("chat", 0xef)),
@@ -58,116 +24,136 @@ fn scheduled() -> Vec<u8> {
             height: 200,
             change: registry::Change::Remove("forge".into()),
         },
-    ]))
+    ])
 }
 
-/// Boots and answers both reads; hands back the ready frame and the id of
-/// the open `rpc.live` watch.
-fn ready() -> (Driver<Shell<Explorer>>, wire::Frame, u64) {
-    let mut driver = Driver::<Shell<Explorer>>::new();
-    let frame = driver.tick(vec![]);
-    assert!(has_text(&frame, "Reading the registry…"));
-    let live = frame
-        .requests
-        .iter()
-        .find(|request| request.kind == "rpc.live")
-        .expect("the view watches the registry")
-        .id;
-    let at = one(&frame, registry::Query::At(0));
-    let frame = driver.tick(vec![answer(at, &programs())]);
-    let pending = one(&frame, registry::Query::Scheduled);
-    let frame = driver.tick(vec![answer(pending, &scheduled())]);
-    (driver, frame, live)
+fn respond(cx: &mut TestAppContext) {
+    cx.host().handle::<QueryBytes<Registry>>(|query| {
+        Ok(match query {
+            registry::Query::At(0) => programs(),
+            registry::Query::Scheduled => scheduled(),
+            other => panic!("unexpected query: {other:?}"),
+        })
+    });
+}
+
+fn ready() -> TestAppContext {
+    let mut cx = TestAppContext::new();
+    cx.host().stream::<Live>();
+    respond(&mut cx);
+    cx.open::<Explorer>();
+    cx.run_until_parked();
+    assert_eq!(
+        cx.host().asked::<QueryBytes<Registry>>(),
+        vec![registry::Query::At(0), registry::Query::Scheduled]
+    );
+    assert_eq!(
+        cx.host().asked::<Live>(),
+        vec![registry::PROGRAM.to_string()]
+    );
+    cx
 }
 
 #[test]
 fn the_registry_lists_what_runs_and_what_is_scheduled() {
-    let (_driver, frame, _) = ready();
-    let texts = ducktape_view_guest::testing::texts(&frame);
-    assert!(has_text(&frame, "2 programs"), "{texts:?}");
-    assert!(has_text(&frame, "identity") && has_text(&frame, "valset"));
-    assert!(has_text(&frame, "Running") && has_text(&frame, "Scheduled"));
+    let cx = ready();
+    let texts = cx.texts();
+    assert!(cx.has_text("2 programs"), "{texts:?}");
+    assert!(cx.has_text("identity") && cx.has_text("valset"));
+    assert!(cx.has_text("Running") && cx.has_text("Scheduled"));
     // a scheduled change says what it does, to what, and when
-    assert!(has_text(&frame, "Set") && has_text(&frame, "chat") && has_text(&frame, "at 120"));
-    assert!(has_text(&frame, "Remove") && has_text(&frame, "forge") && has_text(&frame, "at 200"));
+    assert!(cx.has_text("Set") && cx.has_text("chat") && cx.has_text("at 120"));
+    assert!(cx.has_text("Remove") && cx.has_text("forge") && cx.has_text("at 200"));
     // the code blob reaches the screen shortened, never as 64 hex chars
     assert!(
         texts.iter().any(|text| text == "abababababab…"),
         "{texts:?}"
     );
-    assert!(has_text(&frame, "3 param bytes"));
+    assert!(cx.has_text("3 param bytes"));
 }
 
 #[test]
-fn an_empty_registry_says_so() {
-    let mut driver = Driver::<Shell<Explorer>>::new();
-    let frame = driver.tick(vec![]);
-    let at = one(&frame, registry::Query::At(0));
-    let frame = driver.tick(vec![answer(
-        at,
-        &abi::encode(&registry::Reply::Programs(vec![])),
-    )]);
-    let pending = one(&frame, registry::Query::Scheduled);
-    let frame = driver.tick(vec![answer(
-        pending,
-        &abi::encode(&registry::Reply::Scheduled(vec![])),
-    )]);
-    assert!(has_text(&frame, "No programs"));
+fn loading_waits_for_the_host() {
+    let mut cx = TestAppContext::new();
+    cx.host().stream::<Live>();
+    cx.host().never::<QueryBytes<Registry>>();
+    cx.open::<Explorer>();
+    cx.run_until_parked();
+    assert!(cx.has_text("Reading the registry…"));
+}
+
+#[test]
+fn an_empty_set_says_so() {
+    let mut cx = TestAppContext::new();
+    cx.host().stream::<Live>();
+    cx.host().handle::<QueryBytes<Registry>>(|query| {
+        Ok(match query {
+            registry::Query::At(0) => registry::Reply::Programs(vec![]),
+            registry::Query::Scheduled => registry::Reply::Scheduled(vec![]),
+            other => panic!("unexpected query: {other:?}"),
+        })
+    });
+    cx.open::<Explorer>();
+    cx.run_until_parked();
+    assert!(cx.has_text("No programs"));
 }
 
 #[test]
 fn a_refusal_shows_its_sentence_and_retry_asks_again() {
-    let mut driver = Driver::<Shell<Explorer>>::new();
-    let frame = driver.tick(vec![]);
-    let at = one(&frame, registry::Query::At(0));
-    let frame = driver.tick(vec![refuse(at, "the registry is not running here")]);
-    assert!(has_text(&frame, "the registry is not running here"));
-
-    let frame = driver.tick(press(&frame, "Retry"));
-    let at = one(&frame, registry::Query::At(0));
-    let frame = driver.tick(vec![answer(at, &programs())]);
-    let pending = one(&frame, registry::Query::Scheduled);
-    let frame = driver.tick(vec![answer(pending, &scheduled())]);
-    assert!(has_text(&frame, "identity"));
+    let mut cx = TestAppContext::new();
+    cx.host().stream::<Live>();
+    cx.host()
+        .refuse::<QueryBytes<Registry>>("unavailable", "the registry is not running here");
+    cx.open::<Explorer>();
+    cx.run_until_parked();
+    assert!(cx.has_text("the registry is not running here"));
+    respond(&mut cx);
+    cx.simulate_click("explorer/retry");
+    cx.run_until_parked();
+    assert!(cx.has_text("identity"));
+    assert_eq!(cx.host().asked::<QueryBytes<Registry>>().len(), 3);
 }
 
 #[test]
 fn a_live_bump_re_reads_and_a_snapshot_restores_the_screen() {
-    let (mut driver, _frame, live) = ready();
-    let frame = driver.tick(vec![item(live, b"")]);
-    // what is on screen stays while the re-read runs
-    assert!(has_text(&frame, "identity"));
-    let at = one(&frame, registry::Query::At(0));
-    let frame = driver.tick(vec![answer(
-        at,
-        &abi::encode(&registry::Reply::Programs(vec![entry("forge", 0x11)])),
-    )]);
-    let pending = one(&frame, registry::Query::Scheduled);
-    let frame = driver.tick(vec![answer(
-        pending,
-        &abi::encode(&registry::Reply::Scheduled(vec![])),
-    )]);
-    assert!(has_text(&frame, "forge") && !has_text(&frame, "identity"));
-    assert!(has_text(
-        &frame,
-        "Nothing is scheduled against the registry."
-    ));
+    let mut cx = TestAppContext::new();
+    let feed = cx.host().stream::<Live>();
+    respond(&mut cx);
+    cx.open::<Explorer>();
+    cx.run_until_parked();
+    cx.host()
+        .refuse::<QueryBytes<Registry>>("unavailable", "refresh temporarily unavailable");
+    feed.push(());
+    cx.run_until_parked();
+    assert!(cx.has_text("identity"));
+    assert_eq!(cx.host().asked::<QueryBytes<Registry>>().len(), 3);
+    cx.host().handle::<QueryBytes<Registry>>(|query| {
+        Ok(match query {
+            registry::Query::At(0) => registry::Reply::Programs(vec![entry("forge", 0x11)]),
+            registry::Query::Scheduled => registry::Reply::Scheduled(vec![]),
+            other => panic!("unexpected query: {other:?}"),
+        })
+    });
+    feed.push(());
+    cx.run_until_parked();
+    assert!(cx.has_text("forge") && !cx.has_text("identity"));
+    assert!(cx.has_text("Nothing is scheduled against the registry."));
 
-    let bytes = driver.snapshot().unwrap();
-    let mut restored = Driver::<Shell<Explorer>>::from_snapshot(&bytes, false).unwrap();
-    let frame = restored.tick(vec![]);
-    assert!(has_text(&frame, "forge"), "a restore keeps the programs");
-    assert_eq!(asked(&frame).len(), 1, "and reads them again");
-    assert!(
-        frame
-            .requests
-            .iter()
-            .any(|request| request.kind == "rpc.live")
+    let bytes = cx.snapshot().unwrap();
+    let mut restored = TestAppContext::new();
+    restored.host().stream::<Live>();
+    restored.host().never::<QueryBytes<Registry>>();
+    restored.restore::<Explorer>(&bytes).unwrap();
+    restored.run_until_parked();
+    assert!(restored.has_text("forge"));
+    assert_eq!(restored.host().asked::<QueryBytes<Registry>>().len(), 1);
+    assert_eq!(
+        restored.host().asked::<Live>(),
+        vec![registry::PROGRAM.to_string()]
     );
 }
 
 #[test]
-fn the_ready_registry_is_accessible() {
-    let (_driver, frame, _) = ready();
-    assert_accessible(frame.root.as_ref().expect("a tree"));
+fn the_ready_set_is_accessible() {
+    ready().assert_accessible();
 }

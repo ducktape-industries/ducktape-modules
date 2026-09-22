@@ -54,6 +54,27 @@ An entry point receives the context (`Execute` writes, sends and sets
 output; `Query` responds; both read through `Reads`) and the `Env` of the
 call; nothing reaches the host by any other path.
 
+## A view
+
+A view implements `Render::render(window, cx)` and serializable `View::new(window, cx)`.
+`Context<V>` dereferences to `App`; `listener` registers typed event callbacks and
+returns the ID used by `wire::Node`. Call `cx.notify()` after state changes.
+Unnotified frames retain their tree and event routes; native debug builds catch
+serialized state changes without notification.
+
+`cx.host()` is the typed host door. Keep the `Task` returned by `cx.spawn`, or
+call `.detach()`; dropping it cancels the future and any owned subscription.
+Consume host streams with `while let Some(item) = stream.next().await` and update
+through `WeakEntity`. `TestAppContext` supplies typed fake handlers and feeds,
+input simulation, and tree assertions. See `examples/exported_view.rs` in
+`view-guest` and the four app view test modules.
+
+Snapshot/restore transfers the root view's serde state, not entity identities.
+Snapshots wait for ordinary work to settle; parked host streams restart in
+`View::restored`. Keep independent writes in separate tasks: an opaque joined
+future sharing a stream waiter cannot expose whether its other work is pending.
+The tree vocabulary, manifests, and five-function Wasm ABI are unchanged.
+
 ## Building
 
 `cargo test --workspace`, the same for clippy, `make program-wasm-check`, `make view-wasm-check`, `make

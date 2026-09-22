@@ -7,8 +7,10 @@ use abi::hex;
 use ducktape_view_guest::caps::{Program, QueryBytes};
 use ducktape_view_guest::export_view;
 use ducktape_view_guest::host::{Refusal, malformed};
-use ducktape_view_guest::view::{Cx, Live, Loaded, View, Watching, ask};
+use ducktape_view_guest::view::{Live, Loaded};
 use ducktape_view_guest::wire::{Node, kit, kit::Tone};
+use ducktape_view_guest::{Context, Host, Render, Task, View, Window};
+use futures::StreamExt;
 use modules::module_registry as registry;
 use serde::{Deserialize, Serialize};
 
@@ -24,7 +26,7 @@ impl Program for Registry {
 pub struct Explorer {
     network: Loaded<Network>,
     #[serde(skip)]
-    live: Option<Watching>,
+    live: Option<Task<()>>,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -55,18 +57,27 @@ struct Change {
 impl View for Explorer {
     const PREFERRED_WINDOW_SIZE: &'static str = "760x640";
 
-    fn boot(cx: &mut Cx<Self>) -> Self {
+    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mut view = Self::default();
-        view.restored(cx);
+        view.restored(window, cx);
         view
     }
 
-    fn restored(&mut self, cx: &mut Cx<Self>) {
-        self.live = Some(cx.watch::<Live>(registry::PROGRAM.into(), |view, _, cx| view.read(cx)));
+    fn restored(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        let mut stream = cx.host().subscribe::<Live>(registry::PROGRAM.into());
+        self.live = Some(cx.spawn(async move |this, cx| {
+            while stream.next().await.is_some() {
+                if this.update(cx, |view, cx| view.read(cx)).is_err() {
+                    break;
+                }
+            }
+        }));
         self.read(cx);
     }
+}
 
-    fn render(&mut self, cx: &mut Cx<Self>) -> Node {
+impl Render for Explorer {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> Node {
         let key = "explorer";
         let head = kit::centered_row(
             format!("{key}/head"),
@@ -82,13 +93,14 @@ impl View for Explorer {
 impl Explorer {
     /// One read of the registry — the boot, a retry, a restore, a live bump.
     /// What is already on screen stays there while it runs.
-    fn read(&mut self, cx: &mut Cx<Self>) {
+    fn read(&mut self, cx: &mut Context<Self>) {
         match self.network.ready() {
-            Some(_) => cx.refresh(network(), |view, network, _| {
+            Some(_) => cx.refresh(network(cx.host()), |view, network, _| {
                 view.network = Loaded::Ready(network)
             }),
-            None => self.network = cx.load(network(), |view| &mut view.network),
+            None => self.network = cx.load(network(cx.host()), |view| &mut view.network),
         }
+        cx.notify();
     }
 
     fn count(&self) -> String {
@@ -99,13 +111,13 @@ impl Explorer {
     }
 
     /// The four states of the registry: loading, refused, empty, ready.
-    fn body(&self, key: &str, cx: &mut Cx<Self>) -> Node {
+    fn body(&self, key: &str, cx: &mut Context<Self>) -> Node {
         match &self.network {
             Loaded::Idle | Loaded::Loading(_) => {
                 kit::secondary(format!("{key}/loading"), "Reading the registry…")
             }
             Loaded::Failed(refusal) => {
-                let retry = cx.on(|view, cx| view.read(cx));
+                let retry = cx.listener(|view, _: &(), _, cx| view.read(cx));
                 kit::notice(
                     format!("{key}/refused"),
                     kit::column(
@@ -204,12 +216,18 @@ fn changes(key: &str, changes: &[Change]) -> Node {
 /// before the height asked, and it answers no height of its own, so there is
 /// no "as of now" to ask for — the scheduled list below is what is still to
 /// come.
-async fn network() -> Result<Network, Refusal> {
-    let programs = match ask::<QueryBytes<Registry>>(registry::Query::At(0)).await? {
+async fn network(host: Host) -> Result<Network, Refusal> {
+    let programs = match host
+        .ask::<QueryBytes<Registry>>(registry::Query::At(0))
+        .await?
+    {
         registry::Reply::Programs(programs) => programs,
         other => return Err(unexpected(&other)),
     };
-    let scheduled = match ask::<QueryBytes<Registry>>(registry::Query::Scheduled).await? {
+    let scheduled = match host
+        .ask::<QueryBytes<Registry>>(registry::Query::Scheduled)
+        .await?
+    {
         registry::Reply::Scheduled(scheduled) => scheduled,
         other => return Err(unexpected(&other)),
     };

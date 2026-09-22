@@ -1,17 +1,24 @@
 //! The list pane: search, the channels (with the door to a new one), the
 //! voice rooms and the direct messages, each row marked unread when its
 //! head moved past what the reader saw.
-use ducktape_view_guest::view::Cx;
+use ducktape_view_guest::Context;
 use ducktape_view_guest::wire::{self, Length, Node, kit, kit::Tone};
 
 use crate::chat::ChannelInfo;
 use crate::{ChannelCreate, Chat};
 use ducktape_view_guest::wire::kit::*;
 
-pub fn render(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
+pub fn render(chat: &Chat, cx: &mut Context<Chat>) -> Node {
     let key = "chat/sidebar";
-    let typed = cx.on_value(|chat, text: String, _| chat.search.draft = text);
-    let submit = cx.on(|chat, cx| chat.search_submit(cx));
+    let typed = cx.listener(|chat, event: &String, _window, cx| {
+        let text = event.clone();
+        cx.notify();
+        chat.search.draft = text
+    });
+    let submit = cx.listener(|chat, _event: &(), _window, cx| {
+        cx.notify();
+        chat.search_submit(cx)
+    });
     let mut search = text_field(
         format!("{key}/search"),
         "Search messages",
@@ -25,7 +32,10 @@ pub fn render(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
     }
     let mut search_row = vec![fill_width(search)];
     if !chat.search.query.is_empty() || !chat.search.draft.trim().is_empty() {
-        let clear = cx.on(|chat, _| chat.search_clear());
+        let clear = cx.listener(|chat, _event: &(), _window, cx| {
+            cx.notify();
+            chat.search_clear()
+        });
         search_row.push(glyph(
             format!("{key}/clear-search"),
             "✕",
@@ -45,7 +55,8 @@ pub fn render(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
         Some(_) => ("✕", "Close"),
         None => ("+", "New channel"),
     };
-    let toggle = cx.on(|chat, _| {
+    let toggle = cx.listener(|chat, _event: &(), _window, cx| {
+        cx.notify();
         chat.create = match chat.create.take() {
             Some(_) => None,
             None => Some(ChannelCreate::default()),
@@ -156,7 +167,7 @@ fn channel_button(
     key: &str,
     info: &ChannelInfo,
     selected: bool,
-    cx: &mut Cx<Chat>,
+    cx: &mut Context<Chat>,
 ) -> Node {
     let p = kit::palette();
     let key = format!("{key}/channel/{}", info.channel.id);
@@ -199,7 +210,12 @@ fn channel_button(
         children.push(unread_dot(format!("{key}/unread")));
     }
     let id = info.channel.id.clone();
-    let press = (!chat.session.busy).then(|| cx.on(move |chat, cx| chat.choose(id.clone(), cx)));
+    let press = (!chat.session.busy).then(|| {
+        cx.listener(move |chat, _event: &(), window, cx| {
+            cx.notify();
+            chat.choose(id.clone(), window, cx)
+        })
+    });
     let content = kit::spaced(
         kit::centered_row(format!("{key}/row"), children),
         kit::spacing::XS as f32,
@@ -213,7 +229,7 @@ fn channel_button(
 
 /// A voice room: pressing it joins its huddle; the row the reader sits in
 /// is the selected one.
-fn voice_button(chat: &Chat, key: &str, info: &ChannelInfo, cx: &mut Cx<Chat>) -> Node {
+fn voice_button(chat: &Chat, key: &str, info: &ChannelInfo, cx: &mut Context<Chat>) -> Node {
     let p = kit::palette();
     let key = format!("{key}/voice/{}", info.channel.id);
     let mut children = vec![
@@ -231,7 +247,11 @@ fn voice_button(chat: &Chat, key: &str, info: &ChannelInfo, cx: &mut Cx<Chat>) -
     }
     let id = info.channel.id.clone();
     let press = (!chat.session.busy && !info.channel.archived).then(|| {
-        cx.on(move |_, cx| cx.notify::<crate::api::JoinVoice>(serde_json::json!({"id": id})))
+        cx.listener(move |_, _event: &(), _window, cx| {
+            cx.notify();
+            cx.host()
+                .notify::<crate::api::JoinVoice>(serde_json::json!({"id": id}))
+        })
     });
     let joined = chat.session.huddle_joined && chat.session.huddle_channel == info.channel.id;
     let content = kit::spaced(
@@ -308,7 +328,7 @@ fn dm_button(
     info: &ChannelInfo,
     peer: u64,
     selected: bool,
-    cx: &mut Cx<Chat>,
+    cx: &mut Context<Chat>,
 ) -> Node {
     let key = format!("{key}/dm/{peer}");
     let names = chat.names.ready();
@@ -336,7 +356,12 @@ fn dm_button(
         children.push(unread_dot(format!("{key}/unread")));
     }
     let id = info.channel.id.clone();
-    let press = (!chat.session.busy).then(|| cx.on(move |chat, cx| chat.choose(id.clone(), cx)));
+    let press = (!chat.session.busy).then(|| {
+        cx.listener(move |chat, _event: &(), window, cx| {
+            cx.notify();
+            chat.choose(id.clone(), window, cx)
+        })
+    });
     let content = kit::spaced(
         kit::centered_row(format!("{key}/row"), children),
         kit::spacing::SM as f32,

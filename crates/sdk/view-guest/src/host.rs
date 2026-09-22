@@ -1,18 +1,4 @@
-//! The guest's side of the request/response channel.
-//!
-//! [`request`] asks once and resolves on the first answer; [`subscribe`]
-//! asks once and yields every answer until the host closes the stream. Both
-//! hand the host a [`Request`] through the next frame. The guest never
-//! blocks: the driver polls the app's tasks on every tick, so a task waiting
-//! on the host simply stays pending until a response event arrives.
-//!
-//! [`notify`] is the third shape: it asks and never listens, for things whose
-//! answer nobody wants ([`log`]).
-//!
-//! A request's `kind` is `<capability>.<operation>`. The host refuses a
-//! capability the app's manifest did not declare, and the refusal arrives
-//! as the `Err` of the answer — an ordinary error the app's handler routes.
-
+//! Driver-owned host requests and cancellable streams.
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::future::Future;
@@ -20,7 +6,9 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 
-use futures::Stream;
+use crate::Capability;
+use futures::{Stream, StreamExt};
+use std::rc::Rc;
 
 use crate::wire::Request;
 
@@ -54,6 +42,8 @@ pub fn said(refused: Refusal) -> String {
 
 #[derive(Default)]
 struct Slot {
+    stream: bool,
+    yield_next: bool,
     answers: VecDeque<Answer>,
     closed: bool,
     waker: Option<Waker>,
@@ -65,6 +55,7 @@ struct Registry {
     outbox: Vec<Request>,
     pending: HashMap<u64, Arc<Mutex<Slot>>>,
     cancels: Vec<u64>,
+    diagnostics: HashMap<u64, String>,
 }
 
 impl Registry {
@@ -80,86 +71,128 @@ impl Registry {
     }
 }
 
-thread_local! {
-    // One registry per thread = one per driver: a wasm module has one
-    // thread, and every native test drives its own app on its own thread.
-    static REGISTRY: RefCell<Registry> = RefCell::default();
-}
+/// The request channel owned by one driver; clones share only that driver.
+#[derive(Clone, Default)]
+pub struct Host(Rc<RefCell<Registry>>);
 
-fn open(kind: &str, payload: &[u8]) -> (u64, Arc<Mutex<Slot>>) {
-    let slot = Arc::new(Mutex::new(Slot::default()));
-    let id = REGISTRY.with_borrow_mut(|registry| {
+impl Host {
+    fn open(&self, kind: &str, payload: &[u8]) -> (u64, Arc<Mutex<Slot>>) {
+        let slot = Arc::new(Mutex::new(Slot::default()));
+        let mut registry = self.0.borrow_mut();
         let id = registry.ask(kind, payload);
         registry.pending.insert(id, slot.clone());
-        id
-    });
-    (id, slot)
-}
-
-/// Stops waiting for `id`. Still pending means the host is still working on
-/// it and has to be told; already fulfilled means there is nothing to cancel.
-/// Runs from a `Drop`, so a thread tearing down its registry is not an error.
-fn close(id: u64) {
-    let _ = REGISTRY.try_with(|registry| {
-        let mut registry = registry.borrow_mut();
+        (id, slot)
+    }
+    fn close(&self, id: u64) {
+        let mut registry = self.0.borrow_mut();
         if registry.pending.remove(&id).is_some() {
             registry.cancels.push(id);
         }
-    });
+        registry.diagnostics.remove(&id);
+    }
+    pub(crate) fn request(&self, kind: &str, payload: &[u8]) -> Response {
+        let (id, slot) = self.open(kind, payload);
+        Response {
+            id,
+            slot,
+            host: self.clone(),
+        }
+    }
+    pub(crate) fn raw_subscribe(&self, kind: &str, payload: &[u8]) -> Subscription {
+        let (id, slot) = self.open(kind, payload);
+        slot.lock().expect("stream slot").stream = true;
+        Subscription {
+            id,
+            slot,
+            host: self.clone(),
+        }
+    }
+    pub(crate) fn raw_notify(&self, kind: &str, payload: &[u8]) {
+        self.0.borrow_mut().ask(kind, payload);
+    }
+    pub fn ask<C: Capability>(
+        &self,
+        request: C::Request,
+    ) -> impl Future<Output = Result<C::Reply, Refusal>> + 'static {
+        let response = self.request(C::KIND, &C::encode(&request));
+        self.0
+            .borrow_mut()
+            .diagnostics
+            .insert(response.id, format!("{request:?}"));
+        async move { C::decode(&response.await?) }
+    }
+    pub fn subscribe<C: Capability>(
+        &self,
+        request: C::Request,
+    ) -> impl Stream<Item = Result<C::Reply, Refusal>> + Unpin + 'static {
+        let response = self.raw_subscribe(C::KIND, &C::encode(&request));
+        self.0
+            .borrow_mut()
+            .diagnostics
+            .insert(response.id, format!("{request:?}"));
+        response.map(|answer| answer.and_then(|bytes| C::decode(&bytes)))
+    }
+    pub fn notify<C: Capability>(&self, request: C::Request) {
+        let id = self.0.borrow_mut().ask(C::KIND, &C::encode(&request));
+        self.0
+            .borrow_mut()
+            .diagnostics
+            .insert(id, format!("{request:?}"));
+    }
+    pub fn log(&self, message: impl AsRef<str>) {
+        self.raw_notify("host.log", message.as_ref().as_bytes());
+    }
+    pub fn open_link(&self, link: &str) {
+        self.raw_notify(
+            "host.open_link",
+            &serde_json::to_vec(&serde_json::json!({"link":link})).unwrap(),
+        );
+    }
+    pub fn finish_response(&self, bytes: &[u8]) {
+        self.raw_notify("host.emit", bytes);
+        self.raw_notify("host.finish", &[]);
+    }
+    pub(crate) fn diagnostic(&self, id: u64) -> Option<String> {
+        self.0.borrow().diagnostics.get(&id).cloned()
+    }
+    pub(crate) fn pending_requests(&self) -> bool {
+        self.0
+            .borrow()
+            .pending
+            .values()
+            .any(|slot| !slot.lock().expect("request slot").stream)
+    }
+    pub(crate) fn waiting_stream(&self, waker: &Waker) -> bool {
+        self.0.borrow().pending.values().any(|slot| {
+            let slot = slot.lock().expect("stream slot");
+            slot.stream
+                && !slot.closed
+                && slot.answers.is_empty()
+                && slot
+                    .waker
+                    .as_ref()
+                    .is_some_and(|waiting| waiting.will_wake(waker))
+        })
+    }
+    pub(crate) fn is_stream(&self, id: u64) -> bool {
+        self.0
+            .borrow()
+            .pending
+            .get(&id)
+            .is_some_and(|slot| slot.lock().expect("request slot").stream)
+    }
 }
 
-/// Asks the host for one thing.
-pub fn request(kind: &str, payload: &[u8]) -> Response {
-    let (id, slot) = open(kind, payload);
-    Response { id, slot }
-}
-
-/// Asks the host for a stream of things — timer ticks, bus messages.
-pub fn subscribe(kind: &str, payload: &[u8]) -> Subscription {
-    let (id, slot) = open(kind, payload);
-    Subscription { id, slot }
-}
-
-/// Tells the host something and keeps no slot for the answer, which is
-/// therefore dropped when it comes.
-pub fn notify(kind: &str, payload: &[u8]) {
-    REGISTRY.with_borrow_mut(|registry| registry.ask(kind, payload));
-}
-
-/// Prints from inside a module: `println!` has nowhere to go in wasm.
-pub fn log(message: impl AsRef<str>) {
-    notify("host.log", message.as_ref().as_bytes());
-}
-
-/// Opens a `duck://` address — the ONE door out of a view to whatever owns
-/// that address, and the only way a view moves the app off itself.
-///
-/// The address is the whole request: it names its module, its object and the
-/// network it belongs to (`?net=`), so nothing here says which tab, which
-/// route or which window. The host resolves it against the same table a
-/// pressed link in a document resolves against, and a view that cannot be
-/// opened is the host's answer, not this view's business.
-pub fn open_link(link: &str) {
-    let ask = serde_json::json!({ "link": link });
-    notify("host.open_link", ask.to_string().as_bytes());
-}
-
-/// The host's colour mode, now and whenever it changes: every item is
-/// `light` or `dark`. Needs no capability — an app that cannot follow the
-/// host's dark mode is the one thing every app should be allowed to fix.
-pub fn theme() -> Subscription {
-    subscribe("host.theme", &[])
-}
-
-/// The host's eventual answer to a [`request`].
-pub struct Response {
+/// The host's eventual answer to a [`Host::ask`].
+pub(crate) struct Response {
     id: u64,
     slot: Arc<Mutex<Slot>>,
+    host: Host,
 }
 
 impl Drop for Response {
     fn drop(&mut self) {
-        close(self.id);
+        self.host.close(self.id);
     }
 }
 
@@ -182,24 +215,16 @@ impl Future for Response {
     }
 }
 
-/// Every answer the host sends to a [`subscribe`], until it closes.
-pub struct Subscription {
+/// Every answer the host sends to a [`Host::subscribe`], until it closes.
+pub(crate) struct Subscription {
     id: u64,
     slot: Arc<Mutex<Slot>>,
-}
-
-impl Subscription {
-    /// This instance's host resource ID, for operations on the open stream
-    /// such as `net.send`. Dropping the subscription cancels that resource;
-    /// the ID grants no access to another view instance's resources.
-    pub fn id(&self) -> u64 {
-        self.id
-    }
+    host: Host,
 }
 
 impl Drop for Subscription {
     fn drop(&mut self) {
-        close(self.id);
+        self.host.close(self.id);
     }
 }
 
@@ -208,8 +233,16 @@ impl Stream for Subscription {
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Answer>> {
         let mut slot = self.slot.lock().expect("subscription slot");
+        if std::mem::take(&mut slot.yield_next) {
+            cx.waker().wake_by_ref();
+            return Poll::Pending;
+        }
         match slot.answers.pop_front() {
-            Some(answer) => Poll::Ready(Some(answer)),
+            Some(answer) => {
+                slot.yield_next = true;
+                slot.waker = None;
+                Poll::Ready(Some(answer))
+            }
             None if slot.closed => Poll::Ready(None),
             None => {
                 slot.waker = Some(cx.waker().clone());
@@ -219,74 +252,53 @@ impl Stream for Subscription {
     }
 }
 
-/// Everything asked since the last frame, in order.
-pub(crate) fn drain_outbox() -> Vec<Request> {
-    REGISTRY.with_borrow_mut(|registry| std::mem::take(&mut registry.outbox))
-}
+impl Host {
+    /// Everything asked since the last frame, in order.
+    pub(crate) fn drain_outbox(&self) -> Vec<Request> {
+        let mut registry = self.0.borrow_mut();
+        let keep: std::collections::HashSet<_> = registry
+            .pending
+            .keys()
+            .copied()
+            .chain(registry.outbox.iter().map(|request| request.id))
+            .collect();
+        registry.diagnostics.retain(|id, _| keep.contains(id));
+        std::mem::take(&mut registry.outbox)
+    }
 
-/// Everything abandoned since the last frame.
-pub(crate) fn drain_cancels() -> Vec<u64> {
-    REGISTRY.with_borrow_mut(|registry| std::mem::take(&mut registry.cancels))
-}
+    /// Everything abandoned since the last frame.
+    pub(crate) fn drain_cancels(&self) -> Vec<u64> {
+        std::mem::take(&mut self.0.borrow_mut().cancels)
+    }
 
-/// Delivers one answer; an id nobody waits for is dropped.
-pub(crate) fn fulfill(id: u64, answer: Answer, done: bool) {
-    let slot = REGISTRY.with_borrow_mut(|registry| {
-        if done {
-            registry.pending.remove(&id)
-        } else {
-            registry.pending.get(&id).cloned()
+    /// Delivers one answer; an id nobody waits for is dropped.
+    pub(crate) fn close_stream(&self, id: u64) {
+        let slot = self.0.borrow_mut().pending.remove(&id);
+        if let Some(slot) = slot {
+            let mut slot = slot.lock().expect("answer slot");
+            slot.closed = true;
+            if let Some(waker) = slot.waker.take() {
+                waker.wake();
+            }
         }
-    });
-    if let Some(slot) = slot {
-        let mut slot = slot.lock().expect("answer slot");
-        slot.answers.push_back(answer);
-        slot.closed |= done;
-        if let Some(waker) = slot.waker.take() {
-            waker.wake();
+    }
+
+    pub(crate) fn fulfill(&self, id: u64, answer: Answer, done: bool) {
+        let slot = {
+            let mut registry = self.0.borrow_mut();
+            if done {
+                registry.pending.remove(&id)
+            } else {
+                registry.pending.get(&id).cloned()
+            }
+        };
+        if let Some(slot) = slot {
+            let mut slot = slot.lock().expect("answer slot");
+            slot.answers.push_back(answer);
+            slot.closed |= done;
+            if let Some(waker) = slot.waker.take() {
+                waker.wake();
+            }
         }
-    }
-}
-
-/// Return a background response and finish the session.
-pub fn finish_response(bytes: &[u8]) {
-    notify("host.emit", bytes);
-    notify("host.finish", &[]);
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_dropped_request_is_cancelled_once() {
-        let response = request("host.echo", b"hi");
-        let id = drain_outbox()[0].id;
-        assert!(drain_cancels().is_empty());
-
-        drop(response);
-        assert_eq!(drain_cancels(), vec![id]);
-        assert!(drain_cancels().is_empty());
-    }
-
-    #[test]
-    fn an_answered_request_cancels_nothing() {
-        let response = request("host.echo", b"hi");
-        let id = drain_outbox()[0].id;
-        fulfill(id, Ok(Vec::new()), true);
-
-        drop(response);
-        assert!(drain_cancels().is_empty());
-    }
-
-    #[test]
-    fn notify_asks_and_keeps_no_slot() {
-        notify("host.log", b"hello");
-        let sent = drain_outbox();
-        assert_eq!(sent.len(), 1);
-        assert_eq!(sent[0].kind, "host.log");
-        // Nothing waits for it: the answer is dropped, not a panic.
-        fulfill(sent[0].id, Ok(Vec::new()), true);
-        assert!(drain_cancels().is_empty());
     }
 }

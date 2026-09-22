@@ -1,0 +1,212 @@
+use super::{FakeHost, assert_accessible, find, texts};
+use crate::{
+    App, Driver, Entity, View,
+    host::Host,
+    wire::{Event, Frame, Node},
+};
+
+trait TestDriver {
+    fn tick(&mut self, events: Vec<Event>) -> Frame;
+    fn app_mut(&mut self) -> &mut App;
+    fn host(&self) -> Host;
+    fn snapshot(&self) -> Result<Vec<u8>, String>;
+}
+impl<V: View> TestDriver for Driver<V> {
+    fn tick(&mut self, events: Vec<Event>) -> Frame {
+        self.tick(events)
+    }
+    fn app_mut(&mut self) -> &mut App {
+        self.app_mut()
+    }
+    fn host(&self) -> Host {
+        self.host()
+    }
+    fn snapshot(&self) -> Result<Vec<u8>, String> {
+        self.snapshot()
+    }
+}
+
+/// A single view and its typed host, driven until no immediate work remains.
+#[derive(Default)]
+pub struct TestAppContext {
+    host: FakeHost,
+    driver: Option<Box<dyn TestDriver>>,
+    frame: Frame,
+}
+
+impl TestAppContext {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn host(&self) -> FakeHost {
+        self.host.clone()
+    }
+    pub fn open<V: View>(&mut self) -> Entity<V> {
+        self.open_with_macos(false)
+    }
+    pub fn open_with_macos<V: View>(&mut self, macos: bool) -> Entity<V> {
+        let driver = Driver::<V>::with_macos(macos);
+        let entity = driver.entity();
+        self.host.reset_connection();
+        self.driver = Some(Box::new(driver));
+        self.frame = Frame::default();
+        self.run_until_parked();
+        entity
+    }
+    pub fn snapshot(&self) -> Result<Vec<u8>, String> {
+        self.driver.as_ref().expect("open a view first").snapshot()
+    }
+    pub fn restore<V: View>(&mut self, bytes: &[u8]) -> Result<Entity<V>, String> {
+        self.restore_with_macos(bytes, false)
+    }
+    pub fn restore_with_macos<V: View>(
+        &mut self,
+        bytes: &[u8],
+        macos: bool,
+    ) -> Result<Entity<V>, String> {
+        let driver = Driver::<V>::from_snapshot(bytes, macos)?;
+        let entity = driver.entity();
+        self.host.reset_connection();
+        self.driver = Some(Box::new(driver));
+        self.frame = Frame::default();
+        self.run_until_parked();
+        Ok(entity)
+    }
+    pub(crate) fn app_mut(&mut self) -> &mut App {
+        self.driver.as_mut().expect("open a view first").app_mut()
+    }
+    pub fn run_until_parked(&mut self) {
+        self.dispatch(Vec::new());
+    }
+    fn dispatch(&mut self, mut events: Vec<Event>) {
+        for _ in 0..10_000 {
+            events.extend(self.host.take_events());
+            let driver = self.driver.as_mut().expect("open a view first");
+            let mut frame = driver.tick(std::mem::take(&mut events));
+            self.host.accept(&frame, &driver.host());
+            if frame.root.is_none() {
+                frame.root = self.frame.root.take();
+                if !frame.patches.is_empty() {
+                    crate::wire::apply(
+                        frame.root.as_mut().expect("patch needs previous tree"),
+                        std::mem::take(&mut frame.patches),
+                    )
+                    .expect("valid view patches");
+                }
+            }
+            let busy = frame.busy;
+            self.frame = frame;
+            events = self.host.take_events();
+            if events.is_empty() && !busy {
+                return;
+            }
+        }
+        panic!("view did not park after 10000 ticks");
+    }
+    pub fn texts(&self) -> Vec<String> {
+        texts(&self.frame)
+    }
+    pub fn has_text(&self, text: &str) -> bool {
+        super::has_text(&self.frame, text)
+    }
+    pub fn find(&self, key: &str) -> Option<&Node> {
+        find(&self.frame, key)
+    }
+    pub fn assert_accessible(&self) {
+        assert_accessible(self.frame.root.as_ref().expect("view has a tree"));
+    }
+    pub fn simulate_click(&mut self, key: &str) {
+        self.dispatch(super::press(&self.frame, key));
+    }
+    pub fn simulate_input(&mut self, key: &str, text: &str) {
+        self.dispatch(super::type_into(&self.frame, key, text));
+    }
+    pub fn simulate_toggle(&mut self, key: &str, on: bool) {
+        self.dispatch(super::toggle(&self.frame, key, on));
+    }
+    pub fn simulate_slide(&mut self, key: &str, value: f32) {
+        self.dispatch(super::slide(&self.frame, key, value));
+    }
+    pub fn simulate_select(&mut self, key: &str, option: &str) {
+        self.dispatch(super::pick(&self.frame, key, option));
+    }
+    pub fn simulate_submit(&mut self, key: &str) {
+        self.dispatch(super::submit(&self.frame, key));
+    }
+    pub fn simulate_edit(&mut self, key: &str, before: &str, text: &str) {
+        self.dispatch(super::edit(&self.frame, key, before, text));
+    }
+    pub fn simulate_measure(&mut self, key: &str, width: f32, height: f32) {
+        self.dispatch(super::measure(&self.frame, key, width, height));
+    }
+    pub fn simulate_hover(&mut self, key: &str) {
+        self.dispatch(super::hover(&self.frame, key));
+    }
+    pub fn simulate_scroll(&mut self, key: &str, dx: f32, dy: f32) {
+        self.dispatch(super::scroll(&self.frame, key, dx, dy));
+    }
+    pub fn simulate_pointer_move(&mut self, key: &str, x: f32, y: f32) {
+        self.dispatch(super::move_to(&self.frame, key, x, y));
+    }
+    pub fn simulate_hide(&mut self, key: &str) {
+        self.dispatch(super::hide(&self.frame, key));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Context, Render, Task, Window, view::Live};
+    use futures::StreamExt;
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Default, Serialize, Deserialize)]
+    struct LiveView {
+        items: usize,
+        #[serde(skip)]
+        task: Option<Task<()>>,
+    }
+    impl View for LiveView {
+        fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+            let mut view = Self::default();
+            view.restored(window, cx);
+            view
+        }
+        fn restored(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+            let mut stream = cx.host().subscribe::<Live>("live".into());
+            self.task = Some(cx.spawn(async move |this, cx| {
+                while let Some(item) = stream.next().await {
+                    item.unwrap();
+                    this.update(cx, |view, cx| {
+                        view.items += 1;
+                        cx.notify();
+                    })
+                    .unwrap();
+                }
+            }));
+        }
+    }
+    impl Render for LiveView {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> Node {
+            crate::wire::kit::text("items", self.items.to_string())
+        }
+    }
+
+    #[test]
+    fn restoring_resubscribes_without_replaying_old_events_or_duplicate_ids() {
+        let mut cx = TestAppContext::new();
+        let feed = cx.host().stream::<Live>();
+        cx.open::<LiveView>();
+        feed.push(());
+        cx.run_until_parked();
+        assert!(cx.has_text("1"));
+        let snapshot = cx.snapshot().unwrap();
+        feed.push(());
+        let restored = cx.restore::<LiveView>(&snapshot).unwrap();
+        restored.read(|view| assert_eq!(view.items, 1));
+        feed.push(());
+        cx.run_until_parked();
+        restored.read(|view| assert_eq!(view.items, 2));
+        assert_eq!(cx.host().asked::<Live>().len(), 2);
+    }
+}

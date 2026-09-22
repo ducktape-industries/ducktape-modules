@@ -55,14 +55,13 @@ probe-fixture:
 wasm-views:
 	@for v in $(VIEWS); do $(CARGO) build --release --target wasm32-unknown-unknown -p $$v || exit 1; done
 
-## builds every VIEW_LINKABLE crate for wasm32-unknown-unknown, plus the two
-## exported probes of view-guest, then fails if the normal wasm32 dependency
+## builds every VIEW_LINKABLE crate for wasm32-unknown-unknown, plus the
+## exported view probe of view-guest, then fails if the normal wasm32 dependency
 ## tree of any of them names a VIEW_FORBIDDEN crate.
 view-wasm-check:
 	@for crate in $(VIEW_LINKABLE); do \
 	  $(CARGO) build --target wasm32-unknown-unknown -p $$crate || exit 1; \
 	done; \
-	$(CARGO) build --target wasm32-unknown-unknown -p view-guest --example exported || exit 1; \
 	$(CARGO) build --target wasm32-unknown-unknown -p view-guest --example exported_view || exit 1; \
 	reached=""; \
 	for crate in $(VIEW_LINKABLE); do \
