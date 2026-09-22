@@ -306,7 +306,7 @@ impl Render for ThemeReader {
     }
 }
 #[test]
-fn host_theme_updates_the_global_and_emits_a_style_patch() {
+fn host_theme_events_update_the_global_and_emit_style_patches() {
     let mut driver = Driver::<ThemeReader>::new();
     let first = driver.tick(vec![]);
     let mut root = first.root.unwrap();
@@ -316,9 +316,20 @@ fn host_theme_updates_the_global_and_emits_a_style_patch() {
         [wire::Patch::Props { .. }]
     ));
     wire::apply(&mut root, changed.patches).unwrap();
-    let wire::Node::Container { style, .. } = root else {
+    let wire::Node::Container { ref style, .. } = root else {
         panic!("container")
     };
     assert_eq!(style.background, Some(Theme::dark().surface.into()));
     assert_ne!(Theme::dark().surface, Theme::light().surface);
+
+    let changed = driver.tick(vec![wire::Event::Theme { dark: false }]);
+    assert!(matches!(
+        changed.patches.as_slice(),
+        [wire::Patch::Props { .. }]
+    ));
+    wire::apply(&mut root, changed.patches).unwrap();
+    let wire::Node::Container { ref style, .. } = root else {
+        panic!("container")
+    };
+    assert_eq!(style.background, Some(Theme::light().surface.into()));
 }
