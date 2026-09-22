@@ -224,13 +224,23 @@ async fn network(host: Host) -> Result<Network, Refusal> {
         registry::Reply::Programs(programs) => programs,
         other => return Err(unexpected(&other)),
     };
-    let scheduled = match host
-        .ask::<QueryBytes<Registry>>(registry::Query::Scheduled)
-        .await?
-    {
-        registry::Reply::Scheduled(scheduled) => scheduled,
-        other => return Err(unexpected(&other)),
-    };
+    let mut scheduled = Vec::new();
+    let mut after = None;
+    loop {
+        let page = modules::Page { after, limit: None };
+        let reply = match host
+            .ask::<QueryBytes<Registry>>(registry::Query::Scheduled { page })
+            .await?
+        {
+            registry::Reply::Scheduled(reply) => reply,
+            other => return Err(unexpected(&other)),
+        };
+        scheduled.extend(reply.items);
+        match reply.next {
+            Some(next) => after = Some(next),
+            None => break,
+        }
+    }
     Ok(Network {
         programs: programs
             .iter()

@@ -13,18 +13,26 @@ fn validators() -> valset::Reply {
     valset::Reply::Validators(vec![vec![0xab, 0xcd]])
 }
 
+fn page<T>(items: Vec<T>) -> modules::PageReply<T> {
+    modules::PageReply {
+        height: 1,
+        items,
+        next: None,
+    }
+}
+
 fn memberships() -> valset::Reply {
-    valset::Reply::Memberships(vec![
+    valset::Reply::Memberships(page(vec![
         membership(b"\xab\xcd", "10.0.0.1:4000", valset::Standing::Validator),
         membership(b"\x01\x02", "10.0.0.2:4000", valset::Standing::Resident),
-    ])
+    ]))
 }
 
 fn respond(cx: &mut TestAppContext) {
     cx.host().handle::<QueryBytes<Valset>>(|query| {
         Ok(match query {
             valset::Query::Validators => validators(),
-            valset::Query::Memberships => memberships(),
+            valset::Query::Memberships { .. } => memberships(),
             other => panic!("unexpected query: {other:?}"),
         })
     });
@@ -38,7 +46,15 @@ fn ready() -> TestAppContext {
     cx.run_until_parked();
     assert_eq!(
         cx.host().asked::<QueryBytes<Valset>>(),
-        vec![valset::Query::Validators, valset::Query::Memberships]
+        vec![
+            valset::Query::Validators,
+            valset::Query::Memberships {
+                page: modules::Page {
+                    after: None,
+                    limit: None
+                }
+            }
+        ]
     );
     assert_eq!(cx.host().asked::<Live>(), vec![valset::PROGRAM.to_string()]);
     cx
@@ -73,7 +89,7 @@ fn an_empty_set_says_so() {
     cx.host().handle::<QueryBytes<Valset>>(|query| {
         Ok(match query {
             valset::Query::Validators => valset::Reply::Validators(vec![]),
-            valset::Query::Memberships => valset::Reply::Memberships(vec![]),
+            valset::Query::Memberships { .. } => valset::Reply::Memberships(page(vec![])),
             other => panic!("unexpected query: {other:?}"),
         })
     });
@@ -114,11 +130,13 @@ fn a_live_bump_re_reads_and_a_snapshot_restores_the_screen() {
     cx.host().handle::<QueryBytes<Valset>>(|query| {
         Ok(match query {
             valset::Query::Validators => validators(),
-            valset::Query::Memberships => valset::Reply::Memberships(vec![membership(
-                b"\xab\xcd",
-                "10.9.9.9:4000",
-                valset::Standing::Validator,
-            )]),
+            valset::Query::Memberships { .. } => {
+                valset::Reply::Memberships(page(vec![membership(
+                    b"\xab\xcd",
+                    "10.9.9.9:4000",
+                    valset::Standing::Validator,
+                )]))
+            }
             other => panic!("unexpected query: {other:?}"),
         })
     });

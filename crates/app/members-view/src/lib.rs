@@ -207,24 +207,43 @@ fn render_row(key: &str, row: &Row) -> Node {
 /// The roster, with each account's valset standing joined on the keys it
 /// holds.
 ///
-/// `identity::Reply::Accounts` carries no cursor back, so a view cannot ask
-/// for the next page: `Page::all()` is the only honest ask, and how much
-/// comes back is the program's call.
+/// Both programs answer in pages; the roster follows every `next` cursor to
+/// the end, since the screen shows the whole network.
 async fn roster(host: Host) -> Result<Vec<Row>, Refusal> {
-    let accounts = match host
-        .ask::<QueryBytes<Identity>>(identity::Query::List { page: Page::all() })
-        .await?
-    {
-        identity::Reply::Accounts(accounts) => accounts,
-        other => return Err(unexpected(identity::PROGRAM, &other)),
-    };
-    let members = match host
-        .ask::<QueryBytes<Valset>>(valset::Query::Memberships)
-        .await?
-    {
-        valset::Reply::Memberships(members) => members,
-        other => return Err(unexpected(valset::PROGRAM, &other)),
-    };
+    let mut accounts = Vec::new();
+    let mut after = None;
+    loop {
+        let page = Page { after, limit: None };
+        let reply = match host
+            .ask::<QueryBytes<Identity>>(identity::Query::List { page })
+            .await?
+        {
+            identity::Reply::Accounts(reply) => reply,
+            other => return Err(unexpected(identity::PROGRAM, &other)),
+        };
+        accounts.extend(reply.items);
+        match reply.next {
+            Some(next) => after = Some(next),
+            None => break,
+        }
+    }
+    let mut members = Vec::new();
+    let mut after = None;
+    loop {
+        let page = Page { after, limit: None };
+        let reply = match host
+            .ask::<QueryBytes<Valset>>(valset::Query::Memberships { page })
+            .await?
+        {
+            valset::Reply::Memberships(reply) => reply,
+            other => return Err(unexpected(valset::PROGRAM, &other)),
+        };
+        members.extend(reply.items);
+        match reply.next {
+            Some(next) => after = Some(next),
+            None => break,
+        }
+    }
     Ok(accounts
         .iter()
         .map(|account| row(account, &members))

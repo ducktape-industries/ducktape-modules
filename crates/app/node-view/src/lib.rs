@@ -218,13 +218,23 @@ async fn set(host: Host) -> Result<Set, Refusal> {
         valset::Reply::Validators(keys) => keys,
         other => return Err(unexpected(&other)),
     };
-    let memberships = match host
-        .ask::<QueryBytes<Valset>>(valset::Query::Memberships)
-        .await?
-    {
-        valset::Reply::Memberships(memberships) => memberships,
-        other => return Err(unexpected(&other)),
-    };
+    let mut memberships = Vec::new();
+    let mut after = None;
+    loop {
+        let page = modules::Page { after, limit: None };
+        let reply = match host
+            .ask::<QueryBytes<Valset>>(valset::Query::Memberships { page })
+            .await?
+        {
+            valset::Reply::Memberships(reply) => reply,
+            other => return Err(unexpected(&other)),
+        };
+        memberships.extend(reply.items);
+        match reply.next {
+            Some(next) => after = Some(next),
+            None => break,
+        }
+    }
     Ok(Set {
         validators: validators.iter().map(|key| hex(key)).collect(),
         members: memberships

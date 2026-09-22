@@ -41,20 +41,28 @@ fn membership(key: &[u8], standing: valset::Standing) -> valset::Membership {
     }
 }
 
+fn page<T>(items: Vec<T>) -> modules::PageReply<T> {
+    modules::PageReply {
+        height: 1,
+        items,
+        next: None,
+    }
+}
+
 fn respond(cx: &mut TestAppContext) {
     cx.host().handle::<QueryBytes<Identity>>(|query| {
-        assert_eq!(query, identity::Query::List { page: Page::all() });
-        Ok(identity::Reply::Accounts(vec![
+        assert!(matches!(query, identity::Query::List { .. }));
+        Ok(identity::Reply::Accounts(page(vec![
             person(7, "eddy", b"\x01\x02"),
             program(8, "chat"),
-        ]))
+        ])))
     });
     cx.host().handle::<QueryBytes<Valset>>(|query| {
-        assert_eq!(query, valset::Query::Memberships);
-        Ok(valset::Reply::Memberships(vec![membership(
+        assert!(matches!(query, valset::Query::Memberships { .. }));
+        Ok(valset::Reply::Memberships(page(vec![membership(
             b"\x01\x02",
             valset::Standing::Validator,
-        )]))
+        )])))
     });
 }
 
@@ -110,9 +118,9 @@ fn a_roster_with_nobody_in_it_says_so() {
     let mut cx = TestAppContext::new();
     cx.host().stream::<Live>();
     cx.host()
-        .handle::<QueryBytes<Identity>>(|_| Ok(identity::Reply::Accounts(vec![])));
+        .handle::<QueryBytes<Identity>>(|_| Ok(identity::Reply::Accounts(page(vec![]))));
     cx.host()
-        .handle::<QueryBytes<Valset>>(|_| Ok(valset::Reply::Memberships(vec![])));
+        .handle::<QueryBytes<Valset>>(|_| Ok(valset::Reply::Memberships(page(vec![]))));
     cx.open::<Members>();
     cx.run_until_parked();
     assert!(cx.has_text("No accounts"));
@@ -161,9 +169,9 @@ fn a_live_bump_re_reads_and_a_snapshot_restores_the_screen() {
     assert!(cx.has_text("eddy"));
     assert_eq!(cx.host().asked::<QueryBytes<Identity>>().len(), 2);
     cx.host().handle::<QueryBytes<Identity>>(|_| {
-        Ok(identity::Reply::Accounts(vec![person(
+        Ok(identity::Reply::Accounts(page(vec![person(
             9, "newcomer", b"\x09",
-        )]))
+        )])))
     });
     feed.push(());
     cx.run_until_parked();

@@ -14,8 +14,16 @@ fn programs() -> registry::Reply {
     registry::Reply::Programs(vec![entry("identity", 0xab), entry("valset", 0xcd)])
 }
 
+fn page<T>(items: Vec<T>) -> modules::PageReply<T> {
+    modules::PageReply {
+        height: 1,
+        items,
+        next: None,
+    }
+}
+
 fn scheduled() -> registry::Reply {
-    registry::Reply::Scheduled(vec![
+    registry::Reply::Scheduled(page(vec![
         registry::Scheduled {
             height: 120,
             change: registry::Change::Set(entry("chat", 0xef)),
@@ -24,14 +32,14 @@ fn scheduled() -> registry::Reply {
             height: 200,
             change: registry::Change::Remove("forge".into()),
         },
-    ])
+    ]))
 }
 
 fn respond(cx: &mut TestAppContext) {
     cx.host().handle::<QueryBytes<Registry>>(|query| {
         Ok(match query {
             registry::Query::At(0) => programs(),
-            registry::Query::Scheduled => scheduled(),
+            registry::Query::Scheduled { .. } => scheduled(),
             other => panic!("unexpected query: {other:?}"),
         })
     });
@@ -45,7 +53,15 @@ fn ready() -> TestAppContext {
     cx.run_until_parked();
     assert_eq!(
         cx.host().asked::<QueryBytes<Registry>>(),
-        vec![registry::Query::At(0), registry::Query::Scheduled]
+        vec![
+            registry::Query::At(0),
+            registry::Query::Scheduled {
+                page: modules::Page {
+                    after: None,
+                    limit: None
+                }
+            }
+        ]
     );
     assert_eq!(
         cx.host().asked::<Live>(),
@@ -89,7 +105,7 @@ fn an_empty_set_says_so() {
     cx.host().handle::<QueryBytes<Registry>>(|query| {
         Ok(match query {
             registry::Query::At(0) => registry::Reply::Programs(vec![]),
-            registry::Query::Scheduled => registry::Reply::Scheduled(vec![]),
+            registry::Query::Scheduled { .. } => registry::Reply::Scheduled(page(vec![])),
             other => panic!("unexpected query: {other:?}"),
         })
     });
@@ -130,7 +146,7 @@ fn a_live_bump_re_reads_and_a_snapshot_restores_the_screen() {
     cx.host().handle::<QueryBytes<Registry>>(|query| {
         Ok(match query {
             registry::Query::At(0) => registry::Reply::Programs(vec![entry("forge", 0x11)]),
-            registry::Query::Scheduled => registry::Reply::Scheduled(vec![]),
+            registry::Query::Scheduled { .. } => registry::Reply::Scheduled(page(vec![])),
             other => panic!("unexpected query: {other:?}"),
         })
     });
