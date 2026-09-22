@@ -198,7 +198,7 @@ pub enum Node {
     /// host answers with [`Event::Pointer`], `on_scroll` one it answers
     /// with [`Event::Scroll`]. The node paints nothing of its own.
     MouseArea {
-        key: String,
+        id: ElementIdWire,
         /// `None` is an area assistive technology does not announce.
         role: Option<Role>,
         /// The accessible name of an area no text inside names.
@@ -564,10 +564,10 @@ impl Node {
             | Self::Editor { id, .. }
             | Self::UniformList { id, .. }
             | Self::ResizeHandle { id, .. }
+            | Self::MouseArea { id, .. }
             | Self::Sensor { id, .. }
             | Self::Overlay { id, .. } => id.name(),
-            Self::MouseArea { key, .. }
-            | Self::Float { key, .. }
+            Self::Float { key, .. }
             | Self::Responsive { key, .. }
             | Self::Lazy { key, .. }
             | Self::When { key, .. }
@@ -604,10 +604,10 @@ impl Node {
             | Self::Editor { id, .. }
             | Self::UniformList { id, .. }
             | Self::ResizeHandle { id, .. }
+            | Self::MouseArea { id, .. }
             | Self::Sensor { id, .. }
             | Self::Overlay { id, .. } => Some(IdentityKeyRef::Element(id)),
-            Self::MouseArea { key, .. }
-            | Self::Float { key, .. }
+            Self::Float { key, .. }
             | Self::Responsive { key, .. }
             | Self::Lazy { key, .. }
             | Self::When { key, .. }

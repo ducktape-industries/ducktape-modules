@@ -13,8 +13,8 @@ pub struct ContainerQuery {
 /// Postfix operations keep decoding and evaluation iterative and bounded.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum QueryOp {
-    Width(String),
-    Height(String),
+    Width(crate::WidgetTarget),
+    Height(crate::WidgetTarget),
     Number(f64),
     Bool(bool),
     Negate,
@@ -45,7 +45,11 @@ impl ContainerQuery {
         if self.ops.len() > MAX_QUERY_OPS
             || self.ops.iter().any(|op| match op {
                 QueryOp::Number(n) => !n.is_finite(),
-                QueryOp::Width(key) | QueryOp::Height(key) => key.len() > crate::MAX_STRING_BYTES,
+                QueryOp::Width(path) | QueryOp::Height(path) => {
+                    path.is_empty()
+                        || path.len() > crate::MAX_DEPTH
+                        || path.iter().any(|id| id.validate_host().is_err())
+                }
                 _ => false,
             })
         {
@@ -54,11 +58,11 @@ impl ContainerQuery {
     }
 
     /// A malformed condition never selects a branch.
-    pub fn matches(&self, containers: &HashMap<String, [f64; 2]>) -> bool {
+    pub fn matches(&self, containers: &HashMap<crate::WidgetTarget, [f64; 2]>) -> bool {
         self.evaluate(containers).unwrap_or(false)
     }
 
-    fn evaluate(&self, containers: &HashMap<String, [f64; 2]>) -> Option<bool> {
+    fn evaluate(&self, containers: &HashMap<crate::WidgetTarget, [f64; 2]>) -> Option<bool> {
         if self.ops.len() > MAX_QUERY_OPS {
             return None;
         }
@@ -149,8 +153,11 @@ fn decode_ops<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<Q
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn sizes(width: f64, height: f64) -> HashMap<String, [f64; 2]> {
-        HashMap::from([("panel".into(), [width, height])])
+    fn panel() -> crate::WidgetTarget {
+        vec![crate::ElementIdWire::Name("panel".into())]
+    }
+    fn sizes(width: f64, height: f64) -> HashMap<crate::WidgetTarget, [f64; 2]> {
+        HashMap::from([(panel(), [width, height])])
     }
     #[test]
     fn container_rules_use_both_dimensions_and_guest_thresholds() {
@@ -158,12 +165,12 @@ mod tests {
         // width / 2 >= 300 && height < 500
         let query = ContainerQuery {
             ops: vec![
-                Width("panel".into()),
+                Width(panel()),
                 Number(2.0),
                 Divide,
                 Number(300.0),
                 GreaterEqual,
-                Height("panel".into()),
+                Height(panel()),
                 Number(500.0),
                 Less,
                 And,
@@ -179,9 +186,9 @@ mod tests {
         for ops in [
             vec![],
             vec![Bool(true), Bool(true)],
-            vec![Width("panel".into()), And],
+            vec![Width(panel()), And],
             vec![Number(f64::NAN), Number(0.0), NotEqual],
-            vec![Width("panel".into()), Bool(true), Greater],
+            vec![Width(panel()), Bool(true), Greater],
             vec![Bool(true); MAX_QUERY_OPS + 1],
         ] {
             assert!(!ContainerQuery { ops }.matches(&sizes(600.0, 200.0)));
@@ -191,7 +198,11 @@ mod tests {
     fn nested_rules_read_the_named_ancestor_and_refuse_unknown_containers() {
         use QueryOp::*;
         let query = ContainerQuery {
-            ops: vec![Width("outer".into()), Width("inner".into()), Greater],
+            ops: vec![
+                Width(vec![crate::ElementIdWire::Name("outer".into())]),
+                Width(vec![crate::ElementIdWire::Name("inner".into())]),
+                Greater,
+            ],
         };
         let containers = HashMap::from([
             ("outer".into(), [800.0, 600.0]),

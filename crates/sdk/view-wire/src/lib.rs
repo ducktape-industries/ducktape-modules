@@ -1324,8 +1324,8 @@ fn sanitize_node(
                 *delay = finite(*delay).max(0.0);
             }
         }
-        Node::MouseArea { key, label, .. } => {
-            claim(key, taken);
+        Node::MouseArea { id, label, .. } => {
+            id.validate_host()?;
             if let Some(label) = label {
                 truncate_string(label);
             }
