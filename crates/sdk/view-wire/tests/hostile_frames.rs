@@ -1269,6 +1269,26 @@ fn check_bounds(
                 check_bounds(child, depth + 1, keys, svg_bytes, ctx);
             }
         }
+        Node::List {
+            path,
+            item_count,
+            overdraw,
+            commands,
+            range_start,
+            children,
+            ..
+        } => {
+            assert!(path.len() <= view_wire::MAX_DEPTH);
+            assert!(*item_count <= view_wire::MAX_LIST_ITEMS);
+            assert!(overdraw.is_finite() && (0.0..=4096.0).contains(overdraw));
+            assert!(commands.len() <= view_wire::MAX_LIST_COMMANDS);
+            assert!(children.len() <= view_wire::MAX_LIST_ROWS);
+            assert!(*range_start <= *item_count);
+            assert!(children.len() <= item_count.saturating_sub(*range_start));
+            for child in children {
+                check_bounds(child, depth + 1, keys, svg_bytes, ctx);
+            }
+        }
         Node::Float {
             scale,
             shadow,

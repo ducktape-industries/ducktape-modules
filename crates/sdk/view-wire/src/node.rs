@@ -155,6 +155,26 @@ pub enum Node {
         #[serde(deserialize_with = "decode_children")]
         children: Vec<Node>,
     },
+    /// A native variable-height GPUI list with a bounded frame-owned row window.
+    List {
+        state: u64,
+        #[serde(deserialize_with = "list::decode_path")]
+        path: Vec<ElementIdWire>,
+        item_count: usize,
+        alignment: ListAlignment,
+        overdraw: f32,
+        sizing: ListSizingBehavior,
+        following_tail: bool,
+        revision: u64,
+        #[serde(deserialize_with = "list::decode_commands")]
+        commands: Vec<ListCommand>,
+        request_handler: u32,
+        scroll_handler: Option<u32>,
+        range_start: usize,
+        style: gpui::StyleRefinement,
+        #[serde(deserialize_with = "decode_children")]
+        children: Vec<Node>,
+    },
     Container {
         /// Native GPUI identity, retained as a tagged adapter on the wire.
         id: Option<ElementIdWire>,
@@ -537,9 +557,13 @@ impl Node {
 
     pub fn key(&self) -> Option<&str> {
         match self {
-            Self::Container { id, .. } | Self::Text { id, .. }
-            | Self::Image { id, .. } | Self::Svg { id, .. } => id.as_ref().and_then(ElementIdWire::name),
-            Self::Input { id, .. } | Self::Editor { id, .. } | Self::UniformList { id, .. } => id.name(),
+            Self::Container { id, .. }
+            | Self::Text { id, .. }
+            | Self::Image { id, .. }
+            | Self::Svg { id, .. } => id.as_ref().and_then(ElementIdWire::name),
+            Self::Input { id, .. } | Self::Editor { id, .. } | Self::UniformList { id, .. } => {
+                id.name()
+            }
             Self::ResizeHandle { key, .. }
             | Self::MouseArea { key, .. }
             | Self::Float { key, .. }
@@ -562,7 +586,8 @@ impl Node {
             | Self::Overlay { key, .. }
             | Self::Tooltip { key, .. }
             | Self::Surface { key, .. } => Some(key),
-            Self::Space { .. }
+            Self::List { .. }
+            | Self::Space { .. }
             | Self::Anchored { .. }
             | Self::Deferred { .. }
             | Self::Canvas { .. } => None,
@@ -572,9 +597,13 @@ impl Node {
     /// The node's identity without reducing a typed GPUI ID to text.
     pub fn identity(&self) -> Option<IdentityKeyRef<'_>> {
         match self {
-            Self::Container { id, .. } | Self::Text { id, .. }
-            | Self::Image { id, .. } | Self::Svg { id, .. } => id.as_ref().map(IdentityKeyRef::Element),
-            Self::Input { id, .. } | Self::Editor { id, .. } | Self::UniformList { id, .. } => Some(IdentityKeyRef::Element(id)),
+            Self::Container { id, .. }
+            | Self::Text { id, .. }
+            | Self::Image { id, .. }
+            | Self::Svg { id, .. } => id.as_ref().map(IdentityKeyRef::Element),
+            Self::Input { id, .. } | Self::Editor { id, .. } | Self::UniformList { id, .. } => {
+                Some(IdentityKeyRef::Element(id))
+            }
             Self::ResizeHandle { key, .. }
             | Self::MouseArea { key, .. }
             | Self::Float { key, .. }
@@ -597,7 +626,8 @@ impl Node {
             | Self::Overlay { key, .. }
             | Self::Tooltip { key, .. }
             | Self::Surface { key, .. } => Some(IdentityKeyRef::Legacy(key)),
-            Self::Space { .. }
+            Self::List { .. }
+            | Self::Space { .. }
             | Self::Anchored { .. }
             | Self::Deferred { .. }
             | Self::Canvas { .. } => None,
@@ -613,6 +643,7 @@ impl Node {
             Self::Container { children, .. }
             | Self::Tooltip { children, .. }
             | Self::Overlay { children, .. }
+            | Self::List { children, .. }
             | Self::UniformList { children, .. }
             | Self::When { children, .. }
             | Self::Anchored { children, .. }
@@ -666,6 +697,7 @@ impl Node {
             Self::Container { children, .. }
             | Self::Tooltip { children, .. }
             | Self::Overlay { children, .. }
+            | Self::List { children, .. }
             | Self::UniformList { children, .. }
             | Self::When { children, .. }
             | Self::Anchored { children, .. }
@@ -712,6 +744,7 @@ impl Node {
     pub fn child_list_mut(&mut self) -> Option<&mut Vec<Node>> {
         match self {
             Self::Container { children, .. }
+            | Self::List { children, .. }
             | Self::UniformList { children, .. }
             | Self::When { children, .. }
             | Self::Tooltip { children, .. }

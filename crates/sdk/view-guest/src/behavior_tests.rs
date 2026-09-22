@@ -1,6 +1,6 @@
 use crate::prelude::*;
 use crate::testing::TestAppContext;
-use crate::{View, modal_overlay, resize_handle, sensor, surface, wire};
+use crate::{modal_overlay, resize_handle, sensor, surface, wire, View};
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 struct BehaviorView {

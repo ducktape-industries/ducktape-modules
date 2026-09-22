@@ -4,9 +4,8 @@ extern crate self as ducktape_view_guest;
 
 pub use gpui::{
     hsla, px, rems, rgb, Anchor, AnchoredFitMode, AnchoredPositionMode, ClickEvent, CursorStyle,
-    Edges, ElementId, Global, Hsla, ObjectFit, Pixels, Point, Resource, Role, SharedString,
-    ListHorizontalSizingBehavior, ListSizingBehavior, ScrollStrategy,
-    StyleRefinement, Styled,
+    Edges, ElementId, Global, Hsla, ListHorizontalSizingBehavior, ListSizingBehavior, ObjectFit,
+    Pixels, Point, Resource, Role, ScrollStrategy, SharedString, StyleRefinement, Styled,
 };
 pub use view_guest_derive::IntoElement;
 pub use view_wire as wire;
@@ -15,6 +14,7 @@ pub use theme::Theme;
 mod behavior;
 mod element;
 mod interactivity;
+mod list;
 mod primitives;
 mod surface;
 mod view_element;
@@ -24,6 +24,10 @@ pub use element::{
     RenderOnce, UniformList, UniformListScrollHandle,
 };
 pub use interactivity::{InteractiveElement, Interactivity, Stateful, StatefulInteractiveElement};
+pub use list::{
+    list, FollowMode, List, ListAlignment, ListOffset, ListScrollEvent, ListSizingBehavior,
+    ListState,
+};
 pub use primitives::{
     anchored, canvas, deferred, img, svg, Anchored, Canvas, Deferred, ImageSource, ImageStyle, Img,
     StyledImage, Svg, Transformation,
@@ -34,12 +38,13 @@ pub use view_element::ViewElement;
 /// Traits and primitives used to compose guest GPUI elements.
 pub mod prelude {
     pub use crate::{
-        AnyElement, App, ClickEvent, Context, Element, ElementId, FluentBuilder, Global, Hsla, Input,
-        InteractiveElement, IntoElement, ListHorizontalSizingBehavior, ListSizingBehavior,
-        ParentElement, Render, RenderOnce, Role, ScrollStrategy, SharedString,
-        StatefulInteractiveElement, Styled, StyledImage, Theme, UniformListScrollHandle, Window,
-        anchored, canvas, deferred, div, hsla, img, modal_overlay, px, rems, resize_handle, rgb,
-        sensor, surface, svg, uniform_list, Pixels,
+        anchored, canvas, deferred, div, hsla, img, list, modal_overlay, px, rems, resize_handle,
+        rgb, sensor, surface, svg, uniform_list, AnyElement, App, ClickEvent, Context, Element,
+        ElementId, FluentBuilder, FollowMode, Global, Hsla, Input, InteractiveElement, IntoElement,
+        List, ListAlignment, ListHorizontalSizingBehavior, ListOffset, ListScrollEvent,
+        ListSizingBehavior, ListState, ParentElement, Pixels, Render, RenderOnce, Role,
+        ScrollStrategy, SharedString, StatefulInteractiveElement, Styled, StyledImage, Theme,
+        UniformListScrollHandle, Window,
     };
 }
 mod editor;
@@ -182,11 +187,7 @@ impl<V: View> Driver<V> {
                     if slots::run_route(&slots, handler, &text, &mut window, &mut self.app) {
                         None
                     } else {
-                        slots::run_handler::<String, Callback<V>>(
-                            &slots,
-                            handler,
-                            text,
-                        )
+                        slots::run_handler::<String, Callback<V>>(&slots, handler, text)
                     }
                 }
                 wire::Event::EditorDocument { handler, message } => {
@@ -331,6 +332,19 @@ impl<V: View> Driver<V> {
                         scrollable,
                         scrolled_to_end,
                     );
+                    None
+                }
+                wire::Event::ListRequest { handler, request } => {
+                    let slots = self.app.inner.slots.clone();
+                    let mut window = self.app.window();
+                    slots::run_route(&slots, handler, &request, &mut window, &mut self.app);
+                    self.app.notify();
+                    None
+                }
+                wire::Event::ListScroll { handler, event } => {
+                    let slots = self.app.inner.slots.clone();
+                    let mut window = self.app.window();
+                    slots::run_route(&slots, handler, &event, &mut window, &mut self.app);
                     None
                 }
                 wire::Event::Theme { dark } => {

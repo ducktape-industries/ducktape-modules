@@ -46,8 +46,8 @@ impl TestAppContext {
         self.open_with_macos(false)
     }
     pub fn open_with_macos<V: View>(&mut self, macos: bool) -> Entity<V> {
-        let driver = Driver::<V>::initialize_in(self.fresh_app(macos), None)
-            .expect("view initializes");
+        let driver =
+            Driver::<V>::initialize_in(self.fresh_app(macos), None).expect("view initializes");
         let entity = driver.entity();
         self.host.reset_connection();
         self.driver = Some(Box::new(driver));

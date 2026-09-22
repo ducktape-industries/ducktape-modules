@@ -35,8 +35,12 @@ pub struct Theme {
 }
 impl Global for Theme {}
 impl Theme {
-    pub fn light() -> Self { Self::from_palette(false) }
-    pub fn dark() -> Self { Self::from_palette(true) }
+    pub fn light() -> Self {
+        Self::from_palette(false)
+    }
+    pub fn dark() -> Self {
+        Self::from_palette(true)
+    }
     fn from_palette(dark: bool) -> Self {
         let palette = design::palette(dark);
         let color = |[r, g, b, a]: design::Color| Hsla::from(Rgba { r, g, b, a });
@@ -74,7 +78,9 @@ impl Theme {
     }
 }
 impl Default for Theme {
-    fn default() -> Self { Self::light() }
+    fn default() -> Self {
+        Self::light()
+    }
 }
 
 #[cfg(test)]

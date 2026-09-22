@@ -220,6 +220,31 @@ impl Chat {
         }
     }
 
+    /// Settled native list geometry drives paging and tail state. Wheel deltas
+    /// are intentionally not used: remeasurement and programmatic scrolling
+    /// can move the viewport without one.
+    pub(crate) fn list_scrolled(
+        &mut self,
+        pane: crate::Pane,
+        event: &ducktape_view_guest::ListScrollEvent,
+        cx: &mut Context<Self>,
+    ) {
+        match pane {
+            crate::Pane::Timeline => {
+                let Some(room) = &mut self.room else { return };
+                room.at_tail = event.is_following_tail || event.visible_range.end >= event.count;
+                if event.visible_range.start <= 4 {
+                    self.load_older(cx);
+                }
+            }
+            crate::Pane::Thread => {
+                if event.visible_range.end.saturating_add(4) >= event.count {
+                    self.load_more_replies(cx);
+                }
+            }
+        }
+    }
+
     pub(crate) fn open_thread(&mut self, root: u64, cx: &mut Context<Self>) {
         let viewer = self.viewer();
         self.details = None;

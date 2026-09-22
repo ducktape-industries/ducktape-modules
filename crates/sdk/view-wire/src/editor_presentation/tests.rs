@@ -139,9 +139,7 @@ fn shared_range_scan_preserves_independent_unicode_ranges_and_line_counts() {
     let text = "한x\r\nz\n\r끝\r";
     let source: Vec<_> = crate::editor_lines(text).collect();
     let ranges: Vec<_> = (0..=4)
-        .flat_map(|line| {
-            (0..=5).flat_map(move |start| (0..=5).map(move |end| (line, start, end)))
-        })
+        .flat_map(|line| (0..=5).flat_map(move |start| (0..=5).map(move |end| (line, start, end))))
         .collect();
     let valid = |(line, start, end): (u32, u32, u32)| {
         start <= end

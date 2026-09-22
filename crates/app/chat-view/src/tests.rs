@@ -274,24 +274,17 @@ fn viewport_and_pane_dividers_keep_their_behavior_routes() {
 #[test]
 fn timeline_retains_virtual_tail_anchoring_and_scroll_feedback() {
     let (cx, _) = opened();
-    assert!(matches!(
-        cx.find(room::STREAM_KEY),
-        Some(wire::Node::Scroll {
-            on_scroll: Some(_),
-            virtual_rows: true,
-            anchor_y: wire::ScrollAnchor::End,
-            auto_scroll: true,
-            ..
-        })
-    ));
-    assert!(matches!(
-        cx.find("chat-message-list"),
-        Some(wire::Node::KeyedColumn {
-            virtual_row: Some(_),
-            keys: Some(keys),
-            ..
-        }) if keys.len() == 2
-    ));
+    let Some(wire::Node::Container { children, .. }) = cx.find("chat-message-list") else {
+        panic!("message list keeps its authored container identity")
+    };
+    assert!(matches!(children.as_slice(), [wire::Node::List {
+        item_count: 3,
+        alignment: wire::ListAlignment::Bottom,
+        following_tail: true,
+        scroll_handler: Some(_),
+        children,
+        ..
+    }] if children.len() == 3));
 }
 
 #[test]

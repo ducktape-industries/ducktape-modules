@@ -1,5 +1,5 @@
 use crate::host::{self, Refusal};
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{de::DeserializeOwned, Serialize};
 
 /// One `kind` a view may ask the host for, with the request and reply it
 /// carries. `KIND` is `<capability>.<operation>`; the host refuses one the

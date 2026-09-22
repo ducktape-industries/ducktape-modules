@@ -110,7 +110,10 @@ pub use canvas::{
     CanvasCommand, CanvasLineCap, CanvasLineJoin, CanvasSegment, CanvasShape, CanvasStroke,
     MAX_CANVAS_PARTS,
 };
-pub use list::ListKey;
+pub use list::{
+    ListAlignment, ListCommand, ListKey, ListOffset, ListRequest, ListScroll, ListSizingBehavior,
+    MAX_LIST_COMMANDS, MAX_LIST_ITEMS, MAX_LIST_ROWS,
+};
 mod query;
 pub use query::{ContainerQuery, MAX_QUERY_OPS, QueryOp};
 
@@ -249,6 +252,10 @@ pub enum Event {
         scrollable: bool,
         scrolled_to_end: Option<bool>,
     },
+    /// A native variable-height list requested a bounded item window.
+    ListRequest { handler: u32, request: ListRequest },
+    /// Settled native list geometry, emitted after layout state is released.
+    ListScroll { handler: u32, event: ListScroll },
     /// One answer to a [`Request`]. A one-shot request gets exactly one with
     /// `done`; a subscription gets many, the last one `done`.
     Response {
@@ -902,7 +909,14 @@ fn sanitize_tree(root: &mut Node) -> Result<SanitizeReport, &'static str> {
     let mut taken = Taken::new();
     let mut identity_scopes = vec![std::collections::HashSet::new()];
     let mut authored_path = Vec::new();
-    sanitize_node(root, 0, &mut budgets, &mut taken, &mut identity_scopes, &mut authored_path)?;
+    sanitize_node(
+        root,
+        0,
+        &mut budgets,
+        &mut taken,
+        &mut identity_scopes,
+        &mut authored_path,
+    )?;
     let (after_documents, after) = text_amounts(root)?;
     if after_documents != documents {
         return Err("frame budget would remove an editor document projection");
@@ -1100,8 +1114,8 @@ fn sanitize_node(
                 &mut interactivity.group_hover,
                 &mut interactivity.group_active,
             ]
-                .into_iter()
-                .flatten()
+            .into_iter()
+            .flatten()
             {
                 style_sanitize::sanitize(&mut refinement.style);
                 let mut group = refinement.group.to_string();
@@ -1128,6 +1142,50 @@ fn sanitize_node(
             }
             *indices = kept_indices;
             *children = kept_children;
+        }
+        Node::List {
+            path,
+            item_count,
+            overdraw,
+            style,
+            commands,
+            range_start,
+            children,
+            ..
+        } => {
+            for id in path.iter() {
+                id.validate_host()?;
+            }
+            *item_count = (*item_count).min(MAX_LIST_ITEMS);
+            *overdraw = bounded(*overdraw).min(4096.0);
+            style_sanitize::sanitize(style);
+            commands.truncate(MAX_LIST_COMMANDS);
+            for command in commands {
+                match command {
+                    ListCommand::Reset { count } => *count = (*count).min(MAX_LIST_ITEMS),
+                    ListCommand::Splice { start, end, count } => {
+                        *start = (*start).min(MAX_LIST_ITEMS);
+                        *end = (*end).clamp(*start, MAX_LIST_ITEMS);
+                        *count = (*count).min(MAX_LIST_ITEMS);
+                    }
+                    ListCommand::Remeasure { start, end } => {
+                        *start = (*start).min(*item_count);
+                        *end = (*end).clamp(*start, *item_count);
+                    }
+                    ListCommand::ScrollTo(offset) => {
+                        offset.item_ix = offset.item_ix.min(*item_count);
+                        offset.offset_in_item = bounded(offset.offset_in_item);
+                    }
+                    ListCommand::ScrollToRevealItem(index) => {
+                        *index = (*index).min(item_count.saturating_sub(1));
+                    }
+                    ListCommand::ScrollToEnd
+                    | ListCommand::SetFollowMode { .. }
+                    | ListCommand::PauseFollowingTail => {}
+                }
+            }
+            *range_start = (*range_start).min(*item_count);
+            children.truncate(MAX_LIST_ROWS.min(item_count.saturating_sub(*range_start)));
         }
         Node::Sensor {
             key,
@@ -1649,22 +1707,39 @@ fn sanitize_node(
     // ten thousand rows becomes its first rows, which is what a host can
     // lay out, rather than ten thousand empty nodes it still has to walk.
     if let Node::Container { children, .. }
+    | Node::List { children, .. }
     | Node::When { children, .. }
     | Node::Tooltip { children, .. }
     | Node::Overlay { children, .. }
     | Node::Anchored { children, .. }
-    | Node::Image { state_children: children, .. } = node
+    | Node::Image {
+        state_children: children,
+        ..
+    } = node
     {
         let mut kept = 0;
         for child in children.iter_mut() {
             if budgets.nodes == 0 {
                 break;
             }
-            sanitize_node(child, depth + 1, budgets, taken, identity_scopes, authored_path)?;
+            sanitize_node(
+                child,
+                depth + 1,
+                budgets,
+                taken,
+                identity_scopes,
+                authored_path,
+            )?;
             kept += 1;
         }
         children.truncate(kept);
-        if let Node::Image { loading, fallback, state_children, .. } = node {
+        if let Node::Image {
+            loading,
+            fallback,
+            state_children,
+            ..
+        } = node
+        {
             if state_children.len() < usize::from(*loading) + usize::from(*fallback) {
                 *loading = false;
                 *fallback = false;
@@ -1682,7 +1757,14 @@ fn sanitize_node(
             *child = Node::empty();
             continue;
         }
-        sanitize_node(child, depth + 1, budgets, taken, identity_scopes, authored_path)?;
+        sanitize_node(
+            child,
+            depth + 1,
+            budgets,
+            taken,
+            identity_scopes,
+            authored_path,
+        )?;
     }
     finish_typed_scope(identity_scopes, typed_scope_started);
     if typed_scope_started {
@@ -1706,6 +1788,7 @@ fn lengths_mut(node: &mut Node) -> Vec<&mut Length> {
         | Node::ComboBox { width, .. } => vec![width],
         Node::Container { .. }
         | Node::UniformList { .. }
+        | Node::List { .. }
         | Node::Text { .. }
         | Node::Input { .. }
         | Node::Editor { .. }
@@ -3255,7 +3338,10 @@ mod tests {
             unreachable!()
         };
         *path = vec![ElementIdWire::Name("forged-parent".into()), list];
-        assert_eq!(sanitize(&mut valid).unwrap_err(), "uniform-list authored path is invalid");
+        assert_eq!(
+            sanitize(&mut valid).unwrap_err(),
+            "uniform-list authored path is invalid"
+        );
     }
 
     /// A hostile screen cannot cause quadratic identity repair or alias state.

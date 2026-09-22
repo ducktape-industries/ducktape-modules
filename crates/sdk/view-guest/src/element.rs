@@ -112,6 +112,10 @@ impl<'a> Lowering<'a> {
         self.app
     }
 
+    pub(crate) fn parts(&mut self) -> (&mut Window, &mut App) {
+        (self.window, self.app)
+    }
+
     #[doc(hidden)]
     pub fn render_once(&mut self, component: impl RenderOnce) -> wire::Node {
         let element = component.render(self.window, self.app).into_element();

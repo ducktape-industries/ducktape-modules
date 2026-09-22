@@ -394,7 +394,12 @@ mod tests {
                     center: [f32::NAN, f32::MAX],
                     radius: -1.0,
                 },
-                fill: Some(Hsla { h: f32::INFINITY, s: -1., l: 2., a: 1. }),
+                fill: Some(Hsla {
+                    h: f32::INFINITY,
+                    s: -1.,
+                    l: 2.,
+                    a: 1.,
+                }),
                 even_odd: false,
                 stroke: None,
             },
@@ -409,7 +414,12 @@ mod tests {
                     center: [0.0, 8192.0],
                     radius: 0.0
                 },
-                fill: Some(Hsla { h: 0., s: 0., l: 1., a: 1. }),
+                fill: Some(Hsla {
+                    h: 0.,
+                    s: 0.,
+                    l: 1.,
+                    a: 1.
+                }),
                 even_odd: false,
                 stroke: None,
             }]

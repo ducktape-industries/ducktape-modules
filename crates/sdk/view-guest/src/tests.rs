@@ -273,13 +273,19 @@ fn uniform_list_lowers_only_initial_and_requested_ranges() {
         start: 1_000,
         end: 1_020,
     }]);
-    let wire::Node::UniformList { indices, children, .. } = far.root.unwrap() else {
+    let wire::Node::UniformList {
+        indices, children, ..
+    } = far.root.unwrap()
+    else {
         panic!("expected uniform list after range request");
     };
     assert_eq!(indices.len(), 21);
     assert_eq!(children.len(), indices.len());
     assert_eq!(indices.first(), Some(&0));
-    assert_eq!(&indices[1..], (1_000..1_020).map(|index| index as u32).collect::<Vec<_>>());
+    assert_eq!(
+        &indices[1..],
+        (1_000..1_020).map(|index| index as u32).collect::<Vec<_>>()
+    );
     assert!(far.patches.len() <= wire::MAX_PATCHES);
 
     let unchanged = driver.tick(vec![wire::Event::UniformListRange {
@@ -288,7 +294,10 @@ fn uniform_list_lowers_only_initial_and_requested_ranges() {
         start: 1_000,
         end: 1_020,
     }]);
-    assert!(unchanged.unchanged, "duplicate range requests do not rerender");
+    assert!(
+        unchanged.unchanged,
+        "duplicate range requests do not rerender"
+    );
 
     let bounded = driver.tick(vec![wire::Event::UniformListRange {
         path,

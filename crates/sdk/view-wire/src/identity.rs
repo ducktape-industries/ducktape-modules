@@ -33,9 +33,7 @@ pub(crate) fn same_identity(
         (Some(IdentityKeyRef::Element(left)), Some(IdentityKeyRef::Element(right))) => {
             left == right
         }
-        (Some(IdentityKeyRef::Legacy(left)), Some(IdentityKeyRef::Legacy(right))) => {
-            left == right
-        }
+        (Some(IdentityKeyRef::Legacy(left)), Some(IdentityKeyRef::Legacy(right))) => left == right,
         (None, None) => true,
         _ => false,
     }

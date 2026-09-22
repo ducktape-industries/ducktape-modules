@@ -31,6 +31,111 @@ pub struct UniformListScrollRequest {
     pub strict: bool,
 }
 
+pub const MAX_LIST_ITEMS: usize = 100_000;
+pub const MAX_LIST_ROWS: usize = 64;
+pub const MAX_LIST_COMMANDS: usize = 64;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ListAlignment {
+    Top,
+    Bottom,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ListSizingBehavior {
+    Infer,
+    Auto,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ListOffset {
+    pub item_ix: usize,
+    pub offset_in_item: f32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum ListCommand {
+    Reset {
+        count: usize,
+    },
+    Splice {
+        start: usize,
+        end: usize,
+        count: usize,
+    },
+    Remeasure {
+        start: usize,
+        end: usize,
+    },
+    ScrollTo(ListOffset),
+    ScrollToEnd,
+    ScrollToRevealItem(usize),
+    SetFollowMode {
+        tail: bool,
+    },
+    PauseFollowingTail,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ListRequest {
+    pub start: usize,
+    pub end: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ListScroll {
+    pub visible_start: usize,
+    pub visible_end: usize,
+    pub count: usize,
+    pub is_scrolled: bool,
+    pub is_following_tail: bool,
+    pub offset: ListOffset,
+}
+
+pub(super) fn decode_commands<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<ListCommand>, D::Error> {
+    bounded_vec(deserializer, MAX_LIST_COMMANDS, "too many list commands")
+}
+
+pub(super) fn decode_path<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<crate::ElementIdWire>, D::Error> {
+    bounded_vec(deserializer, crate::MAX_DEPTH, "list ancestry is too deep")
+}
+
+fn bounded_vec<'de, D, T>(
+    deserializer: D,
+    limit: usize,
+    message: &'static str,
+) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    struct Values<T>(usize, &'static str, std::marker::PhantomData<T>);
+    impl<'de, T: Deserialize<'de>> serde::de::Visitor<'de> for Values<T> {
+        type Value = Vec<T>;
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str(self.1)
+        }
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(
+            self,
+            mut seq: A,
+        ) -> Result<Self::Value, A::Error> {
+            let mut values = Vec::new();
+            while let Some(value) = seq.next_element()? {
+                if values.len() == self.0 {
+                    return Err(serde::de::Error::custom(self.1));
+                }
+                values.push(value);
+            }
+            Ok(values)
+        }
+    }
+    deserializer.deserialize_seq(Values(limit, message, std::marker::PhantomData))
+}
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum ListKey {
     Bool(bool),
@@ -98,6 +203,86 @@ impl PartialEq for ListKey {
             (Self::Float(a), Self::Float(b)) => a.to_bits() == b.to_bits(),
             _ => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod variable_tests {
+    use super::*;
+    use crate::{Frame, Node, decode, encode, sanitize};
+
+    fn node(commands: Vec<ListCommand>, children: usize) -> Node {
+        Node::List {
+            state: 7,
+            path: vec![crate::ElementIdWire::Name("room".into())],
+            item_count: usize::MAX,
+            alignment: ListAlignment::Bottom,
+            overdraw: f32::INFINITY,
+            sizing: ListSizingBehavior::Auto,
+            following_tail: true,
+            revision: 3,
+            commands,
+            request_handler: 1,
+            scroll_handler: Some(2),
+            range_start: 99_990,
+            style: gpui::StyleRefinement::default(),
+            children: (0..children)
+                .map(|_| Node::Space {
+                    width: None,
+                    height: None,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn one_wire_walk_clamps_count_geometry_commands_and_rows() {
+        let mut frame = Frame {
+            root: Some(node(
+                (0..MAX_LIST_COMMANDS + 5)
+                    .map(|_| {
+                        ListCommand::ScrollTo(ListOffset {
+                            item_ix: usize::MAX,
+                            offset_in_item: f32::INFINITY,
+                        })
+                    })
+                    .collect(),
+                MAX_LIST_ROWS + 20,
+            )),
+            ..Frame::default()
+        };
+        sanitize(&mut frame).unwrap();
+        let Node::List {
+            item_count,
+            overdraw,
+            commands,
+            children,
+            ..
+        } = frame.root.unwrap()
+        else {
+            panic!()
+        };
+        assert_eq!(item_count, MAX_LIST_ITEMS);
+        assert_eq!(overdraw, 4096.);
+        assert_eq!(commands.len(), MAX_LIST_COMMANDS);
+        assert!(commands.iter().all(|command| matches!(
+            command,
+            ListCommand::ScrollTo(ListOffset {
+                item_ix: MAX_LIST_ITEMS,
+                offset_in_item: 8192.
+            })
+        )));
+        assert!(children.len() <= MAX_LIST_ROWS);
+    }
+
+    #[test]
+    fn decoder_refuses_oversized_command_vectors() {
+        let commands = vec![ListCommand::ScrollToEnd; MAX_LIST_COMMANDS + 1];
+        let frame = Frame {
+            root: Some(node(commands, 0)),
+            ..Frame::default()
+        };
+        assert!(decode::<Frame>(&encode(&frame)).is_err());
     }
 }
 

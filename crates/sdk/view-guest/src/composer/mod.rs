@@ -3,9 +3,9 @@
 mod binding;
 mod editing;
 
-pub use binding::{Event, Outcome, view};
+pub use binding::{view, Event, Outcome};
 
-use crate::{Editor, wire};
+use crate::{wire, Editor};
 use serde::{Deserialize, Serialize};
 use std::ops::Range;
 

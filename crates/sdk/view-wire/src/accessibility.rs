@@ -95,7 +95,11 @@ fn fault(node: &Node) -> Option<FaultKind> {
             if interactivity.role.is_none() {
                 return Some(FaultKind::NoRole);
             }
-            let named = interactivity.aria.label.as_ref().is_some_and(|label| !label.is_empty());
+            let named = interactivity
+                .aria
+                .label
+                .as_ref()
+                .is_some_and(|label| !label.is_empty());
             (!named && !has_text(node)).then_some(FaultKind::Unnamed)
         }
         Node::Input { options, .. } => options

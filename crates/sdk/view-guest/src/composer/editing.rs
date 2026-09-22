@@ -1,6 +1,6 @@
 //! Pure composer decisions. Native input enters through the editor transaction lane.
 use super::{Draft, Mention, MentionChoice};
-use crate::{EditorStateView, wire};
+use crate::{wire, EditorStateView};
 use std::ops::Range;
 
 pub(crate) fn offset(text: &str, position: wire::EditorPosition) -> usize {
