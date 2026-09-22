@@ -1,4 +1,5 @@
 //! A typed guest recipe for a host-painted surface.
+use crate::Element;
 
 use crate::{wire, App, ElementId, IntoElement, Lowering, Window};
 
@@ -40,8 +41,10 @@ impl IntoElement for Surface {
     fn into_element(self) -> Self {
         self
     }
+}
 
-    fn into_node(self, lowering: &mut Lowering<'_>) -> wire::Node {
+impl Element for Surface {
+    fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
         let key = wire::ElementIdWire::from_gpui(self.id)
             .expect("element ID must be portable across the view boundary")
             .name()

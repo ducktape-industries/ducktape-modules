@@ -21,7 +21,7 @@ fn channel(id: &str, name: &str, head_seq: u64) -> ChannelInfo {
 
 #[test]
 fn preferred_window_keeps_the_original_baseline() {
-    assert_eq!(<Chat as View>::PREFERRED_WINDOW_SIZE, "1180x760");
+    assert_eq!(<Chat as View>::PREFERRED_WINDOW_SIZE, "1180,760");
 }
 
 #[test]

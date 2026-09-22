@@ -1,6 +1,7 @@
 //! Wire-backed behavior elements that have no native GPUI element equivalent.
+use crate::Element;
 
-use crate::{AnyElement, App, ElementId, IntoElement, Lowering, Window, wire};
+use crate::{wire, AnyElement, App, ElementId, IntoElement, Lowering, Window};
 use gpui::{
     AbsoluteLength, AlignContent, AlignItems, CursorStyle, DefiniteLength, Hsla, Pixels,
     StyleRefinement, Styled,
@@ -57,7 +58,10 @@ impl IntoElement for Sensor {
     fn into_element(self) -> Self {
         self
     }
-    fn into_node(self, lowering: &mut Lowering<'_>) -> wire::Node {
+}
+
+impl Element for Sensor {
+    fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
         wire::Node::Sensor {
             key: key(self.id),
             reset: None,
@@ -66,7 +70,7 @@ impl IntoElement for Sensor {
             on_hide: None,
             anticipate: None,
             delay: None,
-            child: Box::new(self.child.into_node(lowering)),
+            child: Box::new(lowering.lower(self.child)),
         }
     }
 }
@@ -107,14 +111,17 @@ impl IntoElement for ResizeHandle {
     fn into_element(self) -> Self {
         self
     }
-    fn into_node(self, lowering: &mut Lowering<'_>) -> wire::Node {
+}
+
+impl Element for ResizeHandle {
+    fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
         wire::Node::ResizeHandle {
             key: key(self.id),
             on_press: None,
             on_release: None,
             on_drag: self.on_drag.map(|listener| lowering.route(listener)),
             cursor: self.cursor.map(wire_cursor),
-            content: Box::new(self.child.into_node(lowering)),
+            content: Box::new(lowering.lower(self.child)),
         }
     }
 }
@@ -165,7 +172,10 @@ impl IntoElement for ModalOverlay {
     fn into_element(self) -> Self {
         self
     }
-    fn into_node(self, lowering: &mut Lowering<'_>) -> wire::Node {
+}
+
+impl Element for ModalOverlay {
+    fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
         wire::Node::Overlay {
             key: key(self.id),
             label: self.label,
@@ -184,10 +194,7 @@ impl IntoElement for ModalOverlay {
             on_dismiss: self
                 .on_dismiss
                 .map(|listener| lowering.message_route(listener)),
-            children: vec![
-                self.base.into_node(lowering),
-                self.modal.into_node(lowering),
-            ],
+            children: vec![lowering.lower(self.base), lowering.lower(self.modal)],
         }
     }
 }

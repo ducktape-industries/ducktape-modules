@@ -59,7 +59,7 @@ struct Change {
 }
 
 impl View for Explorer {
-    const PREFERRED_WINDOW_SIZE: &'static str = "760x640";
+    const PREFERRED_WINDOW_SIZE: &'static str = "760,640";
 
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mut view = Self::default();

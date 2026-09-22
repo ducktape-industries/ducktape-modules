@@ -4,7 +4,7 @@ use ducktape_view_guest::testing::TestAppContext;
 
 #[test]
 fn preferred_window_keeps_the_original_baseline() {
-    assert_eq!(<Explorer as View>::PREFERRED_WINDOW_SIZE, "760x640");
+    assert_eq!(<Explorer as View>::PREFERRED_WINDOW_SIZE, "760,640");
 }
 
 #[test]

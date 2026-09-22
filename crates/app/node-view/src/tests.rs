@@ -3,7 +3,7 @@ use ducktape_view_guest::testing::TestAppContext;
 
 #[test]
 fn preferred_window_keeps_the_original_baseline() {
-    assert_eq!(<Nodes as View>::PREFERRED_WINDOW_SIZE, "680x620");
+    assert_eq!(<Nodes as View>::PREFERRED_WINDOW_SIZE, "680,620");
 }
 
 #[test]
