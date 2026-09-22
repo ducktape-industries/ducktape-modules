@@ -229,7 +229,7 @@ pub struct Watches {
 }
 
 impl View for Chat {
-    const PREFERRED_WINDOW_SIZE: &'static str = "1180x760";
+    const PREFERRED_WINDOW_SIZE: &'static str = "1180,760";
 
     fn boot(cx: &mut Cx<Self>) -> Self {
         let mut chat = Self::default();
