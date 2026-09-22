@@ -36,7 +36,7 @@ pub fn thread(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
                         .id("chat-thread-title")
                         .flex_1()
                         .text_size(px(13.5))
-                        .font_semibold()
+                        .font_weight(ducktape_view_guest::FontWeight::SEMIBOLD)
                         .role(Role::Heading)
                         .aria_level(2)
                         .child("Thread"),
@@ -145,7 +145,7 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
                         .id("chat-details-title")
                         .flex_1()
                         .text_size(px(13.5))
-                        .font_semibold()
+                        .font_weight(ducktape_view_guest::FontWeight::SEMIBOLD)
                         .role(Role::Heading)
                         .aria_level(2)
                         .child("Channel details"),

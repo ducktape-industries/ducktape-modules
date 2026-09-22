@@ -97,8 +97,8 @@ impl Render for Nodes {
                             .id("nodes-title")
                             .flex_1()
                             .text_size(px(16.))
-                            .font_semibold()
-                            .role(Role::Heading)
+                            .font_weight(ducktape_view_guest::FontWeight::SEMIBOLD)
+                            .role(ducktape_view_guest::Role::Heading)
                             .aria_level(1)
                             .child("Nodes"),
                     )

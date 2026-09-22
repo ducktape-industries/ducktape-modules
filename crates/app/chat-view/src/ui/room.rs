@@ -99,7 +99,7 @@ fn header(chat: &Chat, room: &Room, cx: &mut Context<Chat>, theme: &Theme) -> im
             div()
                 .id("chat-room-title")
                 .text_size(px(13.5))
-                .font_semibold()
+                .font_weight(ducktape_view_guest::FontWeight::SEMIBOLD)
                 .role(Role::Heading)
                 .aria_level(2)
                 .child(format!("#{}", name)),

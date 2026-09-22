@@ -294,7 +294,7 @@ fn intro(name: &str, dm: Option<&str>, theme: &Theme) -> impl IntoElement {
             div()
                 .id("chat-timeline-intro-title")
                 .text_size(px(16.))
-                .font_semibold()
+                .font_weight(ducktape_view_guest::FontWeight::SEMIBOLD)
                 .role(Role::Heading)
                 .aria_level(1)
                 .child(title),

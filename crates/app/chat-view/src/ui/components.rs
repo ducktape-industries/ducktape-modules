@@ -81,7 +81,7 @@ impl RenderOnce for EmptyState {
             .gap_1()
             .p_6()
             .max_w(px(420.))
-            .child(div().text_size(px(13.5)).font_medium().child(self.title))
+            .child(div().text_size(px(13.5)).font_weight(ducktape_view_guest::FontWeight::MEDIUM).child(self.title))
             .child(
                 div()
                     .text_size(px(12.))

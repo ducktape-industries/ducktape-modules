@@ -53,7 +53,7 @@ pub fn card(
             } else {
                 theme.muted
             })
-            .font_semibold()
+            .font_weight(ducktape_view_guest::FontWeight::SEMIBOLD)
             .text_size(px(11.5))
             .child(message.initial.clone())
             .into_any_element()
@@ -190,7 +190,7 @@ fn content(
             .child(
                 div()
                     .text_size(px(13.))
-                    .font_medium()
+                    .font_weight(ducktape_view_guest::FontWeight::MEDIUM)
                     .child(message.author.clone()),
             );
         if message.agent {
