@@ -80,8 +80,9 @@ dev:
 	@tools/dev.sh "$(DEV_PROGRAMS)" "$(foreach v,$(DEV_VIEWS),$(v):$(call view_limit,$(v)))"
 
 ## where a view's bytes go: `twiggy top` over a release build that keeps its
-## names (`--profile why`: release + `strip = "none"`, its own output dir, so
-## the release artifact is untouched). Install: `cargo install twiggy`.
+## names (`--profile why`: release + `strip = "debuginfo"`, the name section
+## kept, its own output dir, so the release artifact is untouched). Install:
+## `cargo install twiggy`.
 wasm-why:
 	@test -n "$V" || { echo "usage: make wasm-why V=<view>"; exit 1; }
 	@command -v twiggy >/dev/null || { echo "twiggy is not on PATH: cargo install twiggy"; exit 1; }
