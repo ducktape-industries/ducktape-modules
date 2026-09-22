@@ -192,176 +192,36 @@ fn gen_axis(rng: &mut Rng) -> Axis {
     }
 }
 
-fn gen_face(rng: &mut Rng) -> Face {
-    Face {
-        background: gen_opt_color(rng),
-        text: gen_opt_color(rng),
-        border: gen_opt_border(rng),
-    }
-}
 
-fn gen_button_style(rng: &mut Rng) -> ButtonStyle {
-    ButtonStyle {
-        preset: [
-            ButtonPreset::Primary,
-            ButtonPreset::Secondary,
-            ButtonPreset::Success,
-            ButtonPreset::Warning,
-            ButtonPreset::Danger,
-            ButtonPreset::Text,
-            ButtonPreset::Background,
-            ButtonPreset::Subtle,
-        ][rng.next_range(8)],
-        recipe: rng.next_bool().then(|| ButtonRecipe {
-            base: gen_face(rng),
-            hover_background: gen_opt_color(rng),
-            pressed_background: gen_opt_color(rng),
-            disabled_background: gen_opt_color(rng),
-            disabled_text: gen_opt_color(rng),
-            disabled_opacity: gen_opt_f32(rng),
-            focus_ring: gen_opt_color(rng),
-            text_size: gen_opt_f32(rng),
-            line_height: gen_opt_f32(rng),
-            font: rng.next_bool().then(|| NamedFont {
-                family: FontFamily::Named(gen_string(rng)),
-                weight: Weight::Semibold,
-                stretch: FontStretch::Normal,
-                style: FontStyle::Normal,
-            }),
-        }),
-        active: gen_face(rng),
-        hovered: rng.next_bool().then(|| gen_face(rng)),
-        pressed: rng.next_bool().then(|| gen_face(rng)),
-        disabled: rng.next_bool().then(|| gen_face(rng)),
-    }
-}
-
-fn gen_input_face(rng: &mut Rng) -> InputFace {
-    InputFace {
-        icon: gen_opt_color(rng),
-        background: gen_opt_color(rng),
-        border: gen_opt_border(rng),
-        value: gen_opt_color(rng),
-        placeholder: gen_opt_color(rng),
-        selection: gen_opt_color(rng),
-    }
-}
-
-fn gen_input_style(rng: &mut Rng) -> InputStyle {
-    InputStyle {
-        utility: gen_input_face(rng),
-        focus_border: gen_opt_color(rng),
-        focused_hovered: Some(gen_input_face(rng)),
-        active: gen_input_face(rng),
-        hovered: rng.next_bool().then(|| gen_input_face(rng)),
-        focused: rng.next_bool().then(|| gen_input_face(rng)),
-        disabled: rng.next_bool().then(|| gen_input_face(rng)),
-    }
-}
 
 fn gen_opt_bool(rng: &mut Rng) -> Option<bool> {
     rng.next_bool().then(|| rng.next_bool())
 }
 
-fn gen_control_face(rng: &mut Rng) -> Option<ControlFace> {
-    rng.next_bool().then(|| ControlFace {
-        background: gen_opt_color(rng),
-        mark: gen_opt_color(rng),
-        text: gen_opt_color(rng),
-        border: gen_opt_border(rng),
-    })
-}
 
-fn gen_tone(rng: &mut Rng) -> Option<Tone> {
+
+
+
+fn gen_opt_background(rng: &mut Rng) -> Option<Background> {
     rng.next_bool().then(|| {
-        *rng.choose(&[
-            Tone::Primary,
-            Tone::Secondary,
-            Tone::Success,
-            Tone::Warning,
-            Tone::Danger,
-        ])
-    })
-}
-
-fn gen_toggle_style(rng: &mut Rng) -> ToggleStyle {
-    ToggleStyle {
-        tone: gen_tone(rng),
-        active_on: gen_control_face(rng),
-        active_off: gen_control_face(rng),
-        hovered_on: gen_control_face(rng),
-        hovered_off: gen_control_face(rng),
-        disabled_on: gen_control_face(rng),
-        disabled_off: gen_control_face(rng),
-    }
-}
-
-fn gen_radio_style(rng: &mut Rng) -> RadioStyle {
-    RadioStyle {
-        active_on: gen_control_face(rng),
-        active_off: gen_control_face(rng),
-        hovered_on: gen_control_face(rng),
-        hovered_off: gen_control_face(rng),
-    }
-}
-
-fn gen_slider_face(rng: &mut Rng) -> Option<SliderFace> {
-    rng.next_bool().then(|| SliderFace {
-        rail_start: gen_opt_color(rng),
-        rail_end: gen_opt_color(rng),
-        rail_width: gen_opt_f32(rng),
-        rail_border: gen_opt_border(rng),
-        handle: gen_opt_color(rng),
-        handle_border: gen_opt_border(rng),
-        handle_shape: rng.next_bool().then(|| {
-            if rng.next_bool() {
-                SliderHandleShape::Circle {
-                    radius: gen_f32(rng),
-                }
-            } else {
-                SliderHandleShape::Rectangle {
-                    width: rng.next_u64() as u16,
-                    border_radius: [gen_f32(rng), gen_f32(rng), gen_f32(rng), gen_f32(rng)],
-                }
+        if rng.next_bool() {
+            Background::Color(gen_opt_color(rng).unwrap_or(Rgba([0.0; 4])))
+        } else {
+            Background::Linear {
+                angle: gen_f32(rng),
+                stops: std::array::from_fn(|_| {
+                    rng.next_bool().then(|| ColorStop {
+                        offset: gen_f32(rng),
+                        color: gen_opt_color(rng).unwrap_or(Rgba([0.0; 4])),
+                    })
+                }),
             }
-        }),
+        }
     })
 }
 
-fn gen_slider_style(rng: &mut Rng) -> SliderStyle {
-    SliderStyle {
-        active: gen_slider_face(rng),
-        hovered: gen_slider_face(rng),
-        dragged: gen_slider_face(rng),
-    }
-}
 
-fn gen_pick_face(rng: &mut Rng) -> Option<PickFace> {
-    rng.next_bool().then(|| PickFace {
-        background: gen_opt_color(rng),
-        text: gen_opt_color(rng),
-        placeholder: gen_opt_color(rng),
-        handle: gen_opt_color(rng),
-        border: gen_opt_border(rng),
-    })
-}
 
-fn gen_pick_list_style(rng: &mut Rng) -> PickListStyle {
-    PickListStyle {
-        active: gen_pick_face(rng),
-        hovered: gen_pick_face(rng),
-        opened: gen_pick_face(rng),
-        opened_hovered: gen_pick_face(rng),
-        menu: rng.next_bool().then(|| MenuFace {
-            shadow: Shadow::default(),
-            background: gen_opt_color(rng),
-            text: gen_opt_color(rng),
-            border: gen_opt_border(rng),
-            selected_text: gen_opt_color(rng),
-            selected_background: gen_opt_color(rng),
-        }),
-    }
-}
 
 fn gen_anchor(rng: &mut Rng) -> ScrollAnchor {
     *rng.choose(&[ScrollAnchor::Start, ScrollAnchor::End, ScrollAnchor::Keep])
@@ -378,10 +238,7 @@ fn gen_button_label(rng: &mut Rng) -> Node {
         content: ButtonContent::Label(gen_string(rng)),
         label: rng.next_bool().then(|| gen_string(rng)),
         on_press: rng.next_bool().then(|| rng.next_u64() as u32),
-        width: gen_opt_length(rng),
-        height: gen_opt_length(rng),
-        padding: gen_opt_edges(rng),
-        style: gen_button_style(rng),
+        style: gpui::StyleRefinement::default(),
     }
 }
 
@@ -537,13 +394,12 @@ fn gen_svg(rng: &mut Rng) -> Node {
                 data,
                 label: rng.next_bool().then(|| gen_string(rng)),
                 fit: None,
-                width: gen_opt_length(rng),
-                height: gen_opt_length(rng),
                 options: ViewerOptions {
                     padding: gen_opt_f32(rng),
                     scale_bounds: rng.next_bool().then(|| (gen_f32(rng), gen_f32(rng))),
                     scale_step: gen_opt_f32(rng),
                 },
+                style: gpui::StyleRefinement::default(),
             };
         }
         return Node::Image {
@@ -589,8 +445,7 @@ fn gen_toggle(rng: &mut Rng) -> Node {
         label: gen_string(rng),
         checked: rng.next_bool(),
         on_toggle: rng.next_bool().then(|| rng.next_u64() as u32),
-        width: gen_opt_length(rng),
-        style: gen_toggle_style(rng),
+        style: gpui::StyleRefinement::default(),
     }
 }
 
@@ -600,8 +455,7 @@ fn gen_radio(rng: &mut Rng) -> Node {
         label: gen_string(rng),
         selected: rng.next_bool(),
         on_select: rng.next_u64() as u32,
-        width: gen_opt_length(rng),
-        style: gen_radio_style(rng),
+        style: gpui::StyleRefinement::default(),
     }
 }
 
@@ -616,9 +470,7 @@ fn gen_slider(rng: &mut Rng) -> Node {
         on_change: rng.next_u64() as u32,
         on_release: rng.next_bool().then(|| rng.next_u64() as u32),
         axis: gen_axis(rng),
-        width: gen_opt_length(rng),
-        height: gen_opt_length(rng),
-        style: gen_slider_style(rng),
+        style: gpui::StyleRefinement::default(),
     }
 }
 
@@ -639,8 +491,7 @@ fn gen_pick_list(rng: &mut Rng) -> Node {
         placeholder: rng.next_bool().then(|| gen_string(rng)),
         label: rng.next_bool().then(|| gen_string(rng)),
         on_select: rng.next_u64() as u32,
-        width: gen_opt_length(rng),
-        style: gen_pick_list_style(rng),
+        style: gpui::StyleRefinement::default(),
     }
 }
 
@@ -651,12 +502,7 @@ fn gen_progress(rng: &mut Rng) -> Node {
         min: gen_f32(rng),
         max: gen_f32(rng),
         axis: gen_axis(rng),
-        length: gen_opt_length(rng),
-        girth: gen_opt_length(rng),
-        tone: gen_tone(rng),
-        background: gen_opt_color(rng),
-        bar: gen_opt_color(rng),
-        border: gen_opt_border(rng),
+        style: gpui::StyleRefinement::default(),
     }
 }
 
@@ -672,6 +518,7 @@ fn gen_surface(rng: &mut Rng) -> Node {
             view_wire::SurfaceValue::F64(f64::NAN),
         ],
         on_event: Some(0),
+        style: gpui::StyleRefinement::default(),
     }
 }
 
@@ -724,12 +571,9 @@ fn gen_list(rng: &mut Rng, children: Vec<Node>) -> Node {
             return Node::Overlay {
                 id: ElementIdWire::Name(gen_key(rng).into()),
                 label: rng.next_bool().then(|| gen_string(rng)),
-                padding: gen_f32(rng),
-                backdrop: Rgba([gen_f32(rng), gen_f32(rng), gen_f32(rng), gen_f32(rng)]),
-                align_x: gen_opt_align_x(rng).unwrap_or(AlignX::Center),
-                align_y: gen_opt_align_y(rng).unwrap_or(AlignY::Center),
                 on_dismiss: Some(rng.next_u64() as u32),
                 children,
+                style: gpui::StyleRefinement::default(),
             };
         }
         _ => {}
@@ -755,6 +599,7 @@ fn gen_tree(rng: &mut Rng, depth: usize, width: usize) -> Node {
                 on_drag: rng.next_bool().then(|| rng.next_u64() as u32),
                 cursor: Some(mouse::Cursor::ResizingHorizontally),
                 content: Box::new(node),
+                style: gpui::StyleRefinement::default(),
             },
             6 => Node::Tooltip {
                 key: gen_key(rng),
@@ -787,6 +632,7 @@ fn gen_tree(rng: &mut Rng, depth: usize, width: usize) -> Node {
                 anticipate: gen_opt_f32(rng),
                 delay: gen_opt_f32(rng),
                 child: Box::new(node),
+                style: gpui::StyleRefinement::default(),
             },
             5 => Node::MouseArea {
                 id: ElementIdWire::Name(gen_key(rng).into()),
@@ -844,10 +690,7 @@ fn gen_tree(rng: &mut Rng, depth: usize, width: usize) -> Node {
                 content: ButtonContent::Child(Box::new(node)),
                 label: rng.next_bool().then(|| gen_string(rng)),
                 on_press: rng.next_bool().then(|| rng.next_u64() as u32),
-                width: gen_opt_length(rng),
-                height: gen_opt_length(rng),
-                padding: gen_opt_edges(rng),
-                style: gen_button_style(rng),
+                style: gpui::StyleRefinement::default(),
             },
         };
     }
@@ -1192,66 +1035,6 @@ fn check_pixels(value: &Option<f32>, ctx: &str, field: &str) {
     }
 }
 
-/// Every face an input-shaped widget can paint: the two it always has, and
-/// the four it may. `icon` is checked on all of them — a face's `Rgba` is
-/// sanitized whether or not the widget draws one.
-fn check_input_style(style: &InputStyle, ctx: &str) {
-    for face in [
-        Some(&style.utility),
-        Some(&style.active),
-        style.hovered.as_ref(),
-        style.focused.as_ref(),
-        style.focused_hovered.as_ref(),
-        style.disabled.as_ref(),
-    ]
-    .into_iter()
-    .flatten()
-    {
-        check_color(&face.background, ctx);
-        check_border(&face.border, ctx);
-        check_color(&face.value, ctx);
-        check_color(&face.placeholder, ctx);
-        check_color(&face.selection, ctx);
-        check_color(&face.icon, ctx);
-    }
-}
-
-fn check_control_face(face: &Option<ControlFace>, ctx: &str) {
-    let Some(face) = face else { return };
-    check_color(&face.background, ctx);
-    check_color(&face.mark, ctx);
-    check_color(&face.text, ctx);
-    check_border(&face.border, ctx);
-}
-
-fn check_slider_face(face: &Option<SliderFace>, ctx: &str) {
-    let Some(face) = face else { return };
-    check_color(&face.rail_start, ctx);
-    check_color(&face.rail_end, ctx);
-    check_pixels(&face.rail_width, ctx, "rail width");
-    check_border(&face.rail_border, ctx);
-    check_color(&face.handle, ctx);
-    check_border(&face.handle_border, ctx);
-    if let Some(shape) = &face.handle_shape {
-        let radii: &[f32] = match shape {
-            SliderHandleShape::Circle { radius } => std::slice::from_ref(radius),
-            SliderHandleShape::Rectangle { border_radius, .. } => border_radius,
-        };
-        for radius in radii {
-            check_pixels(&Some(*radius), ctx, "slider handle radius");
-        }
-    }
-}
-
-fn check_pick_face(face: &Option<PickFace>, ctx: &str) {
-    let Some(face) = face else { return };
-    check_color(&face.background, ctx);
-    check_color(&face.text, ctx);
-    check_color(&face.placeholder, ctx);
-    check_color(&face.handle, ctx);
-    check_border(&face.border, ctx);
-}
-
 fn check_string(text: &str, ctx: &str, field: &str) {
     assert!(
         text.len() <= MAX_STRING_BYTES,
@@ -1470,8 +1253,6 @@ fn check_bounds(
         Node::ImageViewer {
             data,
             label,
-            width,
-            height,
             options,
             ..
         } => {
@@ -1482,8 +1263,6 @@ fn check_bounds(
             if let Some(label) = label {
                 check_string(label, ctx, "viewer label");
             }
-            check_length(width, ctx);
-            check_length(height, ctx);
             check_pixels(&options.padding, ctx, "viewer padding");
             if let Some((min, max)) = options.scale_bounds {
                 assert!(min.is_finite() && max.is_finite() && min > 0.0 && max >= min);
@@ -1574,10 +1353,6 @@ fn check_bounds(
             content,
             label,
             description,
-            width,
-            height,
-            padding,
-            style,
             ..
         } => {
             match content {
@@ -1589,52 +1364,6 @@ fn check_bounds(
             }
             if let Some(description) = description {
                 check_string(description, ctx, "button description");
-            }
-            check_length(width, ctx);
-            check_length(height, ctx);
-            check_edges(padding, ctx);
-            if let Some(recipe) = &style.recipe {
-                for value in [
-                    &recipe.base.background,
-                    &recipe.base.text,
-                    &recipe.hover_background,
-                    &recipe.pressed_background,
-                    &recipe.disabled_background,
-                    &recipe.disabled_text,
-                    &recipe.focus_ring,
-                ] {
-                    check_color(value, ctx);
-                }
-                check_border(&recipe.base.border, ctx);
-                if let Some(value) = recipe.disabled_opacity {
-                    assert!(value.is_finite() && (0.0..=1.0).contains(&value));
-                }
-                if let Some(value) = recipe.text_size {
-                    assert!(value.is_finite() && (0.0..=TEXT_PIXEL_BOUND).contains(&value));
-                }
-                if let Some(value) = recipe.line_height {
-                    assert!(value.is_finite() && (f32::EPSILON..=16.0).contains(&value));
-                }
-                if let Some(NamedFont {
-                    family: FontFamily::Named(name),
-                    ..
-                }) = &recipe.font
-                {
-                    check_string(name, ctx, "button font");
-                }
-            }
-            for face in [
-                Some(&style.active),
-                style.hovered.as_ref(),
-                style.pressed.as_ref(),
-                style.disabled.as_ref(),
-            ]
-            .into_iter()
-            .flatten()
-            {
-                check_color(&face.background, ctx);
-                check_color(&face.text, ctx);
-                check_border(&face.border, ctx);
             }
         }
         Node::Space { width, height } => {
@@ -1653,41 +1382,11 @@ fn check_bounds(
                 check_pixels(&Some(*corner), ctx, "rule radius");
             }
         }
-        Node::Toggle {
-            label,
-            width,
-            style,
-            ..
-        } => {
+        Node::Toggle { label, .. } => {
             check_string(label, ctx, "control label");
-            check_length(width, ctx);
-            for face in [
-                &style.active_on,
-                &style.active_off,
-                &style.hovered_on,
-                &style.hovered_off,
-                &style.disabled_on,
-                &style.disabled_off,
-            ] {
-                check_control_face(face, ctx);
-            }
         }
-        Node::Radio {
-            label,
-            width,
-            style,
-            ..
-        } => {
+        Node::Radio { label, .. } => {
             check_string(label, ctx, "control label");
-            check_length(width, ctx);
-            for face in [
-                &style.active_on,
-                &style.active_off,
-                &style.hovered_on,
-                &style.hovered_off,
-            ] {
-                check_control_face(face, ctx);
-            }
         }
         Node::Slider {
             label,
@@ -1695,9 +1394,6 @@ fn check_bounds(
             min,
             max,
             step,
-            width,
-            height,
-            style,
             ..
         } => {
             if let Some(label) = label {
@@ -1706,11 +1402,6 @@ fn check_bounds(
             for (number, field) in [(value, "value"), (min, "min"), (max, "max"), (step, "step")] {
                 check_finite(*number, ctx, field);
             }
-            check_length(width, ctx);
-            check_length(height, ctx);
-            for face in [&style.active, &style.hovered, &style.dragged] {
-                check_slider_face(face, ctx);
-            }
         }
         Node::ComboBox {
             state_key,
@@ -1718,7 +1409,6 @@ fn check_bounds(
             selected,
             placeholder,
             label,
-            width,
             settings,
             ..
         } => {
@@ -1734,42 +1424,21 @@ fn check_bounds(
             if let Some(index) = selected {
                 assert!((*index as usize) < options.len());
             }
-            check_length(width, ctx);
-            check_length(&settings.menu_height, ctx);
-            check_pixels(&settings.padding, ctx, "combo padding");
             check_pixels(
                 &settings.icon.as_ref().map(|icon| icon.spacing),
                 ctx,
                 "combo icon spacing",
             );
-            check_input_style(&settings.style, ctx);
         }
         Node::PickList {
             options,
             selected,
             placeholder,
             label,
-            width,
-            style,
             ..
         } => {
             if let Some(label) = label {
                 check_string(label, ctx, "accessible label");
-            }
-            for face in [
-                &style.active,
-                &style.hovered,
-                &style.opened,
-                &style.opened_hovered,
-            ] {
-                check_pick_face(face, ctx);
-            }
-            if let Some(menu) = &style.menu {
-                check_color(&menu.background, ctx);
-                check_color(&menu.text, ctx);
-                check_border(&menu.border, ctx);
-                check_color(&menu.selected_text, ctx);
-                check_color(&menu.selected_background, ctx);
             }
             assert!(
                 options.len() <= MAX_OPTIONS,
@@ -1789,40 +1458,25 @@ fn check_bounds(
             if let Some(placeholder) = placeholder {
                 check_string(placeholder, ctx, "placeholder");
             }
-            check_length(width, ctx);
         }
         Node::Progress {
             value,
             min,
             max,
-            length,
-            girth,
-            background,
-            bar,
-            border,
             ..
         } => {
             for (number, field) in [(value, "value"), (min, "min"), (max, "max")] {
                 check_finite(*number, ctx, field);
             }
-            check_length(length, ctx);
-            check_length(girth, ctx);
-            check_color(background, ctx);
-            check_color(bar, ctx);
-            check_border(border, ctx);
         }
         Node::Overlay {
             label,
-            padding,
-            backdrop,
             children,
             ..
         } => {
             if let Some(label) = label {
                 check_string(label, ctx, "accessible label");
             }
-            check_pixels(&Some(*padding), ctx, "overlay padding");
-            check_color(&Some(*backdrop), ctx);
             assert!(children.len() <= 2, "{ctx}: overlay child count");
             for child in children {
                 check_bounds(child, depth + 1, keys, svg_bytes, ctx);
@@ -2362,6 +2016,7 @@ fn resize_handle_round_trip_retains_routes_and_checks_its_child() {
             width: Some(Length::Fixed(f32::INFINITY)),
             height: Some(Length::Fixed(-10.0)),
         }),
+        style: gpui::StyleRefinement::default(),
     });
     assert_eq!(tree_depth(frame.root.as_ref().unwrap()), 1);
     let mut decoded: Frame = decode(&encode(&frame)).unwrap();

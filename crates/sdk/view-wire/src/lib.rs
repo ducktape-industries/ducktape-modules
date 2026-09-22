@@ -104,8 +104,6 @@ pub use text::{
     Align, FontFamily, FontStretch, FontStyle, LineHeight, NamedFont, Shaping, TextOptions,
     Wrapping,
 };
-mod button;
-pub use button::{ButtonPreset, ButtonRecipe};
 mod canvas;
 pub mod list;
 pub use canvas::{
@@ -605,45 +603,6 @@ pub struct Font {
     pub weight: Weight,
 }
 
-/// One state of a button or input.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct Face {
-    pub background: Option<Rgba>,
-    pub text: Option<Rgba>,
-    pub border: Option<Border>,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct ButtonStyle {
-    pub preset: ButtonPreset,
-    pub recipe: Option<ButtonRecipe>,
-    pub active: Face,
-    pub hovered: Option<Face>,
-    pub pressed: Option<Face>,
-    pub disabled: Option<Face>,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct InputFace {
-    pub icon: Option<Rgba>,
-    pub background: Option<Rgba>,
-    pub border: Option<Border>,
-    pub value: Option<Rgba>,
-    pub placeholder: Option<Rgba>,
-    pub selection: Option<Rgba>,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct InputStyle {
-    pub utility: InputFace,
-    pub focus_border: Option<Rgba>,
-    pub focused_hovered: Option<InputFace>,
-    pub active: InputFace,
-    pub hovered: Option<InputFace>,
-    pub focused: Option<InputFace>,
-    pub disabled: Option<InputFace>,
-}
-
 /// Copied input accessibility and native layout options.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct InputOptions {
@@ -658,133 +617,6 @@ pub struct EditorOptions {
     pub rich: Option<Box<editor_rich::RichPresentation>>,
     pub binding: Option<Box<EditorBinding>>,
     pub presentation: Option<Box<editor_presentation::EditorPresentation>>,
-}
-
-impl InputStyle {
-    fn sanitize(&mut self) {
-        bound_color(&mut self.focus_border);
-        for face in [
-            Some(&mut self.utility),
-            Some(&mut self.active),
-            self.hovered.as_mut(),
-            self.focused.as_mut(),
-            self.focused_hovered.as_mut(),
-            self.disabled.as_mut(),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            bound_color(&mut face.background);
-            bound_border(&mut face.border);
-            bound_color(&mut face.value);
-            bound_color(&mut face.icon);
-            bound_color(&mut face.placeholder);
-            bound_color(&mut face.selection);
-        }
-    }
-}
-
-/// One state of a checkbox, toggler or radio: the box, track or ring; the
-/// mark inside it (the check, the knob, the dot); the label; and the border
-/// around the box or track. `None` leaves the host's theme.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct ControlFace {
-    pub background: Option<Rgba>,
-    pub mark: Option<Rgba>,
-    pub text: Option<Rgba>,
-    pub border: Option<Border>,
-}
-
-/// A theme role a preset paints a control in.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub enum Tone {
-    Primary,
-    Secondary,
-    Success,
-    Warning,
-    Danger,
-}
-
-/// A checkbox's or toggler's faces, per state and per value. A hovered or
-/// disabled face paints over the active face of the same value, so a state
-/// that names only its difference inherits the rest.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct ToggleStyle {
-    /// A checkbox's preset; a switch has none and ignores it.
-    pub tone: Option<Tone>,
-    pub active_on: Option<ControlFace>,
-    pub active_off: Option<ControlFace>,
-    pub hovered_on: Option<ControlFace>,
-    pub hovered_off: Option<ControlFace>,
-    pub disabled_on: Option<ControlFace>,
-    pub disabled_off: Option<ControlFace>,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct RadioStyle {
-    pub active_on: Option<ControlFace>,
-    pub active_off: Option<ControlFace>,
-    pub hovered_on: Option<ControlFace>,
-    pub hovered_off: Option<ControlFace>,
-}
-
-/// A native slider handle, copied independently for each interaction face.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub enum SliderHandleShape {
-    Circle { radius: f32 },
-    Rectangle { width: u16, border_radius: [f32; 4] },
-}
-
-/// One state of a slider: the rail's two halves and its border, and the
-/// handle's colour, border and shape. Omitted fields retain the native style.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct SliderFace {
-    pub rail_start: Option<Rgba>,
-    pub rail_end: Option<Rgba>,
-    pub rail_width: Option<f32>,
-    pub rail_border: Option<Border>,
-    pub handle: Option<Rgba>,
-    pub handle_border: Option<Border>,
-    pub handle_shape: Option<SliderHandleShape>,
-}
-
-/// A hovered or dragged face paints over the active one.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct SliderStyle {
-    pub active: Option<SliderFace>,
-    pub hovered: Option<SliderFace>,
-    pub dragged: Option<SliderFace>,
-}
-
-/// One state of a pick list's closed face.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct PickFace {
-    pub background: Option<Rgba>,
-    pub text: Option<Rgba>,
-    pub placeholder: Option<Rgba>,
-    pub handle: Option<Rgba>,
-    pub border: Option<Border>,
-}
-
-/// The menu a pick list opens.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct MenuFace {
-    pub shadow: Shadow,
-    pub background: Option<Rgba>,
-    pub text: Option<Rgba>,
-    pub border: Option<Border>,
-    pub selected_text: Option<Rgba>,
-    pub selected_background: Option<Rgba>,
-}
-
-/// Active overrides apply first; opened-hovered also inherits opened overrides.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct PickListStyle {
-    pub active: Option<PickFace>,
-    pub hovered: Option<PickFace>,
-    pub opened: Option<PickFace>,
-    pub opened_hovered: Option<PickFace>,
-    pub menu: Option<MenuFace>,
 }
 
 /// Where a scroll's offset is measured from. `Keep` rests at the start and
@@ -1309,12 +1141,14 @@ fn sanitize_node(
         }
         Node::Sensor {
             id,
+            style,
             reset,
             anticipate,
             delay,
             ..
         } => {
             id.validate_host()?;
+            style_sanitize::sanitize(style);
             if let Some(value) = reset
                 && !value.bound(0, budgets, false)
             {
@@ -1331,7 +1165,10 @@ fn sanitize_node(
                 truncate_string(label);
             }
         }
-        Node::ResizeHandle { id, .. } => id.validate_host()?,
+        Node::ResizeHandle { id, style, .. } => {
+            id.validate_host()?;
+            style_sanitize::sanitize(style);
+        }
         Node::Responsive { id, .. } => id.validate_host()?,
         Node::Lazy { key, .. } => claim(key, taken),
         Node::Float {
@@ -1373,8 +1210,7 @@ fn sanitize_node(
         Node::Overlay {
             id,
             label,
-            padding,
-            backdrop,
+            style,
             children,
             ..
         } => {
@@ -1382,11 +1218,8 @@ fn sanitize_node(
             if let Some(label) = label {
                 truncate_string(label);
             }
-            *padding = bounded(*padding);
+            style_sanitize::sanitize(style);
             children.truncate(2);
-            for channel in &mut backdrop.0 {
-                *channel = finite(*channel).clamp(0.0, 1.0);
-            }
         }
 
         Node::Canvas { style, commands } => {
@@ -1432,9 +1265,10 @@ fn sanitize_node(
             bound_color(background);
             bound_border(border);
         }
-        Node::Qr { key, code } => {
+        Node::Qr { key, code, style } => {
             claim(key, taken);
             code.sanitize(budgets);
+            style_sanitize::sanitize(style);
         }
         Node::RichText {
             id,
@@ -1472,6 +1306,7 @@ fn sanitize_node(
             data,
             label,
             options,
+            style,
             ..
         } => {
             id.validate_host()?;
@@ -1480,6 +1315,7 @@ fn sanitize_node(
                 truncate_string(label);
             }
             options.sanitize();
+            style_sanitize::sanitize(style);
         }
         Node::Image {
             id,
@@ -1583,7 +1419,6 @@ fn sanitize_node(
             content,
             label,
             description,
-            padding,
             style,
             ..
         } => {
@@ -1597,23 +1432,7 @@ fn sanitize_node(
             if let Some(description) = description {
                 spend_text(description, budgets);
             }
-            if let Some(recipe) = &mut style.recipe {
-                recipe.sanitize(budgets);
-            }
-            bound_edges(padding);
-            for face in [
-                Some(&mut style.active),
-                style.hovered.as_mut(),
-                style.pressed.as_mut(),
-                style.disabled.as_mut(),
-            ]
-            .into_iter()
-            .flatten()
-            {
-                bound_color(&mut face.background);
-                bound_color(&mut face.text);
-                bound_border(&mut face.border);
-            }
+            style_sanitize::sanitize(style);
         }
         Node::Space { .. } => {}
         Node::Rule {
@@ -1632,41 +1451,17 @@ fn sanitize_node(
                 }
             }
         }
-        Node::Toggle {
-            key, label, style, ..
-        } => {
+        Node::Toggle { key, label, style, .. } => {
             claim(key, taken);
             spend_text(label, budgets);
-            for face in [
-                &mut style.active_on,
-                &mut style.active_off,
-                &mut style.hovered_on,
-                &mut style.hovered_off,
-                &mut style.disabled_on,
-                &mut style.disabled_off,
-            ]
-            .into_iter()
-            .flatten()
-            {
-                bound_control_face(face);
-            }
+            style_sanitize::sanitize(style);
         }
         Node::Radio {
             key, label, style, ..
         } => {
             claim(key, taken);
             spend_text(label, budgets);
-            for face in [
-                &mut style.active_on,
-                &mut style.active_off,
-                &mut style.hovered_on,
-                &mut style.hovered_off,
-            ]
-            .into_iter()
-            .flatten()
-            {
-                bound_control_face(face);
-            }
+            style_sanitize::sanitize(style);
         }
         Node::Slider {
             id,
@@ -1685,26 +1480,7 @@ fn sanitize_node(
             for number in [value, min, max, step] {
                 *number = finite(*number);
             }
-            for face in [&mut style.active, &mut style.hovered, &mut style.dragged]
-                .into_iter()
-                .flatten()
-            {
-                bound_color(&mut face.rail_start);
-                bound_color(&mut face.rail_end);
-                bound_optional(&mut face.rail_width);
-                bound_border(&mut face.rail_border);
-                bound_color(&mut face.handle);
-                bound_border(&mut face.handle_border);
-                if let Some(shape) = &mut face.handle_shape {
-                    let radii: &mut [f32] = match shape {
-                        SliderHandleShape::Circle { radius } => std::slice::from_mut(radius),
-                        SliderHandleShape::Rectangle { border_radius, .. } => border_radius,
-                    };
-                    for radius in radii {
-                        *radius = bounded(*radius);
-                    }
-                }
-            }
+            style_sanitize::sanitize(style);
         }
         Node::ComboBox {
             id,
@@ -1714,11 +1490,13 @@ fn sanitize_node(
             placeholder,
             label,
             settings,
+            style,
             ..
         } => {
             id.validate_host()?;
             spend_text(state_key, budgets);
             settings.sanitize(budgets);
+            style_sanitize::sanitize(style);
             options.truncate(MAX_OPTIONS);
             for option in options.iter_mut() {
                 spend_text(option, budgets);
@@ -1746,29 +1524,7 @@ fn sanitize_node(
                 truncate_string(label);
             }
             settings.sanitize(budgets);
-            for face in [
-                &mut style.active,
-                &mut style.hovered,
-                &mut style.opened,
-                &mut style.opened_hovered,
-            ]
-            .into_iter()
-            .flatten()
-            {
-                bound_color(&mut face.background);
-                bound_color(&mut face.text);
-                bound_color(&mut face.placeholder);
-                bound_color(&mut face.handle);
-                bound_border(&mut face.border);
-            }
-            if let Some(menu) = &mut style.menu {
-                menu.shadow.sanitize();
-                bound_color(&mut menu.background);
-                bound_color(&mut menu.text);
-                bound_border(&mut menu.border);
-                bound_color(&mut menu.selected_text);
-                bound_color(&mut menu.selected_background);
-            }
+            style_sanitize::sanitize(style);
             options.truncate(MAX_OPTIONS);
             for option in options.iter_mut() {
                 spend_text(option, budgets);
@@ -1785,22 +1541,19 @@ fn sanitize_node(
             value,
             min,
             max,
-            background,
-            bar,
-            border,
+            style,
             ..
         } => {
             claim(key, taken);
             for number in [value, min, max] {
                 *number = finite(*number);
             }
-            bound_color(background);
-            bound_color(bar);
-            bound_border(border);
+            style_sanitize::sanitize(style);
         }
-        Node::Surface { id, name, args, .. } => {
+        Node::Surface { id, name, args, style, .. } => {
             id.validate_host()?;
             spend_text(name, budgets);
+            style_sanitize::sanitize(style);
             args.truncate(MAX_SURFACE_ARGS);
             let mut kept = 0;
             for value in args.iter_mut() {
@@ -1893,15 +1646,7 @@ fn sanitize_node(
 fn lengths_mut(node: &mut Node) -> Vec<&mut Length> {
     let slots: Vec<&mut Option<Length>> = match node {
         Node::Scroll { width, height, .. }
-        | Node::Button { width, height, .. }
-        | Node::ImageViewer { width, height, .. }
-        | Node::Slider { width, height, .. }
         | Node::Space { width, height } => vec![width, height],
-        Node::Progress { length, girth, .. } => vec![length, girth],
-        Node::Toggle { width, .. }
-        | Node::Radio { width, .. }
-        | Node::PickList { width, .. }
-        | Node::ComboBox { width, .. } => vec![width],
         Node::Container { .. }
         | Node::UniformList { .. }
         | Node::List { .. }
@@ -1909,6 +1654,14 @@ fn lengths_mut(node: &mut Node) -> Vec<&mut Length> {
         | Node::Input { .. }
         | Node::RichText { .. }
         | Node::Editor { .. }
+        | Node::ImageViewer { .. }
+        | Node::Button { .. }
+        | Node::Toggle { .. }
+        | Node::Radio { .. }
+        | Node::Slider { .. }
+        | Node::ComboBox { .. }
+        | Node::PickList { .. }
+        | Node::Progress { .. }
         | Node::Qr { .. }
         | Node::Rule { .. }
         | Node::Lazy { .. }
@@ -2052,13 +1805,6 @@ fn bound_color(color: &mut Option<Rgba>) {
             };
         }
     }
-}
-
-fn bound_control_face(face: &mut ControlFace) {
-    bound_color(&mut face.background);
-    bound_color(&mut face.mark);
-    bound_color(&mut face.text);
-    bound_border(&mut face.border);
 }
 
 fn bound_border(border: &mut Option<Border>) {
@@ -2259,6 +2005,7 @@ mod tests {
         let mut frame = Frame {
             root: Some(Node::Surface {
                 id: ElementIdWire::Name("preview".into()),
+                style: Default::default(),
                 name: "forge_code".into(),
                 args: vec![SurfaceValue::Record {
                     name: "Preview".into(),
@@ -2414,6 +2161,7 @@ mod tests {
                 (0..20)
                     .map(|i| Node::Surface {
                         id: ElementIdWire::Name(format!("surface-{i}").into()),
+                        style: Default::default(),
                         name: "many".into(),
                         args: vec![SurfaceValue::Unit; MAX_SURFACE_ARGS],
                         on_event: None,
@@ -2439,6 +2187,7 @@ mod tests {
         ];
         let node = Node::Surface {
             id: ElementIdWire::Name("view".into()),
+            style: Default::default(),
             name: "preview".into(),
             args: values.clone(),
             on_event: Some(4),
@@ -2459,6 +2208,7 @@ mod tests {
         assert_eq!(applied, changed);
         let Node::Surface { name, args, .. } = sanitized_root(Node::Surface {
             id: ElementIdWire::Name("view".into()),
+            style: Default::default(),
             name: "preview".into(),
             args: std::iter::once(V::F64(f64::NAN))
                 .chain(std::iter::repeat_n(
@@ -2560,10 +2310,7 @@ mod tests {
                     content: ButtonContent::Label("Go".into()),
                     label: None,
                     on_press: Some(3),
-                    width: None,
-                    height: None,
-                    padding: Some(Edges::all(4.0)),
-                    style: ButtonStyle::default(),
+                    style: gpui::StyleRefinement::default(),
                 },
                 Node::Input {
                     options: Default::default(),
@@ -2996,10 +2743,7 @@ mod tests {
                 content: ButtonContent::Label(long.clone()),
                 label: Some(long),
                 on_press: None,
-                width: None,
-                height: None,
-                padding: None,
-                style: ButtonStyle::default(),
+                style: gpui::StyleRefinement::default(),
             },
             text("tail"),
         ]));
@@ -3102,10 +2846,7 @@ mod tests {
             content,
             label: None,
             on_press: Some(1),
-            width: None,
-            height: None,
-            padding: None,
-            style: ButtonStyle::default(),
+            style: gpui::StyleRefinement::default(),
         }
     }
 
@@ -3210,9 +2951,7 @@ mod tests {
                     on_change: 1,
                     on_release: None,
                     axis: Axis::Row,
-                    width: None,
-                    height: None,
-                    style: SliderStyle::default(),
+                    style: gpui::StyleRefinement::default(),
                 },
                 Node::ComboBox {
                     id: ElementIdWire::Name("App/c".into()),
@@ -3223,7 +2962,7 @@ mod tests {
                     placeholder: String::new(),
                     label: Some("Font".into()),
                     on_select: 2,
-                    width: None,
+                    style: Default::default(),
                     settings: Box::default(),
                 },
                 Node::PickList {
@@ -3234,8 +2973,7 @@ mod tests {
                     placeholder: None,
                     label: Some("Theme".into()),
                     on_select: 3,
-                    width: None,
-                    style: PickListStyle::default(),
+                    style: gpui::StyleRefinement::default(),
                 },
             ])),
             ..Frame::default()
@@ -3323,10 +3061,7 @@ mod tests {
             root: Some(Node::Overlay {
                 id: ElementIdWire::Name("ask".into()),
                 label: Some("Delete page".into()),
-                padding: 16.0,
-                backdrop: Rgba([0.0, 0.0, 0.0, 0.4]),
-                align_x: AlignX::Center,
-                align_y: AlignY::Center,
+                style: Default::default(),
                 on_dismiss: Some(4),
                 children: vec![text("base"), text("Delete this page?")],
             }),
@@ -3528,6 +3263,7 @@ mod tests {
     fn sensor_reset_values_share_the_frame_budget() {
         let sensor = |key: &str| Node::Sensor {
             id: ElementIdWire::Name(key.into()),
+            style: Default::default(),
             reset: Some(SurfaceValue::List(vec![SurfaceValue::Unit; 3000])),
             on_show: Some(3),
             on_resize: None,
@@ -3575,6 +3311,7 @@ mod tests {
     fn a_sensor_is_pulled_into_range_and_keeps_its_child() {
         let root = sanitized_root(Node::Sensor {
             id: ElementIdWire::Name("watch".into()),
+            style: Default::default(),
             reset: None,
             on_show: Some(0),
             on_resize: Some(0),
@@ -3612,8 +3349,7 @@ mod tests {
                 placeholder: Some("é".repeat(MAX_STRING_BYTES)),
                 label: None,
                 on_select: 0,
-                width: Some(Length::Fixed(f32::INFINITY)),
-                style: PickListStyle::default(),
+                style: gpui::StyleRefinement::default(),
             },
             Node::Slider {
                 id: ElementIdWire::Name("App/slide".into()),
@@ -3625,9 +3361,7 @@ mod tests {
                 on_change: 1,
                 on_release: None,
                 axis: Axis::Row,
-                width: None,
-                height: None,
-                style: SliderStyle::default(),
+                style: gpui::StyleRefinement::default(),
             },
             Node::Toggle {
                 key: "App/pick".into(),
@@ -3635,15 +3369,13 @@ mod tests {
                 label: "x".repeat(MAX_STRING_BYTES + 1),
                 checked: true,
                 on_toggle: None,
-                width: None,
-                style: ToggleStyle::default(),
+                style: gpui::StyleRefinement::default(),
             },
         ]));
         let Node::PickList {
             options,
             selected,
             placeholder,
-            width,
             ..
         } = &children[0]
         else {
@@ -3652,7 +3384,6 @@ mod tests {
         assert_eq!(options.len(), MAX_OPTIONS);
         assert_eq!(*selected, None);
         assert!(placeholder.as_ref().unwrap().len() <= MAX_STRING_BYTES);
-        assert_eq!(*width, Some(Length::Fixed(MAX_PIXELS)));
         let Node::Slider {
             value,
             min,

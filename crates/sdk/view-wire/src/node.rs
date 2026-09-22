@@ -101,7 +101,7 @@ pub struct SvgTransformation {
 #[allow(clippy::large_enum_variant)]
 pub enum Node {
     /// A payload encoded and painted by the host.
-    Qr { key: String, code: Qr },
+    Qr { key: String, code: Qr, style: gpui::StyleRefinement },
     /// One native GPUI paragraph with optional interactive byte ranges.
     RichText {
         id: Option<ElementIdWire>,
@@ -185,6 +185,7 @@ pub enum Node {
     /// A grabbed divider: local movement deltas and native cursor; one child.
     ResizeHandle {
         id: ElementIdWire,
+        style: gpui::StyleRefinement,
         on_press: Option<u32>,
         on_release: Option<u32>,
         on_drag: Option<u32>,
@@ -269,6 +270,7 @@ pub enum Node {
     /// must hold before it is reported.
     Sensor {
         id: ElementIdWire,
+        style: gpui::StyleRefinement,
         /// Copied continuity value for `key=`, independent of widget identity.
         reset: Option<SurfaceValue>,
         on_show: Option<u32>,
@@ -332,8 +334,7 @@ pub enum Node {
         data: Option<ImageData>,
         label: Option<String>,
         fit: Option<ContentFit>,
-        width: Option<Length>,
-        height: Option<Length>,
+        style: gpui::StyleRefinement,
         options: ViewerOptions,
     },
     /// A vector picture. Its bytes cross ONCE: the frame that first shows a
@@ -390,10 +391,7 @@ pub enum Node {
         description: Option<String>,
         /// `None` is a disabled button.
         on_press: Option<u32>,
-        width: Option<Length>,
-        height: Option<Length>,
-        padding: Option<Edges>,
-        style: ButtonStyle,
+        style: gpui::StyleRefinement,
     },
     Space {
         width: Option<Length>,
@@ -420,8 +418,7 @@ pub enum Node {
         checked: bool,
         /// `None` is a disabled control.
         on_toggle: Option<u32>,
-        width: Option<Length>,
-        style: ToggleStyle,
+        style: gpui::StyleRefinement,
     },
     /// One radio button. Its value is the guest's business: selecting it
     /// sends the message the guest queued for it.
@@ -430,8 +427,7 @@ pub enum Node {
         label: String,
         selected: bool,
         on_select: u32,
-        width: Option<Length>,
-        style: RadioStyle,
+        style: gpui::StyleRefinement,
     },
     Slider {
         id: ElementIdWire,
@@ -444,9 +440,7 @@ pub enum Node {
         on_change: u32,
         on_release: Option<u32>,
         axis: Axis,
-        width: Option<Length>,
-        height: Option<Length>,
-        style: SliderStyle,
+        style: gpui::StyleRefinement,
     },
     ComboBox {
         id: ElementIdWire,
@@ -458,7 +452,7 @@ pub enum Node {
         /// The accessible name.
         label: Option<String>,
         on_select: u32,
-        width: Option<Length>,
+        style: gpui::StyleRefinement,
         settings: Box<ComboOptions>,
     },
     PickList {
@@ -472,8 +466,7 @@ pub enum Node {
         /// The accessible name.
         label: Option<String>,
         on_select: u32,
-        width: Option<Length>,
-        style: PickListStyle,
+        style: gpui::StyleRefinement,
     },
     Progress {
         key: String,
@@ -481,24 +474,14 @@ pub enum Node {
         min: f32,
         max: f32,
         axis: Axis,
-        length: Option<Length>,
-        girth: Option<Length>,
-        /// The theme role the bar is painted in; `background`, `bar` and
-        /// `border` paint over it.
-        tone: Option<Tone>,
-        background: Option<Rgba>,
-        bar: Option<Rgba>,
-        border: Option<Border>,
+        style: gpui::StyleRefinement,
     },
     /// A base plus an optional modal layer. Closing removes the second child.
     Overlay {
         id: ElementIdWire,
         /// The accessible name of the dialog; the variant is its role.
         label: Option<String>,
-        padding: f32,
-        backdrop: Rgba,
-        align_x: AlignX,
-        align_y: AlignY,
+        style: gpui::StyleRefinement,
         on_dismiss: Option<u32>,
         #[serde(deserialize_with = "decode_children")]
         children: Vec<Node>,
@@ -518,6 +501,7 @@ pub enum Node {
     /// in a sized [`Node::Container`] to set one.
     Surface {
         id: ElementIdWire,
+        style: gpui::StyleRefinement,
         name: String,
         args: Vec<SurfaceValue>,
         on_event: Option<u32>,

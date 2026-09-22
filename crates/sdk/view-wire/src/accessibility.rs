@@ -199,10 +199,7 @@ mod tests {
                 Node::Overlay {
                     id: ElementIdWire::Name("ask".into()),
                     label: Some(String::new()),
-                    padding: 0.0,
-                    backdrop: crate::Rgba([0.0; 4]),
-                    align_x: crate::AlignX::Center,
-                    align_y: crate::AlignY::Center,
+                    style: Default::default(),
                     on_dismiss: None,
                     children: vec![],
                 },

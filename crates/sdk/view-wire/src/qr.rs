@@ -121,6 +121,7 @@ mod tests {
                 children: (0..count)
                     .map(|id| Node::Qr {
                         key: id.to_string(),
+                        style: Default::default(),
                         code: Qr {
                             payload: Some(payload.clone()),
                             ..Default::default()
