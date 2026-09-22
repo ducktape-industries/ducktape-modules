@@ -16,7 +16,7 @@ DUCKTAPE ?= ../ducktape
 # entry is wasm32-gated.
 PROGRAMS := crates/app/chat-program crates/app/forge
 
-# The views: cdylibs for wasm32-unknown-unknown the desktop loads from a file.
+# The views: cdylibs embedded in their program artifacts.
 VIEWS := chat-view
 
 # What a wasm32 view may link. A crate a view links must never reach the
@@ -34,15 +34,45 @@ program-wasm-check:
 	done; \
 	echo "abi and guest build for wasm32"
 
-## builds the boot set for wasm32 and refreshes its committed bytes, which a
-## founding file names and the `modules` suite loads; then the app programs.
-wasm-programs:
+# Cargo uses this directory for all workspaces, including the standalone programs.
+BUILD_TARGET := $(abspath $(or $(CARGO_TARGET_DIR),target))
+PACK_DIR := $(CURDIR)/target/pack/rebuilt
+PACKER := $(BUILD_TARGET)/debug/view-pack
+
+.PHONY: wasm-modules wasm-modules-check wasm-modules-build
+
+## Build every program and view without modifying committed artifacts.
+wasm-modules-build: wasm-views
+	$(CARGO) build -p view-pack --target-dir $(BUILD_TARGET)
 	$(CARGO) build --manifest-path $(SYSTEM)/Cargo.toml \
-	  --target wasm32-unknown-unknown --release
-	cp $(SYSTEM)/target/wasm32-unknown-unknown/release/*.wasm $(SYSTEM)/wasm/
+	  --target-dir $(BUILD_TARGET) --target wasm32-unknown-unknown --release
 	@for p in $(PROGRAMS); do \
-	  $(CARGO) build --manifest-path $$p/Cargo.toml --target wasm32-unknown-unknown --release || exit 1; \
+	  $(CARGO) build --manifest-path $$p/Cargo.toml --target-dir $(BUILD_TARGET) --target wasm32-unknown-unknown --release || exit 1; \
 	done
+	@mkdir -p $(PACK_DIR)
+	@for name in module_registry valset identity chat_program forge; do \
+	  cp $(BUILD_TARGET)/wasm32-unknown-unknown/release/$$name.wasm $(PACK_DIR)/$$name.wasm || exit 1; \
+	done
+	$(PACKER) $(PACK_DIR)/chat_program.wasm $(BUILD_TARGET)/wasm32-unknown-unknown/release/chat_view.wasm $(PACK_DIR)/chat_program.wasm
+
+## Commit these bytes as the founding file's program code, including its view.
+wasm-modules: wasm-modules-build
+	@mkdir -p crates/app/wasm
+	@for name in module_registry valset identity; do cp $(PACK_DIR)/$$name.wasm $(SYSTEM)/wasm/$$name.wasm || exit 1; done
+	@for name in chat_program forge; do cp $(PACK_DIR)/$$name.wasm crates/app/wasm/$$name.wasm || exit 1; done
+
+wasm-programs: wasm-modules
+
+## Report every stale artifact in one run, including program-only drift.
+wasm-modules-check: wasm-modules-build
+	@stale=0; \
+	for entry in module_registry:$(SYSTEM)/wasm valset:$(SYSTEM)/wasm identity:$(SYSTEM)/wasm chat_program:crates/app/wasm forge:crates/app/wasm; do \
+	  name=$${entry%%:*}; file=$${entry#*:}/$$name.wasm; \
+	  if ! cmp -s $(PACK_DIR)/$$name.wasm $$file; then echo "stale: $$file"; stale=1; fi; \
+	done; \
+	$(PACKER) --strip $(PACK_DIR)/chat_program.wasm $(PACK_DIR)/chat_program.stripped.wasm || exit 1; \
+	cmp $(PACK_DIR)/chat_program.stripped.wasm $(BUILD_TARGET)/wasm32-unknown-unknown/release/chat_program.wasm || exit 1; \
+	test $$stale -eq 0
 
 ## refreshes the probe fixture the `modules` suite seats as the authority,
 ## from the ducktape checkout at $(DUCKTAPE).
@@ -51,7 +81,7 @@ probe-fixture:
 
 ## builds every view for wasm32 under target/wasm32-unknown-unknown/release/.
 wasm-views:
-	@for v in $(VIEWS); do $(CARGO) build --release --target wasm32-unknown-unknown -p $$v || exit 1; done
+	@for v in $(VIEWS); do $(CARGO) build --release --target-dir $(BUILD_TARGET) --target wasm32-unknown-unknown -p $$v || exit 1; done
 
 ## builds every VIEW_LINKABLE crate for wasm32-unknown-unknown, plus the two
 ## exported probes of view-guest, then fails if the normal wasm32 dependency
