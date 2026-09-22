@@ -21,7 +21,7 @@
 //! drop silently. A host that reads a frame from an untrusted module runs
 //! [`sanitize`] first.
 
-/// Exact bincode protocol implemented by this build. Bump on serialized shape changes,
+/// Exact named-MessagePack protocol implemented by this build. Bump on serialized shape changes,
 /// in the SAME commit as the shape change: a view built against the old shape is
 /// refused at load instead of faulting on its first frame.
 /// This is independent of the calling convention ([`abi`]) and the manifest text format.
@@ -75,7 +75,9 @@ pub use image::{ImageData, ViewerOptions, viewer_scale_bounds};
 mod snapshot;
 pub use snapshot::{MAX_SNAPSHOT_BYTES, Snapshot, SnapshotValue};
 
+pub mod click;
 mod style;
+mod style_sanitize;
 pub use style::{ElementIdWire, GroupRefinement, Interactivity};
 
 mod combo;
@@ -146,6 +148,8 @@ pub enum Event {
     /// entries in the table the guest filled while building the tree it
     /// last sent.
     Message(u32),
+    /// A GPUI click, kept distinct from message routes and carrying its input data.
+    Click { handler: u32, event: click::Click },
     /// A registered host surface emitted its declared result value.
     Surface { handler: u32, value: SurfaceValue },
     /// A text field's content changed. `handler` indexes the guest's
@@ -984,9 +988,25 @@ fn sanitize_node(node: &mut Node, depth: usize, budgets: &mut Budgets, taken: &m
     match node {
         Node::Container {
             id,
+            style,
             interactivity,
             ..
         } => {
+            style_sanitize::sanitize(style);
+            for refinement in [&mut interactivity.hover, &mut interactivity.active].into_iter().flatten() {
+                style_sanitize::sanitize(refinement);
+            }
+            for refinement in [&mut interactivity.group_hover, &mut interactivity.group_active].into_iter().flatten() {
+                style_sanitize::sanitize(&mut refinement.style);
+                let mut group = refinement.group.to_string();
+                truncate_string(&mut group);
+                refinement.group = group.into();
+            }
+            if let Some(group) = &mut interactivity.group {
+                let mut name = group.to_string();
+                truncate_string(&mut name);
+                *group = name.into();
+            }
             claim_id(id, taken);
             if let Some(id) = &mut interactivity.id {
                 claim_id_value(id, taken);
@@ -1226,10 +1246,12 @@ fn sanitize_node(node: &mut Node, depth: usize, budgets: &mut Budgets, taken: &m
         }
         Node::Text {
             id,
+            style,
             content,
             heading,
             ..
         } => {
+            style_sanitize::sanitize(style);
             claim_id(id, taken);
             spend_text(content, budgets);
             if heading.is_some_and(|level| !(1..=6).contains(&level)) {

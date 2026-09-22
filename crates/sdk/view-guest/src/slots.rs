@@ -134,12 +134,13 @@ pub(crate) fn click(
 pub(crate) fn run_click(
     context: &Context,
     index: u32,
+    event: &gpui::ClickEvent,
     window: &mut crate::Window,
     app: &mut crate::App,
 ) -> bool {
     let listener = context.0.borrow().clicks.get(index as usize).cloned();
     if let Some(listener) = listener {
-        listener(&gpui::ClickEvent::default(), window, app);
+        listener(event, window, app);
         true
     } else {
         false

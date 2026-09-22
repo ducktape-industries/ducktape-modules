@@ -115,18 +115,13 @@ impl<V: View> Driver<V> {
                 | wire::Event::Mouse { .. }
                 | wire::Event::Keyboard { .. } => None,
                 wire::Event::Message(index) => {
+                    slots::take_message::<Callback<V>>(&self.app.inner.slots, index)
+                }
+                wire::Event::Click { handler, event } => {
                     let slots = self.app.inner.slots.clone();
                     let mut window = self.app.window();
-                    if slots::run_click(
-                        &slots,
-                        index,
-                        &mut window,
-                        &mut self.app,
-                    ) {
-                        None
-                    } else {
-                        slots::take_message::<Callback<V>>(&self.app.inner.slots, index)
-                    }
+                    slots::run_click(&slots, handler, &event.into(), &mut window, &mut self.app);
+                    None
                 }
                 wire::Event::Surface { handler, value } => {
                     slots::run_handler::<wire::SurfaceValue, Callback<V>>(
@@ -338,6 +333,7 @@ impl<V: View> Driver<V> {
         for _ in 0..MAX_ROUNDS {
             let mut tasks = std::mem::take(&mut *self.app.inner.tasks.borrow_mut());
             let cut_short = executor::poll(&mut tasks);
+            self.app.refresh_globals();
             let added = !self.app.inner.tasks.borrow().is_empty();
             tasks.append(&mut self.app.inner.tasks.borrow_mut());
             *self.app.inner.tasks.borrow_mut() = tasks;
