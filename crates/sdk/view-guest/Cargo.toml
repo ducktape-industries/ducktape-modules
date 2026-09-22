@@ -13,6 +13,8 @@ view-wire.workspace = true
 design.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+gpui.workspace = true
+view-guest-derive = { path = "../view-guest-derive" }
 # The binary door (`rpc.query_bytes`): a program speaks borsh, and the host
 # envelope carries it base64. Neither reaches the signing graph the view
 # gate forbids.

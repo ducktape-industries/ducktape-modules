@@ -22,6 +22,10 @@ wasmparser = { version = "0.251", optional = true }
 serde-reflection = { version = "0.6", optional = true }
 sha2 = { version = "0.10", optional = true }
 serde = { version = "1", features = ["derive"] }
+gpui.workspace = true
+rmp-serde = "1"
+slotmap = "1.0.6"
+uuid = "1.1.2"
 # `task` and `subscription` are futures glue, and `kit` composes the tree
 # below out of the shared palette. Both are already in every graph that
 # reaches this crate.

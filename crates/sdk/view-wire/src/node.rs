@@ -56,17 +56,6 @@ pub enum Node {
         options: TextOptions,
         on_link: Option<u32>,
     },
-    /// Flex rules and item metadata, interpreted by the host's native layout engine.
-    Flex {
-        key: String,
-        layout: FlexLayout,
-        background: Option<Rgba>,
-        border: Option<Border>,
-        #[serde(deserialize_with = "flex::decode_items")]
-        items: Vec<FlexItem>,
-        #[serde(deserialize_with = "decode_children")]
-        children: Vec<Node>,
-    },
     /// A child positioned in this widget's local coordinates. The host lays it out.
     Pin {
         key: String,
@@ -106,22 +95,13 @@ pub enum Node {
         children: Vec<Node>,
     },
     Container {
-        shadow: Shadow,
-        max_width: Option<f32>,
-        max_height: Option<f32>,
-        clip: bool,
-        key: String,
-        width: Option<Length>,
-        height: Option<Length>,
-        padding: Option<Edges>,
-        align_x: Option<AlignX>,
-        align_y: Option<AlignY>,
-        background: Option<Background>,
-        border: Option<Border>,
-        /// Round the box to whole pixels; `None` is the host's default.
-        snap: Option<bool>,
-        #[serde(deserialize_with = "decode_child")]
-        content: Box<Node>,
+        /// Native GPUI identity, retained as a tagged adapter on the wire.
+        id: Option<ElementIdWire>,
+        /// The real GPUI style refinement, applied by the host's native Div.
+        style: gpui::StyleRefinement,
+        interactivity: Interactivity,
+        #[serde(deserialize_with = "decode_children")]
+        children: Vec<Node>,
     },
     /// A grabbed divider: local movement deltas and native cursor; one child.
     ResizeHandle {
@@ -280,14 +260,9 @@ pub enum Node {
         content: Box<Node>,
     },
     Text {
-        options: TextOptions,
-        key: String,
+        id: Option<ElementIdWire>,
+        style: gpui::StyleRefinement,
         content: String,
-        size: Option<f32>,
-        color: Option<Rgba>,
-        font: Font,
-        width: Option<Length>,
-        align_x: Option<AlignX>,
         /// A heading's level, 1 to 6; the sanitizer makes any other `None`.
         heading: Option<u8>,
         /// `None` is text whose changes are not announced.
@@ -582,13 +557,14 @@ impl Node {
 
     pub fn key(&self) -> Option<&str> {
         match self {
-            Self::Container { key, .. }
-            | Self::ResizeHandle { key, .. }
+            Self::Container { id, .. } | Self::Text { id, .. } => {
+                id.as_ref().and_then(ElementIdWire::name)
+            }
+            Self::ResizeHandle { key, .. }
             | Self::MouseArea { key, .. }
             | Self::Linear { key, .. }
             | Self::Grid { key, .. }
             | Self::KeyedColumn { key, .. }
-            | Self::Flex { key, .. }
             | Self::Pin { key, .. }
             | Self::Float { key, .. }
             | Self::Responsive { key, .. }
@@ -598,7 +574,6 @@ impl Node {
             | Self::Scroll { key, .. }
             | Self::Qr { key, .. }
             | Self::RichText { key, .. }
-            | Self::Text { key, .. }
             | Self::Svg { key, .. }
             | Self::Image { key, .. }
             | Self::ImageViewer { key, .. }
@@ -628,8 +603,16 @@ impl Node {
     /// variant is a new arm in each and nothing else.
     pub fn children(&self) -> &[Node] {
         match self {
-            Self::Container { content, .. }
-            | Self::Pin { content, .. }
+            Self::Container { children, .. }
+            | Self::Linear { children, .. }
+            | Self::Grid { children, .. }
+            | Self::Stack { children, .. }
+            | Self::Hover { children, .. }
+            | Self::Tooltip { children, .. }
+            | Self::Overlay { children, .. }
+            | Self::KeyedColumn { children, .. }
+            | Self::When { children, .. } => children,
+            Self::Pin { content, .. }
             | Self::Float { content, .. }
             | Self::Responsive { content, .. }
             | Self::Lazy { content, .. }
@@ -637,16 +620,6 @@ impl Node {
             | Self::ResizeHandle { content, .. }
             | Self::MouseArea { content, .. }
             | Self::Scroll { content, .. } => std::slice::from_ref(content),
-            Self::Linear { children, .. }
-            | Self::Grid { children, .. }
-            | Self::Stack { children, .. }
-            | Self::Hover { children, .. }
-            | Self::Tooltip { children, .. }
-            | Self::Overlay { children, .. }
-            | Self::KeyedColumn { children, .. }
-            | Self::Flex { children, .. }
-            | Self::When { children, .. } => children,
-
             Self::Button {
                 content: ButtonContent::Child(child),
                 ..
@@ -683,8 +656,16 @@ impl Node {
 
     pub fn children_mut(&mut self) -> &mut [Node] {
         match self {
-            Self::Container { content, .. }
-            | Self::Pin { content, .. }
+            Self::Container { children, .. }
+            | Self::Linear { children, .. }
+            | Self::Grid { children, .. }
+            | Self::Stack { children, .. }
+            | Self::Hover { children, .. }
+            | Self::Tooltip { children, .. }
+            | Self::Overlay { children, .. }
+            | Self::KeyedColumn { children, .. }
+            | Self::When { children, .. } => children,
+            Self::Pin { content, .. }
             | Self::Float { content, .. }
             | Self::Responsive { content, .. }
             | Self::Lazy { content, .. }
@@ -692,16 +673,6 @@ impl Node {
             | Self::ResizeHandle { content, .. }
             | Self::MouseArea { content, .. }
             | Self::Scroll { content, .. } => std::slice::from_mut(content),
-            Self::Linear { children, .. }
-            | Self::Grid { children, .. }
-            | Self::Stack { children, .. }
-            | Self::Hover { children, .. }
-            | Self::Tooltip { children, .. }
-            | Self::Overlay { children, .. }
-            | Self::KeyedColumn { children, .. }
-            | Self::Flex { children, .. }
-            | Self::When { children, .. } => children,
-
             Self::Button {
                 content: ButtonContent::Child(child),
                 ..
@@ -733,17 +704,16 @@ impl Node {
     /// none, and no patch may insert into, remove from or move within it.
     pub fn child_list_mut(&mut self) -> Option<&mut Vec<Node>> {
         match self {
-            Self::Linear { children, .. }
+            Self::Container { children, .. }
+            | Self::Linear { children, .. }
             | Self::Grid { children, .. }
             | Self::KeyedColumn { children, .. }
-            | Self::Flex { children, .. }
             | Self::Stack { children, .. }
             | Self::When { children, .. }
             | Self::Hover { children, .. }
             | Self::Tooltip { children, .. }
             | Self::Overlay { children, .. } => Some(children),
-            Self::Container { .. }
-            | Self::Pin { .. }
+            Self::Pin { .. }
             | Self::Float { .. }
             | Self::Responsive { .. }
             | Self::Lazy { .. }

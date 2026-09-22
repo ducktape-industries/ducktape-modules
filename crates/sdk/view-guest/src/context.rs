@@ -1,6 +1,6 @@
 //! Contexts and handles for the single root entity.
 use crate::{Host, Task, View, Window, executor, slots};
-use std::any::TypeId;
+use std::any::{Any, TypeId};
 use std::cell::{Cell, RefCell};
 use std::ops::{Deref, DerefMut};
 use std::rc::{Rc, Weak};
@@ -18,11 +18,14 @@ pub(crate) struct AppState {
     pub dirty: Cell<bool>,
     pub macos: bool,
     pub alive: Cell<bool>,
+    pub globals: RefCell<std::collections::HashMap<TypeId, Rc<dyn Any>>>,
 }
 impl App {
     pub(crate) fn new(macos: bool) -> Self {
         let host = Host::default();
         let slots = slots::Context::with_host(macos, host.clone());
+        let mut globals = std::collections::HashMap::new();
+        globals.insert(TypeId::of::<crate::Theme>(), Rc::new(crate::Theme::default()) as Rc<dyn Any>);
         Self {
             inner: Rc::new(AppState {
                 host,
@@ -32,6 +35,7 @@ impl App {
                 dirty: Cell::new(true),
                 macos,
                 alive: Cell::new(true),
+                globals: RefCell::new(globals),
             }),
         }
     }
@@ -54,6 +58,24 @@ impl App {
         self.inner
             .generation
             .set(self.inner.generation.get().wrapping_add(1));
+    }
+    pub fn set_global<G: gpui::Global>(&mut self, global: G) {
+        self.inner
+            .globals
+            .borrow_mut()
+            .insert(TypeId::of::<G>(), Rc::new(global));
+    }
+    pub fn global<G: gpui::Global + Clone>(&self) -> G {
+        self.inner
+            .globals
+            .borrow()
+            .get(&TypeId::of::<G>())
+            .and_then(|global| global.downcast_ref::<G>())
+            .cloned()
+            .expect("global is not initialized")
+    }
+    pub fn processor<F>(&self, processor: F) -> F {
+        processor
     }
 }
 #[derive(Clone)]
@@ -132,7 +154,6 @@ impl<V: View> Entity<V> {
             self.app.ptr_eq(&Rc::downgrade(&app.inner)),
             "entity belongs to another app"
         );
-        let _guard = app.inner.slots.enter();
         let mut value = self.value.borrow_mut();
         let view = value.as_mut().expect("entity initialized");
         #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
@@ -211,23 +232,28 @@ impl<V> Context<'_, V> {
         self.entity.downgrade()
     }
 }
-impl<V: 'static> Context<'_, V> {
+impl<V: View + 'static> Context<'_, V> {
     pub fn listener<E: 'static>(
+        &self,
+        f: impl Fn(&mut V, &E, &mut Window, &mut Context<V>) + 'static,
+    ) -> impl Fn(&E, &mut Window, &mut App) + 'static {
+        let f = Rc::new(f);
+        let entity = self.entity.clone();
+        move |event, _window, app| {
+            entity.update_app(app, |view, window, cx| f(view, event, window, cx));
+        }
+    }
+    pub fn handler<E: 'static>(
         &self,
         f: impl Fn(&mut V, &E, &mut Window, &mut Context<V>) + 'static,
     ) -> u32 {
         let f = Rc::new(f);
-        if TypeId::of::<E>() == TypeId::of::<()>() {
-            let event = Box::new(()) as Box<dyn std::any::Any>;
-            let event = *event.downcast::<E>().expect("unit event");
-            let callback: Callback<V> = Rc::new(move |v, w, cx| f(v, &event, w, cx));
-            slots::message(callback)
-        } else {
-            slots::handler::<E, Callback<V>>(Box::new(move |event| {
-                let f = f.clone();
-                Some(Rc::new(move |v, w, cx| f(v, &event, w, cx)))
+        slots::handler::<E, Callback<V>>(&self.app.inner.slots, Box::new(move |event| {
+            let f = f.clone();
+            Some(Rc::new(move |view, window, cx| {
+                f(view, &event, window, cx);
             }))
-        }
+        }))
     }
     pub fn spawn<R: 'static>(
         &self,

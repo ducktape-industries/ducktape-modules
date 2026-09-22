@@ -15,8 +15,8 @@ pub(crate) fn texts(frame: &Frame) -> Vec<String> {
 
 fn collect_texts(node: &Node, out: &mut Vec<String>) {
     match node {
-        Node::Container { content, .. }
-        | Node::Sensor { child: content, .. }
+        Node::Container { children, .. } => children.iter().for_each(|child| collect_texts(child, out)),
+        Node::Sensor { child: content, .. }
         | Node::Pin { content, .. }
         | Node::Float { content, .. }
         | Node::Responsive { content, .. }
@@ -31,7 +31,6 @@ fn collect_texts(node: &Node, out: &mut Vec<String>) {
         | Node::Tooltip { children, .. }
         | Node::Overlay { children, .. }
         | Node::KeyedColumn { children, .. }
-        | Node::Flex { children, .. }
         | Node::When { children, .. } => {
             children.iter().for_each(|child| collect_texts(child, out))
         }
@@ -129,8 +128,8 @@ fn find_by<'a>(node: &'a Node, matches: &dyn Fn(&Node) -> bool) -> Option<&'a No
         return Some(node);
     }
     match node {
-        Node::Container { content, .. }
-        | Node::Sensor { child: content, .. }
+        Node::Container { children, .. } => children.iter().find_map(|child| find_by(child, matches)),
+        Node::Sensor { child: content, .. }
         | Node::Pin { content, .. }
         | Node::Float { content, .. }
         | Node::Responsive { content, .. }
@@ -145,7 +144,6 @@ fn find_by<'a>(node: &'a Node, matches: &dyn Fn(&Node) -> bool) -> Option<&'a No
         | Node::Tooltip { children, .. }
         | Node::Overlay { children, .. }
         | Node::KeyedColumn { children, .. }
-        | Node::Flex { children, .. }
         | Node::When { children, .. } => children.iter().find_map(|child| find_by(child, matches)),
 
         Node::Button {
@@ -466,8 +464,8 @@ fn collect_keys(node: &Node, out: &mut Vec<String>) {
         out.push(key.to_string());
     }
     match node {
-        Node::Container { content, .. }
-        | Node::Sensor { child: content, .. }
+        Node::Container { children, .. } => children.iter().for_each(|child| collect_keys(child, out)),
+        Node::Sensor { child: content, .. }
         | Node::Pin { content, .. }
         | Node::Float { content, .. }
         | Node::Responsive { content, .. }
@@ -482,7 +480,6 @@ fn collect_keys(node: &Node, out: &mut Vec<String>) {
         | Node::Tooltip { children, .. }
         | Node::Overlay { children, .. }
         | Node::KeyedColumn { children, .. }
-        | Node::Flex { children, .. }
         | Node::When { children, .. } => children.iter().for_each(|child| collect_keys(child, out)),
 
         Node::Button {

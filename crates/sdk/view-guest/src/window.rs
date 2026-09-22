@@ -17,7 +17,6 @@ impl Window {
         });
     }
     pub fn dispatch(&mut self, command: wire::WidgetCommand) {
-        let _guard = self.slots.enter();
-        slots::host().notify::<crate::caps::Widget>(command);
+        slots::host(&self.slots).notify::<crate::caps::Widget>(command);
     }
 }

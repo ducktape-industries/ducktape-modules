@@ -1,6 +1,17 @@
 //! Renderer-independent execution of dynamically loaded WASM views.
 pub use view_wire as wire;
-pub use view_wire::kit;
+pub use gpui::{
+    ClickEvent, ElementId, Global, Hsla, SharedString, StyleRefinement, Styled, px, rems, rgb,
+};
+pub use view_guest_derive::IntoElement;
+mod theme;
+pub use theme::Theme;
+mod element;
+pub use element::{
+    anchored, canvas, deferred, div, img, svg, uniform_list, Anchored, Canvas, Deferred, Div,
+    Img, InteractiveElement, IntoElement, Lowering, ParentElement, RenderOnce, Stateful,
+    StatefulInteractiveElement, Svg, UniformList,
+};
 mod editor;
 mod editor_binding;
 mod editor_documents;
@@ -60,7 +71,6 @@ impl<V: View> Driver<V> {
     pub(crate) fn initialize(macos: bool, restored: Option<V>) -> Result<Self, String> {
         let mut app = App::new(macos);
         let entity = Entity::reserve(&app);
-        let _guard = app.inner.slots.enter();
         let mut window = app.window();
         let mut cx = Context {
             app: &mut app,
@@ -91,7 +101,6 @@ impl<V: View> Driver<V> {
         &mut self.app
     }
     pub fn tick(&mut self, events: Vec<wire::Event>) -> wire::Frame {
-        let _guard = self.app.inner.slots.enter();
         self.busy = false;
         self.settle();
         for event in events {
@@ -105,12 +114,29 @@ impl<V: View> Driver<V> {
                 wire::Event::Observation { .. }
                 | wire::Event::Mouse { .. }
                 | wire::Event::Keyboard { .. } => None,
-                wire::Event::Message(index) => slots::take_message::<Callback<V>>(index),
+                wire::Event::Message(index) => {
+                    let slots = self.app.inner.slots.clone();
+                    let mut window = self.app.window();
+                    if slots::run_click(
+                        &slots,
+                        index,
+                        &mut window,
+                        &mut self.app,
+                    ) {
+                        None
+                    } else {
+                        slots::take_message::<Callback<V>>(&self.app.inner.slots, index)
+                    }
+                }
                 wire::Event::Surface { handler, value } => {
-                    slots::run_handler::<wire::SurfaceValue, Callback<V>>(handler, value)
+                    slots::run_handler::<wire::SurfaceValue, Callback<V>>(
+                        &self.app.inner.slots,
+                        handler,
+                        value,
+                    )
                 }
                 wire::Event::Input { handler, text } => {
-                    slots::run_handler::<String, Callback<V>>(handler, text)
+                    slots::run_handler::<String, Callback<V>>(&self.app.inner.slots, handler, text)
                 }
                 wire::Event::EditorDocument { handler, message } => {
                     use wire::editor_document::EditorDocumentMessage;
@@ -119,21 +145,25 @@ impl<V: View> Driver<V> {
                         EditorDocumentMessage::Acknowledged { .. }
                             | EditorDocumentMessage::Failed { .. }
                     ) {
-                        slots::finish_editor_transfer(message.id());
+                        slots::finish_editor_transfer(&self.app.inner.slots, message.id());
                         continue;
                     }
                     slots::run_handler::<wire::editor_document::EditorDocumentMessage, Callback<V>>(
-                        handler, message,
+                        &self.app.inner.slots, handler, message,
                     )
                 }
                 wire::Event::EditorRequest { handler, request } => {
-                    slots::run_handler::<wire::EditorRequest, Callback<V>>(handler, request)
+                    slots::run_handler::<wire::EditorRequest, Callback<V>>(
+                        &self.app.inner.slots,
+                        handler,
+                        request,
+                    )
                 }
                 wire::Event::EditorTransaction { handler, event } => {
                     if let wire::EditorTransactionEvent::Fault { id, .. }
                     | wire::EditorTransactionEvent::Cancelled { id, .. } = &event
                     {
-                        slots::finish_editor_transfer(&wire::editor_document::EditorTransferId {
+                        slots::finish_editor_transfer(&self.app.inner.slots, &wire::editor_document::EditorTransferId {
                             instance: id.instance,
                             document: id.document.clone(),
                             reset: id.reset,
@@ -142,39 +172,59 @@ impl<V: View> Driver<V> {
                         });
                     }
                     if let wire::EditorTransactionEvent::Cancelled { id, .. } = &event {
-                        if !slots::editor_matches_pending(id) {
+                        if !slots::editor_matches_pending(&self.app.inner.slots, id) {
                             continue;
                         }
-                        slots::editor_acknowledge(&event);
+                        slots::editor_acknowledge(&self.app.inner.slots, &event);
                     }
-                    slots::run_handler::<wire::EditorTransactionEvent, Callback<V>>(handler, event)
+                    slots::run_handler::<wire::EditorTransactionEvent, Callback<V>>(
+                        &self.app.inner.slots,
+                        handler,
+                        event,
+                    )
                 }
                 wire::Event::Toggle { handler, on } => {
-                    slots::run_handler::<bool, Callback<V>>(handler, on)
+                    slots::run_handler::<bool, Callback<V>>(&self.app.inner.slots, handler, on)
                 }
                 wire::Event::Slide { handler, value } => {
-                    slots::run_handler::<f32, Callback<V>>(handler, value)
+                    slots::run_handler::<f32, Callback<V>>(&self.app.inner.slots, handler, value)
                 }
                 wire::Event::Select { handler, index } => {
-                    slots::run_handler::<u32, Callback<V>>(handler, index)
+                    slots::run_handler::<u32, Callback<V>>(&self.app.inner.slots, handler, index)
                 }
                 wire::Event::Size {
                     handler,
                     width,
                     height,
-                } => slots::run_handler::<(f32, f32), Callback<V>>(handler, (width, height)),
+                } => slots::run_handler::<(f32, f32), Callback<V>>(
+                    &self.app.inner.slots,
+                    handler,
+                    (width, height),
+                ),
                 wire::Event::Drag { handler, dx, dy } => {
-                    slots::run_handler::<(f64, f64), Callback<V>>(handler, (dx, dy))
+                    slots::run_handler::<(f64, f64), Callback<V>>(
+                        &self.app.inner.slots,
+                        handler,
+                        (dx, dy),
+                    )
                 }
                 wire::Event::Pointer { handler, x, y } => {
-                    slots::run_handler::<(f32, f32), Callback<V>>(handler, (x, y))
+                    slots::run_handler::<(f32, f32), Callback<V>>(
+                        &self.app.inner.slots,
+                        handler,
+                        (x, y),
+                    )
                 }
                 wire::Event::Scroll {
                     handler,
                     dx,
                     dy,
                     pixels,
-                } => slots::run_handler::<(f32, f32, bool), Callback<V>>(handler, (dx, dy, pixels)),
+                } => slots::run_handler::<(f32, f32, bool), Callback<V>>(
+                    &self.app.inner.slots,
+                    handler,
+                    (dx, dy, pixels),
+                ),
                 wire::Event::ScrollOffset {
                     handler,
                     x,
@@ -182,9 +232,15 @@ impl<V: View> Driver<V> {
                     relative_x,
                     relative_y,
                 } => slots::run_handler::<(f32, f32, f32, f32), Callback<V>>(
+                    &self.app.inner.slots,
                     handler,
                     (x, y, relative_x, relative_y),
                 ),
+                wire::Event::Theme { dark } => {
+                    self.app.set_global(if dark { Theme::dark() } else { Theme::light() });
+                    self.app.notify();
+                    None
+                }
                 wire::Event::Response { id, result, done } => {
                     self.app.host().fulfill(id, result, done);
                     // Response order is semantic: queued hidden data must be
@@ -212,20 +268,23 @@ impl<V: View> Driver<V> {
         self.settle();
         let render = self.app.inner.dirty.replace(false)
             || self.last_root.is_none()
-            || slots::editor_transferring();
+            || slots::editor_transferring(&self.app.inner.slots);
         let mut root = if render {
-            slots::reset();
+            slots::reset(&self.app.inner.slots);
             let mut window = self.app.window();
-            let mut cx = Context {
-                app: &mut self.app,
-                entity: self.entity.clone(),
+            let element = {
+                let mut cx = Context {
+                    app: &mut self.app,
+                    entity: self.entity.clone(),
+                };
+                self.entity
+                    .value
+                    .borrow_mut()
+                    .as_mut()
+                    .unwrap()
+                    .render(&mut window, &mut cx)
             };
-            self.entity
-                .value
-                .borrow_mut()
-                .as_mut()
-                .unwrap()
-                .render(&mut window, &mut cx)
+            element.into_node(&mut Lowering::new(&mut window, &mut self.app))
         } else {
             self.last_root.clone().expect("rendered tree")
         };
@@ -258,14 +317,14 @@ impl<V: View> Driver<V> {
             });
             self.last_root = Some(kept);
         }
-        let editor_decisions = slots::take_editor_responses();
-        self.busy |= slots::editor_responses_ready();
+        let editor_decisions = slots::take_editor_responses(&self.app.inner.slots);
+        self.busy |= slots::editor_responses_ready(&self.app.inner.slots);
         wire::Frame {
             upstream_sanitization: Default::default(),
             editor_decisions,
-            editor_documents: slots::take_editor_documents(),
-            mouse_interest: slots::mouse_interest(),
-            event_interest: slots::event_interest(),
+            editor_documents: slots::take_editor_documents(&self.app.inner.slots),
+            mouse_interest: slots::mouse_interest(&self.app.inner.slots),
+            event_interest: slots::event_interest(&self.app.inner.slots),
             root: Some(root),
             patches,
             requests: self.app.host().drain_outbox(),

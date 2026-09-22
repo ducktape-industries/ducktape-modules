@@ -2,10 +2,11 @@
 use crate::{Editor, slots, wire};
 use wire::editor_document::{EditorDocumentMessage, EditorDocumentRef, EditorTransferError};
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct EditorDocumentUpdate {
     document: String,
     message: EditorDocumentMessage,
+    context: slots::Context,
 }
 
 impl EditorDocumentUpdate {
@@ -20,18 +21,18 @@ impl EditorDocumentUpdate {
                 if target != current {
                     Err(EditorTransferError::Identity)
                 } else {
-                    slots::start_editor_transfer(id, target)
+                    slots::start_editor_transfer(&self.context, id, target)
                 }
             }
             EditorDocumentMessage::Acknowledged { .. } | EditorDocumentMessage::Failed { .. } => {
-                slots::finish_editor_transfer(&id);
+                slots::finish_editor_transfer(&self.context, &id);
                 Ok(())
             }
             EditorDocumentMessage::Transfer(transfer) => {
-                match slots::receive_editor_mirror(&transfer) {
+                match slots::receive_editor_mirror(&self.context, &transfer) {
                     Ok(Some((text, target))) => {
                         if editor.install_mirror(text, &target) {
-                            slots::acknowledge_editor_mirror(id.clone());
+                            slots::acknowledge_editor_mirror(&self.context, id.clone());
                             Ok(())
                         } else {
                             Err(EditorTransferError::Identity)
@@ -43,7 +44,7 @@ impl EditorDocumentUpdate {
             }
         };
         if let Err(reason) = result {
-            slots::editor_document_failure(id, reason);
+            slots::editor_document_failure(&self.context, id, reason);
         }
     }
 }
@@ -53,15 +54,19 @@ impl Editor {
     /// by application state; routes and transfer progress retain only identity.
     pub fn document<M: 'static>(
         &self,
+        context: &slots::Context,
         document: String,
         wrap: impl Fn(EditorDocumentUpdate) -> M + 'static,
     ) -> (EditorDocumentRef, u32) {
         let reference = self.document_reference(document.clone());
-        slots::editor_document_frame(&reference, self.text_ref());
-        let handler = slots::handler::<EditorDocumentMessage, M>(Box::new(move |message| {
+        slots::editor_document_frame(context, &reference, self.text_ref());
+        let context = context.clone();
+        let route_context = context.clone();
+        let handler = slots::handler::<EditorDocumentMessage, M>(&route_context, Box::new(move |message| {
             Some(wrap(EditorDocumentUpdate {
                 document: document.clone(),
                 message,
+                context: context.clone(),
             }))
         }));
         (reference, handler)
@@ -107,13 +112,15 @@ mod tests {
         }
     }
     impl Render for DocumentApp {
-        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> wire::Node {
-            let (_, route) = self.editor.document("app:draft".into(), |update| {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> wire::Node {
+            let (_, route) = self
+                .editor
+                .document(&cx.app.inner.slots, "app:draft".into(), |update| {
                 let callback: crate::context::Callback<Self> = Rc::new(move |view, _, _| {
                     update.clone().apply(&mut view.editor);
                 });
                 callback
-            });
+                });
             self.route = route;
             wire::Node::empty()
         }

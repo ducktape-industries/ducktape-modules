@@ -34,7 +34,9 @@
 ///    `Node::MouseArea`; `selected` on `Node::Button`.
 /// 10: the rest of the accessible shape: `heading` and `live` on `Node::Text`,
 ///    `label` on `Node::Overlay`, `role` on `Node::Button`.
-pub const WIRE_EPOCH: u32 = 10;
+/// 11: GPUI-shaped container/text styles, typed element IDs, and named
+///    MessagePack framing.
+pub const WIRE_EPOCH: u32 = 11;
 
 pub mod abi;
 pub mod manifest;
@@ -44,13 +46,6 @@ pub mod schema;
 mod sanitization;
 pub use sanitization::SanitizeReport;
 
-// What a view is WRITTEN in, beside the wire it writes. `kit` composes the
-// `Node` tree this crate defines, and `Task`/`Subscription` are the shapes an
-// app hands back from `update` and `subscription` — so the guest SDK and the
-// desktop that renders for it take one implementation from here rather than
-// one each. Nothing in the three names a host import: they are futures glue
-// and tree construction.
-pub mod kit;
 mod subscription;
 pub mod task;
 pub use subscription::{Observer, Recipe, Subscription};
@@ -80,11 +75,8 @@ pub use image::{ImageData, ViewerOptions, viewer_scale_bounds};
 mod snapshot;
 pub use snapshot::{MAX_SNAPSHOT_BYTES, Snapshot, SnapshotValue};
 
-mod flex;
-pub use flex::{
-    FlexBasis, FlexContentAlignment, FlexDirection, FlexItem, FlexItemAlignment, FlexLayout,
-    FlexMargin, FlexMargins, FlexWrap,
-};
+mod style;
+pub use style::{ElementIdWire, GroupRefinement, Interactivity};
 
 mod combo;
 pub use combo::{ComboIcon, ComboOptions};
@@ -175,6 +167,8 @@ pub enum Event {
         handler: u32,
         event: EditorTransactionEvent,
     },
+    /// The host theme changed; the guest stores the corresponding `Theme` global.
+    Theme { dark: bool },
     /// A checkbox or toggler flipped. `handler` indexes the guest's
     /// per-frame handler table; `on` is the state it now shows.
     Toggle { handler: u32, on: bool },
@@ -923,6 +917,22 @@ fn claim(key: &mut String, taken: &mut Taken) {
     taken.insert(unique, 2);
 }
 
+fn claim_id(id: &mut Option<ElementIdWire>, taken: &mut Taken) {
+    let Some(id) = id else {
+        return;
+    };
+    claim_id_value(id, taken);
+}
+
+fn claim_id_value(id: &mut ElementIdWire, taken: &mut Taken) {
+    let ElementIdWire::Name(name) = id else {
+        return;
+    };
+    let mut key = name.to_string();
+    claim(&mut key, taken);
+    *name = key.into();
+}
+
 /// What is left of a frame's per-frame budgets while its tree is walked.
 pub(crate) struct Budgets {
     pub(crate) nodes: usize,
@@ -973,23 +983,13 @@ fn sanitize_node(node: &mut Node, depth: usize, budgets: &mut Budgets, taken: &m
     }
     match node {
         Node::Container {
-            shadow,
-            max_width,
-            max_height,
-            key,
-            padding,
-            border,
-            background,
+            id,
+            interactivity,
             ..
         } => {
-            claim(key, taken);
-            bound_optional(max_width);
-            bound_optional(max_height);
-            shadow.sanitize();
-            bound_edges(padding);
-            bound_border(border);
-            if let Some(background) = background {
-                background.sanitize();
+            claim_id(id, taken);
+            if let Some(id) = &mut interactivity.id {
+                claim_id_value(id, taken);
             }
         }
         Node::Linear {
@@ -1011,24 +1011,6 @@ fn sanitize_node(node: &mut Node, depth: usize, budgets: &mut Budgets, taken: &m
             bound_edges(padding);
             bound_color(background);
             bound_border(border);
-        }
-        Node::Flex {
-            key,
-            layout,
-            background,
-            border,
-            items,
-            children,
-        } => {
-            claim(key, taken);
-            layout.sanitize();
-            bound_color(background);
-            bound_border(border);
-            children.truncate(MAX_NODES);
-            items.resize(children.len(), FlexItem::default());
-            for item in items {
-                item.sanitize();
-            }
         }
         Node::KeyedColumn {
             key,
@@ -1243,32 +1225,16 @@ fn sanitize_node(node: &mut Node, depth: usize, budgets: &mut Budgets, taken: &m
             bound_color(color);
         }
         Node::Text {
-            options,
-            key,
+            id,
             content,
-            size,
-            color,
             heading,
             ..
         } => {
-            claim(key, taken);
-            options.sanitize(budgets);
+            claim_id(id, taken);
             spend_text(content, budgets);
             if heading.is_some_and(|level| !(1..=6).contains(&level)) {
                 *heading = None;
             }
-            // Tracking expands graphemes into native widgets. Charge a conservative
-            // scalar count against the same host node budget before rendering.
-            if options.tracking > 0.0 {
-                if let Some((end, _)) = content.char_indices().nth(budgets.nodes) {
-                    content.truncate(end);
-                }
-                budgets.nodes = budgets.nodes.saturating_sub(content.chars().count());
-            }
-            if let Some(size) = size {
-                *size = bounded(*size).min(MAX_TEXT_PIXELS);
-            }
-            bound_color(color);
         }
         Node::ImageViewer {
             key,
@@ -1640,7 +1606,6 @@ fn sanitize_node(node: &mut Node, depth: usize, budgets: &mut Budgets, taken: &m
     | Node::Grid { children, .. }
     | Node::Stack { children, .. }
     | Node::KeyedColumn { children, .. }
-    | Node::Flex { children, .. }
     | Node::When { children, .. } = node
     {
         let mut kept = 0;
@@ -1658,9 +1623,6 @@ fn sanitize_node(node: &mut Node, depth: usize, budgets: &mut Budgets, taken: &m
         {
             keys.truncate(kept);
         }
-        if let Node::Flex { items, .. } = node {
-            items.truncate(kept);
-        }
         return;
     }
     for child in node.children_mut() {
@@ -1674,8 +1636,7 @@ fn sanitize_node(node: &mut Node, depth: usize, budgets: &mut Budgets, taken: &m
 
 fn lengths_mut(node: &mut Node) -> Vec<&mut Length> {
     let slots: Vec<&mut Option<Length>> = match node {
-        Node::Container { width, height, .. }
-        | Node::Linear { width, height, .. }
+        Node::Linear { width, height, .. }
         | Node::Grid { width, height, .. }
         | Node::KeyedColumn { width, height, .. }
         | Node::Pin { width, height, .. }
@@ -1693,16 +1654,16 @@ fn lengths_mut(node: &mut Node) -> Vec<&mut Length> {
         Node::Progress { length, girth, .. } => vec![length, girth],
         Node::Editor { height, .. } => vec![height],
         Node::RichText { width, .. }
-        | Node::Text { width, .. }
         | Node::Input { width, .. }
         | Node::Toggle { width, .. }
         | Node::Radio { width, .. }
         | Node::PickList { width, .. }
         | Node::ComboBox { width, .. } => vec![width],
-        Node::Qr { .. }
+        Node::Container { .. }
+        | Node::Text { .. }
+        | Node::Qr { .. }
         | Node::Rule { .. }
         | Node::Lazy { .. }
-        | Node::Flex { .. }
         | Node::Sensor { .. }
         | Node::ResizeHandle { .. }
         | Node::MouseArea { .. }
@@ -1908,12 +1869,12 @@ fn decode_children<'de, D: serde::Deserializer<'de>>(
 }
 
 pub fn encode<T: Serialize>(value: &T) -> Vec<u8> {
-    bincode::serialize(value).expect("wire types are plain data")
+    rmp_serde::to_vec_named(value).expect("wire types are plain data")
 }
 
 /// How many bytes [`encode`] would write, without writing them.
 pub fn encoded_size<T: Serialize>(value: &T) -> u64 {
-    bincode::serialized_size(value).expect("wire types are plain data")
+    encode(value).len() as u64
 }
 
 pub fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, String> {
@@ -1921,7 +1882,7 @@ pub fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, String> {
     surface::reset_decode_budget();
     editor_transaction::reset_decode_budget();
     canvas::reset_decode_budget();
-    bincode::deserialize(bytes).map_err(|error| error.to_string())
+    rmp_serde::from_slice(bytes).map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

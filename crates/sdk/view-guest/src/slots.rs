@@ -20,15 +20,12 @@ struct Tables {
     event_interest: crate::wire::events::Interest,
     messages: Vec<Rc<dyn Any>>,
     handlers: Vec<Rc<dyn Any>>,
+    clicks: Vec<Rc<dyn Fn(&gpui::ClickEvent, &mut crate::Window, &mut crate::App)>>,
     pictures: HashSet<(bool, u64)>,
 }
 
 #[derive(Clone, Default)]
-pub(crate) struct Context(Rc<RefCell<Tables>>);
-
-thread_local! {
-    static CURRENT: RefCell<Context> = RefCell::new(Context::default());
-}
+pub struct Context(Rc<RefCell<Tables>>);
 
 impl Context {
     pub(crate) fn with_macos(_macos: bool) -> Self {
@@ -43,38 +40,25 @@ impl Context {
         context
     }
 
-    pub(crate) fn enter(&self) -> Guard {
-        Guard(CURRENT.with(|current| current.replace(self.clone())))
+    fn tables(&self) -> Rc<RefCell<Tables>> {
+        self.0.clone()
     }
-}
-
-pub(crate) struct Guard(Context);
-impl Drop for Guard {
-    fn drop(&mut self) {
-        CURRENT.with(|current| {
-            current.replace(self.0.clone());
-        });
-    }
-}
-
-fn tables() -> Rc<RefCell<Tables>> {
-    CURRENT.with_borrow(|current| current.0.clone())
 }
 
 /// Returns a picture hash and its bytes the first time this driver sends it.
-pub fn picture(bytes: impl AsRef<[u8]>) -> (u64, Option<Vec<u8>>) {
+pub fn picture(context: &Context, bytes: impl AsRef<[u8]>) -> (u64, Option<Vec<u8>>) {
     use std::hash::{Hash, Hasher};
     let bytes = bytes.as_ref();
     let mut hasher = std::hash::DefaultHasher::new();
     bytes.hash(&mut hasher);
     let hash = hasher.finish();
-    let first = tables().borrow_mut().pictures.insert((false, hash));
+    let first = context.0.borrow_mut().pictures.insert((false, hash));
     (hash, first.then(|| bytes.to_vec()))
 }
 
 /// Registers a message in the frame currently being built.
-pub fn message<M: 'static>(message: M) -> u32 {
-    let tables = tables();
+pub fn message<M: 'static>(context: &Context, message: M) -> u32 {
+    let tables = context.tables();
     let mut tables = tables.borrow_mut();
     let message: Rc<dyn Any> = Rc::new(message);
     let index = u32::try_from(tables.messages.len()).expect("too many message routes");
@@ -83,8 +67,11 @@ pub fn message<M: 'static>(message: M) -> u32 {
 }
 
 /// A typed handler returns None for a value it cannot route.
-pub fn handler<A: 'static, M: 'static>(handler: Box<dyn Fn(A) -> Option<M>>) -> u32 {
-    let tables = tables();
+pub fn handler<A: 'static, M: 'static>(
+    context: &Context,
+    handler: Box<dyn Fn(A) -> Option<M>>,
+) -> u32 {
+    let tables = context.tables();
     let mut tables = tables.borrow_mut();
     let handler: Rc<dyn Any> = Rc::new(handler);
     let index = u32::try_from(tables.handlers.len()).expect("too many handler routes");
@@ -92,8 +79,8 @@ pub fn handler<A: 'static, M: 'static>(handler: Box<dyn Fn(A) -> Option<M>>) -> 
     index
 }
 
-pub(crate) fn reset() {
-    let tables = tables();
+pub(crate) fn reset(context: &Context) {
+    let tables = context.tables();
     let old = {
         let mut tables = tables.borrow_mut();
         (
@@ -104,8 +91,8 @@ pub(crate) fn reset() {
     drop(old);
 }
 
-pub(crate) fn take_message<M: Clone + 'static>(index: u32) -> Option<M> {
-    let tables = tables();
+pub(crate) fn take_message<M: Clone + 'static>(context: &Context, index: u32) -> Option<M> {
+    let tables = context.tables();
     let message = {
         let tables = tables.borrow();
         tables.messages.get(index as usize).cloned()?
@@ -113,8 +100,12 @@ pub(crate) fn take_message<M: Clone + 'static>(index: u32) -> Option<M> {
     message.downcast_ref::<M>().cloned()
 }
 
-pub(crate) fn run_handler<A: 'static, M: 'static>(index: u32, value: A) -> Option<M> {
-    let tables = tables();
+pub(crate) fn run_handler<A: 'static, M: 'static>(
+    context: &Context,
+    index: u32,
+    value: A,
+) -> Option<M> {
+    let tables = context.tables();
     let handler = {
         let tables = tables.borrow();
         tables.handlers.get(index as usize).cloned()?
@@ -122,16 +113,41 @@ pub(crate) fn run_handler<A: 'static, M: 'static>(index: u32, value: A) -> Optio
     handler.downcast_ref::<Box<dyn Fn(A) -> Option<M>>>()?(value)
 }
 
-pub(crate) fn event_interest() -> crate::wire::events::Interest {
-    tables().borrow().event_interest
+pub(crate) fn event_interest(context: &Context) -> crate::wire::events::Interest {
+    context.0.borrow().event_interest
 }
 
-pub(crate) fn mouse_interest() -> bool {
-    tables().borrow().mouse_interest
+pub(crate) fn mouse_interest(context: &Context) -> bool {
+    context.0.borrow().mouse_interest
 }
 
-pub(crate) fn editor_response(response: crate::wire::EditorResponse) {
-    let tables = tables();
+pub(crate) fn click(
+    context: &Context,
+    listener: impl Fn(&gpui::ClickEvent, &mut crate::Window, &mut crate::App) + 'static,
+) -> u32 {
+    let mut tables = context.0.borrow_mut();
+    let index = u32::try_from(tables.clicks.len()).expect("too many click routes");
+    tables.clicks.push(Rc::new(listener));
+    index
+}
+
+pub(crate) fn run_click(
+    context: &Context,
+    index: u32,
+    window: &mut crate::Window,
+    app: &mut crate::App,
+) -> bool {
+    let listener = context.0.borrow().clicks.get(index as usize).cloned();
+    if let Some(listener) = listener {
+        listener(&gpui::ClickEvent::default(), window, app);
+        true
+    } else {
+        false
+    }
+}
+
+pub(crate) fn editor_response(context: &Context, response: crate::wire::EditorResponse) {
+    let tables = context.tables();
     let mut tables = tables.borrow_mut();
     tables.editor_pending.retain(|id| {
         !(id.instance == response.id.instance
@@ -143,23 +159,23 @@ pub(crate) fn editor_response(response: crate::wire::EditorResponse) {
 }
 /// A native commit may have no decision, but an outstanding decision must
 /// match its complete attempt/version before any state or route is accepted.
-pub(crate) fn editor_request_current(id: &crate::wire::EditorTransactionId) -> bool {
-    tables().borrow().editor_pending.iter().all(|pending| {
+pub(crate) fn editor_request_current(context: &Context, id: &crate::wire::EditorTransactionId) -> bool {
+    context.0.borrow().editor_pending.iter().all(|pending| {
         pending.instance != id.instance
             || pending.document != id.document
             || pending.sequence != id.sequence
             || pending.attempt <= id.attempt
     })
 }
-pub(crate) fn editor_matches_pending(id: &crate::wire::EditorTransactionId) -> bool {
-    tables().borrow().editor_pending.iter().all(|pending| {
+pub(crate) fn editor_matches_pending(context: &Context, id: &crate::wire::EditorTransactionId) -> bool {
+    context.0.borrow().editor_pending.iter().all(|pending| {
         pending.instance != id.instance
             || pending.document != id.document
             || pending.sequence != id.sequence
             || pending == id
     })
 }
-pub(crate) fn editor_acknowledge(event: &crate::wire::EditorTransactionEvent) {
+pub(crate) fn editor_acknowledge(context: &Context, event: &crate::wire::EditorTransactionEvent) {
     use crate::wire::EditorTransactionEvent;
     let id = match event {
         EditorTransactionEvent::Interaction { id, .. }
@@ -167,7 +183,7 @@ pub(crate) fn editor_acknowledge(event: &crate::wire::EditorTransactionEvent) {
         | EditorTransactionEvent::Fault { id, .. }
         | EditorTransactionEvent::Cancelled { id, .. } => id,
     };
-    let tables = tables();
+    let tables = context.tables();
     let mut tables = tables.borrow_mut();
     tables.editor_pending.retain(|pending| pending != id);
     tables
@@ -175,6 +191,7 @@ pub(crate) fn editor_acknowledge(event: &crate::wire::EditorTransactionEvent) {
         .retain(|response| &response.id != id);
 }
 pub(crate) fn request_editor_mirror(
+    context: &Context,
     request: &crate::wire::EditorRequest,
 ) -> Result<(), crate::wire::editor_document::EditorTransferError> {
     use crate::wire::editor_document::{
@@ -187,7 +204,7 @@ pub(crate) fn request_editor_mirror(
         serial: request.id.sequence,
         attempt: request.id.attempt,
     };
-    let tables = tables();
+    let tables = context.tables();
     let mut tables = tables.borrow_mut();
     if tables.editor_sender.is_some() || !tables.editor_documents.is_empty() {
         return Err(EditorTransferError::Limit);
@@ -217,13 +234,14 @@ pub(crate) fn request_editor_mirror(
 }
 
 pub(crate) fn receive_editor_mirror(
+    context: &Context,
     transfer: &crate::wire::editor_document::EditorTransfer,
 ) -> Result<
     Option<(String, crate::wire::editor_document::EditorDocumentRef)>,
     crate::wire::editor_document::EditorTransferError,
 > {
     use crate::wire::editor_document::EditorTransferError;
-    let tables = tables();
+    let tables = context.tables();
     let mut tables = tables.borrow_mut();
     let Some((id, target, receiver)) = &mut tables.editor_receiver else {
         return Err(EditorTransferError::Identity);
@@ -247,8 +265,11 @@ pub(crate) fn receive_editor_mirror(
     }
 }
 
-pub(crate) fn acknowledge_editor_mirror(id: crate::wire::editor_document::EditorTransferId) {
-    let tables = tables();
+pub(crate) fn acknowledge_editor_mirror(
+    context: &Context,
+    id: crate::wire::editor_document::EditorTransferId,
+) {
+    let tables = context.tables();
     let mut tables = tables.borrow_mut();
     if tables.editor_documents.is_empty() {
         tables
@@ -258,11 +279,12 @@ pub(crate) fn acknowledge_editor_mirror(id: crate::wire::editor_document::Editor
 }
 
 pub(crate) fn start_editor_transfer(
+    context: &Context,
     id: crate::wire::editor_document::EditorTransferId,
     target: crate::wire::editor_document::EditorDocumentRef,
 ) -> Result<(), crate::wire::editor_document::EditorTransferError> {
     use crate::wire::editor_document::{EditorTransferError, EditorTransferSender};
-    let tables = tables();
+    let tables = context.tables();
     let mut tables = tables.borrow_mut();
     if let Some(sender) = &tables.editor_sender {
         return if sender.id() == &id {
@@ -276,11 +298,12 @@ pub(crate) fn start_editor_transfer(
 }
 
 pub(crate) fn editor_document_frame(
+    context: &Context,
     reference: &crate::wire::editor_document::EditorDocumentRef,
     text: &str,
 ) {
     use crate::wire::editor_document::EditorDocumentMessage;
-    let tables = tables();
+    let tables = context.tables();
     let mut tables = tables.borrow_mut();
     if !tables.editor_documents.is_empty() {
         return;
@@ -303,10 +326,11 @@ pub(crate) fn editor_document_frame(
 }
 
 pub(crate) fn editor_document_failure(
+    context: &Context,
     id: crate::wire::editor_document::EditorTransferId,
     reason: crate::wire::editor_document::EditorTransferError,
 ) {
-    let tables = tables();
+    let tables = context.tables();
     let mut tables = tables.borrow_mut();
     if tables.editor_documents.is_empty() {
         tables
@@ -315,8 +339,11 @@ pub(crate) fn editor_document_failure(
     }
 }
 
-pub(crate) fn finish_editor_transfer(id: &crate::wire::editor_document::EditorTransferId) {
-    let tables = tables();
+pub(crate) fn finish_editor_transfer(
+    context: &Context,
+    id: &crate::wire::editor_document::EditorTransferId,
+) {
+    let tables = context.tables();
     let mut tables = tables.borrow_mut();
     if tables
         .editor_receiver
@@ -334,20 +361,21 @@ pub(crate) fn finish_editor_transfer(id: &crate::wire::editor_document::EditorTr
     }
 }
 
-pub(crate) fn editor_transferring() -> bool {
+pub(crate) fn editor_transferring(context: &Context) -> bool {
     {
-        let tables = tables();
-        let tables = tables.borrow();
+        let tables = context.0.borrow();
         tables.editor_sender.is_some() || tables.editor_receiver.is_some()
     }
 }
 
-pub(crate) fn take_editor_documents() -> Vec<crate::wire::editor_document::EditorDocumentMessage> {
-    std::mem::take(&mut tables().borrow_mut().editor_documents)
+pub(crate) fn take_editor_documents(
+    context: &Context,
+) -> Vec<crate::wire::editor_document::EditorDocumentMessage> {
+    std::mem::take(&mut context.0.borrow_mut().editor_documents)
 }
-pub(crate) fn take_editor_responses() -> Vec<crate::wire::EditorResponse> {
+pub(crate) fn take_editor_responses(context: &Context) -> Vec<crate::wire::EditorResponse> {
     use crate::wire::editor_transaction::{MAX_EDITOR_PATCH_BYTES, MAX_EDITOR_RESPONSES};
-    let tables = tables();
+    let tables = context.tables();
     let mut tables = tables.borrow_mut();
     let mut bytes = 0usize;
     let mut count = 0;
@@ -370,11 +398,11 @@ pub(crate) fn take_editor_responses() -> Vec<crate::wire::EditorResponse> {
     }
     tables.editor_responses.drain(..count).collect()
 }
-pub(crate) fn editor_responses_ready() -> bool {
-    !tables().borrow().editor_responses.is_empty()
+pub(crate) fn editor_responses_ready(context: &Context) -> bool {
+    !context.0.borrow().editor_responses.is_empty()
 }
-pub(crate) fn editor_pending() -> bool {
-    !tables().borrow().editor_pending.is_empty()
+pub(crate) fn editor_pending(context: &Context) -> bool {
+    !context.0.borrow().editor_pending.is_empty()
 }
 
 #[cfg(test)]
@@ -470,6 +498,6 @@ mod response_budget_tests {
     }
 }
 
-pub(crate) fn host() -> crate::Host {
-    tables().borrow().host.clone()
+pub(crate) fn host(context: &Context) -> crate::Host {
+    context.0.borrow().host.clone()
 }

@@ -122,6 +122,7 @@ impl<P: 'static> EditorBinding<P> {
     }
     pub fn register<M: 'static>(
         self,
+        context: &slots::Context,
         route: impl Fn(P) -> M + 'static,
         wrap: impl Fn(EditorTransaction<M>) -> M + 'static,
     ) -> wire::EditorBinding {
@@ -134,21 +135,28 @@ impl<P: 'static> EditorBinding<P> {
         });
         // Existing handler storage already supplies bounded frame-local lifetime
         // and memo capture. No second callback registry or copied document.
-        let map =
-            slots::handler::<(), Rc<Callbacks<M>>>(Box::new(move |()| Some(callbacks.clone())));
+        let context = context.clone();
+        let map = slots::handler::<(), Rc<Callbacks<M>>>(
+            &context,
+            Box::new(move |()| Some(callbacks.clone())),
+        );
         let wrap = Rc::new(wrap);
         let request_wrap = wrap.clone();
-        let on_request = slots::handler::<wire::EditorRequest, M>(Box::new(move |request| {
+        let request_context = context.clone();
+        let on_request = slots::handler::<wire::EditorRequest, M>(&context, Box::new(move |request| {
             Some(request_wrap(EditorTransaction {
                 event: Transaction::Request(request),
                 map,
+                context: request_context.clone(),
                 message: std::marker::PhantomData,
             }))
         }));
-        let on_event = slots::handler::<wire::EditorTransactionEvent, M>(Box::new(move |event| {
+        let event_context = context.clone();
+        let on_event = slots::handler::<wire::EditorTransactionEvent, M>(&context, Box::new(move |event| {
             Some(wrap(EditorTransaction {
                 event: Transaction::Event(event),
                 map,
+                context: event_context.clone(),
                 message: std::marker::PhantomData,
             }))
         }));
@@ -162,6 +170,7 @@ impl<P: 'static> EditorBinding<P> {
 }
 impl EditorBinding<()> {
     pub fn plain<M: 'static>(
+        context: &slots::Context,
         wrap: impl Fn(EditorTransaction<M>) -> M + 'static,
     ) -> wire::EditorBinding {
         let mut binding = EditorBinding::<M>::new(
@@ -169,7 +178,7 @@ impl EditorBinding<()> {
             |_| EditorDecision::DefaultEditorAction,
             |_| None,
         )
-        .register(std::convert::identity, wrap);
+        .register(context, std::convert::identity, wrap);
         binding.authored = false;
         binding
     }
@@ -182,6 +191,7 @@ enum Transaction {
 pub struct EditorTransaction<M> {
     event: Transaction,
     map: u32,
+    context: slots::Context,
     message: std::marker::PhantomData<fn() -> M>,
 }
 impl<M> Clone for EditorTransaction<M> {
@@ -189,6 +199,7 @@ impl<M> Clone for EditorTransaction<M> {
         Self {
             event: self.event.clone(),
             map: self.map,
+            context: self.context.clone(),
             message: std::marker::PhantomData,
         }
     }
@@ -202,17 +213,18 @@ impl<M> std::fmt::Debug for EditorTransaction<M> {
 }
 impl<M: 'static> EditorTransaction<M> {
     pub fn apply(self, editor: &mut Editor) -> Option<M> {
-        let callbacks = slots::run_handler::<(), Rc<Callbacks<M>>>(self.map, ())?;
+        let callbacks = slots::run_handler::<(), Rc<Callbacks<M>>>(&self.context, self.map, ())?;
         match self.event {
             Transaction::Request(request) => {
-                if !slots::editor_request_current(&request.id) {
+                if !slots::editor_request_current(&self.context, &request.id) {
                     return None;
                 }
                 if editor.document_reference(request.id.document.clone()) != request.state {
                     if request.state.reset == editor.reset_revision()
-                        && let Err(reason) = slots::request_editor_mirror(&request)
+                        && let Err(reason) = slots::request_editor_mirror(&self.context, &request)
                     {
                         slots::editor_document_failure(
+                            &self.context,
                             wire::editor_document::EditorTransferId {
                                 instance: request.id.instance,
                                 document: request.id.document.clone(),
@@ -266,7 +278,7 @@ impl<M: 'static> EditorTransaction<M> {
                             })
                         }),
                 };
-                slots::editor_response(wire::EditorResponse {
+                slots::editor_response(&self.context, wire::EditorResponse {
                     id: request.id,
                     decision,
                 });
@@ -279,7 +291,7 @@ impl<M: 'static> EditorTransaction<M> {
                     | wire::EditorTransactionEvent::Fault { id, .. }
                     | wire::EditorTransactionEvent::Cancelled { id, .. } => id,
                 };
-                if !slots::editor_matches_pending(id) {
+                if !slots::editor_matches_pending(&self.context, id) {
                     return None;
                 }
                 let mapped = match &event {
@@ -349,7 +361,7 @@ impl<M: 'static> EditorTransaction<M> {
                         (callbacks.on_event)(EditorTransactionEvent::Cancelled { id })
                     }
                 };
-                slots::editor_acknowledge(&event);
+                slots::editor_acknowledge(&self.context, &event);
                 mapped
             }
         }

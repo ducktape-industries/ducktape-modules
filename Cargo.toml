@@ -34,6 +34,7 @@ members = [
     "crates/sdk/design",
     "crates/sdk/view-wire",
     "crates/sdk/view-guest",
+    "crates/sdk/view-guest-derive",
     "crates/modules",
     "crates/app/chat",
     "crates/app/chat-view",
@@ -59,6 +60,7 @@ design = { path = "crates/sdk/design" }
 view-wire = { path = "crates/sdk/view-wire" }
 view-guest = { path = "crates/sdk/view-guest" }
 ducktape-view-guest = { path = "crates/sdk/view-guest", package = "view-guest" }
+gpui = { package = "gpui-pre", git = "https://github.com/ducktape-industries/gpui-pre", rev = "021b436617db8bf377ad384b464cd1b34692f35e", default-features = false }
 modules = { path = "crates/modules" }
 gitcore = { path = "crates/app/gitcore" }
 forge = { path = "crates/app/forge" }
