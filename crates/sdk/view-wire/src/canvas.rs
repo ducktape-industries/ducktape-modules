@@ -332,6 +332,7 @@ mod tests {
             width: None,
             height: None,
             commands,
+            style: Default::default(),
         }
     }
     fn path(parts: usize) -> CanvasCommand {

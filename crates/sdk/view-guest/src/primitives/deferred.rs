@@ -42,4 +42,3 @@ impl IntoElement for Deferred {
 }
 
 impl gpui::prelude::FluentBuilder for Deferred {}
-

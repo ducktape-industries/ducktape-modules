@@ -65,8 +65,7 @@ pub trait InteractiveElement: Sized {
         group: impl Into<SharedString>,
         f: impl FnOnce(StyleRefinement) -> StyleRefinement,
     ) -> Self {
-        self.interactivity().group_hover =
-            Some((group.into(), f(StyleRefinement::default())));
+        self.interactivity().group_hover = Some((group.into(), f(StyleRefinement::default())));
         self
     }
 }
@@ -240,8 +239,7 @@ pub trait StatefulInteractiveElement: InteractiveElement {
         group: impl Into<SharedString>,
         f: impl FnOnce(StyleRefinement) -> StyleRefinement,
     ) -> Self {
-        self.interactivity().group_active =
-            Some((group.into(), f(StyleRefinement::default())));
+        self.interactivity().group_active = Some((group.into(), f(StyleRefinement::default())));
         self
     }
 
@@ -252,6 +250,5 @@ pub trait StatefulInteractiveElement: InteractiveElement {
 }
 
 impl<T: InteractiveElement> StatefulInteractiveElement for Stateful<T> {}
-
 
 impl<E> gpui::prelude::FluentBuilder for Stateful<E> {}

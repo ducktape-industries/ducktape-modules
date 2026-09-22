@@ -1,5 +1,5 @@
 use crate::{AnyElement, IntoElement, Lowering, ParentElement, wire};
-use gpui::{Anchor, AnchoredFitMode, AnchoredPositionMode, Edges, Pixels, Point};
+use gpui::{Anchor, AnchoredPositionMode, Edges, Pixels, Point};
 
 /// A native GPUI anchored element lowered as a bounded host primitive.
 pub struct Anchored {

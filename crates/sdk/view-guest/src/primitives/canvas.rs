@@ -39,4 +39,3 @@ impl IntoElement for Canvas {
 }
 
 impl gpui::prelude::FluentBuilder for Canvas {}
-

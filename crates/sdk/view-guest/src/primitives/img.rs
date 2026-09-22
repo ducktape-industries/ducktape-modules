@@ -1,6 +1,10 @@
-use crate::interactivity::{Interactivity, InteractiveElement, Stateful, StatefulInteractiveElement};
+use crate::interactivity::{
+    InteractiveElement, Interactivity, Stateful, StatefulInteractiveElement,
+};
 use crate::{IntoElement, Lowering, wire};
-use gpui::{ImageSource as GpuiImageSource, ObjectFit, RenderImage, Resource, Styled, StyleRefinement};
+use gpui::{
+    ImageSource as GpuiImageSource, ObjectFit, RenderImage, Resource, StyleRefinement, Styled,
+};
 use std::sync::Arc;
 
 pub use gpui::ImageSource;
@@ -34,8 +38,8 @@ pub fn img(source: impl Into<ImageSource>) -> Img {
 impl Img {
     pub fn extensions() -> &'static [&'static str] {
         &[
-            "avif", "jpg", "jpeg", "png", "gif", "webp", "tif", "tiff", "tga", "dds", "bmp",
-            "ico", "hdr", "exr", "pbm", "pam", "ppm", "pgm", "ff", "farbfeld", "qoi", "svg",
+            "avif", "jpg", "jpeg", "png", "gif", "webp", "tif", "tiff", "tga", "dds", "bmp", "ico",
+            "hdr", "exr", "pbm", "pam", "ppm", "pgm", "ff", "farbfeld", "qoi", "svg",
         ]
     }
 }

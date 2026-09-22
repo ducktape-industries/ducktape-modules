@@ -1,4 +1,4 @@
-use crate::interactivity::{Interactivity, InteractiveElement, StatefulInteractiveElement};
+use crate::interactivity::{InteractiveElement, Interactivity, StatefulInteractiveElement};
 use crate::{IntoElement, Lowering, wire};
 use gpui::{SharedString, StyleRefinement, Styled};
 

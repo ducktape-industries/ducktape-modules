@@ -124,7 +124,7 @@ mod surface;
 pub use surface::{MAX_SURFACE_DEPTH, MAX_SURFACE_VALUES, SurfaceValue, sanitize_surface_event};
 
 mod node;
-pub use node::{ButtonContent, Live, Node, Role};
+pub use node::{Anchor, AnchoredFitMode, AnchoredPositionMode, ButtonContent, Live, Node, Role};
 mod accessibility;
 pub use accessibility::{Fault, FaultKind, accessibility_faults};
 mod patch;
@@ -1313,8 +1313,14 @@ fn sanitize_node(
             }
         }
 
-        Node::Canvas { key, commands, .. } => {
+        Node::Canvas {
+            key,
+            style,
+            commands,
+            ..
+        } => {
             claim(key, taken);
+            style_sanitize::sanitize(style);
             canvas::sanitize(commands, budgets);
         }
         Node::When { key, condition, .. } => {
