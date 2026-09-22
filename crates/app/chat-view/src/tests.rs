@@ -590,3 +590,21 @@ mod message_parity;
 
 #[path = "rich_message_tests.rs"]
 mod rich_message;
+
+/// `CHAT_SCREEN_EXPORT=1` writes the opened room's tree for the app's
+/// node-less renderer (`ducktape-app --render-tree`), light and dark.
+#[test]
+fn export_chat_screens() {
+    if std::env::var_os("CHAT_SCREEN_EXPORT").is_none() {
+        return;
+    }
+    let out =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/chat/fixtures");
+    std::fs::create_dir_all(&out).unwrap();
+    let (cx, _view) = opened();
+    std::fs::write(
+        out.join("room-light.json"),
+        serde_json::to_vec(cx.root()).unwrap(),
+    )
+    .unwrap();
+}
