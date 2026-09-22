@@ -18,8 +18,8 @@ pub struct Rig {
 
 impl Rig {
     pub fn start(bounds: Bounds, hash: HashKind) -> Rig {
-        let sandbox = MemorySandbox::default();
-        forge::init(&sandbox, &abi::encode(&bounds)).unwrap();
+        let mut sandbox = MemorySandbox::default();
+        forge::init(&mut sandbox, &abi::encode(&bounds)).unwrap();
         let mut rig = Rig {
             sandbox,
             height: 0,
@@ -54,13 +54,13 @@ impl Rig {
     // ponytail: no rollback on a refused op; the story never refuses one.
     pub fn execute(&mut self, op: &Op) -> Result<Vec<u8>, abi::Refusal> {
         self.advance();
-        forge::execute(&self.sandbox, &self.env(), &abi::encode(op))?;
-        Ok(self.sandbox.take_output())
+        let env = self.env();
+        forge::execute(&mut self.sandbox, &env, &abi::encode(op))?;
+        Ok(self.sandbox.forge.take_output())
     }
 
-    pub fn query(&self, query: &Query) -> Vec<u8> {
-        forge::query(&self.sandbox, &self.env(), &abi::encode(query)).unwrap();
-        self.sandbox.take_response()
+    pub fn query(&self, query: &Query) -> Result<Vec<u8>, abi::Refusal> {
+        forge::query(&self.sandbox, &self.env(), &abi::encode(query))
     }
 
     pub fn chat_execute(&mut self, party: chat::Party, msg: chat::ChatMsg) {
@@ -267,8 +267,7 @@ pub fn change(n: u64) -> Query {
     Query::Change {
         repo: REPO.into(),
         n,
-        cursor: None,
-        limit: 128,
+        page: Page::first(128),
     }
 }
 
@@ -276,8 +275,7 @@ pub fn changes() -> Query {
     Query::Changes {
         repo: REPO.into(),
         filter: ChangeFilter::default(),
-        cursor: None,
-        limit: 128,
+        page: Page::first(128),
     }
 }
 

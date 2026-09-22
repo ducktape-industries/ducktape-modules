@@ -3,8 +3,8 @@ use common::*;
 
 #[test]
 fn advertisement_lists_refs_for_receive_and_capabilities_for_upload() {
-    let sandbox = founded();
-    create(&sandbox, "project", HashKind::Sha1);
+    let mut sandbox = founded();
+    create(&mut sandbox, "project", HashKind::Sha1);
     let empty = ask(
         &sandbox,
         &Query::Advertise {
@@ -23,7 +23,7 @@ fn advertisement_lists_refs_for_receive_and_capabilities_for_upload() {
     let mut source = MemoryObjects::new(Hash::Sha1);
     let tip = file_commit(&mut source, &[], 1, &[("a", b"1")]);
     push(
-        &sandbox,
+        &mut sandbox,
         OWNER,
         "project",
         &[(Hash::Sha1.zero(), tip, "refs/heads/main")],
@@ -67,14 +67,14 @@ fn advertisement_lists_refs_for_receive_and_capabilities_for_upload() {
 
 #[test]
 fn ls_refs_and_fetch_serve_what_was_pushed() {
-    let sandbox = founded();
-    create(&sandbox, "project", HashKind::Sha1);
+    let mut sandbox = founded();
+    create(&mut sandbox, "project", HashKind::Sha1);
     let mut source = MemoryObjects::new(Hash::Sha1);
     let root = file_commit(&mut source, &[], 1, &[("a", b"1")]);
     let tip = file_commit(&mut source, &[root], 2, &[("a", b"2")]);
     let zero = Hash::Sha1.zero();
     push(
-        &sandbox,
+        &mut sandbox,
         OWNER,
         "project",
         &[(zero, tip, "refs/heads/main"), (zero, root, "refs/tags/v0")],
@@ -146,8 +146,8 @@ fn ls_refs_and_fetch_serve_what_was_pushed() {
 
 #[test]
 fn an_upload_session_ended_by_a_flush_answers_nothing() {
-    let sandbox = founded();
-    create(&sandbox, "project", HashKind::Sha1);
+    let mut sandbox = founded();
+    create(&mut sandbox, "project", HashKind::Sha1);
     for request in [pktline::flush().to_vec(), Vec::new()] {
         let ended = ask(
             &sandbox,

@@ -4,17 +4,29 @@ use abi::{Env, Origin, Refusal};
 use gitcore::server::{Policy, RefUpdate};
 use gitcore::{Error, Limits, server};
 
+use store::{Reads, Writes, already_exists, capacity, decoded, invalid, not_found, unauthorized};
+
 use crate::contract::{Bounds, Op, Repo, Settings, valid_repo_name};
-use crate::refuse::{already_exists, capacity, invalid, storage, unauthorized};
 use crate::repo::{
     delete_ref, is_writer, load_bounds, load_refs, load_repo, repo_exists, repo_hash, save_bounds,
     save_repo, set_ref, writer_key,
 };
-use crate::sandbox::Sandbox;
-use crate::store::Store;
+use crate::store::Writing;
 
-pub fn init<S: Sandbox>(sandbox: &S, params: &[u8]) -> Result<(), Refusal> {
-    let bounds: Bounds = abi::decode(params)?;
+pub const PROGRAM: &str = "forge";
+
+/// Stored state that is not what forge wrote: an operator's problem.
+pub(crate) fn storage(sentence: impl Into<String>) -> Refusal {
+    Refusal::new(abi::reason::CORRUPT, sentence)
+}
+
+/// A different serving node or object replication can satisfy this query.
+pub(crate) fn object_not_held(oid: impl std::fmt::Display) -> Refusal {
+    not_found(format!("object {oid} is not held by this node"))
+}
+
+pub fn init<S: Writes>(sandbox: &mut S, params: &[u8]) -> Result<(), Refusal> {
+    let bounds: Bounds = decoded(PROGRAM, "Bounds", params)?;
     if bounds.page_size == 0
         || bounds.log_walk == 0
         || bounds.tree_walk == 0
@@ -30,14 +42,14 @@ pub fn init<S: Sandbox>(sandbox: &S, params: &[u8]) -> Result<(), Refusal> {
     Ok(())
 }
 
-pub fn execute<S: Sandbox>(sandbox: &S, env: &Env, payload: &[u8]) -> Result<(), Refusal> {
+pub fn execute<S: Writes>(sandbox: &mut S, env: &Env, payload: &[u8]) -> Result<(), Refusal> {
     let Origin::External(actor) = &env.origin else {
         return Err(unauthorized("a repository op is signed by a member key"));
     };
     if actor.is_empty() {
         return Err(unauthorized("an external origin carries a key"));
     }
-    let op: Op = abi::decode(payload)?;
+    let op: Op = decoded(PROGRAM, "Op", payload)?;
     let name = match &op {
         Op::Create { repo, .. }
         | Op::Configure { repo, .. }
@@ -64,8 +76,8 @@ pub fn execute<S: Sandbox>(sandbox: &S, env: &Env, payload: &[u8]) -> Result<(),
     Ok(())
 }
 
-fn create<S: Sandbox>(
-    sandbox: &S,
+fn create<S: Writes>(
+    sandbox: &mut S,
     actor: &[u8],
     name: &str,
     hash: abi::HashKind,
@@ -89,8 +101,8 @@ fn create<S: Sandbox>(
     Ok(())
 }
 
-fn configure<S: Sandbox>(
-    sandbox: &S,
+fn configure<S: Writes>(
+    sandbox: &mut S,
     actor: &[u8],
     name: &str,
     settings: Settings,
@@ -106,7 +118,7 @@ fn configure<S: Sandbox>(
     Ok(())
 }
 
-fn grant<S: Sandbox>(sandbox: &S, actor: &[u8], name: &str, key: &[u8]) -> Result<(), Refusal> {
+fn grant<S: Writes>(sandbox: &mut S, actor: &[u8], name: &str, key: &[u8]) -> Result<(), Refusal> {
     let repo = load_repo(sandbox, name)?;
     require_owner(&repo, actor)?;
     require_key(key)?;
@@ -114,7 +126,7 @@ fn grant<S: Sandbox>(sandbox: &S, actor: &[u8], name: &str, key: &[u8]) -> Resul
     Ok(())
 }
 
-fn revoke<S: Sandbox>(sandbox: &S, actor: &[u8], name: &str, key: &[u8]) -> Result<(), Refusal> {
+fn revoke<S: Writes>(sandbox: &mut S, actor: &[u8], name: &str, key: &[u8]) -> Result<(), Refusal> {
     let repo = load_repo(sandbox, name)?;
     require_owner(&repo, actor)?;
     require_key(key)?;
@@ -122,7 +134,12 @@ fn revoke<S: Sandbox>(sandbox: &S, actor: &[u8], name: &str, key: &[u8]) -> Resu
     Ok(())
 }
 
-fn push<S: Sandbox>(sandbox: &S, actor: &[u8], name: &str, request: &[u8]) -> Result<(), Refusal> {
+fn push<S: Writes>(
+    sandbox: &mut S,
+    actor: &[u8],
+    name: &str,
+    request: &[u8],
+) -> Result<(), Refusal> {
     let repo = load_repo(sandbox, name)?;
     require_writer(sandbox, name, &repo, actor)?;
     let bounds = load_bounds(sandbox)?;
@@ -132,7 +149,7 @@ fn push<S: Sandbox>(sandbox: &S, actor: &[u8], name: &str, request: &[u8]) -> Re
         allow_force: repo.settings.allow_force,
         allow_delete: repo.settings.allow_delete,
     };
-    let mut store = Store::new(sandbox, hash);
+    let mut store = Writing::new(sandbox, hash);
     let outcome = server::push(
         &mut store,
         &refs,
@@ -142,7 +159,7 @@ fn push<S: Sandbox>(sandbox: &S, actor: &[u8], name: &str, request: &[u8]) -> Re
         &policy,
         cap(bounds.push_walk),
     )
-    .map_err(|error| refusal_of(&store, error))?;
+    .map_err(|error| store.refused.take().unwrap_or_else(|| refusal_of(error)))?;
     let mut repo = repo;
     for (reference, update) in &outcome.moves {
         match update {
@@ -168,7 +185,7 @@ fn require_owner(repo: &Repo, actor: &[u8]) -> Result<(), Refusal> {
     Ok(())
 }
 
-pub(crate) fn require_writer<S: Sandbox>(
+pub(crate) fn require_writer<S: Reads>(
     sandbox: &S,
     name: &str,
     repo: &Repo,
@@ -203,15 +220,13 @@ pub fn cap(bound: u64) -> usize {
     usize::try_from(bound).unwrap_or(usize::MAX)
 }
 
-pub fn refusal_of<S: Sandbox>(store: &Store<'_, S>, error: Error) -> Refusal {
+pub fn refusal_of(error: Error) -> Refusal {
     match error {
-        Error::Storage => store
-            .refusal()
-            .unwrap_or_else(|| storage("the blob store refused a write")),
+        Error::Storage => storage("the blob store refused a write"),
         Error::CapReached | Error::ObjectTooLarge => {
             capacity("query or operation exceeds its configured work/byte bound")
         }
-        Error::MissingObject(id) | Error::MissingBase(id) => crate::refuse::object_not_held(id),
+        Error::MissingObject(id) | Error::MissingBase(id) => object_not_held(id),
         other => invalid(other.to_string()),
     }
 }

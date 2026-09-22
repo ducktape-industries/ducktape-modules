@@ -1,19 +1,18 @@
 //! Structured hunks are built from git::diff's edit ranges, never parsed from patch text.
-use crate::Sandbox;
 use crate::contract::*;
 use crate::ops::cap;
-use crate::paging::Paging;
 use crate::reads::{Reading, entry_kind};
 use abi::Refusal;
 use gitcore::{Mode, Oid, diff};
+use store::{Reads, invalid};
 
-pub fn query<S: Sandbox>(
+pub fn query<S: Reads>(
     r: &Reading<'_, S>,
     height: u64,
     base: &Option<String>,
     head: &str,
     path: Option<&[u8]>,
-    paging: &Paging,
+    paging: &Page,
 ) -> Result<Reply, Refusal> {
     if let Some(path) = path {
         crate::changes::path(path, false)?;
@@ -25,12 +24,7 @@ pub fn query<S: Sandbox>(
         .into_iter()
         .filter(|c| path.is_none_or(|p| c.path == p))
         .collect();
-    let selected = paging.slice(&changes)?;
-    let items = selected
-        .items
-        .iter()
-        .map(|c| file(r, c))
-        .collect::<Result<_, _>>()?;
+    let page = paging.slice(height, &changes)?.try_map(|c| file(r, &c))?;
     Ok(Reply::Diff {
         height,
         base: base
@@ -39,14 +33,11 @@ pub fn query<S: Sandbox>(
             .transpose()?,
         head: r.oid(head)?.to_hex(),
         total_files: changes.len() as u64,
-        page: Page {
-            items,
-            next: selected.next,
-        },
+        page,
     })
 }
 
-fn file<S: Sandbox>(r: &Reading<'_, S>, c: &diff::Change) -> Result<FileDiff, Refusal> {
+fn file<S: Reads>(r: &Reading<'_, S>, c: &diff::Change) -> Result<FileDiff, Refusal> {
     use diff::ChangeKind as K;
     let (old, new, status) = match c.kind {
         K::Added { mode, id } => (None, Some((mode, id)), FileStatus::Added),
@@ -83,7 +74,7 @@ fn file<S: Sandbox>(r: &Reading<'_, S>, c: &diff::Change) -> Result<FileDiff, Re
             Some((_, id)) => {
                 let header = r.result(r.store.header(&id))?;
                 if header.kind != "blob" {
-                    return Err(crate::refuse::invalid("tree leaf must name a blob"));
+                    return Err(invalid("tree leaf must name a blob"));
                 }
                 Ok(header.len)
             }

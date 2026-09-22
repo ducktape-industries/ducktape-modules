@@ -4,10 +4,11 @@
 shape, `name offset len request-hex sha256` — the request is the borsh `Query`
 or `Op` that produced the bytes. `loader.rs` reads both and is shared by
 `#[path]` with forge-view's tests. The bytes are what the rules answered over
-`MemorySandbox` in `tests/fixtures.rs`, which is what `forge.wasm` answers over
+`store::Memory` in `tests/fixtures.rs`, which is what `forge.wasm` answers over
 the host: same code, same bytes (checked once against the wasm-on-runtime
 harness captures when the generator moved here). Three shapes carry git's own
-framing, not borsh.
+framing, not borsh; a refusal is the borsh `abi::Refusal` the program answered
+`Err` with, as the host hands it to a view.
 
 Regenerate with `FORGE_REGENERATE_FIXTURES=1 cargo test -p forge --test
 fixtures`; without the variable the test must reproduce the committed bytes.
@@ -16,13 +17,13 @@ fixtures`; without the variable the test must reproduce the committed bytes.
 | --- | --- | --- |
 | `repos-empty` | `Query` → `Reply` | Empty founded program before Create. |
 | `refs-empty` | `Query` → `Reply` | Unborn repository with no refs. |
-| `log-unborn` | `Query` → `Reply` | Typed not_found refusal for an unborn branch. |
+| `log-unborn` | `Query` → `Refusal` | not_found for an unborn branch. |
 | `changes-empty` | `Query` → `Reply` | Empty list before any change exists. |
 | `judgment-empty` | `Query` → `Reply` | No outstanding work. |
 | `repos` | `Query` → `Reply` | Repository list with activity/ref count. |
 | `repo` | `Query` → `Reply` | Settings, owner, bounds, counts and granted writer page. |
 | `refs` | `Query` → `Reply` | First two refs with continuation. |
-| `log` | `Query` → `Reply` | First history page, full message/signatures/parents and cursor. |
+| `log` | `Query` → `Reply` | First history page, full message/signatures/parents and `next`. |
 | `log-next` | `Query` → `Reply` | Root commit on the final history page. |
 | `tree` | `Query` → `Reply` | First root directory page with continuation. |
 | `tree-directory` | `Query` → `Reply` | Lazy child-directory page. |
@@ -50,11 +51,9 @@ fixtures`; without the variable the test must reproduce the committed bytes.
 | `advertise-receive` | `Query` → `git smart HTTP` | Raw receive-pack advertisement for a populated repository. |
 | `advertise-upload` | `Query` → `git smart HTTP` | Raw upload-pack v2 capabilities. |
 | `upload-refs` | `Query` → `git smart HTTP` | Raw v2 ls-refs response, including HEAD. |
-| `refused-object-not-held` | `Query` → `Reply` | Serving node cannot return the requested object. |
-| `refused-not-found` | `Query` → `Reply` | Repository does not exist. |
-| `refused-invalid-input` | `Query` → `Reply` | Zero list limit is refused. |
-| `refs-before-update` | `Query` → `Reply` | One-ref page whose cursor is later invalidated. |
-| `refused-stale` | `Query` → `Reply` | Continuation from an older answering height. |
+| `refused-object-not-held` | `Query` → `Refusal` | Serving node cannot return the requested object (not_found). |
+| `refused-not-found` | `Query` → `Refusal` | Repository does not exist. |
+| `refused-invalid-input` | `Query` → `Refusal` | A list cursor that is not an 8-byte offset. |
 | `op-change-open` | `Op` → `OpReply` | Assigned first item number. |
 | `change` | `Query` → `Reply` | Open record with body, channel, current endpoints and empty review page. |
 | `changes` | `Query` → `Reply` | Change summary list. |
@@ -75,4 +74,4 @@ fixtures`; without the variable the test must reproduce the committed bytes.
 | `op-merge` | `Op` → `OpReply` | CAS merge receipt linked to a change. |
 | `change-merged` | `Query` → `Reply` | Merged record and result OID. |
 | `judgment-conversation` | `Query` → `Reply` | Chat-authored thread with a reply; no forge review ID. |
-| `refused-capacity` | `Query` → `Reply` | Complete commit walk exceeds the founded bound. |
+| `refused-capacity` | `Query` → `Refusal` | Complete commit walk exceeds the founded bound. |
