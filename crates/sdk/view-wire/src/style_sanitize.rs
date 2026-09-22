@@ -242,6 +242,23 @@ pub(crate) fn sanitize(style: &mut StyleRefinement) {
     }
 }
 
+pub(crate) fn sanitize_text(style: &mut gpui::TextStyleRefinement, budgets: &mut crate::Budgets) {
+    let mut refinement = StyleRefinement::default();
+    refinement.text = std::mem::take(style);
+    sanitize(&mut refinement);
+    *style = refinement.text;
+    if let Some(family) = &mut style.font_family {
+        let mut value = family.to_string();
+        crate::spend_text(&mut value, budgets);
+        *family = value.into();
+    }
+    if let Some(fallbacks) = &mut style.font_fallbacks {
+        for family in std::sync::Arc::make_mut(&mut fallbacks.0) {
+            crate::spend_text(family, budgets);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

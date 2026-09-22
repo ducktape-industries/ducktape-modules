@@ -1,5 +1,4 @@
 //! Declarative editor formatting. Document identity is the enclosing Editor node's reference.
-use crate::{Align, LineHeight, NamedFont};
 use serde::{Deserialize, Serialize};
 
 /// Presentation is bounded independently of the canonical document bytes.
@@ -207,12 +206,7 @@ impl EditorAffordances {
 pub struct EditorFormat {
     pub style: gpui::StyleRefinement,
     pub line_style: gpui::StyleRefinement,
-    pub font: Option<NamedFont>,
-    pub size: Option<f32>,
-    pub line_height: Option<LineHeight>,
     pub line_rule: Option<gpui::Hsla>,
-    /// Where every visual line holding this span sits in the column.
-    pub line_align: Option<Align>,
     pub strikethrough: Option<gpui::Hsla>,
     /// Underline color, drawn along the span's baseline.
     pub underline: Option<gpui::Hsla>,
@@ -247,7 +241,7 @@ pub enum PresentationError {
 }
 
 impl EditorPresentation {
-    pub(super) fn sanitize(&mut self, budgets: &mut crate::Budgets) {
+    pub(super) fn sanitize(&mut self, _budgets: &mut crate::Budgets) {
         crate::style_sanitize::sanitize(&mut self.style);
         for format in &mut self.formats {
             crate::style_sanitize::sanitize(&mut format.style);
@@ -261,15 +255,6 @@ impl EditorPresentation {
             .flatten()
             {
                 crate::style_sanitize::sanitize_hsla(color);
-            }
-            if let Some(size) = &mut format.size {
-                *size = crate::bounded(*size).clamp(f32::EPSILON, crate::MAX_TEXT_PIXELS);
-            }
-            if let Some(height) = &mut format.line_height {
-                height.sanitize();
-            }
-            if let Some(font) = &mut format.font {
-                font.sanitize(budgets);
             }
         }
         // Interaction tags/ranges are semantic data: never shorten them.

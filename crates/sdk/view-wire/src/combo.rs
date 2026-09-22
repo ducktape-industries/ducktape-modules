@@ -12,19 +12,15 @@ pub struct ComboOptions {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ComboIcon {
     pub code_point: char,
-    pub font: Option<NamedFont>,
-    pub size: Option<f32>,
+    pub style: gpui::TextStyleRefinement,
     pub spacing: f32,
     pub right: bool,
 }
 impl ComboOptions {
     pub(super) fn sanitize(&mut self, budgets: &mut Budgets) {
         if let Some(icon) = &mut self.icon {
-            pick::text_size(&mut icon.size);
             icon.spacing = bounded(icon.spacing);
-            if let Some(font) = &mut icon.font {
-                font.sanitize(budgets);
-            }
+            style_sanitize::sanitize_text(&mut icon.style, budgets);
         }
     }
 }
@@ -47,8 +43,11 @@ mod tests {
             settings: Box::new(ComboOptions {
                 icon: Some(ComboIcon {
                     code_point: '⌕',
-                    font: None,
-                    size: Some(f32::MAX),
+                    style: {
+                        let mut style = gpui::TextStyleRefinement::default();
+                        style.font_size = Some(gpui::px(f32::MAX).into());
+                        style
+                    },
                     spacing: f32::NAN,
                     right: false,
                 }),
@@ -74,7 +73,7 @@ mod tests {
         assert_eq!(selected, None);
         assert!(placeholder.len() <= MAX_STRING_BYTES);
         let icon = settings.icon.unwrap();
-        assert_eq!(icon.size, Some(MAX_TEXT_PIXELS));
+        assert_eq!(icon.style.font_size, Some(gpui::px(MAX_TEXT_PIXELS).into()));
         assert_eq!(icon.spacing, 0.0);
     }
 }

@@ -19,10 +19,7 @@ pub enum PickHandle {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PickIcon {
     pub code_point: char,
-    pub font: Option<NamedFont>,
-    pub size: Option<f32>,
-    pub line_height: Option<f32>,
-    pub shaping: Option<Shaping>,
+    pub style: gpui::TextStyleRefinement,
 }
 
 pub(super) fn text_size(value: &mut Option<f32>) {
@@ -30,18 +27,9 @@ pub(super) fn text_size(value: &mut Option<f32>) {
         *value = bounded(*value).clamp(f32::EPSILON, MAX_TEXT_PIXELS);
     }
 }
-pub(super) fn line_height(value: &mut Option<f32>) {
-    if let Some(value) = value {
-        *value = bounded(*value).clamp(f32::EPSILON, MAX_PIXELS / MAX_TEXT_PIXELS);
-    }
-}
 impl PickIcon {
     fn sanitize(&mut self, budgets: &mut Budgets) {
-        text_size(&mut self.size);
-        line_height(&mut self.line_height);
-        if let Some(font) = &mut self.font {
-            font.sanitize(budgets);
-        }
+        style_sanitize::sanitize_text(&mut self.style, budgets);
     }
 }
 impl PickOptions {
@@ -63,18 +51,13 @@ mod tests {
     use super::*;
     #[test]
     fn pick_metrics_are_bounded_and_fonts_share_text_budget() {
-        let font = NamedFont {
-            family: FontFamily::Named("ééé".into()),
-            weight: Weight::Normal,
-            stretch: FontStretch::Normal,
-            style: FontStyle::Normal,
-        };
+        let mut style = gpui::TextStyleRefinement::default();
+        style.font_family = Some("ééé".into());
+        style.font_size = Some(gpui::px(f32::MAX).into());
+        style.line_height = Some(gpui::relative(f32::MAX));
         let icon = PickIcon {
             code_point: '▼',
-            font: Some(font.clone()),
-            size: Some(f32::MAX),
-            line_height: Some(f32::MAX),
-            shaping: None,
+            style,
         };
         let mut options = PickOptions {
             handle: Some(PickHandle::Dynamic {
@@ -89,13 +72,13 @@ mod tests {
         let Some(PickHandle::Dynamic { closed, open }) = options.handle else {
             panic!()
         };
-        assert_eq!(closed.size, Some(MAX_TEXT_PIXELS));
-        assert_eq!(closed.line_height, Some(MAX_PIXELS / MAX_TEXT_PIXELS));
         assert_eq!(
-            closed.font.unwrap().family,
-            FontFamily::Named("ééé".into())
+            closed.style.font_size,
+            Some(gpui::px(MAX_TEXT_PIXELS).into())
         );
-        assert_eq!(open.font.unwrap().family, FontFamily::Named("é".into()));
+        assert_eq!(closed.style.line_height, Some(gpui::relative(8.)));
+        assert_eq!(closed.style.font_family, Some("ééé".into()));
+        assert_eq!(open.style.font_family, Some("é".into()));
         assert_eq!(budget.text, 1);
     }
 }

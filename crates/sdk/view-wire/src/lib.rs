@@ -94,12 +94,8 @@ pub use tooltip::TooltipPosition;
 mod qr;
 pub use qr::{MAX_QR_CODES, MAX_QR_PAYLOAD_BYTES, Qr, QrCorrection, QrSize, QrVersion};
 mod rich_text;
-mod text;
 pub use rich_text::{
     HighlightStyle as RichTextHighlightStyle, Runs as RichTextRuns, TextRun as RichTextRun,
-};
-pub use text::{
-    Align, FontFamily, FontStretch, FontStyle, LineHeight, NamedFont, Shaping, Wrapping,
 };
 mod canvas;
 pub mod list;
@@ -506,20 +502,6 @@ pub enum ScrollDirection {
     Vertical,
     Horizontal,
     Both,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub enum Weight {
-    #[default]
-    Normal,
-    Medium,
-    Semibold,
-    Bold,
-    Thin,
-    ExtraLight,
-    Light,
-    ExtraBold,
-    Black,
 }
 
 /// Copied input accessibility and native layout options.
