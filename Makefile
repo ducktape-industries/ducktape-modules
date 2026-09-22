@@ -17,8 +17,9 @@ DUCKTAPE ?= ../ducktape
 # entry is wasm32-gated.
 PROGRAMS := crates/app/chat-program crates/app/forge
 
-# Views are wasm32 cdylibs. Chat rides its program; Settings rides the registry.
-VIEWS := chat-view members-view node-view explorer-view settings-view
+# Views are wasm32 cdylibs. Chat and Forge ride their own programs;
+# Settings rides the registry.
+VIEWS := chat-view members-view node-view explorer-view settings-view forge-view
 
 # What a wasm32 view may link. A crate a view links must never reach the
 # signing/identity graph (blst does not build for wasm32, and a view has no
@@ -58,6 +59,7 @@ wasm-modules-build: wasm-views
 	done
 	$(PACKER) $(PACK_DIR)/chat_program.wasm $(BUILD_TARGET)/wasm32-unknown-unknown/release/chat_view.wasm $(PACK_DIR)/chat_program.wasm
 	$(PACKER) $(PACK_DIR)/module_registry.wasm $(BUILD_TARGET)/wasm32-unknown-unknown/release/settings_view.wasm $(PACK_DIR)/module_registry.wasm
+	$(PACKER) $(PACK_DIR)/forge.wasm $(BUILD_TARGET)/wasm32-unknown-unknown/release/forge_view.wasm $(PACK_DIR)/forge.wasm
 
 ## Commit these bytes as the founding file's program code, including its view.
 wasm-modules: wasm-modules-build
@@ -74,7 +76,7 @@ wasm-modules-check: wasm-modules-build
 	  name=$${entry%%:*}; file=$${entry#*:}/$$name.wasm; \
 	  if ! cmp -s $(PACK_DIR)/$$name.wasm $$file; then echo "stale: $$file"; stale=1; fi; \
 	done; \
-	for name in chat_program module_registry; do \
+	for name in chat_program module_registry forge; do \
 	  $(PACKER) --strip $(PACK_DIR)/$$name.wasm $(PACK_DIR)/$$name.stripped.wasm || exit 1; \
 	  cmp $(PACK_DIR)/$$name.stripped.wasm $(BUILD_TARGET)/wasm32-unknown-unknown/release/$$name.wasm || exit 1; \
 	done; \
@@ -92,7 +94,7 @@ wasm-views:
 	  artifact="$${CARGO_TARGET_DIR:-target}/wasm32-unknown-unknown/release/$$(echo $$v | tr - _).wasm"; \
 	  WASM_OPT="$(WASM_OPT)" tools/optimize-view.sh "$$artifact" || exit 1; \
 	  python3 tools/check-view-abi.py "$$artifact" || exit 1; \
-	  limit=1200000; if [ "$$v" = chat-view ]; then limit=2500000; elif [ "$$v" = settings-view ]; then limit=1300000; fi; \
+	  limit=1200000; case $$v in chat-view|forge-view) limit=2500000;; settings-view) limit=1300000;; esac; \
 	  bytes=$$(wc -c < "$$artifact"); \
 	  echo "$$v: $$bytes bytes (limit $$limit)"; \
 	  test "$$bytes" -le "$$limit" || exit 1; \

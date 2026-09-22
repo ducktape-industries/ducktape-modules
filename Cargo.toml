@@ -39,6 +39,7 @@ members = [
     "crates/modules",
     "crates/app/chat",
     "crates/app/chat-view",
+    "crates/app/forge-view",
     "crates/app/members-view",
     "crates/app/node-view",
     "crates/app/explorer-view",
