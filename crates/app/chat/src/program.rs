@@ -3,43 +3,14 @@
 use crate::{
     AccountRow, ChatMsg, ChatViewQuery, ChatViewReply, Frame, HUDDLE_JOIN_NS, MsgRow, Party,
 };
-use abi::{Entry, Env, Origin, Refusal, Scan, Scheme, reason};
-use guest::{Execute, Program, Query, Reads};
-use module_registry::Page;
+use abi::{Env, Origin, Refusal, Scheme, reason};
+use guest::{Execute, Program, Query};
+use store::{Page, Reads, decoded, invalid};
 
-struct Reader<'a>(&'a Query);
-
-impl crate::Read for Reader<'_> {
-    fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
-        self.0.get(key)
-    }
-    fn scan(&self, scan: Scan) -> Vec<Entry> {
-        self.0.scan(scan)
-    }
-}
-
-struct Writer<'a>(&'a mut Execute);
-
-impl crate::Read for Writer<'_> {
-    fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
-        self.0.get(key)
-    }
-    fn scan(&self, scan: Scan) -> Vec<Entry> {
-        self.0.scan(scan)
-    }
-}
-
-impl crate::Write for Writer<'_> {
-    fn set(&mut self, key: Vec<u8>, value: Vec<u8>) {
-        self.0.set(key, value)
-    }
-    fn delete(&mut self, key: &[u8]) {
-        self.0.delete(key.to_vec())
-    }
-}
+const PROGRAM: &str = "chat";
 
 fn bad(e: impl ToString) -> Refusal {
-    Refusal::new(reason::INVALID_INPUT, e.to_string())
+    invalid(e.to_string())
 }
 
 fn party_of(ctx: &impl Reads, origin: &Origin) -> Result<Party, Refusal> {
@@ -87,12 +58,7 @@ fn node_joins(ctx: &impl Reads, env: &Env, msg: &ChatMsg) -> Result<(), Refusal>
 }
 
 /// Identity's roster as the view reads it: one door, chat's.
-fn accounts(ctx: &impl Reads, limit: Option<usize>) -> Result<ChatViewReply, Refusal> {
-    // The chat roster asks for one bounded page.
-    let page = Page {
-        after: None,
-        limit: Some(crate::page(limit) as u64),
-    };
+fn accounts(ctx: &impl Reads, page: Page) -> Result<ChatViewReply, Refusal> {
     let identity::Reply::Accounts(accounts) = ctx.ask::<identity::Query, identity::Reply>(
         identity::PROGRAM,
         &identity::Query::List { page },
@@ -121,20 +87,20 @@ struct Chat;
 
 impl Program for Chat {
     fn execute(ctx: &mut Execute, env: &Env, payload: &[u8]) -> Result<(), Refusal> {
-        let msg: ChatMsg = borsh::from_slice(payload).map_err(bad)?;
+        let msg: ChatMsg = decoded(PROGRAM, "ChatMsg", payload)?;
         node_joins(ctx, env, &msg)?;
         let frame = Frame {
             party: party_of(ctx, &env.origin)?,
             height: env.height,
             time: env.time,
         };
-        crate::execute(&mut Writer(ctx), &frame, msg)
+        crate::execute(ctx, &frame, msg)
     }
 
-    fn query(ctx: &mut Query, _env: &Env, request: &[u8]) -> Result<(), Refusal> {
-        let q: ChatViewQuery = borsh::from_slice(request).map_err(bad)?;
+    fn query(ctx: &mut Query, env: &Env, request: &[u8]) -> Result<(), Refusal> {
+        let q: ChatViewQuery = decoded(PROGRAM, "ChatViewQuery", request)?;
         let reply = match q {
-            ChatViewQuery::Accounts { limit } => accounts(ctx, limit)?,
+            ChatViewQuery::Accounts { page } => accounts(ctx, page)?,
             ChatViewQuery::ThreadAttention {
                 channel_id,
                 author: Party::Key(key),
@@ -144,7 +110,8 @@ impl Program for Chat {
                 let mut newest = None;
                 for author in [Party::Key(key), resolved] {
                     let reply = crate::query(
-                        &Reader(ctx),
+                        ctx,
+                        env.height,
                         ChatViewQuery::ThreadAttention {
                             channel_id: channel_id.clone(),
                             author,
@@ -160,9 +127,9 @@ impl Program for Chat {
                 }
                 ChatViewReply::Attention(newest)
             }
-            q => crate::query(&Reader(ctx), q)?,
+            q => crate::query(ctx, env.height, q)?,
         };
-        ctx.respond(borsh::to_vec(&reply).expect("a reply serializes"));
+        ctx.reply(&reply);
         Ok(())
     }
 }

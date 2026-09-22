@@ -31,11 +31,12 @@ fn by_program() -> Env {
 /// A consent proof, natively: the signature is the preimage itself, and the
 /// verifier checks it names the consenting key.
 fn memory() -> Memory {
-    let mut store = Memory::default();
-    store.verifier = Some(Box::new(|_, key, namespace, message, signature| {
-        namespace == CONSENT_NAMESPACE && message == signature && !key.is_empty()
-    }));
-    store
+    Memory {
+        verifier: Some(Box::new(|_, key, namespace, message, signature| {
+            namespace == CONSENT_NAMESPACE && message == signature && !key.is_empty()
+        })),
+        ..Memory::default()
+    }
 }
 
 fn run(store: &mut Memory, env: &Env, op: Op) -> Result<u64, abi::Refusal> {

@@ -1,41 +1,6 @@
 use super::*;
-use std::collections::BTreeMap;
 
-#[derive(Default)]
-struct Memory(BTreeMap<Vec<u8>, Vec<u8>>);
-
-impl Read for Memory {
-    fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
-        self.0.get(key).cloned()
-    }
-    fn scan(&self, scan: Scan) -> Vec<Entry> {
-        let mut hits: Vec<Entry> = self
-            .0
-            .iter()
-            .filter(|(key, _)| scan.admits(key))
-            .map(|(key, value)| Entry {
-                key: key.clone(),
-                value: value.clone(),
-            })
-            .collect();
-        if scan.reverse {
-            hits.reverse();
-        }
-        if let Some(limit) = scan.limit {
-            hits.truncate(limit as usize);
-        }
-        hits
-    }
-}
-
-impl Write for Memory {
-    fn set(&mut self, key: Vec<u8>, value: Vec<u8>) {
-        self.0.insert(key, value);
-    }
-    fn delete(&mut self, key: &[u8]) {
-        self.0.remove(key);
-    }
-}
+use store::Memory;
 
 fn frame(party: Party) -> Frame {
     Frame {
@@ -115,49 +80,53 @@ fn a_channel_takes_posts_threads_reactions_and_answers_the_view() {
     )
     .unwrap();
 
-    let ChatViewReply::Roots {
-        roots, has_more, ..
-    } = query(
+    let ChatViewReply::Roots(page) = query(
         &store,
+        9,
         ChatViewQuery::Roots {
             channel_id: "general".into(),
             viewer_handles: vec!["acct:1".into()],
-            before_seq: None,
-            limit: Some(10),
-        },
-    )
-    .unwrap()
-    else {
-        panic!()
-    };
-    assert!(!has_more);
-    assert_eq!(roots.iter().map(|r| r.seq).collect::<Vec<_>>(), vec![1, 3]);
-    assert_eq!(roots[0].reply_count, 1);
-    assert_eq!(roots[0].tags, vec!["world"]);
-    assert!(roots[0].reactions[0].reacted_by_me);
-
-    let ChatViewReply::Thread { root, replies, .. } = query(
-        &store,
-        ChatViewQuery::Thread {
-            channel_id: "general".into(),
-            root_seq: 1,
-            viewer_handles: vec![],
-            after_reply_seq: None,
-            limit: None,
+            page: Page::first(10),
         },
     )
     .unwrap() else {
         panic!()
     };
-    assert_eq!((root.unwrap().seq, replies[0].seq), (1, 2));
+    assert_eq!((page.height, page.next), (9, None));
+    let roots = page.items;
+    assert_eq!(
+        roots.iter().map(|r| r.seq).collect::<Vec<_>>(),
+        vec![3, 1],
+        "newest first"
+    );
+    let roots: Vec<_> = roots.into_iter().rev().collect();
+    assert_eq!(roots[0].reply_count, 1);
+    assert_eq!(roots[0].tags, vec!["world"]);
+    assert!(roots[0].reactions[0].reacted_by_me);
+
+    let ChatViewReply::Thread { root, replies } = query(
+        &store,
+        9,
+        ChatViewQuery::Thread {
+            channel_id: "general".into(),
+            root_seq: 1,
+            viewer_handles: vec![],
+            page: Page::default(),
+        },
+    )
+    .unwrap() else {
+        panic!()
+    };
+    assert_eq!((root.unwrap().seq, replies.items[0].seq), (1, 2));
 
     let ChatViewReply::Hits(hits) = query(
         &store,
+        9,
         ChatViewQuery::Search {
             text: "hello".into(),
             viewer_handles: vec![],
             channel_id: None,
-            limit: None,
+            page: Page::default(),
         },
     )
     .unwrap() else {
@@ -170,18 +139,18 @@ fn a_channel_takes_posts_threads_reactions_and_answers_the_view() {
 
     let ChatViewReply::TagHits(tags) = query(
         &store,
+        9,
         ChatViewQuery::TagSearch {
             tag: "#World".into(),
             viewer_handles: vec![],
             channel_id: Some("general".into()),
-            after: None,
-            limit: None,
+            page: Page::default(),
         },
     )
     .unwrap() else {
         panic!()
     };
-    assert_eq!(tags.hits[0].seq, 1);
+    assert_eq!(tags.items[0].seq, 1);
 
     execute(
         &mut store,
@@ -194,11 +163,12 @@ fn a_channel_takes_posts_threads_reactions_and_answers_the_view() {
     .unwrap();
     let ChatViewReply::Hits(hits) = query(
         &store,
+        9,
         ChatViewQuery::Search {
             text: "hello".into(),
             viewer_handles: vec![],
             channel_id: Some("general".into()),
-            limit: None,
+            page: Page::default(),
         },
     )
     .unwrap() else {
