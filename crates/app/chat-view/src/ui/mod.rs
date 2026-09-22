@@ -7,11 +7,14 @@ pub mod message;
 pub mod room;
 pub mod side;
 pub mod sidebar;
+mod components;
 mod timeline;
 
+pub(crate) use components::{badge, button, empty_state};
+
 use ducktape_view_guest::{
-    ClickEvent, Context, ElementId, InteractiveElement, IntoElement, ParentElement,
-    StatefulInteractiveElement, Styled, Theme, Window, div, px,
+    Context, ElementId, InteractiveElement, IntoElement, ParentElement,
+    StatefulInteractiveElement, Styled, Theme, div, modal_overlay, px, resize_handle, sensor,
 };
 
 use crate::Chat;
@@ -35,18 +38,68 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>) -> impl IntoElement {
                 &theme,
             )
             .into_any_element()
-        });
+        })
+        .into_any_element();
 
     if let Some(menu) = menu::floating(chat, cx, &theme) {
-        screen = screen.child(menu);
+        let dismiss = cx.listener(|chat, _: &(), _window, cx| {
+            chat.close_menu();
+            cx.notify();
+        });
+        screen = modal_overlay(ElementId::Name("chat-menu-overlay".into()), screen, menu)
+            .label("Message menu")
+            .on_dismiss(dismiss)
+            .into_any_element();
     }
     if let Some(preview) = dialogs::preview(chat, cx, &theme) {
-        screen = screen.child(preview);
+        let dismiss = cx.listener(|chat, _: &(), _window, cx| {
+            chat.preview = None;
+            cx.notify();
+        });
+        screen = modal_overlay(
+            ElementId::Name("chat-preview-overlay".into()),
+            screen,
+            preview,
+        )
+        .label("Attachment preview")
+        .centered()
+        .backdrop([0., 0., 0., 0.55])
+        .on_dismiss(dismiss)
+        .into_any_element();
     }
     if let Some(create) = dialogs::channel_create(chat, cx, &theme) {
-        screen = screen.child(create);
+        let dismiss = cx.listener(|chat, _: &(), _window, cx| {
+            chat.create = None;
+            cx.notify();
+        });
+        let overlay = modal_overlay(
+            ElementId::Name("chat-create-overlay".into()),
+            screen,
+            create,
+        )
+        .label("Create channel")
+        .centered()
+        .padding(24.)
+        .backdrop([0., 0., 0., 0.55]);
+        screen = if chat.create.as_ref().is_some_and(|create| create.busy) {
+            overlay.into_any_element()
+        } else {
+            overlay.on_dismiss(dismiss).into_any_element()
+        };
     }
-    screen
+    let shown = cx.listener(|chat, size: &(f32, f32), _window, cx| {
+        chat.layout.viewport = *size;
+        chat.layout.clamp();
+        cx.notify();
+    });
+    let resized = cx.listener(|chat, size: &(f32, f32), _window, cx| {
+        chat.layout.viewport = *size;
+        chat.layout.clamp();
+        cx.notify();
+    });
+    sensor(ElementId::Name("chat-viewport".into()), screen)
+        .on_show(shown)
+        .on_resize(resized)
 }
 
 fn connected(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement {
@@ -55,83 +108,40 @@ fn connected(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEle
         .flex()
         .size_full()
         .child(sidebar::render(chat, cx, theme))
-        .child(
-            div()
-                .id(ElementId::Name("chat-sidebar-resize".into()))
-                .w(px(1.))
-                .bg(theme.border),
-        )
+        .child(divider("chat-sidebar-resize", theme, cx, |chat, dx| {
+            chat.layout.sidebar += dx;
+        }))
         .child(room::render(chat, cx, theme));
     if chat.details.is_some() && chat.room.is_some() {
         panes = panes
-            .child(
-                div()
-                    .id(ElementId::Name("chat-details-resize".into()))
-                    .w(px(1.))
-                    .bg(theme.border),
-            )
+            .child(divider("chat-details-resize", theme, cx, |chat, dx| {
+                chat.layout.details -= dx;
+            }))
             .child(side::details(chat, cx, theme));
     } else if chat.room.as_ref().is_some_and(|room| room.thread.is_some()) {
         panes = panes
-            .child(
-                div()
-                    .id(ElementId::Name("chat-thread-resize".into()))
-                    .w(px(1.))
-                    .bg(theme.border),
-            )
+            .child(divider("chat-thread-resize", theme, cx, |chat, dx| {
+                chat.layout.thread -= dx;
+            }))
             .child(side::thread(chat, cx, theme));
     }
     panes
 }
 
-pub(crate) fn button(
-    id: impl Into<ElementId>,
-    label: impl Into<String>,
+fn divider(
+    id: &'static str,
     theme: &Theme,
-    click: impl Fn(&ClickEvent, &mut Window, &mut ducktape_view_guest::App) + 'static,
+    cx: &mut Context<Chat>,
+    drag: impl Fn(&mut Chat, f32) + 'static,
 ) -> impl IntoElement {
-    div()
-        .id(id)
-        .px_2()
-        .py_1()
-        .rounded_md()
-        .bg(theme.surface)
-        .hover(|s| s.bg(theme.surface_raised))
-        .active(|s| s.bg(theme.accent_soft))
-        .role(ducktape_view_guest::Role::Button).focusable().on_click(click)
-        .child(label.into())
-}
-
-pub(crate) fn empty_state(
-    id: impl Into<ElementId>,
-    title: impl Into<String>,
-    detail: impl Into<String>,
-    theme: &Theme,
-) -> impl IntoElement {
-    div()
-        .id(id)
-        .flex()
-        .flex_col()
-        .gap_1()
-        .p_6()
-        .max_w(px(420.))
-        .child(div().text_base().child(title.into()))
-        .child(div().text_sm().text_color(theme.muted).child(detail.into()))
-}
-
-pub(crate) fn badge(
-    id: impl Into<ElementId>,
-    label: impl Into<String>,
-    foreground: ducktape_view_guest::Hsla,
-    background: ducktape_view_guest::Hsla,
-) -> impl IntoElement {
-    div()
-        .id(id)
-        .px_1()
-        .py_0p5()
-        .rounded_sm()
-        .bg(background)
-        .text_color(foreground)
-        .text_xs()
-        .child(label.into())
+    let dragged = cx.listener(move |chat, delta: &(f64, f64), _window, cx| {
+        drag(chat, delta.0 as f32);
+        chat.layout.clamp();
+        cx.notify();
+    });
+    resize_handle(
+        ElementId::Name(id.into()),
+        div().w(px(1.)).h_full().bg(theme.border),
+    )
+    .on_drag(dragged)
 }

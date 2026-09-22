@@ -1,8 +1,8 @@
-use super::{FakeHost, assert_accessible, find, texts};
+use super::{assert_accessible, find, texts, FakeHost};
 use crate::{
-    App, Driver, Entity, View,
     host::Host,
     wire::{Event, Frame, Node},
+    App, Driver, Entity, View,
 };
 
 trait TestDriver {
@@ -161,6 +161,12 @@ impl TestAppContext {
     pub fn simulate_measure(&mut self, key: &str, width: f32, height: f32) {
         self.dispatch(super::measure(&self.frame, key, width, height));
     }
+    pub fn simulate_drag(&mut self, key: &str, dx: f64, dy: f64) {
+        self.dispatch(super::drag(&self.frame, key, dx, dy));
+    }
+    pub fn simulate_dismiss(&mut self, key: &str) {
+        self.dispatch(super::dismiss(&self.frame, key));
+    }
     pub fn simulate_hover(&mut self, key: &str) {
         self.dispatch(super::hover(&self.frame, key));
     }
@@ -178,7 +184,7 @@ impl TestAppContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Context, InteractiveElement, ParentElement, Render, Task, Window, view::Live};
+    use crate::{view::Live, Context, InteractiveElement, ParentElement, Render, Task, Window};
     use futures::StreamExt;
     use serde::{Deserialize, Serialize};
 

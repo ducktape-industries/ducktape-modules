@@ -1,6 +1,11 @@
 use super::*;
 use ducktape_view_guest::testing::TestAppContext;
 
+#[test]
+fn preferred_window_keeps_the_original_baseline() {
+    assert_eq!(<Nodes as View>::PREFERRED_WINDOW_SIZE, "680x620");
+}
+
 fn membership(key: &[u8], address: &str, standing: valset::Standing) -> valset::Membership {
     valset::Membership {
         key: key.to_vec(),

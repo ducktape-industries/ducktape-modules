@@ -56,7 +56,7 @@ struct Row {
 }
 
 impl View for Members {
-    const PREFERRED_WINDOW_SIZE: &'static str = "720,640";
+    const PREFERRED_WINDOW_SIZE: &'static str = "720x640";
 
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mut view = Self::default();
@@ -304,21 +304,40 @@ impl RenderOnce for Badge {
     }
 }
 
+#[derive(IntoElement)]
+struct EmptyState {
+    id: ElementId,
+    title: String,
+    detail: String,
+    muted: ducktape_view_guest::Hsla,
+}
+
 fn empty_state(
     id: &str,
     title: &str,
     detail: impl Into<String>,
     theme: &Theme,
-) -> impl IntoElement {
-    div()
-        .id(ElementId::Name(id.into()))
-        .flex()
-        .flex_col()
-        .gap_1()
-        .p_6()
-        .max_w(px(420.))
-        .child(div().text_base().child(title.to_owned()))
-        .child(div().text_sm().text_color(theme.muted).child(detail.into()))
+) -> EmptyState {
+    EmptyState {
+        id: ElementId::Name(id.into()),
+        title: title.to_owned(),
+        detail: detail.into(),
+        muted: theme.muted,
+    }
+}
+
+impl RenderOnce for EmptyState {
+    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        div()
+            .id(self.id)
+            .flex()
+            .flex_col()
+            .gap_1()
+            .p_6()
+            .max_w(px(420.))
+            .child(div().text_base().child(self.title))
+            .child(div().text_sm().text_color(self.muted).child(self.detail))
+    }
 }
 
 fn plural(count: usize, one: &str, many: &str) -> String {

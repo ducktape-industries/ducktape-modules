@@ -2,6 +2,11 @@ use super::*;
 use abi::Scheme;
 use ducktape_view_guest::testing::TestAppContext;
 
+#[test]
+fn preferred_window_keeps_the_original_baseline() {
+    assert_eq!(<Members as View>::PREFERRED_WINDOW_SIZE, "720x640");
+}
+
 fn person(number: u64, name: &str, key: &[u8]) -> identity::Account {
     identity::Account {
         number,

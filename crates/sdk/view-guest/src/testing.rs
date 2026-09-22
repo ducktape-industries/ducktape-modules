@@ -220,7 +220,10 @@ pub(crate) fn press(frame: &Frame, name: &str) -> Vec<Event> {
             handler: interactivity.on_click.expect("click route"),
             event: (&gpui::ClickEvent::default()).into(),
         }],
-        Some(Node::Button { on_press: Some(message), .. }) => vec![Event::Message(*message)],
+        Some(Node::Button {
+            on_press: Some(message),
+            ..
+        }) => vec![Event::Message(*message)],
         Some(Node::Button { on_press: None, .. }) => panic!("button {name:?} is disabled"),
         _ => panic!("no button {name:?} in {:?}", texts(frame)),
     }
@@ -391,6 +394,32 @@ pub(crate) fn measure(frame: &Frame, name: &str, width: f32, height: f32) -> Vec
         width,
         height,
     }]
+}
+
+/// The event the host sends while the named resize handle is grabbed.
+pub(crate) fn drag(frame: &Frame, name: &str, dx: f64, dy: f64) -> Vec<Event> {
+    let Some(Node::ResizeHandle { on_drag, .. }) = find(frame, name) else {
+        panic!("no resize handle {name:?} in {:?}", keys(frame));
+    };
+    let Some(handler) = on_drag else {
+        panic!("resize handle {name:?} has no drag route");
+    };
+    vec![Event::Drag {
+        handler: *handler,
+        dx,
+        dy,
+    }]
+}
+
+/// The event the host sends when the modal backdrop dismisses an overlay.
+pub(crate) fn dismiss(frame: &Frame, name: &str) -> Vec<Event> {
+    let Some(Node::Overlay { on_dismiss, .. }) = find(frame, name) else {
+        panic!("no overlay {name:?} in {:?}", keys(frame));
+    };
+    let Some(message) = on_dismiss else {
+        panic!("overlay {name:?} has no dismiss route");
+    };
+    vec![Event::Message(*message)]
 }
 
 /// The events the host sends when the sensor with key `name` leaves view.

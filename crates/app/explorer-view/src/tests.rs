@@ -2,6 +2,11 @@ use super::*;
 use abi::BlobId;
 use ducktape_view_guest::testing::TestAppContext;
 
+#[test]
+fn preferred_window_keeps_the_original_baseline() {
+    assert_eq!(<Explorer as View>::PREFERRED_WINDOW_SIZE, "760x640");
+}
+
 fn entry(program: &str, code: u8) -> registry::Entry {
     registry::Entry {
         program: program.into(),

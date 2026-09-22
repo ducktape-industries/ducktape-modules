@@ -1,6 +1,7 @@
 use super::*;
 use ducktape_view_guest::Entity;
 use ducktape_view_guest::testing::TestAppContext;
+use ducktape_view_guest::wire;
 
 fn channel(id: &str, name: &str, head_seq: u64) -> ChannelInfo {
     ChannelInfo {
@@ -16,6 +17,11 @@ fn channel(id: &str, name: &str, head_seq: u64) -> ChannelInfo {
         },
         head_seq,
     }
+}
+
+#[test]
+fn preferred_window_keeps_the_original_baseline() {
+    assert_eq!(<Chat as View>::PREFERRED_WINDOW_SIZE, "1180x760");
 }
 
 fn row(seq: u64, author: &str, text: &str) -> MsgRow {
@@ -182,6 +188,96 @@ fn the_room_shows_its_rows_intro_and_actions() {
             .iter()
             .any(|op| matches!(op, ChatMsg::RenameChannel { name, .. } if name == "Lobby"))
     );
+}
+
+#[test]
+fn viewport_and_pane_dividers_keep_their_behavior_routes() {
+    let (mut cx, view) = opened();
+    assert!(matches!(
+        cx.find("chat-viewport"),
+        Some(wire::Node::Sensor {
+            on_show: Some(_),
+            on_resize: Some(_),
+            ..
+        })
+    ));
+    cx.simulate_measure("chat-viewport", 640., 480.);
+    view.read(|chat| {
+        assert_eq!(chat.layout.viewport, (640., 480.));
+        assert!(chat.layout.sidebar <= 320.);
+    });
+    assert!(matches!(
+        cx.find("chat-sidebar-resize"),
+        Some(wire::Node::ResizeHandle {
+            on_drag: Some(_),
+            ..
+        })
+    ));
+    let sidebar = view.read(|chat| chat.layout.sidebar);
+    cx.simulate_drag("chat-sidebar-resize", 18., 0.);
+    view.read(|chat| assert_eq!(chat.layout.sidebar, sidebar + 18.));
+
+    cx.simulate_click("chat-room-details");
+    assert!(matches!(
+        cx.find("chat-details-resize"),
+        Some(wire::Node::ResizeHandle {
+            on_drag: Some(_),
+            ..
+        })
+    ));
+}
+
+#[test]
+fn timeline_retains_virtual_tail_anchoring_and_scroll_feedback() {
+    let (cx, _) = opened();
+    assert!(matches!(
+        cx.find(room::STREAM_KEY),
+        Some(wire::Node::Scroll {
+            on_scroll: Some(_),
+            virtual_rows: true,
+            anchor_y: wire::ScrollAnchor::End,
+            auto_scroll: true,
+            ..
+        })
+    ));
+    assert!(matches!(
+        cx.find("chat-message-list"),
+        Some(wire::Node::KeyedColumn {
+            virtual_row: Some(_),
+            keys: Some(keys),
+            ..
+        }) if keys.len() == 2
+    ));
+}
+
+#[test]
+fn menus_and_dialogs_are_modal_overlays_with_dismiss_routes() {
+    let (mut cx, view) = opened();
+    cx.simulate_click("chat-message-m1-more");
+    assert!(matches!(
+        cx.find("chat-menu-overlay"),
+        Some(wire::Node::Overlay {
+            label: Some(label),
+            on_dismiss: Some(_),
+            children,
+            ..
+        }) if label == "Message menu" && children.len() == 2
+    ));
+
+    cx.simulate_dismiss("chat-menu-overlay");
+    view.read(|chat| assert!(chat.menu.is_none()));
+    cx.simulate_click("chat-sidebar-new-channel");
+    assert!(matches!(
+        cx.find("chat-create-overlay"),
+        Some(wire::Node::Overlay {
+            label: Some(label),
+            on_dismiss: Some(_),
+            children,
+            ..
+        }) if label == "Create channel" && children.len() == 2
+    ));
+    cx.simulate_dismiss("chat-create-overlay");
+    view.read(|chat| assert!(chat.create.is_none()));
 }
 
 #[test]

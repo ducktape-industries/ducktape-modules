@@ -6,6 +6,8 @@ use std::rc::Rc;
 
 type ClickRoute = Rc<dyn Fn(&gpui::ClickEvent, &mut crate::Window, &mut crate::App)>;
 
+struct EventRoute<A>(Rc<dyn Fn(&A, &mut crate::Window, &mut crate::App)>);
+
 #[derive(Default)]
 struct Tables {
     editor_responses: Vec<crate::wire::EditorResponse>,
@@ -114,6 +116,73 @@ pub(crate) fn run_handler<A: 'static, M: 'static>(
         tables.handlers.get(index as usize).cloned()?
     };
     handler.downcast_ref::<Box<dyn Fn(A) -> Option<M>>>()?(value)
+}
+
+pub(crate) fn route<A: 'static>(
+    context: &Context,
+    listener: impl Fn(&A, &mut crate::Window, &mut crate::App) + 'static,
+) -> u32 {
+    let tables = context.tables();
+    let mut tables = tables.borrow_mut();
+    let index = u32::try_from(tables.handlers.len()).expect("too many handler routes");
+    tables
+        .handlers
+        .push(Rc::new(EventRoute::<A>(Rc::new(listener))));
+    index
+}
+
+pub(crate) fn message_route(
+    context: &Context,
+    listener: impl Fn(&(), &mut crate::Window, &mut crate::App) + 'static,
+) -> u32 {
+    let tables = context.tables();
+    let mut tables = tables.borrow_mut();
+    let index = u32::try_from(tables.messages.len()).expect("too many message routes");
+    tables
+        .messages
+        .push(Rc::new(EventRoute::<()>(Rc::new(listener))));
+    index
+}
+
+pub(crate) fn run_route<A: 'static>(
+    context: &Context,
+    index: u32,
+    event: &A,
+    window: &mut crate::Window,
+    app: &mut crate::App,
+) -> bool {
+    let tables = context.tables();
+    let handler = {
+        let tables = tables.borrow();
+        tables.handlers.get(index as usize).cloned()
+    };
+    let Some(route) =
+        handler.and_then(|route| route.downcast_ref::<EventRoute<A>>().map(|r| r.0.clone()))
+    else {
+        return false;
+    };
+    route(event, window, app);
+    true
+}
+
+pub(crate) fn run_message_route(
+    context: &Context,
+    index: u32,
+    window: &mut crate::Window,
+    app: &mut crate::App,
+) -> bool {
+    let tables = context.tables();
+    let route = {
+        let tables = tables.borrow();
+        tables
+            .messages
+            .get(index as usize)
+            .and_then(|route| route.downcast_ref::<EventRoute<()>>())
+            .map(|route| route.0.clone())
+    };
+    let Some(route) = route else { return false };
+    route(&(), window, app);
+    true
 }
 
 pub(crate) fn event_interest(context: &Context) -> crate::wire::events::Interest {

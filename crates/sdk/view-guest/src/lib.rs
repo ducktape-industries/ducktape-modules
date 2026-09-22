@@ -1,26 +1,28 @@
 //! Renderer-independent execution of dynamically loaded WASM views.
-pub use view_wire as wire;
+pub use gpui::prelude::FluentBuilder;
 pub use gpui::{
-    ClickEvent, ElementId, Global, Hsla, Role, SharedString, StyleRefinement, Styled, px, rems, rgb,
+    px, rems, rgb, ClickEvent, ElementId, Global, Hsla, Role, SharedString, StyleRefinement, Styled,
 };
 pub use view_guest_derive::IntoElement;
-pub use gpui::prelude::FluentBuilder;
+pub use view_wire as wire;
 mod theme;
 pub use theme::Theme;
+mod behavior;
 mod element;
 mod interactivity;
-pub use interactivity::{Interactivity, InteractiveElement, Stateful, StatefulInteractiveElement};
+pub use behavior::{modal_overlay, resize_handle, sensor, ModalOverlay, ResizeHandle, Sensor};
 pub use element::{
     anchored, canvas, deferred, div, img, svg, uniform_list, AnyElement, Anchored, Canvas, Deferred, Div,
     Element, Img, IntoElement, Lowering, ParentElement, RenderOnce, Svg, UniformList,
 };
+pub use interactivity::{InteractiveElement, Interactivity, Stateful, StatefulInteractiveElement};
 
 /// Traits and primitives used to compose guest GPUI elements.
 pub mod prelude {
     pub use crate::{
         AnyElement, App, ClickEvent, Context, Element, ElementId, FluentBuilder, Global, Hsla, InteractiveElement,
         IntoElement, ParentElement, Render, RenderOnce, Role, SharedString, StatefulInteractiveElement,
-        Styled, Theme, Window, anchored, canvas, deferred, div, img, px, rems, rgb, svg, uniform_list,
+        Styled, Theme, Window, modal_overlay, resize_handle, sensor, anchored, canvas, deferred, div, img, px, rems, rgb, svg, uniform_list,
     };
 }
 mod editor;
@@ -50,6 +52,8 @@ mod executor;
 pub use executor::Task;
 pub use host::Host;
 pub use window::Window;
+#[cfg(test)]
+mod behavior_tests;
 mod slots;
 use context::Callback;
 
@@ -128,7 +132,13 @@ impl<V: View> Driver<V> {
                 | wire::Event::Mouse { .. }
                 | wire::Event::Keyboard { .. } => None,
                 wire::Event::Message(index) => {
-                    slots::take_message::<Callback<V>>(&self.app.inner.slots, index)
+                    let slots = self.app.inner.slots.clone();
+                    let mut window = self.app.window();
+                    if slots::run_message_route(&slots, index, &mut window, &mut self.app) {
+                        None
+                    } else {
+                        slots::take_message::<Callback<V>>(&slots, index)
+                    }
                 }
                 wire::Event::Click { handler, event } => {
                     let slots = self.app.inner.slots.clone();
@@ -208,17 +218,26 @@ impl<V: View> Driver<V> {
                     handler,
                     width,
                     height,
-                } => slots::run_handler::<(f32, f32), Callback<V>>(
-                    &self.app.inner.slots,
-                    handler,
-                    (width, height),
-                ),
-                wire::Event::Drag { handler, dx, dy } => slots::run_handler::<
-                    (f64, f64),
-                    Callback<V>,
-                >(
-                    &self.app.inner.slots, handler, (dx, dy)
-                ),
+                } => {
+                    let slots = self.app.inner.slots.clone();
+                    let event = (width, height);
+                    let mut window = self.app.window();
+                    if slots::run_route(&slots, handler, &event, &mut window, &mut self.app) {
+                        None
+                    } else {
+                        slots::run_handler::<(f32, f32), Callback<V>>(&slots, handler, event)
+                    }
+                }
+                wire::Event::Drag { handler, dx, dy } => {
+                    let slots = self.app.inner.slots.clone();
+                    let event = (dx, dy);
+                    let mut window = self.app.window();
+                    if slots::run_route(&slots, handler, &event, &mut window, &mut self.app) {
+                        None
+                    } else {
+                        slots::run_handler::<(f64, f64), Callback<V>>(&slots, handler, event)
+                    }
+                }
                 wire::Event::Pointer { handler, x, y } => slots::run_handler::<
                     (f32, f32),
                     Callback<V>,
@@ -459,7 +478,7 @@ pub mod exports {
     use std::any::Any;
     use std::cell::RefCell;
 
-    use crate::{Driver, View, wire};
+    use crate::{wire, Driver, View};
 
     #[link(wasm_import_module = "ducktape_view")]
     unsafe extern "C" {

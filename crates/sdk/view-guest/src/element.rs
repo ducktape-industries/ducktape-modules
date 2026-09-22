@@ -106,6 +106,20 @@ impl<'a> Lowering<'a> {
     fn click(&mut self, listener: ClickListener) -> u32 {
         slots::click(&self.app.inner.slots, listener)
     }
+
+    pub(crate) fn route<A: 'static>(
+        &mut self,
+        listener: impl Fn(&A, &mut Window, &mut App) + 'static,
+    ) -> u32 {
+        slots::route(&self.app.inner.slots, listener)
+    }
+
+    pub(crate) fn message_route(
+        &mut self,
+        listener: impl Fn(&(), &mut Window, &mut App) + 'static,
+    ) -> u32 {
+        slots::message_route(&self.app.inner.slots, listener)
+    }
 }
 
 /// A guest container backed by a real GPUI style refinement.
