@@ -195,7 +195,7 @@ fn the_room_shows_its_rows_intro_and_actions() {
                 .is_some_and(|m| m.mode == Mode::Reactions)
         )
     });
-    cx.simulate_click("chat-message-m1-reaction-🔥");
+    cx.simulate_click("chat-reaction-🔥");
     cx.run_until_parked();
     assert!(
         cx.host()
@@ -352,7 +352,11 @@ fn attachment_preview_keeps_host_surfaces_and_markdown_link_events() {
         "chat-preview-markdown",
         wire::SurfaceValue::Str("https://example.test".into()),
     );
-    assert_eq!(cx.host().opened_links(), vec!["https://example.test"]);
+    assert_eq!(
+        cx.host().opened_links(),
+        vec!["duck://testnet-0a1b2c3d/chat/general", "https://example.test"],
+        "choosing the room informs the host before the preview link opens"
+    );
 }
 
 #[test]
