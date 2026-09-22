@@ -85,7 +85,7 @@ pub fn card(
         .focusable()
         .on_click(press)
         .child(avatar)
-        .child(content(chat, message.clone(), cx, theme));
+        .child(content(chat, message.clone(), pane, cx, theme));
     // Controls are siblings of the selection target: their native click must
     // not also replace the opened menu with the message-selection toolbar.
     let mut outer = div().relative().w_full().group(group.clone()).child(card);
@@ -167,6 +167,7 @@ pub fn card(
 fn content(
     chat: &Chat,
     message: ChatMessage,
+    pane: Pane,
     cx: &mut Context<Chat>,
     theme: &Theme,
 ) -> impl IntoElement {
@@ -254,7 +255,9 @@ fn content(
             .gap_1();
         for reaction in &message.reactions {
             let emoji = reaction.emoji.clone();
+            let description = emoji.clone();
             let add = !reaction.reacted_by_me;
+            let mine = reaction.reacted_by_me;
             let click = cx.listener(move |chat, _: &ClickEvent, _window, cx| {
                 cx.notify();
                 chat.react(reaction_seq, emoji.clone(), add, cx)
@@ -263,35 +266,39 @@ fn content(
                 format!("chat-message-{}-reaction-{}", message.id, reaction.emoji).into(),
             );
             let label = format!("{} {}", reaction.emoji, reaction.count);
-            reactions = if chat.may_write() {
-                reactions.child(action_button(
-                    id,
-                    label,
-                    if add {
-                        "Add reaction"
-                    } else {
-                        "Remove reaction"
-                    },
-                    theme,
-                    true,
-                    click,
-                ))
-            } else {
-                reactions.child(
-                    div()
-                        .id(id)
-                        .px_1()
-                        .py_0p5()
-                        .rounded_sm()
-                        .bg(theme.surface)
-                        .text_size(px(11.))
-                        .child(label),
-                )
-            };
+            reactions = reactions.child(reaction_button(
+                id,
+                label,
+                if add {
+                    "Add reaction"
+                } else {
+                    "Remove reaction"
+                },
+                description,
+                mine,
+                theme,
+                chat.may_write(),
+                click,
+            ));
         }
+        let rev = message.rev;
+        let open = cx.listener(move |chat, event: &ClickEvent, window, cx| {
+            let position = event.position();
+            chat.layout.press = (position.x.into(), position.y.into());
+            chat.open_menu(pane, reaction_seq, rev, Mode::Reactions, window, cx);
+            cx.notify();
+        });
+        reactions = reactions.child(action_button(
+            ElementId::Name(format!("chat-message-{}-reaction-add", message.id).into()),
+            "+",
+            "Add reaction",
+            theme,
+            chat.may_write(),
+            open,
+        ));
         body = body.child(reactions);
     }
-    if message.reply_count > 0 {
+    if message.reply_count > 0 && pane == Pane::Timeline {
         let root = message.seq;
         let open = cx.listener(move |chat, _: &ClickEvent, _window, cx| {
             cx.notify();
@@ -315,6 +322,24 @@ fn content(
                     "{} · View thread ›",
                     plural(message.reply_count, "reply", "replies")
                 )),
+        );
+    } else if message.reply_count > 0 {
+        body = body.child(
+            div()
+                .id(ElementId::Name(
+                    format!("chat-message-{}-reply-separator", message.id).into(),
+                ))
+                .flex()
+                .items_center()
+                .gap_2()
+                .pt_1()
+                .child(
+                    div()
+                        .text_size(px(11.))
+                        .text_color(theme.muted)
+                        .child(plural(message.reply_count, "reply", "replies")),
+                )
+                .child(div().h(px(1.)).flex_1().bg(theme.border)),
         );
     }
     body
@@ -560,6 +585,50 @@ fn action_button(
         .child(label.into());
     if enabled {
         control.focusable().on_click(click)
+    } else {
+        control
+    }
+}
+
+fn reaction_button(
+    id: impl Into<ElementId>,
+    label: impl Into<String>,
+    accessible: &str,
+    emoji: impl Into<String>,
+    mine: bool,
+    theme: &Theme,
+    enabled: bool,
+    click: impl Fn(&ClickEvent, &mut Window, &mut ducktape_view_guest::App) + 'static,
+) -> impl IntoElement {
+    let control = div()
+        .id(id)
+        .px_1()
+        .py_0p5()
+        .rounded_sm()
+        .bg(if mine {
+            theme.accent_soft
+        } else {
+            theme.surface
+        })
+        .text_color(if mine {
+            theme.accent_foreground
+        } else if enabled {
+            theme.foreground
+        } else {
+            theme.muted
+        })
+        .role(ducktape_view_guest::Role::Button)
+        .aria_label(accessible)
+        .aria_description(emoji.into())
+        .aria_toggled(mine.into())
+        .aria_disabled(!enabled)
+        .text_size(px(11.))
+        .child(label.into());
+    if enabled {
+        control
+            .focusable()
+            .hover(|style| style.bg(theme.surface_raised))
+            .on_click(click)
     } else {
         control
     }

@@ -39,6 +39,21 @@ fn attachment_preview_keeps_host_surfaces_and_markdown_link_events() {
 }
 
 #[test]
+fn attachment_preview_failure_names_the_failed_operation() {
+    let (mut cx, view) = opened();
+    let link = files::file_address("testnet#0a1b2c3d", "/secret.txt").unwrap();
+    view.update(&mut cx, |chat, _, cx| {
+        chat.preview = Some(Preview {
+            link,
+            read: Loaded::Failed(Refusal::new("denied", "permission denied")),
+        });
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(cx.has_text("Could not read this file: permission denied"));
+}
+
+#[test]
 fn rich_message_keeps_styles_and_dispatches_each_link_by_value() {
     let (mut cx, view) = opened();
     let spans = vec![

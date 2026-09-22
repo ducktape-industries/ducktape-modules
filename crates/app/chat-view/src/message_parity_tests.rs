@@ -57,3 +57,52 @@ fn copy_range_keeps_its_distinct_message_plate() {
         Some(ducktape_view_guest::Theme::light().surface_raised)
     );
 }
+
+#[test]
+fn reaction_rows_keep_add_action_and_selected_accessibility() {
+    let (mut cx, view) = opened();
+    view.update(&mut cx, |chat, _, cx| {
+        chat.room.as_mut().unwrap().messages.ready_mut().unwrap()[0]
+            .reactions
+            .push(chat::ReactionSummary {
+                emoji: "🔥".into(),
+                count: 2,
+                reacted_by_me: true,
+            });
+        cx.notify();
+    });
+    cx.run_until_parked();
+    let Some(wire::Node::Container { interactivity, .. }) = cx.find("chat-message-m1-reaction-🔥")
+    else {
+        panic!("reaction pill")
+    };
+    assert_eq!(interactivity.aria.description.as_deref(), Some("🔥"));
+    assert!(interactivity.aria.toggled.is_some());
+    assert!(cx.find("chat-message-m1-reaction-add").is_some());
+    cx.simulate_click("chat-message-m1-reaction-add");
+    view.read(|chat| {
+        assert!(
+            chat.menu
+                .as_ref()
+                .is_some_and(|menu| menu.mode == Mode::Reactions && menu.seq == 1)
+        )
+    });
+}
+
+#[test]
+fn thread_root_uses_reply_count_as_a_separator() {
+    let (mut cx, view) = opened();
+    view.update(&mut cx, |chat, _, cx| {
+        let room = chat.room.as_mut().unwrap();
+        room.messages.ready_mut().unwrap()[0].reply_count = 2;
+        room.thread = Some(Thread {
+            root: 1,
+            replies: Loaded::Ready(Vec::new()),
+            ..Thread::default()
+        });
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(cx.find("chat-message-m1-reply-separator").is_some());
+    assert!(cx.has_text("2 replies"));
+}

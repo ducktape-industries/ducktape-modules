@@ -326,6 +326,9 @@ impl Chat {
     }
 
     pub(crate) fn create_channel(&mut self, cx: &mut Context<Self>) {
+        if !self.session.holds_account() {
+            return;
+        }
         let Some(create) = &mut self.create else {
             return;
         };
