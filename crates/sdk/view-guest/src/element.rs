@@ -159,6 +159,10 @@ impl<'a> Lowering<'a> {
     ) -> u32 {
         slots::message_route(&self.app.inner.slots, listener)
     }
+
+    pub(crate) fn picture(&mut self, bytes: impl AsRef<[u8]>) -> (u64, Option<Vec<u8>>) {
+        slots::picture(&self.app.inner.slots, bytes)
+    }
 }
 
 /// A guest container backed by a real GPUI style refinement.

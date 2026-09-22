@@ -1,170 +1,117 @@
-use crate::interactivity::{
-    InteractiveElement, Interactivity, Stateful, StatefulInteractiveElement,
-};
-use crate::{IntoElement, Lowering, wire};
-use gpui::{
-    ImageSource as GpuiImageSource, ObjectFit, RenderImage, Resource, StyleRefinement, Styled,
-};
+use crate::interactivity::{InteractiveElement, Interactivity, Stateful, StatefulInteractiveElement};
+use crate::{AnyElement, Element, IntoElement, Lowering, wire};
+use gpui::{ImageSource as GpuiImageSource, ObjectFit, RenderImage, Resource, StyleRefinement, Styled};
 use std::sync::Arc;
 
 pub use gpui::ImageSource;
 
-/// Image-specific refinements supported by the bounded wire image primitive.
-pub trait StyledImage: Sized {
-    fn grayscale(self, grayscale: bool) -> Self;
-    fn object_fit(self, object_fit: ObjectFit) -> Self;
-}
-
-/// A GPUI-shaped image source lowered to an opaque host resource or bounded bytes.
-pub struct Img {
-    pub(crate) interactivity: Interactivity,
-    source: ImageSource,
-    style: StyleRefinement,
+pub struct ImageStyle {
     grayscale: bool,
     object_fit: ObjectFit,
+    fallback: Option<Box<dyn Fn() -> AnyElement>>,
+    loading: Option<Box<dyn Fn() -> AnyElement>>,
 }
+
+impl Default for ImageStyle {
+    fn default() -> Self {
+        Self { grayscale: false, object_fit: ObjectFit::Contain, fallback: None, loading: None }
+    }
+}
+
+pub trait StyledImage: Sized {
+    fn image_style(&mut self) -> &mut ImageStyle;
+    fn grayscale(mut self, value: bool) -> Self { self.image_style().grayscale = value; self }
+    fn object_fit(mut self, value: ObjectFit) -> Self { self.image_style().object_fit = value; self }
+    fn with_fallback(mut self, fallback: impl Fn() -> AnyElement + 'static) -> Self {
+        self.image_style().fallback = Some(Box::new(fallback)); self
+    }
+    fn with_loading(mut self, loading: impl Fn() -> AnyElement + 'static) -> Self {
+        self.image_style().loading = Some(Box::new(loading)); self
+    }
+}
+
+pub struct Img { pub(crate) interactivity: Interactivity, source: ImageSource, image_style: ImageStyle }
 
 #[track_caller]
 pub fn img(source: impl Into<ImageSource>) -> Img {
-    Img {
-        interactivity: Interactivity::default(),
-        source: source.into(),
-        style: StyleRefinement::default(),
-        grayscale: false,
-        object_fit: ObjectFit::Contain,
-    }
+    Img { interactivity: Interactivity::default(), source: source.into(), image_style: ImageStyle::default() }
 }
 
 impl Img {
     pub fn extensions() -> &'static [&'static str] {
-        &[
-            "avif", "jpg", "jpeg", "png", "gif", "webp", "tif", "tiff", "tga", "dds", "bmp", "ico",
-            "hdr", "exr", "pbm", "pam", "ppm", "pgm", "ff", "farbfeld", "qoi", "svg",
-        ]
+        &["avif", "jpg", "jpeg", "png", "gif", "webp", "tif", "tiff", "tga", "dds", "bmp", "ico", "hdr", "exr", "pbm", "pam", "ppm", "pgm", "ff", "farbfeld", "qoi", "svg"]
     }
 }
 
-impl Styled for Img {
-    fn style(&mut self) -> &mut StyleRefinement {
-        &mut self.style
-    }
-}
-
-impl StyledImage for Img {
-    fn grayscale(mut self, grayscale: bool) -> Self {
-        self.grayscale = grayscale;
-        self
-    }
-
-    fn object_fit(mut self, object_fit: ObjectFit) -> Self {
-        self.object_fit = object_fit;
-        self
-    }
-}
-
-impl StyledImage for Stateful<Img> {
-    fn grayscale(mut self, grayscale: bool) -> Self {
-        self.element.grayscale = grayscale;
-        self
-    }
-
-    fn object_fit(mut self, object_fit: ObjectFit) -> Self {
-        self.element.object_fit = object_fit;
-        self
-    }
-}
-
-impl InteractiveElement for Img {
-    fn interactivity(&mut self) -> &mut Interactivity {
-        &mut self.interactivity
-    }
-}
-
+impl Styled for Img { fn style(&mut self) -> &mut StyleRefinement { &mut self.interactivity.base_style } }
+impl StyledImage for Img { fn image_style(&mut self) -> &mut ImageStyle { &mut self.image_style } }
+impl StyledImage for Stateful<Img> { fn image_style(&mut self) -> &mut ImageStyle { &mut self.element.image_style } }
+impl InteractiveElement for Img { fn interactivity(&mut self) -> &mut Interactivity { &mut self.interactivity } }
 impl StatefulInteractiveElement for Img {}
 
-impl IntoElement for Img {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
-    }
-
-    fn into_node(self, lowering: &mut Lowering<'_>) -> wire::Node {
-        let key = source_key(&self.source);
-        let label = self
-            .interactivity
-            .aria
-            .label
-            .as_ref()
-            .map(ToString::to_string);
-        let data = image_data(self.source);
-        let fit = Some(object_fit(self.object_fit));
-        let interactivity = self.interactivity.into_wire(lowering);
+impl Element for Img {
+    fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
+        let Self { interactivity, source, image_style } = *self;
+        let style = interactivity.base_style.clone();
+        let label = interactivity.aria.label.as_ref().map(ToString::to_string);
+        let (id, interactivity) = interactivity.into_wire(lowering);
+        let (hash, data) = image_data(source, lowering);
+        let fallback = image_style.fallback.map(|child| Box::new(lowering.lower_element(child())));
+        let loading = image_style.loading.map(|child| Box::new(lowering.lower_element(child())));
         wire::Node::Image {
-            key,
-            hash: stable_hash(&interactivity.id, &data),
-            data,
-            label,
-            fit,
-            opacity: None,
-            width: None,
-            height: None,
-            grayscale: self.grayscale,
-            style: self.style,
-            interactivity,
+            id, hash, data, label,
+            image_style: wire::ImageStyle { grayscale: image_style.grayscale, object_fit: object_fit(image_style.object_fit) },
+            fallback, loading, style, interactivity,
         }
     }
 }
 
-fn object_fit(value: ObjectFit) -> wire::ContentFit {
+impl IntoElement for Img { type Element = Self; fn into_element(self) -> Self { self } }
+
+fn object_fit(value: ObjectFit) -> wire::ImageObjectFit {
     match value {
-        ObjectFit::Contain => wire::ContentFit::Contain,
-        ObjectFit::Cover => wire::ContentFit::Cover,
-        ObjectFit::Fill => wire::ContentFit::Fill,
-        ObjectFit::None => wire::ContentFit::None,
-        ObjectFit::ScaleDown => wire::ContentFit::ScaleDown,
+        ObjectFit::Contain => wire::ImageObjectFit::Contain,
+        ObjectFit::Cover => wire::ImageObjectFit::Cover,
+        ObjectFit::Fill => wire::ImageObjectFit::Fill,
+        ObjectFit::None => wire::ImageObjectFit::None,
+        ObjectFit::ScaleDown => wire::ImageObjectFit::ScaleDown,
     }
 }
 
-fn source_key(source: &ImageSource) -> String {
+fn image_data(source: ImageSource, lowering: &mut Lowering<'_>) -> (u64, Option<wire::ImageData>) {
     match source {
-        GpuiImageSource::Resource(resource) => match resource {
-            Resource::Uri(uri) => format!("img:uri:{uri}"),
-            Resource::Path(path) => format!("img:path:{}", path.display()),
-            Resource::Embedded(path) => format!("img:asset:{path}"),
-        },
-        GpuiImageSource::Render(image) => format!("img:render:{}", image.id.0),
-        GpuiImageSource::Image(image) => format!("img:image:{}", image.id()),
-        GpuiImageSource::Custom(_) => "img:unsupported-custom".into(),
+        GpuiImageSource::Image(image) => { let (hash, bytes) = lowering.picture(image.bytes()); (hash, bytes.map(wire::ImageData::Encoded)) }
+        GpuiImageSource::Render(image) => render_image_data(&image, lowering),
+        GpuiImageSource::Resource(resource) => refusal(match resource {
+            Resource::Embedded(path) => format!("host asset unavailable: {path}"),
+            Resource::Path(_) => "guest image path refused".into(),
+            Resource::Uri(_) => "guest image URI refused".into(),
+        }),
+        GpuiImageSource::Custom(_) => refusal("custom image loader cannot cross the guest boundary".into()),
     }
 }
 
-fn image_data(source: ImageSource) -> Option<wire::ImageData> {
-    match source {
-        GpuiImageSource::Resource(resource) => Some(wire::ImageData::Resource(source_key(
-            &GpuiImageSource::Resource(resource),
-        ))),
-        GpuiImageSource::Render(image) => render_image_data(&image),
-        GpuiImageSource::Image(image) => Some(wire::ImageData::Encoded(image.bytes().to_vec())),
-        GpuiImageSource::Custom(_) => None,
+fn render_image_data(image: &Arc<RenderImage>, lowering: &mut Lowering<'_>) -> (u64, Option<wire::ImageData>) {
+    match image.frame_count() {
+        0 => refusal("render image has no frames".into()),
+        1 => {
+            let size = image.size(0);
+            let Some(pixels) = image.as_bytes(0) else { return refusal("render image frame has no pixels".into()) };
+            let mut content = Vec::with_capacity(pixels.len() + 8);
+            content.extend_from_slice(&u32::from(size.width).to_le_bytes());
+            content.extend_from_slice(&u32::from(size.height).to_le_bytes());
+            content.extend_from_slice(pixels);
+            let (hash, first) = lowering.picture(content);
+            (hash, first.map(|content| wire::ImageData::Rgba { width: u32::from(size.width), height: u32::from(size.height), pixels: content[8..].to_vec() }))
+        }
+        count => refusal(format!("animated render image with {count} frames is unsupported")),
     }
 }
 
-fn render_image_data(image: &Arc<RenderImage>) -> Option<wire::ImageData> {
-    let size = image.size(0);
-    Some(wire::ImageData::Rgba {
-        width: u32::from(size.width),
-        height: u32::from(size.height),
-        pixels: image.as_bytes(0)?.to_vec(),
-    })
-}
-
-fn stable_hash(id: &Option<wire::ElementIdWire>, data: &Option<wire::ImageData>) -> u64 {
+fn refusal(reason: String) -> (u64, Option<wire::ImageData>) {
     use std::hash::{Hash, Hasher};
-    let mut hasher = std::hash::DefaultHasher::new();
-    id.hash(&mut hasher);
-    data.hash(&mut hasher);
-    hasher.finish()
+    let mut hasher = std::hash::DefaultHasher::new(); reason.hash(&mut hasher);
+    (hasher.finish(), Some(wire::ImageData::Refusal(reason)))
 }
 
 impl gpui::prelude::FluentBuilder for Img {}

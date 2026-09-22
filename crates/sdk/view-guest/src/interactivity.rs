@@ -21,12 +21,19 @@ pub struct Interactivity {
 }
 
 impl Interactivity {
-    pub(crate) fn into_wire(self, lowering: &mut Lowering<'_>) -> wire::Interactivity {
-        wire::Interactivity {
+    pub(crate) fn into_wire(
+        self,
+        lowering: &mut Lowering<'_>,
+    ) -> (Option<wire::ElementIdWire>, wire::Interactivity) {
+        let id = self
+            .id
+            .map(wire::ElementIdWire::from_gpui)
+            .transpose()
+            .expect("element ID must be portable across the view boundary");
+        let interactivity = wire::Interactivity {
             role: self.role,
             aria: self.aria,
             focusable: self.focusable,
-            id: self.id.map(wire::ElementIdWire::from_gpui),
             group: self.group,
             hover: self.hover,
             active: self.active,
@@ -37,7 +44,8 @@ impl Interactivity {
                 .group_active
                 .map(|(group, style)| wire::GroupRefinement { group, style }),
             on_click: self.on_click.map(|listener| lowering.click(listener)),
-        }
+        };
+        (id, interactivity)
     }
 }
 
