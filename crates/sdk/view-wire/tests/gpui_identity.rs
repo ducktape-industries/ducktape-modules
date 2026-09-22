@@ -167,13 +167,15 @@ mod style_tests {
     #[test]
     fn unsupported_or_invalid_ids_are_rejected_without_fallbacks() {
         assert!(ElementIdWire::FocusHandle(1).to_gpui().is_err());
-        assert!(ElementIdWire::CodeLocation {
-            file: "view.rs".into(),
-            line: 1,
-            column: 1,
-        }
-        .to_gpui()
-        .is_err());
+        assert!(
+            ElementIdWire::CodeLocation {
+                file: "view.rs".into(),
+                line: 1,
+                column: 1,
+            }
+            .to_gpui()
+            .is_err()
+        );
         assert!(ElementIdWire::Path(vec![0xff]).to_gpui().is_err());
     }
 }

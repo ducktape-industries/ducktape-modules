@@ -198,7 +198,7 @@ pub(super) fn sanitize(
         valid
     });
     for range in clickable_ranges {
-        if !valid_range(text, range) || range.is_empty() {
+        if !valid_range(text, range) || range.start >= range.end {
             // Preserve the authored value index: an invalid range must never
             // retarget a later callback value after sanitization.
             *range = 0..0;

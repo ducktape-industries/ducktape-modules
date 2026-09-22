@@ -115,11 +115,18 @@ pub(crate) fn has_text(frame: &Frame, content: &str) -> bool {
 }
 
 pub(crate) fn rich_click(frame: &Frame, key: &str, index: usize) -> Event {
-    let Some(Node::RichText { on_click: Some(handler), clickable_ranges, .. }) = find(frame, key)
+    let Some(Node::RichText {
+        on_click: Some(handler),
+        clickable_ranges,
+        ..
+    }) = find(frame, key)
     else {
         panic!("{key} is not interactive rich text");
     };
-    assert!(index < clickable_ranges.len(), "rich text click index out of bounds");
+    assert!(
+        index < clickable_ranges.len(),
+        "rich text click index out of bounds"
+    );
     Event::Select {
         handler: *handler,
         index: u32::try_from(index).expect("rich text click index fits the wire"),

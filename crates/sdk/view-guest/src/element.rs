@@ -646,31 +646,14 @@ impl Element for UniformList {
         if let Some(handle) = &self.scroll {
             handle.0.borrow_mut().y_flipped = self.y_flipped;
         }
+        let style = self.interactivity.base_style.clone();
+        let (_, interactivity) = self.interactivity.into_wire(lowering);
         wire::Node::UniformList {
             id,
             path,
             route,
-            style: self.interactivity.base_style,
-            interactivity: wire::Interactivity {
-                role: self.interactivity.role,
-                aria: self.interactivity.aria,
-                focusable: self.interactivity.focusable,
-                group: self.interactivity.group,
-                hover: self.interactivity.hover,
-                active: self.interactivity.active,
-                group_hover: self
-                    .interactivity
-                    .group_hover
-                    .map(|(group, style)| wire::GroupRefinement { group, style }),
-                group_active: self
-                    .interactivity
-                    .group_active
-                    .map(|(group, style)| wire::GroupRefinement { group, style }),
-                on_click: self
-                    .interactivity
-                    .on_click
-                    .map(|listener| lowering.click(listener)),
-            },
+            style,
+            interactivity,
             count,
             measure_index,
             sizing: self.sizing,

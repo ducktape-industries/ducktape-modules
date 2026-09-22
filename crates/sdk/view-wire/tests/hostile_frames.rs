@@ -476,21 +476,37 @@ fn gen_text(rng: &mut Rng) -> Node {
 fn gen_native_style(rng: &mut Rng) -> gpui::StyleRefinement {
     use gpui::Styled;
     gpui::StyleRefinement::default()
-        .w(gpui::px(gen_f32(rng))).h(gpui::px(gen_f32(rng)))
+        .w(gpui::px(gen_f32(rng)))
+        .h(gpui::px(gen_f32(rng)))
         .opacity(gen_f32(rng))
-        .text_color(gpui::Hsla { h: gen_f32(rng), s: gen_f32(rng), l: gen_f32(rng), a: gen_f32(rng) })
+        .text_color(gpui::Hsla {
+            h: gen_f32(rng),
+            s: gen_f32(rng),
+            l: gen_f32(rng),
+            a: gen_f32(rng),
+        })
 }
 
 fn check_native_style(style: &gpui::StyleRefinement) {
-    for length in [&style.size.width, &style.size.height].into_iter().flatten() {
-        if let gpui::Length::Definite(gpui::DefiniteLength::Absolute(gpui::AbsoluteLength::Pixels(value))) = length {
+    for length in [&style.size.width, &style.size.height]
+        .into_iter()
+        .flatten()
+    {
+        if let gpui::Length::Definite(gpui::DefiniteLength::Absolute(
+            gpui::AbsoluteLength::Pixels(value),
+        )) = length
+        {
             let value = f32::from(*value);
             assert!(value.is_finite() && (0.0..=PIXEL_BOUND).contains(&value));
         }
     }
-    if let Some(opacity) = style.opacity { assert!(opacity.is_finite() && (0.0..=1.0).contains(&opacity)); }
+    if let Some(opacity) = style.opacity {
+        assert!(opacity.is_finite() && (0.0..=1.0).contains(&opacity));
+    }
     if let Some(color) = style.text.color {
-        for value in [color.h, color.s, color.l, color.a] { assert!(value.is_finite() && (0.0..=1.0).contains(&value)); }
+        for value in [color.h, color.s, color.l, color.a] {
+            assert!(value.is_finite() && (0.0..=1.0).contains(&value));
+        }
     }
 }
 
@@ -532,23 +548,37 @@ fn gen_svg(rng: &mut Rng) -> Node {
         }
         return Node::Image {
             id: Some(ElementIdWire::Name(gen_key(rng).into())),
-            hash: rng.next_u64(), data,
+            hash: rng.next_u64(),
+            data,
             label: rng.next_bool().then(|| gen_string(rng)),
-            image_style: ImageStyle { grayscale: rng.next_bool(), object_fit: ImageObjectFit::Contain },
-            loading: false, fallback: false, state_children: Vec::new(),
-            style: gen_native_style(rng), interactivity: Interactivity::default(),
+            image_style: ImageStyle {
+                grayscale: rng.next_bool(),
+                object_fit: ImageObjectFit::Contain,
+            },
+            loading: false,
+            fallback: false,
+            state_children: Vec::new(),
+            style: gen_native_style(rng),
+            interactivity: Interactivity::default(),
         };
     }
     Node::Svg {
         id: Some(ElementIdWire::Name(gen_key(rng).into())),
-        source: SvgSource::Data { hash: rng.next_u64(), bytes },
+        source: SvgSource::Data {
+            hash: rng.next_u64(),
+            bytes,
+        },
         transformation: SvgTransformation {
             scale: [gen_f32(rng), gen_f32(rng)],
-            translate: [gen_f32(rng), gen_f32(rng)], rotate: gen_f32(rng),
+            translate: [gen_f32(rng), gen_f32(rng)],
+            rotate: gen_f32(rng),
         },
         label: rng.next_bool().then(|| gen_string(rng)),
         style: gen_native_style(rng),
-        interactivity: Interactivity { hover: Some(gen_native_style(rng)), ..Default::default() },
+        interactivity: Interactivity {
+            hover: Some(gen_native_style(rng)),
+            ..Default::default()
+        },
     }
 }
 
@@ -906,7 +936,13 @@ fn gen_patch_tree(rng: &mut Rng) -> Node {
 fn is_list_node(node: &Node) -> bool {
     matches!(
         node,
-        Node::Container { .. } | Node::Tooltip { .. } | Node::Overlay { .. } | Node::When { .. } | Node::Anchored { .. } | Node::Image { .. } | Node::UniformList { .. }
+        Node::Container { .. }
+            | Node::Tooltip { .. }
+            | Node::Overlay { .. }
+            | Node::When { .. }
+            | Node::Anchored { .. }
+            | Node::Image { .. }
+            | Node::UniformList { .. }
     )
 }
 
@@ -1081,7 +1117,10 @@ fn tree_depth(node: &Node) -> usize {
         | Node::Scroll { content, .. } => 1 + tree_depth(content),
         Node::Container { children, .. }
         | Node::Anchored { children, .. }
-        | Node::Image { state_children: children, .. }
+        | Node::Image {
+            state_children: children,
+            ..
+        }
         | Node::Tooltip { children, .. }
         | Node::Overlay { children, .. }
         | Node::When { children, .. } => 1 + children.iter().map(tree_depth).max().unwrap_or(0),
@@ -1394,7 +1433,13 @@ fn check_bounds(
                 check_pixels(&Some(value), ctx, "QR size");
             }
         }
-        Node::RichText { text, runs, font_family_overrides, clickable_ranges, .. } => {
+        Node::RichText {
+            text,
+            runs,
+            font_family_overrides,
+            clickable_ranges,
+            ..
+        } => {
             check_string(text, ctx, "rich text");
             let valid = |range: &std::ops::Range<usize>| {
                 range.start <= range.end
@@ -1447,29 +1492,64 @@ fn check_bounds(
                 assert!(step.is_finite() && step > 0.0);
             }
         }
-        Node::Image { data, label, style, state_children, .. } => {
+        Node::Image {
+            data,
+            label,
+            style,
+            state_children,
+            ..
+        } => {
             if let Some(data) = data {
                 *svg_bytes += data.byte_len();
                 assert!(data.valid_rgba(), "{ctx}: invalid RGBA");
             }
-            if let Some(label) = label { check_string(label, ctx, "image label"); }
+            if let Some(label) = label {
+                check_string(label, ctx, "image label");
+            }
             check_native_style(style);
-            for child in state_children { check_bounds(child, depth + 1, keys, svg_bytes, ctx); }
+            for child in state_children {
+                check_bounds(child, depth + 1, keys, svg_bytes, ctx);
+            }
         }
-        Node::Svg { source, transformation, label, style, interactivity, .. } => {
-            if let SvgSource::Data { bytes, .. } = source { *svg_bytes += bytes.as_ref().map_or(0, Vec::len); }
-            if let Some(label) = label { check_string(label, ctx, "picture label"); }
+        Node::Svg {
+            source,
+            transformation,
+            label,
+            style,
+            interactivity,
+            ..
+        } => {
+            if let SvgSource::Data { bytes, .. } = source {
+                *svg_bytes += bytes.as_ref().map_or(0, Vec::len);
+            }
+            if let Some(label) = label {
+                check_string(label, ctx, "picture label");
+            }
             check_native_style(style);
-            if let Some(hover) = &interactivity.hover { check_native_style(hover); }
-            for value in transformation.scale.into_iter().chain(transformation.translate).chain([transformation.rotate]) {
+            if let Some(hover) = &interactivity.hover {
+                check_native_style(hover);
+            }
+            for value in transformation
+                .scale
+                .into_iter()
+                .chain(transformation.translate)
+                .chain([transformation.rotate])
+            {
                 assert!(value.is_finite() && (-PIXEL_BOUND..=PIXEL_BOUND).contains(&value));
             }
         }
-        Node::Anchored { position, offset, children, .. } => {
+        Node::Anchored {
+            position,
+            offset,
+            children,
+            ..
+        } => {
             for value in position.iter().chain(offset).flatten() {
                 assert!(value.is_finite() && (-PIXEL_BOUND..=PIXEL_BOUND).contains(value));
             }
-            for child in children { check_bounds(child, depth + 1, keys, svg_bytes, ctx); }
+            for child in children {
+                check_bounds(child, depth + 1, keys, svg_bytes, ctx);
+            }
         }
         Node::Deferred { priority, content } => {
             assert!(*priority <= 16);
@@ -1760,7 +1840,10 @@ fn check_bounds(
         }
         Node::Canvas { style, commands } => {
             check_native_style(style);
-            assert!(commands.len() <= view_wire::MAX_CANVAS_PARTS, "{ctx}: canvas command budget");
+            assert!(
+                commands.len() <= view_wire::MAX_CANVAS_PARTS,
+                "{ctx}: canvas command budget"
+            );
         }
         Node::Surface { name, args, .. } => {
             check_string(name, ctx, "surface name");

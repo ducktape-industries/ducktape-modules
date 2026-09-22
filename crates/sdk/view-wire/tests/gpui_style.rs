@@ -18,18 +18,44 @@ fn container(style: StyleRefinement) -> Node {
 
 #[test]
 fn whole_frames_bound_base_and_every_conditional_style() {
-    let hostile = StyleRefinement::default().w(px(f32::INFINITY)).m(px(-900.)).opacity(7.);
+    let hostile = StyleRefinement::default()
+        .w(px(f32::INFINITY))
+        .m(px(-900.))
+        .opacity(7.);
     let mut root = container(hostile.clone());
-    let Node::Container { interactivity, .. } = &mut root else { unreachable!() };
+    let Node::Container { interactivity, .. } = &mut root else {
+        unreachable!()
+    };
     interactivity.hover = Some(hostile.clone());
     interactivity.active = Some(hostile.clone());
-    interactivity.group_hover = Some(GroupRefinement { group: "row".into(), style: hostile.clone() });
-    interactivity.group_active = Some(GroupRefinement { group: "row".into(), style: hostile });
-    let mut frame = Frame { root: Some(root), ..Default::default() };
+    interactivity.group_hover = Some(GroupRefinement {
+        group: "row".into(),
+        style: hostile.clone(),
+    });
+    interactivity.group_active = Some(GroupRefinement {
+        group: "row".into(),
+        style: hostile,
+    });
+    let mut frame = Frame {
+        root: Some(root),
+        ..Default::default()
+    };
     view_wire::sanitize(&mut frame).unwrap();
-    let Node::Container { style, interactivity, .. } = frame.root.unwrap() else { unreachable!() };
-    for style in [style, interactivity.hover.unwrap(), interactivity.active.unwrap(),
-        interactivity.group_hover.unwrap().style, interactivity.group_active.unwrap().style] {
+    let Node::Container {
+        style,
+        interactivity,
+        ..
+    } = frame.root.unwrap()
+    else {
+        unreachable!()
+    };
+    for style in [
+        style,
+        interactivity.hover.unwrap(),
+        interactivity.active.unwrap(),
+        interactivity.group_hover.unwrap().style,
+        interactivity.group_active.unwrap().style,
+    ] {
         assert_eq!(style.size.width, Some(px(0.).into()));
         assert_eq!(style.margin.left, Some(px(0.).into()));
         assert_eq!(style.opacity, Some(1.));
@@ -45,7 +71,12 @@ fn style_changes_are_props_and_patches_receive_the_same_bounds() {
     let encoded = view_wire::encode(&patches);
     let patches = view_wire::decode(&encoded).unwrap();
     view_wire::apply(&mut old, patches).unwrap();
-    let Node::Container { style, children, .. } = old else { unreachable!() };
+    let Node::Container {
+        style, children, ..
+    } = old
+    else {
+        unreachable!()
+    };
     assert_eq!(style.size.width, Some(px(8192.).into()));
     assert!(matches!(&children[0], Node::Text { content, .. } if content == "stable child"));
 }
@@ -63,7 +94,9 @@ fn text_styles_are_bounded_in_the_same_walk() {
         ..Default::default()
     };
     view_wire::sanitize(&mut frame).unwrap();
-    let Node::Text { style, .. } = frame.root.unwrap() else { unreachable!() };
+    let Node::Text { style, .. } = frame.root.unwrap() else {
+        unreachable!()
+    };
     assert_eq!(style.size.width, Some(px(8192.).into()));
     assert_eq!(style.text.font_size, Some(px(512.).into()));
 }

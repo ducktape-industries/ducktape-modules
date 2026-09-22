@@ -630,8 +630,15 @@ pub trait StatefulInteractiveElement: InteractiveElement {
 impl<T: InteractiveElement> StatefulInteractiveElement for Stateful<T> {}
 
 impl Interactivity {
-    pub(crate) fn into_wire(self, lowering: &mut Lowering<'_>) -> (Option<wire::ElementIdWire>, wire::Interactivity) {
-        let id = self.id.map(wire::ElementIdWire::from_gpui).transpose().expect("element ID must be portable across the view boundary");
+    pub(crate) fn into_wire(
+        self,
+        lowering: &mut Lowering<'_>,
+    ) -> (Option<wire::ElementIdWire>, wire::Interactivity) {
+        let id = self
+            .id
+            .map(wire::ElementIdWire::from_gpui)
+            .transpose()
+            .expect("element ID must be portable across the view boundary");
         let tooltip = self.tooltip.map(|tooltip| {
             let request = lowering.tooltip(tooltip.build);
             wire::Tooltip {

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use view_guest::prelude::*;
-use view_guest::{Driver, ElementId, Input, View, Window, wire};
+use view_guest::{wire, Driver, ElementId, Input, View, Window};
 
 #[derive(Default, Serialize, Deserialize)]
 struct Form {
@@ -18,10 +18,7 @@ impl View for Form {
 
 impl Render for Form {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let id = ElementId::NamedChild(
-            Arc::new(ElementId::Name("chat".into())),
-            "search".into(),
-        );
+        let id = ElementId::NamedChild(Arc::new(ElementId::Name("chat".into())), "search".into());
         div().child(
             Input::new(id)
                 .value(self.value.clone())

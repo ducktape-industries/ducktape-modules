@@ -97,7 +97,9 @@ mod qr;
 pub use qr::{MAX_QR_CODES, MAX_QR_PAYLOAD_BYTES, Qr, QrCorrection, QrSize, QrVersion};
 mod rich_text;
 mod text;
-pub use rich_text::{HighlightStyle as RichTextHighlightStyle, Runs as RichTextRuns, TextRun as RichTextRun};
+pub use rich_text::{
+    HighlightStyle as RichTextHighlightStyle, Runs as RichTextRuns, TextRun as RichTextRun,
+};
 pub use text::{
     Align, FontFamily, FontStretch, FontStyle, LineHeight, NamedFont, Shaping, TextOptions,
     Wrapping,
@@ -294,9 +296,15 @@ pub enum Event {
         value: f32,
     },
     /// A pick list chose the option at `index` in the node's `options`.
-    Select { handler: u32, index: u32 },
+    Select {
+        handler: u32,
+        index: u32,
+    },
     /// A native interactive-text hover changed character index.
-    RichTextHover { handler: u32, event: RichTextHover },
+    RichTextHover {
+        handler: u32,
+        event: RichTextHover,
+    },
     /// A [`Node::Sensor`]'s child was measured: shown at, or resized to,
     /// `width` by `height` — the child's own laid-out size in logical
     /// pixels, never where it sits in the window. `handler` is the node's
@@ -366,9 +374,15 @@ pub enum Event {
         scrolled_to_end: Option<bool>,
     },
     /// A native variable-height list requested a bounded item window.
-    ListRequest { handler: u32, request: ListRequest },
+    ListRequest {
+        handler: u32,
+        request: ListRequest,
+    },
     /// Settled native list geometry, emitted after layout state is released.
-    ListScroll { handler: u32, event: ListScroll },
+    ListScroll {
+        handler: u32,
+        event: ListScroll,
+    },
     /// One answer to a [`Request`]. A one-shot request gets exactly one with
     /// `done`; a subscription gets many, the last one `done`.
     Response {
@@ -1176,68 +1190,39 @@ fn sanitize_node(
     if let Some(id) = typed_id {
         authored_path.push(id);
     }
+    if let Node::Container { interactivity, .. }
+    | Node::UniformList { interactivity, .. }
+    | Node::Image { interactivity, .. }
+    | Node::Svg { interactivity, .. } = node
+    {
+        sanitize_interactivity(interactivity);
+        if let Some(tooltip) = &mut interactivity.tooltip {
+            tooltip.delay_ms = tooltip.delay_ms.min(60_000);
+            if budgets.nodes == 0 {
+                tooltip.content = None;
+            } else if let Some(content) = &mut tooltip.content {
+                sanitize_node(
+                    content,
+                    depth + 1,
+                    budgets,
+                    taken,
+                    &mut vec![std::collections::HashSet::new()],
+                    &mut Vec::new(),
+                )?;
+            }
+        }
+    }
     match node {
-        Node::Container {
-            id,
-            style,
-            interactivity,
-            ..
-        } => {
+        Node::Container { id, style, .. } => {
             if let Some(id) = id {
                 id.validate_host()?;
             }
             style_sanitize::sanitize(style);
-            interactivity.aria.sanitize();
-            for refinement in [&mut interactivity.hover, &mut interactivity.active]
-                .into_iter()
-                .flatten()
-            {
-                style_sanitize::sanitize(refinement);
-            }
-            for refinement in [
-                &mut interactivity.group_hover,
-                &mut interactivity.group_active,
-            ]
-            .into_iter()
-            .flatten()
-            {
-                style_sanitize::sanitize(&mut refinement.style);
-                let mut group = refinement.group.to_string();
-                truncate_string(&mut group);
-                refinement.group = group.into();
-            }
-            if let Some(group) = &mut interactivity.group {
-                let mut name = group.to_string();
-                truncate_string(&mut name);
-                *group = name.into();
-            }
-            if let Some(context) = &mut interactivity.key_context {
-                context
-                    .entries
-                    .truncate(interactivity::MAX_KEY_CONTEXT_ENTRIES);
-                for entry in &mut context.entries {
-                    let mut key = entry.key.to_string();
-                    truncate_string(&mut key);
-                    entry.key = key.into();
-                    if let Some(value) = &mut entry.value {
-                        let mut bounded = value.to_string();
-                        truncate_string(&mut bounded);
-                        *value = bounded.into();
-                    }
-                }
-            }
-            if let Some(tooltip) = &mut interactivity.tooltip {
-                tooltip.delay_ms = tooltip.delay_ms.min(60_000);
-                if let Some(content) = &mut tooltip.content {
-                    sanitize_node(content, depth + 1, budgets, taken, identity_scopes)?;
-                }
-            }
         }
         Node::UniformList {
             id,
             path,
             style,
-            interactivity,
             count,
             measure_index,
             scroll_request,
@@ -1256,30 +1241,6 @@ fn sanitize_node(
             }
             for ancestor in path.iter() {
                 ancestor.validate_host()?;
-            }
-            interactivity.aria.sanitize();
-            for refinement in [&mut interactivity.hover, &mut interactivity.active]
-                .into_iter()
-                .flatten()
-            {
-                style_sanitize::sanitize(refinement);
-            }
-            for refinement in [
-                &mut interactivity.group_hover,
-                &mut interactivity.group_active,
-            ]
-            .into_iter()
-            .flatten()
-            {
-                style_sanitize::sanitize(&mut refinement.style);
-                let mut group = refinement.group.to_string();
-                truncate_string(&mut group);
-                refinement.group = group.into();
-            }
-            if let Some(group) = &mut interactivity.group {
-                let mut name = group.to_string();
-                truncate_string(&mut name);
-                *group = name.into();
             }
             *count = (*count).min(MAX_UNIFORM_LIST_COUNT);
             *measure_index = (*measure_index).min(count.saturating_sub(1));
@@ -1487,13 +1448,7 @@ fn sanitize_node(
                 id.validate_host()?;
             }
             style_sanitize::sanitize(style);
-            rich_text::sanitize(
-                text,
-                runs,
-                font_family_overrides,
-                clickable_ranges,
-                budgets,
-            );
+            rich_text::sanitize(text, runs, font_family_overrides, clickable_ranges, budgets);
         }
         Node::Text {
             id,
@@ -1530,7 +1485,6 @@ fn sanitize_node(
             data,
             label,
             style,
-            interactivity,
             loading,
             fallback,
             state_children,
@@ -1541,7 +1495,7 @@ fn sanitize_node(
             }
             ImageData::sanitize(data, budgets);
             style_sanitize::sanitize(style);
-            sanitize_interactivity(interactivity);
+
             if let Some(label) = label {
                 spend_text(label, budgets);
             }
@@ -1559,7 +1513,6 @@ fn sanitize_node(
             transformation,
             label,
             style,
-            interactivity,
         } => {
             if let Some(id) = id {
                 id.validate_host()?;
@@ -1577,7 +1530,7 @@ fn sanitize_node(
             }
             transformation.rotate = signed_bounded(transformation.rotate);
             style_sanitize::sanitize(style);
-            sanitize_interactivity(interactivity);
+
             if let Some(label) = label {
                 spend_text(label, budgets);
             }
@@ -2037,7 +1990,33 @@ fn bound_edges(edges: &mut Option<Edges>) {
 }
 
 fn sanitize_interactivity(interactivity: &mut Interactivity) {
+    interactivity.window_control_area = None;
     interactivity.aria.sanitize();
+    for style in [
+        &mut interactivity.focus,
+        &mut interactivity.in_focus,
+        &mut interactivity.focus_visible,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        style_sanitize::sanitize(style);
+    }
+    if let Some(context) = &mut interactivity.key_context {
+        context
+            .entries
+            .truncate(interactivity::MAX_KEY_CONTEXT_ENTRIES);
+        for entry in &mut context.entries {
+            let mut key = entry.key.to_string();
+            truncate_string(&mut key);
+            entry.key = key.into();
+            if let Some(value) = &mut entry.value {
+                let mut bounded = value.to_string();
+                truncate_string(&mut bounded);
+                *value = bounded.into();
+            }
+        }
+    }
     for style in [&mut interactivity.hover, &mut interactivity.active]
         .into_iter()
         .flatten()
