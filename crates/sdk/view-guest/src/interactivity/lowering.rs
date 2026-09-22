@@ -89,7 +89,7 @@ impl Interactivity {
 }
 
 fn route_plain<E: 'static>(
-    listeners: Vec<Box<dyn Fn(&E, &mut Window, &mut App) + 'static>>,
+    listeners: Vec<EventListener<E>>,
     lowering: &mut Lowering<'_>,
 ) -> Option<u32> {
     (!listeners.is_empty()).then(|| {

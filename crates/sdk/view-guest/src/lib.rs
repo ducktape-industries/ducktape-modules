@@ -185,7 +185,6 @@ macro_rules! export_driver {
 /// exports from. A module runs one app, so its driver lives here.
 #[cfg(target_arch = "wasm32")]
 #[doc(hidden)]
-
 pub mod exports {
     use std::any::Any;
     use std::cell::RefCell;

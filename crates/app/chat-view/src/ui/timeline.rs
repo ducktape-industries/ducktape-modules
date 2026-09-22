@@ -66,41 +66,43 @@ pub fn list(chat: &Chat, pane: Pane, cx: &mut Context<Chat>, theme: &Theme) -> i
             ));
         }
     }
-    if let Some(room) = &chat.room {
-        if matches!(pane, Pane::Timeline) && room.has_older && !room.landed {
-            let older = cx.listener(|chat, _: &ClickEvent, _window, cx| {
-                cx.notify();
-                chat.load_older(cx)
-            });
-            let label = if room.older_loading {
-                "Loading older messages…"
-            } else {
-                "Load older messages"
-            };
-            let control = if room.older_loading || chat.session.busy {
-                div()
-                    .id(ElementId::Name("chat-load-older-button".into()))
-                    .text_color(theme.muted)
-                    .child(label)
-                    .into_any_element()
-            } else {
-                super::button(
-                    ElementId::Name("chat-load-older-button".into()),
-                    label,
-                    theme,
-                    older,
-                )
+    if let Some(room) = &chat.room
+        && matches!(pane, Pane::Timeline)
+        && room.has_older
+        && !room.landed
+    {
+        let older = cx.listener(|chat, _: &ClickEvent, _window, cx| {
+            cx.notify();
+            chat.load_older(cx)
+        });
+        let label = if room.older_loading {
+            "Loading older messages…"
+        } else {
+            "Load older messages"
+        };
+        let control = if room.older_loading || chat.session.busy {
+            div()
+                .id(ElementId::Name("chat-load-older-button".into()))
+                .text_color(theme.muted)
+                .child(label)
                 .into_any_element()
-            };
-            content = content.child(
-                div()
-                    .id(ElementId::Name("chat-load-older".into()))
-                    .flex()
-                    .justify_center()
-                    .p_2()
-                    .child(control),
-            );
-        }
+        } else {
+            super::button(
+                ElementId::Name("chat-load-older-button".into()),
+                label,
+                theme,
+                older,
+            )
+            .into_any_element()
+        };
+        content = content.child(
+            div()
+                .id(ElementId::Name("chat-load-older".into()))
+                .flex()
+                .justify_center()
+                .p_2()
+                .child(control),
+        );
     }
     if !messages.is_empty() {
         let lead = matches!(pane, Pane::Timeline)
@@ -132,7 +134,7 @@ pub fn list(chat: &Chat, pane: Pane, cx: &mut Context<Chat>, theme: &Theme) -> i
             chat.list_scrolled(observed_pane, event, cx);
         }));
         let pane_for_items = pane;
-        let list_theme = theme.clone();
+        let list_theme = *theme;
         let list_messages = messages.clone();
         let unread_seq = (pane == Pane::Timeline && chat.reads.boundary > 0)
             .then(|| {

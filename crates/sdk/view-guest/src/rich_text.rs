@@ -282,7 +282,9 @@ mod tests {
         let mut window = app.window();
         let first = Lowering::new(&mut window, &mut app).lower(
             InteractiveText::new("rich", StyledText::new("one"))
-                .on_click(vec![0..3], move |_, _, _| first_hits.borrow_mut().push(1)),
+                .on_click(std::iter::once(0..3).collect(), move |_, _, _| {
+                    first_hits.borrow_mut().push(1)
+                }),
         );
         let wire::Node::RichText {
             on_click: Some(first_handler),
@@ -296,7 +298,9 @@ mod tests {
         let mut window = app.window();
         let second = Lowering::new(&mut window, &mut app).lower(
             InteractiveText::new("rich", StyledText::new("two"))
-                .on_click(vec![0..3], move |_, _, _| second_hits.borrow_mut().push(2)),
+                .on_click(std::iter::once(0..3).collect(), move |_, _, _| {
+                    second_hits.borrow_mut().push(2)
+                }),
         );
         let wire::Node::RichText {
             on_click: Some(second_handler),

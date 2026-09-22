@@ -1,10 +1,12 @@
 use crate::element::{AnyElement, Element, IntoElement, Lowering, RenderOnce};
 use crate::wire;
 
+type ViewRenderer = Box<dyn FnOnce(&mut crate::Window, &mut crate::App) -> AnyElement>;
+
 /// Type-erased entity-backed view, matching native GPUI's `AnyView` shape.
 /// Guest views remain `View` entities because the wasm driver owns no native entity arena.
 pub struct AnyView {
-    render: Box<dyn FnOnce(&mut crate::Window, &mut crate::App) -> AnyElement>,
+    render: ViewRenderer,
 }
 
 impl<V: crate::View> From<crate::Entity<V>> for AnyView {

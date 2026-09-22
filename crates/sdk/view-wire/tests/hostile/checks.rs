@@ -63,13 +63,7 @@ pub(super) fn check_string(text: &str, ctx: &str, field: &str) {
 /// `MAX_STRING_BYTES` and on a char boundary, every key unique across the
 /// whole tree, every size/colour/border field inside its own bound, and the
 /// picture bytes the tree carries summed into `svg_bytes`.
-pub(super) fn check_bounds(
-    node: &Node,
-    depth: usize,
-    keys: &mut HashSet<String>,
-    svg_bytes: &mut usize,
-    ctx: &str,
-) {
+pub(super) fn check_bounds(node: &Node, depth: usize, svg_bytes: &mut usize, ctx: &str) {
     assert!(
         depth <= MAX_DEPTH,
         "{ctx}: a node sits at depth {depth}, over MAX_DEPTH"
@@ -94,7 +88,7 @@ pub(super) fn check_bounds(
         Node::Container(view_wire::ContainerNode { children, .. })
         | Node::UniformList { children, .. } => {
             for child in children {
-                check_bounds(child, depth + 1, keys, svg_bytes, ctx);
+                check_bounds(child, depth + 1, svg_bytes, ctx);
             }
         }
         Node::List {
@@ -114,7 +108,7 @@ pub(super) fn check_bounds(
             assert!(*range_start <= *item_count);
             assert!(children.len() <= item_count.saturating_sub(*range_start));
             for child in children {
-                check_bounds(child, depth + 1, keys, svg_bytes, ctx);
+                check_bounds(child, depth + 1, svg_bytes, ctx);
             }
         }
         Node::Float {
@@ -125,7 +119,7 @@ pub(super) fn check_bounds(
         } => {
             assert!(scale.is_finite() && (f32::EPSILON..=PIXEL_BOUND).contains(scale));
             check_native_style(style);
-            check_bounds(content, depth + 1, keys, svg_bytes, ctx);
+            check_bounds(content, depth + 1, svg_bytes, ctx);
         }
         Node::Tooltip {
             delay_ms,
@@ -137,7 +131,7 @@ pub(super) fn check_bounds(
             check_native_style(style);
             assert!(children.len() <= 2);
             for child in children {
-                check_bounds(child, depth + 1, keys, svg_bytes, ctx);
+                check_bounds(child, depth + 1, svg_bytes, ctx);
             }
         }
         Node::Sensor {
@@ -153,7 +147,7 @@ pub(super) fn check_bounds(
                     "{ctx}: sensor delay {delay} is not a finite non-negative number"
                 );
             }
-            check_bounds(child, depth + 1, keys, svg_bytes, ctx);
+            check_bounds(child, depth + 1, svg_bytes, ctx);
         }
         Node::Scroll {
             style,
@@ -173,16 +167,16 @@ pub(super) fn check_bounds(
             ] {
                 check_pixels(value, ctx, field);
             }
-            check_bounds(content, depth + 1, keys, svg_bytes, ctx);
+            check_bounds(content, depth + 1, svg_bytes, ctx);
         }
         Node::MouseArea { label, content, .. } => {
             if let Some(label) = label {
                 check_string(label, ctx, "accessible label");
             }
-            check_bounds(content, depth + 1, keys, svg_bytes, ctx);
+            check_bounds(content, depth + 1, svg_bytes, ctx);
         }
         Node::ResizeHandle { content, .. } => {
-            check_bounds(content, depth + 1, keys, svg_bytes, ctx);
+            check_bounds(content, depth + 1, svg_bytes, ctx);
         }
         Node::Qr { code, .. } => {
             if let Some(payload) = &code.payload {
@@ -270,7 +264,7 @@ pub(super) fn check_bounds(
             }
             check_native_style(style);
             for child in state_children {
-                check_bounds(child, depth + 1, keys, svg_bytes, ctx);
+                check_bounds(child, depth + 1, svg_bytes, ctx);
             }
         }
         Node::Svg {
@@ -310,12 +304,12 @@ pub(super) fn check_bounds(
                 assert!(value.is_finite() && (-PIXEL_BOUND..=PIXEL_BOUND).contains(value));
             }
             for child in children {
-                check_bounds(child, depth + 1, keys, svg_bytes, ctx);
+                check_bounds(child, depth + 1, svg_bytes, ctx);
             }
         }
         Node::Deferred { priority, content } => {
             assert!(*priority <= 16);
-            check_bounds(content, depth + 1, keys, svg_bytes, ctx);
+            check_bounds(content, depth + 1, svg_bytes, ctx);
         }
         Node::Input {
             id,
@@ -340,7 +334,7 @@ pub(super) fn check_bounds(
         } => {
             match content {
                 ButtonContent::Label(text) => check_string(text, ctx, "button label"),
-                ButtonContent::Child(child) => check_bounds(child, depth + 1, keys, svg_bytes, ctx),
+                ButtonContent::Child(child) => check_bounds(child, depth + 1, svg_bytes, ctx),
             }
             if let Some(label) = label {
                 check_string(label, ctx, "accessible label");
@@ -442,12 +436,12 @@ pub(super) fn check_bounds(
             }
             assert!(children.len() <= 2, "{ctx}: overlay child count");
             for child in children {
-                check_bounds(child, depth + 1, keys, svg_bytes, ctx);
+                check_bounds(child, depth + 1, svg_bytes, ctx);
             }
         }
-        Node::Lazy { content, .. } => check_bounds(content, depth + 1, keys, svg_bytes, ctx),
+        Node::Lazy { content, .. } => check_bounds(content, depth + 1, svg_bytes, ctx),
         Node::Responsive { content, .. } => {
-            check_bounds(content, depth + 1, keys, svg_bytes, ctx);
+            check_bounds(content, depth + 1, svg_bytes, ctx);
         }
         Node::When { condition, .. } => {
             assert!(
@@ -524,9 +518,8 @@ pub(super) fn check_frame(frame: &Frame, ctx: &str) {
             "{ctx}: {} nodes, over MAX_NODES",
             root.count()
         );
-        let mut keys = HashSet::new();
         let mut svg_bytes = 0;
-        check_bounds(root, 0, &mut keys, &mut svg_bytes, ctx);
+        check_bounds(root, 0, &mut svg_bytes, ctx);
         assert!(
             svg_bytes <= MAX_PICTURE_BYTES_PER_FRAME,
             "{ctx}: {svg_bytes} picture bytes, over MAX_PICTURE_BYTES_PER_FRAME"

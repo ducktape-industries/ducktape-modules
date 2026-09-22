@@ -43,10 +43,9 @@ mod tests {
             settings: Box::new(ComboOptions {
                 icon: Some(ComboIcon {
                     code_point: '⌕',
-                    style: {
-                        let mut style = gpui::TextStyleRefinement::default();
-                        style.font_size = Some(gpui::px(f32::MAX).into());
-                        style
+                    style: gpui::TextStyleRefinement {
+                        font_size: Some(gpui::px(f32::MAX).into()),
+                        ..Default::default()
                     },
                     spacing: f32::NAN,
                     right: false,

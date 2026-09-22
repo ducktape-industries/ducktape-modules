@@ -1,6 +1,7 @@
 use super::{App, ClickEvent, MouseButton, Window};
 
 pub(crate) type ClickListener = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
+pub(super) type EventListener<E> = Box<dyn Fn(&E, &mut Window, &mut App) + 'static>;
 pub(super) type MouseDownListener =
     Box<dyn Fn(&gpui::MouseDownEvent, &mut Window, &mut App) + 'static>;
 pub(super) type MouseUpListener = Box<dyn Fn(&gpui::MouseUpEvent, &mut Window, &mut App) + 'static>;

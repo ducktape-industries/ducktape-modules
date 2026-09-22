@@ -9,6 +9,7 @@ use std::{
 
 pub use gpui::{FollowMode, ListAlignment, ListOffset, ListScrollEvent, ListSizingBehavior};
 type ScrollHandler = dyn FnMut(&ListScrollEvent, &mut Window, &mut App) + 'static;
+type ItemRenderer = Box<dyn FnMut(usize, &mut Window, &mut App) -> AnyElement>;
 
 #[derive(Clone)]
 pub struct ListState(Rc<State>);
@@ -202,7 +203,7 @@ impl Inner {
 
 pub struct List {
     state: ListState,
-    render_item: Box<dyn FnMut(usize, &mut Window, &mut App) -> AnyElement>,
+    render_item: ItemRenderer,
     style: StyleRefinement,
     sizing_behavior: ListSizingBehavior,
 }

@@ -17,6 +17,8 @@ use std::cell::RefCell;
 use std::ops::Range;
 use std::rc::Rc;
 
+type InputListener<T> = Box<dyn Fn(&T, &mut Window, &mut App)>;
+
 /// A guest element that can be lowered by the driver.
 ///
 /// This is intentionally a guest-side boundary with the same name as GPUI's
@@ -168,34 +170,20 @@ impl<'a> Lowering<'a> {
         slots::picture(&self.app.inner.slots, bytes)
     }
 
-    pub(crate) fn tooltip(
-        &mut self,
-        build: Box<dyn Fn(&mut Window, &mut App) -> crate::AnyView + 'static>,
-    ) -> u32 {
+    pub(crate) fn tooltip(&mut self, build: slots::TooltipBuilder) -> u32 {
         slots::tooltip(&self.app.inner.slots, build)
     }
 
-    pub(crate) fn rich_text_tooltip(
-        &mut self,
-        build: Box<dyn Fn(usize, &mut Window, &mut App) -> Option<crate::AnyView> + 'static>,
-    ) -> u32 {
+    pub(crate) fn rich_text_tooltip(&mut self, build: slots::RichTextTooltipBuilder) -> u32 {
         slots::rich_text_tooltip(&self.app.inner.slots, build)
     }
 }
 
 /// A guest container backed by a real GPUI style refinement.
+#[derive(Default)]
 pub struct Div {
     pub(crate) interactivity: Interactivity,
     children: Vec<AnyElement>,
-}
-
-impl Default for Div {
-    fn default() -> Self {
-        Self {
-            interactivity: Interactivity::default(),
-            children: Vec::new(),
-        }
-    }
 }
 
 impl Styled for Div {
@@ -258,8 +246,8 @@ pub struct Input {
     options: wire::InputOptions,
     secure: bool,
     style: StyleRefinement,
-    on_input: Option<Box<dyn Fn(&String, &mut Window, &mut App)>>,
-    on_submit: Option<Box<dyn Fn(&(), &mut Window, &mut App)>>,
+    on_input: Option<InputListener<String>>,
+    on_submit: Option<InputListener<()>>,
 }
 
 impl Input {

@@ -596,12 +596,11 @@ pub(super) fn sanitize_node(
             state_children,
             ..
         } = node
+            && state_children.len() < usize::from(*loading) + usize::from(*fallback)
         {
-            if state_children.len() < usize::from(*loading) + usize::from(*fallback) {
-                *loading = false;
-                *fallback = false;
-                state_children.clear();
-            }
+            *loading = false;
+            *fallback = false;
+            state_children.clear();
         }
         finish_typed_scope(identity_scopes, typed_scope_started);
         if typed_scope_started {

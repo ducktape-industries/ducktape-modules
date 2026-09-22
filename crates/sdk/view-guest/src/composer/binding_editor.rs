@@ -65,6 +65,10 @@ pub(crate) fn key_tag(
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "these are the native editor binding's independent authored inputs"
+)]
 pub(super) fn editor<V: 'static>(
     draft: &Draft,
     key: &str,

@@ -8,8 +8,18 @@ use std::sync::{Arc, Weak};
 type ClickRoute = Rc<dyn Fn(&gpui::ClickEvent, &mut crate::Window, &mut crate::App)>;
 type TooltipRoute =
     Rc<dyn Fn(Option<usize>, &mut crate::Window, &mut crate::App) -> Option<crate::AnyView>>;
+pub(crate) type TooltipBuilder =
+    Box<dyn Fn(&mut crate::Window, &mut crate::App) -> crate::AnyView + 'static>;
+pub(crate) type RichTextTooltipBuilder =
+    Box<dyn Fn(usize, &mut crate::Window, &mut crate::App) -> Option<crate::AnyView> + 'static>;
+type EditorReceiver = (
+    crate::wire::editor_document::EditorTransferId,
+    crate::wire::editor_document::EditorDocumentRef,
+    crate::wire::editor_document::EditorTransferReceiver,
+);
+type EventHandler<A> = Rc<dyn Fn(&A, &mut crate::Window, &mut crate::App)>;
 
-struct EventRoute<A>(Rc<dyn Fn(&A, &mut crate::Window, &mut crate::App)>);
+struct EventRoute<A>(EventHandler<A>);
 
 #[derive(Default)]
 struct Tables {
@@ -17,11 +27,7 @@ struct Tables {
     editor_responses: Vec<crate::wire::EditorResponse>,
     editor_documents: Vec<crate::wire::editor_document::EditorDocumentMessage>,
     editor_sender: Option<crate::wire::editor_document::EditorTransferSender>,
-    editor_receiver: Option<(
-        crate::wire::editor_document::EditorTransferId,
-        crate::wire::editor_document::EditorDocumentRef,
-        crate::wire::editor_document::EditorTransferReceiver,
-    )>,
+    editor_receiver: Option<EditorReceiver>,
     editor_pending: Vec<crate::wire::EditorTransactionId>,
     host: crate::Host,
     mouse_interest: bool,
@@ -105,10 +111,7 @@ pub(crate) fn reset(context: &Context) {
     drop(old);
 }
 
-pub(crate) fn tooltip(
-    context: &Context,
-    build: Box<dyn Fn(&mut crate::Window, &mut crate::App) -> crate::AnyView + 'static>,
-) -> u32 {
+pub(crate) fn tooltip(context: &Context, build: TooltipBuilder) -> u32 {
     let mut tables = context.0.borrow_mut();
     let index = u32::try_from(tables.tooltips.len()).expect("too many tooltip routes");
     tables
@@ -117,12 +120,7 @@ pub(crate) fn tooltip(
     index
 }
 
-pub(crate) fn rich_text_tooltip(
-    context: &Context,
-    build: Box<
-        dyn Fn(usize, &mut crate::Window, &mut crate::App) -> Option<crate::AnyView> + 'static,
-    >,
-) -> u32 {
+pub(crate) fn rich_text_tooltip(context: &Context, build: RichTextTooltipBuilder) -> u32 {
     let mut tables = context.0.borrow_mut();
     let index = u32::try_from(tables.tooltips.len()).expect("too many tooltip routes");
     tables.tooltips.push(Rc::new(move |index, window, cx| {

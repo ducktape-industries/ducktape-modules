@@ -218,7 +218,7 @@ mod tests {
             (1..3, HighlightStyle::from(gpui::HighlightStyle::default())),
         ]);
         let mut overrides = vec![(3..99, "Mono".into()), (1..3, "Mono".into())];
-        let mut clicks = vec![1..2, 1..3, 3..4, 4..3];
+        let mut clicks = vec![1..2, 1..3, 3..4, std::ops::Range { start: 4, end: 3 }];
         let mut budgets = Budgets::frame();
         sanitize(
             &mut text,

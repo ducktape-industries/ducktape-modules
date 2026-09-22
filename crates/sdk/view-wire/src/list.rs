@@ -180,6 +180,36 @@ impl PartialEq for ListKey {
     }
 }
 
+pub(super) fn decode_indices<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<u32>, D::Error> {
+    struct Indices;
+    impl<'de> serde::de::Visitor<'de> for Indices {
+        type Value = Vec<u32>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("bounded uniform-list row indices")
+        }
+
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(
+            self,
+            mut seq: A,
+        ) -> Result<Self::Value, A::Error> {
+            let mut indices = Vec::new();
+            while let Some(index) = seq.next_element()? {
+                if indices.len() == super::MAX_UNIFORM_LIST_ROWS {
+                    return Err(serde::de::Error::custom(
+                        "too many uniform-list row indices",
+                    ));
+                }
+                indices.push(index);
+            }
+            Ok(indices)
+        }
+    }
+    deserializer.deserialize_seq(Indices)
+}
+
 #[cfg(test)]
 mod variable_tests {
     use super::*;
@@ -298,34 +328,4 @@ mod variable_tests {
         };
         assert!(decode::<Frame>(&encode(&frame)).is_err());
     }
-}
-
-pub(super) fn decode_indices<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Vec<u32>, D::Error> {
-    struct Indices;
-    impl<'de> serde::de::Visitor<'de> for Indices {
-        type Value = Vec<u32>;
-
-        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str("bounded uniform-list row indices")
-        }
-
-        fn visit_seq<A: serde::de::SeqAccess<'de>>(
-            self,
-            mut seq: A,
-        ) -> Result<Self::Value, A::Error> {
-            let mut indices = Vec::new();
-            while let Some(index) = seq.next_element()? {
-                if indices.len() == super::MAX_UNIFORM_LIST_ROWS {
-                    return Err(serde::de::Error::custom(
-                        "too many uniform-list row indices",
-                    ));
-                }
-                indices.push(index);
-            }
-            Ok(indices)
-        }
-    }
-    deserializer.deserialize_seq(Indices)
 }

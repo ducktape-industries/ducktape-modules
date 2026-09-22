@@ -220,6 +220,7 @@ impl App {
         FocusHandle::new(id)
     }
 
+    #[expect(clippy::new_ret_no_self, reason = "matches GPUI's App::new entity API")]
     pub fn new<V: View>(&mut self, build: impl FnOnce(&mut Context<V>) -> V) -> Entity<V> {
         let entity = Entity::reserve(self);
         let value = build(&mut Context {

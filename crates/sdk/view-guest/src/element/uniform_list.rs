@@ -1,5 +1,7 @@
 use super::*;
 
+type UniformProcessor = Box<dyn Fn(Range<usize>, &mut Window, &mut App) -> Vec<AnyElement>>;
+
 /// A handle for controlling a guest uniform list across frames.
 #[derive(Clone, Default)]
 pub struct UniformListScrollHandle(Rc<RefCell<UniformListScrollState>>);
@@ -83,7 +85,7 @@ impl UniformListScrollHandle {
 /// A GPUI-shaped uniform list recipe. The host owns layout and virtualization.
 pub struct UniformList {
     count: usize,
-    processor: Box<dyn Fn(Range<usize>, &mut Window, &mut App) -> Vec<AnyElement>>,
+    processor: UniformProcessor,
     pub(crate) interactivity: Interactivity,
     measure_index: usize,
     sizing: wire::list::UniformListSizing,

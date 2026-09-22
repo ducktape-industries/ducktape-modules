@@ -247,7 +247,7 @@ impl MemberRow {
     fn new(row: &Row, theme: &Theme) -> Self {
         Self {
             row: row.clone(),
-            theme: theme.clone(),
+            theme: *theme,
         }
     }
 }

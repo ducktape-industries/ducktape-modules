@@ -52,10 +52,10 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
         } else {
             pane = pane.child(timeline::list(chat, Pane::Timeline, cx, theme));
         }
-        if let Some(info) = chat.room_info() {
-            if !info.channel.huddle.is_empty() {
-                pane = pane.child(huddle(chat, info, cx, theme));
-            }
+        if let Some(info) = chat.room_info()
+            && !info.channel.huddle.is_empty()
+        {
+            pane = pane.child(huddle(chat, info, cx, theme));
         }
         let refusal = chat.write_refusal();
         if refusal.is_empty() {

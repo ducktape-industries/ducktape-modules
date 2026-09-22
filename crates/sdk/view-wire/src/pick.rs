@@ -9,6 +9,10 @@ pub struct PickOptions {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "the public wire schema keeps native icon payloads inline"
+)]
 pub enum PickHandle {
     Arrow { size: Option<f32> },
     Static(PickIcon),
@@ -51,10 +55,12 @@ mod tests {
     use super::*;
     #[test]
     fn pick_metrics_are_bounded_and_fonts_share_text_budget() {
-        let mut style = gpui::TextStyleRefinement::default();
-        style.font_family = Some("ééé".into());
-        style.font_size = Some(gpui::px(f32::MAX).into());
-        style.line_height = Some(gpui::relative(f32::MAX));
+        let style = gpui::TextStyleRefinement {
+            font_family: Some("ééé".into()),
+            font_size: Some(gpui::px(f32::MAX).into()),
+            line_height: Some(gpui::relative(f32::MAX)),
+            ..Default::default()
+        };
         let icon = PickIcon {
             code_point: '▼',
             style,

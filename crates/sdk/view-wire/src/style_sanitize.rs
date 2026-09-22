@@ -243,8 +243,10 @@ pub(crate) fn sanitize(style: &mut StyleRefinement) {
 }
 
 pub(crate) fn sanitize_text(style: &mut gpui::TextStyleRefinement, budgets: &mut crate::Budgets) {
-    let mut refinement = StyleRefinement::default();
-    refinement.text = std::mem::take(style);
+    let mut refinement = StyleRefinement {
+        text: std::mem::take(style),
+        ..Default::default()
+    };
     sanitize(&mut refinement);
     *style = refinement.text;
     if let Some(family) = &mut style.font_family {
@@ -318,17 +320,19 @@ mod tests {
     }
     #[test]
     fn bounds_shadow_count_and_gpu_radius() {
-        let mut style = StyleRefinement::default();
-        style.box_shadow = Some(vec![
-            gpui::BoxShadow {
-                color: rgb(0).into(),
-                offset: gpui::point(px(f32::NAN), px(1000.)),
-                blur_radius: px(1e9),
-                spread_radius: px(-100.),
-                inset: false,
-            };
-            100
-        ]);
+        let mut style = StyleRefinement {
+            box_shadow: Some(vec![
+                gpui::BoxShadow {
+                    color: rgb(0).into(),
+                    offset: gpui::point(px(f32::NAN), px(1000.)),
+                    blur_radius: px(1e9),
+                    spread_radius: px(-100.),
+                    inset: false,
+                };
+                100
+            ]),
+            ..Default::default()
+        };
         sanitize(&mut style);
         let shadows = style.box_shadow.unwrap();
         assert_eq!(shadows.len(), MAX_SHADOWS);

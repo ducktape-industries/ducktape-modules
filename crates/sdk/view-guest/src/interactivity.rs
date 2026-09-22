@@ -17,9 +17,11 @@ mod focus;
 pub use focus::FocusHandle;
 
 struct TooltipBuilder {
-    build: Box<dyn Fn(&mut Window, &mut App) -> AnyView + 'static>,
+    build: ViewBuilder,
     hoverable: bool,
 }
+
+type ViewBuilder = Box<dyn Fn(&mut Window, &mut App) -> AnyView + 'static>;
 
 /// The explicit state carried by guest interactivity until frame lowering.
 #[derive(Default)]
@@ -60,9 +62,9 @@ pub struct Interactivity {
     key_up: Vec<KeyUpListener>,
     capture_key_up: Vec<KeyUpListener>,
     modifiers_changed: Vec<ModifiersChangedListener>,
-    on_hover: Option<Box<dyn Fn(&bool, &mut Window, &mut App) + 'static>>,
+    on_hover: Option<EventListener<bool>>,
     hover_listener_mode: gpui::HoverListenerMode,
-    on_file_drop_exit: Vec<Box<dyn Fn(&FileDropEvent, &mut Window, &mut App) + 'static>>,
+    on_file_drop_exit: Vec<EventListener<FileDropEvent>>,
     tooltip: Option<TooltipBuilder>,
     tooltip_show_delay: Option<Duration>,
     occlude: bool,
