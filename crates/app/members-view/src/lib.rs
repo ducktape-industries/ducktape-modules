@@ -95,14 +95,15 @@ impl Render for Members {
             .size_full()
             .bg(theme.background)
             .text_color(theme.foreground)
+            .text_size(px(13.))
             .child(
                 div()
                     .id(ElementId::Name("members-head".into()))
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(div().flex_1().text_lg().child("Members"))
-                    .child(div().text_sm().text_color(theme.muted).child(self.count())),
+                    .child(div().id("members-title").flex_1().text_size(px(16.)).font_semibold().role(Role::Heading).aria_level(1).child("Members"))
+                    .child(div().text_size(px(11.)).text_color(theme.muted).child(self.count())),
             )
             .child(
                 Input::new(ElementId::Name("members-filter".into()))
@@ -151,7 +152,7 @@ impl Members {
         match &self.rows {
             Loaded::Idle | Loaded::Loading(_) => div()
                 .id(ElementId::Name("members-loading".into()))
-                .text_sm()
+                .text_size(px(12.))
                 .text_color(theme.muted)
                 .child("Reading the roster…")
                 .into_any_element(),
@@ -249,7 +250,7 @@ impl RenderOnce for MemberRow {
             .child(
                 div()
                     .w(px(56.))
-                    .text_sm()
+                    .text_size(px(12.))
                     .text_color(theme.muted)
                     .child(format!("#{}", row.number)),
             )
@@ -257,7 +258,7 @@ impl RenderOnce for MemberRow {
             .child(Badge::new(row.control, theme.muted, theme.surface_raised))
             .child(
                 div()
-                    .text_sm()
+                    .text_size(px(12.))
                     .text_color(theme.muted)
                     .child(plural(row.keys, "key", "keys")),
             );
@@ -297,7 +298,7 @@ impl RenderOnce for Badge {
             .rounded_sm()
             .bg(self.background)
             .text_color(self.foreground)
-            .text_xs()
+            .text_size(px(11.))
             .child(self.label)
     }
 }
@@ -333,8 +334,8 @@ impl RenderOnce for EmptyState {
             .gap_1()
             .p_6()
             .max_w(px(420.))
-            .child(div().text_base().child(self.title))
-            .child(div().text_sm().text_color(self.muted).child(self.detail))
+            .child(div().text_size(px(13.)).child(self.title))
+            .child(div().text_size(px(12.)).text_color(self.muted).child(self.detail))
     }
 }
 

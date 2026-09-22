@@ -13,8 +13,8 @@ impl Section {
 }
 impl RenderOnce for Section {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        div().id(self.id).role(Role::Heading).aria_level(2).h(px(28.)).flex().items_center().px_2()
-            .text_sm().text_color(cx.global::<Theme>().muted).child(self.label)
+        div().id(self.id).role(Role::Heading).aria_level(2).h(px(28.)).flex().items_center().pl_2().pr_1()
+            .text_size(px(12.)).font_medium().text_color(cx.global::<Theme>().muted).child(self.label)
     }
 }
 
@@ -32,7 +32,7 @@ impl EmptyState {
 impl RenderOnce for EmptyState {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         div().id(self.id).flex().flex_col().gap_1().p_6().max_w(px(420.))
-            .child(div().text_base().child(self.title))
-            .child(div().text_sm().text_color(cx.global::<Theme>().muted).child(self.detail))
+            .child(div().text_size(px(13.5)).font_medium().child(self.title))
+            .child(div().text_size(px(12.)).text_color(cx.global::<Theme>().muted).child(self.detail))
     }
 }

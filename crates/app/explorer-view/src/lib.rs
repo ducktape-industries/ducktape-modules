@@ -92,14 +92,15 @@ impl Render for Explorer {
             .size_full()
             .bg(theme.background)
             .text_color(theme.foreground)
+            .text_size(px(13.))
             .child(
                 div()
                     .id(ElementId::Name("explorer-head".into()))
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(div().flex_1().text_lg().child("Programs"))
-                    .child(div().text_sm().text_color(theme.muted).child(self.count())),
+                    .child(div().id("explorer-title").flex_1().text_size(px(16.)).font_semibold().role(Role::Heading).aria_level(1).child("Programs"))
+                    .child(div().text_size(px(11.)).text_color(theme.muted).child(self.count())),
             )
             .child(self.body(cx, &theme))
     }
@@ -130,7 +131,7 @@ impl Explorer {
         match &self.network {
             Loaded::Idle | Loaded::Loading(_) => div()
                 .id(ElementId::Name("explorer-loading".into()))
-                .text_sm()
+                .text_size(px(12.))
                 .text_color(theme.muted)
                 .child("Reading the registry…")
                 .into_any_element(),
@@ -184,7 +185,7 @@ fn programs(programs: &[Entry], theme: &Theme) -> AnyElement {
     if programs.is_empty() {
         return div()
             .id(ElementId::Name("explorer-no-programs".into()))
-            .text_sm()
+            .text_size(px(12.))
             .text_color(theme.muted)
             .child("No program runs here yet.")
             .into_any_element();
@@ -203,7 +204,7 @@ fn programs(programs: &[Entry], theme: &Theme) -> AnyElement {
                 .items_center()
                 .gap_2()
                 .child(div().flex_1().truncate().child(entry.program.clone()))
-                .child(div().text_sm().text_color(theme.muted).child(plural(
+                .child(div().text_size(px(12.)).text_color(theme.muted).child(plural(
                     entry.params,
                     "param byte",
                     "param bytes",
@@ -211,7 +212,7 @@ fn programs(programs: &[Entry], theme: &Theme) -> AnyElement {
                 .child(
                     div()
                         .font_family("JetBrains Mono")
-                        .text_sm()
+                        .text_size(px(12.))
                         .child(short_id(&entry.code, 12)),
                 )
         }))
@@ -222,7 +223,7 @@ fn changes(changes: &[Change], theme: &Theme) -> AnyElement {
     if changes.is_empty() {
         return div()
             .id(ElementId::Name("explorer-no-changes".into()))
-            .text_sm()
+            .text_size(px(12.))
             .text_color(theme.muted)
             .child("Nothing is scheduled against the registry.")
             .into_any_element();
@@ -250,13 +251,13 @@ fn changes(changes: &[Change], theme: &Theme) -> AnyElement {
                         .rounded_sm()
                         .bg(background)
                         .text_color(foreground)
-                        .text_xs()
+                        .text_size(px(11.))
                         .child(change.verb.clone()),
                 )
                 .child(div().flex_1().truncate().child(change.program.clone()))
                 .child(
                     div()
-                        .text_sm()
+                        .text_size(px(12.))
                         .text_color(theme.muted)
                         .child(format!("at {}", change.height)),
                 );
@@ -264,7 +265,7 @@ fn changes(changes: &[Change], theme: &Theme) -> AnyElement {
                 row = row.child(
                     div()
                         .font_family("JetBrains Mono")
-                        .text_sm()
+                        .text_size(px(12.))
                         .child(short_id(code, 12)),
                 );
             }

@@ -85,14 +85,15 @@ impl Render for Nodes {
             .size_full()
             .bg(theme.background)
             .text_color(theme.foreground)
+            .text_size(px(13.))
             .child(
                 div()
                     .id(ElementId::Name("nodes-head".into()))
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(div().flex_1().text_lg().child("Nodes"))
-                    .child(div().text_sm().text_color(theme.muted).child(self.count())),
+                    .child(div().id("nodes-title").flex_1().text_size(px(16.)).font_semibold().role(Role::Heading).aria_level(1).child("Nodes"))
+                    .child(div().text_size(px(11.)).text_color(theme.muted).child(self.count())),
             )
             .child(self.body(cx, &theme))
     }
@@ -125,7 +126,7 @@ impl Nodes {
         match &self.set {
             Loaded::Idle | Loaded::Loading(_) => div()
                 .id(ElementId::Name("nodes-loading".into()))
-                .text_sm()
+                .text_size(px(12.))
                 .text_color(theme.muted)
                 .child("Reading the validator set…")
                 .into_any_element(),
@@ -179,7 +180,7 @@ fn validators(validators: &[String], theme: &Theme) -> AnyElement {
     if validators.is_empty() {
         return div()
             .id(ElementId::Name("nodes-no-validators".into()))
-            .text_sm()
+            .text_size(px(12.))
             .text_color(theme.muted)
             .child("No key validates on this network.")
             .into_any_element();
@@ -198,7 +199,7 @@ fn validators(validators: &[String], theme: &Theme) -> AnyElement {
                 .child(
                     div()
                         .w(px(28.))
-                        .text_sm()
+                        .text_size(px(12.))
                         .text_color(theme.muted)
                         .child((index + 1).to_string()),
                 )
@@ -206,7 +207,7 @@ fn validators(validators: &[String], theme: &Theme) -> AnyElement {
                     div()
                         .flex_1()
                         .font_family("JetBrains Mono")
-                        .text_sm()
+                        .text_size(px(12.))
                         .child(short_id(validator, 16)),
                 )
         }))
@@ -234,15 +235,15 @@ fn members(members: &[Member], theme: &Theme) -> impl IntoElement {
                     div()
                         .flex_1()
                         .font_family("JetBrains Mono")
-                        .text_sm()
+                        .text_size(px(12.))
                         .child(short_id(&member.key, 16)),
                 )
                 .child(
                     div()
                         .max_w(px(220.))
                         .truncate()
-                        .text_sm()
-                        .child(member.address.clone()),
+                        .text_size(px(12.))
+                        .child(short_id(&member.address, 28)),
                 )
                 .child(
                     div()
@@ -251,7 +252,7 @@ fn members(members: &[Member], theme: &Theme) -> impl IntoElement {
                         .rounded_sm()
                         .bg(background)
                         .text_color(foreground)
-                        .text_xs()
+                        .text_size(px(11.))
                         .child(member.standing.clone()),
                 )
         }))
