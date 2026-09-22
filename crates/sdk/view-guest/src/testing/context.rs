@@ -134,6 +134,10 @@ impl TestAppContext {
     pub fn find(&self, key: &str) -> Option<&Node> {
         find(&self.frame, key)
     }
+    /// The whole tree of the last frame, for node-less host renders.
+    pub fn root(&self) -> &Node {
+        self.frame.root.as_ref().expect("view has a tree")
+    }
     pub fn assert_accessible(&self) {
         assert_accessible(self.frame.root.as_ref().expect("view has a tree"));
     }

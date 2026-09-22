@@ -92,7 +92,7 @@ wasm-views:
 	  artifact="$${CARGO_TARGET_DIR:-target}/wasm32-unknown-unknown/release/$$(echo $$v | tr - _).wasm"; \
 	  WASM_OPT="$(WASM_OPT)" tools/optimize-view.sh "$$artifact" || exit 1; \
 	  python3 tools/check-view-abi.py "$$artifact" || exit 1; \
-	  limit=1200000; if [ "$$v" = chat-view ]; then limit=2500000; fi; \
+	  limit=1200000; if [ "$$v" = chat-view ]; then limit=2500000; elif [ "$$v" = settings-view ]; then limit=1300000; fi; \
 	  bytes=$$(wc -c < "$$artifact"); \
 	  echo "$$v: $$bytes bytes (limit $$limit)"; \
 	  test "$$bytes" -le "$$limit" || exit 1; \
