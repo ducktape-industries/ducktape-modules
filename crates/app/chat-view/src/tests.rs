@@ -484,7 +484,11 @@ fn a_send_shows_pending_then_lands_and_a_refusal_is_a_banner() {
 #[test]
 fn channel_create_preserves_busy_account_and_voice_gates() {
     fn disabled(cx: &TestAppContext, id: &str) -> bool {
-        let Some(wire::Node::Container { interactivity, .. }) = cx.find(id) else {
+        let Some(wire::Node::Container(ducktape_view_guest::wire::ContainerNode {
+            interactivity,
+            ..
+        })) = cx.find(id)
+        else {
             panic!("{id} button")
         };
         interactivity.aria.disabled == Some(true) && interactivity.on_click.is_none()

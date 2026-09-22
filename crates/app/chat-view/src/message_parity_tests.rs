@@ -72,7 +72,9 @@ fn reaction_rows_keep_add_action_and_selected_accessibility() {
         cx.notify();
     });
     cx.run_until_parked();
-    let Some(wire::Node::Container { interactivity, .. }) = cx.find("chat-message-m1-reaction-🔥")
+    let Some(wire::Node::Container(ducktape_view_guest::wire::ContainerNode {
+        interactivity, ..
+    })) = cx.find("chat-message-m1-reaction-🔥")
     else {
         panic!("reaction pill")
     };
