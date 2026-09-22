@@ -54,7 +54,7 @@ struct Row {
 }
 
 impl View for Members {
-    const PREFERRED_WINDOW_SIZE: &'static str = "720x640";
+    const PREFERRED_WINDOW_SIZE: &'static str = "720,640";
 
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mut view = Self::default();
