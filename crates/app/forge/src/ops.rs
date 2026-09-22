@@ -1,14 +1,11 @@
 // The execute path: repository lifecycle, access, a git push and a merge, each a straight walk over the sandbox.
 
 use abi::{Env, Origin, Refusal};
-use gitcore::merge::{MergeOutcome, merge_base, merge_trees};
 use gitcore::server::{Policy, RefUpdate};
-use gitcore::{Commit, Error, Kind, Limits, Objects, Oid, Signature, server};
+use gitcore::{Error, Limits, server};
 
 use crate::contract::{Bounds, Op, Repo, Settings, valid_repo_name};
-use crate::refuse::{
-    already_exists, capacity, invalid, not_found, storage, unauthorized, wrong_state,
-};
+use crate::refuse::{already_exists, capacity, invalid, storage, unauthorized};
 use crate::repo::{
     delete_ref, is_writer, load_bounds, load_refs, load_repo, repo_exists, repo_hash, save_bounds,
     save_repo, set_ref, writer_key,
@@ -18,6 +15,17 @@ use crate::store::Store;
 
 pub fn init<S: Sandbox>(sandbox: &S, params: &[u8]) -> Result<(), Refusal> {
     let bounds: Bounds = abi::decode(params)?;
+    if bounds.page_size == 0
+        || bounds.log_walk == 0
+        || bounds.tree_walk == 0
+        || bounds.blob_bytes == 0
+        || bounds.record_bytes == 0
+        || bounds.diff_bytes < bounds.blob_bytes
+    {
+        return Err(invalid(
+            "bounds need a positive page size and positive read/record budgets; diff_bytes >= blob_bytes",
+        ));
+    }
     save_bounds(sandbox, &bounds);
     Ok(())
 }
@@ -26,19 +34,34 @@ pub fn execute<S: Sandbox>(sandbox: &S, env: &Env, payload: &[u8]) -> Result<(),
     let Origin::External(actor) = &env.origin else {
         return Err(unauthorized("a repository op is signed by a member key"));
     };
-    match abi::decode(payload)? {
+    if actor.is_empty() {
+        return Err(unauthorized("an external origin carries a key"));
+    }
+    let op: Op = abi::decode(payload)?;
+    let name = match &op {
+        Op::Create { repo, .. }
+        | Op::Configure { repo, .. }
+        | Op::Grant { repo, .. }
+        | Op::Revoke { repo, .. }
+        | Op::Push { repo, .. }
+        | Op::Merge { repo, .. }
+        | Op::ChangeOpen { repo, .. }
+        | Op::ChangeEdit { repo, .. }
+        | Op::ChangeClose { repo, .. }
+        | Op::ReviewSubmit { repo, .. } => repo.clone(),
+    };
+    match op {
         Op::Create { repo, hash } => create(sandbox, actor, &repo, hash),
         Op::Configure { repo, settings } => configure(sandbox, actor, &repo, settings),
         Op::Grant { repo, key } => grant(sandbox, actor, &repo, &key),
         Op::Revoke { repo, key } => revoke(sandbox, actor, &repo, &key),
         Op::Push { repo, request } => push(sandbox, actor, &repo, &request),
-        Op::Merge {
-            repo,
-            into,
-            from,
-            message,
-        } => merge(sandbox, actor, env.time, &repo, &into, &from, &message),
-    }
+        op => crate::changes::execute(sandbox, env, actor, op),
+    }?;
+    let mut repo = load_repo(sandbox, &name)?;
+    repo.last_activity = env.height;
+    save_repo(sandbox, &name, &repo);
+    Ok(())
 }
 
 fn create<S: Sandbox>(
@@ -59,6 +82,8 @@ fn create<S: Sandbox>(
         hash,
         owner: actor.to_vec(),
         settings: Settings::default(),
+        refs_count: 0,
+        last_activity: 0,
     };
     save_repo(sandbox, name, &repo);
     Ok(())
@@ -118,145 +143,21 @@ fn push<S: Sandbox>(sandbox: &S, actor: &[u8], name: &str, request: &[u8]) -> Re
         cap(bounds.push_walk),
     )
     .map_err(|error| refusal_of(&store, error))?;
+    let mut repo = repo;
     for (reference, update) in &outcome.moves {
+        match update {
+            RefUpdate::Set(_) if !refs.contains_key(reference) => repo.refs_count += 1,
+            RefUpdate::Delete => repo.refs_count -= 1,
+            _ => {}
+        }
         match update {
             RefUpdate::Set(target) => set_ref(sandbox, name, reference, target),
             RefUpdate::Delete => delete_ref(sandbox, name, reference),
         }
     }
+    save_repo(sandbox, name, &repo);
     sandbox.output(outcome.report);
     Ok(())
-}
-
-enum Merged {
-    Nothing,
-    Unrelated,
-    FastForward(Oid),
-    Commit(Oid),
-    Conflicts(Vec<Vec<u8>>),
-}
-
-fn merge<S: Sandbox>(
-    sandbox: &S,
-    actor: &[u8],
-    time: u64,
-    name: &str,
-    into: &[u8],
-    from: &[u8],
-    message: &[u8],
-) -> Result<(), Refusal> {
-    let repo = load_repo(sandbox, name)?;
-    require_writer(sandbox, name, &repo, actor)?;
-    let bounds = load_bounds(sandbox)?;
-    let hash = repo_hash(&repo);
-    let refs = load_refs(sandbox, name, hash)?;
-    let Some(ours) = refs.get(into).copied() else {
-        return Err(not_found(format!(
-            "no ref {}",
-            String::from_utf8_lossy(into)
-        )));
-    };
-    let Some(theirs) = refs.get(from).copied() else {
-        return Err(not_found(format!(
-            "no ref {}",
-            String::from_utf8_lossy(from)
-        )));
-    };
-    let mut store = Store::new(sandbox, hash);
-    let author = Signature {
-        name: abi::hex(actor).into_bytes(),
-        email: Vec::new(),
-        time: time as i64,
-        offset_minutes: 0,
-    };
-    let merged = merge_commits(&mut store, &bounds, ours, theirs, author, message)
-        .map_err(|error| refusal_of(&store, error))?;
-    match merged {
-        Merged::Nothing => Err(wrong_state(format!(
-            "{} is already in {}",
-            String::from_utf8_lossy(from),
-            String::from_utf8_lossy(into)
-        ))),
-        Merged::Unrelated => Err(wrong_state("the two histories are unrelated")),
-        Merged::Conflicts(paths) => Err(wrong_state(format!(
-            "conflicts in {}",
-            paths
-                .iter()
-                .map(|path| String::from_utf8_lossy(path).into_owned())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ))),
-        Merged::FastForward(target) | Merged::Commit(target) => {
-            set_ref(sandbox, name, into, &target);
-            sandbox.output(target.to_hex().into_bytes());
-            Ok(())
-        }
-    }
-}
-
-fn merge_commits<O: Objects>(
-    store: &mut O,
-    bounds: &Bounds,
-    ours: Oid,
-    theirs: Oid,
-    author: Signature,
-    message: &[u8],
-) -> gitcore::Result<Merged> {
-    let Some(base) = merge_base(store, &ours, &theirs, cap(bounds.push_walk))? else {
-        return Ok(Merged::Unrelated);
-    };
-    let theirs_already_in_ours = base == theirs;
-    if theirs_already_in_ours {
-        return Ok(Merged::Nothing);
-    }
-    let ours_behind_theirs = base == ours;
-    if ours_behind_theirs {
-        return Ok(Merged::FastForward(theirs));
-    }
-    let base_tree = tree_of(store, &base)?;
-    let our_tree = tree_of(store, &ours)?;
-    let their_tree = tree_of(store, &theirs)?;
-    let outcome = merge_trees(
-        store,
-        Some(&base_tree),
-        &our_tree,
-        &their_tree,
-        cap(bounds.merge_cost),
-    )?;
-    match outcome {
-        MergeOutcome::Conflicts(conflicts) => Ok(Merged::Conflicts(
-            conflicts
-                .into_iter()
-                .map(|conflict| conflict.path)
-                .collect(),
-        )),
-        MergeOutcome::Clean(tree) => {
-            let commit = Commit {
-                tree,
-                parents: vec![ours, theirs],
-                author: author.clone(),
-                committer: author,
-                extra: Vec::new(),
-                message: message.to_vec(),
-            };
-            let id = store.put(Kind::Commit, &commit.serialize())?;
-            Ok(Merged::Commit(id))
-        }
-    }
-}
-
-fn tree_of<O: Objects>(store: &O, commit: &Oid) -> gitcore::Result<Oid> {
-    let Some(object) = store.get(commit)? else {
-        return Err(Error::MissingObject(*commit));
-    };
-    let is_commit = object.kind == Kind::Commit;
-    if !is_commit {
-        return Err(Error::WrongKind {
-            id: *commit,
-            expected: Kind::Commit,
-        });
-    }
-    Ok(Commit::parse(&object.body, commit.hash())?.tree)
 }
 
 fn require_owner(repo: &Repo, actor: &[u8]) -> Result<(), Refusal> {
@@ -267,7 +168,7 @@ fn require_owner(repo: &Repo, actor: &[u8]) -> Result<(), Refusal> {
     Ok(())
 }
 
-fn require_writer<S: Sandbox>(
+pub(crate) fn require_writer<S: Sandbox>(
     sandbox: &S,
     name: &str,
     repo: &Repo,
@@ -307,7 +208,10 @@ pub fn refusal_of<S: Sandbox>(store: &Store<'_, S>, error: Error) -> Refusal {
         Error::Storage => store
             .refusal()
             .unwrap_or_else(|| storage("the blob store refused a write")),
-        Error::CapReached => capacity("history too long to walk within the bound"),
+        Error::CapReached | Error::ObjectTooLarge => {
+            capacity("query or operation exceeds its configured work/byte bound")
+        }
+        Error::MissingObject(id) | Error::MissingBase(id) => crate::refuse::object_not_held(id),
         other => invalid(other.to_string()),
     }
 }

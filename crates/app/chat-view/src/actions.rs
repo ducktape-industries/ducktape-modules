@@ -1,8 +1,8 @@
 //! What a press does: the message menus, reactions, edits and deletes, the
 //! channel's details, copying, links, the attachment preview, pictures, the
 //! search and the live-run poll.
-use ducktape_view_guest::host;
-use ducktape_view_guest::view::{Cx, Loaded};
+use ducktape_view_guest::Context;
+use ducktape_view_guest::view::Loaded;
 use ducktape_view_guest::wire;
 
 use crate::api::{Copy, copy};
@@ -53,7 +53,8 @@ impl Chat {
         seq: u64,
         rev: u32,
         mode: Mode,
-        cx: &mut Cx<Self>,
+        window: &mut ducktape_view_guest::Window,
+        _cx: &mut Context<Self>,
     ) {
         if seq == 0 {
             return;
@@ -85,8 +86,10 @@ impl Chat {
             at: self.layout.press,
         });
         if mode != Mode::Editing {
-            cx.widget(wire::WidgetCommand::Focus {
-                target: crate::ui::menu::focus_key(pane, mode),
+            window.dispatch(wire::WidgetCommand::Focus {
+                target: vec![wire::ElementIdWire::Name(
+                    crate::ui::menu::focus_key(pane, mode).into(),
+                )],
             });
         }
     }
@@ -153,7 +156,7 @@ impl Chat {
 
     // ---------- writes ----------
 
-    pub(crate) fn react(&mut self, seq: u64, emoji: String, add: bool, cx: &mut Cx<Self>) {
+    pub(crate) fn react(&mut self, seq: u64, emoji: String, add: bool, cx: &mut Context<Self>) {
         let channel_id = self.room_id();
         if channel_id.is_empty() || seq == 0 {
             return;
@@ -185,7 +188,7 @@ impl Chat {
         self.submit(op, cx);
     }
 
-    pub(crate) fn delete_armed(&mut self, cx: &mut Cx<Self>) {
+    pub(crate) fn delete_armed(&mut self, cx: &mut Context<Self>) {
         let Some(menu) = self.menu.take() else { return };
         if menu.mode != Mode::Delete || self.session.busy {
             return;
@@ -200,7 +203,7 @@ impl Chat {
         );
     }
 
-    pub(crate) fn rename(&mut self, cx: &mut Cx<Self>) {
+    pub(crate) fn rename(&mut self, cx: &mut Context<Self>) {
         let Some(details) = &self.details else { return };
         let name = details.name_draft.trim().to_owned();
         if name.is_empty() || self.session.busy {
@@ -210,7 +213,7 @@ impl Chat {
         self.submit(ChatMsg::RenameChannel { channel_id, name }, cx);
     }
 
-    pub(crate) fn set_archived(&mut self, archived: bool, cx: &mut Cx<Self>) {
+    pub(crate) fn set_archived(&mut self, archived: bool, cx: &mut Context<Self>) {
         let channel_id = self.room_id();
         if channel_id.is_empty() || self.session.busy {
             return;
@@ -224,7 +227,7 @@ impl Chat {
         );
     }
 
-    pub(crate) fn set_member(&mut self, text: &str, member: bool, cx: &mut Cx<Self>) {
+    pub(crate) fn set_member(&mut self, text: &str, member: bool, cx: &mut Context<Self>) {
         let channel_id = self.room_id();
         if channel_id.is_empty() || self.session.busy {
             return;
@@ -264,14 +267,14 @@ impl Chat {
 
     // ---------- copying and links ----------
 
-    pub(crate) fn copy_text(&self, text: String, label: &str, cx: &mut Cx<Self>) {
+    pub(crate) fn copy_text(&self, text: String, label: &str, cx: &mut Context<Self>) {
         if !text.is_empty() {
-            cx.notify::<Copy>(copy(&text, label));
+            cx.host().notify::<Copy>(copy(&text, label));
         }
     }
 
     /// The copy range as one run of text, to the clipboard.
-    pub(crate) fn copy_range(&mut self, cx: &mut Cx<Self>) {
+    pub(crate) fn copy_range(&mut self, cx: &mut Context<Self>) {
         let Some(range) = self.copy else { return };
         let lines: Vec<String> = self
             .messages(range.pane)
@@ -301,20 +304,20 @@ impl Chat {
         crate::files::channel_link(&self.session.chain, &self.room_id(), Some(seq))
     }
 
-    pub(crate) fn open_link(&mut self, link: String) {
+    pub(crate) fn open_link(&mut self, link: String, cx: &mut Context<Self>) {
         self.preview = None;
         self.create = None;
         let url = crate::files::pressed_link(link, &self.session.chain);
         if !url.is_empty() {
-            host::open_link(&url);
+            cx.host().open_link(&url);
         }
     }
 
     // ---------- attachments ----------
 
-    pub(crate) fn open_preview(&mut self, link: String, cx: &mut Cx<Self>) {
+    pub(crate) fn open_preview(&mut self, link: String, cx: &mut Context<Self>) {
         if !crate::ATTACHMENTS {
-            return self.open_link(link);
+            return self.open_link(link, cx);
         }
         self.preview = Some(Preview {
             link,
@@ -324,14 +327,14 @@ impl Chat {
     }
 
     /// A preview that is not a decoded picture reads its file.
-    pub(crate) fn preview_read(&mut self, cx: &mut Cx<Self>) {
+    pub(crate) fn preview_read(&mut self, cx: &mut Context<Self>) {
         let Some(preview) = &self.preview else { return };
         let picture = matches!(self.pictures.get(&preview.link), Some(&(w, h)) if w > 0 && h > 0);
         if picture || !preview.read.is_idle() {
             return;
         }
         let path = crate::files::attachment_file_path(&preview.link);
-        let load = cx.load(crate::files::read_preview(path), |chat| {
+        let load = cx.load(crate::files::read_preview(cx.host(), path), |chat| {
             &mut chat.preview.get_or_insert_default().read
         });
         if let Some(preview) = &mut self.preview {
@@ -341,7 +344,7 @@ impl Chat {
 
     /// Every picture attachment on screen the host has not been asked for
     /// yet: one decode each, answered into `pictures`.
-    pub(crate) fn load_pictures(&mut self, cx: &mut Cx<Self>) {
+    pub(crate) fn load_pictures(&mut self, cx: &mut Context<Self>) {
         if !crate::ATTACHMENTS {
             return;
         }
@@ -356,19 +359,22 @@ impl Chat {
         for link in links {
             self.pictures.insert(link.clone(), (-1, -1));
             let path = crate::files::attachment_file_path(&link);
-            cx.spawn(async move {
-                let drawn = crate::files::picture_load(path).await;
-                move |chat: &mut Chat, cx: &mut Cx<Chat>| {
+            cx.spawn(async move |this, cx| {
+                let host = cx.host();
+                let drawn = crate::files::picture_load(host, path).await;
+                let _ = this.update(cx, |chat, cx| {
+                    cx.notify();
                     chat.pictures.insert(link, drawn);
                     chat.preview_read(cx);
-                }
-            });
+                });
+            })
+            .detach();
         }
     }
 
     // ---------- search ----------
 
-    pub(crate) fn search_submit(&mut self, cx: &mut Cx<Self>) {
+    pub(crate) fn search_submit(&mut self, cx: &mut Context<Self>) {
         let query = self.search.draft.trim().to_owned();
         if query.is_empty() {
             return;
@@ -377,12 +383,13 @@ impl Chat {
         self.search_now(cx);
     }
 
-    pub(crate) fn search_now(&mut self, cx: &mut Cx<Self>) {
+    pub(crate) fn search_now(&mut self, cx: &mut Context<Self>) {
         let (text, viewer) = (self.search.query.clone(), self.viewer());
+        let host = cx.host();
         self.search.hits = cx.load(
             async move {
                 let (rows, capped, has_more, next_after) =
-                    crate::search_hits(text, None, viewer, None).await?;
+                    crate::search_hits(host, text, None, viewer, None).await?;
                 Ok(Hits {
                     rows,
                     capped,
@@ -394,7 +401,7 @@ impl Chat {
         );
     }
 
-    pub(crate) fn search_more(&mut self, cx: &mut Cx<Self>) {
+    pub(crate) fn search_more(&mut self, cx: &mut Context<Self>) {
         let Some(after) = self.search.hits.ready().and_then(|h| h.next_after.clone()) else {
             return;
         };
@@ -403,9 +410,11 @@ impl Chat {
         }
         self.search.more_loading = true;
         let (text, viewer) = (self.search.query.clone(), self.viewer());
-        cx.spawn(async move {
-            let result = crate::search_hits(text, None, viewer, Some(after)).await;
-            move |chat: &mut Chat, _: &mut Cx<Chat>| {
+        cx.spawn(async move |this, cx| {
+            let host = cx.host();
+            let result = crate::search_hits(host, text, None, viewer, Some(after)).await;
+            let _ = this.update(cx, |chat, cx| {
+                cx.notify();
                 chat.search.more_loading = false;
                 let Ok((rows, _, has_more, next_after)) = result else {
                     return;
@@ -423,8 +432,9 @@ impl Chat {
                     hits.has_more = has_more;
                     hits.next_after = next_after;
                 }
-            }
-        });
+            });
+        })
+        .detach();
     }
 
     pub(crate) fn search_clear(&mut self) {
@@ -432,9 +442,15 @@ impl Chat {
     }
 
     /// A hit opens its room around the message.
-    pub(crate) fn open_hit(&mut self, channel_id: String, seq: u64, cx: &mut Cx<Self>) {
+    pub(crate) fn open_hit(
+        &mut self,
+        channel_id: String,
+        seq: u64,
+        window: &mut ducktape_view_guest::Window,
+        cx: &mut Context<Self>,
+    ) {
         self.search_clear();
         self.create = None;
-        self.open_at(channel_id, seq, cx);
+        self.open_at(channel_id, seq, window, cx);
     }
 }

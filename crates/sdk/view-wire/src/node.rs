@@ -35,97 +35,151 @@ pub enum Live {
     Assertive,
 }
 
-/// One widget. `key` is the node's identity across frames — the
-/// accessibility path the compiler already computes (`App/content/count`)
-/// — which the host uses for widget state (focus, caret, scroll) and for
-/// the accessibility tree.
+/// The reference point used by the native GPUI anchored element.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Anchor {
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+    TopCenter,
+    BottomCenter,
+    LeftCenter,
+    RightCenter,
+}
+
+/// How an anchored child is kept inside the host viewport.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum AnchoredFitMode {
+    SnapToWindow,
+    SnapToWindowWithMargin([f32; 4]),
+    SwitchAnchor,
+}
+
+/// Coordinate space for an anchored position.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AnchoredPositionMode {
+    Window,
+    Local,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ImageObjectFit {
+    Fill,
+    Contain,
+    Cover,
+    ScaleDown,
+    None,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ImageStyle {
+    pub grayscale: bool,
+    pub object_fit: ImageObjectFit,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SvgSource {
+    None,
+    Data { hash: u64, bytes: Option<Vec<u8>> },
+    Asset(String),
+    External(String),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SvgTransformation {
+    pub scale: [f32; 2],
+    pub translate: [f32; 2],
+    pub rotate: f32,
+}
+
+/// One widget. Retained elements carry their native typed identity across
+/// frames for host state, focus, and accessibility ancestry.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum Node {
     /// A payload encoded and painted by the host.
-    Qr { key: String, code: Qr },
-    /// Styled spans form one native paragraph; link clicks carry a String handler payload.
-    RichText {
-        key: String,
-        #[serde(deserialize_with = "rich_text::decode_spans")]
-        spans: Vec<RichSpan>,
-        size: Option<f32>,
-        color: Option<Rgba>,
-        font: Font,
-        width: Option<Length>,
-        align_x: Option<AlignX>,
-        options: TextOptions,
-        on_link: Option<u32>,
+    Qr {
+        id: ElementIdWire,
+        code: Qr,
+        style: gpui::StyleRefinement,
     },
-    /// Flex rules and item metadata, interpreted by the host's native layout engine.
-    Flex {
-        key: String,
-        layout: FlexLayout,
-        background: Option<Rgba>,
-        border: Option<Border>,
-        #[serde(deserialize_with = "flex::decode_items")]
-        items: Vec<FlexItem>,
+    /// One native GPUI paragraph with optional interactive byte ranges.
+    RichText {
+        id: Option<ElementIdWire>,
+        style: gpui::StyleRefinement,
+        text: String,
+        runs: RichTextRuns,
+        font_family_overrides: Vec<(std::ops::Range<usize>, gpui::SharedString)>,
+        clickable_ranges: Vec<std::ops::Range<usize>>,
+        on_click: Option<u32>,
+        on_hover: Option<u32>,
+        tooltip: Option<crate::RichTextTooltip>,
+    },
+    /// A native GPUI anchored element. The host owns fitting and clipping.
+    Anchored {
+        anchor: Anchor,
+        fit: AnchoredFitMode,
+        position: Option<[f32; 2]>,
+        position_mode: AnchoredPositionMode,
+        offset: Option<[f32; 2]>,
         #[serde(deserialize_with = "decode_children")]
         children: Vec<Node>,
-    },
-    /// A child positioned in this widget's local coordinates. The host lays it out.
-    Pin {
-        key: String,
-        x: f32,
-        y: f32,
-        width: Option<Length>,
-        height: Option<Length>,
-        #[serde(deserialize_with = "decode_child")]
-        content: Box<Node>,
     },
     /// Floating content the host offsets from its own origin.
     Float {
-        key: String,
+        id: ElementIdWire,
         x: f32,
         y: f32,
         scale: f32,
-        shadow: Shadow,
-        radius: Option<[f32; 4]>,
+        style: gpui::StyleRefinement,
         #[serde(deserialize_with = "decode_child")]
         content: Box<Node>,
     },
-    /// Copied keyed rows; the host owns widget state and optional virtualization.
-    KeyedColumn {
-        key: String,
-        #[serde(deserialize_with = "list::decode_optional_keys")]
-        keys: Option<Vec<ListKey>>,
-        background: Option<Rgba>,
-        border: Option<Border>,
-        spacing: Option<f32>,
-        padding: Option<Edges>,
-        width: Option<Length>,
-        height: Option<Length>,
-        max_width: Option<f32>,
-        align: Option<AlignX>,
-        virtual_row: Option<f32>,
+    /// A GPUI uniform-height list. The host owns the native viewport; the
+    /// guest carries only the row indices the host has requested.
+    UniformList {
+        id: ElementIdWire,
+        path: Vec<ElementIdWire>,
+        route: u32,
+        style: gpui::StyleRefinement,
+        interactivity: Interactivity,
+        count: usize,
+        measure_index: usize,
+        sizing: crate::list::UniformListSizing,
+        horizontal_sizing: crate::list::UniformListHorizontalSizing,
+        y_flipped: bool,
+        scroll_request: Option<crate::list::UniformListScrollRequest>,
+        #[serde(deserialize_with = "list::decode_indices")]
+        indices: Vec<u32>,
         #[serde(deserialize_with = "decode_children")]
         children: Vec<Node>,
     },
-    Container {
-        shadow: Shadow,
-        max_width: Option<f32>,
-        max_height: Option<f32>,
-        clip: bool,
-        key: String,
-        width: Option<Length>,
-        height: Option<Length>,
-        padding: Option<Edges>,
-        align_x: Option<AlignX>,
-        align_y: Option<AlignY>,
-        background: Option<Background>,
-        border: Option<Border>,
-        /// Round the box to whole pixels; `None` is the host's default.
-        snap: Option<bool>,
-        #[serde(deserialize_with = "decode_child")]
-        content: Box<Node>,
+    /// A native variable-height GPUI list with a bounded frame-owned row window.
+    List {
+        state: u64,
+        #[serde(deserialize_with = "list::decode_path")]
+        path: Vec<ElementIdWire>,
+        item_count: usize,
+        alignment: ListAlignment,
+        overdraw: f32,
+        sizing: ListSizingBehavior,
+        following_tail: bool,
+        revision: u64,
+        #[serde(deserialize_with = "list::decode_commands")]
+        commands: Vec<ListCommand>,
+        request_handler: u32,
+        scroll_handler: Option<u32>,
+        range_start: usize,
+        style: gpui::StyleRefinement,
+        #[serde(deserialize_with = "decode_children")]
+        children: Vec<Node>,
     },
+    Container(ContainerNode),
     /// A grabbed divider: local movement deltas and native cursor; one child.
     ResizeHandle {
-        key: String,
+        id: ElementIdWire,
+        style: gpui::StyleRefinement,
         on_press: Option<u32>,
         on_release: Option<u32>,
         on_drag: Option<u32>,
@@ -139,7 +193,7 @@ pub enum Node {
     /// host answers with [`Event::Pointer`], `on_scroll` one it answers
     /// with [`Event::Scroll`]. The node paints nothing of its own.
     MouseArea {
-        key: String,
+        id: ElementIdWire,
         /// `None` is an area assistive technology does not announce.
         role: Option<Role>,
         /// The accessible name of an area no text inside names.
@@ -165,76 +219,38 @@ pub enum Node {
         content: Box<Node>,
     },
     Tooltip {
-        key: String,
+        id: ElementIdWire,
         position: TooltipPosition,
-        gap: f32,
-        padding: f32,
         delay_ms: u64,
         snap: bool,
-        style: TooltipStyle,
+        style: gpui::StyleRefinement,
         /// Content followed by tip; extra children are discarded by sanitization.
-        #[serde(deserialize_with = "decode_children")]
-        children: Vec<Node>,
-    },
-    Linear {
-        max_width: Option<f32>,
-        clip: bool,
-        key: String,
-        wrap: Option<Wrap>,
-        axis: Axis,
-        spacing: Option<f32>,
-        padding: Option<Edges>,
-        width: Option<Length>,
-        height: Option<Length>,
-        /// Cross-axis alignment of the children.
-        align: Option<AlignX>,
-        /// The surface behind the children: a layout paints nothing of its
-        /// own, so this is a box drawn around it.
-        background: Option<Rgba>,
-        border: Option<Border>,
-        #[serde(deserialize_with = "decode_children")]
-        children: Vec<Node>,
-    },
-    /// Equal cells in rows of `columns`, or of as many as fit at `fluid`
-    /// pixels each. A cell is `aspect` times as wide as it is tall unless
-    /// `height` gives the rows a length to share; without either the host
-    /// draws squares.
-    Grid {
-        key: String,
-        columns: Option<u32>,
-        /// The widest a cell may be; the column count follows the width.
-        /// Wins over `columns`.
-        fluid: Option<f32>,
-        spacing: Option<f32>,
-        padding: Option<Edges>,
-        width: Option<Length>,
-        height: Option<Length>,
-        /// Horizontal pixels per vertical pixel of a cell.
-        aspect: Option<f32>,
-        background: Option<Rgba>,
-        border: Option<Border>,
         #[serde(deserialize_with = "decode_children")]
         children: Vec<Node>,
     },
     /// Supplies widget-local dimensions to descendant container conditions.
     Responsive {
-        key: String,
-        width: Option<Length>,
-        height: Option<Length>,
+        id: ElementIdWire,
         #[serde(deserialize_with = "decode_child")]
         content: Box<Node>,
     },
     /// A guest-memoized subtree. Generation changes whenever cached content or
     /// its callable routes are rebuilt, including a rebuild after eviction.
     Lazy {
-        key: String,
+        id: ElementIdWire,
         generation: u64,
+        #[serde(deserialize_with = "decode_child")]
+        content: Box<Node>,
+    },
+    /// A deferred draw. Unlike [`Node::Lazy`], this is never a guest cache.
+    Deferred {
+        priority: usize,
         #[serde(deserialize_with = "decode_child")]
         content: Box<Node>,
     },
     /// Splices selected children into the surrounding layout. It adds no box.
     When {
-        key: String,
+        id: ElementIdWire,
         condition: ContainerQuery,
         #[serde(deserialize_with = "decode_children")]
         children: Vec<Node>,
@@ -245,7 +261,8 @@ pub enum Node {
     /// is the message for leaving view. `delay` is milliseconds a size
     /// must hold before it is reported.
     Sensor {
-        key: String,
+        id: ElementIdWire,
+        style: gpui::StyleRefinement,
         /// Copied continuity value for `key=`, independent of widget identity.
         reset: Option<SurfaceValue>,
         on_show: Option<u32>,
@@ -259,10 +276,9 @@ pub enum Node {
     Scroll {
         on_scroll: Option<u32>,
         virtual_rows: bool,
-        key: String,
+        id: ElementIdWire,
         direction: ScrollDirection,
-        width: Option<Length>,
-        height: Option<Length>,
+        style: gpui::StyleRefinement,
         /// No scroll bar is drawn; the content still scrolls.
         bar_hidden: bool,
         bar_width: Option<f32>,
@@ -274,45 +290,32 @@ pub enum Node {
         anchor_y: ScrollAnchor,
         /// Follow content that grows while the reader sits at the end.
         auto_scroll: bool,
-        background: Option<Rgba>,
-        border: Option<Border>,
         #[serde(deserialize_with = "decode_child")]
         content: Box<Node>,
     },
-    Text {
-        options: TextOptions,
-        key: String,
-        content: String,
-        size: Option<f32>,
-        color: Option<Rgba>,
-        font: Font,
-        width: Option<Length>,
-        align_x: Option<AlignX>,
-        /// A heading's level, 1 to 6; the sanitizer makes any other `None`.
-        heading: Option<u8>,
-        /// `None` is text whose changes are not announced.
-        live: Option<Live>,
-    },
+    Text(TextNode),
     /// A raster picture sent once per typed content hash.
     Image {
-        key: String,
+        id: Option<ElementIdWire>,
         hash: u64,
         data: Option<ImageData>,
         label: Option<String>,
-        fit: Option<ContentFit>,
-        opacity: Option<f32>,
-        width: Option<Length>,
-        height: Option<Length>,
+        image_style: ImageStyle,
+        loading: bool,
+        fallback: bool,
+        #[serde(deserialize_with = "decode_children")]
+        state_children: Vec<Node>,
+        style: gpui::StyleRefinement,
+        interactivity: Interactivity,
     },
     /// A native zoom/pan viewer sharing the raster picture cache and budgets.
     ImageViewer {
-        key: String,
+        id: ElementIdWire,
         hash: u64,
         data: Option<ImageData>,
         label: Option<String>,
         fit: Option<ContentFit>,
-        width: Option<Length>,
-        height: Option<Length>,
+        style: gpui::StyleRefinement,
         options: ViewerOptions,
     },
     /// A vector picture. Its bytes cross ONCE: the frame that first shows a
@@ -321,45 +324,31 @@ pub enum Node {
     /// it decoded by hash for as long as the guest runs; a hash it has not
     /// seen draws as empty space of the node's size.
     Svg {
-        key: String,
-        /// Use the nearest button's final status text color at draw time.
-        inherit_button_ink: bool,
-        /// The guest's content hash of the picture: an opaque cache key,
-        /// not something the host recomputes.
-        hash: u64,
-        /// The picture, on the first frame it is shown.
-        bytes: Option<Vec<u8>>,
-        /// The accessible name of the picture.
+        id: Option<ElementIdWire>,
+        source: SvgSource,
+        transformation: SvgTransformation,
         label: Option<String>,
-        /// A tint for the whole picture, over its own colours.
-        color: Option<Rgba>,
-        /// The tint while hovered: `None` keeps `color`, `Some(None)` drops
-        /// the tint, `Some(Some(_))` is another one.
-        hover: Option<Option<Rgba>>,
-        fit: Option<ContentFit>,
-        /// `0.0..=1.0`; `None` is opaque.
-        opacity: Option<f32>,
-        width: Option<Length>,
-        height: Option<Length>,
+        style: gpui::StyleRefinement,
+        interactivity: Interactivity,
     },
     Input {
         options: InputOptions,
-        key: String,
+        id: ElementIdWire,
         placeholder: String,
         /// Copied document state, adopted by reset and host observation revision.
         value: String,
         on_input: u32,
         on_submit: Option<u32>,
-        width: Option<Length>,
         secure: bool,
-        style: Box<InputStyle>,
+        style: gpui::StyleRefinement,
     },
     /// A multiline text editor. The host owns the `text_editor::Content` —
     /// native widget interaction — and the guest sees document state, unlike
     /// [`Node::Input`]. Presentation crosses as copied data.
     Editor {
         options: Box<EditorOptions>,
-        key: String,
+        id: ElementIdWire,
+        style: gpui::StyleRefinement,
         placeholder: String,
         /// The accessible name.
         label: Option<String>,
@@ -368,14 +357,9 @@ pub enum Node {
         /// Mutable guest state route, present even while editing is disabled.
         on_document: u32,
         editable: bool,
-        /// Pixels; the editor fills its parent otherwise.
-        width: Option<f32>,
-        height: Option<Length>,
-        min_height: Option<f32>,
-        max_height: Option<f32>,
     },
     Button {
-        key: String,
+        id: ElementIdWire,
         content: ButtonContent,
         /// The accessible name of a button whose content is not a plain
         /// label.
@@ -388,51 +372,37 @@ pub enum Node {
         description: Option<String>,
         /// `None` is a disabled button.
         on_press: Option<u32>,
-        width: Option<Length>,
-        height: Option<Length>,
-        padding: Option<Edges>,
-        style: ButtonStyle,
+        style: gpui::StyleRefinement,
     },
     Space {
-        width: Option<Length>,
-        height: Option<Length>,
+        style: gpui::StyleRefinement,
     },
     Rule {
-        key: String,
+        id: ElementIdWire,
         axis: Axis,
-        thickness: f32,
-        color: Option<Rgba>,
-        /// The theme's weak rule colour instead of its strong one, under
-        /// `color` when both are given.
-        weak: bool,
-        /// top-left, top-right, bottom-right, bottom-left.
-        radius: Option<[f32; 4]>,
-        /// Round the rule to whole pixels; `None` is the host's default.
-        snap: Option<bool>,
+        style: gpui::StyleRefinement,
     },
     /// A checkbox or a toggler: a labelled bool.
     Toggle {
-        key: String,
+        id: ElementIdWire,
         kind: ToggleKind,
         label: String,
         checked: bool,
         /// `None` is a disabled control.
         on_toggle: Option<u32>,
-        width: Option<Length>,
-        style: ToggleStyle,
+        style: gpui::StyleRefinement,
     },
     /// One radio button. Its value is the guest's business: selecting it
     /// sends the message the guest queued for it.
     Radio {
-        key: String,
+        id: ElementIdWire,
         label: String,
         selected: bool,
         on_select: u32,
-        width: Option<Length>,
-        style: RadioStyle,
+        style: gpui::StyleRefinement,
     },
     Slider {
-        key: String,
+        id: ElementIdWire,
         /// The accessible name.
         label: Option<String>,
         value: f32,
@@ -442,12 +412,10 @@ pub enum Node {
         on_change: u32,
         on_release: Option<u32>,
         axis: Axis,
-        width: Option<Length>,
-        height: Option<Length>,
-        style: SliderStyle,
+        style: gpui::StyleRefinement,
     },
     ComboBox {
-        key: String,
+        id: ElementIdWire,
         state_key: String,
         options: Vec<String>,
         selected: Option<u32>,
@@ -456,12 +424,12 @@ pub enum Node {
         /// The accessible name.
         label: Option<String>,
         on_select: u32,
-        width: Option<Length>,
+        style: gpui::StyleRefinement,
         settings: Box<ComboOptions>,
     },
     PickList {
         settings: Box<PickOptions>,
-        key: String,
+        id: ElementIdWire,
         /// Every option as the guest shows it; the host answers with an
         /// index into this list.
         options: Vec<String>,
@@ -470,69 +438,29 @@ pub enum Node {
         /// The accessible name.
         label: Option<String>,
         on_select: u32,
-        width: Option<Length>,
-        style: PickListStyle,
+        style: gpui::StyleRefinement,
     },
     Progress {
-        key: String,
+        id: ElementIdWire,
         value: f32,
         min: f32,
         max: f32,
         axis: Axis,
-        length: Option<Length>,
-        girth: Option<Length>,
-        /// The theme role the bar is painted in; `background`, `bar` and
-        /// `border` paint over it.
-        tone: Option<Tone>,
-        background: Option<Rgba>,
-        bar: Option<Rgba>,
-        border: Option<Border>,
-    },
-    /// Union-sized layers, or native base/under layering when `under` is nonzero.
-    Stack {
-        key: String,
-        width: Option<Length>,
-        height: Option<Length>,
-        padding: Option<Edges>,
-        background: Option<Rgba>,
-        border: Option<Border>,
-        clip: bool,
-        under: u32,
-        #[serde(deserialize_with = "decode_children")]
-        children: Vec<Node>,
-    },
-    /// The host's draw-time base/reveal pair; `open` can hold the reveal visible.
-    Hover {
-        key: String,
-        width: Option<Length>,
-        height: Option<Length>,
-        padding: Option<Edges>,
-        background: Option<Rgba>,
-        border: Option<Border>,
-        tint: Option<Rgba>,
-        radius: f32,
-        open: bool,
-        #[serde(deserialize_with = "decode_children")]
-        children: Vec<Node>,
+        style: gpui::StyleRefinement,
     },
     /// A base plus an optional modal layer. Closing removes the second child.
     Overlay {
-        key: String,
+        id: ElementIdWire,
         /// The accessible name of the dialog; the variant is its role.
         label: Option<String>,
-        padding: f32,
-        backdrop: Rgba,
-        align_x: AlignX,
-        align_y: AlignY,
+        style: gpui::StyleRefinement,
         on_dismiss: Option<u32>,
         #[serde(deserialize_with = "decode_children")]
         children: Vec<Node>,
     },
     /// Bounded geometry painted by the host, in widget-local coordinates.
     Canvas {
-        key: String,
-        width: Option<Length>,
-        height: Option<Length>,
+        style: gpui::StyleRefinement,
         #[serde(deserialize_with = "canvas::decode_parts")]
         commands: Vec<CanvasCommand>,
     },
@@ -544,237 +472,12 @@ pub enum Node {
     /// a visible placeholder. It takes the size its parent gives it: wrap it
     /// in a sized [`Node::Container`] to set one.
     Surface {
-        key: String,
+        id: ElementIdWire,
+        style: gpui::StyleRefinement,
         name: String,
         args: Vec<SurfaceValue>,
         on_event: Option<u32>,
     },
 }
 
-impl Node {
-    /// The node an empty view renders as.
-    pub fn empty() -> Self {
-        Self::Space {
-            width: None,
-            height: None,
-        }
-    }
-
-    /// Hashes the current copied subtree without allocating an encoded buffer.
-    /// A host uses this after sanitization: shared frame budgets may change
-    /// content even when a guest memo generation stays the same.
-    pub fn fingerprint(&self) -> u64 {
-        use std::hash::Hasher;
-        struct Sink(std::hash::DefaultHasher);
-        impl std::io::Write for Sink {
-            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-                self.0.write(bytes);
-                Ok(bytes.len())
-            }
-            fn flush(&mut self) -> std::io::Result<()> {
-                Ok(())
-            }
-        }
-        let mut sink = Sink(std::hash::DefaultHasher::new());
-        bincode::serialize_into(&mut sink, self).expect("node fingerprint sink cannot fail");
-        sink.0.finish()
-    }
-
-    pub fn key(&self) -> Option<&str> {
-        match self {
-            Self::Container { key, .. }
-            | Self::ResizeHandle { key, .. }
-            | Self::MouseArea { key, .. }
-            | Self::Linear { key, .. }
-            | Self::Grid { key, .. }
-            | Self::KeyedColumn { key, .. }
-            | Self::Flex { key, .. }
-            | Self::Pin { key, .. }
-            | Self::Float { key, .. }
-            | Self::Responsive { key, .. }
-            | Self::Lazy { key, .. }
-            | Self::When { key, .. }
-            | Self::Sensor { key, .. }
-            | Self::Scroll { key, .. }
-            | Self::Qr { key, .. }
-            | Self::RichText { key, .. }
-            | Self::Text { key, .. }
-            | Self::Svg { key, .. }
-            | Self::Image { key, .. }
-            | Self::ImageViewer { key, .. }
-            | Self::Input { key, .. }
-            | Self::Editor { key, .. }
-            | Self::Button { key, .. }
-            | Self::Rule { key, .. }
-            | Self::Toggle { key, .. }
-            | Self::Radio { key, .. }
-            | Self::Slider { key, .. }
-            | Self::PickList { key, .. }
-            | Self::ComboBox { key, .. }
-            | Self::Progress { key, .. }
-            | Self::Stack { key, .. }
-            | Self::Hover { key, .. }
-            | Self::Overlay { key, .. }
-            | Self::Tooltip { key, .. }
-            | Self::Canvas { key, .. }
-            | Self::Surface { key, .. } => Some(key),
-            Self::Space { .. } => None,
-        }
-    }
-
-    /// The node's children in order. One arm per variant, here and in
-    /// [`Node::children_mut`] and [`Node::child_list_mut`]: everything that
-    /// walks, diffs or patches a tree goes through these three, so a new
-    /// variant is a new arm in each and nothing else.
-    pub fn children(&self) -> &[Node] {
-        match self {
-            Self::Container { content, .. }
-            | Self::Pin { content, .. }
-            | Self::Float { content, .. }
-            | Self::Responsive { content, .. }
-            | Self::Lazy { content, .. }
-            | Self::Sensor { child: content, .. }
-            | Self::ResizeHandle { content, .. }
-            | Self::MouseArea { content, .. }
-            | Self::Scroll { content, .. } => std::slice::from_ref(content),
-            Self::Linear { children, .. }
-            | Self::Grid { children, .. }
-            | Self::Stack { children, .. }
-            | Self::Hover { children, .. }
-            | Self::Tooltip { children, .. }
-            | Self::Overlay { children, .. }
-            | Self::KeyedColumn { children, .. }
-            | Self::Flex { children, .. }
-            | Self::When { children, .. } => children,
-
-            Self::Button {
-                content: ButtonContent::Child(child),
-                ..
-            } => std::slice::from_ref(child),
-            Self::Button { .. }
-            | Self::Qr { .. }
-            | Self::RichText { .. }
-            | Self::Text { .. }
-            | Self::Svg { .. }
-            | Self::Image { .. }
-            | Self::ImageViewer { .. }
-            | Self::Input { .. }
-            | Self::Editor { .. }
-            | Self::Space { .. }
-            | Self::Rule { .. }
-            | Self::Toggle { .. }
-            | Self::Radio { .. }
-            | Self::Slider { .. }
-            | Self::PickList { .. }
-            | Self::ComboBox { .. }
-            | Self::Progress { .. }
-            | Self::Canvas { .. }
-            | Self::Surface { .. } => &[],
-        }
-    }
-
-    /// Runs `visit` on every node in the tree, depth first, this one first.
-    pub fn for_each_mut(&mut self, visit: &mut impl FnMut(&mut Node)) {
-        visit(self);
-        for child in self.children_mut() {
-            child.for_each_mut(visit);
-        }
-    }
-
-    pub fn children_mut(&mut self) -> &mut [Node] {
-        match self {
-            Self::Container { content, .. }
-            | Self::Pin { content, .. }
-            | Self::Float { content, .. }
-            | Self::Responsive { content, .. }
-            | Self::Lazy { content, .. }
-            | Self::Sensor { child: content, .. }
-            | Self::ResizeHandle { content, .. }
-            | Self::MouseArea { content, .. }
-            | Self::Scroll { content, .. } => std::slice::from_mut(content),
-            Self::Linear { children, .. }
-            | Self::Grid { children, .. }
-            | Self::Stack { children, .. }
-            | Self::Hover { children, .. }
-            | Self::Tooltip { children, .. }
-            | Self::Overlay { children, .. }
-            | Self::KeyedColumn { children, .. }
-            | Self::Flex { children, .. }
-            | Self::When { children, .. } => children,
-
-            Self::Button {
-                content: ButtonContent::Child(child),
-                ..
-            } => std::slice::from_mut(child),
-            Self::Button { .. }
-            | Self::Qr { .. }
-            | Self::RichText { .. }
-            | Self::Text { .. }
-            | Self::Input { .. }
-            | Self::Editor { .. }
-            | Self::Space { .. }
-            | Self::Rule { .. }
-            | Self::Toggle { .. }
-            | Self::Radio { .. }
-            | Self::Slider { .. }
-            | Self::PickList { .. }
-            | Self::ComboBox { .. }
-            | Self::Progress { .. }
-            | Self::Svg { .. }
-            | Self::Image { .. }
-            | Self::ImageViewer { .. }
-            | Self::Canvas { .. }
-            | Self::Surface { .. } => &mut [],
-        }
-    }
-
-    /// The children as a list that can grow and shrink, for the variants
-    /// that hold one; a fixed-arity node (a container's one content) has
-    /// none, and no patch may insert into, remove from or move within it.
-    pub fn child_list_mut(&mut self) -> Option<&mut Vec<Node>> {
-        match self {
-            Self::Linear { children, .. }
-            | Self::Grid { children, .. }
-            | Self::KeyedColumn { children, .. }
-            | Self::Flex { children, .. }
-            | Self::Stack { children, .. }
-            | Self::When { children, .. }
-            | Self::Hover { children, .. }
-            | Self::Tooltip { children, .. }
-            | Self::Overlay { children, .. } => Some(children),
-            Self::Container { .. }
-            | Self::Pin { .. }
-            | Self::Float { .. }
-            | Self::Responsive { .. }
-            | Self::Lazy { .. }
-            | Self::Sensor { .. }
-            | Self::ResizeHandle { .. }
-            | Self::MouseArea { .. }
-            | Self::Scroll { .. }
-            | Self::Button { .. }
-            | Self::Qr { .. }
-            | Self::RichText { .. }
-            | Self::Text { .. }
-            | Self::Input { .. }
-            | Self::Editor { .. }
-            | Self::Space { .. }
-            | Self::Rule { .. }
-            | Self::Toggle { .. }
-            | Self::Radio { .. }
-            | Self::Slider { .. }
-            | Self::PickList { .. }
-            | Self::ComboBox { .. }
-            | Self::Progress { .. }
-            | Self::Svg { .. }
-            | Self::Image { .. }
-            | Self::ImageViewer { .. }
-            | Self::Canvas { .. }
-            | Self::Surface { .. } => None,
-        }
-    }
-
-    /// Every node in the tree, depth first, this one included.
-    pub fn count(&self) -> usize {
-        1 + self.children().iter().map(Node::count).sum::<usize>()
-    }
-}
+mod impls;

@@ -13,17 +13,8 @@ const REPO: &str = "p/";
 const WRITER: &str = "w/";
 const REF: &str = "r/";
 
-pub fn repos_prefix() -> Vec<u8> {
-    REPO.as_bytes().to_vec()
-}
-
 pub fn repo_key(name: &str) -> Vec<u8> {
     format!("{REPO}{name}").into_bytes()
-}
-
-pub fn repo_name(key: &[u8]) -> Option<String> {
-    let name = key.strip_prefix(REPO.as_bytes())?;
-    String::from_utf8(name.to_vec()).ok()
 }
 
 pub fn writers_prefix(name: &str) -> Vec<u8> {
@@ -61,6 +52,16 @@ pub fn load_bounds<S: Sandbox>(sandbox: &S) -> Result<Bounds, Refusal> {
 }
 
 pub fn save_repo<S: Sandbox>(sandbox: &S, name: &str, repo: &Repo) {
+    if let Some(old) = sandbox
+        .get(&repo_key(name))
+        .and_then(|b| abi::decode::<Repo>(&b).ok())
+    {
+        sandbox.delete(activity_key(name, old.last_activity));
+    }
+    sandbox.set(
+        activity_key(name, repo.last_activity),
+        name.as_bytes().to_vec(),
+    );
     sandbox.set(repo_key(name), abi::encode(repo));
 }
 
@@ -118,4 +119,54 @@ pub fn delete_ref<S: Sandbox>(sandbox: &S, name: &str, reference: &[u8]) {
 
 pub fn repo_hash(repo: &Repo) -> Hash {
     hash_of(repo.hash)
+}
+
+pub fn activity_key(name: &str, height: u64) -> Vec<u8> {
+    [
+        b"a/".as_slice(),
+        &(u64::MAX - height).to_be_bytes(),
+        b"/",
+        name.as_bytes(),
+    ]
+    .concat()
+}
+
+pub fn load_ref<S: Sandbox>(
+    sandbox: &S,
+    name: &str,
+    reference: &[u8],
+    hash: Hash,
+) -> Result<Option<Oid>, Refusal> {
+    sandbox
+        .get(&ref_key(name, reference))
+        .map(|b| Oid::from_bytes(hash, &b).map_err(|e| crate::refuse::storage(e.to_string())))
+        .transpose()
+}
+
+/// Resolving an op's endpoint reads consensus refs only, never objects.
+pub fn resolve<S: Sandbox>(
+    sandbox: &S,
+    name: &str,
+    revision: &crate::Revision,
+    hash: Hash,
+) -> Result<Oid, Refusal> {
+    match revision {
+        crate::Revision::Oid(hex) => parse_oid(hash, hex),
+        crate::Revision::Ref(reference) => {
+            if !gitcore::server::valid_ref_name(reference) {
+                return Err(crate::refuse::invalid("revision must name a full ref"));
+            }
+            load_ref(sandbox, name, reference, hash)?
+                .ok_or_else(|| crate::refuse::not_found("the ref does not exist"))
+        }
+    }
+}
+
+pub fn parse_oid(hash: Hash, hex: &str) -> Result<Oid, Refusal> {
+    let oid = Oid::from_hex(hash, hex)
+        .map_err(|_| crate::refuse::invalid("oid has the wrong length or hex for this repo"))?;
+    if oid.is_zero() {
+        return Err(crate::refuse::invalid("an object id cannot be zero"));
+    }
+    Ok(oid)
 }

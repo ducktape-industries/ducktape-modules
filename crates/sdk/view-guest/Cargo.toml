@@ -1,13 +1,8 @@
-# The generic runtime a wasm view is written against: `App`/`Driver`,
-# `export_app!`, the host request/subscribe protocol, slots, editor
-# primitives and the native test helpers. Lifted from ducktape-views'
-# `support/guest` as a rename; a view links it as `ducktape-view-guest`
-# (`package = "view-guest"`, see the root manifest) so call sites keep the
-# name they were written with.
+# GPUI-shaped guest contexts, host IO, editor primitives and typed tests.
 [package]
 name = "view-guest"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 publish = false
 license = "MIT"
 description = "Renderer-independent WASM view execution and host protocol"
@@ -18,12 +13,14 @@ view-wire.workspace = true
 design.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+gpui.workspace = true
+view-guest-derive = { path = "../view-guest-derive" }
+# The binary door (`rpc.query_bytes`): a program speaks borsh, and the host
+# envelope carries it base64. Neither reaches the signing graph the view
+# gate forbids.
+borsh.workspace = true
+base64.workspace = true
 unicode-segmentation = "1"
-
-# The `export_app!` probe `make view-wasm-check` builds for wasm32.
-[[example]]
-name = "exported"
-crate-type = ["cdylib"]
 
 [[example]]
 name = "exported_view"

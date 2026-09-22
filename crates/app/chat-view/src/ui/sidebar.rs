@@ -1,87 +1,130 @@
-//! The list pane: search, the channels (with the door to a new one), the
-//! voice rooms and the direct messages, each row marked unread when its
-//! head moved past what the reader saw.
-use ducktape_view_guest::view::Cx;
-use ducktape_view_guest::wire::{self, Length, Node, kit, kit::Tone};
+//! The channel and direct-message pane, authored as native GPUI elements.
+
+use ducktape_view_guest::AnyElement;
+use ducktape_view_guest::prelude::*;
+use ducktape_view_guest::{ClickEvent, Context, ElementId, ParentElement, Styled, Theme, div, px};
 
 use crate::chat::ChannelInfo;
 use crate::{ChannelCreate, Chat};
-use ducktape_view_guest::wire::kit::*;
 
-pub fn render(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
-    let key = "chat/sidebar";
-    let typed = cx.on_value(|chat, text: String, _| chat.search.draft = text);
-    let submit = cx.on(|chat, cx| chat.search_submit(cx));
-    let mut search = text_field(
-        format!("{key}/search"),
-        "Search messages",
-        &chat.search.draft,
-        typed,
-        Some(submit),
-        false,
-    );
-    if let Node::Input { placeholder, .. } = &mut search {
-        *placeholder = "Search messages…".into();
-    }
-    let mut search_row = vec![fill_width(search)];
+pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement {
+    let typed = cx.listener(|chat, event: &String, _window, cx| {
+        chat.search.draft = event.clone();
+        cx.notify();
+    });
+    let submit = cx.listener(|chat, _: &(), _window, cx| {
+        cx.notify();
+        chat.search_submit(cx)
+    });
+    let search_input = Input::new("chat-sidebar-search")
+        .h(px(28.))
+        .flex_1()
+        .px_2()
+        .py_1()
+        .rounded_md()
+        .border_1()
+        .border_color(theme.sidebar_border)
+        .bg(theme.sidebar_raised)
+        .text_color(theme.sidebar_foreground)
+        .value(chat.search.draft.clone())
+        .placeholder("Search messages…")
+        .label("Search messages")
+        .on_input(typed)
+        .on_submit(submit);
+    let mut search = div()
+        .flex()
+        .items_center()
+        .gap_1()
+        .flex_1()
+        .child(search_input);
     if !chat.search.query.is_empty() || !chat.search.draft.trim().is_empty() {
-        let clear = cx.on(|chat, _| chat.search_clear());
-        search_row.push(glyph(
-            format!("{key}/clear-search"),
-            "✕",
-            "Clear message search",
-            Some(clear),
-        ));
+        let clear = cx.listener(|chat, _: &ClickEvent, _window, cx| {
+            chat.search_clear();
+            cx.notify();
+        });
+        search = search.child(
+            div()
+                .id("chat-sidebar-clear-search")
+                .px_1()
+                .role(ducktape_view_guest::Role::Button)
+                .focusable()
+                .on_click(clear)
+                .child("✕"),
+        );
     }
-    let top = padded_all(
-        kit::spaced(
-            kit::centered_row(format!("{key}/search-row"), search_row),
-            kit::spacing::XXS as f32,
-        ),
-        kit::spacing::SM as f32,
-    );
 
-    let (mark, name) = match chat.create {
-        Some(_) => ("✕", "Close"),
-        None => ("+", "New channel"),
-    };
-    let toggle = cx.on(|chat, _| {
+    let toggle = cx.listener(|chat, _: &ClickEvent, _window, cx| {
         chat.create = match chat.create.take() {
             Some(_) => None,
             None => Some(ChannelCreate::default()),
-        }
+        };
+        cx.notify();
     });
+    let content = div()
+        .id("chat-sidebar")
+        .flex()
+        .flex_col()
+        .w(px(chat.layout.sidebar))
+        .h_full()
+        .bg(theme.sidebar)
+        .text_color(theme.sidebar_foreground)
+        .child(
+            div()
+                .id("chat-sidebar-search-row")
+                .flex()
+                .items_center()
+                .gap_1()
+                .p_2()
+                .child(search),
+        );
+
     let busy = chat.session.loading || chat.session.busy;
-    let door = gated(
-        glyph(
-            format!("{key}/new-channel"),
-            mark,
-            name,
-            (!busy).then_some(toggle),
-        ),
-        // closing an open form is a read: only the door is gated
-        chat.create.is_some() || chat.session.holds_account(),
-        "Create an account to create a channel",
-    );
-    let mut rows = vec![section_row(
-        &format!("{key}/channels-header"),
+    let door = div()
+        .id("chat-sidebar-new-channel")
+        .px_1()
+        .py_0p5()
+        .rounded_sm()
+        .hover(|s| s.bg(theme.sidebar_raised))
+        .when(!busy || chat.create.is_some(), |el| {
+            el.role(ducktape_view_guest::Role::Button)
+                .focusable()
+                .on_click(toggle)
+        })
+        .child(if chat.create.is_some() {
+            "✕ Close"
+        } else {
+            "+ New channel"
+        });
+    let mut list = div()
+        .id("chat-sidebar-rooms")
+        .flex_1()
+        .overflow_y_scroll()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .p_2();
+    list = list.child(section_header(
+        "chat-sidebar-channels-header",
         "Channels",
-        Some(door),
-    )];
+        door,
+        theme,
+    ));
+
     let channels: Vec<&ChannelInfo> = chat.channels.ready().into_iter().flatten().collect();
     if chat.channels.is_loading() && channels.is_empty() {
-        rows.push(kit::caption(format!("{key}/loading"), "Loading rooms…"));
+        list = list.child(quiet("chat-sidebar-loading", "Loading rooms…", theme));
     }
     if let Some(refusal) = chat.channels.failed() {
-        rows.push(kit::caption(
-            format!("{key}/failed"),
+        list = list.child(quiet(
+            "chat-sidebar-failed",
             refusal.sentence.clone(),
+            theme,
         ));
     }
     let open = chat.room.as_ref().map(|room| room.id.as_str());
     let mine = chat.my_account();
-    let mut dms = Vec::new();
     let mut voice = Vec::new();
+    let mut dms = Vec::new();
     for info in channels {
         if crate::chat::dm_peers(&info.channel.id).is_some() {
             if let Some(peer) =
@@ -89,180 +132,213 @@ pub fn render(chat: &Chat, cx: &mut Cx<Chat>) -> Node {
             {
                 dms.push((info, peer));
             }
-            continue;
-        }
-        if info.channel.voice {
+        } else if info.channel.voice {
             voice.push(info);
-            continue;
+        } else {
+            list = list.child(channel_button(
+                chat,
+                info,
+                open == Some(info.channel.id.as_str()),
+                cx,
+                theme,
+            ));
         }
-        rows.push(channel_button(
-            chat,
-            key,
-            info,
-            open == Some(info.channel.id.as_str()),
-            cx,
-        ));
     }
     if !voice.is_empty() {
-        rows.push(kit::gap(kit::spacing::SM as f32));
-        rows.push(section_row(&format!("{key}/voice-header"), "Voice", None));
+        list = list.child(section_header(
+            "chat-sidebar-voice-header",
+            "Voice",
+            div(),
+            theme,
+        ));
         for info in voice {
-            rows.push(voice_button(chat, key, info, cx));
+            list = list.child(voice_button(chat, info, cx, theme));
         }
     }
     if !dms.is_empty() {
-        rows.push(kit::gap(kit::spacing::SM as f32));
-        rows.push(section_row(
-            &format!("{key}/dm-header"),
+        list = list.child(section_header(
+            "chat-sidebar-dm-header",
             "Direct messages",
-            None,
+            div(),
+            theme,
         ));
         for (info, peer) in dms {
-            rows.push(dm_button(
+            list = list.child(dm_button(
                 chat,
-                key,
                 info,
                 peer,
                 open == Some(info.channel.id.as_str()),
                 cx,
+                theme,
             ));
         }
     }
-    let list = kit::scroll(
-        format!("{key}/rooms"),
-        kit::padded(
-            kit::spaced(kit::column(format!("{key}/room-list"), rows), 2.),
-            wire::Edges {
-                top: kit::spacing::XXS as f32,
-                right: kit::spacing::SM as f32,
-                bottom: kit::spacing::LG as f32,
-                left: kit::spacing::SM as f32,
-            },
-        ),
-    );
-    kit::pane(
-        key,
-        fill(kit::spaced(
-            kit::column(format!("{key}/content"), [top, list]),
-            0.,
-        )),
-        Length::Fixed(chat.layout.sidebar),
-    )
+    content.child(list)
 }
 
-/// A channel: the hash, the name, and what stands out about it.
+fn section_header(
+    id: impl Into<ElementId>,
+    label: &str,
+    control: impl IntoElement,
+    theme: &Theme,
+) -> impl IntoElement {
+    div()
+        .id(id)
+        .flex()
+        .items_center()
+        .gap_1()
+        .px_1()
+        .py_1()
+        .text_size(px(11.))
+        .text_color(theme.sidebar_muted)
+        .child(div().flex_1().child(label.to_owned()))
+        .child(control)
+}
+
+fn quiet(id: impl Into<ElementId>, text: impl Into<String>, theme: &Theme) -> impl IntoElement {
+    div()
+        .id(id)
+        .px_1()
+        .py_1()
+        .text_size(px(11.))
+        .text_color(theme.sidebar_muted)
+        .child(text.into())
+}
+
 fn channel_button(
     chat: &Chat,
-    key: &str,
     info: &ChannelInfo,
     selected: bool,
-    cx: &mut Cx<Chat>,
-) -> Node {
-    let p = kit::palette();
-    let key = format!("{key}/channel/{}", info.channel.id);
+    cx: &mut Context<Chat>,
+    theme: &Theme,
+) -> AnyElement {
+    let id = info.channel.id.clone();
+    let click = cx.listener(move |chat, _: &ClickEvent, window, cx| {
+        cx.notify();
+        chat.choose(id.clone(), window, cx)
+    });
     let unread = chat.unread(info) && !selected;
-    let name = if unread {
-        kit::strong(format!("{key}/name"), &info.channel.name)
-    } else {
-        kit::text(format!("{key}/name"), &info.channel.name)
-    };
-    let mut children = vec![
-        kit::nowrap(kit::colored(kit::text(format!("{key}/hash"), "#"), p.muted)),
-        gives_way(&format!("{key}/name-box"), name),
-    ];
+    let mut row = div()
+        .id(format!("chat-sidebar-channel-{}", info.channel.id))
+        .flex()
+        .w_full()
+        .items_center()
+        .gap_1()
+        .min_h(px(28.))
+        .px_1()
+        .rounded_md()
+        .bg(if selected {
+            theme.sidebar_raised
+        } else {
+            theme.sidebar
+        })
+        .hover(|s| s.bg(theme.sidebar_raised))
+        .role(ducktape_view_guest::Role::Button)
+        .aria_selected(selected)
+        .focusable()
+        .on_click(click)
+        .child(div().text_color(theme.sidebar_muted).child("#"))
+        .child(
+            div()
+                .flex_1()
+                .truncate()
+                .text_color(if unread {
+                    theme.sidebar_foreground
+                } else {
+                    theme.sidebar_muted
+                })
+                .child(info.channel.name.clone()),
+        );
     if !info.channel.huddle.is_empty() {
-        children.push(kit::nowrap(kit::colored(
-            kit::text_size(
-                kit::text(
-                    format!("{key}/huddle"),
-                    format!("🔊 {}", info.channel.huddle.len()),
-                ),
-                kit::type_scale::CAPTION as f32,
-            ),
-            p.success,
-        )));
+        row = row.child(
+            div()
+                .text_size(px(11.))
+                .text_color(theme.success)
+                .child(format!("🔊 {}", info.channel.huddle.len())),
+        );
     }
     if crate::chat::members_only(info) {
-        children.push(kit::nowrap(kit::caption(
-            format!("{key}/members-only"),
-            "Members only",
-        )));
+        row = row.child(
+            div()
+                .text_size(px(11.))
+                .text_color(theme.sidebar_muted)
+                .child("Members only"),
+        );
     }
     if info.channel.archived {
-        children.push(kit::nowrap(kit::caption(
-            format!("{key}/archived"),
-            "Archived",
-        )));
+        row = row.child(
+            div()
+                .text_size(px(11.))
+                .text_color(theme.sidebar_muted)
+                .child("Archived"),
+        );
     }
     if unread {
-        children.push(kit::spacer());
-        children.push(unread_dot(format!("{key}/unread")));
-    }
-    let id = info.channel.id.clone();
-    let press = (!chat.session.busy).then(|| cx.on(move |chat, cx| chat.choose(id.clone(), cx)));
-    let content = kit::spaced(
-        kit::centered_row(format!("{key}/row"), children),
-        kit::spacing::XS as f32,
-    );
-    let row = sidebar_row(
-        kit::list_row(key.clone(), content, selected, press),
-        &info.channel.name,
-    );
-    with_seats(chat, &key, row, info)
-}
-
-/// A voice room: pressing it joins its huddle; the row the reader sits in
-/// is the selected one.
-fn voice_button(chat: &Chat, key: &str, info: &ChannelInfo, cx: &mut Cx<Chat>) -> Node {
-    let p = kit::palette();
-    let key = format!("{key}/voice/{}", info.channel.id);
-    let mut children = vec![
-        kit::nowrap(kit::colored(
-            kit::text(format!("{key}/mark"), "🔊"),
-            p.muted,
-        )),
-        kit::nowrap(kit::text(format!("{key}/name"), &info.channel.name)),
-    ];
-    if info.channel.archived {
-        children.push(kit::nowrap(kit::caption(
-            format!("{key}/archived"),
-            "Archived",
-        )));
-    }
-    let id = info.channel.id.clone();
-    let press = (!chat.session.busy && !info.channel.archived).then(|| {
-        cx.on(move |_, cx| cx.notify::<crate::api::JoinVoice>(serde_json::json!({"id": id})))
-    });
-    let joined = chat.session.huddle_joined && chat.session.huddle_channel == info.channel.id;
-    let content = kit::spaced(
-        kit::centered_row(format!("{key}/row"), children),
-        kit::spacing::XS as f32,
-    );
-    let row = sidebar_row(
-        kit::list_row(key.clone(), content, joined, press),
-        &info.channel.name,
-    );
-    with_seats(chat, &key, row, info)
-}
-
-/// The people in the room's huddle, under the room like a voice channel.
-fn with_seats(chat: &Chat, key: &str, row: Node, info: &ChannelInfo) -> Node {
-    if info.channel.huddle.is_empty() {
-        return row;
-    }
-    let me = chat.me_key();
-    let mut seats = vec![row];
-    for (index, seat) in info.channel.huddle.iter().enumerate() {
-        let key = format!("{key}/seat/{index}");
-        let label = chat.names.ready().map_or_else(
-            || seat.party.clone(),
-            |names| names.member_label(&seat.party),
+        row = row.child(
+            div()
+                .id(format!("chat-sidebar-channel-{}-unread", info.channel.id))
+                .size_2()
+                .rounded_full()
+                .bg(theme.accent),
         );
-        let is_you = !me.is_empty()
-            && chat
-                .names
-                .ready()
-                .is_some_and(|names| names.owns_handle(&seat.party, &me));
+    }
+    with_seats(chat, info, row, theme)
+}
+
+fn voice_button(
+    chat: &Chat,
+    info: &ChannelInfo,
+    cx: &mut Context<Chat>,
+    theme: &Theme,
+) -> AnyElement {
+    let id = info.channel.id.clone();
+    let click = cx.listener(move |chat, _: &ClickEvent, _window, cx| {
+        cx.host()
+            .notify::<crate::api::JoinVoice>(serde_json::json!({"id": id}));
+        cx.notify();
+        chat.notice.clear();
+    });
+    let selected = chat.session.huddle_joined && chat.session.huddle_channel == info.channel.id;
+    let row = div()
+        .id(format!("chat-sidebar-voice-{}", info.channel.id))
+        .flex()
+        .items_center()
+        .gap_1()
+        .min_h(px(28.))
+        .px_1()
+        .rounded_md()
+        .bg(if selected {
+            theme.sidebar_raised
+        } else {
+            theme.sidebar
+        })
+        .hover(|s| s.bg(theme.sidebar_raised))
+        .when(!info.channel.archived, |el| {
+            el.role(ducktape_view_guest::Role::Button)
+                .focusable()
+                .on_click(click)
+        })
+        .child("🔊")
+        .child(div().flex_1().child(info.channel.name.clone()))
+        .when(info.channel.archived, |el| {
+            el.child(quiet("archived", "Archived", theme))
+        });
+    with_seats(chat, info, row, theme)
+}
+
+fn with_seats(chat: &Chat, info: &ChannelInfo, row: impl IntoElement, theme: &Theme) -> AnyElement {
+    let mut content = div()
+        .id(format!("chat-sidebar-seats-{}", info.channel.id))
+        .flex()
+        .flex_col()
+        .child(row);
+    let Some(names) = chat.names.ready() else {
+        return content.into_any_element();
+    };
+    let me = chat.me_key();
+    for (index, seat) in info.channel.huddle.iter().enumerate() {
+        let label = names.member_label(&seat.party);
+        let is_you = names.owns_handle(&seat.party, &me);
         let speaking = if is_you {
             chat.session.call_speaking
         } else {
@@ -271,80 +347,152 @@ fn with_seats(chat: &Chat, key: &str, row: Node, info: &ChannelInfo) -> Node {
                 .iter()
                 .any(|peer| peer.peer == seat.node && peer.speaking && !peer.muted)
         };
-        let tone = if speaking {
-            Tone::Success
+        let note = if is_you {
+            if chat.session.call_muted {
+                "you · muted"
+            } else {
+                "you"
+            }
         } else {
-            Tone::Neutral
+            ""
         };
-        let mut children = vec![
-            kit::avatar(format!("{key}/avatar"), kit::initials(&label), tone),
-            kit::nowrap(kit::secondary(format!("{key}/name"), &label)),
-        ];
-        let mine = match (is_you, chat.session.call_muted) {
-            (true, true) => "you · muted",
-            (true, false) => "you",
-            (false, _) => "",
-        };
-        if !mine.is_empty() {
-            children.push(kit::nowrap(kit::caption(format!("{key}/you"), mine)));
-        }
-        seats.push(kit::padded(
-            kit::spaced(kit::centered_row(key, children), kit::spacing::SM as f32),
-            wire::Edges {
-                top: 2.,
-                right: kit::spacing::SM as f32,
-                bottom: 2.,
-                left: 28.,
-            },
-        ));
+        content = content.child(
+            div()
+                .id(ElementId::named_usize("chat-sidebar-seat", index))
+                .flex()
+                .items_center()
+                .gap_1()
+                .pl_7()
+                .py_0p5()
+                .child(
+                    div()
+                        .size_5()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded_full()
+                        .bg(if speaking {
+                            theme.success_soft
+                        } else {
+                            theme.sidebar_raised
+                        })
+                        .text_size(px(11.))
+                        .text_color(if speaking {
+                            theme.success
+                        } else {
+                            theme.sidebar_muted
+                        })
+                        .child(initials(&label)),
+                )
+                .child(div().flex_1().text_size(px(11.)).child(label))
+                .when(!note.is_empty(), |el| {
+                    el.child(
+                        div()
+                            .text_size(px(11.))
+                            .text_color(theme.sidebar_muted)
+                            .child(note),
+                    )
+                }),
+        );
     }
-    kit::spaced(kit::column(format!("{key}/with-huddle"), seats), 2.)
+    content.into_any_element()
 }
 
-/// A direct message: the peer's avatar and name, an Agent badge on software.
 fn dm_button(
     chat: &Chat,
-    key: &str,
     info: &ChannelInfo,
     peer: u64,
     selected: bool,
-    cx: &mut Cx<Chat>,
-) -> Node {
-    let key = format!("{key}/dm/{peer}");
+    cx: &mut Context<Chat>,
+    theme: &Theme,
+) -> impl IntoElement {
     let names = chat.names.ready();
     let name = names.map_or_else(
         || format!("account {peer}"),
         |n| n.member_label(&format!("acct:{peer}")),
     );
-    let unread = chat.unread(info) && !selected;
-    let label = if unread {
-        kit::strong(format!("{key}/name"), &name)
-    } else {
-        kit::text(format!("{key}/name"), &name)
-    };
     let agent = names.is_some_and(|n| n.is_program(peer));
-    let tone = if agent { Tone::Agent } else { Tone::Neutral };
-    let mut children = vec![
-        kit::avatar(format!("{key}/avatar"), kit::initials(&name), tone),
-        gives_way(&format!("{key}/name-box"), label),
-    ];
+    let unread = chat.unread(info) && !selected;
+    let id = info.channel.id.clone();
+    let click = cx.listener(move |chat, _: &ClickEvent, window, cx| {
+        cx.notify();
+        chat.choose(id.clone(), window, cx)
+    });
+    let mut row = div()
+        .id(format!("chat-sidebar-dm-{peer}"))
+        .flex()
+        .items_center()
+        .gap_1()
+        .min_h(px(28.))
+        .px_1()
+        .rounded_md()
+        .bg(if selected {
+            theme.sidebar_raised
+        } else {
+            theme.sidebar
+        })
+        .hover(|s| s.bg(theme.sidebar_raised))
+        .role(ducktape_view_guest::Role::Button)
+        .focusable()
+        .on_click(click)
+        .child(
+            div()
+                .size_6()
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded_full()
+                .bg(if agent {
+                    theme.agent_soft
+                } else {
+                    theme.sidebar_raised
+                })
+                .text_size(px(11.))
+                .child(initials(&name)),
+        )
+        .child(
+            div()
+                .flex_1()
+                .truncate()
+                .text_color(if unread {
+                    theme.sidebar_foreground
+                } else {
+                    theme.sidebar_muted
+                })
+                .child(name),
+        );
     if agent {
-        children.push(kit::badge(format!("{key}/agent"), "Agent", Tone::Agent));
+        row = row.child(super::badge(
+            format!("chat-sidebar-dm-{peer}-agent"),
+            "Agent",
+            theme.agent,
+            theme.agent_soft,
+        ));
     }
     if unread {
-        children.push(kit::spacer());
-        children.push(unread_dot(format!("{key}/unread")));
+        row = row.child(
+            div()
+                .id(format!("chat-sidebar-dm-{peer}-unread"))
+                .size_2()
+                .rounded_full()
+                .bg(theme.accent),
+        );
     }
-    let id = info.channel.id.clone();
-    let press = (!chat.session.busy).then(|| cx.on(move |chat, cx| chat.choose(id.clone(), cx)));
-    let content = kit::spaced(
-        kit::centered_row(format!("{key}/row"), children),
-        kit::spacing::SM as f32,
-    );
-    sidebar_row(kit::list_row(key, content, selected, press), &name)
+    row
 }
 
-/// The DM peer of the open room, when it is one.
+fn initials(name: &str) -> String {
+    let mut chars = name
+        .split_whitespace()
+        .filter_map(|word| word.chars().next());
+    let first = chars.next();
+    let second = chars.next();
+    match (first, second) {
+        (Some(first), Some(second)) => format!("{first}{second}").to_uppercase(),
+        _ => name.chars().take(2).collect::<String>().to_uppercase(),
+    }
+}
+
 pub fn dm_peer(chat: &Chat) -> Option<(String, bool)> {
     let room = chat.room.as_ref()?;
     let names = chat.names.ready()?;

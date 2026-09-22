@@ -1,8 +1,11 @@
 //! The smallest `View` that invokes `export_view!` at a crate root; the
-//! wasm32 twin of `exported.rs` for the state-and-handlers shape.
+//! wasm32 probe for the entity-and-listeners shape.
 
 use serde::{Deserialize, Serialize};
-use view_guest::{Cx, View, wire};
+use view_guest::{
+    div, ClickEvent, Context, InteractiveElement, IntoElement, ParentElement, Render,
+    StatefulInteractiveElement, View, Window,
+};
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct Exported {
@@ -10,18 +13,21 @@ pub struct Exported {
 }
 
 impl View for Exported {
-    fn boot(_: &mut Cx<Self>) -> Self {
+    fn new(_: &mut Window, _: &mut Context<Self>) -> Self {
         Self::default()
     }
+}
 
-    fn render(&mut self, cx: &mut Cx<Self>) -> wire::Node {
-        let press = cx.on(|view, _| view.presses += 1);
-        wire::kit::button(
-            "press",
-            self.presses.to_string(),
-            Some(press),
-            Default::default(),
-        )
+impl Render for Exported {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let press = cx.listener(|view, _: &ClickEvent, _, cx| {
+            view.presses += 1;
+            cx.notify();
+        });
+        div()
+            .id("press")
+            .on_click(press)
+            .child(self.presses.to_string())
     }
 }
 

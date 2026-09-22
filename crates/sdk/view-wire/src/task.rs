@@ -58,11 +58,6 @@ impl<T: 'static> Task<T> {
                 .boxed_local()
         }))
     }
-    /// The stream this task is, or nothing when it is [`Task::none`] — what
-    /// a driver spawns from, which must tell the two apart.
-    pub fn into_option(self) -> Option<BoxStream<T>> {
-        self.0
-    }
     pub fn into_stream(self) -> BoxStream<T> {
         self.0
             .unwrap_or_else(|| futures::stream::empty().boxed_local())

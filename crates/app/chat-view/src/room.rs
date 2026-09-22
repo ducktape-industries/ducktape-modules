@@ -1,34 +1,50 @@
 //! The open room: opening, landing, paging history, the thread beside it and
 //! what the reader has read.
+use ducktape_view_guest::Context;
 use ducktape_view_guest::host::Refusal;
-use ducktape_view_guest::view::{Cx, Loaded};
+use ducktape_view_guest::view::Loaded;
 use ducktape_view_guest::wire;
 
 use crate::chat::{ChannelInfo, MsgRow};
 use crate::{Chat, Room, Thread, WINDOW};
 
 pub(crate) const STREAM_KEY: &str = "chat/room/stream";
-pub(crate) const THREAD_KEY: &str = "chat/thread/stream";
 
 impl Chat {
     /// A room the reader chose: opened here, and named to the host so its
     /// tray, links and notices follow.
-    pub(crate) fn choose(&mut self, id: String, cx: &mut Cx<Self>) {
+    pub(crate) fn choose(
+        &mut self,
+        id: String,
+        window: &mut ducktape_view_guest::Window,
+        cx: &mut Context<Self>,
+    ) {
         self.create = None;
         self.search_clear();
         let link = crate::files::channel_link(&self.session.chain, &id, None);
         if !link.is_empty() {
-            ducktape_view_guest::host::open_link(&link);
+            cx.host().open_link(&link);
         }
-        self.open(id, cx);
+        self.open(id, window, cx);
     }
 
-    pub(crate) fn open(&mut self, id: String, cx: &mut Cx<Self>) {
-        self.open_at(id, 0, cx);
+    pub(crate) fn open(
+        &mut self,
+        id: String,
+        window: &mut ducktape_view_guest::Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_at(id, 0, window, cx);
     }
 
     /// The room at its live tail (`land` 0) or around a landing seq.
-    pub(crate) fn open_at(&mut self, id: String, land: u64, cx: &mut Cx<Self>) {
+    pub(crate) fn open_at(
+        &mut self,
+        id: String,
+        land: u64,
+        window: &mut ducktape_view_guest::Window,
+        cx: &mut Context<Self>,
+    ) {
         let viewer = self.viewer();
         let same = self.room.as_ref().is_some_and(|room| room.id == id);
         if !same {
@@ -50,33 +66,42 @@ impl Chat {
         room.landed = land > 0;
         room.at_tail = land == 0;
         room.messages = if land > 0 {
+            let host = cx.host();
             cx.load(
                 async move {
-                    let rows = crate::around(id, land, viewer).await?;
+                    let rows = crate::around(host, id, land, viewer).await?;
                     Ok(rows)
                 },
                 |chat| &mut room_of(chat).messages,
             )
         } else {
             let (has_older_id, viewer2) = (id.clone(), viewer.clone());
-            let handle = cx.spawn(async move {
-                let result = crate::roots(has_older_id, viewer2, None, WINDOW).await;
-                move |chat: &mut Chat, cx: &mut Cx<Chat>| chat.rows_arrived(result, cx)
+            let handle = cx.spawn(async move |this, cx| {
+                let host = cx.host();
+                let result = crate::roots(host, has_older_id, viewer2, None, WINDOW).await;
+                let _ = this.update(cx, |chat, cx| {
+                    cx.notify();
+                    chat.rows_arrived(result, cx)
+                });
             });
-            Loaded::Loading(handle.abort_on_drop())
+            Loaded::Loading(handle)
         };
         let members_id = self.room.as_ref().map(|r| r.id.clone()).unwrap_or_default();
         let room = room_of(self);
-        room.members = cx.load(crate::members(members_id), |chat| {
+        room.members = cx.load(crate::members(cx.host(), members_id), |chat| {
             &mut room_of(chat).members
         });
         if land > 0 {
-            self.reveal(STREAM_KEY, land, cx);
+            self.reveal(STREAM_KEY, land, window, cx);
         }
     }
 
     /// The newest window landed: the rows, and whether older ones remain.
-    fn rows_arrived(&mut self, result: Result<(Vec<MsgRow>, bool), Refusal>, cx: &mut Cx<Self>) {
+    fn rows_arrived(
+        &mut self,
+        result: Result<(Vec<MsgRow>, bool), Refusal>,
+        cx: &mut Context<Self>,
+    ) {
         let Some(room) = &mut self.room else { return };
         match result {
             Ok((rows, has_older)) => {
@@ -91,7 +116,7 @@ impl Chat {
     }
 
     /// Re-read what the room shows, keeping the rows there until fresh land.
-    pub(crate) fn refresh_room(&mut self, cx: &mut Cx<Self>) {
+    pub(crate) fn refresh_room(&mut self, cx: &mut Context<Self>) {
         let Some(room) = &self.room else { return };
         let (id, viewer) = (room.id.clone(), self.viewer());
         if !room.landed {
@@ -101,26 +126,29 @@ impl Chat {
                 .map_or(WINDOW, |rows| rows.len().max(WINDOW));
             cx.spawn({
                 let (id, viewer) = (id.clone(), viewer.clone());
-                async move {
-                    let result = crate::roots(id, viewer, None, shown).await;
-                    move |chat: &mut Chat, cx: &mut Cx<Chat>| {
+                async move |this, cx| {
+                    let host = cx.host();
+                    let result = crate::roots(host, id, viewer, None, shown).await;
+                    let _ = this.update(cx, |chat, cx| {
+                        cx.notify();
                         if let (Ok((rows, has_older)), Some(room)) = (result, chat.room.as_mut()) {
                             room.has_older = has_older;
                             room.messages = Loaded::Ready(rows);
                             room.settle();
                             chat.load_pictures(cx);
                         }
-                    }
+                    });
                 }
-            });
+            })
+            .detach();
         }
-        cx.refresh(crate::members(id.clone()), |chat, members, _| {
+        cx.refresh(crate::members(cx.host(), id.clone()), |chat, members, _| {
             room_of(chat).members = Loaded::Ready(members);
         });
         if let Some(thread) = &room.thread {
             let root = thread.root;
             cx.refresh(
-                crate::thread(id, root, viewer, None),
+                crate::thread(cx.host(), id, root, viewer, None),
                 move |chat, page, cx| {
                     let Some(thread) = chat.room.as_mut().and_then(|room| room.thread.as_mut())
                     else {
@@ -139,7 +167,7 @@ impl Chat {
     }
 
     /// One older page before the oldest row on screen.
-    pub(crate) fn load_older(&mut self, cx: &mut Cx<Self>) {
+    pub(crate) fn load_older(&mut self, cx: &mut Context<Self>) {
         let viewer = self.viewer();
         let Some(room) = &mut self.room else { return };
         let Some(oldest) = room
@@ -155,9 +183,11 @@ impl Chat {
         }
         room.older_loading = true;
         let id = room.id.clone();
-        cx.spawn(async move {
-            let result = crate::roots(id, viewer, Some(oldest), crate::PAGE).await;
-            move |chat: &mut Chat, cx: &mut Cx<Chat>| {
+        cx.spawn(async move |this, cx| {
+            let host = cx.host();
+            let result = crate::roots(host, id, viewer, Some(oldest), crate::PAGE).await;
+            let _ = this.update(cx, |chat, cx| {
+                cx.notify();
                 let Some(room) = &mut chat.room else { return };
                 room.older_loading = false;
                 match result {
@@ -174,21 +204,37 @@ impl Chat {
                         chat.notice = format!("Couldn’t read this room: {}", refusal.sentence)
                     }
                 }
-            }
-        });
+            });
+        })
+        .detach();
     }
 
-    /// The stream scrolled: near its top an older page is asked for; at its
-    /// tail there is nothing to jump to.
-    pub(crate) fn scrolled(&mut self, relative_y: f32, cx: &mut Cx<Self>) {
-        let Some(room) = &mut self.room else { return };
-        room.at_tail = relative_y.is_nan() || relative_y <= 0.02;
-        if relative_y >= 0.9 {
-            self.load_older(cx);
+    /// Settled native list geometry drives paging and tail state. Wheel deltas
+    /// are intentionally not used: remeasurement and programmatic scrolling
+    /// can move the viewport without one.
+    pub(crate) fn list_scrolled(
+        &mut self,
+        pane: crate::Pane,
+        event: &ducktape_view_guest::ListScrollEvent,
+        cx: &mut Context<Self>,
+    ) {
+        match pane {
+            crate::Pane::Timeline => {
+                let Some(room) = &mut self.room else { return };
+                room.at_tail = event.is_following_tail || event.visible_range.end >= event.count;
+                if event.visible_range.start <= 4 {
+                    self.load_older(cx);
+                }
+            }
+            crate::Pane::Thread => {
+                if event.visible_range.end.saturating_add(4) >= event.count {
+                    self.load_more_replies(cx);
+                }
+            }
         }
     }
 
-    pub(crate) fn open_thread(&mut self, root: u64, cx: &mut Cx<Self>) {
+    pub(crate) fn open_thread(&mut self, root: u64, cx: &mut Context<Self>) {
         let viewer = self.viewer();
         self.details = None;
         self.menu = None;
@@ -200,9 +246,11 @@ impl Chat {
             root,
             ..Thread::default()
         };
-        let handle = cx.spawn(async move {
-            let result = crate::thread(id, root, viewer, None).await;
-            move |chat: &mut Chat, cx: &mut Cx<Chat>| {
+        let handle = cx.spawn(async move |this, cx| {
+            let host = cx.host();
+            let result = crate::thread(host, id, root, viewer, None).await;
+            let _ = this.update(cx, |chat, cx| {
+                cx.notify();
                 let Some(thread) = chat.room.as_mut().and_then(|r| r.thread.as_mut()) else {
                     return;
                 };
@@ -219,15 +267,15 @@ impl Chat {
                     }
                     Err(refusal) => thread.replies = Loaded::Failed(refusal),
                 }
-            }
+            });
         });
         let Some(thread) = self.room.as_mut().and_then(|r| r.thread.as_mut()) else {
             return;
         };
-        thread.replies = Loaded::Loading(handle.abort_on_drop());
+        thread.replies = Loaded::Loading(handle);
     }
 
-    pub(crate) fn load_more_replies(&mut self, cx: &mut Cx<Self>) {
+    pub(crate) fn load_more_replies(&mut self, cx: &mut Context<Self>) {
         let viewer = self.viewer();
         let Some(room) = &mut self.room else { return };
         let id = room.id.clone();
@@ -239,9 +287,11 @@ impl Chat {
         }
         thread.more_loading = true;
         let (root, after) = (thread.root, thread.next);
-        cx.spawn(async move {
-            let result = crate::thread(id, root, viewer, after).await;
-            move |chat: &mut Chat, _: &mut Cx<Chat>| {
+        cx.spawn(async move |this, cx| {
+            let host = cx.host();
+            let result = crate::thread(host, id, root, viewer, after).await;
+            let _ = this.update(cx, |chat, cx| {
+                cx.notify();
                 let Some(thread) = chat.room.as_mut().and_then(|r| r.thread.as_mut()) else {
                     return;
                 };
@@ -255,8 +305,9 @@ impl Chat {
                         rows.extend(more);
                     }
                 }
-            }
-        });
+            });
+        })
+        .detach();
     }
 
     pub(crate) fn close_thread(&mut self) {
@@ -311,9 +362,15 @@ impl Chat {
     }
 
     /// Scroll a stream to the row with `seq`.
-    pub(crate) fn reveal(&mut self, target: &str, seq: u64, cx: &mut Cx<Self>) {
-        cx.widget(wire::WidgetCommand::ScrollToKey {
-            target: target.to_owned(),
+    pub(crate) fn reveal(
+        &mut self,
+        target: &str,
+        seq: u64,
+        window: &mut ducktape_view_guest::Window,
+        _cx: &mut Context<Self>,
+    ) {
+        window.dispatch(wire::WidgetCommand::ScrollToKey {
+            target: vec![wire::ElementIdWire::Name(target.to_owned().into())],
             key: wire::ListKey::from(seq as i64).virtual_key(),
         });
     }

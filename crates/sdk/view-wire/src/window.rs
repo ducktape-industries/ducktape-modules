@@ -1,6 +1,14 @@
 //! Commands for the requesting guest's own host window. No native window ID crosses.
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WindowControlArea {
+    Drag,
+    Close,
+    Max,
+    Min,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum WindowCommand {
     Focus,
@@ -21,11 +29,8 @@ impl WindowCommand {
         Ok(())
     }
 
-    /// Fixed-size payload, rejecting trailing bytes before any host side effect.
+    /// Canonical payload, rejecting trailing bytes before any host side effect.
     pub fn decode(bytes: &[u8]) -> Result<Self, String> {
-        if bytes.len() > 12 {
-            return Err("RequestError: window command exceeds 12 bytes".into());
-        }
         let command: Self = crate::decode(bytes)
             .map_err(|error| format!("RequestError: invalid window command: {error}"))?;
         if crate::encoded_size(&command) != bytes.len() as u64 {

@@ -30,8 +30,8 @@ pub struct Qr {
     pub correction: Option<QrCorrection>,
     pub version: Option<QrVersion>,
     pub size: Option<QrSize>,
-    pub cell: Option<Rgba>,
-    pub background: Option<Rgba>,
+    pub cell: Option<gpui::Hsla>,
+    pub background: Option<gpui::Hsla>,
 }
 
 impl Qr {
@@ -59,8 +59,9 @@ impl Qr {
                 QrSize::Total(value) => *value = bounded(*value).min(MAX_PIXELS / 3.0),
             }
         }
-        bound_color(&mut self.cell);
-        bound_color(&mut self.background);
+        for color in [&mut self.cell, &mut self.background].into_iter().flatten() {
+            style_sanitize::sanitize_hsla(color);
+        }
     }
 }
 
@@ -114,25 +115,21 @@ mod tests {
                 MAX_TEXT_BYTES_PER_FRAME / MAX_QR_PAYLOAD_BYTES,
             ),
         ] {
-            let root = Node::Stack {
-                key: "codes".into(),
-                width: None,
-                height: None,
-                padding: None,
-                background: None,
-                border: None,
-                clip: false,
-                under: 0,
+            let root = Node::Container(crate::ContainerNode {
+                id: Some(ElementIdWire::Name("codes".into())),
+                style: gpui::StyleRefinement::default(),
+                interactivity: Interactivity::default(),
                 children: (0..count)
                     .map(|id| Node::Qr {
-                        key: id.to_string(),
+                        id: ElementIdWire::Integer(id as u64),
+                        style: Default::default(),
                         code: Qr {
                             payload: Some(payload.clone()),
                             ..Default::default()
                         },
                     })
                     .collect(),
-            };
+            });
             let mut frame: Frame = decode(&encode(&Frame {
                 root: Some(root),
                 ..Default::default()

@@ -2,8 +2,8 @@
 //! props stream and this view answers it without a screen — desktop notice
 //! policy, huddle join/leave/move, a search, the shell's room facts and the
 //! live-run reads. The answer goes back through `finish_response`.
-use ducktape_view_guest::host::{self, Refusal};
-use ducktape_view_guest::view::{Submit, ViewOf, ask};
+use ducktape_view_guest::host::Refusal;
+use ducktape_view_guest::view::{Submit, ViewOf};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -90,12 +90,12 @@ struct Failure {
     committed: bool,
 }
 
-pub async fn run(request: Request, names: NameDirectory) {
-    let output = match participate(request, names).await {
+pub async fn run(host: ducktape_view_guest::Host, request: Request, names: NameDirectory) {
+    let output = match participate(host.clone(), request, names).await {
         Ok(output) => output,
         Err((message, committed)) => json!({"error": Failure { message, committed }}),
     };
-    host::finish_response(&serde_json::to_vec(&output).expect("background result encodes"));
+    host.finish_response(&serde_json::to_vec(&output).expect("background result encodes"));
 }
 
 type Outcome = Result<Value, (String, bool)>;
@@ -104,26 +104,38 @@ fn failed(refusal: Refusal) -> (String, bool) {
     (refusal.sentence, false)
 }
 
-async fn participate(request: Request, names: NameDirectory) -> Outcome {
+async fn participate(
+    host: ducktape_view_guest::Host,
+    request: Request,
+    names: NameDirectory,
+) -> Outcome {
     match request {
-        Request::Notice { request } => Ok(json!({"notice": notice(request, &names).await})),
-        Request::Search { channel, text } => search(channel, text, &names).await,
-        Request::Join { channel } => join(channel).await.map(|c| json!({"channel": c})),
-        Request::Leave { channel } => leave(channel).await.map(|c| json!({"channel": c})),
-        Request::Move { from, channel } => move_seat(from, channel)
+        Request::Notice { request } => {
+            Ok(json!({"notice": notice(host.clone(), request, &names).await}))
+        }
+        Request::Search { channel, text } => search(host.clone(), channel, text, &names).await,
+        Request::Join { channel } => join(host.clone(), channel)
             .await
             .map(|c| json!({"channel": c})),
-        Request::Workspace { requested, key } => workspace(requested, &key, &names).await,
-        Request::Window { channel, key } => window(channel, &key, &names).await,
+        Request::Leave { channel } => leave(host.clone(), channel)
+            .await
+            .map(|c| json!({"channel": c})),
+        Request::Move { from, channel } => move_seat(host.clone(), from, channel)
+            .await
+            .map(|c| json!({"channel": c})),
+        Request::Workspace { requested, key } => {
+            workspace(host.clone(), requested, &key, &names).await
+        }
+        Request::Window { channel, key } => window(host.clone(), channel, &key, &names).await,
         Request::Channel { channel, key, .. } => {
-            Ok(json!({"channel": facts(&channel, &key, &names).await?}))
+            Ok(json!({"channel": facts(host.clone(), &channel, &key, &names).await?}))
         }
         Request::ShellDelta {
             payload,
             assigned,
             key,
             ..
-        } => delta(payload, assigned, &key, &names).await,
+        } => delta(host.clone(), payload, assigned, &key, &names).await,
     }
 }
 
@@ -137,12 +149,12 @@ fn participation_channel(channel: &str) -> Result<&str, (String, bool)> {
     Ok(channel)
 }
 
-async fn join(channel: String) -> Result<String, (String, bool)> {
+async fn join(host: ducktape_view_guest::Host, channel: String) -> Result<String, (String, bool)> {
     let channel = participation_channel(&channel)?;
-    let proof =
-        ask::<Admin>(json!({"route": "/v1/huddle/node-proof", "payload": {"channel_id": channel}}))
-            .await
-            .map_err(failed)?;
+    let proof = host
+        .ask::<Admin>(json!({"route": "/v1/huddle/node-proof", "payload": {"channel_id": channel}}))
+        .await
+        .map_err(failed)?;
     let node = proof["node"].as_str().unwrap_or_default();
     let signature = proof["node_proof"].as_str().unwrap_or_default();
     let (Some(node), Some(signature)) = (unhex(node), unhex(signature)) else {
@@ -151,50 +163,70 @@ async fn join(channel: String) -> Result<String, (String, bool)> {
     if node.len() != 32 || signature.len() != 64 {
         return Err(("invalid node participation proof".into(), false));
     }
-    submit(ChatMsg::JoinHuddle {
-        channel_id: channel.to_owned(),
-        node,
-        node_proof: signature,
-    })
+    submit(
+        host.clone(),
+        ChatMsg::JoinHuddle {
+            channel_id: channel.to_owned(),
+            node,
+            node_proof: signature,
+        },
+    )
     .await?;
     Ok(channel.to_owned())
 }
 
-async fn leave(channel: String) -> Result<String, (String, bool)> {
+async fn leave(host: ducktape_view_guest::Host, channel: String) -> Result<String, (String, bool)> {
     let channel = participation_channel(&channel)?;
-    submit(ChatMsg::LeaveHuddle {
-        channel_id: channel.to_owned(),
-    })
+    submit(
+        host.clone(),
+        ChatMsg::LeaveHuddle {
+            channel_id: channel.to_owned(),
+        },
+    )
     .await?;
     Ok(channel.to_owned())
 }
 
-async fn move_seat(from: String, channel: String) -> Result<String, (String, bool)> {
+async fn move_seat(
+    host: ducktape_view_guest::Host,
+    from: String,
+    channel: String,
+) -> Result<String, (String, bool)> {
     let channel = participation_channel(&channel)?.to_owned();
     if from == channel {
         return Ok(channel);
     }
     if from.is_empty() {
-        return join(channel).await;
+        return join(host.clone(), channel).await;
     }
-    leave(from).await?;
-    join(channel).await.map_err(|(message, _)| (message, true))
+    leave(host.clone(), from).await?;
+    join(host.clone(), channel)
+        .await
+        .map_err(|(message, _)| (message, true))
 }
 
-async fn submit(op: ChatMsg) -> Result<(), (String, bool)> {
-    ask::<Submit<ChatApi>>(op).await.map(|_| ()).map_err(failed)
+async fn submit(host: ducktape_view_guest::Host, op: ChatMsg) -> Result<(), (String, bool)> {
+    host.ask::<Submit<ChatApi>>(op)
+        .await
+        .map(|_| ())
+        .map_err(failed)
 }
 
 // ---------- search ----------
 
-async fn search(channel: String, text: String, names: &NameDirectory) -> Outcome {
+async fn search(
+    host: ducktape_view_guest::Host,
+    channel: String,
+    text: String,
+    names: &NameDirectory,
+) -> Outcome {
     let text = text.trim();
     if text.is_empty() || text.contains('\0') {
         return Err(("search must be nonempty and contain no NUL".into(), false));
     }
     let channel_id = (!channel.is_empty()).then_some(channel);
     let (hits, capped, has_more, next_after) =
-        crate::search_hits(text.to_owned(), channel_id, Vec::new(), None)
+        crate::search_hits(host.clone(), text.to_owned(), channel_id, Vec::new(), None)
             .await
             .map_err(failed)?;
     let hits: Vec<Value> = hits
@@ -215,30 +247,42 @@ async fn search(channel: String, text: String, names: &NameDirectory) -> Outcome
 
 // ---------- desktop notices ----------
 
-async fn notice(request: NoticeRequest, names: &NameDirectory) -> Option<DesktopNotice> {
+async fn notice(
+    host: ducktape_view_guest::Host,
+    request: NoticeRequest,
+    names: &NameDirectory,
+) -> Option<DesktopNotice> {
     let operation = request.payload.as_object()?;
     if operation.len() != 1 {
         return None;
     }
     match operation.keys().next()?.as_str() {
-        "post_message" => message_notice(request, names).await,
-        "join_huddle" => joined_notice(request, names).await,
+        "post_message" => message_notice(host.clone(), request, names).await,
+        "join_huddle" => joined_notice(host.clone(), request, names).await,
         _ => None,
     }
 }
 
-async fn channel_row(channel_id: &str) -> Option<crate::chat::ChannelInfo> {
-    match ask::<ViewOf<ChatApi>>(ChatViewQuery::Channel {
-        channel_id: channel_id.to_owned(),
-    })
-    .await
+async fn channel_row(
+    host: ducktape_view_guest::Host,
+    channel_id: &str,
+) -> Option<crate::chat::ChannelInfo> {
+    match host
+        .ask::<ViewOf<ChatApi>>(ChatViewQuery::Channel {
+            channel_id: channel_id.to_owned(),
+        })
+        .await
     {
         Ok(ChatViewReply::Channel(Some(info))) => Some(info),
         _ => None,
     }
 }
 
-async fn message_notice(request: NoticeRequest, names: &NameDirectory) -> Option<DesktopNotice> {
+async fn message_notice(
+    host: ducktape_view_guest::Host,
+    request: NoticeRequest,
+    names: &NameDirectory,
+) -> Option<DesktopNotice> {
     let stamp = request.assigned.as_ref()?.get("posted")?;
     let post = request.payload.get("post_message")?;
     let channel_id = post["channel_id"].as_str()?.to_owned();
@@ -278,7 +322,7 @@ async fn message_notice(request: NoticeRequest, names: &NameDirectory) -> Option
     }
     let room = match dm {
         Some(name) => name,
-        None => channel_row(&channel_id).await.map_or_else(
+        None => channel_row(host.clone(), &channel_id).await.map_or_else(
             || channel_id.clone(),
             |info| format!("#{}", info.channel.name),
         ),
@@ -291,9 +335,13 @@ async fn message_notice(request: NoticeRequest, names: &NameDirectory) -> Option
     })
 }
 
-async fn joined_notice(request: NoticeRequest, names: &NameDirectory) -> Option<DesktopNotice> {
+async fn joined_notice(
+    host: ducktape_view_guest::Host,
+    request: NoticeRequest,
+    names: &NameDirectory,
+) -> Option<DesktopNotice> {
     let channel_id = request.payload["join_huddle"]["channel_id"].as_str()?;
-    let info = channel_row(channel_id).await?;
+    let info = channel_row(host.clone(), channel_id).await?;
     let [first] = info.channel.huddle.as_slice() else {
         return None;
     };
@@ -333,7 +381,7 @@ fn shell_channel(info: &crate::chat::ChannelInfo, names: &NameDirectory, key: &s
             let label = names.member_label(&seat.party);
             json!({
                 "label": label,
-                "initials": ducktape_view_guest::wire::kit::initials(&label),
+                "initials": initials(&label),
                 "is_you": unhex(key).is_some_and(|key| names.owns_handle(&seat.party, &key)),
                 "node": seat.node,
             })
@@ -351,8 +399,13 @@ fn shell_channel(info: &crate::chat::ChannelInfo, names: &NameDirectory, key: &s
     })
 }
 
-async fn facts(id: &str, key: &str, names: &NameDirectory) -> Result<Value, (String, bool)> {
-    let Some(info) = channel_row(id).await else {
+async fn facts(
+    host: ducktape_view_guest::Host,
+    id: &str,
+    key: &str,
+    names: &NameDirectory,
+) -> Result<Value, (String, bool)> {
+    let Some(info) = channel_row(host.clone(), id).await else {
         return Ok(Value::Null);
     };
     let roster: Vec<Value> = info
@@ -364,7 +417,7 @@ async fn facts(id: &str, key: &str, names: &NameDirectory) -> Result<Value, (Str
             json!({
                 "key": seat.party,
                 "label": label,
-                "initials": ducktape_view_guest::wire::kit::initials(&label),
+                "initials": initials(&label),
                 "is_agent": false,
                 "is_you": unhex(key).is_some_and(|key| names.owns_handle(&seat.party, &key)),
                 "node": seat.node,
@@ -385,8 +438,25 @@ fn workspace_data(channels: Vec<Value>, active: Option<(Value, Value)>) -> Value
     })
 }
 
-async fn workspace(requested: Option<String>, key: &str, names: &NameDirectory) -> Outcome {
-    let channels = crate::channels().await.map_err(failed)?;
+fn initials(name: &str) -> String {
+    let mut chars = name
+        .split_whitespace()
+        .filter_map(|word| word.chars().next());
+    let first = chars.next();
+    let second = chars.next();
+    match (first, second) {
+        (Some(first), Some(second)) => format!("{first}{second}").to_uppercase(),
+        _ => name.chars().take(2).collect::<String>().to_uppercase(),
+    }
+}
+
+async fn workspace(
+    host: ducktape_view_guest::Host,
+    requested: Option<String>,
+    key: &str,
+    names: &NameDirectory,
+) -> Outcome {
+    let channels = crate::channels(host.clone()).await.map_err(failed)?;
     let selected = requested
         .as_deref()
         .and_then(|id| channels.iter().find(|info| info.channel.id == id))
@@ -404,7 +474,7 @@ async fn workspace(requested: Option<String>, key: &str, names: &NameDirectory) 
     let Some(selected) = selected else {
         return Ok(workspace_data(rows, None));
     };
-    let facts = facts(&selected.channel.id, key, names).await?;
+    let facts = facts(host.clone(), &selected.channel.id, key, names).await?;
     let Value::Array(pair) = facts else {
         return Err(("selected channel disappeared during loading".into(), false));
     };
@@ -414,13 +484,18 @@ async fn workspace(requested: Option<String>, key: &str, names: &NameDirectory) 
     Ok(workspace_data(rows, Some((active.clone(), roster.clone()))))
 }
 
-async fn window(id: String, key: &str, names: &NameDirectory) -> Outcome {
-    let facts = facts(&id, key, names).await?;
+async fn window(
+    host: ducktape_view_guest::Host,
+    id: String,
+    key: &str,
+    names: &NameDirectory,
+) -> Outcome {
+    let facts = facts(host.clone(), &id, key, names).await?;
     let Value::Array(pair) = facts else {
-        return Box::pin(workspace(None, key, names)).await;
+        return Box::pin(workspace(host.clone(), None, key, names)).await;
     };
     let [active, roster] = pair.as_slice() else {
-        return Box::pin(workspace(None, key, names)).await;
+        return Box::pin(workspace(host.clone(), None, key, names)).await;
     };
     Ok(workspace_data(
         vec![active.clone()],
@@ -430,6 +505,7 @@ async fn window(id: String, key: &str, names: &NameDirectory) -> Outcome {
 
 /// The shell retains channel rows and unread heads, never message bodies.
 async fn delta(
+    host: ducktape_view_guest::Host,
     payload: Value,
     assigned: Option<Value>,
     key: &str,
@@ -463,7 +539,7 @@ async fn delta(
         _ => return Ok(json!({"delta": null})),
     }
     .ok_or(("channel operation has no channel".to_owned(), false))?;
-    let facts = facts(id, key, names).await?;
+    let facts = facts(host.clone(), id, key, names).await?;
     let row = facts[0].clone();
     if row.is_null() {
         return Err(("changed channel disappeared".into(), false));

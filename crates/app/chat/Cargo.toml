@@ -3,9 +3,21 @@ name = "chat"
 version.workspace = true
 edition.workspace = true
 
+# The types and rules are always built; the view links them with `program`
+# off. `program` adds the wasm32 program over the host: `guest`'s contexts,
+# the `alloc`/`call` exports and the `ducktape.*` imports.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+program = ["dep:guest", "dep:identity", "identity/guest", "dep:module-registry"]
+
 [dependencies]
 abi = { workspace = true }
 borsh = { workspace = true }
+guest = { workspace = true, optional = true }
+identity = { workspace = true, optional = true }
+module-registry = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 unicode-normalization = { workspace = true }
