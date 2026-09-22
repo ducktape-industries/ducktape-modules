@@ -1,11 +1,11 @@
-//! Structured hunks are built from gitcore's edit ranges, never parsed from patch text.
+//! Structured hunks are built from git::diff's edit ranges, never parsed from patch text.
 use crate::Sandbox;
 use crate::contract::*;
+use crate::git::{Mode, Oid, diff};
 use crate::ops::cap;
 use crate::paging::Paging;
 use crate::reads::{Reading, entry_kind};
 use abi::Refusal;
-use gitcore::{Mode, Oid, diff};
 
 pub fn query<S: Sandbox>(
     r: &Reading<'_, S>,
@@ -141,7 +141,7 @@ fn file<S: Sandbox>(r: &Reading<'_, S>, c: &diff::Change) -> Result<FileDiff, Re
     Ok(result)
 }
 
-fn hunks(old: &[u8], new: &[u8], cost: usize) -> gitcore::Result<Vec<DiffHunk>> {
+fn hunks(old: &[u8], new: &[u8], cost: usize) -> crate::git::Result<Vec<DiffHunk>> {
     let a = diff::split_lines(old);
     let b = diff::split_lines(new);
     let edits = diff::lines(old, new, cost)?;

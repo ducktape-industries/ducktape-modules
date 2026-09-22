@@ -55,7 +55,7 @@ impl View for Settings {
                 }
             }
         }));
-        let mut live = cx.host().subscribe::<Live>(modules::valset::PROGRAM.into());
+        let mut live = cx.host().subscribe::<Live>(valset::PROGRAM.into());
         self.watches.push(cx.spawn(async move |this, cx| {
             while live.next().await.is_some() {
                 if this

@@ -21,7 +21,6 @@ impl Paging {
             | Query::Log { cursor, limit, .. }
             | Query::Tree { cursor, limit, .. }
             | Query::Diff { cursor, limit, .. }
-            | Query::Compare { cursor, limit, .. }
             | Query::Changes { cursor, limit, .. }
             | Query::Change { cursor, limit, .. }
             | Query::Judgment { cursor, limit, .. } => (cursor.take(), std::mem::take(limit)),

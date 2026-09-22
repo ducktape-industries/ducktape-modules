@@ -29,7 +29,6 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/tools/view-pack",
     "crates/sdk/abi",
     "crates/sdk/guest",
     "crates/sdk/ducklink",
@@ -37,7 +36,9 @@ members = [
     "crates/sdk/view-wire",
     "crates/sdk/view-guest",
     "crates/sdk/view-guest-derive",
-    "crates/modules",
+    "crates/system/module-registry",
+    "crates/system/valset",
+    "crates/system/identity",
     "crates/app/chat",
     "crates/app/chat-view",
     "crates/app/forge-view",
@@ -45,11 +46,8 @@ members = [
     "crates/app/node-view",
     "crates/app/explorer-view",
     "crates/app/settings-view",
-    "crates/app/gitcore",
     "crates/app/forge",
-    "crates/app/forge-harness",
 ]
-exclude = ["crates/modules/system"]
 
 [workspace.package]
 edition = "2024"
@@ -65,17 +63,17 @@ view-wire = { path = "crates/sdk/view-wire" }
 view-guest = { path = "crates/sdk/view-guest" }
 ducktape-view-guest = { path = "crates/sdk/view-guest", package = "view-guest" }
 gpui = { package = "gpui-pre", git = "https://github.com/ducktape-industries/gpui-pre", rev = "5545e0156ec81ef772c2af8c12283c67f646bd14", default-features = false }
-modules = { path = "crates/modules" }
-gitcore = { path = "crates/app/gitcore" }
+module-registry = { path = "crates/system/module-registry" }
+valset = { path = "crates/system/valset" }
+identity = { path = "crates/system/identity" }
 chat = { path = "crates/app/chat" }
 forge = { path = "crates/app/forge" }
 
-# ---- the host the boot set's suite runs on, the probe fixture it seats, the
-# key schemes it signs with, and the runtime forge's rig drives its wasm on
+# ---- the host the founding suite runs the boot set on, the probe fixture it
+# seats and the key schemes it signs with (dev-dependencies only)
 host = { git = "https://github.com/ducktape-industries/ducktape", rev = "5d1d1f61d89960164cab919dfbb16a1d8cdb3b36" }
 fixture-probe = { git = "https://github.com/ducktape-industries/ducktape", rev = "5d1d1f61d89960164cab919dfbb16a1d8cdb3b36" }
 keyscheme = { git = "https://github.com/ducktape-industries/ducktape", rev = "5d1d1f61d89960164cab919dfbb16a1d8cdb3b36" }
-runtime = { git = "https://github.com/ducktape-industries/ducktape", rev = "5d1d1f61d89960164cab919dfbb16a1d8cdb3b36" }
 commonware-cryptography = "2026.9.0"
 commonware-runtime = "2026.9.0"
 
@@ -85,14 +83,8 @@ serde_json = "1"
 # borsh — the one codec the program abi is written in.
 borsh = { version = "1", default-features = false, features = ["derive", "std"] }
 sha2 = "0.10"
-sha1 = "0.10"
-flate2 = "1"
-axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync"] }
 tempfile = "3"
-ureq = { version = "3", default-features = false }
 base64 = "0.22"
-async-trait = "0.1"
 futures = "0.3"
 # duckfs path normalization: NFC so visually-identical names collide instead
 # of coexisting (a consensus-determinism requirement, not cosmetics).

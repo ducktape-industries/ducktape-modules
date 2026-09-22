@@ -1,8 +1,8 @@
 // The fixture story, natively: the same objects real git built through the harness (Ada, one fixed second, the same files), pushed as one op, then heights that move like the kernel's.
 
 use super::*;
+use forge::git::Tag;
 use forge::{ChangeFilter, Query, ReviewDraft, Revision, Verdict};
-use gitcore::Tag;
 
 pub const REPO: &str = "project";
 pub const TESTER: &[u8] = b"tester";
@@ -286,8 +286,6 @@ pub fn compare(from: &str, into: &str) -> Query {
         repo: REPO.into(),
         from: reference(from),
         into: reference(into),
-        cursor: None,
-        limit: 128,
     }
 }
 

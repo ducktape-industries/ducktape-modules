@@ -16,7 +16,7 @@ use ducktape_view_guest::{
 mod components;
 use components::{EmptyState, Section};
 use futures::StreamExt;
-use modules::valset;
+
 use serde::{Deserialize, Serialize};
 
 /// The validator set's query surface, as this view reads it.
@@ -303,7 +303,7 @@ async fn set(host: Host) -> Result<Set, Refusal> {
     let mut memberships = Vec::new();
     let mut after = None;
     loop {
-        let page = modules::Page { after, limit: None };
+        let page = module_registry::Page { after, limit: None };
         let reply = match host
             .ask::<QueryBytes<Valset>>(valset::Query::Memberships { page })
             .await?

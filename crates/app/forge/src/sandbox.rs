@@ -3,8 +3,8 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
+use crate::git::{Kind, Oid, oid_of};
 use abi::{Blob, BlobHeader, BlobId, Entry, HashKind, Refusal, Scan, reason};
-use gitcore::{Kind, Oid, oid_of};
 
 pub trait Sandbox {
     fn get(&self, key: &[u8]) -> Option<Vec<u8>>;
@@ -198,17 +198,17 @@ impl Sandbox for MemorySandbox {
     }
 }
 
-pub fn hash_of(kind: HashKind) -> gitcore::Hash {
+pub fn hash_of(kind: HashKind) -> crate::git::Hash {
     match kind {
-        HashKind::Sha1 => gitcore::Hash::Sha1,
-        HashKind::Sha256 => gitcore::Hash::Sha256,
+        HashKind::Sha1 => crate::git::Hash::Sha1,
+        HashKind::Sha256 => crate::git::Hash::Sha256,
     }
 }
 
-pub fn hash_kind_of(hash: gitcore::Hash) -> HashKind {
+pub fn hash_kind_of(hash: crate::git::Hash) -> HashKind {
     match hash {
-        gitcore::Hash::Sha1 => HashKind::Sha1,
-        gitcore::Hash::Sha256 => HashKind::Sha256,
+        crate::git::Hash::Sha1 => HashKind::Sha1,
+        crate::git::Hash::Sha256 => HashKind::Sha256,
     }
 }
 

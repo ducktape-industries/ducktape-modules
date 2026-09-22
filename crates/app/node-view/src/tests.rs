@@ -40,8 +40,8 @@ fn validators() -> valset::Reply {
     valset::Reply::Validators(vec![vec![0xab, 0xcd]])
 }
 
-fn page<T>(items: Vec<T>) -> modules::PageReply<T> {
-    modules::PageReply {
+fn page<T>(items: Vec<T>) -> module_registry::PageReply<T> {
+    module_registry::PageReply {
         height: 1,
         items,
         next: None,
@@ -76,7 +76,7 @@ fn ready() -> TestAppContext {
         vec![
             valset::Query::Validators,
             valset::Query::Memberships {
-                page: modules::Page {
+                page: module_registry::Page {
                     after: None,
                     limit: None
                 }

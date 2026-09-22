@@ -8,7 +8,7 @@ only. No legacy wire/layout conversion exists. Found this version with its new
 
 ## Decisions in one screen
 
-- Gitcore reads loose commit/tree/blob objects through the sandbox; queries never
+- `forge::git` reads loose commit/tree/blob objects through the sandbox; queries never
   parse packs. No gix, host Git mirror, or forge-specific host storage is needed.
 - Reads run off consensus. Every change/review mutation is an operation. Merge
   objects are computed and published by the client; `Merge` checks both endpoint
@@ -48,7 +48,7 @@ Repos sort by descending activity height then name. Refs use byte-name order,
 trees use Git entry order, diffs use path-byte order, changes use ascending item
 number, and reviews use submission order. Judgment scans repo then item number.
 Log covers all parents, ordered by descending committer time then OID, matching
-Gitcore's walk (not a promise of topological order under clock skew).
+`forge::git`'s walk (not a promise of topological order under clock skew).
 
 ## Queries and examples
 
@@ -67,7 +67,7 @@ and decode a `forge::Reply` from the concatenated `Respond` bytes.
 | `Tree { repo: r, at: b, path: b"src".to_vec(), cursor: None, limit: 20 }` | resolved tree OID and `page<TreeInfo>`: name, OID, kind/mode; `at` accepts commit or tree |
 | `Blob { repo: r, oid: blob, range: Some(ByteRange { offset: 0, len: 100 }) }` | OID, total size, classification, actual byte range and bytes |
 | `Diff { repo: r, base: Some(a), head: b, path: None, cursor: None, limit: 20 }` | normalized endpoints, total matching file count, `page<FileDiff>` |
-| `Compare { repo: r, from: feature, into: main, cursor: None, limit: 20 }` | resolved endpoints, merge base, ahead/behind, mergeability, `conflicts: Page<Conflict>` |
+| `Compare { repo: r, from: feature, into: main }` | resolved endpoints, merge base, ahead/behind, mergeability |
 | `Activity { repo: r }` | `last_height`: last successful forge operation in the repo |
 | `Changes { repo: r, filter: ChangeFilter { state: Some(ChangeState::Open), ..Default::default() }, cursor: None, limit: 20 }` | `page<ChangeSummary>` with author, endpoints, counts and historical verdict totals |
 | `Change { repo: r, n: 1, cursor: None, limit: 20 }` | full change record/body/channel, optional current source/target heads, `reviews: Page<Review>` |
@@ -117,13 +117,12 @@ and exact bytes including the original newline, if any. Literal `++ x` is data,
 not a patch header. Use endpoint trees/blobs to expand context or comment on any
 line of a changed file. No text-patch parsing is needed in the view or host.
 
-`Compare` distinguishes `UpToDate`, `FastForward`, `Clean`, `Conflicts`, and
-`Unrelated`. Its prospective three-way computation is off consensus and never
-writes objects. It uses Gitcore's conservative line-merge rules (adjacent edits
-may conflict), and its deterministic lowest-OID choice among multiple merge
-bases. Binary content is never auto text-merged. A clean result is advisory:
-clients publish their chosen result and both-head CAS decides whether it still
-applies. Approvals and requested changes never block that CAS.
+`Compare` reports ancestry facts only: `UpToDate`, `FastForward`, `Diverged`
+or `Unrelated`, with the merge base (the deterministic lowest-OID choice among
+several) and ahead/behind counts. Whether diverged endpoints merge cleanly is
+the git client's to find out: it merges, pushes the result and the both-head
+CAS of `Merge` decides whether that result still applies. Approvals and
+requested changes never block that CAS.
 
 ## Operations and examples
 
@@ -162,7 +161,7 @@ anchor, read the exported cap, and preserve drafts on failed submission.
 ## Bounds, refusals, and the current host seam
 
 New bounds are `page_size`, `log_walk`, `tree_walk`, `diff_bytes`, `blob_bytes`,
-and `record_bytes`. Defaults live in `forge_harness::default_bounds()`; founding
+and `record_bytes`. Defaults live in qa's `forge_smoke::default_bounds()` (which also writes a founding's `forge.params`); founding
 chooses deployment values. `log_walk` bounds a complete DAG walk and the total
 review lookup count in one judgment query. A log beyond that complete-walk bound
 refuses rather than inventing partial ancestry; each page repeats the bounded
@@ -188,7 +187,7 @@ is not a local-availability probe either. The guest therefore returns
 wait loop in a query**, but cannot intercept the host's required-blob failure.
 Core/SDK must provide a query-local nonblocking blob read/stat, or convert
 `BlobUnavailable` at the query boundary. Do not change required reads in execution
-into refusals. This limitation is not proven away by the memory harness.
+into refusals. This limitation is not proven away by the in-process smoke in qa.
 
 Likewise, `emit` commits an outbox item, not the receiver's execution. The guarded
 chat namespace and validated payloads prevent ordinary delivery refusals, but

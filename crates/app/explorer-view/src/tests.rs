@@ -41,8 +41,8 @@ fn programs() -> registry::Reply {
     registry::Reply::Programs(vec![entry("identity", 0xab), entry("valset", 0xcd)])
 }
 
-fn page<T>(items: Vec<T>) -> modules::PageReply<T> {
-    modules::PageReply {
+fn page<T>(items: Vec<T>) -> module_registry::PageReply<T> {
+    module_registry::PageReply {
         height: 1,
         items,
         next: None,
@@ -83,7 +83,7 @@ fn ready() -> TestAppContext {
         vec![
             registry::Query::At(0),
             registry::Query::Scheduled {
-                page: modules::Page {
+                page: module_registry::Page {
                     after: None,
                     limit: None
                 }

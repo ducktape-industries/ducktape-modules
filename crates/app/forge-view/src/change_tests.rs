@@ -53,9 +53,13 @@ fn the_change_header_carries_its_endpoints_and_a_merge_the_program_allows() {
 }
 
 #[test]
-fn a_conflicting_comparison_says_why_it_cannot_merge() {
-    let (cx, _view) = change_screen("conflicts", ChangeTab::Conversation);
-    assert!(cx.has_text("The endpoints conflict"), "{:?}", cx.texts());
+fn a_diverged_comparison_says_why_it_cannot_merge() {
+    let (cx, _view) = change_screen("diverged", ChangeTab::Conversation);
+    assert!(
+        cx.has_text("The endpoints diverged: merge with git and push the result"),
+        "{:?}",
+        cx.texts()
+    );
     let Some(ducktape_view_guest::wire::Node::Container(node)) = cx.find("forge-merge") else {
         panic!("the merge button stays visible");
     };

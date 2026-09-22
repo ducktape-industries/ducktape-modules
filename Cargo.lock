@@ -659,7 +659,8 @@ dependencies = [
  "abi",
  "borsh",
  "guest",
- "modules",
+ "identity",
+ "module-registry",
  "serde",
  "serde_json",
  "unicode-normalization",
@@ -1967,7 +1968,7 @@ version = "0.1.0"
 dependencies = [
  "abi",
  "futures",
- "modules",
+ "module-registry",
  "serde",
  "view-guest",
 ]
@@ -2192,30 +2193,11 @@ dependencies = [
  "abi",
  "borsh",
  "chat",
- "gitcore",
  "guest",
+ "miniz_oxide 0.8.9",
  "serde_json",
+ "sha1-checked",
  "sha2 0.10.9",
-]
-
-[[package]]
-name = "forge-harness"
-version = "0.1.0"
-dependencies = [
- "abi",
- "async-trait",
- "axum",
- "borsh",
- "chat",
- "flate2",
- "forge",
- "runtime",
- "serde_json",
- "sha1",
- "sha2 0.10.9",
- "tempfile",
- "tokio",
- "ureq",
 ]
 
 [[package]]
@@ -2460,15 +2442,6 @@ dependencies = [
  "hashbrown 0.16.1",
  "indexmap",
  "stable_deref_trait",
-]
-
-[[package]]
-name = "gitcore"
-version = "0.1.0"
-dependencies = [
- "miniz_oxide 0.8.9",
- "sha1-checked",
- "sha2 0.10.9",
 ]
 
 [[package]]
@@ -3081,6 +3054,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d3067d79b975e8844ca9eb072e16b31c3c1c36928edf9c6789548c524d0d954"
 
 [[package]]
+name = "identity"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "borsh",
+ "guest",
+ "module-registry",
+]
+
+[[package]]
 name = "idna"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3571,8 +3554,10 @@ version = "0.1.0"
 dependencies = [
  "abi",
  "futures",
- "modules",
+ "identity",
+ "module-registry",
  "serde",
+ "valset",
  "view-guest",
 ]
 
@@ -3659,7 +3644,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "modules"
+name = "module-registry"
 version = "0.1.0"
 dependencies = [
  "abi",
@@ -3669,8 +3654,10 @@ dependencies = [
  "fixture-probe",
  "guest",
  "host",
+ "identity",
  "keyscheme",
  "tempfile",
+ "valset",
 ]
 
 [[package]]
@@ -3731,8 +3718,9 @@ version = "0.1.0"
 dependencies = [
  "abi",
  "futures",
- "modules",
+ "module-registry",
  "serde",
+ "valset",
  "view-guest",
 ]
 
@@ -5219,9 +5207,10 @@ dependencies = [
  "abi",
  "borsh",
  "futures",
- "modules",
+ "identity",
  "serde",
  "serde_json",
+ "valset",
  "view-guest",
 ]
 
@@ -6214,31 +6203,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a156c684c91ea7d62626509bce3cb4e1d9ed5c4d978f7b4352658f96a4c26b4a"
 
 [[package]]
-name = "ureq"
-version = "3.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a7ac20be9b7726e0bbdbf974c059676d9acb1cd414961f570a4e8231cacd7fc"
-dependencies = [
- "base64 0.23.1",
- "log",
- "percent-encoding",
- "ureq-proto",
- "utf8-zero",
-]
-
-[[package]]
-name = "ureq-proto"
-version = "0.6.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f86fd172ccca569e458f61b6bdd6220965a9ef36e672a6852953b51a0e1583be"
-dependencies = [
- "base64 0.23.1",
- "http",
- "httparse",
- "log",
-]
-
-[[package]]
 name = "url"
 version = "2.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6278,12 +6242,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "utf8-zero"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8c0a043c9540bae7c578c88f91dda8bd82e59ae27c21baca69c8b191aaf5a6e"
-
-[[package]]
 name = "utf8_iter"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6311,6 +6269,16 @@ dependencies = [
  "aligned-vec",
  "num-traits",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "valset"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "borsh",
+ "guest",
+ "module-registry",
 ]
 
 [[package]]
@@ -6384,16 +6352,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
-]
-
-[[package]]
-name = "view-pack"
-version = "0.1.0"
-dependencies = [
- "tempfile",
- "view-wire",
- "wasm-encoder 0.251.0",
- "wasmparser 0.251.0",
 ]
 
 [[package]]

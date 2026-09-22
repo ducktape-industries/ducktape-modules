@@ -6,7 +6,7 @@ use ducktape_view_guest::{
     host::{Refusal, malformed},
     view::{Capability, json_decode, json_encode},
 };
-use modules::{identity, valset};
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

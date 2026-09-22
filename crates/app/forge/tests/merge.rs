@@ -2,7 +2,7 @@ mod common;
 use common::*;
 
 #[test]
-fn client_merge_fast_forwards_commits_or_names_the_conflicts() {
+fn client_merge_fast_forwards_or_lands_the_merge_commit_the_client_built() {
     let sandbox = founded();
     create(&sandbox, "project", HashKind::Sha1);
     let mut source = MemoryObjects::new(Hash::Sha1);
@@ -46,25 +46,18 @@ fn client_merge_fast_forwards_commits_or_names_the_conflicts() {
                     repo: "project".into(),
                     from: forge::Revision::Ref(from.as_bytes().to_vec()),
                     into: forge::Revision::Ref(b"refs/heads/main".to_vec()),
-                    cursor: None,
-                    limit: 128,
                 },
             )
             .unwrap(),
         )
         .unwrap();
-        let Reply::Compare {
-            comparison,
-            conflicts,
-            ..
-        } = reply
-        else {
+        let Reply::Compare { comparison, .. } = reply else {
             panic!("{reply:?}");
         };
-        (comparison.mergeability, conflicts.items)
+        comparison
     };
     assert_eq!(
-        compare("refs/heads/feature").0,
+        compare("refs/heads/feature").mergeability,
         forge::Mergeability::FastForward
     );
     let forwarded: forge::OpReply =
@@ -116,18 +109,16 @@ fn client_merge_fast_forwards_commits_or_names_the_conflicts() {
         b"",
     )
     .unwrap();
-    assert_eq!(compare("refs/heads/feature").0, forge::Mergeability::Clean);
-    let tree_of = |id| {
-        Commit::parse(&source.get(&id).unwrap().unwrap().body, Hash::Sha1)
-            .unwrap()
-            .tree
-    };
-    let (base, ours, theirs) = (tree_of(root), tree_of(main), tree_of(feature));
-    let gitcore::merge::MergeOutcome::Clean(tree) =
-        gitcore::merge::merge_trees(&mut source, Some(&base), &ours, &theirs, 100).unwrap()
-    else {
-        panic!("clean merge");
-    };
+    let diverged = compare("refs/heads/feature");
+    assert_eq!(diverged.mergeability, forge::Mergeability::Diverged);
+    assert_eq!((diverged.ahead, diverged.behind), (1, 1));
+    assert_eq!(diverged.base, Some(root.to_hex()));
+    // The merge itself is the client's: it builds the merge commit, pushes
+    // it, then asks forge to land it under CAS.
+    let tree = file_commit(&mut source, &[], 5, &[("a", b"2\n"), ("b", b"2\n")]);
+    let tree = Commit::parse(&source.get(&tree).unwrap().unwrap().body, Hash::Sha1)
+        .unwrap()
+        .tree;
     let author = Signature {
         name: abi::hex(OWNER).into_bytes(),
         email: Vec::new(),
@@ -169,9 +160,10 @@ fn client_merge_fast_forwards_commits_or_names_the_conflicts() {
     assert_eq!(actual.parents, [main, feature]);
     assert_eq!(actual.author.name, abi::hex(OWNER).into_bytes());
     assert_eq!(actual.author.time, TIME as i64);
-    let conflicts = compare("refs/heads/clash");
-    assert_eq!(conflicts.0, forge::Mergeability::Conflicts);
-    assert!(conflicts.1.iter().any(|c| c.path == b"a"));
+    assert_eq!(
+        compare("refs/heads/clash").mergeability,
+        forge::Mergeability::Diverged
+    );
     assert_eq!(
         refs_of(&sandbox, "project")["refs/heads/main"],
         merged_id.to_hex()

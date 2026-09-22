@@ -171,8 +171,6 @@ pub enum Query {
         repo: String,
         from: Revision,
         into: Revision,
-        cursor: Option<Cursor>,
-        limit: u32,
     },
     Activity {
         repo: String,
@@ -247,7 +245,6 @@ pub enum Reply {
     Compare {
         height: u64,
         comparison: Comparison,
-        conflicts: Page<Conflict>,
     },
     Activity {
         height: u64,

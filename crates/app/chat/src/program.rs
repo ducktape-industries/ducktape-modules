@@ -5,7 +5,7 @@ use crate::{
 };
 use abi::{Entry, Env, Origin, Refusal, Scan, Scheme, reason};
 use guest::{Execute, Program, Query, Reads};
-use modules::{Page, identity};
+use module_registry::Page;
 
 struct Reader<'a>(&'a Query);
 

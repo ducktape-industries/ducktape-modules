@@ -15,7 +15,7 @@ use ducktape_view_guest::{
     Window, div, px,
 };
 use futures::StreamExt;
-use modules::{Page, identity, valset};
+use module_registry::Page;
 use serde::{Deserialize, Serialize};
 
 /// The identity program's query surface, as this view reads it.

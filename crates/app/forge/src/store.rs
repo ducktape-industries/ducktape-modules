@@ -1,9 +1,9 @@
-// gitcore's Objects over the sandbox's blob store: a git object's blob id is its oid, so no map sits between them.
+// git::Objects over the sandbox's blob store: a git object's blob id is its oid, so no map sits between them.
 
 use std::cell::Cell;
 
+use crate::git::{Error, Hash, Kind, Object, Objects, Oid};
 use abi::{BlobHeader, Refusal};
-use gitcore::{Error, Hash, Kind, Object, Objects, Oid};
 
 use crate::sandbox::{Sandbox, blob_id_of, hash_kind_of, oid_of_blob};
 
@@ -34,7 +34,7 @@ impl<'a, S: Sandbox> Store<'a, S> {
         }
     }
 
-    pub fn header(&self, id: &Oid) -> gitcore::Result<BlobHeader> {
+    pub fn header(&self, id: &Oid) -> crate::git::Result<BlobHeader> {
         self.sandbox
             .blob_stat(blob_id_of(id))
             .ok_or(Error::MissingObject(*id))
@@ -46,7 +46,7 @@ impl<'a, S: Sandbox> Store<'a, S> {
 }
 
 impl<S: Sandbox> Objects for Store<'_, S> {
-    fn get(&self, id: &Oid) -> gitcore::Result<Option<Object>> {
+    fn get(&self, id: &Oid) -> crate::git::Result<Option<Object>> {
         if let Some(budget) = &self.budget {
             let header = match self.sandbox.blob_stat(blob_id_of(id)) {
                 Some(header) => header,
@@ -65,14 +65,14 @@ impl<S: Sandbox> Objects for Store<'_, S> {
         Ok(Some(Object::new(kind, blob.body)))
     }
 
-    fn has(&self, id: &Oid) -> gitcore::Result<bool> {
+    fn has(&self, id: &Oid) -> crate::git::Result<bool> {
         Ok(self.sandbox.blob_stat(blob_id_of(id)).is_some())
     }
 
-    fn put(&mut self, kind: Kind, body: &[u8]) -> gitcore::Result<Oid> {
+    fn put(&mut self, kind: Kind, body: &[u8]) -> crate::git::Result<Oid> {
         // Compare may compute a prospective tree off consensus. Never persist it.
         if self.budget.is_some() {
-            return gitcore::oid_of(self.hash, kind, body);
+            return crate::git::oid_of(self.hash, kind, body);
         }
         match self
             .sandbox
