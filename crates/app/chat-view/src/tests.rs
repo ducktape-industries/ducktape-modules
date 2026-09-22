@@ -4,6 +4,14 @@ use ducktape_view_guest::testing::TestAppContext;
 use ducktape_view_guest::wire;
 use ducktape_view_guest::{Entity, StyleRefinement, Styled};
 
+fn page<T>(items: Vec<T>) -> ::chat::PageReply<T> {
+    ::chat::PageReply {
+        height: 1,
+        items,
+        next: None,
+    }
+}
+
 fn channel(id: &str, name: &str, head_seq: u64) -> ChannelInfo {
     ChannelInfo {
         channel: ::chat::ChannelRow {
@@ -82,30 +90,21 @@ fn configure(cx: &mut TestAppContext) {
                     keys: Vec::new(),
                 },
             ]),
-            ChatViewQuery::Channels { .. } => ChatViewReply::Channels {
-                channels: vec![channel("general", "General", 3), channel("dm-7-8", "dm", 1)],
-                has_more: false,
-                next_after: None,
-            },
-            ChatViewQuery::Roots { channel_id, .. } => ChatViewReply::Roots {
-                roots: if channel_id == "general" {
+            ChatViewQuery::Channels { .. } => ChatViewReply::Channels(page(vec![
+                channel("general", "General", 3),
+                channel("dm-7-8", "dm", 1),
+            ])),
+            ChatViewQuery::Roots { channel_id, .. } => {
+                ChatViewReply::Roots(page(if channel_id == "general" {
                     vec![row(1, "acct:7", "hello"), row(2, "acct:8", "**hi** there")]
                 } else {
                     Vec::new()
-                },
-                has_more: false,
-                next_before_seq: None,
-            },
-            ChatViewQuery::Members { .. } => ChatViewReply::Members {
-                members: Vec::new(),
-                has_more: false,
-                next_after: None,
-            },
+                }))
+            }
+            ChatViewQuery::Members { .. } => ChatViewReply::Members(page(Vec::new())),
             ChatViewQuery::Thread { .. } => ChatViewReply::Thread {
                 root: None,
-                replies: Vec::new(),
-                has_more: false,
-                next_reply_seq: None,
+                replies: page(Vec::new()),
             },
             ChatViewQuery::Search { text, .. } => {
                 assert_eq!(text, "hello");

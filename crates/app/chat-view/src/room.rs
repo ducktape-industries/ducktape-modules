@@ -156,8 +156,8 @@ impl Chat {
                     };
                     if thread.root == root {
                         thread.replies = Loaded::Ready(page.0);
-                        thread.has_more = page.1;
-                        thread.next = page.2;
+                        thread.has_more = page.1.is_some();
+                        thread.next = page.1;
                         room_of(chat).settle();
                         chat.load_pictures(cx);
                     }
@@ -185,7 +185,8 @@ impl Chat {
         let id = room.id.clone();
         cx.spawn(async move |this, cx| {
             let host = cx.host();
-            let result = crate::roots(host, id, viewer, Some(oldest), crate::PAGE).await;
+            let below = chat::roots_below(&id, oldest);
+            let result = crate::roots(host, id, viewer, Some(below), crate::PAGE).await;
             let _ = this.update(cx, |chat, cx| {
                 cx.notify();
                 let Some(room) = &mut chat.room else { return };
@@ -258,9 +259,9 @@ impl Chat {
                     return;
                 }
                 match result {
-                    Ok((replies, has_more, next)) => {
+                    Ok((replies, next)) => {
                         thread.replies = Loaded::Ready(replies);
-                        thread.has_more = has_more;
+                        thread.has_more = next.is_some();
                         thread.next = next;
                         room_of(chat).settle();
                         chat.load_pictures(cx);
@@ -286,7 +287,7 @@ impl Chat {
             return;
         }
         thread.more_loading = true;
-        let (root, after) = (thread.root, thread.next);
+        let (root, after) = (thread.root, thread.next.clone());
         cx.spawn(async move |this, cx| {
             let host = cx.host();
             let result = crate::thread(host, id, root, viewer, after).await;
@@ -296,10 +297,10 @@ impl Chat {
                     return;
                 };
                 thread.more_loading = false;
-                if let Ok((more, has_more, next)) = result
+                if let Ok((more, next)) = result
                     && thread.root == root
                 {
-                    thread.has_more = has_more;
+                    thread.has_more = next.is_some();
                     thread.next = next;
                     if let Some(rows) = thread.replies.ready_mut() {
                         rows.extend(more);

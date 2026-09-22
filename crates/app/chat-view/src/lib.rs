@@ -20,7 +20,6 @@ mod ui;
 
 use chat::{
     ChannelInfo, ChatMsg, ChatViewQuery, ChatViewReply, MemberRow, MessageHits, MsgRow, PostPolicy,
-    TagPage,
 };
 use client::{NameDirectory, mention_token};
 use ducktape_view_guest::Context;
