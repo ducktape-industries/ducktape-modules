@@ -1,4 +1,11 @@
+//! The `valset` program: who validates and who resides on a network. The
+//! types are always built; a view links them with `program` off. The `program`
+//! feature adds the wasm32 program over the host (`program.rs`).
+#[cfg(feature = "program")]
+mod program;
+
 use borsh::{BorshDeserialize, BorshSerialize};
+use module_registry::{Page, PageReply};
 
 pub use abi::valset::{Genesis, Member, PROGRAM};
 
@@ -34,7 +41,7 @@ pub enum Op {
 pub enum Query {
     Validators,
     Members,
-    Memberships { page: crate::Page },
+    Memberships { page: Page },
     Membership { key: Vec<u8> },
 }
 
@@ -42,11 +49,11 @@ pub enum Query {
 pub enum Reply {
     Validators(Vec<Vec<u8>>),
     Members(Vec<Member>),
-    Memberships(crate::PageReply<Membership>),
+    Memberships(PageReply<Membership>),
     Membership(Option<Membership>),
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "guest")]
 pub fn standing(ctx: &impl guest::Reads, key: &[u8]) -> Result<Option<Standing>, abi::Refusal> {
     match ctx.ask::<Query, Reply>(PROGRAM, &Query::Membership { key: key.to_vec() })? {
         Reply::Membership(membership) => Ok(membership.map(|membership| membership.standing)),
@@ -54,5 +61,32 @@ pub fn standing(ctx: &impl guest::Reads, key: &[u8]) -> Result<Option<Standing>,
             abi::reason::UNEXPECTED_REPLY,
             format!("valset answered Membership with {other:?}"),
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_host_contract_is_a_prefix_of_the_program_contract() {
+        assert_eq!(
+            abi::encode(&abi::valset::Query::Validators),
+            abi::encode(&super::Query::Validators)
+        );
+        assert_eq!(
+            abi::encode(&abi::valset::Query::Members),
+            abi::encode(&super::Query::Members)
+        );
+        let member = abi::valset::Member {
+            key: vec![1],
+            address: "a".into(),
+        };
+        assert_eq!(
+            abi::encode(&abi::valset::Reply::Validators(vec![vec![1]])),
+            abi::encode(&super::Reply::Validators(vec![vec![1]]))
+        );
+        assert_eq!(
+            abi::encode(&abi::valset::Reply::Members(vec![member.clone()])),
+            abi::encode(&super::Reply::Members(vec![member]))
+        );
     }
 }

@@ -1,8 +1,9 @@
+// The wasm32 program over the contract: guest contexts as the store, the schedule folded at each block, then the ops and queries.
+
 use abi::{Env, HashKind, Refusal, Scan};
 use guest::{Execute, Program, Query as QueryCtx, Reads};
-use modules::AUTHORITY;
-use modules::module_registry::{CODE_KIND, Change, Entry, Genesis, Op, Query, Reply, Scheduled};
-use modules::program::{already_exists, invalid, not_found, u64_key};
+use crate::helpers::{already_exists, invalid, not_found, u64_key};
+use crate::{AUTHORITY, CODE_KIND, Change, Entry, Genesis, Op, Page, Query, Reply, Scheduled};
 
 const PROGRAM: &str = "p/";
 const SCHEDULE: &str = "s/";
@@ -65,7 +66,7 @@ fn publish(ctx: &mut Execute, body: Vec<u8>) -> Result<(), Refusal> {
 }
 
 fn schedule(ctx: &mut Execute, env: &Env, scheduled: Scheduled) -> Result<(), Refusal> {
-    modules::program::from(env, AUTHORITY)?;
+    crate::helpers::from(env, AUTHORITY)?;
     let in_the_future = scheduled.height > env.height;
     if !in_the_future {
         return Err(invalid(format!(
@@ -93,7 +94,7 @@ fn schedule(ctx: &mut Execute, env: &Env, scheduled: Scheduled) -> Result<(), Re
 }
 
 fn cancel(ctx: &mut Execute, env: &Env, height: u64, program: &str) -> Result<(), Refusal> {
-    modules::program::from(env, AUTHORITY)?;
+    crate::helpers::from(env, AUTHORITY)?;
     let key = schedule_key(height, program);
     let pending = ctx.get(&key).is_some();
     if !pending {
@@ -148,7 +149,7 @@ fn at(ctx: &impl Reads, height: u64) -> Result<Vec<Entry>, Refusal> {
     Ok(entries)
 }
 
-fn scheduled(ctx: &impl Reads, page: &modules::Page) -> Result<Vec<(Vec<u8>, Scheduled)>, Refusal> {
+fn scheduled(ctx: &impl Reads, page: &Page) -> Result<Vec<(Vec<u8>, Scheduled)>, Refusal> {
     ctx.records::<Change>(page.scan_ahead(SCHEDULE.as_bytes()))?
         .into_iter()
         .map(|(key, change)| {

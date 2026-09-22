@@ -68,8 +68,8 @@ fn membership(key: &[u8], standing: valset::Standing) -> valset::Membership {
     }
 }
 
-fn page<T>(items: Vec<T>) -> modules::PageReply<T> {
-    modules::PageReply {
+fn page<T>(items: Vec<T>) -> module_registry::PageReply<T> {
+    module_registry::PageReply {
         height: 1,
         items,
         next: None,

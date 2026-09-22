@@ -37,7 +37,9 @@ members = [
     "crates/sdk/view-wire",
     "crates/sdk/view-guest",
     "crates/sdk/view-guest-derive",
-    "crates/modules",
+    "crates/system/module-registry",
+    "crates/system/valset",
+    "crates/system/identity",
     "crates/app/chat",
     "crates/app/chat-view",
     "crates/app/forge-view",
@@ -49,7 +51,6 @@ members = [
     "crates/app/forge",
     "crates/app/forge-harness",
 ]
-exclude = ["crates/modules/system"]
 
 [workspace.package]
 edition = "2024"
@@ -65,7 +66,9 @@ view-wire = { path = "crates/sdk/view-wire" }
 view-guest = { path = "crates/sdk/view-guest" }
 ducktape-view-guest = { path = "crates/sdk/view-guest", package = "view-guest" }
 gpui = { package = "gpui-pre", git = "https://github.com/ducktape-industries/gpui-pre", rev = "5545e0156ec81ef772c2af8c12283c67f646bd14", default-features = false }
-modules = { path = "crates/modules" }
+module-registry = { path = "crates/system/module-registry" }
+valset = { path = "crates/system/valset" }
+identity = { path = "crates/system/identity" }
 gitcore = { path = "crates/app/gitcore" }
 chat = { path = "crates/app/chat" }
 forge = { path = "crates/app/forge" }

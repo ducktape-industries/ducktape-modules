@@ -1,6 +1,6 @@
 use super::*;
 use ducktape_view_guest::{caps::QueryBytes, testing::TestAppContext};
-use modules::{identity, valset};
+
 fn status() -> Status {
     Status {
         network: "Workshop".into(),

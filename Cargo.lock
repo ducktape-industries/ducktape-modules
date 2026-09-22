@@ -659,7 +659,8 @@ dependencies = [
  "abi",
  "borsh",
  "guest",
- "modules",
+ "identity",
+ "module-registry",
  "serde",
  "serde_json",
  "unicode-normalization",
@@ -1967,7 +1968,7 @@ version = "0.1.0"
 dependencies = [
  "abi",
  "futures",
- "modules",
+ "module-registry",
  "serde",
  "view-guest",
 ]
@@ -3081,6 +3082,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d3067d79b975e8844ca9eb072e16b31c3c1c36928edf9c6789548c524d0d954"
 
 [[package]]
+name = "identity"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "borsh",
+ "guest",
+ "module-registry",
+]
+
+[[package]]
 name = "idna"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3571,8 +3582,10 @@ version = "0.1.0"
 dependencies = [
  "abi",
  "futures",
- "modules",
+ "identity",
+ "module-registry",
  "serde",
+ "valset",
  "view-guest",
 ]
 
@@ -3659,7 +3672,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "modules"
+name = "module-registry"
 version = "0.1.0"
 dependencies = [
  "abi",
@@ -3669,8 +3682,10 @@ dependencies = [
  "fixture-probe",
  "guest",
  "host",
+ "identity",
  "keyscheme",
  "tempfile",
+ "valset",
 ]
 
 [[package]]
@@ -3731,8 +3746,9 @@ version = "0.1.0"
 dependencies = [
  "abi",
  "futures",
- "modules",
+ "module-registry",
  "serde",
+ "valset",
  "view-guest",
 ]
 
@@ -5219,9 +5235,10 @@ dependencies = [
  "abi",
  "borsh",
  "futures",
- "modules",
+ "identity",
  "serde",
  "serde_json",
+ "valset",
  "view-guest",
 ]
 
@@ -6311,6 +6328,16 @@ dependencies = [
  "aligned-vec",
  "num-traits",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "valset"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "borsh",
+ "guest",
+ "module-registry",
 ]
 
 [[package]]

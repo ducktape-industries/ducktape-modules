@@ -4,7 +4,7 @@ use ducktape_view_guest::{
     caps::QueryBytes,
     host::{Refusal, malformed},
 };
-use modules::{identity, valset};
+
 use serde::{Deserialize, Serialize};
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Account {

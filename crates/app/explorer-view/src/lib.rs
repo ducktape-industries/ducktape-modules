@@ -15,7 +15,7 @@ use ducktape_view_guest::{
 mod components;
 use components::{EmptyState, Section};
 use futures::StreamExt;
-use modules::module_registry as registry;
+use module_registry as registry;
 use serde::{Deserialize, Serialize};
 
 /// The registry's query surface, as this view reads it.
@@ -322,7 +322,7 @@ async fn network(host: Host) -> Result<Network, Refusal> {
     let mut scheduled = Vec::new();
     let mut after = None;
     loop {
-        let page = modules::Page { after, limit: None };
+        let page = module_registry::Page { after, limit: None };
         let reply = match host
             .ask::<QueryBytes<Registry>>(registry::Query::Scheduled { page })
             .await?

@@ -1,12 +1,14 @@
+// The wasm32 program over the contract: guest contexts as the store, the signer resolved to its account, then the ops and queries.
+
 use abi::{Env, Origin, Refusal, Scheme};
 use guest::{Execute, Program, Query as QueryCtx, Reads};
-use modules::AccountNumber;
-use modules::identity::{
-    Account, Admission, CONSENT_NAMESPACE, Consent, Control, Key, Op, Query, Reference, Reply,
-    Standing,
-};
-use modules::program::{
+use module_registry::helpers::{
     already_exists, bytes_key, invalid, not_found, u64_key, unauthorized, wrong_state,
+};
+
+use crate::{
+    Account, AccountNumber, Admission, CONSENT_NAMESPACE, Consent, Control, Key, Op, Query,
+    Reference, Reply, Standing,
 };
 
 const ACCOUNT: &str = "a/";
@@ -145,7 +147,7 @@ fn named(name: String) -> Result<String, Refusal> {
 }
 
 fn create(ctx: &mut Execute, env: &Env, name: String, scheme: Scheme) -> Result<(), Refusal> {
-    let signer = modules::program::external(env)?;
+    let signer = module_registry::helpers::external(env)?;
     let number = next_number(ctx)?;
     admit_key(ctx, &signer, number)?;
     store(
@@ -175,7 +177,7 @@ fn add_key(
     label: Option<String>,
     consent: Consent,
 ) -> Result<(), Refusal> {
-    let signer = modules::program::external(env)?;
+    let signer = module_registry::helpers::external(env)?;
     let mut account = account(ctx, consent.account)?;
     let Control::Keys(keys) = &mut account.control else {
         return Err(wrong_state("a program account holds no keys"));
@@ -220,7 +222,7 @@ fn add_key(
 }
 
 fn remove_key(ctx: &mut Execute, env: &Env, key: &[u8]) -> Result<(), Refusal> {
-    let signer = modules::program::external(env)?;
+    let signer = module_registry::helpers::external(env)?;
     let mut account = account_of_key(ctx, &signer)?;
     let Control::Keys(keys) = &mut account.control else {
         return Err(wrong_state("a program account holds no keys"));
@@ -309,7 +311,7 @@ fn create_program(
     name: String,
     controller: AccountNumber,
 ) -> Result<(), Refusal> {
-    let executor = modules::program::program(env)?;
+    let executor = module_registry::helpers::program(env)?;
     let controlling = account(ctx, controller)?;
     if !controlling.live() {
         return Err(wrong_state(format!("account {controller} is not live")));
@@ -341,7 +343,7 @@ fn set_standing(
     number: AccountNumber,
     standing: Standing,
 ) -> Result<(), Refusal> {
-    let program = modules::program::program(env)?;
+    let program = module_registry::helpers::program(env)?;
     let mut account = account(ctx, number)?;
     let Control::Program {
         executor,

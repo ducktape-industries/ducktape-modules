@@ -8,12 +8,13 @@ use commonware_runtime::{Runner as _, deterministic};
 use fixture_probe::Step;
 use host::{Applied, Block, BlockId, Founding, Genesis, Host, Layer, Limits, Receipt, Submission};
 use keyscheme::testkit;
-use modules::{AUTHORITY, AccountNumber, Page, identity, module_registry, valset};
+use identity::AccountNumber;
+use module_registry::{AUTHORITY, Page};
 
 /// Where `make wasm-programs` left the boot set: the bytes are a build
 /// output, never committed.
 fn release_dir() -> std::path::PathBuf {
-    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
     std::env::var_os("CARGO_TARGET_DIR")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| workspace.join("target"))

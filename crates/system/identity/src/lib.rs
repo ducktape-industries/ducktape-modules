@@ -1,7 +1,15 @@
+//! The `identity` program: accounts, the keys and programs that control them,
+//! and the consent by which a key joins an account. The types are always
+//! built; a view links them with `program` off. The `program` feature adds the
+//! wasm32 program over the host (`program.rs`).
+#[cfg(feature = "program")]
+mod program;
+
 use abi::{BlobId, ProgramId, Scheme};
 use borsh::{BorshDeserialize, BorshSerialize};
+use module_registry::{Page, PageReply};
 
-use crate::{AccountNumber, Page};
+pub type AccountNumber = u64;
 
 pub const PROGRAM: &str = "identity";
 pub const CONSENT_NAMESPACE: &[u8] = b"ducktape:identity:consent";
@@ -150,7 +158,7 @@ pub enum Reply {
     Number(Option<AccountNumber>),
     Generation(u64),
     Resolved(Vec<Option<AccountNumber>>),
-    Accounts(crate::PageReply<Account>),
+    Accounts(PageReply<Account>),
 }
 
 pub fn principal(number: AccountNumber) -> Vec<u8> {
@@ -161,7 +169,7 @@ pub fn account_of_principal(bytes: &[u8]) -> Option<AccountNumber> {
     <[u8; 8]>::try_from(bytes).ok().map(u64::from_le_bytes)
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "guest")]
 pub fn account_of(
     ctx: &impl guest::Reads,
     key: &[u8],
@@ -175,7 +183,7 @@ pub fn account_of(
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "guest")]
 pub fn account(
     ctx: &impl guest::Reads,
     number: AccountNumber,

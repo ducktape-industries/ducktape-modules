@@ -1,8 +1,11 @@
+// The wasm32 program over the contract: guest contexts as the store, governance-only writes, the last validator kept seated.
+
 use abi::{Env, Refusal, Scan};
 use guest::{Execute, Program, Query as QueryCtx, Reads};
-use modules::AUTHORITY;
-use modules::program::{bytes_key, invalid, wrong_state};
-use modules::valset::{Genesis, Membership, Op, Query, Reply, Standing};
+use module_registry::AUTHORITY;
+use module_registry::helpers::{bytes_key, invalid, wrong_state};
+
+use crate::{Genesis, Membership, Op, Query, Reply, Standing};
 
 const MEMBER: &str = "m/";
 const KEY_LEN: usize = 32;
@@ -28,7 +31,7 @@ impl Program for Valset {
     }
 
     fn execute(ctx: &mut Execute, env: &Env, payload: &[u8]) -> Result<(), Refusal> {
-        modules::program::from(env, AUTHORITY)?;
+        module_registry::helpers::from(env, AUTHORITY)?;
         match abi::decode(payload)? {
             Op::Set(membership) => set(ctx, membership),
             Op::Remove { key } => remove(ctx, &key),

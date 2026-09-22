@@ -6,21 +6,18 @@ WASM_OPT ?= wasm-opt
 # What a program links: abi and guest build for wasm32 with nothing else.
 PROGRAM_LINKABLE := abi guest
 
-# The boot set: its own wasm32 workspace.
-SYSTEM := crates/modules/system
-
-# The ducktape checkout the probe fixture the `modules` suite seats is copied
+# The ducktape checkout the probe fixture the founding suite seats is copied
 # from (crates/kernel/fixtures, `make kernel-fixtures` there). The probe is a
 # dev-dependency only, which cargo cannot build for wasm32 from here.
-DUCKTAPE ?= ../ducktape
+DUCKTAPE ?= ../core
 
-# The app programs: root members whose program ABI (the guest glue, the
-# `alloc`/`call` exports, the `ducktape.*` imports) sits behind their `program`
-# feature. Their views link the same crates with the feature off. One cargo
-# invocation per program: forge links chat, and `-p chat -p forge --features
-# program` in one call would unify `chat/program` into forge's link (two
-# `alloc`/`call`).
-PROGRAMS := chat forge
+# Every program, system and app: root members whose program ABI (the guest
+# glue, the `alloc`/`call` exports, the `ducktape.*` imports) sits behind their
+# `program` feature. Their views link the same crates with the feature off.
+# One cargo invocation per program: forge links chat and identity links
+# module-registry, and `-p a -p b --features program` in one call would unify
+# `program` into the other's link (two `alloc`/`call`).
+PROGRAMS := module-registry valset identity chat forge
 
 # Views are wasm32 cdylibs. Chat and Forge ride their own programs;
 # Settings rides the registry.
@@ -28,11 +25,11 @@ VIEWS := chat-view members-view node-view explorer-view settings-view forge-view
 
 # What a wasm32 view may link. A crate a view links must never reach the
 # signing/identity graph (blst does not build for wasm32, and a view has no
-# business holding keys). `modules` is here because the system views read the
-# boot set's contracts: its signing deps are dev-only, and `-e normal` below
-# is what says so. `chat` and `forge` are linked with `program` off, which is
-# what a plain `-p` build below checks.
-VIEW_LINKABLE := ducklink view-wire view-guest design modules settings-view chat forge
+# business holding keys). The system crates are here because the system views
+# read their contracts: module-registry's signing deps are dev-only, and `-e
+# normal` below is what says so. Every program crate is linked with `program`
+# off, which is what a plain `-p` build below checks.
+VIEW_LINKABLE := ducklink view-wire view-guest design module-registry valset identity settings-view chat forge
 VIEW_FORBIDDEN := blst commonware-cryptography wasm-bindgen js-sys web-sys
 
 # Cargo uses this directory for both workspaces.
@@ -60,15 +57,14 @@ program-wasm-check:
 	done; \
 	echo "abi and guest build for wasm32"
 
-## builds the boot set and every app program (with `program` on) into
-## $(RELEASE)/<name>.wasm. The `modules` suite reads the boot set from there.
+## builds every program (with `program` on) into $(RELEASE)/<name>.wasm. The
+## founding suite reads the boot set from there.
 wasm-programs:
-	$(WASM_BUILD) --manifest-path $(SYSTEM)/Cargo.toml
 	@for p in $(PROGRAMS); do \
 	  $(WASM_BUILD) -p $$p --features program || exit 1; \
 	done
 
-## the whole suite: the boot set's tests run the bytes wasm-programs built.
+## the whole suite: the founding suite runs the bytes wasm-programs built.
 test: wasm-programs
 	$(CARGO) test --workspace
 
@@ -101,10 +97,10 @@ wasm-reproducible:
 	  if strings $$f | grep -qE "$(CURDIR)|$(HOME)"; then echo "$$f embeds an absolute path"; strings $$f | grep -E "$(CURDIR)|$(HOME)" | head -3; exit 1; fi; \
 	done; echo "no packed program embeds a path of this checkout or home"
 
-## refreshes the probe fixture the `modules` suite seats as the authority,
+## refreshes the probe fixture the founding suite seats as the authority,
 ## from the ducktape checkout at $(DUCKTAPE).
 probe-fixture:
-	cp $(DUCKTAPE)/crates/kernel/fixtures/wasm/fixture_probe.wasm crates/modules/tests/
+	cp $(DUCKTAPE)/crates/kernel/fixtures/wasm/fixture_probe.wasm crates/system/module-registry/tests/
 
 ## builds every view for wasm32 under $(RELEASE)/.
 wasm-views:

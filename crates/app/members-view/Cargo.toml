@@ -13,7 +13,9 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 futures.workspace = true
 ducktape-view-guest.workspace = true
-modules.workspace = true
+identity.workspace = true
+valset.workspace = true
+module-registry.workspace = true
 serde.workspace = true
 
 # Typed fake-host tests use the program contracts.

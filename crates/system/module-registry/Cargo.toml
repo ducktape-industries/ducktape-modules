@@ -1,0 +1,30 @@
+[package]
+name = "module-registry"
+version.workspace = true
+edition.workspace = true
+
+# The contract types (and the paging and origin helpers every system program
+# shares) are always built; a view links them with `program` off. `program`
+# adds the wasm32 program over the host: `guest`'s contexts, the `alloc`/`call`
+# exports and the `ducktape.*` imports.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+program = ["dep:guest"]
+
+[dependencies]
+abi = { workspace = true }
+borsh = { workspace = true }
+guest = { workspace = true, optional = true }
+
+# The founding suite (`tests/system.rs`) drives the built boot set on the host.
+[dev-dependencies]
+identity = { workspace = true }
+valset = { workspace = true }
+commonware-cryptography = { workspace = true }
+commonware-runtime = { workspace = true }
+fixture-probe = { workspace = true }
+host = { workspace = true }
+keyscheme = { workspace = true, features = ["testkit"] }
+tempfile = { workspace = true }
