@@ -333,7 +333,7 @@ fn voice_button(
 }
 
 fn with_seats(chat: &Chat, info: &ChannelInfo, row: impl IntoElement, theme: &Theme) -> AnyElement {
-    let content = div()
+    let mut content = div()
         .id(ElementId::Name(
             format!("chat-sidebar-seats-{}", info.channel.id).into(),
         ))
