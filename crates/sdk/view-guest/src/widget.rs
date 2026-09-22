@@ -4,6 +4,10 @@ mod tests {
     use crate::{host, wire, Context, Driver, ElementId, Host, Input, Render, View, Window};
     use serde::{Deserialize, Serialize};
 
+    fn target(name: &str) -> wire::WidgetTarget {
+        vec![wire::ElementIdWire::Name(name.into())]
+    }
+
     async fn perform(host: Host, command: wire::WidgetCommand) -> Result<Vec<u8>, host::Refusal> {
         host.request("host.widget", &wire::encode(&command)).await
     }
@@ -17,7 +21,7 @@ mod tests {
                 perform(
                     host.clone(),
                     wire::WidgetCommand::Focus {
-                        target: "App/draft".into(),
+                        target: target("App/draft"),
                     },
                 )
                 .await
@@ -25,7 +29,7 @@ mod tests {
                 let bytes = perform(
                     host,
                     wire::WidgetCommand::Focused {
-                        target: "App/draft".into(),
+                        target: target("App/draft"),
                     },
                 )
                 .await
@@ -60,7 +64,7 @@ mod tests {
         assert_eq!(
             wire::decode::<wire::WidgetCommand>(&focus.payload).unwrap(),
             wire::WidgetCommand::Focus {
-                target: "App/draft".into()
+                target: target("App/draft")
             }
         );
         assert!(
@@ -78,7 +82,7 @@ mod tests {
         assert_eq!(
             wire::decode::<wire::WidgetCommand>(&query.payload).unwrap(),
             wire::WidgetCommand::Focused {
-                target: "App/draft".into()
+                target: target("App/draft")
             }
         );
         driver.tick(vec![wire::Event::Response {
@@ -98,11 +102,11 @@ mod tests {
         window.focus("second");
         let requests = host.drain_outbox();
         assert_eq!(requests.len(), 2);
-        for (request, target) in requests.iter().zip(["first", "second"]) {
+        for (request, name) in requests.iter().zip(["first", "second"]) {
             assert_eq!(
                 wire::decode::<wire::WidgetCommand>(&request.payload).unwrap(),
                 wire::WidgetCommand::Focus {
-                    target: target.into()
+                    target: target(name)
                 }
             );
         }

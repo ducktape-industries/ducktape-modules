@@ -1,6 +1,9 @@
 //! Commands applied only to the requesting guest's mounted widget tree.
 use serde::{Deserialize, Serialize};
 
+/// Full authored typed ancestry of one mounted element, including the target.
+pub type WidgetTarget = Vec<crate::ElementIdWire>;
+
 /// Payload of `host.widget`. Mutation requests return an encoded unit;
 /// `Focused` returns an encoded bool. Targets are the tree's qualified keys.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -8,58 +11,58 @@ pub enum WidgetCommand {
     /// Queue a guest-defined action after native edits on this editor settle.
     /// The host sends EditorInteraction::Action through its transaction lane.
     EditorAction {
-        target: String,
+        target: WidgetTarget,
         #[serde(deserialize_with = "crate::editor_transaction::decode_document")]
         tag: String,
     },
     FocusPrevious,
     FocusNext,
     Focus {
-        target: String,
+        target: WidgetTarget,
     },
     FocusHandle {
         handle: u64,
     },
     Focused {
-        target: String,
+        target: WidgetTarget,
     },
     CursorFront {
-        target: String,
+        target: WidgetTarget,
     },
     CursorEnd {
-        target: String,
+        target: WidgetTarget,
     },
     Cursor {
-        target: String,
+        target: WidgetTarget,
         position: u32,
     },
     SelectAll {
-        target: String,
+        target: WidgetTarget,
     },
     Select {
-        target: String,
+        target: WidgetTarget,
         start: u32,
         end: u32,
     },
     Snap {
-        target: String,
+        target: WidgetTarget,
         x: f32,
         y: f32,
     },
     SnapEnd {
-        target: String,
+        target: WidgetTarget,
     },
     ScrollTo {
-        target: String,
+        target: WidgetTarget,
         x: f32,
         y: f32,
     },
     ScrollToKey {
-        target: String,
+        target: WidgetTarget,
         key: u64,
     },
     ScrollBy {
-        target: String,
+        target: WidgetTarget,
         x: f32,
         y: f32,
     },
@@ -84,8 +87,11 @@ impl WidgetCommand {
             | Self::ScrollBy { target, .. }
             | Self::ScrollToKey { target, .. } => target,
         };
-        if target.len() > crate::MAX_STRING_BYTES {
-            return Err("widget target exceeds the key byte limit".into());
+        if target.is_empty() || target.len() > crate::MAX_DEPTH {
+            return Err("widget target path is empty or too deep".into());
+        }
+        for id in target {
+            id.validate_host()?;
         }
         if let Self::EditorAction { tag, .. } = self {
             let invalid_tag = tag.is_empty() || tag.len() > crate::MAX_STRING_BYTES;
@@ -113,10 +119,14 @@ impl WidgetCommand {
 mod tests {
     use super::*;
 
+    fn target(id: crate::ElementIdWire) -> WidgetTarget {
+        vec![id]
+    }
+
     #[test]
     fn editor_action_keeps_its_target_and_rejects_unbounded_tags() {
         let mut command = WidgetCommand::EditorAction {
-            target: "Other/body".into(),
+            target: target(crate::ElementIdWire::Name("Other/body".into())),
             tag: "send".into(),
         };
         assert!(command.validate().is_ok());
@@ -133,17 +143,20 @@ mod tests {
 
     #[test]
     fn widget_targets_are_rejected_whole_instead_of_redirected() {
-        let key = "가".repeat(crate::MAX_STRING_BYTES / 3 + 1);
+        let key = crate::ElementIdWire::Name("가".repeat(crate::MAX_STRING_BYTES / 3 + 1).into());
         let mut command = WidgetCommand::Focus {
-            target: key.clone(),
+            target: target(key.clone()),
         };
         assert!(
             command.validate().is_err(),
             "oversized target must be refused"
         );
-        assert_eq!(command, WidgetCommand::Focus { target: key });
+        assert_eq!(command, WidgetCommand::Focus { target: target(key) });
         let expected = WidgetCommand::Focus {
-            target: "App/chat(room)/draft".into(),
+            target: vec![
+                crate::ElementIdWire::Integer(1),
+                crate::ElementIdWire::Name("draft".into()),
+            ],
         };
         let mut decoded: WidgetCommand = crate::decode(&crate::encode(&expected)).unwrap();
         decoded.validate().unwrap();
@@ -155,17 +168,17 @@ mod tests {
         for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
             for mut command in [
                 WidgetCommand::Snap {
-                    target: "list".into(),
+                    target: target(crate::ElementIdWire::Name("list".into())),
                     x: value,
                     y: 0.0,
                 },
                 WidgetCommand::ScrollTo {
-                    target: "list".into(),
+                    target: target(crate::ElementIdWire::Name("list".into())),
                     x: 0.0,
                     y: value,
                 },
                 WidgetCommand::ScrollBy {
-                    target: "list".into(),
+                    target: target(crate::ElementIdWire::Name("list".into())),
                     x: value,
                     y: 0.0,
                 },
@@ -177,7 +190,7 @@ mod tests {
             }
         }
         let mut snap = WidgetCommand::Snap {
-            target: "list".into(),
+            target: target(crate::ElementIdWire::Name("list".into())),
             x: -1.0,
             y: 2.0,
         };
@@ -185,13 +198,13 @@ mod tests {
         assert_eq!(
             snap,
             WidgetCommand::Snap {
-                target: "list".into(),
+                target: target(crate::ElementIdWire::Name("list".into())),
                 x: 0.0,
                 y: 1.0
             }
         );
         let expected = WidgetCommand::ScrollBy {
-            target: "list".into(),
+            target: target(crate::ElementIdWire::Name("list".into())),
             x: -24.0,
             y: 10.0,
         };

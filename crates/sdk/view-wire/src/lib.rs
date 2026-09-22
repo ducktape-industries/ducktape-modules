@@ -123,7 +123,7 @@ mod window;
 pub use window::{WindowCommand, WindowControlArea};
 
 mod widget;
-pub use widget::WidgetCommand;
+pub use widget::{WidgetCommand, WidgetTarget};
 
 mod surface;
 pub use surface::{MAX_SURFACE_DEPTH, MAX_SURFACE_VALUES, SurfaceValue, sanitize_surface_event};
@@ -1307,13 +1307,13 @@ fn sanitize_node(
             children.truncate(MAX_LIST_ROWS.min(item_count.saturating_sub(*range_start)));
         }
         Node::Sensor {
-            key,
+            id,
             reset,
             anticipate,
             delay,
             ..
         } => {
-            claim(key, taken);
+            id.validate_host()?;
             if let Some(value) = reset
                 && !value.bound(0, budgets, false)
             {
@@ -1330,8 +1330,8 @@ fn sanitize_node(
                 truncate_string(label);
             }
         }
-        Node::ResizeHandle { key, .. } | Node::Responsive { key, .. } | Node::Lazy { key, .. } => {
-            claim(key, taken)
+        Node::ResizeHandle { id, .. } => id.validate_host()?,
+        Node::Responsive { key, .. } | Node::Lazy { key, .. } => claim(key, taken),
         }
         Node::Float {
             key,
@@ -1370,14 +1370,14 @@ fn sanitize_node(
             children.truncate(2);
         }
         Node::Overlay {
-            key,
+            id,
             label,
             padding,
             backdrop,
             children,
             ..
         } => {
-            claim(key, taken);
+            id.validate_host()?;
             if let Some(label) = label {
                 truncate_string(label);
             }

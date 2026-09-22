@@ -87,7 +87,9 @@ impl Chat {
         });
         if mode != Mode::Editing {
             window.dispatch(wire::WidgetCommand::Focus {
-                target: crate::ui::menu::focus_key(pane, mode),
+                target: vec![wire::ElementIdWire::Name(
+                    crate::ui::menu::focus_key(pane, mode).into(),
+                )],
             });
         }
     }

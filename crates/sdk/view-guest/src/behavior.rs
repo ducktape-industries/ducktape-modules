@@ -11,12 +11,9 @@ type SizeListener = Box<dyn Fn(&(Pixels, Pixels), &mut Window, &mut App)>;
 type DragListener = Box<dyn Fn(&(Pixels, Pixels), &mut Window, &mut App)>;
 type UnitListener = Box<dyn Fn(&(), &mut Window, &mut App)>;
 
-fn key(id: ElementId) -> String {
+fn wire_id(id: ElementId) -> wire::ElementIdWire {
     wire::ElementIdWire::from_gpui(id)
         .expect("element ID must be portable across the view boundary")
-        .name()
-        .expect("behavior element IDs require names until retained nodes carry ElementIdWire")
-        .to_owned()
 }
 
 pub struct Sensor {
@@ -67,7 +64,7 @@ impl Element for Sensor {
 
     fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
         wire::Node::Sensor {
-            key: key(self.id),
+            id: wire_id(self.id),
             reset: None,
             on_show: self.on_show.map(|listener| lowering.route(listener)),
             on_resize: self.on_resize.map(|listener| lowering.route(listener)),
@@ -124,7 +121,7 @@ impl Element for ResizeHandle {
 
     fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
         wire::Node::ResizeHandle {
-            key: key(self.id),
+            id: wire_id(self.id),
             on_press: None,
             on_release: None,
             on_drag: self.on_drag.map(|listener| lowering.route(listener)),
@@ -189,7 +186,7 @@ impl Element for ModalOverlay {
 
     fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
         wire::Node::Overlay {
-            key: key(self.id),
+            id: wire_id(self.id),
             label: self.label,
             padding: pixel_padding(self.style.padding.top),
             backdrop: wire_rgba(self.backdrop),

@@ -184,7 +184,7 @@ pub enum Node {
     },
     /// A grabbed divider: local movement deltas and native cursor; one child.
     ResizeHandle {
-        key: String,
+        id: ElementIdWire,
         on_press: Option<u32>,
         on_release: Option<u32>,
         on_drag: Option<u32>,
@@ -268,7 +268,7 @@ pub enum Node {
     /// is the message for leaving view. `delay` is milliseconds a size
     /// must hold before it is reported.
     Sensor {
-        key: String,
+        id: ElementIdWire,
         /// Copied continuity value for `key=`, independent of widget identity.
         reset: Option<SurfaceValue>,
         on_show: Option<u32>,
@@ -492,7 +492,7 @@ pub enum Node {
     },
     /// A base plus an optional modal layer. Closing removes the second child.
     Overlay {
-        key: String,
+        id: ElementIdWire,
         /// The accessible name of the dialog; the variant is its role.
         label: Option<String>,
         padding: f32,
@@ -558,18 +558,19 @@ impl Node {
             Self::Container { id, .. }
             | Self::Text { id, .. }
             | Self::Image { id, .. }
-            | Self::Svg { id, .. } => id.as_ref().and_then(ElementIdWire::name),
-            Self::Input { id, .. } | Self::Editor { id, .. } | Self::UniformList { id, .. } => {
-                id.name()
-            }
-            Self::RichText { id, .. } => id.as_ref().and_then(ElementIdWire::name),
-            Self::ResizeHandle { key, .. }
-            | Self::MouseArea { key, .. }
+            | Self::Svg { id, .. }
+            | Self::RichText { id, .. } => id.as_ref().and_then(ElementIdWire::name),
+            Self::Input { id, .. }
+            | Self::Editor { id, .. }
+            | Self::UniformList { id, .. }
+            | Self::ResizeHandle { id, .. }
+            | Self::Sensor { id, .. }
+            | Self::Overlay { id, .. } => id.name(),
+            Self::MouseArea { key, .. }
             | Self::Float { key, .. }
             | Self::Responsive { key, .. }
             | Self::Lazy { key, .. }
             | Self::When { key, .. }
-            | Self::Sensor { key, .. }
             | Self::Scroll { key, .. }
             | Self::Qr { key, .. }
             | Self::ImageViewer { key, .. }
@@ -581,7 +582,6 @@ impl Node {
             | Self::PickList { key, .. }
             | Self::ComboBox { key, .. }
             | Self::Progress { key, .. }
-            | Self::Overlay { key, .. }
             | Self::Tooltip { key, .. }
             | Self::Surface { key, .. } => Some(key),
             Self::List { .. }
@@ -598,18 +598,19 @@ impl Node {
             Self::Container { id, .. }
             | Self::Text { id, .. }
             | Self::Image { id, .. }
-            | Self::Svg { id, .. } => id.as_ref().map(IdentityKeyRef::Element),
-            Self::Input { id, .. } | Self::Editor { id, .. } | Self::UniformList { id, .. } => {
-                Some(IdentityKeyRef::Element(id))
-            }
-            Self::RichText { id, .. } => id.as_ref().map(IdentityKeyRef::Element),
-            Self::ResizeHandle { key, .. }
-            | Self::MouseArea { key, .. }
+            | Self::Svg { id, .. }
+            | Self::RichText { id, .. } => id.as_ref().map(IdentityKeyRef::Element),
+            Self::Input { id, .. }
+            | Self::Editor { id, .. }
+            | Self::UniformList { id, .. }
+            | Self::ResizeHandle { id, .. }
+            | Self::Sensor { id, .. }
+            | Self::Overlay { id, .. } => Some(IdentityKeyRef::Element(id)),
+            Self::MouseArea { key, .. }
             | Self::Float { key, .. }
             | Self::Responsive { key, .. }
             | Self::Lazy { key, .. }
             | Self::When { key, .. }
-            | Self::Sensor { key, .. }
             | Self::Scroll { key, .. }
             | Self::Qr { key, .. }
             | Self::ImageViewer { key, .. }
@@ -621,7 +622,6 @@ impl Node {
             | Self::PickList { key, .. }
             | Self::ComboBox { key, .. }
             | Self::Progress { key, .. }
-            | Self::Overlay { key, .. }
             | Self::Tooltip { key, .. }
             | Self::Surface { key, .. } => Some(IdentityKeyRef::Legacy(key)),
             Self::List { .. }

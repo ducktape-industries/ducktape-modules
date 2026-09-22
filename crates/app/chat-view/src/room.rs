@@ -381,7 +381,7 @@ impl Chat {
         _cx: &mut Context<Self>,
     ) {
         window.dispatch(wire::WidgetCommand::ScrollToKey {
-            target: target.to_owned(),
+            target: vec![wire::ElementIdWire::Name(target.to_owned().into())],
             key: wire::ListKey::from(seq as i64).virtual_key(),
         });
     }
