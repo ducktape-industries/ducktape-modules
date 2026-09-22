@@ -34,7 +34,6 @@ fn editor(key: &str, placeholder: &str, document: editor_document::EditorDocumen
     }
 }
 
-/// of the few tests that read it.
 fn sanitized_root(root: Node) -> Node {
     let mut frame = Frame {
         root: Some(root),

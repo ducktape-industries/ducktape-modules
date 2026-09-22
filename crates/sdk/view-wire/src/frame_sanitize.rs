@@ -254,16 +254,16 @@ fn sanitize_tree_with(
 /// Typed IDs are unique among the children of the first containing element
 /// with an ID. An id-less wrapper is transparent to that GPUI scope; an
 /// identified node starts a fresh scope for its descendants.
-type IdentityScopes = Vec<std::collections::HashSet<IdentityKey>>;
+type IdentityScopes = Vec<std::collections::HashSet<ElementIdWire>>;
 
 fn claim_typed_scope(node: &Node, scopes: &mut IdentityScopes) -> Result<bool, &'static str> {
-    let Some(IdentityKeyRef::Element(id)) = node.identity() else {
+    let Some(id) = node.identity() else {
         return Ok(false);
     };
     let scope = scopes
         .last_mut()
         .expect("the root identity scope is always present");
-    if !scope.insert(IdentityKey::Element(id.clone())) {
+    if !scope.insert(id.clone()) {
         return Err("duplicate typed element identity among siblings");
     }
     scopes.push(std::collections::HashSet::new());

@@ -48,7 +48,7 @@ pub use sanitization::SanitizeReport;
 
 mod subscription;
 pub mod task;
-pub use subscription::{Observer, Recipe, Subscription};
+pub use subscription::{Recipe, Subscription};
 pub use task::Task;
 
 use serde::{Deserialize, Serialize};
@@ -76,10 +76,8 @@ pub use snapshot::{MAX_SNAPSHOT_BYTES, Snapshot, SnapshotValue};
 mod aria;
 pub mod click;
 pub use aria::Aria;
-mod identity;
 mod style;
 mod style_sanitize;
-pub use identity::{IdentityKey, IdentityKeyRef};
 pub use style::{
     ElementIdAtom, ElementIdWire, GroupRefinement, Interactivity, MAX_ELEMENT_ID_DEPTH,
 };

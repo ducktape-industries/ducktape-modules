@@ -346,20 +346,6 @@ pub struct Frame {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub enum AlignX {
-    Left,
-    Center,
-    Right,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub enum AlignY {
-    Top,
-    Center,
-    Bottom,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Axis {
     Column,
     Row,

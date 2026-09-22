@@ -1,19 +1,16 @@
 //! Persistent streams are identified by their recipe, not recreated per frame.
-use crate as wire;
 use crate::task::BoxStream;
 use futures::{Stream, StreamExt};
 use std::any::TypeId;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
-pub type Observer<T> = Box<dyn Fn(&wire::Event) -> Option<T>>;
 pub struct Recipe<T> {
     pub key: u64,
     pub start: Box<dyn FnOnce() -> BoxStream<T>>,
 }
 pub struct Subscription<T> {
     recipes: Vec<Recipe<T>>,
-    observers: Vec<Observer<T>>,
 }
 
 fn fingerprint(value: impl Hash) -> u64 {
@@ -26,15 +23,9 @@ impl<T: 'static> Subscription<T> {
     pub fn into_recipes(self) -> Vec<Recipe<T>> {
         self.recipes
     }
-    /// What a driver needs to run one: the streams to start, keyed, and the
-    /// event filters to ask on every observation.
-    pub fn into_parts(self) -> (Vec<Recipe<T>>, Vec<Observer<T>>) {
-        (self.recipes, self.observers)
-    }
     pub fn none() -> Self {
         Self {
             recipes: Vec::new(),
-            observers: Vec::new(),
         }
     }
     pub fn run<S: Stream<Item = T> + 'static>(make: fn() -> S) -> Self {
@@ -43,32 +34,12 @@ impl<T: 'static> Subscription<T> {
                 key: fingerprint((TypeId::of::<S>(), make as usize)),
                 start: Box::new(move || make().boxed_local()),
             }],
-            observers: Vec::new(),
-        }
-    }
-    pub fn run_with<D: Hash + 'static, S: Stream<Item = T> + 'static>(
-        data: D,
-        make: fn(&D) -> S,
-    ) -> Self {
-        Self {
-            recipes: vec![Recipe {
-                key: fingerprint((TypeId::of::<D>(), TypeId::of::<S>(), make as usize, &data)),
-                start: Box::new(move || make(&data).boxed_local()),
-            }],
-            observers: Vec::new(),
-        }
-    }
-    pub fn filter_events(filter: impl Fn(&wire::Event) -> Option<T> + 'static) -> Self {
-        Self {
-            recipes: Vec::new(),
-            observers: vec![Box::new(filter)],
         }
     }
     pub fn batch(subscriptions: impl IntoIterator<Item = Self>) -> Self {
         let mut result = Self::none();
         for mut subscription in subscriptions {
             result.recipes.append(&mut subscription.recipes);
-            result.observers.append(&mut subscription.observers);
         }
         result
     }
@@ -86,15 +57,6 @@ impl<T: 'static> Subscription<T> {
                             (recipe.start)().map(move |value| map(value)).boxed_local()
                         }),
                     }
-                })
-                .collect(),
-            observers: self
-                .observers
-                .into_iter()
-                .map(|observe| {
-                    let map = map.clone();
-                    Box::new(move |event: &wire::Event| observe(event).map(|value| map(value)))
-                        as Observer<U>
                 })
                 .collect(),
         }

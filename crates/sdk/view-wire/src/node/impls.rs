@@ -29,52 +29,17 @@ impl Node {
     }
 
     pub fn key(&self) -> Option<&str> {
-        match self {
-            Self::Container(crate::ContainerNode { id, .. })
-            | Self::Text(crate::TextNode { id, .. })
-            | Self::Image { id, .. }
-            | Self::Svg { id, .. }
-            | Self::RichText { id, .. } => id.as_ref().and_then(ElementIdWire::name),
-            Self::Input { id, .. }
-            | Self::Editor { id, .. }
-            | Self::UniformList { id, .. }
-            | Self::ResizeHandle { id, .. }
-            | Self::MouseArea { id, .. }
-            | Self::Sensor { id, .. }
-            | Self::Responsive { id, .. }
-            | Self::Scroll { id, .. }
-            | Self::Overlay { id, .. }
-            | Self::ImageViewer { id, .. }
-            | Self::Slider { id, .. }
-            | Self::PickList { id, .. }
-            | Self::ComboBox { id, .. }
-            | Self::Surface { id, .. }
-            | Self::Float { id, .. }
-            | Self::Lazy { id, .. }
-            | Self::When { id, .. }
-            | Self::Qr { id, .. }
-            | Self::Button { id, .. }
-            | Self::Rule { id, .. }
-            | Self::Toggle { id, .. }
-            | Self::Radio { id, .. }
-            | Self::Progress { id, .. }
-            | Self::Tooltip { id, .. } => id.name(),
-            Self::List { .. }
-            | Self::Space { .. }
-            | Self::Anchored { .. }
-            | Self::Deferred { .. }
-            | Self::Canvas { .. } => None,
-        }
+        self.identity().and_then(ElementIdWire::name)
     }
 
-    /// The node's identity without reducing a typed GPUI ID to text.
-    pub fn identity(&self) -> Option<IdentityKeyRef<'_>> {
+    /// The node's typed identity, when the variant carries one.
+    pub fn identity(&self) -> Option<&ElementIdWire> {
         match self {
             Self::Container(crate::ContainerNode { id, .. })
             | Self::Text(crate::TextNode { id, .. })
             | Self::Image { id, .. }
             | Self::Svg { id, .. }
-            | Self::RichText { id, .. } => id.as_ref().map(IdentityKeyRef::Element),
+            | Self::RichText { id, .. } => id.as_ref(),
             Self::Input { id, .. }
             | Self::Editor { id, .. }
             | Self::UniformList { id, .. }
@@ -98,7 +63,7 @@ impl Node {
             | Self::Toggle { id, .. }
             | Self::Radio { id, .. }
             | Self::Progress { id, .. }
-            | Self::Tooltip { id, .. } => Some(IdentityKeyRef::Element(id)),
+            | Self::Tooltip { id, .. } => Some(id),
             Self::List { .. }
             | Self::Space { .. }
             | Self::Anchored { .. }

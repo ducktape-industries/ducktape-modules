@@ -14,10 +14,7 @@ pub(super) fn sanitize_node(
         *node = Node::empty();
         return Ok(());
     }
-    let typed_id = match node.identity() {
-        Some(IdentityKeyRef::Element(id)) => Some(id.clone()),
-        _ => None,
-    };
+    let typed_id = node.identity().cloned();
     let typed_scope_started = claim_typed_scope(node, identity_scopes)?;
     if let Some(id) = typed_id {
         authored_path.push(id);

@@ -211,7 +211,11 @@ pub(super) fn gen_rule(rng: &mut Rng) -> Node {
 pub(super) fn gen_text(rng: &mut Rng) -> Node {
     Node::Text(view_wire::TextNode {
         id: None,
-        style: gpui::StyleRefinement::default(),
+        style: if rng.next_range(8) == 0 {
+            gen_native_style(rng)
+        } else {
+            gpui::StyleRefinement::default()
+        },
         content: gen_string(rng),
         // 0 and 7 are outside 1..=6, for the sanitizer to drop.
         heading: rng.next_bool().then(|| rng.next_range(8) as u8),
@@ -221,45 +225,128 @@ pub(super) fn gen_text(rng: &mut Rng) -> Node {
     })
 }
 
+/// A whole hostile refinement: every field `sanitize` bounds, drawn from
+/// [`gen_f32`], so a tree exercises each clamp on every styled node.
+pub(super) fn gen_native_style(rng: &mut Rng) -> gpui::StyleRefinement {
+    use gpui::{AbsoluteLength, DefiniteLength, px, rems};
+    let number = gen_f32;
+    let absolute = |rng: &mut Rng| -> AbsoluteLength {
+        if rng.next_bool() {
+            px(number(rng)).into()
+        } else {
+            rems(number(rng)).into()
+        }
+    };
+    let definite = |rng: &mut Rng| -> DefiniteLength {
+        if rng.next_bool() {
+            absolute(rng).into()
+        } else {
+            DefiniteLength::Fraction(number(rng))
+        }
+    };
+    let mut style = gpui::StyleRefinement::default();
+    for value in [
+        &mut style.inset.top,
+        &mut style.inset.right,
+        &mut style.inset.bottom,
+        &mut style.inset.left,
+        &mut style.size.width,
+        &mut style.size.height,
+        &mut style.min_size.width,
+        &mut style.min_size.height,
+        &mut style.max_size.width,
+        &mut style.max_size.height,
+        &mut style.margin.top,
+        &mut style.margin.right,
+        &mut style.margin.bottom,
+        &mut style.margin.left,
+        &mut style.flex_basis,
+    ] {
+        *value = Some(definite(rng).into());
+    }
+    for value in [
+        &mut style.padding.top,
+        &mut style.padding.right,
+        &mut style.padding.bottom,
+        &mut style.padding.left,
+        &mut style.gap.width,
+        &mut style.gap.height,
+    ] {
+        *value = Some(definite(rng));
+    }
+    for value in [
+        &mut style.border_widths.top,
+        &mut style.border_widths.right,
+        &mut style.border_widths.bottom,
+        &mut style.border_widths.left,
+        &mut style.corner_radii.top_left,
+        &mut style.corner_radii.top_right,
+        &mut style.corner_radii.bottom_left,
+        &mut style.corner_radii.bottom_right,
+        &mut style.scrollbar_width,
+    ] {
+        *value = Some(absolute(rng));
+    }
+    style.flex_grow = Some(gen_f32(rng));
+    style.flex_shrink = Some(gen_f32(rng));
+    style.aspect_ratio = Some(gen_f32(rng));
+    style.opacity = Some(gen_f32(rng));
+    style.border_color = Some(gen_color(rng));
+    style.background = Some(gen_color(rng).into());
+    style.box_shadow = Some(
+        (0..rng.next_range(20))
+            .map(|_| gpui::BoxShadow {
+                color: gen_color(rng),
+                offset: gpui::point(px(gen_f32(rng)), px(gen_f32(rng))),
+                blur_radius: px(gen_f32(rng)),
+                spread_radius: px(gen_f32(rng)),
+                inset: false,
+            })
+            .collect(),
+    );
+    style.grid_cols = Some(gpui::GridTemplate {
+        repeat: rng.next_u64() as u16,
+        ..Default::default()
+    });
+    style.grid_rows = Some(gpui::GridTemplate {
+        repeat: rng.next_u64() as u16,
+        ..Default::default()
+    });
+    style.grid_location = Some(gpui::GridLocation {
+        row: gpui::GridPlacement::Line(rng.next_u64() as i16)
+            ..gpui::GridPlacement::Span(rng.next_u64() as u16),
+        column: gpui::GridPlacement::Span(rng.next_u64() as u16)
+            ..gpui::GridPlacement::Line(rng.next_u64() as i16),
+    });
+    style.text.color = Some(gen_color(rng));
+    style.text.background_color = Some(gen_color(rng));
+    style.text.font_size = Some(absolute(rng));
+    style.text.line_height = Some(definite(rng));
+    style.text.font_weight = Some(gpui::FontWeight(gen_f32(rng)));
+    style.text.line_clamp = Some(rng.next_u64() as usize);
+    style.text.underline = Some(gpui::UnderlineStyle {
+        thickness: px(gen_f32(rng)),
+        color: Some(gen_color(rng)),
+        wavy: true,
+    });
+    style.text.strikethrough = Some(gpui::StrikethroughStyle {
+        thickness: px(gen_f32(rng)),
+        color: Some(gen_color(rng)),
+    });
+    style
+}
+
+pub(super) fn gen_color(rng: &mut Rng) -> gpui::Hsla {
+    gpui::Hsla {
+        h: gen_f32(rng),
+        s: gen_f32(rng),
+        l: gen_f32(rng),
+        a: gen_f32(rng),
+    }
+}
+
 /// A picture whose bytes cross about half the time, and about one time in
 /// sixteen run past `MAX_PICTURE_BYTES_PER_FRAME` on their own.
-pub(super) fn gen_native_style(rng: &mut Rng) -> gpui::StyleRefinement {
-    use gpui::Styled;
-    gpui::StyleRefinement::default()
-        .w(gpui::px(gen_f32(rng)))
-        .h(gpui::px(gen_f32(rng)))
-        .opacity(gen_f32(rng))
-        .text_color(gpui::Hsla {
-            h: gen_f32(rng),
-            s: gen_f32(rng),
-            l: gen_f32(rng),
-            a: gen_f32(rng),
-        })
-}
-
-pub(super) fn check_native_style(style: &gpui::StyleRefinement) {
-    for length in [&style.size.width, &style.size.height]
-        .into_iter()
-        .flatten()
-    {
-        if let gpui::Length::Definite(gpui::DefiniteLength::Absolute(
-            gpui::AbsoluteLength::Pixels(value),
-        )) = length
-        {
-            let value = f32::from(*value);
-            assert!(value.is_finite() && (0.0..=PIXEL_BOUND).contains(&value));
-        }
-    }
-    if let Some(opacity) = style.opacity {
-        assert!(opacity.is_finite() && (0.0..=1.0).contains(&opacity));
-    }
-    if let Some(color) = style.text.color {
-        for value in [color.h, color.s, color.l, color.a] {
-            assert!(value.is_finite() && (0.0..=1.0).contains(&value));
-        }
-    }
-}
-
 pub(super) fn gen_svg(rng: &mut Rng) -> Node {
     let bytes = rng.next_bool().then(|| {
         let len = match rng.next_range(16) {
@@ -441,12 +528,28 @@ pub(super) fn gen_leaf(rng: &mut Rng) -> Node {
 /// (`deep_chain_bytes` in `lib.rs`) builds a deep chain the same way,
 /// because a recursive builder would blow its own stack before `decode`
 /// ever got a chance to refuse anything.
-/// A current wire node holding a child list, around `children`.
-pub(super) fn gen_container(_rng: &mut Rng, children: Vec<Node>) -> Node {
+/// A current wire node holding a child list, around `children`. One in
+/// eight carries a hostile base style and every conditional refinement, so
+/// the bounds are exercised on the node kind views style most.
+pub(super) fn gen_container(rng: &mut Rng, children: Vec<Node>) -> Node {
+    let styled = rng.next_range(8) == 0;
+    let refinement = |rng: &mut Rng| styled.then(|| gen_native_style(rng));
+    let group = |rng: &mut Rng| {
+        refinement(rng).map(|style| GroupRefinement {
+            group: "row".into(),
+            style,
+        })
+    };
     Node::Container(view_wire::ContainerNode {
         id: None,
-        style: gpui::StyleRefinement::default(),
-        interactivity: Interactivity::default(),
+        style: refinement(rng).unwrap_or_default(),
+        interactivity: Interactivity {
+            hover: refinement(rng),
+            active: refinement(rng),
+            group_hover: group(rng),
+            group_active: group(rng),
+            ..Default::default()
+        },
         children,
     })
 }

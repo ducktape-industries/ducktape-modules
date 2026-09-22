@@ -1,7 +1,7 @@
 //! Patches: the mutation list a guest sends instead of a whole tree, the
 //! host-side [`apply`], and the [`diff`] that produces one.
 
-use crate::{identity::same_identity, *};
+use crate::*;
 use serde::{Deserialize, Serialize};
 
 /// One edit to the tree the host holds. `path` is the child index at every
@@ -204,7 +204,7 @@ fn diff_list(old: &mut [Node], new: &mut [Node], path: &mut Vec<u32>, out: &mut 
             .iter()
             .zip(new.iter())
             .all(|(a, b)| match (a.identity(), b.identity()) {
-                (Some(a), Some(b)) => same_identity(Some(a), Some(b)),
+                (Some(a), Some(b)) => a == b,
                 (None, None) => std::mem::discriminant(a) == std::mem::discriminant(b),
                 _ => false,
             });
@@ -219,11 +219,11 @@ fn diff_list(old: &mut [Node], new: &mut [Node], path: &mut Vec<u32>, out: &mut 
     // An identity that appears once on each side is a child that survives;
     // every other child — unkeyed, or a duplicate — is removed and inserted
     // afresh. Typed GPUI IDs stay typed all the way through this map.
-    let unique = |nodes: &[Node]| -> std::collections::HashMap<IdentityKey, usize> {
+    let unique = |nodes: &[Node]| -> std::collections::HashMap<ElementIdWire, usize> {
         let mut seen = std::collections::HashMap::new();
         for (index, node) in nodes.iter().enumerate() {
             if let Some(identity) = node.identity() {
-                seen.entry(identity.to_owned())
+                seen.entry(identity.clone())
                     .and_modify(|at| *at = usize::MAX)
                     .or_insert(index);
             }
