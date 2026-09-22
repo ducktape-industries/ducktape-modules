@@ -445,7 +445,7 @@ export_view!(
     Members,
     "Members",
     "Every account of this network, with the standing of the keys it holds.",
-    ["rpc"]
+    ["rpc", "host"]
 );
 
 #[cfg(test)]

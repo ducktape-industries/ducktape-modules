@@ -61,7 +61,7 @@ impl<T> Loaded<T> {
 enum LoadedSnapshot<T> {
     Idle,
     Ready(T),
-    Failed(Refusal),
+    Failed { reason: String, sentence: String },
 }
 
 impl<T: Serialize> Serialize for Loaded<T> {
@@ -69,7 +69,10 @@ impl<T: Serialize> Serialize for Loaded<T> {
         match self {
             Self::Idle | Self::Loading(_) => LoadedSnapshot::<&T>::Idle,
             Self::Ready(value) => LoadedSnapshot::Ready(value),
-            Self::Failed(refusal) => LoadedSnapshot::Failed(refusal.clone()),
+            Self::Failed(refusal) => LoadedSnapshot::Failed {
+                reason: refusal.reason.clone(),
+                sentence: refusal.sentence.clone(),
+            },
         }
         .serialize(serializer)
     }
@@ -80,7 +83,9 @@ impl<'de, T: Deserialize<'de>> Deserialize<'de> for Loaded<T> {
         Ok(match LoadedSnapshot::deserialize(deserializer)? {
             LoadedSnapshot::Idle => Self::Idle,
             LoadedSnapshot::Ready(value) => Self::Ready(value),
-            LoadedSnapshot::Failed(refusal) => Self::Failed(refusal),
+            LoadedSnapshot::Failed { reason, sentence } => {
+                Self::Failed(Refusal::new(reason, sentence))
+            }
         })
     }
 }

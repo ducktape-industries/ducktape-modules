@@ -117,9 +117,15 @@ pub const fn manifest_bytes<const N: usize>(text: &str, preferred_size: &str) ->
 }
 
 /// The manifest section and the wasm32 exports ([`wire::abi`]) for a view. `export_view!` invokes this internally.
+/// Each capability must be one of [`wire::doors::CAPABILITIES`], the
+/// `<capability>` half of the door kinds the view asks through.
 #[macro_export]
 macro_rules! export_driver {
     ($app:ty, $name:expr, $description:expr, [$($capability:literal),* $(,)?]) => {
+        $(const _: () = assert!(
+            $crate::wire::doors::is_capability($capability),
+            concat!("`", $capability, "` is not a door capability: see view_wire::doors::CAPABILITIES")
+        );)*
         const MANIFEST: &str = concat!("ducktape.view.manifest.v1\n", $name, "\n", $description, "\n" $(, $capability, ",")*, "\n");
 
         #[cfg_attr(target_arch = "wasm32", unsafe(link_section = "ducktape.view.manifest"))]

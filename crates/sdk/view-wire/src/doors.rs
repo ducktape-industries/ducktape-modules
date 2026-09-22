@@ -465,9 +465,61 @@ pub const ALL: &[&str] = &[
     NotifyShow::KIND,
 ];
 
+/// The `<capability>` half of every kind in [`ALL`]: the names a view's
+/// manifest may declare. `export_view!` refuses any other at compile time.
+pub const CAPABILITIES: &[&str] = &[
+    "rpc",
+    "op",
+    "blob",
+    "host",
+    "clock",
+    "fs",
+    "clipboard",
+    "media",
+    "audio",
+    "video",
+    "notify",
+];
+
+/// Whether `name` is in [`CAPABILITIES`]; `const` so a manifest literal is
+/// checked where it is written.
+pub const fn is_capability(name: &str) -> bool {
+    let name = name.as_bytes();
+    let mut index = 0;
+    while index < CAPABILITIES.len() {
+        let known = CAPABILITIES[index].as_bytes();
+        if known.len() == name.len() {
+            let mut byte = 0;
+            while byte < known.len() && known[byte] == name[byte] {
+                byte += 1;
+            }
+            if byte == known.len() {
+                return true;
+            }
+        }
+        index += 1;
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn capabilities_are_exactly_the_prefixes_of_every_kind() {
+        let mut prefixes: Vec<&str> = ALL
+            .iter()
+            .map(|kind| kind.split_once('.').unwrap().0)
+            .collect();
+        prefixes.sort_unstable();
+        prefixes.dedup();
+        let mut known = CAPABILITIES.to_vec();
+        known.sort_unstable();
+        assert_eq!(prefixes, known);
+        assert!(is_capability("rpc") && is_capability("notify"));
+        assert!(!is_capability("chat") && !is_capability("rpc.query") && !is_capability(""));
+    }
 
     struct Binary;
     impl Program for Binary {

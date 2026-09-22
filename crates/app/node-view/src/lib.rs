@@ -342,7 +342,7 @@ export_view!(
     Nodes,
     "Nodes",
     "The validator set of this network and every membership behind it.",
-    ["rpc"]
+    ["rpc", "host"]
 );
 
 #[cfg(test)]

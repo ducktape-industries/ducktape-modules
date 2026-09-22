@@ -180,5 +180,5 @@ view_guest::export_view!(
     MediaProbe,
     "Media probe",
     "opens the microphone and the camera through the device doors",
-    ["media.devices", "audio.capture", "video.capture"]
+    ["media", "audio", "video"]
 );

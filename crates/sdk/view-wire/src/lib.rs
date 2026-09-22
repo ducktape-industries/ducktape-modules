@@ -25,6 +25,8 @@
 /// in the SAME commit as the shape change: a view built against the old shape is
 /// refused at load instead of faulting on its first frame.
 /// This is independent of the calling convention ([`abi`]) and the manifest text format.
+/// `tests/golden.rs` holds the bytes of every node, event and door: it fails on
+/// any change and says to bump this and regenerate with `WIRE_GOLDEN_WRITE=1`.
 ///
 /// 8: `Event::Response` carries `Result<Vec<u8>, Refusal>` (1b4d8a0 changed the
 ///    shape and left the epoch at 7; views deployed before it faulted with

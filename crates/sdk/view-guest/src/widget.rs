@@ -1,6 +1,7 @@
 //! Widget commands use the mounted host's scoped request channel.
 #[cfg(test)]
 mod tests {
+    use crate::doors::{Door, Widget};
     use crate::{host, wire, Context, Driver, ElementId, Host, Input, Render, View, Window};
     use serde::{Deserialize, Serialize};
 
@@ -9,7 +10,7 @@ mod tests {
     }
 
     async fn perform(host: Host, command: wire::WidgetCommand) -> Result<Vec<u8>, host::Refusal> {
-        host.request("host.widget", &wire::encode(&command)).await
+        host.request(Widget::KIND, &wire::encode(&command)).await
     }
 
     #[derive(Serialize, Deserialize)]
@@ -60,7 +61,7 @@ mod tests {
         let [focus] = frame.requests.as_slice() else {
             panic!("one focus request: {:?}", frame.requests)
         };
-        assert_eq!(focus.kind, "host.widget");
+        assert_eq!(focus.kind, Widget::KIND);
         assert_eq!(
             wire::decode::<wire::WidgetCommand>(&focus.payload).unwrap(),
             wire::WidgetCommand::Focus {

@@ -246,6 +246,7 @@ pub enum Event {
     /// `done`; a subscription gets many, the last one `done`.
     Response {
         id: u64,
+        #[serde(with = "response")]
         result: Result<Vec<u8>, Refusal>,
         done: bool,
     },
@@ -254,39 +255,51 @@ pub enum Event {
     Resync,
 }
 
-/// Why a request failed, as the guest gets it: a stable snake_case `reason` to
-/// branch on and the `sentence` to show.
-///
-/// The host owns the split, and that is the point of this type existing. A
-/// refusal used to cross as one flat string carrying its own transport
-/// envelope — `RPC returned 400 Bad Request: {"error":"Module(<the module's
-/// words>)"}` — so a view that wanted the sentence had to peel the envelope
-/// back off, and one that wanted to tell "never" from "not yet" had only prose
-/// to read. Every view doing that itself is the same code written as many times
-/// as there are views, drifting apart.
-///
-/// `sentence` is the refusing module's own words, verbatim. Nothing here
-/// paraphrases a refusal it did not write.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Refusal {
-    pub reason: String,
-    pub sentence: String,
-}
+/// Why a request failed, as the guest gets it: the program abi's own
+/// [`Refusal`] — a stable snake_case `reason` to branch on and the refusing
+/// module's `sentence`, verbatim — so a refusal a program wrote and one the
+/// host wrote are the same type end to end. `Display` writes
+/// `reason: sentence`; a screen that wants the sentence alone reads it.
+pub use ::abi::Refusal;
 
-impl Refusal {
-    pub fn new(reason: impl Into<String>, sentence: impl Into<String>) -> Self {
-        Self {
-            reason: reason.into(),
-            sentence: sentence.into(),
-        }
+/// `Refusal` derives borsh only (it is the program abi's type, a copy of the
+/// kernel's), so the one place it crosses the MessagePack layer,
+/// [`Event::Response`], spells its serde shape here: the same
+/// `{"Ok": bytes} | {"Err": {"reason", "sentence"}}` a derived `Result` writes.
+mod response {
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Serialize, Deserialize)]
+    #[serde(remote = "::abi::Refusal")]
+    struct RefusalDef {
+        reason: String,
+        sentence: String,
     }
-}
 
-/// So a view that only wants to SHOW the refusal writes `{refusal}` and is
-/// done — the token is for branching, not for reading.
-impl std::fmt::Display for Refusal {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(&self.sentence)
+    #[derive(Serialize, Deserialize)]
+    enum ResultDef {
+        Ok(Vec<u8>),
+        Err(#[serde(with = "RefusalDef")] ::abi::Refusal),
+    }
+
+    pub fn serialize<S: serde::Serializer>(
+        result: &Result<Vec<u8>, ::abi::Refusal>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        match result {
+            Ok(bytes) => ResultDef::Ok(bytes.clone()),
+            Err(refusal) => ResultDef::Err(refusal.clone()),
+        }
+        .serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Result<Vec<u8>, ::abi::Refusal>, D::Error> {
+        Ok(match ResultDef::deserialize(deserializer)? {
+            ResultDef::Ok(bytes) => Ok(bytes),
+            ResultDef::Err(refusal) => Err(refusal),
+        })
     }
 }
 
