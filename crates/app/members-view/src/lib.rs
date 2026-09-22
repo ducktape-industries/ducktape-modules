@@ -9,7 +9,6 @@ use ducktape_view_guest::caps::{Program, QueryBytes};
 use ducktape_view_guest::export_view;
 use ducktape_view_guest::host::{Refusal, malformed};
 use ducktape_view_guest::view::{Live, Loaded};
-use ducktape_view_guest::{ClickEvent, InteractiveElement};
 use ducktape_view_guest::{
     App, ClickEvent, Context, ElementId, Host, InteractiveElement, IntoElement, ParentElement,
     Render, RenderOnce, StatefulInteractiveElement, Styled, Task, Theme, View, Window, div, px,
