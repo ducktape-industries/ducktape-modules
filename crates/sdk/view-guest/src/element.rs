@@ -549,3 +549,13 @@ fn stable_hash(bytes: &[u8]) -> u64 {
     bytes.hash(&mut hasher);
     hasher.finish()
 }
+
+impl gpui::prelude::FluentBuilder for Div {}
+impl gpui::prelude::FluentBuilder for AnyElement {}
+impl<E> gpui::prelude::FluentBuilder for Stateful<E> {}
+impl gpui::prelude::FluentBuilder for Img {}
+impl gpui::prelude::FluentBuilder for Svg {}
+impl gpui::prelude::FluentBuilder for Deferred {}
+impl gpui::prelude::FluentBuilder for Anchored {}
+impl gpui::prelude::FluentBuilder for Canvas {}
+impl<R> gpui::prelude::FluentBuilder for UniformList<R> {}

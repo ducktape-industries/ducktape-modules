@@ -220,9 +220,8 @@ impl<M: 'static> EditorTransaction<M> {
                     return None;
                 }
                 if editor.document_reference(request.id.document.clone()) != request.state {
-                    if request.state.reset == editor.reset_revision()
-                        && let Err(reason) = slots::request_editor_mirror(&self.context, &request)
-                    {
+                    if request.state.reset == editor.reset_revision() {
+                        if let Err(reason) = slots::request_editor_mirror(&self.context, &request) {
                         slots::editor_document_failure(
                             &self.context,
                             wire::editor_document::EditorTransferId {
@@ -234,6 +233,7 @@ impl<M: 'static> EditorTransaction<M> {
                             },
                             reason,
                         );
+                        }
                     }
                     return None;
                 }

@@ -11,9 +11,11 @@ use ducktape_view_guest::host::{Refusal, malformed};
 use ducktape_view_guest::view::{Live, Loaded};
 use ducktape_view_guest::{ClickEvent, InteractiveElement, StatefulInteractiveElement};
 use ducktape_view_guest::{
-    AnyElement, App, Context, ElementId, Host, IntoElement, ParentElement, Render, RenderOnce,
+    AnyElement, Context, ElementId, Host, IntoElement, ParentElement, Render,
     Styled, Task, Theme, View, Window, div, px,
 };
+mod components;
+use components::{EmptyState, Section};
 use futures::StreamExt;
 use modules::valset;
 use serde::{Deserialize, Serialize};
@@ -156,12 +158,7 @@ impl Nodes {
                     .into_any_element()
             }
             Loaded::Ready(set) if set.members.is_empty() && set.validators.is_empty() => {
-                empty_state(
-                    "nodes-empty",
-                    "No members",
-                    "The validator set of this network is empty.",
-                    theme,
-                )
+                EmptyState::new("nodes-empty", "No members", "The validator set of this network is empty.")
                 .into_any_element()
             }
             Loaded::Ready(set) => div()
@@ -171,9 +168,9 @@ impl Nodes {
                 .flex()
                 .flex_col()
                 .gap_2()
-                .child(section("nodes-set-header", "Validator set", theme))
+                .child(Section::new("nodes-set-header", "Validator set"))
                 .child(validators(&set.validators, theme))
-                .child(section("nodes-members-header", "Memberships", theme))
+                .child(Section::new("nodes-members-header", "Memberships"))
                 .child(members(&set.members, theme))
                 .into_any_element(),
         }
@@ -260,35 +257,6 @@ fn members(members: &[Member], theme: &Theme) -> impl IntoElement {
                         .child(member.standing.clone()),
                 )
         }))
-}
-
-fn section(id: &str, label: &str, theme: &Theme) -> impl IntoElement {
-    div()
-        .id(ElementId::Name(id.into()))
-        .h(px(28.))
-        .flex()
-        .items_center()
-        .px_2()
-        .text_sm()
-        .text_color(theme.muted)
-        .child(label.to_owned())
-}
-
-fn empty_state(id: &str, title: &str, detail: &str, theme: &Theme) -> impl IntoElement {
-    div()
-        .id(ElementId::Name(id.into()))
-        .flex()
-        .flex_col()
-        .gap_1()
-        .p_6()
-        .max_w(px(420.))
-        .child(div().text_base().child(title.to_owned()))
-        .child(
-            div()
-                .text_sm()
-                .text_color(theme.muted)
-                .child(detail.to_owned()),
-        )
 }
 
 fn short_id(id: &str, keep: usize) -> String {

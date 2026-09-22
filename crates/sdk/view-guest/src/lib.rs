@@ -4,6 +4,7 @@ pub use gpui::{
     ClickEvent, ElementId, Global, Hsla, SharedString, StyleRefinement, Styled, px, rems, rgb,
 };
 pub use view_guest_derive::IntoElement;
+pub use gpui::prelude::FluentBuilder;
 mod theme;
 pub use theme::Theme;
 mod element;
@@ -16,7 +17,7 @@ pub use element::{
 /// Traits and primitives used to compose guest GPUI elements.
 pub mod prelude {
     pub use crate::{
-        AnyElement, App, ClickEvent, Context, ElementId, Global, Hsla, InteractiveElement,
+        AnyElement, App, ClickEvent, Context, ElementId, FluentBuilder, Global, Hsla, InteractiveElement,
         IntoElement, ParentElement, Render, RenderOnce, SharedString, StatefulInteractiveElement,
         Styled, Theme, Window, anchored, canvas, deferred, div, img, px, rems, rgb, svg, uniform_list,
     };

@@ -13,6 +13,8 @@ use ducktape_view_guest::{
     AnyElement, Context, ElementId, Host, IntoElement, ParentElement, Render, Styled, Task, Theme,
     View, Window, div, px,
 };
+mod components;
+use components::{EmptyState, Section};
 use futures::StreamExt;
 use modules::module_registry as registry;
 use serde::{Deserialize, Serialize};
@@ -161,12 +163,7 @@ impl Explorer {
                     .into_any_element()
             }
             Loaded::Ready(network) if network.programs.is_empty() && network.changes.is_empty() => {
-                empty_state(
-                    "explorer-empty",
-                    "No programs",
-                    "The registry of this network runs nothing yet.",
-                    theme,
-                )
+                EmptyState::new("explorer-empty", "No programs", "The registry of this network runs nothing yet.")
                 .into_any_element()
             }
             Loaded::Ready(network) => div()
@@ -176,9 +173,9 @@ impl Explorer {
                 .flex()
                 .flex_col()
                 .gap_2()
-                .child(section("explorer-running-header", "Running", theme))
+                .child(Section::new("explorer-running-header", "Running"))
                 .child(programs(&network.programs, theme))
-                .child(section("explorer-scheduled-header", "Scheduled", theme))
+                .child(Section::new("explorer-scheduled-header", "Scheduled"))
                 .child(changes(&network.changes, theme))
                 .into_any_element(),
         }
@@ -276,35 +273,6 @@ fn changes(changes: &[Change], theme: &Theme) -> AnyElement {
             row
         }))
         .into_any_element()
-}
-
-fn section(id: &str, label: &str, theme: &Theme) -> impl IntoElement {
-    div()
-        .id(ElementId::Name(id.into()))
-        .h(px(28.))
-        .flex()
-        .items_center()
-        .px_2()
-        .text_sm()
-        .text_color(theme.muted)
-        .child(label.to_owned())
-}
-
-fn empty_state(id: &str, title: &str, detail: &str, theme: &Theme) -> impl IntoElement {
-    div()
-        .id(ElementId::Name(id.into()))
-        .flex()
-        .flex_col()
-        .gap_1()
-        .p_6()
-        .max_w(px(420.))
-        .child(div().text_base().child(title.to_owned()))
-        .child(
-            div()
-                .text_sm()
-                .text_color(theme.muted)
-                .child(detail.to_owned()),
-        )
 }
 
 fn short_id(id: &str, keep: usize) -> String {
