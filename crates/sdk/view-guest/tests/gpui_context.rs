@@ -107,19 +107,34 @@ fn pointer_listener_preserves_payload_and_routes_after_frame_reset() {
 #[derive(Serialize, Deserialize)]
 struct TooltipSurface;
 impl View for TooltipSurface {
-    fn new(_: &mut Window, _: &mut Context<Self>) -> Self { Self }
+    fn new(_: &mut Window, _: &mut Context<Self>) -> Self {
+        Self
+    }
 }
 impl Render for TooltipSurface {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()
             .id("target")
-            .hoverable_tooltip(|_, _| AnyView::new(div().id("tip").child("Help")))
             .tooltip_show_delay(std::time::Duration::from_millis(250))
+            .hoverable_tooltip(|_, cx| cx.new(|_| TooltipContent).into())
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct TooltipContent;
+impl View for TooltipContent {
+    fn new(_: &mut Window, _: &mut Context<Self>) -> Self {
+        Self
+    }
+}
+impl Render for TooltipContent {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().id("tip").child("Help")
     }
 }
 
 #[test]
-fn tooltip_lowers_a_guest_subtree_with_native_delay_and_hoverability() {
+fn tooltip_delay_is_order_independent_and_builder_runs_only_after_request() {
     let mut driver = Driver::<TooltipSurface>::new();
     let frame = driver.tick(vec![]);
     let wire::Node::Container { interactivity, .. } = frame.root.as_ref().unwrap() else {
@@ -128,11 +143,58 @@ fn tooltip_lowers_a_guest_subtree_with_native_delay_and_hoverability() {
     let tooltip = interactivity.tooltip.as_ref().expect("tooltip recipe");
     assert!(tooltip.hoverable);
     assert_eq!(tooltip.delay_ms, 250);
-    let wire::Node::Container { id, children, .. } = tooltip.content.as_ref() else {
+    assert!(
+        tooltip.content.is_none(),
+        "ordinary render must not build the tooltip"
+    );
+    let response = driver.tick(vec![wire::Event::TooltipRequest {
+        request: tooltip.request,
+    }]);
+    let [response] = response.tooltip_responses.as_slice() else {
+        panic!("one tooltip response")
+    };
+    assert_eq!(response.request, tooltip.request);
+    let wire::Node::Container { id, children, .. } = response.content.as_ref() else {
         panic!("tooltip content is a lowered container")
     };
     assert_eq!(id, &Some(wire::ElementIdWire::Name("tip".into())));
     assert_eq!(children.len(), 1);
+}
+
+#[derive(Serialize, Deserialize)]
+struct FocusSurface;
+impl View for FocusSurface {
+    fn new(_: &mut Window, _: &mut Context<Self>) -> Self {
+        Self
+    }
+}
+impl Render for FocusSurface {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let first = cx.focus_handle();
+        let same = first.clone();
+        let unrelated = cx.focus_handle();
+        div()
+            .child(div().id("first").track_focus(&first))
+            .child(div().id("same").track_focus(&same))
+            .child(div().id("other").track_focus(&unrelated))
+    }
+}
+
+#[test]
+fn opaque_focus_allocations_share_only_through_clone() {
+    let frame = Driver::<FocusSurface>::new().tick(vec![]);
+    let wire::Node::Container { children, .. } = frame.root.unwrap() else {
+        panic!("root container")
+    };
+    let ids: Vec<_> = children
+        .iter()
+        .map(|node| match node {
+            wire::Node::Container { interactivity, .. } => interactivity.focus_handle.unwrap(),
+            _ => panic!("focus container"),
+        })
+        .collect();
+    assert_eq!(ids[0], ids[1]);
+    assert_ne!(ids[0], ids[2]);
 }
 
 #[test]
@@ -192,12 +254,16 @@ fn listeners_use_weak_entities() {
 }
 
 #[derive(Serialize, Deserialize)]
-struct GlobalReader { initial: usize }
+struct GlobalReader {
+    initial: usize,
+}
 struct Configuration(usize);
 impl Global for Configuration {}
 impl View for GlobalReader {
     fn new(_: &mut Window, cx: &mut Context<Self>) -> Self {
-        Self { initial: cx.global::<Configuration>().0 }
+        Self {
+            initial: cx.global::<Configuration>().0,
+        }
     }
     fn restored(&mut self, _: &mut Window, cx: &mut Context<Self>) {
         self.initial = cx.global::<Configuration>().0;
@@ -225,7 +291,9 @@ fn test_globals_are_available_during_creation_and_restore_without_clone() {
 #[derive(Default, Serialize, Deserialize)]
 struct ThemeReader;
 impl View for ThemeReader {
-    fn new(_: &mut Window, _: &mut Context<Self>) -> Self { Self }
+    fn new(_: &mut Window, _: &mut Context<Self>) -> Self {
+        Self
+    }
 }
 impl Render for ThemeReader {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -238,9 +306,14 @@ fn host_theme_updates_the_global_and_emits_a_style_patch() {
     let first = driver.tick(vec![]);
     let mut root = first.root.unwrap();
     let changed = driver.tick(vec![wire::Event::Theme { dark: true }]);
-    assert!(matches!(changed.patches.as_slice(), [wire::Patch::Props { .. }]));
+    assert!(matches!(
+        changed.patches.as_slice(),
+        [wire::Patch::Props { .. }]
+    ));
     wire::apply(&mut root, changed.patches).unwrap();
-    let wire::Node::Container { style, .. } = root else { panic!("container") };
+    let wire::Node::Container { style, .. } = root else {
+        panic!("container")
+    };
     assert_eq!(style.background, Some(Theme::dark().surface.into()));
     assert_ne!(Theme::dark().surface, Theme::light().surface);
 }

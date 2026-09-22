@@ -1,6 +1,8 @@
 //! GPUI-shaped interaction recipes lowered into driver-owned frame routes.
 
-use crate::{wire, AnyElement, AnyView, App, Div, Element, IntoElement, Lowering, ParentElement, Window};
+use crate::{
+    wire, AnyElement, AnyView, App, Div, Element, IntoElement, Lowering, ParentElement, Window,
+};
 use gpui::{
     ClickEvent, ElementId, FileDropEvent, MouseButton, SharedString, StyleRefinement, Styled,
     WindowControlArea,
@@ -34,10 +36,9 @@ struct MouseUpBinding {
     listener: MouseUpListener,
 }
 
-/// A guest-owned focus identity. Native GPUI focus handles cannot cross the
-/// wasm boundary, so the host creates the corresponding native handle while
-/// retaining this typed GPUI element identity.
-#[derive(Clone, Debug)]
+/// A guest-app-local focus allocation. Native GPUI focus handles cannot cross
+/// the wasm boundary, so the host maps this opaque token to one native handle.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FocusHandle {
     id: u64,
 }
@@ -435,7 +436,6 @@ impl<E: Element> IntoElement for Stateful<E> {
     fn into_element(self) -> Self {
         self
     }
-
 }
 
 impl<E: ParentElement> ParentElement for Stateful<E> {

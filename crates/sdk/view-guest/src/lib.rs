@@ -38,7 +38,7 @@ pub use view_element::{AnyView, ViewElement};
 /// Traits and primitives used to compose guest GPUI elements.
 pub mod prelude {
     pub use crate::{
-    anchored, canvas, deferred, div, hsla, img, list, modal_overlay, px, rems, resize_handle, rgb, sensor, surface, svg, uniform_list, AnyElement, App, ClickEvent, Context, Element, ElementId, FluentBuilder, FollowMode, Global, Hsla, Input, InteractiveElement, IntoElement, List, ListAlignment, ListHorizontalSizingBehavior, ListOffset, ListScrollEvent, ListSizingBehavior, ListState, ParentElement, Pixels, Render, RenderOnce, Role, ScrollStrategy, SharedString, StatefulInteractiveElement, Styled, StyledImage, Theme, UniformListScrollHandle, Window, InteractiveText, StyledText, AnyView, FileDropEvent, FocusHandle, HoverListenerMode, WindowControlArea,
+        anchored, canvas, deferred, div, hsla, img, list, modal_overlay, px, rems, resize_handle, rgb, sensor, surface, svg, uniform_list, AnyElement, App, ClickEvent, Context, Element, ElementId, FluentBuilder, FollowMode, Global, Hsla, Input, InteractiveElement, IntoElement, List, ListAlignment, ListHorizontalSizingBehavior, ListOffset, ListScrollEvent, ListSizingBehavior, ListState, ParentElement, Pixels, Render, RenderOnce, Role, ScrollStrategy, SharedString, StatefulInteractiveElement, Styled, StyledImage, Theme, UniformListScrollHandle, Window, InteractiveText, StyledText, AnyView, FileDropEvent, FocusHandle, HoverListenerMode, WindowControlArea, KeyDownEvent, KeyUpEvent, ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent, MousePressureEvent, MouseUpEvent, PinchEvent, ScrollWheelEvent,
     };
 }
 mod editor;

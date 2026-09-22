@@ -862,15 +862,25 @@ const MAX_TEXT_PIXELS: f32 = 512.0;
 /// instead of a tree is bounded by [`apply`], since every bound is on the
 /// tree the patches make and only the host holds it.
 pub fn sanitize(frame: &mut Frame) -> Result<SanitizeReport, &'static str> {
+    let mut budgets = Budgets::frame();
     let mut report = if let Some(root) = &mut frame.root {
-        sanitize_tree(root)?
+        sanitize_tree_with(root, &mut budgets)?
     } else {
         SanitizeReport::default()
     };
     frame.tooltip_responses.truncate(MAX_PATCHES);
-    for response in &mut frame.tooltip_responses {
-        report.merge(sanitize_tree(&mut response.content)?);
+    let mut kept = 0;
+    for index in 0..frame.tooltip_responses.len() {
+        if budgets.nodes == 0 {
+            break;
+        }
+        report.merge(sanitize_tree_with(
+            &mut frame.tooltip_responses[index].content,
+            &mut budgets,
+        )?);
+        kept += 1;
     }
+    frame.tooltip_responses.truncate(kept);
     frame.upstream_sanitization.merge(report);
     for request in &mut frame.requests {
         truncate_string(&mut request.kind);
@@ -1019,15 +1029,21 @@ fn text_amounts(root: &Node) -> Result<(usize, usize), &'static str> {
 }
 
 fn sanitize_tree(root: &mut Node) -> Result<SanitizeReport, &'static str> {
+    sanitize_tree_with(root, &mut Budgets::frame())
+}
+
+fn sanitize_tree_with(
+    root: &mut Node,
+    budgets: &mut Budgets,
+) -> Result<SanitizeReport, &'static str> {
     let (documents, before) = text_amounts(root)?;
-    let mut budgets = Budgets::frame();
     let mut taken = Taken::new();
     let mut identity_scopes = vec![std::collections::HashSet::new()];
     let mut authored_path = Vec::new();
     sanitize_node(
         root,
         0,
-        &mut budgets,
+        budgets,
         &mut taken,
         &mut identity_scopes,
         &mut authored_path,
@@ -2519,11 +2535,27 @@ mod tests {
     }
 
     #[test]
+    fn tooltip_responses_share_the_frame_node_budget() {
+        let response = || TooltipResponse {
+            request: 1,
+            content: Box::new(column((0..MAX_NODES).map(|_| Node::empty()).collect())),
+        };
+        let mut frame = Frame {
+            tooltip_responses: vec![response(), response()],
+            ..Default::default()
+        };
+        sanitize(&mut frame).unwrap();
+        assert_eq!(frame.tooltip_responses.len(), 1);
+        assert!(frame.tooltip_responses[0].content.count() <= MAX_NODES);
+    }
+
+    #[test]
     fn a_frame_round_trips() {
         let frame = Frame {
             upstream_sanitization: Default::default(),
             editor_decisions: Vec::new(),
             editor_documents: Vec::new(),
+            tooltip_responses: Vec::new(),
             mouse_interest: true,
             event_interest: Default::default(),
             root: Some(column(vec![
@@ -3401,6 +3433,7 @@ mod tests {
             upstream_sanitization: Default::default(),
             editor_decisions: Vec::new(),
             editor_documents: Vec::new(),
+            tooltip_responses: Vec::new(),
             mouse_interest: false,
             event_interest: Default::default(),
             root: Some(column(vec![text("hello"), Node::empty()])),

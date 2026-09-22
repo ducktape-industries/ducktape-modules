@@ -845,6 +845,7 @@ fn gen_frame_with(rng: &mut Rng, depth: usize, width: usize) -> Frame {
         upstream_sanitization: Default::default(),
         editor_decisions: Vec::new(),
         editor_documents: Vec::new(),
+        tooltip_responses: Vec::new(),
         mouse_interest: rng.next_bool(),
         event_interest: Default::default(),
         root: Some(root),

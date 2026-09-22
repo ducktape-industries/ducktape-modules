@@ -214,7 +214,9 @@ impl App {
 
     pub fn focus_handle(&mut self) -> FocusHandle {
         let id = self.inner.next_focus_id.get();
-        self.inner.next_focus_id.set(id.wrapping_add(1));
+        self.inner
+            .next_focus_id
+            .set(id.checked_add(1).expect("focus handle space exhausted"));
         FocusHandle::new(id)
     }
 

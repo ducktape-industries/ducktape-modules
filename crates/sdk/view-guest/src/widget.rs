@@ -107,4 +107,20 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn focus_handle_schedules_its_opaque_host_command() {
+        let mut app = crate::App::for_driver(false);
+        let handle = app.focus_handle();
+        let mut window = app.window();
+        handle.focus(&mut window, &mut app);
+        let requests = app.host().drain_outbox();
+        let [request] = requests.as_slice() else {
+            panic!("one focus command")
+        };
+        assert_eq!(
+            wire::decode::<wire::WidgetCommand>(&request.payload).unwrap(),
+            wire::WidgetCommand::FocusHandle { handle: 0 }
+        );
+    }
 }
