@@ -18,6 +18,11 @@ use std::ops::Range;
 /// native trait. GPUI's real `Element` requires native layout and paint state;
 /// a wasm guest has neither, so lowering is the only operation it can perform.
 pub trait Element: 'static + IntoElement {
+    /// The authored identity that enters the typed ancestry while this element lowers.
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
     #[doc(hidden)]
     fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node;
 
@@ -39,10 +44,15 @@ pub trait IntoElement: Sized {
 }
 
 trait ElementObject {
+    fn id(&self) -> Option<ElementId>;
     fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node;
 }
 
 impl<T: Element> ElementObject for T {
+    fn id(&self) -> Option<ElementId> {
+        Element::id(self)
+    }
+
     fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
         Element::lower(self, lowering)
     }
@@ -52,6 +62,10 @@ impl<T: Element> ElementObject for T {
 pub struct AnyElement(Box<dyn ElementObject>);
 
 impl Element for AnyElement {
+    fn id(&self) -> Option<ElementId> {
+        self.0.id()
+    }
+
     fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
         self.0.lower(lowering)
     }
@@ -73,11 +87,16 @@ impl IntoElement for AnyElement {
 pub struct Lowering<'a> {
     window: &'a mut Window,
     app: &'a mut App,
+    authored_path: Vec<wire::ElementIdWire>,
 }
 
 impl<'a> Lowering<'a> {
     pub(crate) fn new(window: &'a mut Window, app: &'a mut App) -> Self {
-        Self { window, app }
+        Self {
+            window,
+            app,
+            authored_path: Vec::new(),
+        }
     }
 
     pub fn window(&mut self) -> &mut Window {
@@ -91,8 +110,7 @@ impl<'a> Lowering<'a> {
     #[doc(hidden)]
     pub fn render_once(&mut self, component: impl RenderOnce) -> wire::Node {
         let element = component.render(self.window, self.app).into_element();
-        let element = Box::new(element);
-        Element::lower(element, self)
+        self.lower_element(element)
     }
 
     pub(crate) fn lower<E: IntoElement>(&mut self, element: E) -> wire::Node {
@@ -100,7 +118,23 @@ impl<'a> Lowering<'a> {
     }
 
     pub(crate) fn lower_element<E: Element>(&mut self, element: E) -> wire::Node {
-        Box::new(element).lower(self)
+        let id = element
+            .id()
+            .map(wire::ElementIdWire::from_gpui)
+            .transpose()
+            .expect("element ID must be portable across the view boundary");
+        if let Some(id) = &id {
+            self.authored_path.push(id.clone());
+        }
+        let node = Element::lower(Box::new(element), self);
+        if id.is_some() {
+            self.authored_path.pop();
+        }
+        node
+    }
+
+    pub(crate) fn current_path(&self) -> &[wire::ElementIdWire] {
+        &self.authored_path
     }
 
     fn click(&mut self, listener: ClickListener) -> u32 {
@@ -144,16 +178,22 @@ impl Styled for Div {
 }
 
 impl Element for Div {
+    fn id(&self) -> Option<ElementId> {
+        self.interactivity.id.clone()
+    }
+
     fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
         let Self {
             interactivity,
             children,
         } = *self;
-        let id = interactivity
-            .id
-            .map(wire::ElementIdWire::from_gpui)
-            .transpose()
-            .expect("element ID must be portable across the view boundary");
+        let id = interactivity.id.map(|_| {
+            lowering
+                .current_path()
+                .last()
+                .cloned()
+                .expect("identified div must lower inside its authored scope")
+        });
         let on_click = interactivity
             .on_click
             .map(|listener| lowering.click(listener));
@@ -174,7 +214,7 @@ impl Element for Div {
         };
         let children = children
             .into_iter()
-            .map(|child| child.0.lower(lowering))
+            .map(|child| lowering.lower_element(child))
             .collect();
         wire::Node::Container {
             id,
@@ -371,7 +411,7 @@ impl Element for Anchored {
             y: 0.0,
             width: None,
             height: None,
-            content: Box::new(self.child.0.lower(lowering)),
+            content: Box::new(lowering.lower_element(self.child)),
         }
     }
 }
@@ -400,7 +440,7 @@ impl Element for Deferred {
         wire::Node::Lazy {
             key: "deferred".into(),
             generation: 0,
-            content: Box::new(self.child.0.lower(lowering)),
+            content: Box::new(lowering.lower_element(self.child)),
         }
     }
 }
@@ -610,3 +650,6 @@ mod tests {
             .when(true, |element| element);
     }
 }
+
+#[cfg(test)]
+mod ancestry_tests;

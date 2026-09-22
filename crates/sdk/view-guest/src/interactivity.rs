@@ -76,8 +76,12 @@ impl<E: Element> IntoElement for Stateful<E> {
 }
 
 impl<E: Element> Element for Stateful<E> {
+    fn id(&self) -> Option<ElementId> {
+        self.element.id()
+    }
+
     fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
-        Box::new(self.element).lower(lowering)
+        Element::lower(Box::new(self.element), lowering)
     }
 }
 
