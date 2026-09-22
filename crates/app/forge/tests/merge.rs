@@ -149,7 +149,7 @@ fn client_merge_fast_forwards_commits_or_names_the_conflicts() {
         &sandbox,
         OWNER,
         "project",
-        &[],
+        &[(zero, merged_id, "refs/heads/merge-result")],
         &pack_of(&source, &all_ids(&source)),
     )
     .unwrap();

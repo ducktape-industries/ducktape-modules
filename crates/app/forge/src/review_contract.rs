@@ -103,7 +103,8 @@ pub struct ChangeSummary {
 }
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize, Serialize)]
 pub struct ReplyAttention {
-    pub review: u64,
+    /// None for a conversation thread authored directly in chat.
+    pub review: Option<u64>,
     pub root_seq: u64,
     pub last_reply_seq: u64,
 }

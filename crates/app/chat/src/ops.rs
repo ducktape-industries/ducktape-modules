@@ -83,6 +83,13 @@ pub fn execute(store: &mut impl Write, frame: &Frame, msg: ChatMsg) -> Result<()
                 if root.reply_count >= MAX_THREAD_REPLIES {
                     return Err(refuse(reason::CAPACITY, "this thread is full"));
                 }
+                if let Some(last) = root.last_reply_seq {
+                    store.delete(attention_key(&channel_id, &root.author, last).as_bytes());
+                }
+                store.set(
+                    attention_key(&channel_id, &root.author, seq).into_bytes(),
+                    abi::encode(&root_seq),
+                );
                 root.reply_count += 1;
                 root.last_reply_seq = Some(seq);
                 put_row(store, &root)?;
@@ -156,6 +163,9 @@ pub fn execute(store: &mut impl Write, frame: &Frame, msg: ChatMsg) -> Result<()
                 return Ok(());
             }
             index(store, &row, false);
+            if let Some(last) = row.last_reply_seq {
+                store.delete(attention_key(&channel_id, &row.author, last).as_bytes());
+            }
             for entry in store.scan(Scan::prefix(react_key(&channel_id, seq, "", ""))) {
                 store.delete(&entry.key);
             }

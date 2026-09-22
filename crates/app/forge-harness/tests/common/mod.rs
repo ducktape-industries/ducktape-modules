@@ -209,3 +209,5 @@ pub fn pkt(out: &mut Vec<u8>, line: &str) {
     out.extend_from_slice(format!("{:04x}", line.len() + 4).as_bytes());
     out.extend_from_slice(line.as_bytes());
 }
+
+pub mod story;

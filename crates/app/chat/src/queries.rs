@@ -80,6 +80,17 @@ pub fn query(store: &impl Read, q: ChatViewQuery) -> Result<ChatViewReply, Refus
                 next_after,
             }
         }
+        ChatViewQuery::ThreadAttention { channel_id, author } => {
+            let entries = store
+                .scan(Scan::prefix(attention_prefix(&channel_id, &party_handle(&author))).limit(1));
+            let root = entries
+                .first()
+                .map(|e| {
+                    abi::decode::<u64>(&e.value).map_err(|e| refuse(reason::CORRUPT, e.to_string()))
+                })
+                .transpose()?;
+            ChatViewReply::Attention(root.map(|seq| row(store, &channel_id, seq)).transpose()?)
+        }
         ChatViewQuery::MessageById { message_id } => {
             let address: Option<(String, u64)> = load(store, &msgid_key(&message_id))?;
             ChatViewReply::Message(match address {

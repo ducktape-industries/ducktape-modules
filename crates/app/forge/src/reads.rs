@@ -159,6 +159,7 @@ pub fn answer<S: Sandbox>(
     Ok(match q {
         Query::Log { from, .. } => {
             let tip = r.commit_id(resolve(s, name, from, hash)?)?;
+            // ponytail: repeat the complete walk up to log_walk; index history if larger repos need it.
             let ids = r.result(gitcore::walk::commits(
                 &r.store,
                 &[tip],

@@ -61,3 +61,23 @@ pub fn message<S: Sandbox>(s: &S, id: &str) -> Result<Option<chat::MsgRow>, Refu
         )),
     }
 }
+
+pub fn attention<S: Sandbox>(
+    s: &S,
+    channel: &str,
+    key: &[u8],
+) -> Result<Option<chat::MsgRow>, Refusal> {
+    let request = serde_json::to_vec(&ChatViewQuery::ThreadAttention {
+        channel_id: channel.into(),
+        author: chat::Party::Key(key.to_vec()),
+    })
+    .expect("chat query");
+    let bytes = s.query(CHAT, request)?;
+    match serde_json::from_slice::<ChatViewReply>(&bytes).map_err(|e| storage(e.to_string()))? {
+        ChatViewReply::Attention(row) => Ok(row),
+        _ => Err(Refusal::new(
+            abi::reason::UNEXPECTED_REPLY,
+            "chat must answer ThreadAttention with Attention",
+        )),
+    }
+}

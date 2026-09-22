@@ -30,6 +30,9 @@ pub fn involved_key(actor: &[u8], repo: &str, n: u64) -> Vec<u8> {
     ]
     .concat()
 }
+pub fn authored_prefix(repo: &str, n: u64, actor: &[u8]) -> Vec<u8> {
+    format!("review-author/{repo}/{n:016x}/{}/", abi::hex(actor)).into_bytes()
+}
 pub fn latest_key(repo: &str, n: u64, actor: &[u8]) -> Vec<u8> {
     format!("l/{repo}/{n:016x}/{}", abi::hex(actor)).into_bytes()
 }
@@ -302,6 +305,9 @@ pub fn execute<S: Sandbox>(s: &S, env: &Env, actor: &[u8], op: Op) -> Result<(),
             change.system_seq = next(change.system_seq)?;
             row.message_id = discussion::message_id(s)?;
             s.set(review_key(&repo, n, id), abi::encode(&row));
+            let author_index =
+                [authored_prefix(&repo, n, actor), id.to_be_bytes().to_vec()].concat();
+            s.set(author_index, abi::encode(&id));
             s.set(latest_key(&repo, n, actor), abi::encode(&id));
             involve(s, actor, &repo, n);
             save(s, &repo, &change);

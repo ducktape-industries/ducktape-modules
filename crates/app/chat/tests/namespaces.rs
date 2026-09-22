@@ -125,6 +125,28 @@ fn channel_and_system_message_ids_belong_to_the_exact_program_prefix() {
         },
     )
     .unwrap();
+    let attention = || chat::ChatViewQuery::ThreadAttention {
+        channel_id: "forge:repo:1".into(),
+        author: Party::Module("forge".into()),
+    };
+    let chat::ChatViewReply::Attention(Some(root)) = chat::query(&store, attention()).unwrap()
+    else {
+        panic!();
+    };
+    assert_eq!(root.last_reply_seq, Some(2));
+    chat::execute(
+        &mut store,
+        &forge,
+        ChatMsg::DeleteMessage {
+            channel_id: "forge:repo:1".into(),
+            seq: 1,
+        },
+    )
+    .unwrap();
+    assert!(matches!(
+        chat::query(&store, attention()).unwrap(),
+        chat::ChatViewReply::Attention(None)
+    ));
     for party in [Party::Key(vec![2]), Party::System] {
         let id = if party == Party::System {
             "system:room"

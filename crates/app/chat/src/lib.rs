@@ -11,6 +11,8 @@
 //! first, `thread/<ch>/<root>/<reply>`, `msgid/<id>`, `member/<ch>/<handle>`
 //! → [`MemberRow`], `react/<ch>/<seq>/<emoji>/<handle>`, `tok/<token>/<ch>/<seq>`
 //! and `tag/<label>/<!time>/<ch>/<seq>` + `tagc/<ch>/<label>/<!seq>` postings.
+//! `attention/<ch>/<author>/<!last_reply>` stores a Borsh root sequence; one
+//! entry per answered thread lets callers find the latest reply without scanning messages.
 pub mod message;
 
 use std::collections::BTreeSet;
@@ -59,6 +61,16 @@ fn msgid_key(id: &str) -> String {
 }
 fn thread_key(ch: &str, root: u64, reply: u64) -> String {
     format!("thread/{ch}/{root:016x}/{reply:016x}")
+}
+fn attention_prefix(ch: &str, author: &str) -> String {
+    format!("attention/{ch}/{author}/")
+}
+fn attention_key(ch: &str, author: &str, reply: u64) -> String {
+    format!(
+        "{}{last:016x}",
+        attention_prefix(ch, author),
+        last = u64::MAX - reply
+    )
 }
 fn member_key(ch: &str, handle: &str) -> String {
     format!("member/{ch}/{handle}")

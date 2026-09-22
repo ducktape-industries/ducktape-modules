@@ -16,7 +16,6 @@ use crate::store::Store;
 pub fn init<S: Sandbox>(sandbox: &S, params: &[u8]) -> Result<(), Refusal> {
     let bounds: Bounds = abi::decode(params)?;
     if bounds.page_size == 0
-        || bounds.page_size > 1024
         || bounds.log_walk == 0
         || bounds.tree_walk == 0
         || bounds.blob_bytes == 0
@@ -24,7 +23,7 @@ pub fn init<S: Sandbox>(sandbox: &S, params: &[u8]) -> Result<(), Refusal> {
         || bounds.diff_bytes < bounds.blob_bytes
     {
         return Err(invalid(
-            "bounds need a 1..=1024 page size and positive read/record budgets; diff_bytes >= blob_bytes",
+            "bounds need a positive page size and positive read/record budgets; diff_bytes >= blob_bytes",
         ));
     }
     save_bounds(sandbox, &bounds);

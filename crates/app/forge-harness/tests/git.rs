@@ -143,6 +143,33 @@ fn sha256_repository() {
     let cloned = clone(&remote, &[]);
     let cloned = clone_path(&cloned);
     let cloned_head = head(&cloned);
+    let forge::Reply::Log { page, .. } = remote.query(&forge::Query::Log {
+        repo: REPO.into(),
+        from: forge::Revision::Ref(b"refs/heads/main".to_vec()),
+        cursor: None,
+        limit: 1,
+    }) else {
+        panic!();
+    };
+    assert_eq!(page.items[0].oid, cloned_head);
+    let forge::Reply::Tree { page, .. } = remote.query(&forge::Query::Tree {
+        repo: REPO.into(),
+        at: cloned_head.clone(),
+        path: Vec::new(),
+        cursor: None,
+        limit: 1,
+    }) else {
+        panic!();
+    };
+    assert_eq!(page.items[0].oid.len(), 64);
+    let forge::Reply::Blob { blob, .. } = remote.query(&forge::Query::Blob {
+        repo: REPO.into(),
+        oid: page.items[0].oid.clone(),
+        range: None,
+    }) else {
+        panic!();
+    };
+    assert_eq!(blob.bytes, b"0\n");
     assert_eq!(cloned_head.len(), 64);
     assert_eq!(cloned_head, head(source.path()));
     assert_eq!(
@@ -181,8 +208,27 @@ fn gzip_request_bodies() {
     let trace = String::from_utf8_lossy(&fetched.stderr);
     assert!(fetched.status.success(), "{trace}");
     assert!(trace.contains("Content-Encoding: gzip"), "{trace}");
-    let branches = git(&cloned, &["branch", "-r"]);
-    assert_eq!(branches.lines().count(), 31, "{branches}");
+    let branches = git(
+        &cloned,
+        &[
+            "for-each-ref",
+            "--format=%(refname) %(symref)",
+            "refs/remotes/origin",
+        ],
+    );
+    let mut expected: Vec<String> = (0..30)
+        .map(|n| format!("refs/remotes/origin/branch-{n} "))
+        .collect();
+    expected.extend([
+        "refs/remotes/origin/main ".into(),
+        "refs/remotes/origin/HEAD refs/remotes/origin/main".into(),
+    ]);
+    expected.sort();
+    assert_eq!(
+        branches.lines().collect::<Vec<_>>(),
+        expected,
+        "every fetched branch plus the clone's symbolic HEAD"
+    );
 
     let mut request = Vec::new();
     for line in ["command=ls-refs\n", "object-format=sha1\n"] {

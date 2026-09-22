@@ -89,8 +89,10 @@ fn accounts(ctx: &impl Reads, limit: Option<usize>) -> Result<ChatViewReply, Ref
         after: None,
         limit: Some(chat::page(limit) as u64),
     };
-    let identity::Reply::Accounts(accounts) =
-        ctx.ask::<identity::Query, identity::Reply>(identity::PROGRAM, &identity::Query::List { page })?
+    let identity::Reply::Accounts(accounts) = ctx.ask::<identity::Query, identity::Reply>(
+        identity::PROGRAM,
+        &identity::Query::List { page },
+    )?
     else {
         return Err(Refusal::new(
             reason::UNEXPECTED_REPLY,
@@ -128,6 +130,31 @@ impl Program for Chat {
         let q: ChatViewQuery = serde_json::from_slice(request).map_err(bad)?;
         let reply = match q {
             ChatViewQuery::Accounts { limit } => accounts(ctx, limit)?,
+            ChatViewQuery::ThreadAttention {
+                channel_id,
+                author: Party::Key(key),
+            } => {
+                // A key may have posted before or after acquiring an account.
+                let resolved = party_of(ctx, &Origin::External(key.clone()))?;
+                let mut newest = None;
+                for author in [Party::Key(key), resolved] {
+                    let reply = chat::query(
+                        &Reader(ctx),
+                        ChatViewQuery::ThreadAttention {
+                            channel_id: channel_id.clone(),
+                            author,
+                        },
+                    )?;
+                    if let ChatViewReply::Attention(Some(row)) = reply
+                        && newest.as_ref().is_none_or(|old: &chat::MsgRow| {
+                            old.last_reply_seq < row.last_reply_seq
+                        })
+                    {
+                        newest = Some(row);
+                    }
+                }
+                ChatViewReply::Attention(newest)
+            }
             q => chat::query(&Reader(ctx), q)?,
         };
         ctx.respond(serde_json::to_vec(&reply).expect("a reply serializes"));

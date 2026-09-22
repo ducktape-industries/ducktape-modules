@@ -4,7 +4,7 @@ use crate::changes::{self, involved_key, latest_key, load, review_key};
 use crate::contract::*;
 use crate::paging::Paging;
 use crate::repo::{load_ref, load_repo, repo_hash};
-use abi::Refusal;
+use abi::{Refusal, Scan};
 
 fn summary(repo: &str, c: &Change) -> ChangeSummary {
     ChangeSummary {
@@ -88,11 +88,21 @@ pub fn answer<S: Sandbox>(s: &S, height: u64, q: &Query, p: &Paging) -> Result<R
             if key.is_empty() {
                 return Err(crate::refuse::invalid("judgment needs a key"));
             }
-            let entries = p.entries(s, &changes::involved_prefix(key))?;
+            // Chat participants need not have submitted a forge op, so page all changes.
+            let entries = p.entries(s, b"c/")?;
+            let mut remaining = crate::repo::load_bounds(s)?.log_walk;
             let mut items = Vec::new();
             for entry in entries.items {
-                let (repo, n): (String, u64) = abi::decode(&entry.value)?;
-                let c = load(s, &repo, n)?;
+                let c: Change = abi::decode(&entry.value)?;
+                let rest = &entry.key[2..];
+                let slash = rest
+                    .iter()
+                    .position(|b| *b == b'/')
+                    .ok_or_else(|| crate::refuse::storage("invalid change key"))?;
+                let repo = std::str::from_utf8(&rest[..slash])
+                    .map_err(|_| crate::refuse::storage("invalid repo key"))?
+                    .to_owned();
+                let n = c.n;
                 if c.state != ChangeState::Open {
                     continue;
                 }
@@ -111,18 +121,44 @@ pub fn answer<S: Sandbox>(s: &S, height: u64, q: &Query, p: &Paging) -> Result<R
                     && latest
                         .as_ref()
                         .is_none_or(|r| source.as_ref() != Some(&r.draft.commit_oid));
-                let replies = match latest {
-                    Some(review) => {
-                        crate::discussion::message(s, &review.message_id)?.and_then(|root| {
-                            root.last_reply_seq.map(|last_reply_seq| ReplyAttention {
-                                review: review.id,
-                                root_seq: root.seq,
-                                last_reply_seq,
-                            })
+                let mut replies =
+                    crate::discussion::attention(s, &c.channel, key)?.and_then(|root| {
+                        root.last_reply_seq.map(|last_reply_seq| ReplyAttention {
+                            review: None,
+                            root_seq: root.seq,
+                            last_reply_seq,
                         })
+                    });
+                let authored = s.scan(
+                    Scan::prefix(changes::authored_prefix(&repo, n, key))
+                        .reverse()
+                        .limit(remaining.saturating_add(1)),
+                );
+                if authored.len() as u64 > remaining {
+                    return Err(crate::refuse::capacity(
+                        "judgment review walk exceeds Bounds.log_walk",
+                    ));
+                }
+                remaining -= authored.len() as u64;
+                for entry in authored {
+                    let id: u64 = abi::decode(&entry.value)?;
+                    let bytes = s
+                        .get(&review_key(&repo, n, id))
+                        .ok_or_else(|| crate::refuse::storage("authored review missing"))?;
+                    let review: Review = abi::decode(&bytes)?;
+                    if let Some(root) = crate::discussion::message(s, &review.message_id)?
+                        && let Some(last_reply_seq) = root.last_reply_seq
+                        && replies
+                            .as_ref()
+                            .is_none_or(|r| r.last_reply_seq < last_reply_seq)
+                    {
+                        replies = Some(ReplyAttention {
+                            review: Some(id),
+                            root_seq: root.seq,
+                            last_reply_seq,
+                        });
                     }
-                    None => None,
-                };
+                }
                 if requested || replies.is_some() {
                     items.push(Judgment {
                         change: summary(&repo, &c),

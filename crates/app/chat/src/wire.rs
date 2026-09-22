@@ -177,6 +177,11 @@ pub enum ChatViewQuery {
     MessageById {
         message_id: String,
     },
+    /// The author's most recently answered thread in this channel, if any.
+    ThreadAttention {
+        channel_id: String,
+        author: Party,
+    },
     /// one page of timeline roots older than `before_seq`, oldest first
     Roots {
         channel_id: String,
@@ -259,6 +264,7 @@ pub enum ChatViewReply {
     },
     Channel(Option<ChannelInfo>),
     Message(Option<MsgRow>),
+    Attention(Option<MsgRow>),
     Roots {
         roots: Vec<MsgRow>,
         has_more: bool,
