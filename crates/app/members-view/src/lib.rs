@@ -81,12 +81,11 @@ impl View for Members {
 impl Render for Members {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = *cx.global::<Theme>();
-        let theme = &theme;
         let typed = cx.listener(|view, text: &String, _, cx| {
             view.filter = text.clone();
             cx.notify();
         });
-        let body = self.body(cx, theme);
+        let body = self.body(cx, &theme);
         div()
             .id(ElementId::Name("members".into()))
             .flex()

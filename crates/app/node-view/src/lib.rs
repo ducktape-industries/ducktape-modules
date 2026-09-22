@@ -77,7 +77,6 @@ impl View for Nodes {
 impl Render for Nodes {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = *cx.global::<Theme>();
-        let theme = &theme;
         div()
             .id(ElementId::Name("nodes".into()))
             .flex()
@@ -96,7 +95,7 @@ impl Render for Nodes {
                     .child(div().flex_1().text_lg().child("Nodes"))
                     .child(div().text_sm().text_color(theme.muted).child(self.count())),
             )
-            .child(self.body(cx, theme))
+            .child(self.body(cx, &theme))
     }
 }
 

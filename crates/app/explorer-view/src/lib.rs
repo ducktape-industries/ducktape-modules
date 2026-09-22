@@ -84,7 +84,6 @@ impl View for Explorer {
 impl Render for Explorer {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = *cx.global::<Theme>();
-        let theme = &theme;
         div()
             .id(ElementId::Name("explorer".into()))
             .flex()
@@ -103,7 +102,7 @@ impl Render for Explorer {
                     .child(div().flex_1().text_lg().child("Programs"))
                     .child(div().text_sm().text_color(theme.muted).child(self.count())),
             )
-            .child(self.body(cx, theme))
+            .child(self.body(cx, &theme))
     }
 }
 

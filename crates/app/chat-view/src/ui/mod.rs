@@ -18,7 +18,7 @@ use ducktape_view_guest::{
 use crate::Chat;
 
 pub fn render(chat: &Chat, cx: &mut Context<Chat>) -> impl IntoElement {
-    let theme = cx.global::<Theme>();
+    let theme = *cx.global::<Theme>();
     let mut screen = div()
         .id(ElementId::Name("chat-root".into()))
         .relative()
@@ -27,24 +27,24 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>) -> impl IntoElement {
         .bg(theme.background)
         .text_color(theme.foreground)
         .child(if chat.session.connected {
-            connected(chat, cx, theme).into_any_element()
+            connected(chat, cx, &theme).into_any_element()
         } else {
             empty_state(
                 ElementId::Name("chat-disconnected".into()),
                 "Not connected",
                 "Choose a network from the sidebar to reconnect.",
-                theme,
+                &theme,
             )
             .into_any_element()
         });
 
-    if let Some(menu) = menu::floating(chat, cx, theme) {
+    if let Some(menu) = menu::floating(chat, cx, &theme) {
         screen = screen.child(menu);
     }
-    if let Some(preview) = dialogs::preview(chat, cx, theme) {
+    if let Some(preview) = dialogs::preview(chat, cx, &theme) {
         screen = screen.child(preview);
     }
-    if let Some(create) = dialogs::channel_create(chat, cx, theme) {
+    if let Some(create) = dialogs::channel_create(chat, cx, &theme) {
         screen = screen.child(create);
     }
     screen
