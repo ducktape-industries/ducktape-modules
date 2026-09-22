@@ -102,13 +102,12 @@ impl IntoElement for Div {
     }
 
     fn into_node(self, lowering: &mut Lowering<'_>) -> wire::Node {
-        let id = self.interactivity.id.map(wire::ElementIdWire::from_gpui);
+        let id = self.interactivity.id.map(wire::ElementIdWire::from_gpui).transpose().expect("element ID must be portable across the view boundary");
         let on_click = self.interactivity.on_click.map(|listener| lowering.click(listener));
         let interactivity = wire::Interactivity {
             role: self.interactivity.role,
             aria: self.interactivity.aria,
             focusable: self.interactivity.focusable,
-            id: id.clone(),
             group: self.interactivity.group,
             hover: self.interactivity.hover,
             active: self.interactivity.active,
@@ -405,6 +404,7 @@ impl<R: IntoElement> IntoElement for UniformList<R> {
             .collect();
         wire::Node::KeyedColumn {
             key: wire::ElementIdWire::from_gpui(self.id)
+                .expect("element ID must be portable across the view boundary")
                 .name()
                 .unwrap_or("uniform-list")
                 .to_owned(),
