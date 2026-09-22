@@ -38,6 +38,13 @@ impl Sandbox for Executing<'_> {
         self.0.borrow().blob_stat(id)
     }
 
+    fn emit(&self, target: &str, payload: Vec<u8>) {
+        self.0.borrow_mut().emit(target, payload);
+    }
+    fn query(&self, target: &str, request: Vec<u8>) -> Result<Vec<u8>, Refusal> {
+        self.0.borrow().query(target, request)
+    }
+
     fn output(&self, bytes: Vec<u8>) {
         self.0.borrow_mut().output(bytes)
     }
@@ -78,6 +85,13 @@ impl Sandbox for Querying<'_> {
         self.0.borrow().blob_stat(id)
     }
 
+    fn emit(&self, _target: &str, _payload: Vec<u8>) {
+        unreachable!("a query does not emit")
+    }
+    fn query(&self, target: &str, request: Vec<u8>) -> Result<Vec<u8>, Refusal> {
+        self.0.borrow().query(target, request)
+    }
+
     fn output(&self, _bytes: Vec<u8>) {
         unreachable!("a query does not write")
     }
@@ -98,8 +112,8 @@ impl Program for Forge {
         crate::execute(&Executing(RefCell::new(ctx)), env, payload)
     }
 
-    fn query(ctx: &mut Query, _env: &Env, request: &[u8]) -> Result<(), Refusal> {
-        crate::query(&Querying(RefCell::new(ctx)), request)
+    fn query(ctx: &mut Query, env: &Env, request: &[u8]) -> Result<(), Refusal> {
+        crate::query(&Querying(RefCell::new(ctx)), env, request)
     }
 }
 

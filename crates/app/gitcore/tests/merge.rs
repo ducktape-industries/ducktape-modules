@@ -352,3 +352,20 @@ fn tree_merge_mode_conflict_and_nested_paths() {
         vec![("x".to_string(), Mode::Regular, a)]
     );
 }
+
+#[test]
+fn binary_content_is_never_automatically_text_merged() {
+    let base = b"a\0\nb\nc\n";
+    assert_eq!(
+        merge_lines(base, b"ours\0\nb\nc\n", b"a\0\nb\ntheirs\n", 100).unwrap(),
+        Merged::Conflict
+    );
+    assert_eq!(
+        merge_lines(base, base, b"new\0", 100).unwrap(),
+        Merged::Clean(b"new\0".to_vec())
+    );
+    assert_eq!(
+        merge_lines(b"a\n", b"\xff\n", b"other\n", 100).unwrap(),
+        Merged::Conflict
+    );
+}

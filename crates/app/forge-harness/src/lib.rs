@@ -61,8 +61,15 @@ impl Program {
 
     pub async fn execute(&mut self, op: &Op) -> Result<Vec<u8>, Failure> {
         self.host.advance_height();
+        for delivered in self.host.deliver() {
+            delivered?;
+        }
+        let before = self.host.clone();
         let ran = self.run(GuestCall::Execute(abi::encode(op))).await;
         let output = self.host.take_output();
+        if ran.is_err() {
+            self.host = before;
+        }
         ran.map(|()| output)
     }
 
@@ -94,6 +101,47 @@ impl Harness {
         Ok(Harness {
             program: Arc::new(Mutex::new(program)),
         })
+    }
+
+    pub fn from_snapshot(wasm: &[u8], host: MemoryHost) -> Result<Self, Failure> {
+        let runtime = Runtime::new(Limits {
+            fuel: None,
+            memory_bytes: None,
+        });
+        let code = runtime.load(wasm)?;
+        Ok(Self {
+            program: Arc::new(Mutex::new(Program {
+                runtime,
+                code,
+                host,
+            })),
+        })
+    }
+    pub async fn snapshot(&self) -> MemoryHost {
+        self.program.lock().await.host.clone()
+    }
+    pub async fn set_actor(&self, actor: Vec<u8>) {
+        self.program.lock().await.host.set_actor(actor);
+    }
+    pub async fn advance(&self) -> Result<(), Failure> {
+        let mut p = self.program.lock().await;
+        p.host.advance_height();
+        for outcome in p.host.deliver() {
+            outcome?;
+        }
+        Ok(())
+    }
+    pub async fn chat_execute(
+        &self,
+        party: chat::Party,
+        msg: chat::ChatMsg,
+    ) -> Result<(), Failure> {
+        self.advance().await?;
+        self.program.lock().await.host.chat_execute(party, msg)?;
+        Ok(())
+    }
+    pub async fn chat_query(&self, q: chat::ChatViewQuery) -> Result<chat::ChatViewReply, Failure> {
+        Ok(self.program.lock().await.host.chat_query(q)?)
     }
 
     pub async fn create_repo(&self, name: &str, hash: HashKind) -> Result<(), Failure> {
@@ -128,6 +176,12 @@ pub fn default_bounds() -> Bounds {
         max_object_size: 256 << 20,
         push_walk: 10_000,
         fetch_walk: 1_000_000,
-        merge_cost: 1_000_000,
+        merge_cost: 1024,
+        page_size: 128,
+        log_walk: 10_000,
+        tree_walk: 1024,
+        diff_bytes: 32 << 20,
+        blob_bytes: 256 << 10,
+        record_bytes: 64 << 10,
     }
 }

@@ -75,3 +75,8 @@ view-wasm-check:
 	  echo "view-linkable crates reach the signing/identity graph:$$reached"; \
 	  exit 1; \
 	fi
+
+# The forge harness and contract gate need only this app program.
+.PHONY: forge-wasm
+forge-wasm:
+	$(CARGO) build -p forge --target wasm32-unknown-unknown --release

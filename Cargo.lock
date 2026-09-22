@@ -1549,8 +1549,11 @@ version = "0.1.0"
 dependencies = [
  "abi",
  "borsh",
+ "chat",
  "gitcore",
  "guest",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
