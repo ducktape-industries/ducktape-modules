@@ -1,1 +1,0 @@
-{"bytes":161,"codec":"git","height":3,"request":{"Advertise":{"repo":"project","service":"UploadPack"}},"request_borsh_hex":"030700000070726f6a65637401","sha256":"00b15f7b519a6baf94879069a5a5a742dcd953d250318684b3e3f00ca8fa066c","wire_type":"git smart HTTP"}

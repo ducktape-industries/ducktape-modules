@@ -11,6 +11,8 @@ pub use gitcore::{
     TreeEntry, pack,
 };
 
+pub mod story;
+
 pub const OWNER: &[u8] = b"owner-key";
 pub const WRITER: &[u8] = b"writer-key";
 pub const STRANGER: &[u8] = b"stranger-key";

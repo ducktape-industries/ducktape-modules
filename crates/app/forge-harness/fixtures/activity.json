@@ -1,1 +1,0 @@
-{"bytes":17,"codec":"borsh","reply":{"Activity":{"height":3,"last_height":3}},"request":{"Activity":{"repo":"project"}},"request_borsh_hex":"0a0700000070726f6a656374","sha256":"ec02b446db85734ff05b3563d45de0bb70c48f1a07b54b80675a8e037b08e6ab","wire_type":"forge::Reply"}

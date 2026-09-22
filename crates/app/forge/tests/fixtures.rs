@@ -1,97 +1,125 @@
-//! Replay bytes come directly from forge.wasm's Respond/Output, never hand-built replies.
+//! The replay fixtures forge-view renders from: every reply is what the rules
+//! answered over `MemorySandbox`, the same bytes the wasm answers over the
+//! host. `FORGE_REGENERATE_FIXTURES=1` rewrites `fixtures/replies.{bin,idx}`;
+//! otherwise the run must reproduce them byte for byte.
 mod common;
+#[path = "../fixtures/loader.rs"]
+mod loader;
+
+use std::path::{Path, PathBuf};
+
 use common::story::*;
 use common::*;
 use forge::*;
-use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-fn save(name: &str, bytes: &[u8], mut sidecar: Value) {
-    sidecar["bytes"] = json!(bytes.len());
-    sidecar["sha256"] = json!(abi::hex(&Sha256::digest(bytes)));
-    let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures");
-    let json = serde_json::to_string(&sidecar).unwrap() + "\n";
-    let binary = folder.join(format!("{name}.bin"));
-    let metadata = folder.join(format!("{name}.json"));
-    if std::env::var_os("FORGE_REGENERATE_FIXTURES").as_deref() == Some(std::ffi::OsStr::new("1")) {
-        std::fs::create_dir_all(&folder).unwrap();
-        std::fs::write(&binary, bytes).unwrap();
-        std::fs::write(&metadata, json).unwrap();
-    } else {
-        assert_eq!(
-            std::fs::read(&binary).unwrap_or_else(|_| panic!("regenerate {}", binary.display())),
-            bytes,
-            "{name} actual program bytes"
-        );
-        // Key order in the sidecar depends on whether some crate in the build
-        // turned on serde_json's `preserve_order`; the content is the contract.
-        let stored: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(&metadata).unwrap()).unwrap();
-        let fresh: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(stored, fresh, "{name} sidecar");
-    }
-}
-fn capture(remote: &Remote, name: &str, q: Query) -> Reply {
-    let bytes = remote.rt.block_on(remote.harness.query(&q)).unwrap();
-    let reply: Reply = abi::decode(&bytes).unwrap();
-    assert_eq!(abi::encode(&reply), bytes);
-    save(
-        name,
-        &bytes,
-        json!({"wire_type":"forge::Reply","codec":"borsh","request":q,
-        "request_borsh_hex":abi::hex(&abi::encode(&q)),"reply":reply}),
-    );
-    reply
-}
-fn output(remote: &Remote, name: &str, op: Op) -> OpReply {
-    let bytes = remote.execute(&op).unwrap();
-    let reply: OpReply = abi::decode(&bytes).unwrap();
-    assert_eq!(abi::encode(&reply), bytes);
-    save(
-        name,
-        &bytes,
-        json!({"wire_type":"forge::OpReply","codec":"borsh","op":op,
-        "request_borsh_hex":abi::hex(&abi::encode(&op)),"reply":reply}),
-    );
-    reply
-}
-fn git_reply(remote: &Remote, name: &str, q: Query) {
-    let bytes = remote.rt.block_on(remote.harness.query(&q)).unwrap();
-    assert!(!bytes.is_empty());
-    save(
-        name,
-        &bytes,
-        json!({"wire_type":"git smart HTTP","codec":"git","request":q,
-        "request_borsh_hex":abi::hex(&abi::encode(&q)),"height":remote.snapshot().height()}),
-    );
+struct Captured {
+    name: &'static str,
+    request: Vec<u8>,
+    bytes: Vec<u8>,
 }
 
-#[test]
-fn replay_fixtures_are_the_programs_real_bytes() {
-    assert!(!skipped(), "fixture generation requires git");
-    let bounds = Bounds {
-        blob_bytes: 64,
-        ..forge_harness::default_bounds()
-    };
-    let remote = Remote::start(bounds, HashKind::Sha1);
-    let empty = remote
-        .rt
-        .block_on(Harness::new(wasm(), bounds, b"tester".to_vec()))
-        .unwrap();
+#[derive(Default)]
+struct Tape(Vec<Captured>);
+
+impl Tape {
+    fn save(&mut self, name: &'static str, request: Vec<u8>, bytes: Vec<u8>) {
+        self.0.push(Captured {
+            name,
+            request,
+            bytes,
+        });
+    }
+
+    /// A UI reply: the bytes decode as `Reply` and re-encode to themselves.
+    fn capture(&mut self, rig: &Rig, name: &'static str, q: Query) -> Reply {
+        let bytes = rig.query(&q);
+        let reply: Reply = abi::decode(&bytes).unwrap();
+        assert_eq!(abi::encode(&reply), bytes);
+        self.save(name, abi::encode(&q), bytes);
+        reply
+    }
+
+    /// An op's output: the bytes decode as `OpReply`.
+    fn output(&mut self, rig: &mut Rig, name: &'static str, op: Op) -> OpReply {
+        let bytes = rig.execute(&op).unwrap();
+        let reply: OpReply = abi::decode(&bytes).unwrap();
+        assert_eq!(abi::encode(&reply), bytes);
+        self.save(name, abi::encode(&op), bytes);
+        reply
+    }
+
+    /// A smart-HTTP reply: git's own framing, not borsh.
+    fn git_reply(&mut self, rig: &Rig, name: &'static str, q: Query) {
+        let bytes = rig.query(&q);
+        assert!(!bytes.is_empty());
+        self.save(name, abi::encode(&q), bytes);
+    }
+}
+
+fn dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures")
+}
+
+fn write(tape: &Tape) {
+    let mut bin = Vec::new();
+    let mut idx = String::new();
+    for c in &tape.0 {
+        idx += &format!(
+            "{} {} {} {} {}\n",
+            c.name,
+            bin.len(),
+            c.bytes.len(),
+            abi::hex(&c.request),
+            abi::hex(&Sha256::digest(&c.bytes))
+        );
+        bin.extend_from_slice(&c.bytes);
+    }
+    std::fs::write(dir().join("replies.bin"), bin).unwrap();
+    std::fs::write(dir().join("replies.idx"), idx).unwrap();
+}
+
+fn check(tape: &Tape) {
+    let index = loader::index(&dir());
+    let all = std::fs::read(dir().join("replies.bin")).unwrap();
+    assert_eq!(
+        index.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(),
+        tape.0.iter().map(|c| c.name).collect::<Vec<_>>(),
+        "the committed shapes, in order"
+    );
+    for (f, c) in index.iter().zip(&tape.0) {
+        let stored = &all[f.offset..f.offset + f.len];
+        assert_eq!(f.request, c.request, "{}: request", c.name);
+        assert_eq!(stored, c.bytes, "{}: actual program bytes", c.name);
+        assert_eq!(
+            f.sha256,
+            abi::hex(&Sha256::digest(stored)),
+            "{}: sha256",
+            c.name
+        );
+    }
+}
+
+/// The story, in the harness's order and at its heights.
+fn replay(tape: &mut Tape) {
+    let bounds = fixture_bounds();
+    let mut rig = Rig::start(bounds, HashKind::Sha1);
+    let empty = MemorySandbox::default();
+    forge::init(&empty, &abi::encode(&bounds)).unwrap();
     let q = Query::Repos {
         cursor: None,
         limit: 2,
     };
-    let bytes = remote.rt.block_on(empty.query(&q)).unwrap();
-    let reply: Reply = abi::decode(&bytes).unwrap();
-    save(
-        "repos-empty",
-        &bytes,
-        json!({"wire_type":"forge::Reply","codec":"borsh","request":q,
-        "request_borsh_hex":abi::hex(&abi::encode(&q)),"reply":reply}),
-    );
-    capture(
-        &remote,
+    let unfounded = Env {
+        height: 0,
+        ..rig.env()
+    };
+    forge::query(&empty, &unfounded, &abi::encode(&q)).unwrap();
+    let bytes = empty.take_response();
+    let _: Reply = abi::decode(&bytes).unwrap();
+    tape.save("repos-empty", abi::encode(&q), bytes);
+    tape.capture(
+        &rig,
         "refs-empty",
         Query::Refs {
             repo: REPO.into(),
@@ -99,8 +127,8 @@ fn replay_fixtures_are_the_programs_real_bytes() {
             limit: 2,
         },
     );
-    capture(
-        &remote,
+    tape.capture(
+        &rig,
         "log-unborn",
         Query::Log {
             repo: REPO.into(),
@@ -109,9 +137,9 @@ fn replay_fixtures_are_the_programs_real_bytes() {
             limit: 2,
         },
     );
-    capture(&remote, "changes-empty", changes());
-    capture(
-        &remote,
+    tape.capture(&rig, "changes-empty", changes());
+    tape.capture(
+        &rig,
         "judgment-empty",
         Query::Judgment {
             key: b"reviewer".to_vec(),
@@ -119,23 +147,22 @@ fn replay_fixtures_are_the_programs_real_bytes() {
             limit: 2,
         },
     );
-    let story = Story::pushed(&remote);
-    capture(
-        &remote,
+    let mut story = Story::pushed(&mut rig);
+    tape.capture(
+        &rig,
         "repos",
         Query::Repos {
             cursor: None,
             limit: 2,
         },
     );
-    remote
-        .execute(&Op::Grant {
-            repo: REPO.into(),
-            key: b"writer".to_vec(),
-        })
-        .unwrap();
-    capture(
-        &remote,
+    rig.execute(&Op::Grant {
+        repo: REPO.into(),
+        key: b"writer".to_vec(),
+    })
+    .unwrap();
+    tape.capture(
+        &rig,
         "repo",
         Query::Repo {
             repo: REPO.into(),
@@ -143,8 +170,8 @@ fn replay_fixtures_are_the_programs_real_bytes() {
             limit: 2,
         },
     );
-    capture(
-        &remote,
+    tape.capture(
+        &rig,
         "refs",
         Query::Refs {
             repo: REPO.into(),
@@ -152,8 +179,8 @@ fn replay_fixtures_are_the_programs_real_bytes() {
             limit: 2,
         },
     );
-    let Reply::Log { page, .. } = capture(
-        &remote,
+    let Reply::Log { page, .. } = tape.capture(
+        &rig,
         "log",
         Query::Log {
             repo: REPO.into(),
@@ -164,8 +191,8 @@ fn replay_fixtures_are_the_programs_real_bytes() {
     ) else {
         panic!();
     };
-    capture(
-        &remote,
+    tape.capture(
+        &rig,
         "log-next",
         Query::Log {
             repo: REPO.into(),
@@ -174,8 +201,8 @@ fn replay_fixtures_are_the_programs_real_bytes() {
             limit: 1,
         },
     );
-    capture(
-        &remote,
+    tape.capture(
+        &rig,
         "tree",
         Query::Tree {
             repo: REPO.into(),
@@ -185,8 +212,8 @@ fn replay_fixtures_are_the_programs_real_bytes() {
             limit: 2,
         },
     );
-    capture(
-        &remote,
+    tape.capture(
+        &rig,
         "tree-directory",
         Query::Tree {
             repo: REPO.into(),
@@ -202,27 +229,27 @@ fn replay_fixtures_are_the_programs_real_bytes() {
         ("blob-oversize", "large.txt"),
         ("blob-empty", "empty.txt"),
     ] {
-        capture(
-            &remote,
+        tape.capture(
+            &rig,
             name,
             Query::Blob {
                 repo: REPO.into(),
-                oid: story.oid(&format!("feature:{path}")),
+                oid: story.oid(path),
                 range: None,
             },
         );
     }
-    capture(
-        &remote,
+    tape.capture(
+        &rig,
         "blob-range",
         Query::Blob {
             repo: REPO.into(),
-            oid: story.oid("feature:src/lib.rs"),
+            oid: story.oid("src/lib.rs"),
             range: Some(ByteRange { offset: 4, len: 6 }),
         },
     );
-    let Reply::Diff { page, .. } = capture(
-        &remote,
+    let Reply::Diff { page, .. } = tape.capture(
+        &rig,
         "diff",
         Query::Diff {
             repo: REPO.into(),
@@ -235,8 +262,8 @@ fn replay_fixtures_are_the_programs_real_bytes() {
     ) else {
         panic!();
     };
-    capture(
-        &remote,
+    tape.capture(
+        &rig,
         "diff-next",
         Query::Diff {
             repo: REPO.into(),
@@ -256,8 +283,8 @@ fn replay_fixtures_are_the_programs_real_bytes() {
         ("diff-deleted", "gone.txt"),
         ("diff-added", "new.txt"),
     ] {
-        capture(
-            &remote,
+        tape.capture(
+            &rig,
             name,
             Query::Diff {
                 repo: REPO.into(),
@@ -269,8 +296,8 @@ fn replay_fixtures_are_the_programs_real_bytes() {
             },
         );
     }
-    capture(
-        &remote,
+    tape.capture(
+        &rig,
         "diff-root",
         Query::Diff {
             repo: REPO.into(),
@@ -281,8 +308,8 @@ fn replay_fixtures_are_the_programs_real_bytes() {
             limit: 2,
         },
     );
-    capture(
-        &remote,
+    tape.capture(
+        &rig,
         "diff-empty",
         Query::Diff {
             repo: REPO.into(),
@@ -300,19 +327,19 @@ fn replay_fixtures_are_the_programs_real_bytes() {
         ("compare-conflicts", "feature", "conflict"),
         ("compare-unrelated", "feature", "unrelated"),
     ] {
-        capture(&remote, name, compare(from, into));
+        tape.capture(&rig, name, compare(from, into));
     }
-    capture(&remote, "activity", Query::Activity { repo: REPO.into() });
-    git_reply(
-        &remote,
+    tape.capture(&rig, "activity", Query::Activity { repo: REPO.into() });
+    tape.git_reply(
+        &rig,
         "advertise-receive",
         Query::Advertise {
             repo: REPO.into(),
             service: Service::ReceivePack,
         },
     );
-    git_reply(
-        &remote,
+    tape.git_reply(
+        &rig,
         "advertise-upload",
         Query::Advertise {
             repo: REPO.into(),
@@ -320,20 +347,20 @@ fn replay_fixtures_are_the_programs_real_bytes() {
         },
     );
     let mut request = Vec::new();
-    pkt(&mut request, "command=ls-refs\n");
+    pktline::push_line(&mut request, b"command=ls-refs");
     request.extend_from_slice(b"0001");
-    pkt(&mut request, "symrefs\n");
+    pktline::push_line(&mut request, b"symrefs");
     request.extend_from_slice(b"0000");
-    git_reply(
-        &remote,
+    tape.git_reply(
+        &rig,
         "upload-refs",
         Query::Upload {
             repo: REPO.into(),
             request,
         },
     );
-    capture(
-        &remote,
+    tape.capture(
+        &rig,
         "refused-object-not-held",
         Query::Blob {
             repo: REPO.into(),
@@ -341,15 +368,15 @@ fn replay_fixtures_are_the_programs_real_bytes() {
             range: None,
         },
     );
-    capture(
-        &remote,
+    tape.capture(
+        &rig,
         "refused-not-found",
         Query::Activity {
             repo: "absent".into(),
         },
     );
-    capture(
-        &remote,
+    tape.capture(
+        &rig,
         "refused-invalid-input",
         Query::Refs {
             repo: REPO.into(),
@@ -357,8 +384,8 @@ fn replay_fixtures_are_the_programs_real_bytes() {
             limit: 0,
         },
     );
-    let Reply::Refs { page, .. } = capture(
-        &remote,
+    let Reply::Refs { page, .. } = tape.capture(
+        &rig,
         "refs-before-update",
         Query::Refs {
             repo: REPO.into(),
@@ -368,9 +395,9 @@ fn replay_fixtures_are_the_programs_real_bytes() {
     ) else {
         panic!();
     };
-    remote.advance();
-    capture(
-        &remote,
+    rig.advance();
+    tape.capture(
+        &rig,
         "refused-stale",
         Query::Refs {
             repo: REPO.into(),
@@ -378,11 +405,11 @@ fn replay_fixtures_are_the_programs_real_bytes() {
             limit: 1,
         },
     );
-    output(&remote, "op-change-open", story.open("Review this change"));
-    capture(&remote, "change", change(1));
-    capture(&remote, "changes", changes());
-    capture(
-        &remote,
+    tape.output(&mut rig, "op-change-open", story.open("Review this change"));
+    tape.capture(&rig, "change", change(1));
+    tape.capture(&rig, "changes", changes());
+    tape.capture(
+        &rig,
         "judgment",
         Query::Judgment {
             key: b"reviewer".to_vec(),
@@ -390,8 +417,8 @@ fn replay_fixtures_are_the_programs_real_bytes() {
             limit: 2,
         },
     );
-    output(
-        &remote,
+    tape.output(
+        &mut rig,
         "op-change-edit",
         Op::ChangeEdit {
             repo: REPO.into(),
@@ -401,17 +428,17 @@ fn replay_fixtures_are_the_programs_real_bytes() {
             reviewers: None,
         },
     );
-    remote.actor(b"reviewer");
+    rig.actor = b"reviewer".to_vec();
     for (name, verdict) in [
         ("op-review-comment", Verdict::Comment),
         ("op-review-request-changes", Verdict::RequestChanges),
         ("op-review-approve", Verdict::Approve),
     ] {
-        output(&remote, name, review(&story, verdict));
+        tape.output(&mut rig, name, review(&story.feature, &story.root, verdict));
     }
-    remote.advance();
-    let Reply::Change { reviews, .. } = capture(
-        &remote,
+    rig.advance();
+    let Reply::Change { reviews, .. } = tape.capture(
+        &rig,
         "change-reviewed",
         Query::Change {
             repo: REPO.into(),
@@ -422,8 +449,8 @@ fn replay_fixtures_are_the_programs_real_bytes() {
     ) else {
         panic!();
     };
-    let Reply::Change { reviews, .. } = capture(
-        &remote,
+    let Reply::Change { reviews, .. } = tape.capture(
+        &rig,
         "change-reviews-next",
         Query::Change {
             repo: REPO.into(),
@@ -434,29 +461,26 @@ fn replay_fixtures_are_the_programs_real_bytes() {
     ) else {
         panic!();
     };
-    let chat::ChatViewReply::Message(Some(root)) = remote
-        .rt
-        .block_on(remote.harness.chat_query(chat::ChatViewQuery::MessageById {
+    let chat::ChatViewReply::Message(Some(root)) = rig
+        .sandbox
+        .chat_query(chat::ChatViewQuery::MessageById {
             message_id: reviews.items[0].message_id.clone(),
-        }))
+        })
         .unwrap()
     else {
         panic!();
     };
-    remote
-        .rt
-        .block_on(remote.harness.chat_execute(
-            chat::Party::Key(b"tester".to_vec()),
-            chat::ChatMsg::PostMessage {
-                channel_id: "forge:project:1".into(),
-                message_id: "fixture-reply".into(),
-                blocks: vec![chat::Block::paragraph("A reply about the anchored line")],
-                thread: Some(root.seq),
-            },
-        ))
-        .unwrap();
-    capture(
-        &remote,
+    rig.chat_execute(
+        chat::Party::Key(TESTER.to_vec()),
+        chat::ChatMsg::PostMessage {
+            channel_id: "forge:project:1".into(),
+            message_id: "fixture-reply".into(),
+            blocks: vec![chat::Block::paragraph("A reply about the anchored line")],
+            thread: Some(root.seq),
+        },
+    );
+    tape.capture(
+        &rig,
         "judgment-replies",
         Query::Judgment {
             key: b"reviewer".to_vec(),
@@ -464,13 +488,11 @@ fn replay_fixtures_are_the_programs_real_bytes() {
             limit: 2,
         },
     );
-    remote.actor(b"tester");
-    commit_file(story.source.path(), "follow-up.txt", "follow-up\n");
-    git(story.source.path(), &["push", "-q", &remote.url, "feature"]);
-    let tip = head(story.source.path());
-    capture(&remote, "change-outdated", change(1));
-    capture(
-        &remote,
+    rig.actor = TESTER.to_vec();
+    let tip = story.push_follow_up(&mut rig, "follow-up.txt", b"follow-up\n");
+    tape.capture(&rig, "change-outdated", change(1));
+    tape.capture(
+        &rig,
         "judgment-head-moved",
         Query::Judgment {
             key: b"reviewer".to_vec(),
@@ -478,22 +500,22 @@ fn replay_fixtures_are_the_programs_real_bytes() {
             limit: 2,
         },
     );
-    output(
-        &remote,
+    tape.output(
+        &mut rig,
         "op-change-open-second",
         story.open("Close this change"),
     );
-    output(
-        &remote,
+    tape.output(
+        &mut rig,
         "op-change-close",
         Op::ChangeClose {
             repo: REPO.into(),
             n: 2,
         },
     );
-    capture(&remote, "change-closed", change(2));
-    capture(
-        &remote,
+    tape.capture(&rig, "change-closed", change(2));
+    tape.capture(
+        &rig,
         "changes-filtered",
         Query::Changes {
             repo: REPO.into(),
@@ -505,8 +527,8 @@ fn replay_fixtures_are_the_programs_real_bytes() {
             limit: 2,
         },
     );
-    output(
-        &remote,
+    tape.output(
+        &mut rig,
         "op-merge",
         Op::Merge {
             repo: REPO.into(),
@@ -518,32 +540,29 @@ fn replay_fixtures_are_the_programs_real_bytes() {
             change: Some(1),
         },
     );
-    capture(&remote, "change-merged", change(1));
+    tape.capture(&rig, "change-merged", change(1));
     let mut conversation = story.open("Conversation attention");
     if let Op::ChangeOpen { from, .. } = &mut conversation {
         *from = reference("clean");
     }
-    remote.execute(&conversation).unwrap();
-    remote.advance();
+    rig.execute(&conversation).unwrap();
+    rig.advance();
     for (key, id, thread) in [
         (b"talker".as_slice(), "conversation-root", None),
-        (b"tester".as_slice(), "conversation-reply", Some(2)),
+        (TESTER, "conversation-reply", Some(2)),
     ] {
-        remote
-            .rt
-            .block_on(remote.harness.chat_execute(
-                chat::Party::Key(key.to_vec()),
-                chat::ChatMsg::PostMessage {
-                    channel_id: "forge:project:3".into(),
-                    message_id: id.into(),
-                    blocks: vec![chat::Block::paragraph("Conversation")],
-                    thread,
-                },
-            ))
-            .unwrap();
+        rig.chat_execute(
+            chat::Party::Key(key.to_vec()),
+            chat::ChatMsg::PostMessage {
+                channel_id: "forge:project:3".into(),
+                message_id: id.into(),
+                blocks: vec![chat::Block::paragraph("Conversation")],
+                thread,
+            },
+        );
     }
-    capture(
-        &remote,
+    tape.capture(
+        &rig,
         "judgment-conversation",
         Query::Judgment {
             key: b"talker".to_vec(),
@@ -551,15 +570,15 @@ fn replay_fixtures_are_the_programs_real_bytes() {
             limit: 128,
         },
     );
-    let narrow = Remote::start(
+    let mut narrow = Rig::start(
         Bounds {
             log_walk: 1,
             ..bounds
         },
         HashKind::Sha1,
     );
-    Story::pushed(&narrow);
-    capture(
+    Story::pushed(&mut narrow);
+    tape.capture(
         &narrow,
         "refused-capacity",
         Query::Log {
@@ -569,4 +588,15 @@ fn replay_fixtures_are_the_programs_real_bytes() {
             limit: 1,
         },
     );
+}
+
+#[test]
+fn replay_fixtures_are_the_programs_real_bytes() {
+    let tape = &mut Tape::default();
+    replay(tape);
+    if std::env::var_os("FORGE_REGENERATE_FIXTURES").as_deref() == Some(std::ffi::OsStr::new("1")) {
+        write(tape);
+    } else {
+        check(tape);
+    }
 }

@@ -1,9 +1,9 @@
 //! Every screen of this view, replayed from the forge program's own bytes.
 //!
-//! `crates/app/forge-harness/fixtures/*.bin` are real `Respond` bytes taken
-//! off the running program; nothing here builds a reply by hand. The fake
-//! host decodes one and hands it back, so an unhandled ask is a panic and a
-//! screen that reads a field the program does not send cannot compile.
+//! `crates/app/forge/fixtures/replies.bin` holds the program's real `Respond`
+//! bytes; nothing here builds a reply by hand. The fake host decodes one and
+//! hands it back, so an unhandled ask is a panic and a screen that reads a
+//! field the program does not send cannot compile.
 use super::*;
 use crate::api::{Ask, Props, Session, SubmitForge};
 use crate::state::{ChangeTab, Filter, RepoTab};
@@ -15,12 +15,13 @@ use forge::{ChangeFilter, ChangeState, Op, Query, Reply};
 
 use crate::api::ChatApi;
 
+#[path = "../../forge/fixtures/loader.rs"]
+mod loader;
+
 /// One committed fixture, exactly as the program answered it.
 pub(crate) fn bytes(name: &str) -> Vec<u8> {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../forge-harness/fixtures")
-        .join(format!("{name}.bin"));
-    std::fs::read(&path).unwrap_or_else(|error| panic!("fixture {name}: {error}"))
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../forge/fixtures");
+    loader::bytes(&dir, name)
 }
 
 fn reply(name: &str) -> Reply {

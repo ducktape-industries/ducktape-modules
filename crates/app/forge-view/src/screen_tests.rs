@@ -37,7 +37,7 @@ fn export_forge_screens() {
                 "theme": theme,
                 "width": 1180,
                 "height": 760,
-                "how": "TestAppContext + FakeHost over forge-harness fixtures",
+                "how": "TestAppContext + FakeHost over forge fixtures",
             }));
         }
     }

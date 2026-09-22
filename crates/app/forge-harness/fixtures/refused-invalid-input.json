@@ -1,1 +1,0 @@
-{"bytes":64,"codec":"borsh","reply":{"Refused":{"height":3,"reason":"invalid_input","sentence":"limit must be 1..=Bounds.page_size"}},"request":{"Refs":{"cursor":null,"limit":0,"repo":"project"}},"request_borsh_hex":"020700000070726f6a6563740000000000","sha256":"5b106de32ab65e48a312083cc8a95a3020e62f72f5ec52734cb1e6888ac40309","wire_type":"forge::Reply"}

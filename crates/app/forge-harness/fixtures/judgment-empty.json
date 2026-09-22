@@ -1,1 +1,0 @@
-{"bytes":14,"codec":"borsh","reply":{"Judgment":{"height":1,"page":{"items":[],"next":null}}},"request":{"Judgment":{"cursor":null,"key":[114,101,118,105,101,119,101,114],"limit":2}},"request_borsh_hex":"0d0800000072657669657765720002000000","sha256":"518fdc0503fa757b497469f92182a861133166ffe03a4cb3e34f1d3b2d0de2e5","wire_type":"forge::Reply"}

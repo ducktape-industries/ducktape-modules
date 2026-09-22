@@ -218,5 +218,5 @@ version proves atomic record+queue and next-block delivery, including restart.
   and resolves key/account attention. Screenshots and live app walks are outside
   this program task.
 
-See [the fixture manifest](../forge-harness/fixtures/FIXTURES.md) for real wasm
-response bytes and regeneration commands.
+See [the fixture manifest](fixtures/FIXTURES.md) for the program's real
+response bytes and the regeneration command.
