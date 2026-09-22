@@ -325,6 +325,93 @@ fn menus_and_dialogs_are_modal_overlays_with_dismiss_routes() {
 }
 
 #[test]
+fn message_menu_preserves_disabled_actions_and_executes_enabled_routes() {
+    let (mut cx, view) = opened();
+    view.update(&mut cx, |chat, _, cx| {
+        chat.menu = Some(Menu {
+            pane: Pane::Timeline,
+            seq: 1,
+            rev: 0,
+            mode: Mode::More,
+            at: (611., 455.),
+        });
+        chat.session.me.clear();
+        cx.notify();
+    });
+    cx.run_until_parked();
+    for id in [
+        "chat-menu-add-reaction",
+        "chat-menu-edit",
+        "chat-menu-delete",
+    ] {
+        let Some(wire::Node::Container { interactivity, .. }) = cx.find(id) else {
+            panic!("{id} remains a visible native menu row");
+        };
+        assert_eq!(interactivity.aria.disabled, Some(true));
+        assert!(interactivity.on_click.is_none());
+    }
+    assert!(cx.has_text("😀") && cx.has_text("✎") && cx.has_text("🗑"));
+
+    view.update(&mut cx, |chat, _, cx| {
+        chat.session.me = "acct:7".into();
+        cx.notify();
+    });
+    cx.run_until_parked();
+    cx.simulate_click("chat-menu-delete");
+    assert!(cx.has_text("Delete this message?"));
+    view.update(&mut cx, |chat, _, cx| {
+        chat.session.busy = true;
+        cx.notify();
+    });
+    cx.run_until_parked();
+    let Some(wire::Node::Container { interactivity, .. }) = cx.find("chat-menu-confirm-delete")
+    else {
+        panic!("busy delete confirmation remains visible");
+    };
+    assert_eq!(interactivity.aria.disabled, Some(true));
+    assert!(interactivity.on_click.is_none());
+    view.update(&mut cx, |chat, _, cx| {
+        chat.session.busy = false;
+        cx.notify();
+    });
+    cx.run_until_parked();
+    cx.simulate_click("chat-menu-confirm-delete");
+    cx.run_until_parked();
+    assert!(cx.host().asked::<Submit<ChatApi>>().iter().any(|op| {
+        matches!(op, ChatMsg::DeleteMessage { channel_id, seq: 1 } if channel_id == "general")
+    }));
+}
+
+#[test]
+fn reaction_picker_keeps_labels_and_its_stable_action_id() {
+    let (mut cx, view) = opened();
+    view.update(&mut cx, |chat, _, cx| {
+        chat.menu = Some(Menu {
+            pane: Pane::Timeline,
+            seq: 1,
+            rev: 0,
+            mode: Mode::Reactions,
+            at: (333., 222.),
+        });
+        cx.notify();
+    });
+    cx.run_until_parked();
+    let Some(wire::Node::Container { interactivity, .. }) = cx.find("chat-reaction-🔥") else {
+        panic!("reaction is a native cell");
+    };
+    assert_eq!(interactivity.aria.label.as_deref(), Some("Add reaction"));
+    assert_eq!(interactivity.aria.description.as_deref(), Some("🔥"));
+    cx.simulate_click("chat-reaction-🔥");
+    cx.run_until_parked();
+    assert!(
+        cx.host()
+            .asked::<Submit<ChatApi>>()
+            .iter()
+            .any(|op| { matches!(op, ChatMsg::AddReaction { emoji, .. } if emoji == "🔥") })
+    );
+}
+
+#[test]
 fn attachment_preview_keeps_host_surfaces_and_markdown_link_events() {
     let (mut cx, view) = opened();
     let link = files::file_address("testnet#0a1b2c3d", "/readme.md").unwrap();
