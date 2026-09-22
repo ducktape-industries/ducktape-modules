@@ -11,8 +11,8 @@ use ducktape_view_guest::host::{Refusal, malformed};
 use ducktape_view_guest::view::{Live, Loaded};
 use ducktape_view_guest::{ClickEvent, InteractiveElement, StatefulInteractiveElement};
 use ducktape_view_guest::{
-    AnyElement, Context, ElementId, Host, IntoElement, ParentElement, Render,
-    Styled, Task, Theme, View, Window, div, px,
+    AnyElement, Context, ElementId, Host, IntoElement, ParentElement, Render, Styled, Task, Theme,
+    View, Window, div, px,
 };
 mod components;
 use components::{EmptyState, Section};
