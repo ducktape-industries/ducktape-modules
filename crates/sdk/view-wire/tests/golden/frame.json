@@ -207,6 +207,10 @@
                 {
                   "start": 0,
                   "end": 4
+                },
+                {
+                  "start": 5,
+                  "end": 9
                 }
               ],
               "on_click": 1,

@@ -28,7 +28,7 @@ pub fn every_node() -> Node {
                 },
             )]),
             font_family_overrides: vec![(Range { start: 5, end: 9 }, "Mono".into())],
-            clickable_ranges: vec![0..4],
+            clickable_ranges: vec![0..4, 5..9],
             on_click: Some(1),
             on_hover: Some(2),
             tooltip: None,

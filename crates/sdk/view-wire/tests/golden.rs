@@ -191,12 +191,11 @@ impl Program for Golden {
     type Reply = Vec<u32>;
 }
 
-/// One exchange: the kind, the request bytes and the reply bytes, plus the
-/// values as JSON for the readable twin.
-fn exchange<D: Door>(
-    request: D::Request,
-    reply: D::Reply,
-) -> ((String, Vec<u8>, Vec<u8>), serde_json::Value)
+/// The kind, the request bytes and the reply bytes of one exchange.
+type Exchange = (String, Vec<u8>, Vec<u8>);
+
+/// One exchange, plus the values as JSON for the readable twin.
+fn exchange<D: Door>(request: D::Request, reply: D::Reply) -> (Exchange, serde_json::Value)
 where
     D::Request: serde::Serialize,
     D::Reply: serde::Serialize,
@@ -212,7 +211,7 @@ where
     )
 }
 
-fn every_door() -> Vec<((String, Vec<u8>, Vec<u8>), serde_json::Value)> {
+fn every_door() -> Vec<(Exchange, serde_json::Value)> {
     use doors::*;
     let file = SelectedFile {
         token: "t1".into(),
