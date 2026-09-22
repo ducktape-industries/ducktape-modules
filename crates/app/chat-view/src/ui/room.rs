@@ -3,6 +3,7 @@
 use ducktape_view_guest::prelude::*;
 use ducktape_view_guest::{ClickEvent, Context, ElementId, ParentElement, Styled, Theme, div, px};
 
+use super::timeline;
 use crate::chat::ChannelInfo;
 use crate::composer::Target;
 use crate::ui::{badge, button, empty_state};
@@ -64,7 +65,12 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
             };
             let hint = match super::sidebar::dm_peer(chat) {
                 Some((peer, _)) => format!("Message {peer}"),
-                None => format!("Message #{name}"),
+                None => {
+                    let name = chat
+                        .info(&room.id)
+                        .map_or_else(|| short_id(&room.id, 8), |info| info.channel.name.clone());
+                    format!("Message #{name}")
+                }
             };
             let editable = !chat.session.loading && chat.session.connected;
             pane = pane.child(composer(chat, target, &hint, editable, cx));
@@ -130,19 +136,22 @@ fn no_room(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement {
             "Loading channels…",
             "Choose a room when they arrive.",
             theme,
-        ),
+        )
+        .into_any_element(),
         Loaded::Failed(refusal) => empty_state(
             ElementId::Name("chat-no-room-failed".into()),
             "Couldn’t read the channels",
             refusal.sentence.clone(),
             theme,
-        ),
+        )
+        .into_any_element(),
         Loaded::Ready(rooms) if !rooms.is_empty() => empty_state(
             ElementId::Name("chat-no-room".into()),
             "No channel open",
             "Choose a channel from the sidebar.",
             theme,
-        ),
+        )
+        .into_any_element(),
         Loaded::Ready(_) => {
             let open = cx.listener(|chat, _: &ClickEvent, _window, cx| {
                 chat.create = Some(Default::default());
@@ -167,6 +176,7 @@ fn no_room(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement {
                     theme,
                     open,
                 ))
+                .into_any_element()
         }
     }
     .into_any_element()
@@ -437,6 +447,7 @@ pub fn selection_bar(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl
             theme,
             copy,
         ))
+        .into_any_element()
 }
 
 pub fn composer_key(target: &Target) -> String {

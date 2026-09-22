@@ -115,7 +115,7 @@ pub fn list(chat: &Chat, pane: Pane, cx: &mut Context<Chat>, theme: &Theme) -> i
                 Pane::Thread => "chat-thread-list".into(),
             }),
             count,
-            cx.processor(move |chat, range, window, cx| {
+            cx.processor(move |chat, range: std::ops::Range<usize>, window, cx| {
                 chat.messages(pane_for_items)
                     .into_iter()
                     .enumerate()

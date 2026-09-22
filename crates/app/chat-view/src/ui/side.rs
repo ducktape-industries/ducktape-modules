@@ -5,6 +5,7 @@ use ducktape_view_guest::{
     AnyElement, ClickEvent, Context, ElementId, ParentElement, Styled, Theme, div, px,
 };
 
+use super::timeline;
 use crate::Chat;
 use crate::ui::room;
 use crate::ui::{button, empty_state};
@@ -191,29 +192,40 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
                 .text_color(theme.faint)
                 .child("Select a member below to remove it from this channel."),
         );
-    if let Some(room) = &chat.room {
-        if let Some(members) = room.members.ready() {
-            for (index, member) in members.iter().enumerate() {
-                let party = member.key.clone();
-                let remove = cx.listener(move |chat, _: &ClickEvent, _window, cx| {
-                    chat.set_member(&party, false, cx);
-                });
-                content = content.child(
-                    div()
-                        .id(ElementId::named_usize("chat-details-member", index))
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .child(div().flex_1().text_sm().child(member.label.clone()))
-                        .child(button(
-                            ElementId::named_usize("chat-details-remove", index),
-                            "Remove",
-                            theme,
-                            remove,
-                        )),
-                );
-            }
+    let roster = chat.members();
+    if roster.is_empty() {
+        content = content.child(
+            div()
+                .id(ElementId::Name("chat-details-no-members".into()))
+                .text_xs()
+                .text_color(theme.faint)
+                .child("No members added. An open channel needs none."),
+        );
+    }
+    for (index, member) in roster.iter().enumerate() {
+        let party = member.key.clone();
+        let remove = cx.listener(move |chat, _: &ClickEvent, _window, cx| {
+            chat.set_member(&party, false, cx);
+        });
+        let mut remove_button = div()
+            .id(ElementId::named_usize("chat-details-remove", index))
+            .px_2()
+            .py_1()
+            .rounded_md()
+            .bg(theme.surface)
+            .hover(|s| s.bg(theme.surface_raised))
+            .child("Remove");
+        if !chat.session.busy {
+            remove_button = remove_button.on_click(remove);
         }
+        let row = div()
+            .id(ElementId::named_usize("chat-details-member", index))
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(div().flex_1().text_sm().child(member.label.clone()))
+            .child(remove_button);
+        content = content.child(row);
     }
     content.into_any_element()
 }

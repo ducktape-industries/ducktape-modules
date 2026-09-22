@@ -11,8 +11,8 @@ use ducktape_view_guest::host::{Refusal, malformed};
 use ducktape_view_guest::view::{Live, Loaded};
 use ducktape_view_guest::{ClickEvent, InteractiveElement};
 use ducktape_view_guest::{
-    App, Context, ElementId, Host, IntoElement, ParentElement, Render, RenderOnce,
-    StatefulInteractiveElement, Styled, Task, Theme, View, Window, div, px,
+    App, ClickEvent, Context, ElementId, Host, InteractiveElement, IntoElement, ParentElement,
+    Render, RenderOnce, StatefulInteractiveElement, Styled, Task, Theme, View, Window, div, px,
 };
 use futures::StreamExt;
 use modules::{Page, identity, valset};

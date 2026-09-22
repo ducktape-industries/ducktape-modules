@@ -2,7 +2,7 @@
 
 use ducktape_view_guest::AnyElement;
 use ducktape_view_guest::prelude::*;
-use ducktape_view_guest::{Context, ElementId, ParentElement, Styled, Theme, div, px};
+use ducktape_view_guest::{ClickEvent, Context, ElementId, ParentElement, Styled, Theme, div, px};
 
 use crate::chat::ChannelInfo;
 use crate::{ChannelCreate, Chat};
@@ -32,7 +32,7 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
         .on_input(typed)
         .on_submit(submit);
     if !chat.search.query.is_empty() || !chat.search.draft.trim().is_empty() {
-        let clear = cx.listener(|chat, _: &(), _window, cx| {
+        let clear = cx.listener(|chat, _: &ClickEvent, _window, cx| {
             chat.search_clear();
             cx.notify();
         });
@@ -45,7 +45,7 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
         );
     }
 
-    let toggle = cx.listener(|chat, _: &(), _window, cx| {
+    let toggle = cx.listener(|chat, _: &ClickEvent, _window, cx| {
         chat.create = match chat.create.take() {
             Some(_) => None,
             None => Some(ChannelCreate::default()),

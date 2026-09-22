@@ -116,9 +116,8 @@ pub fn channel_create(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Opt
             "Create channel",
             theme,
             submit,
-        ))
-        .into_any_element();
-    Some(card)
+        ));
+    Some(card.into_any_element())
 }
 
 pub fn preview(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Option<AnyElement> {
@@ -194,7 +193,16 @@ pub fn preview(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Option<Any
                     .p_3()
                     .bg(theme.surface)
                     .font_family("JetBrains Mono")
-                    .child(text.clone()),
+                    .child(if text.binary {
+                        "No preview: this file is binary.".to_owned()
+                    } else {
+                        text.text.clone()
+                    })
+                    .when(text.clipped, |el| {
+                        el.child(
+                            "Only the beginning is shown here. Open in Files for the whole file.",
+                        )
+                    }),
             );
         }
     }

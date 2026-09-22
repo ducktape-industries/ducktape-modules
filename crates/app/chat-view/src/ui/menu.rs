@@ -41,7 +41,6 @@ pub fn floating(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Option<An
             .absolute()
             .top_3()
             .right_3()
-            .z_index(10.)
             .min_w_48()
             .p_2()
             .rounded_md()
@@ -169,12 +168,13 @@ fn message_menu(chat: &Chat, menu: &Menu, cx: &mut Context<Chat>, theme: &Theme)
             let mut grid = div()
                 .id(ElementId::Name("chat-reaction-grid".into()))
                 .grid()
-                .grid_cols_8()
+                .grid_cols(8)
                 .gap_1();
             for emoji in reaction_palette() {
                 let emoji = emoji.to_owned();
+                let reaction = emoji.clone();
                 let click = cx.listener(move |chat, _: &ClickEvent, _window, cx| {
-                    chat.react(seq, emoji.clone(), true, cx)
+                    chat.react(seq, reaction.clone(), true, cx)
                 });
                 grid = grid.child(
                     div()
