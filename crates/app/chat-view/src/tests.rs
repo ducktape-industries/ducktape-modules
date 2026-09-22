@@ -500,7 +500,7 @@ fn rich_message_keeps_styles_and_dispatches_each_link_by_value() {
     else {
         panic!("message paragraph is one rich text node");
     };
-    assert_eq!(text, "bold italic first reviewer");
+    assert_eq!(text, "bold italic first @reviewer");
     let wire::RichTextRuns::Highlights(highlights) = runs else {
         panic!("chat authors highlight ranges");
     };
@@ -521,12 +521,12 @@ fn rich_message_keeps_styles_and_dispatches_each_link_by_value() {
     cx.simulate_rich_click(key, 1);
     assert_eq!(
         cx.host().opened_links(),
-        vec!["https://one.example", "duck://testnet-0a1b2c3d/identity/8",]
+        vec!["duck://testnet-0a1b2c3d/chat/general", "https://one.example", "duck://testnet-0a1b2c3d/identity/8",]
     );
 }
 
 #[test]
-fn picture_attachment_uses_the_scoped_surface_and_opens_preview() {
+fn picture_attachment_keeps_scoped_surface_and_respects_attachment_gate() {
     let (mut cx, view) = opened();
     let link = files::file_address("testnet#0a1b2c3d", "/shared/attachments/picture.png").unwrap();
     view.update(&mut cx, |chat, _, cx| {
@@ -562,12 +562,8 @@ fn picture_attachment_uses_the_scoped_surface_and_opens_preview() {
                 ))
     ));
     cx.simulate_click("chat-message-picture-block-0");
-    view.read(|chat| {
-        assert_eq!(
-            chat.preview.as_ref().map(|preview| &preview.link),
-            Some(&link)
-        )
-    });
+    view.read(|chat| assert!(chat.preview.is_none(), "attachment previews remain disabled"));
+    assert_eq!(cx.host().opened_links(), vec!["duck://testnet-0a1b2c3d/chat/general".to_owned(), link]);
 }
 
 #[test]
@@ -655,3 +651,6 @@ fn unread_rooms_carry_a_dot_and_the_open_room_a_divider() {
     cx.run_until_parked();
     assert!(cx.has_text("New messages"));
 }
+
+#[path = "message_parity_tests.rs"]
+mod message_parity;
