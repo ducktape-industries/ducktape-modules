@@ -37,7 +37,7 @@ pub fn floating(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Option<An
     let (at, size) = popup_geometry(menu, reaction_palette().len())?;
     let content = message_menu(chat, menu, cx, theme);
     let frame = div()
-        .id(ElementId::Name(focus_key(menu.pane, menu.mode).into()))
+        .id(focus_key(menu.pane, menu.mode))
         .w(px(size.0))
         .h(px(size.1))
         .overflow_hidden()
@@ -93,7 +93,7 @@ pub fn editing(
     });
     Some(
         div()
-            .id(ElementId::Name("chat-message-editing".into()))
+            .id("chat-message-editing")
             .px_4()
             .py_1()
             .child(
@@ -137,7 +137,7 @@ fn actions(chat: &Chat, menu: &Menu, cx: &mut Context<Chat>, theme: &Theme) -> A
     let (pane, seq, rev) = (menu.pane, menu.seq, menu.rev);
     let writable = chat.may_write();
     let mut list = div()
-        .id(ElementId::Name("chat-menu-actions".into()))
+        .id("chat-menu-actions")
         .flex()
         .flex_col()
         .gap(px(ROW_GAP))
@@ -216,7 +216,7 @@ fn reactions(chat: &Chat, menu: &Menu, cx: &mut Context<Chat>, theme: &Theme) ->
     let writable = chat.may_write();
     let seq = menu.seq;
     let mut grid = div()
-        .id(ElementId::Name("chat-reaction-grid".into()))
+        .id("chat-reaction-grid")
         .grid()
         .grid_cols(COLUMNS)
         .gap(px(PICKER_GAP))
@@ -230,7 +230,7 @@ fn reactions(chat: &Chat, menu: &Menu, cx: &mut Context<Chat>, theme: &Theme) ->
             })) as Press
         });
         grid = grid.child(Reaction {
-            id: ElementId::Name(format!("chat-reaction-{emoji}").into()),
+            id: format!("chat-reaction-{emoji}").into(),
             emoji: emoji.into(),
             press,
             theme: *theme,

@@ -77,7 +77,7 @@ impl Render for Nodes {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = *cx.global::<Theme>();
         div()
-            .id(ElementId::Name("nodes".into()))
+            .id("nodes")
             .flex()
             .flex_col()
             .gap_3()
@@ -88,7 +88,7 @@ impl Render for Nodes {
             .text_size(px(13.))
             .child(
                 div()
-                    .id(ElementId::Name("nodes-head".into()))
+                    .id("nodes-head")
                     .flex()
                     .items_center()
                     .gap_2()
@@ -139,7 +139,7 @@ impl Nodes {
     fn body(&self, cx: &mut Context<Self>, theme: &Theme) -> AnyElement {
         match &self.set {
             Loaded::Idle | Loaded::Loading(_) => div()
-                .id(ElementId::Name("nodes-loading".into()))
+                .id("nodes-loading")
                 .text_size(px(12.))
                 .text_color(theme.muted)
                 .child("Reading the validator set…")
@@ -147,7 +147,7 @@ impl Nodes {
             Loaded::Failed(refusal) => {
                 let retry = cx.listener(|view, _: &ClickEvent, _, cx| view.read(cx));
                 div()
-                    .id(ElementId::Name("nodes-refused".into()))
+                    .id("nodes-refused")
                     .flex()
                     .flex_col()
                     .gap_2()
@@ -159,7 +159,7 @@ impl Nodes {
                     .child(refusal.sentence.clone())
                     .child(
                         div()
-                            .id(ElementId::Name("nodes-retry".into()))
+                            .id("nodes-retry")
                             .px_2()
                             .py_1()
                             .rounded_md()
@@ -181,7 +181,7 @@ impl Nodes {
                 .into_any_element()
             }
             Loaded::Ready(set) => div()
-                .id(ElementId::Name("nodes-list".into()))
+                .id("nodes-list")
                 .flex_1()
                 .overflow_y_scroll()
                 .flex()
@@ -199,14 +199,14 @@ impl Nodes {
 fn validators(validators: &[String], theme: &Theme) -> AnyElement {
     if validators.is_empty() {
         return div()
-            .id(ElementId::Name("nodes-no-validators".into()))
+            .id("nodes-no-validators")
             .text_size(px(12.))
             .text_color(theme.muted)
             .child("No key validates on this network.")
             .into_any_element();
     }
     div()
-        .id(ElementId::Name("nodes-validators".into()))
+        .id("nodes-validators")
         .flex()
         .flex_col()
         .gap_2()
@@ -236,7 +236,7 @@ fn validators(validators: &[String], theme: &Theme) -> AnyElement {
 
 fn members(members: &[Member], theme: &Theme) -> impl IntoElement {
     div()
-        .id(ElementId::Name("nodes-members".into()))
+        .id("nodes-members")
         .flex()
         .flex_col()
         .gap_2()

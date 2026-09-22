@@ -3,21 +3,21 @@
 
 use ducktape_view_guest::prelude::*;
 use ducktape_view_guest::{
-    ClickEvent, Context, ElementId, FollowMode, ListAlignment, ListSizingBehavior, ListState,
-    ParentElement, Styled, Theme, div, list as gpui_list, px,
+    ClickEvent, Context, FollowMode, ListAlignment, ListSizingBehavior, ListState, ParentElement,
+    Styled, Theme, div, list as gpui_list, px,
 };
 
-use crate::ui::message;
 use crate::ui::room::selection_bar;
+use crate::ui::{message, quiet};
 use crate::{Chat, Loaded, Pane};
 
 pub fn list(chat: &Chat, pane: Pane, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement {
     let messages = chat.messages(pane);
     let mut content = div()
-        .id(ElementId::Name(match pane {
-            Pane::Timeline => "chat-timeline".into(),
-            Pane::Thread => "chat-thread-messages".into(),
-        }))
+        .id(match pane {
+            Pane::Timeline => "chat-timeline",
+            Pane::Thread => "chat-thread-messages",
+        })
         .flex_1()
         .min_h(px(0.))
         .flex()
@@ -35,7 +35,7 @@ pub fn list(chat: &Chat, pane: Pane, cx: &mut Context<Chat>, theme: &Theme) -> i
                 .is_some_and(|thread| matches!(thread.replies, Loaded::Loading(_))),
         };
         if loading {
-            return content.child(quiet("Loading messages…", theme));
+            return content.child(quiet("Loading messages…", theme).p_4());
         }
         let failed = match pane {
             Pane::Timeline => chat
@@ -51,7 +51,7 @@ pub fn list(chat: &Chat, pane: Pane, cx: &mut Context<Chat>, theme: &Theme) -> i
                 .map(|error| error.sentence.clone()),
         };
         if let Some(error) = failed {
-            return content.child(quiet(error, theme));
+            return content.child(quiet(error, theme).p_4());
         }
         if let Some(room) = &chat.room {
             let name = chat
@@ -82,22 +82,16 @@ pub fn list(chat: &Chat, pane: Pane, cx: &mut Context<Chat>, theme: &Theme) -> i
         };
         let control = if room.older_loading || chat.session.busy {
             div()
-                .id(ElementId::Name("chat-load-older-button".into()))
+                .id("chat-load-older-button")
                 .text_color(theme.muted)
                 .child(label)
                 .into_any_element()
         } else {
-            super::button(
-                ElementId::Name("chat-load-older-button".into()),
-                label,
-                theme,
-                older,
-            )
-            .into_any_element()
+            super::button("chat-load-older-button", label, theme, older).into_any_element()
         };
         content = content.child(
             div()
-                .id(ElementId::Name("chat-load-older".into()))
+                .id("chat-load-older")
                 .flex()
                 .justify_center()
                 .p_2()
@@ -175,10 +169,10 @@ pub fn list(chat: &Chat, pane: Pane, cx: &mut Context<Chat>, theme: &Theme) -> i
         .w_full();
         content = content.child(
             div()
-                .id(ElementId::Name(match pane {
-                    Pane::Timeline => "chat-message-list".into(),
-                    Pane::Thread => "chat-thread-list".into(),
-                }))
+                .id(match pane {
+                    Pane::Timeline => "chat-message-list",
+                    Pane::Thread => "chat-thread-list",
+                })
                 .flex()
                 .flex_col()
                 .flex_1()
@@ -209,12 +203,12 @@ pub fn list(chat: &Chat, pane: Pane, cx: &mut Context<Chat>, theme: &Theme) -> i
         });
         content = content.child(
             div()
-                .id(ElementId::Name("chat-jump-latest".into()))
+                .id("chat-jump-latest")
                 .flex()
                 .justify_center()
                 .p_2()
                 .child(super::button(
-                    ElementId::Name("chat-jump-latest-button".into()),
+                    "chat-jump-latest-button",
                     "Jump to latest",
                     theme,
                     latest,
@@ -263,7 +257,7 @@ fn list_state(chat: &Chat, pane: Pane, keys: &[String]) -> ListState {
 
 fn unread_marker(theme: &Theme) -> impl IntoElement {
     div()
-        .id(ElementId::Name("chat-unread-marker".into()))
+        .id("chat-unread-marker")
         .flex()
         .items_center()
         .gap_2()
@@ -289,7 +283,7 @@ fn intro(name: &str, dm: Option<&str>, theme: &Theme) -> impl IntoElement {
         ),
     };
     div()
-        .id(ElementId::Name("chat-timeline-intro".into()))
+        .id("chat-timeline-intro")
         .p_6()
         .flex()
         .flex_col()
@@ -310,12 +304,4 @@ fn intro(name: &str, dm: Option<&str>, theme: &Theme) -> impl IntoElement {
                 .child(detail),
         )
         .child(div().h(px(1.)).w_full().bg(theme.border))
-}
-
-fn quiet(text: impl Into<String>, theme: &Theme) -> impl IntoElement {
-    div()
-        .p_4()
-        .text_size(px(12.))
-        .text_color(theme.muted)
-        .child(text.into())
 }

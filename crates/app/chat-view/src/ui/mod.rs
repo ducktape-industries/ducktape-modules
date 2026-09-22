@@ -10,10 +10,10 @@ pub mod side;
 pub mod sidebar;
 mod timeline;
 
-pub(crate) use components::{badge, button, empty_state};
+pub(crate) use components::{badge, button, empty_state, quiet};
 use ducktape_view_guest::{
-    Context, ElementId, InteractiveElement, IntoElement, ParentElement, Pixels, Styled, Theme, div,
-    hsla, modal_overlay, px, resize_handle, sensor,
+    Context, InteractiveElement, IntoElement, ParentElement, Pixels, Styled, Theme, div, hsla,
+    modal_overlay, px, resize_handle, sensor,
 };
 
 use crate::Chat;
@@ -21,7 +21,7 @@ use crate::Chat;
 pub fn render(chat: &Chat, cx: &mut Context<Chat>) -> impl IntoElement {
     let theme = *cx.global::<Theme>();
     let mut screen = div()
-        .id(ElementId::Name("chat-root".into()))
+        .id("chat-root")
         .relative()
         .flex()
         .size_full()
@@ -32,7 +32,7 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>) -> impl IntoElement {
             connected(chat, cx, &theme).into_any_element()
         } else {
             empty_state(
-                ElementId::Name("chat-disconnected".into()),
+                "chat-disconnected",
                 "Not connected",
                 "Choose a network from the sidebar to reconnect.",
                 &theme,
@@ -46,7 +46,7 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>) -> impl IntoElement {
             chat.close_menu();
             cx.notify();
         });
-        screen = modal_overlay(ElementId::Name("chat-menu-overlay".into()), screen, menu)
+        screen = modal_overlay("chat-menu-overlay", screen, menu)
             .label("Message menu")
             .on_dismiss(dismiss)
             .into_any_element();
@@ -56,35 +56,27 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>) -> impl IntoElement {
             chat.preview = None;
             cx.notify();
         });
-        screen = modal_overlay(
-            ElementId::Name("chat-preview-overlay".into()),
-            screen,
-            preview,
-        )
-        .label("Attachment preview")
-        .flex()
-        .items_center()
-        .justify_center()
-        .backdrop(hsla(0., 0., 0., 0.55))
-        .on_dismiss(dismiss)
-        .into_any_element();
+        screen = modal_overlay("chat-preview-overlay", screen, preview)
+            .label("Attachment preview")
+            .flex()
+            .items_center()
+            .justify_center()
+            .backdrop(hsla(0., 0., 0., 0.55))
+            .on_dismiss(dismiss)
+            .into_any_element();
     }
     if let Some(create) = dialogs::channel_create(chat, cx, &theme) {
         let dismiss = cx.listener(|chat, _: &(), _window, cx| {
             chat.create = None;
             cx.notify();
         });
-        let overlay = modal_overlay(
-            ElementId::Name("chat-create-overlay".into()),
-            screen,
-            create,
-        )
-        .label("Create channel")
-        .flex()
-        .items_center()
-        .justify_center()
-        .p_6()
-        .backdrop(hsla(0., 0., 0., 0.55));
+        let overlay = modal_overlay("chat-create-overlay", screen, create)
+            .label("Create channel")
+            .flex()
+            .items_center()
+            .justify_center()
+            .p_6()
+            .backdrop(hsla(0., 0., 0., 0.55));
         screen = if chat.create.as_ref().is_some_and(|create| create.busy) {
             overlay.into_any_element()
         } else {
@@ -101,7 +93,7 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>) -> impl IntoElement {
         chat.layout.clamp();
         cx.notify();
     });
-    sensor(ElementId::Name("chat-viewport".into()), screen)
+    sensor("chat-viewport", screen)
         .size_full()
         .on_show(shown)
         .on_resize(resized)
@@ -109,7 +101,7 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>) -> impl IntoElement {
 
 fn connected(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement {
     let mut panes = div()
-        .id(ElementId::Name("chat-panes".into()))
+        .id("chat-panes")
         .flex()
         .size_full()
         .child(sidebar::render(chat, cx, theme))
@@ -144,9 +136,5 @@ fn divider(
         chat.layout.clamp();
         cx.notify();
     });
-    resize_handle(
-        ElementId::Name(id.into()),
-        div().w(px(1.)).h_full().bg(theme.border),
-    )
-    .on_drag(dragged)
+    resize_handle(id, div().w(px(1.)).h_full().bg(theme.border)).on_drag(dragged)
 }

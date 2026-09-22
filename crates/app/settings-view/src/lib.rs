@@ -387,7 +387,7 @@ impl Render for Settings {
 }
 fn section(key: &str, title: &str, body: impl IntoElement, theme: &Theme) -> impl IntoElement {
     div()
-        .id(ElementId::Name(format!("settings/{key}/card").into()))
+        .id(format!("settings/{key}/card"))
         .bg(theme.background)
         .border_1()
         .border_color(theme.border)
@@ -395,14 +395,14 @@ fn section(key: &str, title: &str, body: impl IntoElement, theme: &Theme) -> imp
         .p_3()
         .child(
             div()
-                .id(ElementId::Name(format!("settings/{key}/section").into()))
+                .id(format!("settings/{key}/section"))
                 .flex()
                 .flex_col()
                 .gap_2()
                 .w_full()
                 .child(
                     div()
-                        .id(ElementId::Name(format!("settings/{key}/heading").into()))
+                        .id(format!("settings/{key}/heading"))
                         .h(px(28.))
                         .flex()
                         .items_center()
@@ -421,13 +421,13 @@ fn section(key: &str, title: &str, body: impl IntoElement, theme: &Theme) -> imp
 }
 fn line(key: &str, label: &str, value: &str) -> Stateful<Div> {
     div()
-        .id(ElementId::Name(format!("settings/{key}").into()))
+        .id(format!("settings/{key}"))
         .w_full()
         .child(format!("{label}: {value}"))
 }
 fn refusal(key: &str, sentence: &str, theme: &Theme) -> impl IntoElement {
     div()
-        .id(ElementId::Name(format!("settings/{key}/refused").into()))
+        .id(format!("settings/{key}/refused"))
         .bg(theme.danger_soft)
         .border_1()
         .border_color(theme.danger)
@@ -436,21 +436,21 @@ fn refusal(key: &str, sentence: &str, theme: &Theme) -> impl IntoElement {
         .py_2()
         .child(
             div()
-                .id(ElementId::Name(format!("settings/{key}/why").into()))
+                .id(format!("settings/{key}/why"))
                 .w_full()
                 .child(sentence.to_owned()),
         )
 }
 fn secondary(id: impl Into<String>, text: impl Into<String>, theme: &Theme) -> Stateful<Div> {
     div()
-        .id(ElementId::Name(id.into().into()))
+        .id(id.into())
         .text_size(px(12.))
         .text_color(theme.muted)
         .child(text.into())
 }
 fn button(id: impl Into<String>, label: impl Into<String>, theme: &Theme) -> Stateful<Div> {
     div()
-        .id(ElementId::Name(id.into().into()))
+        .id(id.into())
         .px_2()
         .py_1()
         .rounded_md()

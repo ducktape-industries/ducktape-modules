@@ -585,11 +585,8 @@ fn unread_rooms_carry_a_dot_and_the_open_room_a_divider() {
     assert!(cx.has_text("New messages"));
 }
 
-#[path = "message_parity_tests.rs"]
-mod message_parity;
-
-#[path = "rich_message_tests.rs"]
-mod rich_message;
+mod message;
+mod rich;
 
 /// `CHAT_SCREEN_EXPORT=1` writes the opened room's tree for the app's
 /// node-less renderer (`ducktape-app --render-tree`), light and dark.

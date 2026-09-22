@@ -84,7 +84,7 @@ impl Render for Explorer {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = *cx.global::<Theme>();
         div()
-            .id(ElementId::Name("explorer".into()))
+            .id("explorer")
             .flex()
             .flex_col()
             .gap_3()
@@ -95,7 +95,7 @@ impl Render for Explorer {
             .text_size(px(13.))
             .child(
                 div()
-                    .id(ElementId::Name("explorer-head".into()))
+                    .id("explorer-head")
                     .flex()
                     .items_center()
                     .gap_2()
@@ -144,7 +144,7 @@ impl Explorer {
     fn body(&self, cx: &mut Context<Self>, theme: &Theme) -> AnyElement {
         match &self.network {
             Loaded::Idle | Loaded::Loading(_) => div()
-                .id(ElementId::Name("explorer-loading".into()))
+                .id("explorer-loading")
                 .text_size(px(12.))
                 .text_color(theme.muted)
                 .child("Reading the registry…")
@@ -152,7 +152,7 @@ impl Explorer {
             Loaded::Failed(refusal) => {
                 let retry = cx.listener(|view, _: &ClickEvent, _, cx| view.read(cx));
                 div()
-                    .id(ElementId::Name("explorer-refused".into()))
+                    .id("explorer-refused")
                     .flex()
                     .flex_col()
                     .gap_2()
@@ -164,7 +164,7 @@ impl Explorer {
                     .child(refusal.sentence.clone())
                     .child(
                         div()
-                            .id(ElementId::Name("explorer-retry".into()))
+                            .id("explorer-retry")
                             .px_2()
                             .py_1()
                             .rounded_md()
@@ -186,7 +186,7 @@ impl Explorer {
                 .into_any_element()
             }
             Loaded::Ready(network) => div()
-                .id(ElementId::Name("explorer-list".into()))
+                .id("explorer-list")
                 .flex_1()
                 .overflow_y_scroll()
                 .flex()
@@ -204,22 +204,20 @@ impl Explorer {
 fn programs(programs: &[Entry], theme: &Theme) -> AnyElement {
     if programs.is_empty() {
         return div()
-            .id(ElementId::Name("explorer-no-programs".into()))
+            .id("explorer-no-programs")
             .text_size(px(12.))
             .text_color(theme.muted)
             .child("No program runs here yet.")
             .into_any_element();
     }
     div()
-        .id(ElementId::Name("explorer-programs".into()))
+        .id("explorer-programs")
         .flex()
         .flex_col()
         .gap_2()
         .children(programs.iter().map(|entry| {
             div()
-                .id(ElementId::Name(
-                    format!("explorer-program-{}", entry.program).into(),
-                ))
+                .id(format!("explorer-program-{}", entry.program))
                 .flex()
                 .items_center()
                 .gap_2()
@@ -243,14 +241,14 @@ fn programs(programs: &[Entry], theme: &Theme) -> AnyElement {
 fn changes(changes: &[Change], theme: &Theme) -> AnyElement {
     if changes.is_empty() {
         return div()
-            .id(ElementId::Name("explorer-no-changes".into()))
+            .id("explorer-no-changes")
             .text_size(px(12.))
             .text_color(theme.muted)
             .child("Nothing is scheduled against the registry.")
             .into_any_element();
     }
     div()
-        .id(ElementId::Name("explorer-changes".into()))
+        .id("explorer-changes")
         .flex()
         .flex_col()
         .gap_2()

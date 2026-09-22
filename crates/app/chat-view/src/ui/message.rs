@@ -39,7 +39,7 @@ pub fn card(
     let group: ducktape_view_guest::SharedString = format!("chat-message-{id}").into();
     let avatar = if message.show_author {
         div()
-            .id(ElementId::Name(format!("chat-message-{id}-avatar").into()))
+            .id(format!("chat-message-{id}-avatar"))
             .size_7()
             .flex()
             .items_center()
@@ -63,7 +63,7 @@ pub fn card(
         div().w_7().h(px(4.)).flex_shrink_0().into_any_element()
     };
     let card = div()
-        .id(ElementId::Name(format!("chat-message-{id}").into()))
+        .id(format!("chat-message-{id}"))
         .relative()
         .flex()
         .gap(px(10.))
@@ -95,7 +95,7 @@ pub fn card(
         let rev = message.rev;
         let writable = chat.may_write();
         let mut actions = div()
-            .id(ElementId::Name(format!("chat-message-{id}-actions").into()))
+            .id(format!("chat-message-{id}-actions"))
             .absolute()
             .right_2()
             .top_1()
@@ -113,7 +113,7 @@ pub fn card(
                 chat.open_thread(seq, cx);
             });
             actions = actions.child(action_button(
-                ElementId::Name(format!("chat-message-{id}-thread").into()),
+                format!("chat-message-{id}-thread"),
                 "💬",
                 "Open thread",
                 theme,
@@ -126,7 +126,7 @@ pub fn card(
             chat.react(seq, "👍".into(), true, cx);
         });
         actions = actions.child(action_button(
-            ElementId::Name(format!("chat-message-{id}-thumbs-up").into()),
+            format!("chat-message-{id}-thumbs-up"),
             "👍",
             "React with 👍",
             theme,
@@ -140,7 +140,7 @@ pub fn card(
             chat.open_menu(pane, seq, rev, Mode::Reactions, window, cx);
         });
         actions = actions.child(action_button(
-            ElementId::Name(format!("chat-message-{id}-react").into()),
+            format!("chat-message-{id}-react"),
             "😀",
             "Manage reactions",
             theme,
@@ -154,7 +154,7 @@ pub fn card(
             chat.open_menu(pane, seq, rev, Mode::More, window, cx);
         });
         actions = actions.child(action_button(
-            ElementId::Name(format!("chat-message-{id}-more").into()),
+            format!("chat-message-{id}-more"),
             "⋯",
             "More message actions",
             theme,
@@ -174,9 +174,7 @@ fn content(
     theme: &Theme,
 ) -> impl IntoElement {
     let mut body = div()
-        .id(ElementId::Name(
-            format!("chat-message-{}-contents", message.id).into(),
-        ))
+        .id(format!("chat-message-{}-contents", message.id))
         .flex_1()
         .min_w(px(0.))
         .flex()
@@ -184,9 +182,7 @@ fn content(
         .gap_1();
     if message.show_author {
         let mut header = div()
-            .id(ElementId::Name(
-                format!("chat-message-{}-header", message.id).into(),
-            ))
+            .id(format!("chat-message-{}-header", message.id))
             .flex()
             .items_center()
             .gap_1()
@@ -198,7 +194,7 @@ fn content(
             );
         if message.agent {
             header = header.child(badge(
-                ElementId::Name(format!("chat-message-{}-agent", message.id).into()),
+                format!("chat-message-{}-agent", message.id),
                 "Agent",
                 theme.agent,
                 theme.agent_soft,
@@ -221,9 +217,7 @@ fn content(
     if message.blocks.is_empty() {
         body = body.child(
             div()
-                .id(ElementId::Name(
-                    format!("chat-message-{}-text", message.id).into(),
-                ))
+                .id(format!("chat-message-{}-text", message.id))
                 .child(message.body.clone()),
         );
     }
@@ -238,9 +232,7 @@ fn content(
     if message.pending {
         body = body.child(
             div()
-                .id(ElementId::Name(
-                    format!("chat-message-{}-pending", message.id).into(),
-                ))
+                .id(format!("chat-message-{}-pending", message.id))
                 .text_size(px(11.))
                 .text_color(theme.muted)
                 .child("sending…"),
@@ -249,9 +241,7 @@ fn content(
     if !message.reactions.is_empty() {
         let reaction_seq = message.seq;
         let mut reactions = div()
-            .id(ElementId::Name(
-                format!("chat-message-{}-reactions", message.id).into(),
-            ))
+            .id(format!("chat-message-{}-reactions", message.id))
             .flex()
             .flex_wrap()
             .gap_1();
@@ -264,9 +254,7 @@ fn content(
                 cx.notify();
                 chat.react(reaction_seq, emoji.clone(), add, cx)
             });
-            let id = ElementId::Name(
-                format!("chat-message-{}-reaction-{}", message.id, reaction.emoji).into(),
-            );
+            let id = format!("chat-message-{}-reaction-{}", message.id, reaction.emoji);
             let label = format!("{} {}", reaction.emoji, reaction.count);
             reactions = reactions.child(reaction_button(
                 id,
@@ -286,7 +274,7 @@ fn content(
             cx.notify();
         });
         reactions = reactions.child(action_button(
-            ElementId::Name(format!("chat-message-{}-reaction-add", message.id).into()),
+            format!("chat-message-{}-reaction-add", message.id),
             "+",
             "Add reaction",
             theme,
@@ -303,9 +291,7 @@ fn content(
         });
         body = body.child(
             div()
-                .id(ElementId::Name(
-                    format!("chat-message-{}-replies", message.id).into(),
-                ))
+                .id(format!("chat-message-{}-replies", message.id))
                 .flex()
                 .items_center()
                 .gap_1()
@@ -323,9 +309,7 @@ fn content(
     } else if message.reply_count > 0 {
         body = body.child(
             div()
-                .id(ElementId::Name(
-                    format!("chat-message-{}-reply-separator", message.id).into(),
-                ))
+                .id(format!("chat-message-{}-reply-separator", message.id))
                 .flex()
                 .items_center()
                 .gap_2()
@@ -350,7 +334,7 @@ fn block_view(
     cx: &mut Context<Chat>,
     theme: &Theme,
 ) -> AnyElement {
-    let id = ElementId::Name(format!("chat-message-{}-block-{index}", message.id).into());
+    let id = ElementId::from(format!("chat-message-{}-block-{index}", message.id));
     match block.kind.as_str() {
         "divider" => div()
             .id(id)
@@ -376,7 +360,7 @@ fn block_view(
                 );
             }
             code.child(plain_line(
-                ElementId::Name(format!("chat-message-{}-block-{index}-code", message.id).into()),
+                format!("chat-message-{}-block-{index}-code", message.id).into(),
                 &block.text,
                 true,
             ))
@@ -423,12 +407,9 @@ fn block_view(
                                     .border_color(theme.border)
                                     .rounded_md()
                                     .child(surface(
-                                        ElementId::Name(
-                                            format!(
-                                                "chat-message-{}-block-{index}-picture",
-                                                message.id
-                                            )
-                                            .into(),
+                                        format!(
+                                            "chat-message-{}-block-{index}-picture",
+                                            message.id
                                         ),
                                         "picture",
                                         vec![

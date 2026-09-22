@@ -2,8 +2,8 @@
 
 use ducktape_view_guest::prelude::*;
 use ducktape_view_guest::{
-    AnyElement, App, ClickEvent, Context, ElementId, ParentElement, Styled, Theme, Window, div, px,
-    surface, wire,
+    AnyElement, App, ClickEvent, Context, ParentElement, Styled, Theme, Window, div, px, surface,
+    wire,
 };
 
 use crate::ui::button;
@@ -19,7 +19,7 @@ fn dialog_button(
 ) -> AnyElement {
     let enabled = press.is_some();
     let button = div()
-        .id(ElementId::Name(id.into()))
+        .id(id)
         .px_2()
         .py_1()
         .rounded_md()
@@ -76,7 +76,7 @@ pub fn channel_create(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Opt
         chat.create = None;
         cx.notify();
     });
-    let mut name = Input::new(ElementId::Name("chat-create-name".into()))
+    let mut name = Input::new("chat-create-name")
         .h(px(28.))
         .px_2()
         .py_1()
@@ -100,7 +100,7 @@ pub fn channel_create(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Opt
     let cancel = (!busy).then(|| Box::new(cancel) as Press);
     let submit = can_submit.then(|| Box::new(submit) as Press);
     let mut card = div()
-        .id(ElementId::Name("chat-create-card".into()))
+        .id("chat-create-card")
         .max_w(px(480.))
         .flex()
         .flex_col()
@@ -180,7 +180,7 @@ pub fn preview(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Option<Any
         cx.notify();
     });
     let mut card = div()
-        .id(ElementId::Name("chat-preview-card".into()))
+        .id("chat-preview-card")
         .size_full()
         .max_w(px(720.))
         .flex()
@@ -197,18 +197,8 @@ pub fn preview(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Option<Any
                 .flex()
                 .items_center()
                 .child(div().flex_1().child(name))
-                .child(button(
-                    ElementId::Name("chat-preview-open".into()),
-                    "Open in Files",
-                    theme,
-                    open,
-                ))
-                .child(button(
-                    ElementId::Name("chat-preview-close".into()),
-                    "Close preview",
-                    theme,
-                    close,
-                )),
+                .child(button("chat-preview-open", "Open in Files", theme, open))
+                .child(button("chat-preview-close", "Close preview", theme, close)),
         );
     if let Some(&(width, height)) = chat.pictures.get(&preview.link)
         && width > 0
@@ -218,11 +208,11 @@ pub fn preview(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Option<Any
         return Some(
             card.child(
                 div()
-                    .id(ElementId::Name("chat-preview-picture-frame".into()))
+                    .id("chat-preview-picture-frame")
                     .w(px(width))
                     .h(px(height))
                     .child(surface(
-                        ElementId::Name("chat-preview-picture".into()),
+                        "chat-preview-picture",
                         "picture",
                         vec![
                             wire::SurfaceValue::Str(crate::files::PICTURE_SURFACE.into()),
@@ -255,7 +245,7 @@ pub fn preview(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Option<Any
         Loaded::Ready(text) => {
             if text.binary {
                 card = card.child(crate::ui::empty_state(
-                    ElementId::Name("chat-preview-binary".into()),
+                    "chat-preview-binary",
                     "No preview",
                     crate::files::BINARY_PLATE,
                     theme,
@@ -270,7 +260,7 @@ pub fn preview(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Option<Any
                         }
                     });
                     surface(
-                        ElementId::Name("chat-preview-markdown".into()),
+                        "chat-preview-markdown",
                         "markdown",
                         vec![
                             wire::SurfaceValue::Str(text.text.clone()),
@@ -281,7 +271,7 @@ pub fn preview(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Option<Any
                     .on_event(open)
                 } else {
                     surface(
-                        ElementId::Name("chat-preview-code".into()),
+                        "chat-preview-code",
                         "code",
                         vec![
                             wire::SurfaceValue::Str(text.text.clone()),

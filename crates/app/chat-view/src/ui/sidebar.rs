@@ -16,7 +16,7 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
         cx.notify();
         chat.search_submit(cx)
     });
-    let search_input = Input::new(ElementId::Name("chat-sidebar-search".into()))
+    let search_input = Input::new("chat-sidebar-search")
         .h(px(28.))
         .flex_1()
         .px_2()
@@ -44,7 +44,7 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
         });
         search = search.child(
             div()
-                .id(ElementId::Name("chat-sidebar-clear-search".into()))
+                .id("chat-sidebar-clear-search")
                 .px_1()
                 .role(ducktape_view_guest::Role::Button)
                 .focusable()
@@ -61,7 +61,7 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
         cx.notify();
     });
     let content = div()
-        .id(ElementId::Name("chat-sidebar".into()))
+        .id("chat-sidebar")
         .flex()
         .flex_col()
         .w(px(chat.layout.sidebar))
@@ -70,7 +70,7 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
         .text_color(theme.sidebar_foreground)
         .child(
             div()
-                .id(ElementId::Name("chat-sidebar-search-row".into()))
+                .id("chat-sidebar-search-row")
                 .flex()
                 .items_center()
                 .gap_1()
@@ -80,7 +80,7 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
 
     let busy = chat.session.loading || chat.session.busy;
     let door = div()
-        .id(ElementId::Name("chat-sidebar-new-channel".into()))
+        .id("chat-sidebar-new-channel")
         .px_1()
         .py_0p5()
         .rounded_sm()
@@ -96,7 +96,7 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
             "+ New channel"
         });
     let mut list = div()
-        .id(ElementId::Name("chat-sidebar-rooms".into()))
+        .id("chat-sidebar-rooms")
         .flex_1()
         .overflow_y_scroll()
         .flex()
@@ -219,9 +219,7 @@ fn channel_button(
     });
     let unread = chat.unread(info) && !selected;
     let mut row = div()
-        .id(ElementId::Name(
-            format!("chat-sidebar-channel-{}", info.channel.id).into(),
-        ))
+        .id(format!("chat-sidebar-channel-{}", info.channel.id))
         .flex()
         .w_full()
         .items_center()
@@ -278,9 +276,7 @@ fn channel_button(
     if unread {
         row = row.child(
             div()
-                .id(ElementId::Name(
-                    format!("chat-sidebar-channel-{}-unread", info.channel.id).into(),
-                ))
+                .id(format!("chat-sidebar-channel-{}-unread", info.channel.id))
                 .size_2()
                 .rounded_full()
                 .bg(theme.accent),
@@ -304,9 +300,7 @@ fn voice_button(
     });
     let selected = chat.session.huddle_joined && chat.session.huddle_channel == info.channel.id;
     let row = div()
-        .id(ElementId::Name(
-            format!("chat-sidebar-voice-{}", info.channel.id).into(),
-        ))
+        .id(format!("chat-sidebar-voice-{}", info.channel.id))
         .flex()
         .items_center()
         .gap_1()
@@ -334,9 +328,7 @@ fn voice_button(
 
 fn with_seats(chat: &Chat, info: &ChannelInfo, row: impl IntoElement, theme: &Theme) -> AnyElement {
     let mut content = div()
-        .id(ElementId::Name(
-            format!("chat-sidebar-seats-{}", info.channel.id).into(),
-        ))
+        .id(format!("chat-sidebar-seats-{}", info.channel.id))
         .flex()
         .flex_col()
         .child(row);
@@ -427,7 +419,7 @@ fn dm_button(
         chat.choose(id.clone(), window, cx)
     });
     let mut row = div()
-        .id(ElementId::Name(format!("chat-sidebar-dm-{peer}").into()))
+        .id(format!("chat-sidebar-dm-{peer}"))
         .flex()
         .items_center()
         .gap_1()
@@ -471,7 +463,7 @@ fn dm_button(
         );
     if agent {
         row = row.child(super::badge(
-            ElementId::Name(format!("chat-sidebar-dm-{peer}-agent").into()),
+            format!("chat-sidebar-dm-{peer}-agent"),
             "Agent",
             theme.agent,
             theme.agent_soft,
@@ -480,9 +472,7 @@ fn dm_button(
     if unread {
         row = row.child(
             div()
-                .id(ElementId::Name(
-                    format!("chat-sidebar-dm-{peer}-unread").into(),
-                ))
+                .id(format!("chat-sidebar-dm-{peer}-unread"))
                 .size_2()
                 .rounded_full()
                 .bg(theme.accent),

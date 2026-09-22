@@ -16,7 +16,7 @@ pub fn thread(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
         cx.notify();
     });
     let mut pane = div()
-        .id(ElementId::Name("chat-thread-pane".into()))
+        .id("chat-thread-pane")
         .w(px(chat.layout.thread))
         .h_full()
         .flex()
@@ -24,7 +24,7 @@ pub fn thread(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
         .bg(theme.surface)
         .child(
             div()
-                .id(ElementId::Name("chat-thread-header".into()))
+                .id("chat-thread-header")
                 .flex()
                 .items_center()
                 .gap_2()
@@ -41,12 +41,7 @@ pub fn thread(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
                         .aria_level(2)
                         .child("Thread"),
                 )
-                .child(button(
-                    ElementId::Name("chat-thread-close".into()),
-                    "Close thread",
-                    theme,
-                    close,
-                )),
+                .child(button("chat-thread-close", "Close thread", theme, close)),
         );
     if let Some(room) = &chat.room
         && let Some(thread_state) = &room.thread
@@ -76,7 +71,7 @@ pub fn thread(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
         }
     } else {
         pane = pane.child(empty_state(
-            ElementId::Name("chat-thread-empty".into()),
+            "chat-thread-empty",
             "No thread open",
             "Choose a reply from the room.",
             theme,
@@ -126,7 +121,7 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
         chat.set_member(&text, true, cx);
     });
     let mut content = div()
-        .id(ElementId::Name("chat-details-pane".into()))
+        .id("chat-details-pane")
         .w(px(chat.layout.details))
         .h_full()
         .overflow_y_scroll()
@@ -137,7 +132,7 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
         .bg(theme.surface)
         .child(
             div()
-                .id(ElementId::Name("chat-details-header".into()))
+                .id("chat-details-header")
                 .flex()
                 .items_center()
                 .child(
@@ -150,12 +145,7 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
                         .aria_level(2)
                         .child("Channel details"),
                 )
-                .child(button(
-                    ElementId::Name("chat-details-close".into()),
-                    "Close",
-                    theme,
-                    close,
-                )),
+                .child(button("chat-details-close", "Close", theme, close)),
         )
         .child(div().h(px(1.)).w_full().bg(theme.border))
         .child(
@@ -165,7 +155,7 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
                 .child("Name"),
         )
         .child(
-            Input::new(ElementId::Name("chat-details-name-input".into()))
+            Input::new("chat-details-name-input")
                 .h(px(28.))
                 .px_2()
                 .py_1()
@@ -178,13 +168,13 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
                 .on_input(typed_name),
         )
         .child(button(
-            ElementId::Name("chat-details-rename-button".into()),
+            "chat-details-rename-button",
             "Rename",
             theme,
             rename,
         ))
         .child(button(
-            ElementId::Name("chat-details-archive".into()),
+            "chat-details-archive",
             if info.channel.archived {
                 "Unarchive channel"
             } else {
@@ -201,7 +191,7 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
                 .child("Members"),
         )
         .child(
-            Input::new(ElementId::Name("chat-details-member-input".into()))
+            Input::new("chat-details-member-input")
                 .h(px(28.))
                 .px_2()
                 .py_1()
@@ -214,7 +204,7 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
                 .on_input(typed_member),
         )
         .child(button(
-            ElementId::Name("chat-details-add-member".into()),
+            "chat-details-add-member",
             "Add member",
             theme,
             add_member,
@@ -229,7 +219,7 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
     if roster.is_empty() {
         content = content.child(
             div()
-                .id(ElementId::Name("chat-details-no-members".into()))
+                .id("chat-details-no-members")
                 .text_size(px(11.))
                 .text_color(theme.faint)
                 .child("No members added. An open channel needs none."),

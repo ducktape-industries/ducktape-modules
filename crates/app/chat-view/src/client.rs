@@ -501,7 +501,7 @@ pub fn height_label(height: u64) -> String {
     format!("block {}", grouped(height))
 }
 
-fn short_id(id: &str, keep: usize) -> String {
+pub(crate) fn short_id(id: &str, keep: usize) -> String {
     let mut head: String = id.chars().take(keep).collect();
     if id.chars().count() > keep {
         head.push('…');

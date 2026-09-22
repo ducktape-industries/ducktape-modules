@@ -87,7 +87,7 @@ impl Render for Members {
         });
         let body = self.body(cx, &theme);
         div()
-            .id(ElementId::Name("members".into()))
+            .id("members")
             .flex()
             .flex_col()
             .gap_3()
@@ -98,7 +98,7 @@ impl Render for Members {
             .text_size(px(13.))
             .child(
                 div()
-                    .id(ElementId::Name("members-head".into()))
+                    .id("members-head")
                     .flex()
                     .items_center()
                     .gap_2()
@@ -120,7 +120,7 @@ impl Render for Members {
                     ),
             )
             .child(
-                Input::new(ElementId::Name("members-filter".into()))
+                Input::new("members-filter")
                     .h(px(28.))
                     .w_full()
                     .px_2()
@@ -165,7 +165,7 @@ impl Members {
     fn body(&self, cx: &mut Context<Self>, theme: &Theme) -> impl IntoElement {
         match &self.rows {
             Loaded::Idle | Loaded::Loading(_) => div()
-                .id(ElementId::Name("members-loading".into()))
+                .id("members-loading")
                 .text_size(px(12.))
                 .text_color(theme.muted)
                 .child("Reading the roster…")
@@ -173,7 +173,7 @@ impl Members {
             Loaded::Failed(refusal) => {
                 let retry = cx.listener(|view, _: &ClickEvent, _, cx| view.read(cx));
                 div()
-                    .id(ElementId::Name("members-refused".into()))
+                    .id("members-refused")
                     .flex()
                     .flex_col()
                     .gap_2()
@@ -185,7 +185,7 @@ impl Members {
                     .child(refusal.sentence.clone())
                     .child(
                         div()
-                            .id(ElementId::Name("members-retry".into()))
+                            .id("members-retry")
                             .px_2()
                             .py_1()
                             .rounded_md()
@@ -217,7 +217,7 @@ impl Members {
                     .into_any_element();
                 }
                 div()
-                    .id(ElementId::Name("members-list".into()))
+                    .id("members-list")
                     .flex_1()
                     .overflow_y_scroll()
                     .flex()
@@ -327,9 +327,14 @@ struct EmptyState {
     muted: ducktape_view_guest::Hsla,
 }
 
-fn empty_state(id: &str, title: &str, detail: impl Into<String>, theme: &Theme) -> EmptyState {
+fn empty_state(
+    id: &'static str,
+    title: &str,
+    detail: impl Into<String>,
+    theme: &Theme,
+) -> EmptyState {
     EmptyState {
-        id: ElementId::Name(id.into()),
+        id: id.into(),
         title: title.to_owned(),
         detail: detail.into(),
         muted: theme.muted,

@@ -1,5 +1,6 @@
 //! Small repeated presentation components local to Chat.
 
+use ducktape_view_guest::Div;
 use ducktape_view_guest::prelude::*;
 
 #[derive(IntoElement)]
@@ -94,6 +95,14 @@ impl RenderOnce for EmptyState {
                     .child(self.detail),
             )
     }
+}
+
+/// One muted line of status text.
+pub(crate) fn quiet(text: impl Into<String>, theme: &Theme) -> Div {
+    div()
+        .text_size(px(12.))
+        .text_color(theme.muted)
+        .child(text.into())
 }
 
 #[derive(IntoElement)]

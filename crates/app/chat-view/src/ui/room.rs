@@ -6,12 +6,12 @@ use ducktape_view_guest::{ClickEvent, Context, ElementId, ParentElement, Styled,
 use super::timeline;
 use crate::chat::ChannelInfo;
 use crate::composer::Target;
-use crate::ui::{badge, button, empty_state};
+use crate::ui::{badge, button, empty_state, quiet};
 use crate::{Chat, Loaded, Pane, Room};
 
 pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement {
     let mut pane = div()
-        .id(ElementId::Name("chat-room".into()))
+        .id("chat-room")
         .flex_1()
         .min_w(px(0.))
         .h_full()
@@ -28,7 +28,7 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
             });
             pane = pane.child(
                 div()
-                    .id(ElementId::Name("chat-room-notice".into()))
+                    .id("chat-room-notice")
                     .mx_3()
                     .my_2()
                     .p_2()
@@ -40,7 +40,7 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
                     .gap_2()
                     .child(div().flex_1().child(chat.notice.clone()))
                     .child(button(
-                        ElementId::Name("chat-room-notice-dismiss".into()),
+                        "chat-room-notice-dismiss",
                         "Dismiss",
                         theme,
                         dismiss,
@@ -66,9 +66,10 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
             let hint = match super::sidebar::dm_peer(chat) {
                 Some((peer, _)) => format!("Message {peer}"),
                 None => {
-                    let name = chat
-                        .info(&room.id)
-                        .map_or_else(|| short_id(&room.id, 8), |info| info.channel.name.clone());
+                    let name = chat.info(&room.id).map_or_else(
+                        || crate::client::short_id(&room.id, 8),
+                        |info| info.channel.name.clone(),
+                    );
                     format!("Message #{name}")
                 }
             };
@@ -85,13 +86,16 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
 
 fn header(chat: &Chat, room: &Room, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement {
     let info = chat.info(&room.id);
-    let name = info.map_or_else(|| short_id(&room.id, 8), |info| info.channel.name.clone());
+    let name = info.map_or_else(
+        || crate::client::short_id(&room.id, 8),
+        |info| info.channel.name.clone(),
+    );
     let details = cx.listener(|chat, _: &ClickEvent, _window, cx| {
         chat.toggle_details();
         cx.notify();
     });
     let mut title = div()
-        .id(ElementId::Name("chat-room-title".into()))
+        .id("chat-room-title")
         .flex()
         .items_center()
         .gap_2()
@@ -121,7 +125,7 @@ fn header(chat: &Chat, room: &Room, cx: &mut Context<Chat>, theme: &Theme) -> im
         ));
     }
     div()
-        .id(ElementId::Name("chat-room-header".into()))
+        .id("chat-room-header")
         .flex()
         .items_center()
         .gap_2()
@@ -130,7 +134,7 @@ fn header(chat: &Chat, room: &Room, cx: &mut Context<Chat>, theme: &Theme) -> im
         .border_color(theme.border)
         .child(div().flex_1().child(title))
         .child(button(
-            ElementId::Name("chat-room-details".into()),
+            "chat-room-details",
             "Channel details",
             theme,
             details,
@@ -140,21 +144,21 @@ fn header(chat: &Chat, room: &Room, cx: &mut Context<Chat>, theme: &Theme) -> im
 fn no_room(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement {
     match &chat.channels {
         Loaded::Idle | Loaded::Loading(_) => empty_state(
-            ElementId::Name("chat-no-room-loading".into()),
+            "chat-no-room-loading",
             "Loading channels…",
             "Choose a room when they arrive.",
             theme,
         )
         .into_any_element(),
         Loaded::Failed(refusal) => empty_state(
-            ElementId::Name("chat-no-room-failed".into()),
+            "chat-no-room-failed",
             "Couldn’t read the channels",
             refusal.sentence.clone(),
             theme,
         )
         .into_any_element(),
         Loaded::Ready(rooms) if !rooms.is_empty() => empty_state(
-            ElementId::Name("chat-no-room".into()),
+            "chat-no-room",
             "No channel open",
             "Choose a channel from the sidebar.",
             theme,
@@ -166,7 +170,7 @@ fn no_room(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement {
                 cx.notify();
             });
             div()
-                .id(ElementId::Name("chat-no-room-empty".into()))
+                .id("chat-no-room-empty")
                 .flex()
                 .flex_col()
                 .gap_2()
@@ -179,7 +183,7 @@ fn no_room(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement {
                         .child("Create the first channel in this network."),
                 )
                 .child(button(
-                    ElementId::Name("chat-no-room-create".into()),
+                    "chat-no-room-create",
                     "Create a channel",
                     theme,
                     open,
@@ -197,7 +201,7 @@ fn huddle(
     theme: &Theme,
 ) -> impl IntoElement {
     let mut row = div()
-        .id(ElementId::Name("chat-room-huddle".into()))
+        .id("chat-room-huddle")
         .flex()
         .items_center()
         .gap_2()
@@ -234,18 +238,8 @@ fn huddle(
             cx.notify();
         });
         row = row
-            .child(button(
-                ElementId::Name("chat-room-huddle-show".into()),
-                "Show",
-                theme,
-                show,
-            ))
-            .child(button(
-                ElementId::Name("chat-room-huddle-leave".into()),
-                "Leave",
-                theme,
-                leave,
-            ));
+            .child(button("chat-room-huddle-show", "Show", theme, show))
+            .child(button("chat-room-huddle-leave", "Leave", theme, leave));
     } else {
         let channel = info.channel.id.clone();
         let voice = info.channel.voice;
@@ -259,7 +253,7 @@ fn huddle(
             cx.notify();
         });
         row = row.child(button(
-            ElementId::Name("chat-room-huddle-join".into()),
+            "chat-room-huddle-join",
             if info.channel.huddle.is_empty() {
                 "Call"
             } else {
@@ -274,7 +268,7 @@ fn huddle(
 
 fn search_results(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement {
     let mut content = div()
-        .id(ElementId::Name("chat-search-results".into()))
+        .id("chat-search-results")
         .flex_1()
         .overflow_y_scroll()
         .flex()
@@ -290,7 +284,7 @@ fn search_results(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl In
         }
         Loaded::Ready(hits) if hits.rows.is_empty() => {
             content = content.child(empty_state(
-                ElementId::Name("chat-search-empty".into()),
+                "chat-search-empty",
                 "No results",
                 "Nothing matched this message search.",
                 theme,
@@ -339,12 +333,7 @@ fn search_results(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl In
                     cx.notify();
                     chat.search_more(cx)
                 });
-                content = content.child(button(
-                    ElementId::Name("chat-search-more".into()),
-                    "More results",
-                    theme,
-                    more,
-                ));
+                content = content.child(button("chat-search-more", "More results", theme, more));
             }
         }
     }
@@ -353,7 +342,7 @@ fn search_results(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl In
         cx.notify();
     });
     content.child(button(
-        ElementId::Name("chat-search-clear".into()),
+        "chat-search-clear",
         "Clear message search",
         theme,
         clear,
@@ -362,7 +351,7 @@ fn search_results(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl In
 
 fn gate(_chat: &Chat, refusal: &str, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement {
     let mut notice = div()
-        .id(ElementId::Name("chat-room-write-refusal".into()))
+        .id("chat-room-write-refusal")
         .mx_3()
         .my_2()
         .p_3()
@@ -390,12 +379,7 @@ fn gate(_chat: &Chat, refusal: &str, cx: &mut Context<Chat>, theme: &Theme) -> A
             cx.notify();
             chat.set_archived(false, cx);
         });
-        notice = notice.child(button(
-            ElementId::Name("chat-room-unarchive".into()),
-            "Unarchive",
-            theme,
-            reopen,
-        ));
+        notice = notice.child(button("chat-room-unarchive", "Unarchive", theme, reopen));
     }
     notice.into_any_element()
 }
@@ -423,21 +407,6 @@ pub fn composer(
     )
 }
 
-fn quiet(text: impl Into<String>, theme: &Theme) -> impl IntoElement {
-    div()
-        .text_size(px(12.))
-        .text_color(theme.muted)
-        .child(text.into())
-}
-
-fn short_id(id: &str, keep: usize) -> String {
-    let mut head: String = id.chars().take(keep).collect();
-    if id.chars().count() > keep {
-        head.push('…');
-    }
-    head
-}
-
 pub fn selection_bar(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement {
     let count = chat.copy_count();
     if count == 0 {
@@ -448,7 +417,7 @@ pub fn selection_bar(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl
         chat.copy_range(cx)
     });
     div()
-        .id(ElementId::Name("chat-selection-bar".into()))
+        .id("chat-selection-bar")
         .flex()
         .items_center()
         .gap_2()
@@ -458,11 +427,6 @@ pub fn selection_bar(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl
             "{count} message{} selected",
             if count == 1 { "" } else { "s" }
         )))
-        .child(button(
-            ElementId::Name("chat-selection-copy".into()),
-            "Copy",
-            theme,
-            copy,
-        ))
+        .child(button("chat-selection-copy", "Copy", theme, copy))
         .into_any_element()
 }
