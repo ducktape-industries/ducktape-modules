@@ -6,41 +6,66 @@
 //! which exists in a wasm guest. Lowering turns this small recipe into wire
 //! data once per frame.
 
-use crate::{App, Window, slots, wire};
 use crate::interactivity::{ClickListener, Interactivity};
+use crate::{slots, wire, App, Window};
 use gpui::{ElementId, SharedString, StyleRefinement, Styled};
+use std::borrow::Cow;
 use std::ops::Range;
 
-/// A value that can be lowered into the SDK wire tree.
-pub trait IntoElement: Sized + 'static {
-    type Element;
+/// A guest element that can be lowered by the driver.
+///
+/// This is intentionally a guest-side boundary with the same name as GPUI's
+/// native trait. GPUI's real `Element` requires native layout and paint state;
+/// a wasm guest has neither, so lowering is the only operation it can perform.
+pub trait Element: 'static + IntoElement {
+    #[doc(hidden)]
+    fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node;
+
+    #[doc(hidden)]
+    fn into_any(self) -> AnyElement {
+        AnyElement(Box::new(self))
+    }
+}
+
+/// A value that can be converted into a guest element recipe.
+pub trait IntoElement: Sized {
+    type Element: Element;
 
     fn into_element(self) -> Self::Element;
 
     fn into_any_element(self) -> AnyElement {
-        AnyElement(Box::new(self))
+        self.into_element().into_any()
     }
-
-    fn into_node(self, lowering: &mut Lowering<'_>) -> wire::Node;
 }
 
-trait ErasedElement {
+trait ElementObject {
     fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node;
 }
 
-impl<T: IntoElement> ErasedElement for T {
+impl<T: Element> ElementObject for T {
     fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
-        (*self).into_node(lowering)
+        Element::lower(self, lowering)
     }
 }
 
 /// A type-erased guest element, used for conditional children and components.
-pub struct AnyElement(Box<dyn ErasedElement>);
+pub struct AnyElement(Box<dyn ElementObject>);
+
+impl Element for AnyElement {
+    fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
+        self.0.lower(lowering)
+    }
+}
+
 impl IntoElement for AnyElement {
     type Element = Self;
-    fn into_element(self) -> Self { self }
-    fn into_node(self, lowering: &mut Lowering<'_>) -> wire::Node {
-        self.0.lower(lowering)
+
+    fn into_element(self) -> Self {
+        self
+    }
+
+    fn into_any_element(self) -> AnyElement {
+        self
     }
 }
 
@@ -65,7 +90,17 @@ impl<'a> Lowering<'a> {
 
     #[doc(hidden)]
     pub fn render_once(&mut self, component: impl RenderOnce) -> wire::Node {
-        component.render(self.window, self.app).into_node(self)
+        let element = component.render(self.window, self.app).into_element();
+        let element = Box::new(element);
+        Element::lower(element, self)
+    }
+
+    pub(crate) fn lower<E: IntoElement>(&mut self, element: E) -> wire::Node {
+        self.lower_element(element.into_element())
+    }
+
+    pub(crate) fn lower_element<E: Element>(&mut self, element: E) -> wire::Node {
+        Box::new(element).lower(self)
     }
 
     fn click(&mut self, listener: ClickListener) -> u32 {
@@ -76,7 +111,7 @@ impl<'a> Lowering<'a> {
 /// A guest container backed by a real GPUI style refinement.
 pub struct Div {
     pub(crate) interactivity: Interactivity,
-    children: Vec<Box<dyn ErasedElement>>,
+    children: Vec<AnyElement>,
 }
 
 impl Default for Div {
@@ -94,44 +129,53 @@ impl Styled for Div {
     }
 }
 
+impl Element for Div {
+    fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
+        let Self {
+            interactivity,
+            children,
+        } = *self;
+        let id = interactivity
+            .id
+            .map(wire::ElementIdWire::from_gpui)
+            .transpose()
+            .expect("element ID must be portable across the view boundary");
+        let on_click = interactivity
+            .on_click
+            .map(|listener| lowering.click(listener));
+        let wire_interactivity = wire::Interactivity {
+            role: interactivity.role,
+            aria: interactivity.aria,
+            focusable: interactivity.focusable,
+            group: interactivity.group,
+            hover: interactivity.hover,
+            active: interactivity.active,
+            group_hover: interactivity
+                .group_hover
+                .map(|(group, style)| wire::GroupRefinement { group, style }),
+            group_active: interactivity
+                .group_active
+                .map(|(group, style)| wire::GroupRefinement { group, style }),
+            on_click,
+        };
+        let children = children
+            .into_iter()
+            .map(|child| child.0.lower(lowering))
+            .collect();
+        wire::Node::Container {
+            id,
+            style: interactivity.base_style,
+            interactivity: wire_interactivity,
+            children,
+        }
+    }
+}
+
 impl IntoElement for Div {
     type Element = Self;
 
     fn into_element(self) -> Self {
         self
-    }
-
-    fn into_node(self, lowering: &mut Lowering<'_>) -> wire::Node {
-        let id = self.interactivity.id.map(wire::ElementIdWire::from_gpui).transpose().expect("element ID must be portable across the view boundary");
-        let on_click = self.interactivity.on_click.map(|listener| lowering.click(listener));
-        let interactivity = wire::Interactivity {
-            role: self.interactivity.role,
-            aria: self.interactivity.aria,
-            focusable: self.interactivity.focusable,
-            group: self.interactivity.group,
-            hover: self.interactivity.hover,
-            active: self.interactivity.active,
-            group_hover: self
-                .interactivity
-                .group_hover
-                .map(|(group, style)| wire::GroupRefinement { group, style }),
-            group_active: self
-                .interactivity
-                .group_active
-                .map(|(group, style)| wire::GroupRefinement { group, style }),
-            on_click,
-        };
-        let children = self
-            .children
-            .into_iter()
-            .map(|child| child.lower(lowering))
-            .collect();
-        wire::Node::Container {
-            id,
-            style: self.interactivity.base_style,
-            interactivity,
-            children,
-        }
     }
 }
 
@@ -144,12 +188,18 @@ pub fn div() -> Div {
 pub trait ParentElement {
     fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>);
 
-    fn child(mut self, child: impl IntoElement) -> Self where Self: Sized {
+    fn child(mut self, child: impl IntoElement) -> Self
+    where
+        Self: Sized,
+    {
         self.extend(std::iter::once(child.into_any_element()));
         self
     }
 
-    fn children(mut self, children: impl IntoIterator<Item = impl IntoElement>) -> Self where Self: Sized {
+    fn children(mut self, children: impl IntoIterator<Item = impl IntoElement>) -> Self
+    where
+        Self: Sized,
+    {
         self.extend(children.into_iter().map(IntoElement::into_any_element));
         self
     }
@@ -157,61 +207,57 @@ pub trait ParentElement {
 
 impl ParentElement for Div {
     fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>) {
-        self.children.extend(elements.into_iter().map(|element| element.0));
+        self.children.extend(elements);
     }
 }
 
-impl IntoElement for wire::Node {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
-    }
-
-    fn into_node(self, _lowering: &mut Lowering<'_>) -> wire::Node {
-        self
-    }
-}
-
-impl IntoElement for String {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
-    }
-
-    fn into_node(self, _lowering: &mut Lowering<'_>) -> wire::Node {
+impl Element for SharedString {
+    fn lower(self: Box<Self>, _lowering: &mut Lowering<'_>) -> wire::Node {
         wire::Node::Text {
             id: None,
             style: StyleRefinement::default(),
-            content: self,
+            content: self.to_string(),
             heading: None,
             live: None,
         }
     }
 }
 
-impl IntoElement for &'static str {
-    type Element = String;
-
-    fn into_element(self) -> String {
-        self.to_owned()
+impl Element for &'static str {
+    fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
+        lowering.lower((*self).to_owned())
     }
+}
 
-    fn into_node(self, lowering: &mut Lowering<'_>) -> wire::Node {
-        self.to_owned().into_node(lowering)
+impl IntoElement for String {
+    type Element = SharedString;
+
+    fn into_element(self) -> Self::Element {
+        self.into()
+    }
+}
+
+impl IntoElement for &'static str {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
     }
 }
 
 impl IntoElement for SharedString {
     type Element = Self;
 
-    fn into_element(self) -> Self {
+    fn into_element(self) -> Self::Element {
         self
     }
+}
 
-    fn into_node(self, lowering: &mut Lowering<'_>) -> wire::Node {
-        self.to_string().into_node(lowering)
+impl IntoElement for Cow<'static, str> {
+    type Element = SharedString;
+
+    fn into_element(self) -> Self::Element {
+        self.into()
     }
 }
 
@@ -231,18 +277,12 @@ pub fn img(source: impl Into<String>) -> Img {
     }
 }
 
-impl IntoElement for Img {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
-    }
-
-    fn into_node(self, _lowering: &mut Lowering<'_>) -> wire::Node {
+impl Element for Img {
+    fn lower(self: Box<Self>, _lowering: &mut Lowering<'_>) -> wire::Node {
         wire::Node::Image {
             key: self.source.clone(),
             hash: stable_hash(self.source.as_bytes()),
-            data: Some(wire::ImageData::Resource(self.source)),
+            data: Some(wire::ImageData::Resource(self.source.clone())),
             label: None,
             fit: None,
             opacity: None,
@@ -252,29 +292,33 @@ impl IntoElement for Img {
     }
 }
 
+impl IntoElement for Img {
+    type Element = Self;
+
+    fn into_element(self) -> Self {
+        self
+    }
+}
+
 /// An SVG host primitive carrying bytes through the existing bounded cache.
 pub struct Svg {
     bytes: Vec<u8>,
 }
 
 pub fn svg(bytes: impl Into<Vec<u8>>) -> Svg {
-    Svg { bytes: bytes.into() }
+    Svg {
+        bytes: bytes.into(),
+    }
 }
 
-impl IntoElement for Svg {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
-    }
-
-    fn into_node(self, _lowering: &mut Lowering<'_>) -> wire::Node {
+impl Element for Svg {
+    fn lower(self: Box<Self>, _lowering: &mut Lowering<'_>) -> wire::Node {
         let hash = stable_hash(&self.bytes);
         wire::Node::Svg {
             key: format!("svg:{hash}"),
             inherit_button_ink: false,
             hash,
-            bytes: Some(self.bytes),
+            bytes: Some(self.bytes.clone()),
             label: None,
             color: None,
             hover: None,
@@ -286,14 +330,35 @@ impl IntoElement for Svg {
     }
 }
 
+impl IntoElement for Svg {
+    type Element = Self;
+
+    fn into_element(self) -> Self {
+        self
+    }
+}
+
 /// A host-positioned child primitive.
 pub struct Anchored {
-    child: Box<dyn ErasedElement>,
+    child: AnyElement,
 }
 
 pub fn anchored(child: impl IntoElement) -> Anchored {
     Anchored {
-        child: Box::new(child),
+        child: child.into_any_element(),
+    }
+}
+
+impl Element for Anchored {
+    fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
+        wire::Node::Pin {
+            key: "anchored".into(),
+            x: 0.0,
+            y: 0.0,
+            width: None,
+            height: None,
+            content: Box::new(self.child.0.lower(lowering)),
+        }
     }
 }
 
@@ -303,27 +368,26 @@ impl IntoElement for Anchored {
     fn into_element(self) -> Self {
         self
     }
-
-    fn into_node(self, lowering: &mut Lowering<'_>) -> wire::Node {
-        wire::Node::Pin {
-            key: "anchored".into(),
-            x: 0.0,
-            y: 0.0,
-            width: None,
-            height: None,
-            content: Box::new(self.child.lower(lowering)),
-        }
-    }
 }
 
 /// A deferred child primitive. The host controls when it is painted.
 pub struct Deferred {
-    child: Box<dyn ErasedElement>,
+    child: AnyElement,
 }
 
 pub fn deferred(child: impl IntoElement) -> Deferred {
     Deferred {
-        child: Box::new(child),
+        child: child.into_any_element(),
+    }
+}
+
+impl Element for Deferred {
+    fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
+        wire::Node::Lazy {
+            key: "deferred".into(),
+            generation: 0,
+            content: Box::new(self.child.0.lower(lowering)),
+        }
     }
 }
 
@@ -332,14 +396,6 @@ impl IntoElement for Deferred {
 
     fn into_element(self) -> Self {
         self
-    }
-
-    fn into_node(self, lowering: &mut Lowering<'_>) -> wire::Node {
-        wire::Node::Lazy {
-            key: "deferred".into(),
-            generation: 0,
-            content: Box::new(self.child.lower(lowering)),
-        }
     }
 }
 
@@ -354,20 +410,22 @@ pub fn canvas(commands: impl Into<Vec<wire::CanvasCommand>>) -> Canvas {
     }
 }
 
-impl IntoElement for Canvas {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
-    }
-
-    fn into_node(self, _lowering: &mut Lowering<'_>) -> wire::Node {
+impl Element for Canvas {
+    fn lower(self: Box<Self>, _lowering: &mut Lowering<'_>) -> wire::Node {
         wire::Node::Canvas {
             key: "canvas".into(),
             width: None,
             height: None,
             commands: self.commands,
         }
+    }
+}
+
+impl IntoElement for Canvas {
+    type Element = Self;
+
+    fn into_element(self) -> Self {
+        self
     }
 }
 
@@ -390,20 +448,19 @@ pub fn uniform_list<R: IntoElement>(
     }
 }
 
-impl<R: IntoElement> IntoElement for UniformList<R> {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
-    }
-
-    fn into_node(self, lowering: &mut Lowering<'_>) -> wire::Node {
-        let children = (self.processor)(0..self.count, lowering.window, lowering.app)
+impl<R: IntoElement + 'static> Element for UniformList<R> {
+    fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
+        let Self {
+            id,
+            count,
+            processor,
+        } = *self;
+        let children = (processor)(0..count, lowering.window, lowering.app)
             .into_iter()
-            .map(|child| child.into_node(lowering))
+            .map(|child| lowering.lower(child))
             .collect();
         wire::Node::KeyedColumn {
-            key: wire::ElementIdWire::from_gpui(self.id)
+            key: wire::ElementIdWire::from_gpui(id)
                 .expect("element ID must be portable across the view boundary")
                 .name()
                 .unwrap_or("uniform-list")
@@ -423,6 +480,14 @@ impl<R: IntoElement> IntoElement for UniformList<R> {
     }
 }
 
+impl<R: IntoElement + 'static> IntoElement for UniformList<R> {
+    type Element = Self;
+
+    fn into_element(self) -> Self {
+        self
+    }
+}
+
 fn stable_hash(bytes: &[u8]) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::hash::DefaultHasher::new();
@@ -438,3 +503,50 @@ impl gpui::prelude::FluentBuilder for Deferred {}
 impl gpui::prelude::FluentBuilder for Anchored {}
 impl gpui::prelude::FluentBuilder for Canvas {}
 impl<R> gpui::prelude::FluentBuilder for UniformList<R> {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::borrow::Cow;
+
+    #[derive(crate::IntoElement)]
+    struct DerivedComponent;
+
+    impl RenderOnce for DerivedComponent {
+        fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+            "derived"
+        }
+    }
+
+    fn assert_element<T: Element>() {}
+
+    #[test]
+    fn authoring_associated_types_follow_gpui() {
+        fn string() -> <String as IntoElement>::Element {
+            String::from("string").into_element()
+        }
+        fn text() -> <&'static str as IntoElement>::Element {
+            "text".into_element()
+        }
+        fn shared() -> <SharedString as IntoElement>::Element {
+            SharedString::from("shared").into_element()
+        }
+        fn borrowed() -> <Cow<'static, str> as IntoElement>::Element {
+            Cow::Borrowed("borrowed").into_element()
+        }
+
+        assert_element::<SharedString>();
+        assert_element::<&'static str>();
+        assert_element::<Div>();
+        assert_eq!(string().to_string(), "string");
+        assert_eq!((*text()).to_owned(), "text");
+        assert_eq!(shared().to_string(), "shared");
+        assert_eq!(borrowed().to_string(), "borrowed");
+    }
+
+    #[test]
+    fn derive_and_any_element_use_the_internal_lowering_boundary() {
+        let _: AnyElement = DerivedComponent.into_any_element();
+        let _: AnyElement = div().child(DerivedComponent).into_any_element();
+    }
+}

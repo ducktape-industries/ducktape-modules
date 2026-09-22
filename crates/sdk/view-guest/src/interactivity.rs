@@ -1,5 +1,5 @@
 //! GPUI-shaped interaction recipes, lowered into driver-owned frame routes.
-use crate::{AnyElement, App, Div, IntoElement, Lowering, ParentElement, Window, wire};
+use crate::{AnyElement, App, Div, Element, IntoElement, Lowering, ParentElement, Window, wire};
 use gpui::{ClickEvent, ElementId, SharedString, StyleRefinement, Styled};
 
 pub(crate) type ClickListener = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
@@ -67,15 +67,17 @@ impl<E: Styled> Styled for Stateful<E> {
     }
 }
 
-impl<E: IntoElement> IntoElement for Stateful<E> {
+impl<E: Element> IntoElement for Stateful<E> {
     type Element = Self;
 
     fn into_element(self) -> Self {
         self
     }
+}
 
-    fn into_node(self, lowering: &mut Lowering<'_>) -> wire::Node {
-        self.element.into_node(lowering)
+impl<E: Element> Element for Stateful<E> {
+    fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
+        Box::new(self.element).lower(lowering)
     }
 }
 

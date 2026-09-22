@@ -12,13 +12,13 @@ mod interactivity;
 pub use interactivity::{Interactivity, InteractiveElement, Stateful, StatefulInteractiveElement};
 pub use element::{
     anchored, canvas, deferred, div, img, svg, uniform_list, AnyElement, Anchored, Canvas, Deferred, Div,
-    Img, IntoElement, Lowering, ParentElement, RenderOnce, Svg, UniformList,
+    Element, Img, IntoElement, Lowering, ParentElement, RenderOnce, Svg, UniformList,
 };
 
 /// Traits and primitives used to compose guest GPUI elements.
 pub mod prelude {
     pub use crate::{
-        AnyElement, App, ClickEvent, Context, ElementId, FluentBuilder, Global, Hsla, InteractiveElement,
+        AnyElement, App, ClickEvent, Context, Element, ElementId, FluentBuilder, Global, Hsla, InteractiveElement,
         IntoElement, ParentElement, Render, RenderOnce, Role, SharedString, StatefulInteractiveElement,
         Styled, Theme, Window, anchored, canvas, deferred, div, img, px, rems, rgb, svg, uniform_list,
     };
@@ -288,14 +288,13 @@ impl<V: View> Driver<V> {
                     app: &mut self.app,
                     entity: self.entity.clone(),
                 };
-                self.entity
-                    .value
-                    .borrow_mut()
-                    .as_mut()
-                    .unwrap()
+                let mut view = self.entity.value.borrow_mut();
+                view.as_mut()
+                    .expect("entity initialized")
                     .render(&mut window, &mut cx)
+                    .into_element()
             };
-            element.into_node(&mut Lowering::new(&mut window, &mut self.app))
+            Lowering::new(&mut window, &mut self.app).lower_element(element)
         } else {
             self.last_root.clone().expect("rendered tree")
         };

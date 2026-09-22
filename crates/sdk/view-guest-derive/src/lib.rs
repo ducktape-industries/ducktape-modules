@@ -20,12 +20,14 @@ pub fn derive_into_element(input: TokenStream) -> TokenStream {
             fn into_element(self) -> Self::Element {
                 self
             }
+        }
 
-            fn into_node(
-                self,
+        impl #impl_generics ::ducktape_view_guest::Element for #name #ty_generics #where_clause {
+            fn lower(
+                self: ::std::boxed::Box<Self>,
                 lowering: &mut ::ducktape_view_guest::Lowering<'_>,
             ) -> ::ducktape_view_guest::wire::Node {
-                lowering.render_once(self)
+                lowering.render_once(*self)
             }
         }
     }
