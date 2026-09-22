@@ -370,7 +370,8 @@ fn block_view(
                 && width > 0
                 && height > 0
             {
-                card = card.child(div().max_w(px(360.)).max_h(px(240.)).child(surface(
+                let (width, height) = crate::files::picture_box(width, height);
+                card = card.child(div().w(px(width)).h(px(height)).overflow_hidden().border_1().border_color(theme.border).rounded_md().child(surface(
                     ElementId::Name(
                         format!("chat-message-{}-block-{index}-picture", message.id).into(),
                     ),
