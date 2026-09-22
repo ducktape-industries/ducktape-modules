@@ -1,8 +1,8 @@
 //! State stored by the root view and its panes.
 use super::{ChannelInfo, Draft, Loaded, MemberRow, MsgRow, NameDirectory, Session, files};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
 use std::cell::RefCell;
+use std::collections::{BTreeMap, HashMap};
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct Chat {

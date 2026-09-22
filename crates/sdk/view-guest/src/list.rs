@@ -472,14 +472,54 @@ mod tests {
             }
             other => panic!("expected list, got {other:?}"),
         }
+        state.scroll_to(ListOffset {
+            item_ix: 1_999,
+            offset_in_item: px(3.),
+        });
+        driver.app.notify();
+        let patched = driver.tick(vec![]);
         assert!(
-            !frame.patches.is_empty(),
-            "state operations update by patches"
+            patched
+                .patches
+                .iter()
+                .any(|patch| matches!(patch, wire::Patch::Props { .. })),
+            "same-shape state operations update by props patches"
         );
         driver.app.notify();
         let next = driver.tick(vec![]);
         assert!(
             matches!(list_node(&next), wire::Node::List { commands, .. } if commands.is_empty())
         );
+    }
+
+    #[test]
+    fn list_handles_and_requested_windows_are_driver_isolated() {
+        let mut first = Driver::<ListView>::new();
+        let mut second = Driver::<ListView>::new();
+        let first_frame = first.tick(vec![]);
+        let second_frame = second.tick(vec![]);
+        let (first_state, first_handler) = match list_node(&first_frame) {
+            wire::Node::List {
+                state,
+                request_handler,
+                ..
+            } => (*state, *request_handler),
+            _ => unreachable!(),
+        };
+        let second_state = match list_node(&second_frame) {
+            wire::Node::List { state, .. } => *state,
+            _ => unreachable!(),
+        };
+        assert_ne!(first_state, second_state);
+        first.tick(vec![wire::Event::ListRequest {
+            handler: first_handler,
+            request: wire::ListRequest { start: 7, end: 9 },
+        }]);
+        first
+            .entity()
+            .read(|view| assert_eq!(view.rendered.last().copied(), Some(8)));
+        second
+            .entity()
+            .read(|view| assert_eq!(view.rendered.last().copied(), Some(1_999)));
     }
 }

@@ -3,8 +3,8 @@
 
 use ducktape_view_guest::prelude::*;
 use ducktape_view_guest::{
-    div, list, px, ClickEvent, Context, ElementId, FollowMode, ListAlignment, ListSizingBehavior,
-    ListState, ParentElement, Styled, Theme,
+    ClickEvent, Context, ElementId, FollowMode, ListAlignment, ListSizingBehavior, ListState,
+    ParentElement, Styled, Theme, div, list as gpui_list, px,
 };
 
 use crate::ui::message;
@@ -131,7 +131,6 @@ pub fn list(chat: &Chat, pane: Pane, cx: &mut Context<Chat>, theme: &Theme) -> i
         state.set_scroll_handler(cx.listener(move |chat, event, _window, cx| {
             chat.list_scrolled(observed_pane, event, cx);
         }));
-        let count = keys.len();
         let pane_for_items = pane;
         let list_theme = theme.clone();
         let list_messages = messages.clone();
@@ -143,7 +142,7 @@ pub fn list(chat: &Chat, pane: Pane, cx: &mut Context<Chat>, theme: &Theme) -> i
                     .map(|message| message.seq)
             })
             .flatten();
-        let list = list(
+        let list = gpui_list(
             state,
             cx.processor(move |chat, index: usize, window, cx| {
                 if lead && index == 0 {
