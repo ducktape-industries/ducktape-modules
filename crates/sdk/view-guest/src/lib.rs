@@ -25,7 +25,7 @@ pub use element::{
 };
 pub use interactivity::{InteractiveElement, Interactivity, Stateful, StatefulInteractiveElement};
 pub use list::{
-    list, FollowMode, List, ListAlignment, ListOffset, ListScrollEvent, ListSizingBehavior,
+    list, FollowMode, List, ListAlignment, ListOffset, ListScrollEvent,
     ListState,
 };
 pub use primitives::{

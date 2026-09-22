@@ -1,4 +1,4 @@
-//! Native GPUI message lists. The room and thread use the same uniform list;
+//! Native GPUI message lists. The room and thread use native variable-height lists;
 //! callbacks still call the root view's existing message operations.
 
 use ducktape_view_guest::prelude::*;

@@ -1153,6 +1153,9 @@ fn sanitize_node(
             children,
             ..
         } => {
+            if path != authored_path {
+                return Err("list authored path is invalid");
+            }
             for id in path.iter() {
                 id.validate_host()?;
             }

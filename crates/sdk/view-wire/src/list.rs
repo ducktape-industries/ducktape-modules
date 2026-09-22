@@ -214,7 +214,7 @@ mod variable_tests {
     fn node(commands: Vec<ListCommand>, children: usize) -> Node {
         Node::List {
             state: 7,
-            path: vec![crate::ElementIdWire::Name("room".into())],
+            path: Vec::new(),
             item_count: usize::MAX,
             alignment: ListAlignment::Bottom,
             overdraw: f32::INFINITY,
@@ -273,6 +273,15 @@ mod variable_tests {
             })
         )));
         assert!(children.len() <= MAX_LIST_ROWS);
+    }
+
+    #[test]
+    fn a_list_cannot_address_another_authored_ancestor() {
+        let mut root = node(Vec::new(), 0);
+        let Node::List { path, .. } = &mut root else { unreachable!() };
+        path.push(crate::ElementIdWire::Name("other-room".into()));
+        let mut frame = Frame { root: Some(root), ..Default::default() };
+        assert_eq!(sanitize(&mut frame), Err("list authored path is invalid"));
     }
 
     #[test]
