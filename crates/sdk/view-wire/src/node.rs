@@ -575,7 +575,7 @@ impl Node {
             Self::Container { id, .. } | Self::Text { id, .. } => {
                 id.as_ref().and_then(ElementIdWire::name)
             }
-            Self::Input { id, .. } | Self::Editor { id, .. } => id.name(),
+            Self::Input { id, .. } | Self::Editor { id, .. } | Self::UniformList { id, .. } => id.name(),
             Self::ResizeHandle { key, .. }
             | Self::MouseArea { key, .. }
             | Self::Linear { key, .. }
@@ -607,7 +607,7 @@ impl Node {
             | Self::Tooltip { key, .. }
             | Self::Canvas { key, .. }
             | Self::Surface { key, .. } => Some(key),
-            Self::UniformList { .. } | Self::Space { .. } => None,
+            Self::Space { .. } => None,
         }
     }
 
