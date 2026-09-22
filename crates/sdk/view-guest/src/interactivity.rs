@@ -20,6 +20,27 @@ pub struct Interactivity {
     pub(crate) on_click: Option<ClickListener>,
 }
 
+impl Interactivity {
+    pub(crate) fn into_wire(self, lowering: &mut Lowering<'_>) -> wire::Interactivity {
+        wire::Interactivity {
+            role: self.role,
+            aria: self.aria,
+            focusable: self.focusable,
+            id: self.id.map(wire::ElementIdWire::from_gpui),
+            group: self.group,
+            hover: self.hover,
+            active: self.active,
+            group_hover: self
+                .group_hover
+                .map(|(group, style)| wire::GroupRefinement { group, style }),
+            group_active: self
+                .group_active
+                .map(|(group, style)| wire::GroupRefinement { group, style }),
+            on_click: self.on_click.map(|listener| lowering.click(listener)),
+        }
+    }
+}
+
 /// Add basic group and identity declarations to an element recipe.
 pub trait InteractiveElement: Sized {
     fn interactivity(&mut self) -> &mut Interactivity;

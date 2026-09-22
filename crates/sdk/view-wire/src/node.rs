@@ -35,6 +35,34 @@ pub enum Live {
     Assertive,
 }
 
+/// The reference point used by the native GPUI anchored element.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Anchor {
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+    TopCenter,
+    BottomCenter,
+    LeftCenter,
+    RightCenter,
+}
+
+/// How an anchored child is kept inside the host viewport.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum AnchoredFitMode {
+    SnapToWindow,
+    SnapToWindowWithMargin(Edges),
+    SwitchAnchor,
+}
+
+/// Coordinate space for an anchored position.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AnchoredPositionMode {
+    Window,
+    Local,
+}
+
 /// One widget. `key` is the node's identity across frames — the
 /// accessibility path the compiler already computes (`App/content/count`)
 /// — which the host uses for widget state (focus, caret, scroll) and for
@@ -66,6 +94,17 @@ pub enum Node {
         height: Option<Length>,
         #[serde(deserialize_with = "decode_child")]
         content: Box<Node>,
+    },
+    /// A native GPUI anchored element. The host owns fitting and clipping.
+    Anchored {
+        key: String,
+        anchor: Anchor,
+        fit: AnchoredFitMode,
+        position: Option<[f32; 2]>,
+        position_mode: AnchoredPositionMode,
+        offset: Option<[f32; 2]>,
+        #[serde(deserialize_with = "decode_children")]
+        children: Vec<Node>,
     },
     /// Floating content the host offsets from its own origin.
     Float {
@@ -232,6 +271,13 @@ pub enum Node {
         #[serde(deserialize_with = "decode_child")]
         content: Box<Node>,
     },
+    /// A deferred draw. Unlike [`Node::Lazy`], this is never a guest cache.
+    Deferred {
+        key: String,
+        priority: usize,
+        #[serde(deserialize_with = "decode_child")]
+        content: Box<Node>,
+    },
     /// Splices selected children into the surrounding layout. It adds no box.
     When {
         key: String,
@@ -298,6 +344,12 @@ pub enum Node {
         opacity: Option<f32>,
         width: Option<Length>,
         height: Option<Length>,
+        #[serde(default)]
+        grayscale: bool,
+        #[serde(default)]
+        style: gpui::StyleRefinement,
+        #[serde(default)]
+        interactivity: Interactivity,
     },
     /// A native zoom/pan viewer sharing the raster picture cache and budgets.
     ImageViewer {
@@ -324,6 +376,9 @@ pub enum Node {
         hash: u64,
         /// The picture, on the first frame it is shown.
         bytes: Option<Vec<u8>>,
+        /// A safe host-owned asset path. The host refuses arbitrary paths.
+        #[serde(default)]
+        path: Option<String>,
         /// The accessible name of the picture.
         label: Option<String>,
         /// A tint for the whole picture, over its own colours.
@@ -336,6 +391,10 @@ pub enum Node {
         opacity: Option<f32>,
         width: Option<Length>,
         height: Option<Length>,
+        #[serde(default)]
+        style: gpui::StyleRefinement,
+        #[serde(default)]
+        interactivity: Interactivity,
     },
     Input {
         options: InputOptions,
@@ -523,6 +582,8 @@ pub enum Node {
         key: String,
         width: Option<Length>,
         height: Option<Length>,
+        #[serde(default)]
+        style: gpui::StyleRefinement,
         #[serde(deserialize_with = "canvas::decode_parts")]
         commands: Vec<CanvasCommand>,
     },
@@ -582,9 +643,11 @@ impl Node {
             | Self::Grid { key, .. }
             | Self::KeyedColumn { key, .. }
             | Self::Pin { key, .. }
+            | Self::Anchored { key, .. }
             | Self::Float { key, .. }
             | Self::Responsive { key, .. }
             | Self::Lazy { key, .. }
+            | Self::Deferred { key, .. }
             | Self::When { key, .. }
             | Self::Sensor { key, .. }
             | Self::Scroll { key, .. }
@@ -670,11 +733,13 @@ impl Node {
             | Self::Overlay { children, .. }
             | Self::KeyedColumn { children, .. }
             | Self::UniformList { children, .. }
-            | Self::When { children, .. } => children,
+            | Self::When { children, .. }
+            | Self::Anchored { children, .. } => children,
             Self::Pin { content, .. }
             | Self::Float { content, .. }
             | Self::Responsive { content, .. }
             | Self::Lazy { content, .. }
+            | Self::Deferred { content, .. }
             | Self::Sensor { child: content, .. }
             | Self::ResizeHandle { content, .. }
             | Self::MouseArea { content, .. }
@@ -724,11 +789,13 @@ impl Node {
             | Self::Overlay { children, .. }
             | Self::KeyedColumn { children, .. }
             | Self::UniformList { children, .. }
-            | Self::When { children, .. } => children,
+            | Self::When { children, .. }
+            | Self::Anchored { children, .. } => children,
             Self::Pin { content, .. }
             | Self::Float { content, .. }
             | Self::Responsive { content, .. }
             | Self::Lazy { content, .. }
+            | Self::Deferred { content, .. }
             | Self::Sensor { child: content, .. }
             | Self::ResizeHandle { content, .. }
             | Self::MouseArea { content, .. }
@@ -773,11 +840,13 @@ impl Node {
             | Self::When { children, .. }
             | Self::Hover { children, .. }
             | Self::Tooltip { children, .. }
+            | Self::Anchored { children, .. }
             | Self::Overlay { children, .. } => Some(children),
             Self::Pin { .. }
             | Self::Float { .. }
             | Self::Responsive { .. }
             | Self::Lazy { .. }
+            | Self::Deferred { .. }
             | Self::Sensor { .. }
             | Self::ResizeHandle { .. }
             | Self::MouseArea { .. }

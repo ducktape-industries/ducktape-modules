@@ -3,8 +3,9 @@ pub use gpui::prelude::FluentBuilder;
 extern crate self as ducktape_view_guest;
 
 pub use gpui::{
-    hsla, px, rems, rgb, ClickEvent, CursorStyle, ElementId, Global, Hsla,
-    ListHorizontalSizingBehavior, ListSizingBehavior, Pixels, Role, ScrollStrategy, SharedString,
+    hsla, px, rems, rgb, Anchor, AnchoredFitMode, AnchoredPositionMode, ClickEvent, CursorStyle,
+    Edges, ElementId, Global, Hsla, ObjectFit, Pixels, Point, Resource, Role, SharedString,
+    ListHorizontalSizingBehavior, ListSizingBehavior, ScrollStrategy,
     StyleRefinement, Styled,
 };
 pub use view_guest_derive::IntoElement;
@@ -15,25 +16,30 @@ mod behavior;
 mod element;
 mod view_element;
 mod interactivity;
+mod primitives;
 mod surface;
 pub use behavior::{modal_overlay, resize_handle, sensor, ModalOverlay, ResizeHandle, Sensor};
 pub use element::{
-    anchored, canvas, deferred, div, img, svg, uniform_list, AnyElement, Anchored, Canvas, Deferred, Div,
-    Element, Img, Input, IntoElement, Lowering, ParentElement, RenderOnce, Svg, UniformList,
-    UniformListScrollHandle,
+    div, uniform_list, AnyElement, Div, Element, Input, IntoElement, Lowering, ParentElement,
+    RenderOnce, UniformList, UniformListScrollHandle,
 };
 pub use interactivity::{InteractiveElement, Interactivity, Stateful, StatefulInteractiveElement};
+pub use primitives::{
+    anchored, canvas, deferred, img, svg, Anchored, Canvas, Deferred, ImageSource, Img, StyledImage,
+    Svg,
+};
 pub use surface::{surface, Surface};
 pub use view_element::ViewElement;
 
 /// Traits and primitives used to compose guest GPUI elements.
 pub mod prelude {
     pub use crate::{
-        AnyElement, App, ClickEvent, Context, Element, ElementId, FluentBuilder, Global, Hsla, Input, InteractiveElement,
-        IntoElement, ListHorizontalSizingBehavior, ListSizingBehavior, ParentElement, Render,
-        RenderOnce, Role, ScrollStrategy, SharedString, StatefulInteractiveElement, Styled, Theme,
-        UniformListScrollHandle, Window, hsla, Pixels, surface, modal_overlay, resize_handle,
-        sensor, anchored, canvas, deferred, div, img, px, rems, rgb, svg, uniform_list,
+        AnyElement, App, ClickEvent, Context, Element, ElementId, FluentBuilder, Global, Hsla, Input,
+        InteractiveElement, IntoElement, ListHorizontalSizingBehavior, ListSizingBehavior,
+        ParentElement, Render, RenderOnce, Role, ScrollStrategy, SharedString,
+        StatefulInteractiveElement, Styled, StyledImage, Theme, UniformListScrollHandle, Window,
+        anchored, canvas, deferred, div, hsla, img, modal_overlay, px, rems, resize_handle, rgb,
+        sensor, surface, svg, uniform_list, Pixels,
     };
 }
 mod editor;
