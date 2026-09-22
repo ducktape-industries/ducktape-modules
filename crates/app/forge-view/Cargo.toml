@@ -1,0 +1,27 @@
+[package]
+name = "forge-view"
+edition.workspace = true
+version.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+ducktape-view-guest.workspace = true
+abi.workspace = true
+borsh.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+base64.workspace = true
+futures.workspace = true
+modules.workspace = true
+ducklink.workspace = true
+chat = { path = "../chat" }
+
+[dev-dependencies]
+forge.workspace = true
+forge-harness = { path = "../forge-harness" }
+tokio.workspace = true
+tempfile.workspace = true
+sha2.workspace = true
