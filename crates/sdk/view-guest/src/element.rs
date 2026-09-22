@@ -8,7 +8,10 @@
 
 use crate::interactivity::{ClickListener, Interactivity};
 use crate::{slots, wire, App, Window};
-use gpui::{ElementId, ListHorizontalSizingBehavior, ListSizingBehavior, Overflow, ScrollStrategy, SharedString, StyleRefinement, Styled};
+use gpui::{
+    ElementId, ListHorizontalSizingBehavior, ListSizingBehavior, Overflow, ScrollStrategy,
+    SharedString, StyleRefinement, Styled,
+};
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::ops::Range;
@@ -771,7 +774,10 @@ impl Element for UniformList {
     fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
         let count = self.count.min(wire::MAX_UNIFORM_LIST_COUNT);
         let path = lowering.current_path().to_vec();
-        let id = path.last().cloned().expect("uniform list lowers inside its authored scope");
+        let id = path
+            .last()
+            .cloned()
+            .expect("uniform list lowers inside its authored scope");
         let measure_index = self.measure_index.min(count.saturating_sub(1));
         let scroll = self.scroll.as_ref().map(|handle| &handle.0);
         let (route, ranges) = lowering
@@ -779,14 +785,21 @@ impl Element for UniformList {
             .uniform_list_route(&path, count, measure_index, scroll);
         let mut indices = Vec::new();
         let mut children = Vec::new();
-        for range in ranges {
+        'ranges: for range in ranges {
             let range = range.start.min(count)..range.end.min(count);
             if range.is_empty() {
                 continue;
             }
             let rendered = (self.processor)(range.clone(), lowering.window, lowering.app);
-            for (index, child) in range.zip(rendered).take(wire::MAX_UNIFORM_LIST_ROWS) {
-                indices.push(index as u32);
+            for (index, child) in range.zip(rendered) {
+                let index = index as u32;
+                if indices.contains(&index) {
+                    continue;
+                }
+                if indices.len() == wire::MAX_UNIFORM_LIST_ROWS {
+                    break 'ranges;
+                }
+                indices.push(index);
                 children.push(lowering.lower_element(child));
             }
         }
@@ -809,9 +822,18 @@ impl Element for UniformList {
                 group: self.interactivity.group,
                 hover: self.interactivity.hover,
                 active: self.interactivity.active,
-                group_hover: self.interactivity.group_hover.map(|(group, style)| wire::GroupRefinement { group, style }),
-                group_active: self.interactivity.group_active.map(|(group, style)| wire::GroupRefinement { group, style }),
-                on_click: self.interactivity.on_click.map(|listener| lowering.click(listener)),
+                group_hover: self
+                    .interactivity
+                    .group_hover
+                    .map(|(group, style)| wire::GroupRefinement { group, style }),
+                group_active: self
+                    .interactivity
+                    .group_active
+                    .map(|(group, style)| wire::GroupRefinement { group, style }),
+                on_click: self
+                    .interactivity
+                    .on_click
+                    .map(|listener| lowering.click(listener)),
             },
             count,
             measure_index,

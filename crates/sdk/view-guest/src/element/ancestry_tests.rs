@@ -152,3 +152,78 @@ fn uniform_list_opens_its_typed_registry_scope() {
     }));
     assert_eq!(*paths.borrow(), vec![vec![named("list"), named("row")]]);
 }
+
+#[test]
+fn equal_uniform_list_ids_use_distinct_typed_parent_registries() {
+    let root = lower(
+        div()
+            .child(
+                div()
+                    .id(ElementId::Integer(1))
+                    .child(uniform_list("same", 1, |_, _, _| vec![div()])),
+            )
+            .child(div().id(ElementId::Name("1".into())).child(uniform_list(
+                "same",
+                1,
+                |_, _, _| vec![div()],
+            ))),
+    );
+    fn collect(node: &wire::Node, lists: &mut Vec<(Vec<wire::ElementIdWire>, u32)>) {
+        if let wire::Node::UniformList { path, route, .. } = node {
+            lists.push((path.clone(), *route));
+        }
+        for child in node.children() {
+            collect(child, lists);
+        }
+    }
+    let mut lists = Vec::new();
+    collect(&root, &mut lists);
+    assert_eq!(
+        lists
+            .iter()
+            .map(|(path, _)| path.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            vec![wire_id(ElementId::Integer(1)), named("same")],
+            vec![wire_id(ElementId::Name("1".into())), named("same")],
+        ]
+    );
+    assert_ne!(lists[0].1, lists[1].1);
+}
+
+#[test]
+fn uniform_list_lowers_selected_measurement_and_scroll_request() {
+    let scroll = UniformListScrollHandle::new();
+    scroll.scroll_to_item_strict_with_offset(42, ScrollStrategy::Center, 2);
+    let root = lower(
+        uniform_list("list", 100, |range, _, _| {
+            range.map(|_| div()).collect::<Vec<_>>()
+        })
+        .with_width_from_item(Some(7))
+        .track_scroll(&scroll)
+        .y_flipped(true),
+    );
+    let wire::Node::UniformList {
+        indices,
+        measure_index,
+        y_flipped,
+        scroll_request,
+        ..
+    } = root
+    else {
+        panic!("expected uniform list");
+    };
+    assert_eq!(indices, [7]);
+    assert_eq!(measure_index, 7);
+    assert!(y_flipped);
+    assert!(scroll.y_flipped());
+    assert_eq!(
+        scroll_request,
+        Some(wire::list::UniformListScrollRequest {
+            index: 42,
+            strategy: wire::list::UniformListScrollStrategy::Center,
+            offset: 2,
+            strict: true,
+        })
+    );
+}

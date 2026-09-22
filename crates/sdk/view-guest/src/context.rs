@@ -1,5 +1,5 @@
 //! Contexts and handles for the single root entity.
-use crate::{Host, Task, View, Window, executor, slots};
+use crate::{executor, slots, Host, Task, View, Window};
 use std::any::{Any, TypeId};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -42,7 +42,10 @@ impl App {
         let host = Host::default();
         let slots = slots::Context::with_host(macos, host.clone());
         let mut globals = std::collections::HashMap::new();
-        globals.insert(TypeId::of::<crate::Theme>(), Rc::new(crate::Theme::default()) as Rc<dyn Any>);
+        globals.insert(
+            TypeId::of::<crate::Theme>(),
+            Rc::new(crate::Theme::default()) as Rc<dyn Any>,
+        );
         let globals = Rc::new(globals);
         Self {
             globals: globals.clone(),
@@ -118,7 +121,9 @@ impl App {
                 }
             }
             let route = self.inner.next_uniform_route.get();
-            self.inner.next_uniform_route.set(route.wrapping_add(1).max(1));
+            self.inner
+                .next_uniform_route
+                .set(route.wrapping_add(1).max(1));
             let measure_index = measure_index.min(count.saturating_sub(1));
             lists.insert(
                 path.to_vec(),
@@ -136,6 +141,7 @@ impl App {
         }
         let state = lists.get_mut(path).expect("uniform-list route inserted");
         state.count = count;
+        let previous_measure_index = state.measure_index;
         state.measure_index = measure_index.min(count.saturating_sub(1));
         state.scroll = scroll.map(Rc::downgrade);
         state.ranges.retain_mut(|range| {
@@ -143,6 +149,10 @@ impl App {
             range.end = range.end.min(count);
             range.start < range.end
         });
+        if previous_measure_index != state.measure_index {
+            let previous = previous_measure_index..previous_measure_index.saturating_add(1);
+            state.ranges.retain(|range| range != &previous);
+        }
         let measurement = state.measure_index..state.measure_index.saturating_add(1).min(count);
         if count > 0 && !state.ranges.iter().any(|range| range == &measurement) {
             state.ranges.insert(0, measurement);
