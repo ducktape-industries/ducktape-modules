@@ -102,6 +102,7 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>) -> impl IntoElement {
         cx.notify();
     });
     sensor(ElementId::Name("chat-viewport".into()), screen)
+        .size_full()
         .on_show(shown)
         .on_resize(resized)
 }

@@ -1,5 +1,5 @@
 use super::*;
-use ducktape_view_guest::Entity;
+use ducktape_view_guest::{Entity, StyleRefinement, Styled};
 use ducktape_view_guest::testing::TestAppContext;
 use ducktape_view_guest::wire;
 
@@ -247,14 +247,18 @@ fn the_room_shows_its_rows_intro_and_actions() {
 #[test]
 fn viewport_and_pane_dividers_keep_their_behavior_routes() {
     let (mut cx, view) = opened();
-    assert!(matches!(
-        cx.find("chat-viewport"),
-        Some(wire::Node::Sensor {
-            on_show: Some(_),
-            on_resize: Some(_),
-            ..
-        })
-    ));
+    let full = StyleRefinement::default().size_full();
+    let Some(wire::Node::Sensor {
+        on_show: Some(_),
+        on_resize: Some(_),
+        style,
+        ..
+    }) = cx.find("chat-viewport")
+    else {
+        panic!("chat viewport sensor")
+    };
+    assert_eq!(style.size.width, full.size.width);
+    assert_eq!(style.size.height, full.size.height);
     cx.simulate_measure("chat-viewport", 640., 480.);
     view.read(|chat| {
         assert_eq!(chat.layout.viewport, (640., 480.));

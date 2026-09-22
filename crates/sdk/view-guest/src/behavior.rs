@@ -18,6 +18,7 @@ pub struct Sensor {
     child: AnyElement,
     on_show: Option<SizeListener>,
     on_resize: Option<SizeListener>,
+    style: StyleRefinement,
 }
 
 pub fn sensor(id: impl Into<ElementId>, child: impl IntoElement) -> Sensor {
@@ -26,6 +27,7 @@ pub fn sensor(id: impl Into<ElementId>, child: impl IntoElement) -> Sensor {
         child: child.into_any_element(),
         on_show: None,
         on_resize: None,
+        style: StyleRefinement::default(),
     }
 }
 
@@ -69,8 +71,14 @@ impl Element for Sensor {
             anticipate: None,
             delay: None,
             child: Box::new(lowering.lower(self.child)),
-            style: StyleRefinement::default(),
+            style: self.style,
         }
+    }
+}
+
+impl Styled for Sensor {
+    fn style(&mut self) -> &mut StyleRefinement {
+        &mut self.style
     }
 }
 

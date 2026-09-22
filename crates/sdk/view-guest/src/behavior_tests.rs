@@ -16,6 +16,21 @@ impl View for BehaviorView {
     }
 }
 
+#[derive(Default, serde::Deserialize, serde::Serialize)]
+struct DefaultSensorView;
+
+impl View for DefaultSensorView {
+    fn new(_: &mut Window, _: &mut Context<Self>) -> Self {
+        Self
+    }
+}
+
+impl Render for DefaultSensorView {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        sensor(ElementId::Name("default-sensor".into()), div())
+    }
+}
+
 impl Render for BehaviorView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let measured = cx.listener(|view, size: &(Pixels, Pixels), _, cx| {
@@ -53,7 +68,8 @@ impl Render for BehaviorView {
                 )
                 .on_drag(dragged),
             )
-            .on_show(measured),
+            .on_show(measured)
+            .size_full(),
             div().child("modal"),
         )
         .label("Behavior dialog")
@@ -68,13 +84,17 @@ impl Render for BehaviorView {
 fn behavior_elements_lower_typed_routes_and_children() {
     let mut cx = TestAppContext::new();
     let view = cx.open::<BehaviorView>();
-    assert!(matches!(
-        cx.find("behavior-sensor"),
-        Some(wire::Node::Sensor {
-            on_show: Some(_),
-            ..
-        })
-    ));
+    let full = crate::StyleRefinement::default().size_full();
+    let Some(wire::Node::Sensor {
+        on_show: Some(_),
+        style,
+        ..
+    }) = cx.find("behavior-sensor")
+    else {
+        panic!("behavior sensor")
+    };
+    assert_eq!(style.size.width, full.size.width);
+    assert_eq!(style.size.height, full.size.height);
     assert!(matches!(
         cx.find("behavior-resize"),
         Some(wire::Node::ResizeHandle {
@@ -101,4 +121,14 @@ fn behavior_elements_lower_typed_routes_and_children() {
         assert_eq!(view.surface_event, "opened");
         assert!(view.dismissed);
     });
+}
+
+#[test]
+fn sensor_style_is_opt_in() {
+    let mut cx = TestAppContext::new();
+    cx.open::<DefaultSensorView>();
+    let Some(wire::Node::Sensor { style, .. }) = cx.find("default-sensor") else {
+        panic!("default sensor")
+    };
+    assert_eq!(style, crate::StyleRefinement::default());
 }
