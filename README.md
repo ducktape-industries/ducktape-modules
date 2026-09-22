@@ -4,7 +4,7 @@ The ducktape contract line and the programs written against it, one
 repository. Only what compiles to wasm lives here, in three folders:
 
 ```
-crates/sdk/     abi guest ducklink view-wire view-guest view-guest-derive design
+crates/sdk/     abi guest program program-derive ducklink view-wire view-guest view-guest-derive design
 crates/system/  module-registry valset identity
 crates/app/     chat chat-view forge forge-view members-view node-view explorer-view settings-view
 crates/lib/     gitcore
@@ -14,10 +14,11 @@ crates/lib/     gitcore
 |---|---|
 | `crates/sdk/abi` | the borsh bytes ABI a program and the host share: `GuestCall`, `HostOp`/`HostReply`, `Env`, `Refusal`, the `module_registry` and `valset` contracts. A copy of ducktape's `crates/kernel/abi`, like `guest` beside it |
 | `crates/sdk/guest` | what a program compiles against: the `Program` trait, the `Execute` and `Query` contexts its entry points receive, `program!` |
+| `crates/sdk/program`, `program-derive` | a program as a state struct plus methods: `Map`/`Set`/`Item` fields under their own prefixes, scalars in one root record, `#[program]` deriving `Op`/`Query`/`Reply` and the guest glue from the methods; `MemoryStore` runs the same methods natively |
 | `crates/sdk/ducklink` | the `duck://` link: `duck://<chain>/<program>/<tail…>`, one spelling per name, no program names known here |
 | `crates/sdk/view-wire`, `view-guest`, `view-guest-derive`, `design` | the host<->view wire, the runtime a wasm view is written against, the palette |
 | `crates/system/module-registry` | the boot set's root: the registry program (its `Op`, `Query`, `Reply`), `AUTHORITY`, `Page`/`PageReply` and the origin/key/refusal `helpers` every system program links. Its `tests/system.rs` founds ducktape's host over the bytes `make wasm-programs` built and drives every system program |
-| `crates/system/valset`, `identity` | the other two boot programs, the same shape: types always built, the wasm32 program behind `program`, the asks another program makes of them (`identity::account_of`, `valset::standing`) behind `guest` |
+| `crates/system/valset`, `identity` | the other two boot programs: types always built, the wasm32 program behind `program`, the asks another program makes of them (`identity::account_of`, `valset::standing`) behind `guest`. `identity` is written in the `#[program]` shape over `crates/sdk/program` |
 | `crates/app/chat`, `chat-view` | the reference app module: `chat` is one crate whose types and rules over a `Read`/`Write` store are always built (native, tested), and whose wasm32 program over the host sits behind its `program` feature. `chat-view` links `chat` with the feature off: the types, no host import, no program export |
 | `crates/app/forge`, `forge-view` | the git server as a program, the same shape as `chat`: a push is one op whose input is the receive-pack body a client sent, a merge is an op that lands the commit the client built, fetch and the ref advertisement are queries; a git object's blob id is its oid. it links `gitcore` for the git; merging is the client's. The rules run natively over `MemorySandbox`, which is where `fixtures/` comes from; `forge-view` links `forge` with `program` off |
 | `crates/app/members-view`, `node-view`, `explorer-view`, `settings-view` | the system views, which link the system crates with `program` off |

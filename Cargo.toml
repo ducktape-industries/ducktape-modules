@@ -3,7 +3,9 @@
 #
 #   crates/sdk/     the contracts: `abi` (the borsh bytes ABI a program and the
 #                   host share), `guest` (what a program compiles against),
-#                   `ducklink` (the `duck://` grammar), and the view contract
+#                   `program` + `program-derive` (a program as a state struct
+#                   whose methods are its contract, over `guest`), `ducklink`
+#                   (the `duck://` grammar), and the view contract
 #                   (`view-wire`, `view-guest`, `design`)
 #   crates/system/  the boot set: module-registry, valset and identity, one
 #                   crate each in the same shape as the app programs; the
@@ -29,6 +31,8 @@ resolver = "2"
 members = [
     "crates/sdk/abi",
     "crates/sdk/guest",
+    "crates/sdk/program",
+    "crates/sdk/program-derive",
     "crates/sdk/ducklink",
     "crates/sdk/design",
     "crates/sdk/view-wire",
@@ -56,6 +60,7 @@ version = "0.1.0"
 # ---- the contracts, in tree
 abi = { path = "crates/sdk/abi" }
 guest = { path = "crates/sdk/guest" }
+program = { path = "crates/sdk/program" }
 gitcore = { path = "crates/lib/gitcore" }
 ducklink = { path = "crates/sdk/ducklink" }
 design = { path = "crates/sdk/design" }
@@ -93,6 +98,7 @@ unicode-normalization = "0.1"
 [patch."https://github.com/ducktape-industries/ducktape"]
 abi = { path = "crates/sdk/abi" }
 guest = { path = "crates/sdk/guest" }
+program = { path = "crates/sdk/program" }
 
 # proc-macro and build-script crates (serde_derive, async-trait, borsh-derive)
 # are compiled once and then run for every unit below them — unoptimized they

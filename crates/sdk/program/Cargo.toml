@@ -1,0 +1,18 @@
+[package]
+name = "program"
+version.workspace = true
+edition.workspace = true
+
+# The runtime a `#[program]` state struct is written over: typed collections
+# under prefixes, the key encoding, and the `Store` they read and write
+# through. Always built (a view links it through its program crate with
+# `program` off); the `program` feature adds the host-backed store and the
+# `Store` impls over `guest`'s contexts.
+[features]
+program = ["dep:guest"]
+
+[dependencies]
+abi = { workspace = true }
+borsh = { workspace = true }
+guest = { workspace = true, optional = true }
+program-derive = { path = "../program-derive" }

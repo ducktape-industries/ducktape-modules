@@ -93,7 +93,7 @@ fn accounts(ctx: &impl Reads, limit: Option<usize>) -> Result<ChatViewReply, Ref
         after: None,
         limit: Some(crate::page(limit) as u64),
     };
-    let identity::Reply::Accounts(accounts) = ctx.ask::<identity::Query, identity::Reply>(
+    let identity::Reply::List(accounts) = ctx.ask::<identity::Query, identity::Reply>(
         identity::PROGRAM,
         &identity::Query::List { page },
     )?

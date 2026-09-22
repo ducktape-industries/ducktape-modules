@@ -3,19 +3,21 @@ name = "identity"
 version.workspace = true
 edition.workspace = true
 
-# The types are always built; a view links them with `program` off. `guest`
-# adds the asks another program makes of identity (`account_of`, `account`);
-# `program` adds the wasm32 program over the host: `guest`'s contexts, the
-# `alloc`/`call` exports and the `ducktape.*` imports.
+# The types and the state are always built; a view links them with `program`
+# off. `guest` adds the asks another program makes of identity (`account_of`,
+# `account`); `program` adds the wasm32 program over the host: `program`'s
+# host store, `guest`'s contexts, the `alloc`/`call` exports and the
+# `ducktape.*` imports.
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [features]
 guest = ["dep:guest"]
-program = ["guest"]
+program = ["guest", "program/program"]
 
 [dependencies]
 abi = { workspace = true }
 borsh = { workspace = true }
 guest = { workspace = true, optional = true }
 module-registry = { workspace = true }
+program = { workspace = true }

@@ -3,8 +3,8 @@
 CARGO ?= cargo
 WASM_OPT ?= wasm-opt
 
-# What a program links: abi and guest build for wasm32 with nothing else.
-PROGRAM_LINKABLE := abi guest
+# What a program links: abi, guest and the program runtime build for wasm32 with nothing else.
+PROGRAM_LINKABLE := abi guest program
 
 # The ducktape checkout the probe fixture the founding suite seats is copied
 # from (crates/kernel/fixtures, `make kernel-fixtures` there). The probe is a
@@ -48,12 +48,12 @@ WASM_BUILD := RUSTFLAGS="$(WASM_RUSTFLAGS)" $(CARGO) build --target-dir $(BUILD_
 
 .PHONY: program-wasm-check wasm-programs probe-fixture wasm-views view-wasm-check test
 
-## builds abi and guest for wasm32-unknown-unknown.
+## builds abi, guest and program for wasm32-unknown-unknown.
 program-wasm-check:
 	@for crate in $(PROGRAM_LINKABLE); do \
 	  $(CARGO) build --target wasm32-unknown-unknown -p $$crate || exit 1; \
 	done; \
-	echo "abi and guest build for wasm32"
+	echo "abi, guest and program build for wasm32"
 
 ## builds every program (with `program` on) into $(RELEASE)/<name>.wasm. The
 ## founding suite reads the boot set from there.

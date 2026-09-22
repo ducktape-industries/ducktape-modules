@@ -1,0 +1,15 @@
+[package]
+name = "program-derive"
+version.workspace = true
+edition.workspace = true
+
+# `#[program]`: on a state struct, the record under `state` and the
+# collections under their names; on its impl, the wire enums and the guest
+# glue derived from the methods. Reached through `program::program`.
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full"] }

@@ -79,7 +79,7 @@ fn page<T>(items: Vec<T>) -> module_registry::PageReply<T> {
 fn respond(cx: &mut TestAppContext) {
     cx.host().handle::<QueryBytes<Identity>>(|query| {
         assert!(matches!(query, identity::Query::List { .. }));
-        Ok(identity::Reply::Accounts(page(vec![
+        Ok(identity::Reply::List(page(vec![
             person(7, "eddy", b"\x01\x02"),
             program(8, "chat"),
         ])))
@@ -145,7 +145,7 @@ fn a_roster_with_nobody_in_it_says_so() {
     let mut cx = TestAppContext::new();
     cx.host().stream::<Live>();
     cx.host()
-        .handle::<QueryBytes<Identity>>(|_| Ok(identity::Reply::Accounts(page(vec![]))));
+        .handle::<QueryBytes<Identity>>(|_| Ok(identity::Reply::List(page(vec![]))));
     cx.host()
         .handle::<QueryBytes<Valset>>(|_| Ok(valset::Reply::Memberships(page(vec![]))));
     cx.open::<Members>();
@@ -196,7 +196,7 @@ fn a_live_bump_re_reads_and_a_snapshot_restores_the_screen() {
     assert!(cx.has_text("eddy"));
     assert_eq!(cx.host().asked::<QueryBytes<Identity>>().len(), 2);
     cx.host().handle::<QueryBytes<Identity>>(|_| {
-        Ok(identity::Reply::Accounts(page(vec![person(
+        Ok(identity::Reply::List(page(vec![person(
             9, "newcomer", b"\x09",
         )])))
     });

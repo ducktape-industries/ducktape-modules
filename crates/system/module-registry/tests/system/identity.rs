@@ -69,7 +69,7 @@ fn identity_founds_accounts_admits_keys_by_consent_and_provisions_programs() {
             },
         )
         .await;
-        let identity::Reply::Account(Some(account)) = net
+        let identity::Reply::Get(Some(account)) = net
             .ask(identity::PROGRAM, &identity::Query::Get { number: 1 })
             .await
         else {
@@ -77,7 +77,7 @@ fn identity_founds_accounts_admits_keys_by_consent_and_provisions_programs() {
         };
         assert_eq!(account.name, "Alice");
         assert_eq!(account.keys().len(), 2);
-        let identity::Reply::Number(of_phone) = net
+        let identity::Reply::OfKey(of_phone) = net
             .ask(
                 identity::PROGRAM,
                 &identity::Query::OfKey { key: phone.clone() },
@@ -167,7 +167,7 @@ fn identity_founds_accounts_admits_keys_by_consent_and_provisions_programs() {
             abi::decode::<AccountNumber>(output_of(&created)).unwrap(),
             2
         );
-        let identity::Reply::Account(Some(chief)) = net
+        let identity::Reply::Get(Some(chief)) = net
             .ask(identity::PROGRAM, &identity::Query::Get { number: 2 })
             .await
         else {
@@ -181,7 +181,7 @@ fn identity_founds_accounts_admits_keys_by_consent_and_provisions_programs() {
                 standing: identity::Standing::Active,
             }
         );
-        let identity::Reply::Accounts(controlled) = net
+        let identity::Reply::Controlled(controlled) = net
             .ask(
                 identity::PROGRAM,
                 &identity::Query::Controlled {
@@ -237,7 +237,7 @@ fn identity_founds_accounts_admits_keys_by_consent_and_provisions_programs() {
             )
             .await;
         assert_eq!(circular, reason::WRONG_STATE);
-        let identity::Reply::Resolved(resolved) = net
+        let identity::Reply::Resolve(resolved) = net
             .ask(
                 identity::PROGRAM,
                 &identity::Query::Resolve {
@@ -259,7 +259,7 @@ fn identity_founds_accounts_admits_keys_by_consent_and_provisions_programs() {
             &identity::Op::Revoke { account: 2 },
         )
         .await;
-        let identity::Reply::Account(Some(revoked)) = net
+        let identity::Reply::Get(Some(revoked)) = net
             .ask(identity::PROGRAM, &identity::Query::Get { number: 2 })
             .await
         else {
@@ -317,9 +317,9 @@ fn account_lists_resume_with_the_answering_height() {
                 } else {
                     identity::Query::List { page }
                 };
-                let identity::Reply::Accounts(reply) = net.ask(identity::PROGRAM, &query).await
-                else {
-                    panic!()
+                let reply = match net.ask(identity::PROGRAM, &query).await {
+                    identity::Reply::List(reply) | identity::Reply::Controlled(reply) => reply,
+                    _ => panic!(),
                 };
                 assert_eq!(reply.height, net.height);
                 assert!(reply.items.len() <= 2);
@@ -338,7 +338,7 @@ fn account_lists_resume_with_the_answering_height() {
                 }
             );
         }
-        let identity::Reply::Accounts(reply) = net
+        let identity::Reply::List(reply) = net
             .ask(
                 identity::PROGRAM,
                 &identity::Query::List {

@@ -21,11 +21,11 @@ fn respond(cx: &TestAppContext) {
         Ok(match q {
             identity::Query::OfKey { key } => {
                 assert_eq!(key, vec![0xab, 0xcd]);
-                identity::Reply::Number(Some(7))
+                identity::Reply::OfKey(Some(7))
             }
             identity::Query::Get { number } => {
                 assert_eq!(number, 7);
-                identity::Reply::Account(Some(identity::Account {
+                identity::Reply::Get(Some(identity::Account {
                     number,
                     name: "Maya".into(),
                     control: identity::Control::Keys(vec![identity::Key {
@@ -64,7 +64,7 @@ fn fixture(state: &str, dark: bool) -> TestAppContext {
     match state {
         "unregistered" => cx.host().handle::<QueryBytes<Identity>>(|q| {
             assert!(matches!(q, identity::Query::OfKey { .. }));
-            Ok(identity::Reply::Number(None))
+            Ok(identity::Reply::OfKey(None))
         }),
         "loading" => {
             cx.host().never::<NodeStatus>();

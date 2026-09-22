@@ -28,7 +28,7 @@ fn founding_seats_the_validators_and_every_program_answers() {
         assert_eq!(seated.len(), 2);
         assert!(seated.contains(&member(1)));
         assert!(seated.contains(&member(2)));
-        let identity::Reply::Accounts(accounts) = net
+        let identity::Reply::List(accounts) = net
             .ask(
                 identity::PROGRAM,
                 &identity::Query::List {

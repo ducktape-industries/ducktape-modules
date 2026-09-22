@@ -378,7 +378,7 @@ async fn roster(host: Host) -> Result<Vec<Row>, Refusal> {
             .ask::<QueryBytes<Identity>>(identity::Query::List { page })
             .await?
         {
-            identity::Reply::Accounts(reply) => reply,
+            identity::Reply::List(reply) => reply,
             other => return Err(unexpected(identity::PROGRAM, &other)),
         };
         accounts.extend(reply.items);

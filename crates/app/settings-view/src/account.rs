@@ -33,7 +33,7 @@ pub async fn read_account(host: Host, key: String) -> Result<Option<Account>, Re
         .ask::<QueryBytes<Identity>>(identity::Query::OfKey { key: key.clone() })
         .await?
     {
-        identity::Reply::Number(n) => n,
+        identity::Reply::OfKey(n) => n,
         other => return Err(malformed(format!("identity answered OfKey with {other:?}"))),
     };
     let Some(number) = number else {
@@ -47,7 +47,7 @@ pub async fn read_account(host: Host, key: String) -> Result<Option<Account>, Re
         .ask::<QueryBytes<Identity>>(identity::Query::Get { number })
         .await?
     {
-        identity::Reply::Account(a) => a,
+        identity::Reply::Get(a) => a,
         other => return Err(malformed(format!("identity answered Get with {other:?}"))),
     };
     let Some(account) = account else {
