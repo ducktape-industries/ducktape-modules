@@ -30,7 +30,7 @@ jobs:
           echo "$RUNNER_TEMP/binaryen-version_132/bin" >> "$GITHUB_PATH"
           cargo install wasm-tools --locked
       - run: cargo fmt --all -- --check
-      - run: make wasm-programs CARGO="cargo --locked"
+      # the founding suite runs `make wasm-programs` itself
       - run: cargo test --locked --workspace --no-fail-fast
       - run: cargo clippy --locked --workspace --tests --no-deps -- -D warnings
       - run: make program-wasm-check CARGO="cargo --locked"
