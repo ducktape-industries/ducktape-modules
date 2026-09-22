@@ -8,9 +8,9 @@
 #   crates/modules/ the boot set: the `modules` crate (the contracts of the
 #                   programs every network founds with and the helpers a
 #                   program builds on), `system/` (the wasm32 workspace of
-#                   module-registry, valset and identity, their bytes committed
-#                   under `system/wasm/`) and the suite that drives them on the
-#                   host
+#                   module-registry, valset and identity) and the suite that
+#                   drives them on the host, over the bytes `make wasm-programs`
+#                   built
 #   crates/app/     the app modules: chat and forge (each one crate: types and
 #                   rules always, the wasm32 program behind the `program`
 #                   feature), chat-view and forge-view (which link their

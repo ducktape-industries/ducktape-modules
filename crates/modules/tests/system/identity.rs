@@ -29,6 +29,9 @@ fn consent(
 
 #[test]
 fn identity_founds_accounts_admits_keys_by_consent_and_provisions_programs() {
+    if !built() {
+        return;
+    }
     deterministic::Runner::default().start(|context| async move {
         let dir = tempfile::tempdir().unwrap();
         let mut net = Net::found(context, dir.path()).await;
@@ -271,6 +274,9 @@ fn identity_founds_accounts_admits_keys_by_consent_and_provisions_programs() {
 
 #[test]
 fn account_lists_resume_with_the_answering_height() {
+    if !built() {
+        return;
+    }
     deterministic::Runner::default().start(|context| async move {
         let dir = tempfile::tempdir().unwrap();
         let mut net = Net::found(context, dir.path()).await;

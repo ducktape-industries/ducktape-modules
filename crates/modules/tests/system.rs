@@ -10,17 +10,42 @@ use host::{Applied, Block, BlockId, Founding, Genesis, Host, Layer, Limits, Rece
 use keyscheme::testkit;
 use modules::{AUTHORITY, AccountNumber, Page, identity, module_registry, valset};
 
-macro_rules! program {
-    ($name:literal) => {
-        include_bytes!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/system/wasm/",
-            $name,
-            ".wasm"
-        ))
-    };
+/// Where `make wasm-programs` left the boot set: the bytes are a build
+/// output, never committed.
+fn release_dir() -> std::path::PathBuf {
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    std::env::var_os("CARGO_TARGET_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| workspace.join("target"))
+        .join("wasm32-unknown-unknown/release")
 }
 
+/// False, with the one line that says what to run, when the boot set has not
+/// been built; every test returns early on it instead of failing.
+fn built() -> bool {
+    let missing: Vec<String> = ["module_registry", "valset", "identity"]
+        .into_iter()
+        .filter(|name| !release_dir().join(format!("{name}.wasm")).exists())
+        .map(str::to_owned)
+        .collect();
+    if !missing.is_empty() {
+        println!(
+            "skipping: {} not built under {}; run `make wasm-programs` first",
+            missing.join(", "),
+            release_dir().display()
+        );
+    }
+    missing.is_empty()
+}
+
+fn program(name: &str) -> Vec<u8> {
+    let path = release_dir().join(format!("{name}.wasm"));
+    std::fs::read(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
+}
+
+/// The kernel's probe fixture, copied from ducktape by `make probe-fixture`
+/// (the probe is a dev-dependency only, which cargo cannot build for wasm32
+/// from here).
 const PROBE: &[u8] = include_bytes!("fixture_probe.wasm");
 const NETWORK: &[u8] = b"net";
 const EPOCH_LENGTH: u64 = 4;
@@ -84,11 +109,11 @@ impl Net {
     async fn found(context: Ctx, dir: &std::path::Path) -> Net {
         let genesis = Genesis {
             network: NETWORK.to_vec(),
-            module_registry: program!("module_registry").to_vec(),
-            valset: program!("valset").to_vec(),
+            module_registry: program("module_registry"),
+            valset: program("valset"),
             validators: vec![member(1), member(2)],
             programs: vec![
-                founding(identity::PROGRAM, program!("identity")),
+                founding(identity::PROGRAM, &program("identity")),
                 probe(AUTHORITY),
                 probe("probe"),
             ],

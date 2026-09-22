@@ -9,7 +9,7 @@ repository.
 | `crates/sdk/guest` | what a program compiles against: the `Program` trait, the `Execute` and `Query` contexts its entry points receive, `program!` |
 | `crates/sdk/ducklink` | the `duck://` link: `duck://<chain>/<program>/<tail…>`, one spelling per name, no program names known here |
 | `crates/sdk/view-wire`, `view-guest`, `design` | the host<->view wire, the runtime a wasm view is written against, the palette |
-| `crates/modules` | the boot set: the `modules` crate (each program's `Op`, `Query` and `Reply`, `AUTHORITY`, `Page`, the helpers a program builds on), `system/` (the wasm32 workspace of `module-registry`, `valset` and `identity`; `make wasm-programs` rebuilds them into `system/wasm/`), and `tests/system.rs`, which founds ducktape's host over the committed bytes and drives every program |
+| `crates/modules` | the boot set: the `modules` crate (each program's `Op`, `Query` and `Reply`, `AUTHORITY`, `Page`, the helpers a program builds on), `system/` (the wasm32 workspace of `module-registry`, `valset` and `identity`), and `tests/system.rs`, which founds ducktape's host over the bytes `make wasm-programs` built and drives every program |
 | `crates/app/chat`, `chat-view` | the reference app module: `chat` is one crate whose types and rules over a `Read`/`Write` store are always built (native, tested), and whose wasm32 program over the host sits behind its `program` feature. `chat-view` links `chat` with the feature off: the types, no host import, no program export |
 | `crates/app/gitcore` | git as a `no_std` library over one `Objects` trait: objects, packs, walks, diff, merge, and the server side of the wire protocol (receive-pack v1, upload-pack v2) |
 | `crates/app/forge`, `forge-view` | the git server as a program, the same shape as `chat`: a push is one op whose input is the receive-pack body a client sent, a merge is an op, fetch and the ref advertisement are queries; a git object's blob id is its oid. The rules run natively over `MemorySandbox`, which is where `fixtures/` comes from; `forge-view` links `forge` with `program` off |
@@ -83,9 +83,15 @@ The tree vocabulary, manifests, and five-function Wasm ABI are unchanged.
 
 ## Building
 
-`cargo test --workspace`, the same for clippy, `make program-wasm-check`, `make view-wasm-check`, `make
-wasm-programs` and `make wasm-views` are what CI runs. The toolchain is
-pinned in `rust-toolchain.toml`.
+`make test` (`make wasm-programs`, then `cargo test --workspace`), clippy,
+`make program-wasm-check`, `make view-wasm-check`, `make wasm-views` and
+`make wasm-reproducible` are what CI runs. The toolchain is pinned in
+`rust-toolchain.toml`.
+
+Every wasm artifact is a build output: `make wasm-modules` builds the boot
+set, the app programs and the views and packs each view into its program
+under `$CARGO_TARGET_DIR/pack/`; nothing built is committed. `make
+wasm-reproducible` proves the bytes do not depend on the checkout.
 
 View releases require `wasm-tools`, Python 3, and
 [Binaryen wasm-opt 132](https://github.com/WebAssembly/binaryen/releases/tag/version_132).

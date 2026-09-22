@@ -16,15 +16,16 @@ the view from the program code blob and passes that view to
 `view_wire::manifest::read_manifest`; no separate view file is needed at runtime.
 
 `make wasm-modules` builds the system programs, app programs, and views, then
-refreshes `crates/modules/system/wasm/*.wasm` and `crates/app/wasm/*.wasm`.
+packs them under `$CARGO_TARGET_DIR/pack/` (default `target/pack/`):
 `chat.wasm` embeds `chat_view.wasm`, `forge.wasm` embeds `forge_view.wasm`
-and `module_registry.wasm` embeds `settings_view.wasm`. A founding file must
-name the packaged program artifact as its code. The kernel stores those
-complete bytes in its code blob.
+and `module_registry.wasm` embeds `settings_view.wasm`. Those are build
+outputs, never committed: genesis and qa consume them from there. A founding
+file must name the packaged program artifact as its code; the kernel stores
+those complete bytes in its code blob.
 
-`make wasm-modules-check` rebuilds into `target/pack/rebuilt`, reports every
-stale committed artifact, and verifies stripping restores the built program.
-Both targets honor `CARGO_TARGET_DIR` across both Cargo workspaces.
+`make wasm-reproducible` builds them twice, the second time from a fresh
+target directory, and requires identical sha256 for every artifact and no
+absolute path inside any of them.
 The integration test builds Chat and its view, invokes the CLI, and verifies
 the app's section-reader contract and actual manifest parser. Its nested Cargo
 build logs are saved under `target/pack/test-{program,view}.log`.

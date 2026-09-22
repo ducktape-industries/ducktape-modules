@@ -2,6 +2,9 @@ use super::*;
 
 #[test]
 fn founding_seats_the_validators_and_every_program_answers() {
+    if !built() {
+        return;
+    }
     deterministic::Runner::default().start(|context| async move {
         let dir = tempfile::tempdir().unwrap();
         let net = Net::found(context, dir.path()).await;
