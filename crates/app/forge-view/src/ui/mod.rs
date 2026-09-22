@@ -145,6 +145,11 @@ fn repo(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
             .selected(forge.nav().tab == tab),
         );
     }
+    let about = cx.listener(|forge, _: &ClickEvent, _, cx| forge.toggle_dock(Dock::About, cx));
+    tabs = tabs.child(div().flex_1()).child(
+        button(id("forge-dock-about"), "About", theme, about)
+            .selected(forge.nav().dock == Some(Dock::About)),
+    );
     let body: AnyElement = match forge.nav().tab {
         RepoTab::Code => code::render(forge, cx, theme),
         RepoTab::Commits => commits::render(forge, cx, theme),

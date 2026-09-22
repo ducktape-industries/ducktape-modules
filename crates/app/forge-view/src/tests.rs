@@ -293,6 +293,20 @@ fn a_repository_opens_on_code_with_its_header_ref_picker_and_tabs() {
 }
 
 #[test]
+fn the_about_panel_docks_what_the_repo_record_carries() {
+    let (mut cx, view) = opened("default");
+    cx.simulate_click("forge-dock-about");
+    cx.run_until_parked();
+    view.read(|forge| assert_eq!(forge.nav().dock, Some(crate::state::Dock::About)));
+    assert!(cx.has_text("sha1"), "{:?}", cx.texts());
+    assert!(cx.has_text("64 bytes"), "the founded inline blob bound");
+    assert!(cx.has_text("Wren"), "the granted writer");
+    cx.simulate_click("forge-dock-close");
+    cx.run_until_parked();
+    view.read(|forge| assert!(forge.nav().dock.is_none()));
+}
+
+#[test]
 fn code_reads_the_tree_then_one_file_and_says_what_it_cannot_show() {
     let (mut cx, view) = opened("default");
     cx.simulate_click("forge-ref-refs/heads/clean");
