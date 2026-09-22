@@ -61,7 +61,7 @@ impl Chat {
         let choices = self.mention_choices();
         let key = draft_key(&target);
         let draft = self.drafts.entry(key.clone()).or_default();
-        match draft.handle(event, &choices) {
+        match draft.handle(event, &choices, cx) {
             Outcome::Updated => {}
             Outcome::Run(run) => run(self, window, cx),
             Outcome::Enqueue(tag) => window.dispatch(wire::WidgetCommand::EditorAction {

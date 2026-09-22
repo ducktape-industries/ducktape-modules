@@ -3,6 +3,7 @@ use std::any::Any;
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
+use std::sync::{Arc, Weak};
 
 type ClickRoute = Rc<dyn Fn(&gpui::ClickEvent, &mut crate::Window, &mut crate::App)>;
 
@@ -10,6 +11,7 @@ struct EventRoute<A>(Rc<dyn Fn(&A, &mut crate::Window, &mut crate::App)>);
 
 #[derive(Default)]
 struct Tables {
+    identity: Arc<()>,
     editor_responses: Vec<crate::wire::EditorResponse>,
     editor_documents: Vec<crate::wire::editor_document::EditorDocumentMessage>,
     editor_sender: Option<crate::wire::editor_document::EditorTransferSender>,
@@ -46,6 +48,10 @@ impl Context {
 
     fn tables(&self) -> Rc<RefCell<Tables>> {
         self.0.clone()
+    }
+
+    pub(crate) fn identity(&self) -> Weak<()> {
+        Arc::downgrade(&self.0.borrow().identity)
     }
 }
 

@@ -127,8 +127,8 @@ mod tests {
                         }),
                         EditorElementEvent::Observed(()) => Rc::new(|_, _, _| {}),
                         EditorElementEvent::Transaction(transaction) => {
-                            Rc::new(move |view, _, _| {
-                                transaction.clone().apply(&mut view.editor);
+                            Rc::new(move |view, _, cx| {
+                                transaction.clone().apply(&mut view.editor, cx);
                             })
                         }
                     }

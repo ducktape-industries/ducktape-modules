@@ -3,9 +3,9 @@
 use super::{Draft, MentionChoice};
 use crate::context::Callback;
 use crate::{
-    div, wire, Context, EditorBinding, EditorDocumentUpdate, EditorElement, EditorElementEvent,
-    EditorKeyRequest, EditorTransaction, EditorTransactionEvent, InteractiveElement, IntoElement,
-    ParentElement, StatefulInteractiveElement, View, Window,
+    div, wire, App, Context, EditorBinding, EditorDocumentUpdate, EditorElement,
+    EditorElementEvent, EditorKeyRequest, EditorTransaction, EditorTransactionEvent,
+    InteractiveElement, IntoElement, ParentElement, StatefulInteractiveElement, View, Window,
 };
 use gpui::Styled;
 use std::rc::Rc;
@@ -104,14 +104,19 @@ pub(crate) fn key_tag(
 }
 
 impl Draft {
-    pub fn handle<V: 'static>(&mut self, event: Event<V>, choices: &[MentionChoice]) -> Outcome<V> {
+    pub fn handle<V: 'static>(
+        &mut self,
+        event: Event<V>,
+        choices: &[MentionChoice],
+        cx: &mut App,
+    ) -> Outcome<V> {
         match event {
             Event::Document(update) => {
                 update.apply(&mut self.editor);
                 Outcome::Updated
             }
             Event::Transaction(transaction) => transaction
-                .apply(&mut self.editor)
+                .apply(&mut self.editor, cx)
                 .map_or(Outcome::Updated, Outcome::Run),
             Event::Committed(change) => {
                 self.committed(
