@@ -96,7 +96,7 @@ mod tests {
     #[test]
     fn window_dispatch_enqueues_commands_in_order() {
         let host = Host::default();
-        let mut window = Window::new(false, crate::slots::Context::with_host(false, host.clone()));
+        let mut window = Window::new(crate::slots::Context::with_host(host.clone()));
         // Window mutations enqueue synchronously; explicit request futures wait for acknowledgments.
         window.focus("first");
         window.focus("second");
@@ -114,7 +114,7 @@ mod tests {
 
     #[test]
     fn focus_handle_schedules_its_opaque_host_command() {
-        let mut app = crate::App::for_driver(false);
+        let mut app = crate::App::for_driver();
         let handle = app.focus_handle();
         let mut window = app.window();
         handle.focus(&mut window, &mut app);

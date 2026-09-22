@@ -1,17 +1,13 @@
 //! Wire-backed behavior elements that have no native GPUI element equivalent.
 use crate::Element;
 
+use crate::element::wire_id;
 use crate::{wire, AnyElement, App, ElementId, IntoElement, Lowering, Window};
 use gpui::{CursorStyle, Hsla, Pixels, StyleRefinement, Styled};
 
 type SizeListener = Box<dyn Fn(&(Pixels, Pixels), &mut Window, &mut App)>;
 type DragListener = Box<dyn Fn(&(Pixels, Pixels), &mut Window, &mut App)>;
 type UnitListener = Box<dyn Fn(&(), &mut Window, &mut App)>;
-
-fn wire_id(id: ElementId) -> wire::ElementIdWire {
-    wire::ElementIdWire::from_gpui(id)
-        .expect("element ID must be portable across the view boundary")
-}
 
 pub struct Sensor {
     id: ElementId,

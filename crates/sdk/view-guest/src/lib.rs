@@ -92,26 +92,6 @@ use context::Callback;
 mod driver;
 pub use driver::Driver;
 
-/// The most a panic message may carry across the `panicked` import. A host
-/// shows one line of it, and every byte over that is one the host lifts out
-/// of guest memory before it can refuse anything — so the message is cut
-/// here, where the guest still owns it, on a char boundary.
-pub const MAX_PANIC_BYTES: usize = 1024;
-
-/// The line the panic hook hands the host: the payload and where it came
-/// from, cut to [`MAX_PANIC_BYTES`].
-pub fn panic_line(message: &str, at: &str) -> String {
-    let mut line = format!("{message} at {at}");
-    if line.len() > MAX_PANIC_BYTES {
-        let cut = (0..=MAX_PANIC_BYTES)
-            .rev()
-            .find(|at| line.is_char_boundary(*at))
-            .unwrap_or(0);
-        line.truncate(cut);
-    }
-    line
-}
-
 /// Appends the preferred window size and current wire epoch at compile time.
 pub const fn manifest_bytes<const N: usize>(text: &str, preferred_size: &str) -> [u8; N] {
     let bytes = text.as_bytes();
@@ -159,8 +139,8 @@ macro_rules! export_driver {
             }
 
             #[unsafe(export_name = "init")]
-            extern "C" fn init(macos: u32) {
-                $crate::exports::init::<$app>(macos)
+            extern "C" fn init(_macos: u32) {
+                $crate::exports::init::<$app>()
             }
 
             #[unsafe(export_name = "tick")]
@@ -174,8 +154,8 @@ macro_rules! export_driver {
             }
 
             #[unsafe(export_name = "restore")]
-            extern "C" fn restore(ptr: u32, len: u32, macos: u32) -> u64 {
-                $crate::exports::restore::<$app>(ptr, len, macos)
+            extern "C" fn restore(ptr: u32, len: u32, _macos: u32) -> u64 {
+                $crate::exports::restore::<$app>(ptr, len)
             }
         }
     };
@@ -196,6 +176,26 @@ pub mod exports {
         fn panicked(ptr: u32, len: u32);
     }
 
+    /// The most a panic message may carry across the `panicked` import. A host
+    /// shows one line of it, and every byte over that is one the host lifts out
+    /// of guest memory before it can refuse anything — so the message is cut
+    /// here, where the guest still owns it, on a char boundary.
+    const MAX_PANIC_BYTES: usize = 1024;
+
+    /// The line the panic hook hands the host: the payload and where it came
+    /// from, cut to [`MAX_PANIC_BYTES`].
+    fn panic_line(message: &str, at: &str) -> String {
+        let mut line = format!("{message} at {at}");
+        if line.len() > MAX_PANIC_BYTES {
+            let cut = (0..=MAX_PANIC_BYTES)
+                .rev()
+                .find(|at| line.is_char_boundary(*at))
+                .unwrap_or(0);
+            line.truncate(cut);
+        }
+        line
+    }
+
     thread_local! {
         // The last answer, kept until the next export is entered: the host
         // copies it out before it calls again.
@@ -212,9 +212,9 @@ pub mod exports {
         })
     }
 
-    pub fn init<A: View>(macos: u32) {
+    pub fn init<A: View>() {
         install_panic_hook();
-        let driver = Driver::<A>::with_macos(macos != 0);
+        let driver = Driver::<A>::new();
         DRIVER.set(Some(Box::new(driver)));
     }
 
@@ -237,9 +237,9 @@ pub mod exports {
     }
 
     /// A refused state leaves the driver that was there in place.
-    pub fn restore<A: View>(ptr: u32, len: u32, macos: u32) -> u64 {
+    pub fn restore<A: View>(ptr: u32, len: u32) -> u64 {
         install_panic_hook();
-        let restored = Driver::<A>::from_snapshot(&take(ptr, len), macos != 0).map(|driver| {
+        let restored = Driver::<A>::from_snapshot(&take(ptr, len)).map(|driver| {
             DRIVER.set(Some(Box::new(driver)));
             Vec::new()
         });
@@ -284,14 +284,11 @@ pub mod exports {
                 .location()
                 .map(|location| format!("{}:{}", location.file(), location.line()))
                 .unwrap_or_else(|| "unknown".into());
-            let line = crate::panic_line(message, &at);
+            let line = panic_line(message, &at);
             unsafe { panicked(line.as_ptr() as u32, line.len() as u32) };
         }));
     }
 }
-
-mod combo;
-pub use combo::Combo;
 
 #[cfg(test)]
 mod tests;

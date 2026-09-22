@@ -49,8 +49,7 @@ impl Element for Surface {
     }
 
     fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
-        let id = wire::ElementIdWire::from_gpui(self.id)
-            .expect("element ID must be portable across the view boundary");
+        let id = crate::element::wire_id(self.id);
         wire::Node::Surface {
             id,
             name: self.name,

@@ -13,8 +13,8 @@ impl<V: View> Driver<V> {
         self.entity
             .read(|view| serde_json::to_vec(view).map_err(|error| error.to_string()))
     }
-    pub fn from_snapshot(bytes: &[u8], macos: bool) -> Result<Self, String> {
+    pub fn from_snapshot(bytes: &[u8]) -> Result<Self, String> {
         let view = serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
-        Self::initialize(macos, Some(view))
+        Self::initialize(Some(view))
     }
 }

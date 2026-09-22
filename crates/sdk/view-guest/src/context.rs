@@ -32,16 +32,15 @@ pub(crate) struct AppState {
     pub generation: Cell<u64>,
     pub next_focus_id: Cell<u64>,
     pub dirty: Cell<bool>,
-    pub macos: bool,
     pub alive: Cell<bool>,
     pub globals: RefCell<Rc<Globals>>,
     uniform_lists: RefCell<HashMap<Vec<crate::wire::ElementIdWire>, UniformListRoute>>,
     next_uniform_route: Cell<u32>,
 }
 impl App {
-    pub(crate) fn for_driver(macos: bool) -> Self {
+    pub(crate) fn for_driver() -> Self {
         let host = Host::default();
-        let slots = slots::Context::with_host(macos, host.clone());
+        let slots = slots::Context::with_host(host.clone());
         let mut globals = std::collections::HashMap::new();
         globals.insert(
             TypeId::of::<crate::Theme>(),
@@ -57,7 +56,6 @@ impl App {
                 generation: Cell::new(0),
                 next_focus_id: Cell::new(0),
                 dirty: Cell::new(true),
-                macos,
                 alive: Cell::new(true),
                 globals: RefCell::new(globals),
                 uniform_lists: RefCell::default(),
@@ -77,7 +75,7 @@ impl App {
         task
     }
     pub(crate) fn window(&self) -> Window {
-        Window::new(self.inner.macos, self.inner.slots.clone())
+        Window::new(self.inner.slots.clone())
     }
     pub(crate) fn notify(&self) {
         self.inner.dirty.set(true);
@@ -431,7 +429,7 @@ mod global_tests {
 
     #[test]
     fn globals_need_not_clone_and_app_snapshots_refresh_safely() {
-        let mut driver = App::for_driver(false);
+        let mut driver = App::for_driver();
         driver.set_global(Counter(1));
         let mut task = App::from_state(driver.inner.clone());
         let old = driver.global::<Counter>();
@@ -445,7 +443,7 @@ mod global_tests {
     fn updating_a_global_preserves_other_tasks_updates() {
         struct Other(usize);
         impl gpui::Global for Other {}
-        let mut driver = App::for_driver(false);
+        let mut driver = App::for_driver();
         let mut task = App::from_state(driver.inner.clone());
         task.set_global(Other(7));
         driver.set_global(Counter(3));

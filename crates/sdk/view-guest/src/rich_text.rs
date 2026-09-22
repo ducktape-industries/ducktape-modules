@@ -253,7 +253,7 @@ mod tests {
             InteractiveText::new("rich", StyledText::new("one two"))
                 .on_click(vec![0..3, 4..7], |_, _, _| {})
         };
-        let mut app = App::for_driver(false);
+        let mut app = App::for_driver();
         let mut window = app.window();
         let first = Lowering::new(&mut window, &mut app).lower(make());
         let mut window = app.window();
@@ -277,7 +277,7 @@ mod tests {
     #[test]
     fn a_new_frame_replaces_the_old_rich_text_callback() {
         let hits = Rc::new(RefCell::new(Vec::new()));
-        let mut app = App::for_driver(false);
+        let mut app = App::for_driver();
         let first_hits = hits.clone();
         let mut window = app.window();
         let first = Lowering::new(&mut window, &mut app).lower(
@@ -326,7 +326,7 @@ mod tests {
     fn two_ranges_dispatch_distinct_value_indices() {
         let hits = Rc::new(RefCell::new(Vec::new()));
         let routed = hits.clone();
-        let mut app = App::for_driver(false);
+        let mut app = App::for_driver();
         let mut window = app.window();
         let node = Lowering::new(&mut window, &mut app).lower(
             InteractiveText::new("rich", StyledText::new("one two"))

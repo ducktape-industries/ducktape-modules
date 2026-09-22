@@ -43,11 +43,7 @@ impl TestAppContext {
         self.host.clone()
     }
     pub fn open<V: View>(&mut self) -> Entity<V> {
-        self.open_with_macos(false)
-    }
-    pub fn open_with_macos<V: View>(&mut self, macos: bool) -> Entity<V> {
-        let driver =
-            Driver::<V>::initialize_in(self.fresh_app(macos), None).expect("view initializes");
+        let driver = Driver::<V>::initialize_in(self.fresh_app(), None).expect("view initializes");
         let entity = driver.entity();
         self.host.reset_connection();
         self.driver = Some(Box::new(driver));
@@ -59,15 +55,8 @@ impl TestAppContext {
         self.driver.as_ref().expect("open a view first").snapshot()
     }
     pub fn restore<V: View>(&mut self, bytes: &[u8]) -> Result<Entity<V>, String> {
-        self.restore_with_macos(bytes, false)
-    }
-    pub fn restore_with_macos<V: View>(
-        &mut self,
-        bytes: &[u8],
-        macos: bool,
-    ) -> Result<Entity<V>, String> {
         let value = serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
-        let driver = Driver::<V>::initialize_in(self.fresh_app(macos), Some(value))?;
+        let driver = Driver::<V>::initialize_in(self.fresh_app(), Some(value))?;
         let entity = driver.entity();
         self.host.reset_connection();
         self.driver = Some(Box::new(driver));
@@ -78,8 +67,8 @@ impl TestAppContext {
     pub(crate) fn app_mut(&mut self) -> &mut App {
         self.driver.as_mut().expect("open a view first").app_mut()
     }
-    fn fresh_app(&self, macos: bool) -> App {
-        let mut app = App::for_driver(macos);
+    fn fresh_app(&self) -> App {
+        let mut app = App::for_driver();
         for (kind, value) in &self.globals {
             app.set_shared_global(*kind, value.clone());
         }
@@ -147,23 +136,11 @@ impl TestAppContext {
     pub fn simulate_input(&mut self, key: &str, text: &str) {
         self.dispatch(super::type_into(&self.frame, key, text));
     }
-    pub fn simulate_toggle(&mut self, key: &str, on: bool) {
-        self.dispatch(super::toggle(&self.frame, key, on));
-    }
-    pub fn simulate_slide(&mut self, key: &str, value: f32) {
-        self.dispatch(super::slide(&self.frame, key, value));
-    }
-    pub fn simulate_select(&mut self, key: &str, option: &str) {
-        self.dispatch(super::pick(&self.frame, key, option));
-    }
     pub fn simulate_rich_click(&mut self, key: &str, index: usize) {
         self.dispatch(vec![super::rich_click(&self.frame, key, index)]);
     }
     pub fn simulate_submit(&mut self, key: &str) {
         self.dispatch(super::submit(&self.frame, key));
-    }
-    pub fn simulate_edit(&mut self, key: &str, before: &str, text: &str) {
-        self.dispatch(super::edit(&self.frame, key, before, text));
     }
     pub fn simulate_measure(&mut self, key: &str, width: f32, height: f32) {
         self.dispatch(super::measure(&self.frame, key, width, height));
@@ -176,18 +153,6 @@ impl TestAppContext {
     }
     pub fn simulate_surface(&mut self, key: &str, value: crate::wire::SurfaceValue) {
         self.dispatch(super::surface(&self.frame, key, value));
-    }
-    pub fn simulate_hover(&mut self, key: &str) {
-        self.dispatch(super::hover(&self.frame, key));
-    }
-    pub fn simulate_scroll(&mut self, key: &str, dx: f32, dy: f32) {
-        self.dispatch(super::scroll(&self.frame, key, dx, dy));
-    }
-    pub fn simulate_pointer_move(&mut self, key: &str, x: f32, y: f32) {
-        self.dispatch(super::move_to(&self.frame, key, x, y));
-    }
-    pub fn simulate_hide(&mut self, key: &str) {
-        self.dispatch(super::hide(&self.frame, key));
     }
 }
 

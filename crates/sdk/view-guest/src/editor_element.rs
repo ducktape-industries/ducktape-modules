@@ -106,8 +106,7 @@ impl<P: 'static, M: 'static> Element for EditorElement<P, M> {
             presentation,
             rich,
         } = *self;
-        let id = wire::ElementIdWire::from_gpui(id)
-            .expect("editor element ID must be portable across the view boundary");
+        let id = crate::element::wire_id(id);
         let context = &lowering.app().inner.slots;
         let document_route = route.clone();
         let (document, on_document) = editor.document(context, document, move |update| {

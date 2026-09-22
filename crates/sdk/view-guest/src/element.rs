@@ -97,6 +97,13 @@ pub struct Lowering<'a> {
     authored_path: Vec<wire::ElementIdWire>,
 }
 
+/// An authored [`ElementId`] as the wire carries it. Every id a view can
+/// author fits; the only refusals are ids gpui itself could not name.
+pub(crate) fn wire_id(id: ElementId) -> wire::ElementIdWire {
+    wire::ElementIdWire::from_gpui(id)
+        .expect("element ID must be portable across the view boundary")
+}
+
 impl<'a> Lowering<'a> {
     pub(crate) fn new(window: &'a mut Window, app: &'a mut App) -> Self {
         Self {
@@ -129,11 +136,7 @@ impl<'a> Lowering<'a> {
     }
 
     pub(crate) fn lower_element<E: Element>(&mut self, element: E) -> wire::Node {
-        let id = element
-            .id()
-            .map(wire::ElementIdWire::from_gpui)
-            .transpose()
-            .expect("element ID must be portable across the view boundary");
+        let id = element.id().map(wire_id);
         if let Some(id) = &id {
             self.authored_path.push(id.clone());
         }
@@ -314,8 +317,7 @@ impl Styled for Input {
 impl Element for Input {
     fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
         let this = *self;
-        let id = wire::ElementIdWire::from_gpui(this.id)
-            .expect("input element ID must be portable across the view boundary");
+        let id = wire_id(this.id);
         let on_input = this.on_input.map(|listener| lowering.route(listener));
         let on_submit = this
             .on_submit

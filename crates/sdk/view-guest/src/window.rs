@@ -1,20 +1,15 @@
 //! The guest's single window delegates platform work to its host.
 use crate::{slots, wire};
 pub struct Window {
-    macos: bool,
     slots: slots::Context,
 }
 impl Window {
-    pub(crate) fn new(macos: bool, slots: slots::Context) -> Self {
-        Self { macos, slots }
-    }
-    pub fn is_macos(&self) -> bool {
-        self.macos
+    pub(crate) fn new(slots: slots::Context) -> Self {
+        Self { slots }
     }
     pub fn focus(&mut self, target: impl Into<crate::ElementId>) {
         self.dispatch(wire::WidgetCommand::Focus {
-            target: vec![wire::ElementIdWire::from_gpui(target.into())
-                .expect("widget focus target must be portable")],
+            target: vec![crate::element::wire_id(target.into())],
         });
     }
     pub fn dispatch(&mut self, command: wire::WidgetCommand) {

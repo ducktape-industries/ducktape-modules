@@ -21,13 +21,10 @@ impl<V: View> Default for Driver<V> {
 }
 impl<V: View> Driver<V> {
     pub fn new() -> Self {
-        Self::with_macos(cfg!(target_os = "macos"))
+        Self::initialize(None).expect("view initializes")
     }
-    pub fn with_macos(macos: bool) -> Self {
-        Self::initialize(macos, None).expect("view initializes")
-    }
-    pub(crate) fn initialize(macos: bool, restored: Option<V>) -> Result<Self, String> {
-        Self::initialize_in(App::for_driver(macos), restored)
+    pub(crate) fn initialize(restored: Option<V>) -> Result<Self, String> {
+        Self::initialize_in(App::for_driver(), restored)
     }
     pub(crate) fn initialize_in(mut app: App, restored: Option<V>) -> Result<Self, String> {
         let entity = Entity::reserve(&app);

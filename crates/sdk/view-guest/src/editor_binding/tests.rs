@@ -216,9 +216,9 @@ fn native_message_envelope_is_send_and_stale_commit_cannot_acknowledge() {
 
 #[test]
 fn transaction_cannot_route_through_another_driver() {
-    let source = crate::App::for_driver(false);
+    let source = crate::App::for_driver();
     let context = &source.inner.slots;
-    let mut other = crate::App::for_driver(false);
+    let mut other = crate::App::for_driver();
     let mut editor = Editor::new("before");
     slots::editor_response(
         context,
@@ -238,7 +238,7 @@ fn transaction_cannot_route_through_another_driver() {
 #[test]
 fn transaction_from_a_dropped_driver_cannot_route() {
     let (transaction, calls) = {
-        let source = crate::App::for_driver(false);
+        let source = crate::App::for_driver();
         let context = &source.inner.slots;
         let editor = Editor::new("before");
         let calls = Rc::new(Cell::new(0));
@@ -248,7 +248,7 @@ fn transaction_from_a_dropped_driver_cannot_route() {
             calls,
         )
     };
-    let mut other = crate::App::for_driver(false);
+    let mut other = crate::App::for_driver();
     let mut editor = Editor::new("before");
     transaction.apply(&mut editor, &mut other);
     assert_eq!(editor.text(), "before");

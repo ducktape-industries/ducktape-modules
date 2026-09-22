@@ -81,7 +81,7 @@ impl Element for ProbeComponent {
 }
 
 fn lower(element: impl IntoElement) -> wire::Node {
-    let mut app = App::for_driver(false);
+    let mut app = App::for_driver();
     let mut window = app.window();
     Lowering::new(&mut window, &mut app).lower(element)
 }

@@ -5,11 +5,7 @@ impl Interactivity {
         self,
         lowering: &mut Lowering<'_>,
     ) -> (Option<wire::ElementIdWire>, wire::Interactivity) {
-        let id = self
-            .id
-            .map(wire::ElementIdWire::from_gpui)
-            .transpose()
-            .expect("element ID must be portable across the view boundary");
+        let id = self.id.map(crate::element::wire_id);
         let tooltip = self.tooltip.map(|tooltip| {
             let request = lowering.tooltip(tooltip.build);
             wire::Tooltip {

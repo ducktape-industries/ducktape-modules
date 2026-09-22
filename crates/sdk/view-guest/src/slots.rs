@@ -44,14 +44,8 @@ struct Tables {
 pub struct Context(Rc<RefCell<Tables>>);
 
 impl Context {
-    pub(crate) fn with_macos(_macos: bool) -> Self {
-        Self(Rc::new(RefCell::new(Tables {
-            ..Tables::default()
-        })))
-    }
-
-    pub(crate) fn with_host(macos: bool, host: crate::Host) -> Self {
-        let context = Self::with_macos(macos);
+    pub(crate) fn with_host(host: crate::Host) -> Self {
+        let context = Self::default();
         context.0.borrow_mut().host = host;
         context
     }

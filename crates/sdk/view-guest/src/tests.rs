@@ -110,9 +110,9 @@ fn snapshot_refuses_unsettled_writes_and_failed_restore_keeps_old_driver() {
         .unwrap();
     driver.tick(vec![response(write.id, true)]);
     let snapshot = driver.snapshot().unwrap();
-    assert!(Driver::<Probe>::from_snapshot(&[], false).is_err());
+    assert!(Driver::<Probe>::from_snapshot(&[]).is_err());
     assert_eq!(driver.snapshot().unwrap(), snapshot);
-    let mut restored = Driver::<Probe>::from_snapshot(&snapshot, false).unwrap();
+    let mut restored = Driver::<Probe>::from_snapshot(&snapshot).unwrap();
     assert_eq!(restored.tick(vec![]).requests.len(), 2);
 }
 

@@ -65,7 +65,7 @@ fn drawn(draft: &Draft) -> wire::Node {
 }
 
 fn drawn_with(draft: &Draft, key: &str, attach: bool, choices: &[MentionChoice]) -> wire::Node {
-    let mut app = App::for_driver(false);
+    let mut app = App::for_driver();
     let entity = Entity::reserve(&app);
     let mut window = app.window();
     let mut cx = Context {
@@ -116,7 +116,7 @@ fn clickable(root: &wire::Node, key: &str) -> Option<u32> {
 #[test]
 fn two_drafts_at_one_key_are_two_documents_the_host_can_tell_apart() {
     let field = |draft: &Draft, document: &str| {
-        let mut app = App::for_driver(false);
+        let mut app = App::for_driver();
         let mut window = app.window();
         let handle: Handle<()> = Rc::new(|_, _, _, _| {});
         let field = editor(
@@ -149,7 +149,7 @@ fn two_drafts_at_one_key_are_two_documents_the_host_can_tell_apart() {
 
 #[test]
 fn discarded_composer_editor_does_not_register_routes_before_lowering() {
-    let mut app = App::for_driver(false);
+    let mut app = App::for_driver();
     let handle: Handle<()> = Rc::new(|_, _, _, _| {});
     drop(editor(
         &Draft::default(),
