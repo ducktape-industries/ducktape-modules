@@ -169,32 +169,6 @@ impl From<f64> for ListKey {
     }
 }
 
-pub(super) fn decode_keys<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Vec<ListKey>, D::Error> {
-    struct Keys;
-    impl<'de> serde::de::Visitor<'de> for Keys {
-        type Value = Vec<ListKey>;
-        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str("bounded row keys")
-        }
-        fn visit_seq<A: serde::de::SeqAccess<'de>>(
-            self,
-            mut seq: A,
-        ) -> Result<Self::Value, A::Error> {
-            let mut keys = Vec::new();
-            while let Some(key) = seq.next_element()? {
-                if keys.len() == super::MAX_DECODED_NODES {
-                    return Err(serde::de::Error::custom("too many row keys"));
-                }
-                keys.push(key);
-            }
-            Ok(keys)
-        }
-    }
-    deserializer.deserialize_seq(Keys)
-}
-
 impl PartialEq for ListKey {
     fn eq(&self, other: &Self) -> bool {
         match (*self, *other) {
@@ -324,25 +298,6 @@ mod variable_tests {
         };
         assert!(decode::<Frame>(&encode(&frame)).is_err());
     }
-}
-
-pub(super) fn decode_optional_keys<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Option<Vec<ListKey>>, D::Error> {
-    struct Keys;
-    impl<'de> serde::de::Visitor<'de> for Keys {
-        type Value = Option<Vec<ListKey>>;
-        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_str("optional bounded row keys")
-        }
-        fn visit_none<E: serde::de::Error>(self) -> Result<Self::Value, E> {
-            Ok(None)
-        }
-        fn visit_some<D: serde::Deserializer<'de>>(self, d: D) -> Result<Self::Value, D::Error> {
-            decode_keys(d).map(Some)
-        }
-    }
-    deserializer.deserialize_option(Keys)
 }
 
 pub(super) fn decode_indices<'de, D: serde::Deserializer<'de>>(
