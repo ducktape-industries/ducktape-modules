@@ -597,6 +597,49 @@ impl Node {
         }
     }
 
+    /// The node's identity without reducing a typed GPUI ID to text.
+    pub fn identity(&self) -> Option<IdentityKeyRef<'_>> {
+        match self {
+            Self::Container { id, .. } | Self::Text { id, .. } => {
+                id.as_ref().map(IdentityKeyRef::Element)
+            }
+            Self::ResizeHandle { key, .. }
+            | Self::MouseArea { key, .. }
+            | Self::Linear { key, .. }
+            | Self::Grid { key, .. }
+            | Self::KeyedColumn { key, .. }
+            | Self::Pin { key, .. }
+            | Self::Float { key, .. }
+            | Self::Responsive { key, .. }
+            | Self::Lazy { key, .. }
+            | Self::When { key, .. }
+            | Self::Sensor { key, .. }
+            | Self::Scroll { key, .. }
+            | Self::Qr { key, .. }
+            | Self::RichText { key, .. }
+            | Self::Svg { key, .. }
+            | Self::Image { key, .. }
+            | Self::ImageViewer { key, .. }
+            | Self::Input { key, .. }
+            | Self::Editor { key, .. }
+            | Self::Button { key, .. }
+            | Self::Rule { key, .. }
+            | Self::Toggle { key, .. }
+            | Self::Radio { key, .. }
+            | Self::Slider { key, .. }
+            | Self::PickList { key, .. }
+            | Self::ComboBox { key, .. }
+            | Self::Progress { key, .. }
+            | Self::Stack { key, .. }
+            | Self::Hover { key, .. }
+            | Self::Overlay { key, .. }
+            | Self::Tooltip { key, .. }
+            | Self::Canvas { key, .. }
+            | Self::Surface { key, .. } => Some(IdentityKeyRef::Legacy(key)),
+            Self::Space { .. } => None,
+        }
+    }
+
     /// The node's children in order. One arm per variant, here and in
     /// [`Node::children_mut`] and [`Node::child_list_mut`]: everything that
     /// walks, diffs or patches a tree goes through these three, so a new

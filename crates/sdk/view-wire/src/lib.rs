@@ -78,9 +78,13 @@ pub use snapshot::{MAX_SNAPSHOT_BYTES, Snapshot, SnapshotValue};
 pub mod click;
 mod aria;
 pub use aria::Aria;
+mod identity;
 mod style;
 mod style_sanitize;
-pub use style::{ElementIdWire, GroupRefinement, Interactivity};
+pub use identity::{IdentityKey, IdentityKeyRef};
+pub use style::{
+    ElementIdAtom, ElementIdWire, GroupRefinement, Interactivity, MAX_ELEMENT_ID_DEPTH,
+};
 
 mod combo;
 pub use combo::{ComboIcon, ComboOptions};
@@ -884,7 +888,7 @@ fn sanitize_tree(root: &mut Node) -> Result<SanitizeReport, &'static str> {
     let (documents, before) = text_amounts(root)?;
     let mut budgets = Budgets::frame();
     let mut taken = Taken::new();
-    sanitize_node(root, 0, &mut budgets, &mut taken);
+    sanitize_node(root, 0, &mut budgets, &mut taken)?;
     let (after_documents, after) = text_amounts(root)?;
     if after_documents != documents {
         return Err("frame budget would remove an editor document projection");
@@ -900,6 +904,19 @@ fn sanitize_tree(root: &mut Node) -> Result<SanitizeReport, &'static str> {
 /// one, and a screen of eight thousand nodes sharing a key — the guest's to
 /// send — took nine seconds of the window thread that way.
 type Taken = std::collections::HashMap<String, usize>;
+
+fn reject_duplicate_typed_siblings(children: &[Node]) -> Result<(), &'static str> {
+    let mut seen = std::collections::HashSet::new();
+    for child in children {
+        let Some(IdentityKeyRef::Element(id)) = child.identity() else {
+            continue;
+        };
+        if !seen.insert(id) {
+            return Err("duplicate typed element identity among siblings");
+        }
+    }
+    Ok(())
+}
 
 /// A key already used in this tree, made unique. A key is the node's
 /// identity — its widget state, its focus target, its accessibility id, and
@@ -921,22 +938,6 @@ fn claim(key: &mut String, taken: &mut Taken) {
     }
     taken.insert(std::mem::replace(key, unique.clone()), nth + 1);
     taken.insert(unique, 2);
-}
-
-fn claim_id(id: &mut Option<ElementIdWire>, taken: &mut Taken) {
-    let Some(id) = id else {
-        return;
-    };
-    claim_id_value(id, taken);
-}
-
-fn claim_id_value(id: &mut ElementIdWire, taken: &mut Taken) {
-    let ElementIdWire::Name(name) = id else {
-        return;
-    };
-    let mut key = name.to_string();
-    claim(&mut key, taken);
-    *name = key.into();
 }
 
 /// What is left of a frame's per-frame budgets while its tree is walked.
@@ -979,14 +980,20 @@ fn spend_svg(bytes: &mut Option<Vec<u8>>, budgets: &mut Budgets) {
     }
 }
 
-fn sanitize_node(node: &mut Node, depth: usize, budgets: &mut Budgets, taken: &mut Taken) {
+fn sanitize_node(
+    node: &mut Node,
+    depth: usize,
+    budgets: &mut Budgets,
+    taken: &mut Taken,
+) -> Result<(), &'static str> {
     // The caller guarantees one node of budget; a node too deep spends it
     // on the empty node that stands in for it.
     budgets.nodes -= 1;
     if depth >= MAX_DEPTH {
         *node = Node::empty();
-        return;
+        return Ok(());
     }
+    reject_duplicate_typed_siblings(node.children())?;
     match node {
         Node::Container {
             id,
@@ -994,12 +1001,24 @@ fn sanitize_node(node: &mut Node, depth: usize, budgets: &mut Budgets, taken: &m
             interactivity,
             ..
         } => {
+            if let Some(id) = id {
+                id.validate_host()?;
+            }
             style_sanitize::sanitize(style);
             interactivity.aria.sanitize();
-            for refinement in [&mut interactivity.hover, &mut interactivity.active].into_iter().flatten() {
+            for refinement in [&mut interactivity.hover, &mut interactivity.active]
+                .into_iter()
+                .flatten()
+            {
                 style_sanitize::sanitize(refinement);
             }
-            for refinement in [&mut interactivity.group_hover, &mut interactivity.group_active].into_iter().flatten() {
+            for refinement in [
+                &mut interactivity.group_hover,
+                &mut interactivity.group_active,
+            ]
+            .into_iter()
+            .flatten()
+            {
                 style_sanitize::sanitize(&mut refinement.style);
                 let mut group = refinement.group.to_string();
                 truncate_string(&mut group);
@@ -1009,10 +1028,6 @@ fn sanitize_node(node: &mut Node, depth: usize, budgets: &mut Budgets, taken: &m
                 let mut name = group.to_string();
                 truncate_string(&mut name);
                 *group = name.into();
-            }
-            claim_id(id, taken);
-            if let Some(id) = &mut interactivity.id {
-                claim_id_value(id, taken);
             }
         }
         Node::Linear {
@@ -1254,8 +1269,10 @@ fn sanitize_node(node: &mut Node, depth: usize, budgets: &mut Budgets, taken: &m
             heading,
             ..
         } => {
+            if let Some(id) = id {
+                id.validate_host()?;
+            }
             style_sanitize::sanitize(style);
-            claim_id(id, taken);
             spend_text(content, budgets);
             if heading.is_some_and(|level| !(1..=6).contains(&level)) {
                 *heading = None;
@@ -1638,7 +1655,7 @@ fn sanitize_node(node: &mut Node, depth: usize, budgets: &mut Budgets, taken: &m
             if budgets.nodes == 0 {
                 break;
             }
-            sanitize_node(child, depth + 1, budgets, taken);
+            sanitize_node(child, depth + 1, budgets, taken)?;
             kept += 1;
         }
         children.truncate(kept);
@@ -1648,15 +1665,16 @@ fn sanitize_node(node: &mut Node, depth: usize, budgets: &mut Budgets, taken: &m
         {
             keys.truncate(kept);
         }
-        return;
+        return Ok(());
     }
     for child in node.children_mut() {
         if budgets.nodes == 0 {
             *child = Node::empty();
             continue;
         }
-        sanitize_node(child, depth + 1, budgets, taken);
+        sanitize_node(child, depth + 1, budgets, taken)?;
     }
+    Ok(())
 }
 
 fn lengths_mut(node: &mut Node) -> Vec<&mut Length> {
