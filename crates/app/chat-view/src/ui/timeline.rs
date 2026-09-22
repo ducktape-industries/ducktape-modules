@@ -179,6 +179,8 @@ pub fn list(chat: &Chat, pane: Pane, cx: &mut Context<Chat>, theme: &Theme) -> i
                     Pane::Timeline => "chat-message-list".into(),
                     Pane::Thread => "chat-thread-list".into(),
                 }))
+                .flex()
+                .flex_col()
                 .flex_1()
                 .min_h(px(0.))
                 .child(list),
