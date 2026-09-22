@@ -401,11 +401,12 @@ pub fn composer(
     let empty = crate::composer::Draft::default();
     let draft = chat.drafts.get(&key).unwrap_or(&empty);
     let choices = chat.mention_choices();
-    crate::composer::view(
+    crate::composer::view::<Chat>(
         draft,
         &key,
         hint,
         editable,
+        crate::ATTACHMENTS,
         &choices,
         cx,
         move |chat, event, window, cx| chat.composer(target.clone(), event, window, cx),

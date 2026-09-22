@@ -224,7 +224,7 @@ fn pixel_padding(length: Option<DefiniteLength>) -> f32 {
     }
 }
 
-fn wire_rgba(color: Hsla) -> wire::Rgba {
+pub(crate) fn wire_rgba(color: Hsla) -> wire::Rgba {
     let color: gpui::Rgba = color.into();
     wire::Rgba([color.r, color.g, color.b, color.a])
 }

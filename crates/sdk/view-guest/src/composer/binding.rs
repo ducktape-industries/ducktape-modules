@@ -1,15 +1,18 @@
-//! Guest-owned composer projection built from the GPUI-shaped SDK surface.
+//! Guest-owned composer projection and its GPUI presentation.
 
-use super::{Draft, MentionChoice};
+use super::{AttachmentState, Draft, MentionChoice};
 use crate::context::Callback;
+use crate::prelude::*;
 use crate::{
-    div, wire, App, Context, EditorBinding, EditorDocumentUpdate, EditorElement,
-    EditorElementEvent, EditorKeyRequest, EditorTransaction, EditorTransactionEvent,
-    InteractiveElement, IntoElement, ParentElement, StatefulInteractiveElement, View, Window,
+    wire, App, EditorBinding, EditorDocumentUpdate, EditorElement, EditorElementEvent,
+    EditorKeyRequest, EditorTransaction, EditorTransactionEvent, View,
 };
-use gpui::Styled;
 use std::rc::Rc;
-use wire::keyboard::{Key, Modifiers, Named};
+
+#[path = "binding_editor.rs"]
+mod binding_editor;
+pub(crate) use binding_editor::key_tag;
+use binding_editor::{editor, matching_choices};
 
 #[derive(Clone, Debug)]
 pub struct Change {
@@ -45,63 +48,7 @@ pub enum Outcome<V> {
 }
 
 pub type Handle<V> = Rc<dyn Fn(&mut V, Event<V>, &mut Window, &mut Context<V>)>;
-
-fn matching_choices<'a>(choices: &'a [MentionChoice], partial: &str) -> Vec<&'a MentionChoice> {
-    let needle = partial.to_lowercase();
-    choices
-        .iter()
-        .filter(|choice| choice.label.to_lowercase().starts_with(&needle))
-        .take(32)
-        .collect()
-}
-
-pub(crate) fn key_tag(
-    draft: &Draft,
-    choices: &[MentionChoice],
-    state: crate::EditorStateView<'_>,
-    key: &wire::keyboard::KeyState,
-) -> String {
-    let command = key.modifiers.control || key.modifiers.logo;
-    if command {
-        return match (&key.key, key.modifiers.shift) {
-            (Key::Character(key), false) if key == "z" => "undo",
-            (Key::Character(key), true) if key == "z" => "redo",
-            (Key::Character(key), false) if key == "y" => "redo",
-            (Key::Character(key), false) if key == "b" => "bold",
-            (Key::Character(key), false) if key == "i" => "italic",
-            (Key::Character(key), true) if key == "c" => "code",
-            (Key::Character(key), true) if key == "9" => "quote",
-            (Key::Character(key), false) if key == "v" => "paste",
-            (Key::Character(key), false) if key == "c" => "copy",
-            (Key::Character(key), false) if key == "x" => "cut",
-            _ => "",
-        }
-        .into();
-    }
-    match &key.key {
-        Key::Named(Named::Enter | Named::Tab) => {
-            if let Some((_, partial)) = draft.query(state) {
-                let choices = matching_choices(choices, &partial);
-                let selected = draft.menu_index.min(choices.len().saturating_sub(1));
-                if let Some(choice) = choices.get(selected) {
-                    return format!("mention:{}", choice.token);
-                }
-            }
-            if key.key == Key::Named(Named::Enter) {
-                "send".into()
-            } else {
-                String::new()
-            }
-        }
-        Key::Named(Named::ArrowDown) if draft.query(state).is_some() => "menu-next".into(),
-        Key::Named(Named::ArrowUp) if draft.query(state).is_some() => "menu-previous".into(),
-        Key::Named(Named::Escape) if draft.query(state).is_some() => "menu-dismiss".into(),
-        Key::Named(Named::ArrowUp | Named::ArrowDown | Named::Escape) => "ignore".into(),
-        Key::Named(Named::Backspace) => "backspace".into(),
-        Key::Named(Named::Delete) => "delete".into(),
-        _ => String::new(),
-    }
-}
+type Click = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
 impl Draft {
     pub fn handle<V: 'static>(
@@ -141,199 +88,360 @@ impl Draft {
     }
 }
 
-/// Render a composer using the host editor node and GPUI-shaped surrounding
-/// elements. Native editor behavior remains a host primitive.
+const TEXT_INSET: f32 = design::spacing::MD as f32;
+const CONTROL_INSET: f32 = design::spacing::XXS as f32;
+const MARK: f32 = 24.;
+
+#[derive(IntoElement)]
+struct Mark {
+    id: ElementId,
+    sign: SharedString,
+    label: SharedString,
+    on_click: Option<Click>,
+}
+
+impl RenderOnce for Mark {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let theme = *cx.global::<Theme>();
+        let mut mark = div()
+            .id(self.id)
+            .role(Role::Button)
+            .aria_label(self.label)
+            .aria_disabled(self.on_click.is_none())
+            .flex()
+            .items_center()
+            .justify_center()
+            .w(px(MARK))
+            .h(px(MARK))
+            .rounded_sm()
+            .border_1()
+            .border_color(theme.border)
+            .text_size(px(design::type_scale::BODY as f32))
+            .text_color(theme.muted)
+            .child(self.sign);
+        if let Some(on_click) = self.on_click {
+            mark = mark.on_click(on_click);
+        }
+        mark
+    }
+}
+
+#[derive(IntoElement)]
+struct ActionButton {
+    id: ElementId,
+    label: SharedString,
+    primary: bool,
+    on_click: Option<Click>,
+}
+
+impl RenderOnce for ActionButton {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let theme = *cx.global::<Theme>();
+        let (background, foreground, border) = if self.primary {
+            (theme.primary, theme.primary_foreground, theme.primary)
+        } else {
+            (theme.surface, theme.foreground, theme.border)
+        };
+        let mut button = div()
+            .id(self.id)
+            .role(Role::Button)
+            .aria_label(self.label.clone())
+            .aria_disabled(self.on_click.is_none())
+            .flex()
+            .items_center()
+            .justify_center()
+            .h(px(design::height::CONTROL as f32))
+            .px_2()
+            .rounded_sm()
+            .border_1()
+            .border_color(border)
+            .bg(background)
+            .text_color(foreground)
+            .text_size(px(design::type_scale::SECONDARY as f32))
+            .child(self.label);
+        if let Some(on_click) = self.on_click {
+            button = button.on_click(on_click);
+        }
+        button
+    }
+}
+
+#[derive(IntoElement)]
+struct MentionItem {
+    id: ElementId,
+    label: SharedString,
+    selected: bool,
+    on_click: Option<Click>,
+}
+
+impl RenderOnce for MentionItem {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let theme = *cx.global::<Theme>();
+        let mut row = div()
+            .id(self.id)
+            .role(Role::MenuItem)
+            .aria_label(self.label.clone())
+            .aria_selected(self.selected)
+            .w_full()
+            .flex()
+            .items_center()
+            .min_h(px(design::height::ROW as f32))
+            .px_2()
+            .rounded_sm()
+            .bg(if self.selected {
+                theme.accent_soft
+            } else {
+                theme.background
+            })
+            .text_color(if self.selected {
+                theme.accent_foreground
+            } else {
+                theme.foreground
+            })
+            .text_size(px(design::type_scale::BODY as f32))
+            .child(self.label);
+        if let Some(on_click) = self.on_click {
+            row = row.on_click(on_click);
+        }
+        row
+    }
+}
+
+#[derive(IntoElement)]
+struct AttachmentChip {
+    id: ElementId,
+    remove_id: ElementId,
+    name: SharedString,
+    note: SharedString,
+    note_color: gpui::Hsla,
+    remove: Option<Click>,
+}
+
+impl RenderOnce for AttachmentChip {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let theme = *cx.global::<Theme>();
+        div()
+            .id(self.id.clone())
+            .flex()
+            .items_center()
+            .gap_1()
+            .max_w(px(320.))
+            .p_1()
+            .pl_2()
+            .rounded_sm()
+            .border_1()
+            .border_color(theme.border)
+            .bg(theme.surface)
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .child(div().whitespace_nowrap().text_sm().child(self.name))
+                    .child(
+                        div()
+                            .whitespace_nowrap()
+                            .text_xs()
+                            .text_color(self.note_color)
+                            .child(self.note),
+                    ),
+            )
+            .child(Mark {
+                id: self.remove_id,
+                sign: "×".into(),
+                label: "Remove attachment".into(),
+                on_click: self.remove,
+            })
+    }
+}
+
+fn press<V: View + 'static>(
+    editable: bool,
+    tag: String,
+    handle: &Handle<V>,
+    cx: &Context<V>,
+) -> Option<Click> {
+    if !editable {
+        return None;
+    }
+    let handle = handle.clone();
+    Some(Box::new(cx.listener(
+        move |view, _: &ClickEvent, window, cx| {
+            handle(view, Event::Action(tag.clone()), window, cx);
+            cx.notify();
+        },
+    )))
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn view<V: View + 'static>(
     draft: &Draft,
     key: &str,
     hint: &str,
     editable: bool,
+    attach: bool,
     choices: &[MentionChoice],
     cx: &mut Context<V>,
     handle: impl Fn(&mut V, Event<V>, &mut Window, &mut Context<V>) + 'static,
 ) -> impl IntoElement {
     let handle: Handle<V> = Rc::new(handle);
-    let effect_handle = handle.clone();
-    let effect = Rc::new(move |event: Event<V>| {
-        let handle = effect_handle.clone();
-        let callback: Callback<V> = Rc::new(
-            move |view: &mut V, window: &mut Window, cx: &mut Context<'_, V>| {
-                handle(view, event.clone(), window, cx)
-            },
-        );
-        callback
-    });
-    let document_key = format!("{key}/editor");
-    let draft_for_decisions = draft.clone();
-    let choices_for_decisions = choices.to_vec();
-    let deciding = draft_for_decisions.clone();
-    let decide_choices = choices_for_decisions.clone();
-    let observing = draft_for_decisions.clone();
-    let observed_choices = choices_for_decisions.clone();
-    let interacting = draft_for_decisions;
-    let interaction_choices = choices_for_decisions;
-    let claims = [Named::Enter, Named::Tab, Named::Backspace, Named::Delete]
-        .into_iter()
-        .chain(
-            draft
-                .query(draft.editor.state_view())
-                .is_some()
-                .then_some([Named::ArrowUp, Named::ArrowDown, Named::Escape])
-                .into_iter()
-                .flatten(),
-        )
-        .map(|key| wire::EditorKeyClaim {
-            key: Key::Named(key),
-            modifiers: Modifiers::default(),
-            command: false,
-        })
-        .chain(
-            [
-                ("z", false),
-                ("z", true),
-                ("y", false),
-                ("b", false),
-                ("i", false),
-                ("c", true),
-                ("9", true),
-                ("v", false),
-                ("c", false),
-                ("x", false),
-            ]
+    let editor = editor(
+        draft,
+        &format!("{key}/editor"),
+        key,
+        hint,
+        editable,
+        choices,
+        handle.clone(),
+        cx.global::<Theme>().accent,
+    );
+    let mut rows: Vec<AnyElement> = Vec::new();
+
+    if let Some((_, partial)) = draft.query(draft.editor.state_view()) {
+        let matches = matching_choices(choices, &partial);
+        let selected = draft.menu_index.min(matches.len().saturating_sub(1));
+        let menu = matches
             .into_iter()
-            .map(|(key, shift)| wire::EditorKeyClaim {
-                key: Key::Character(key.into()),
-                modifiers: Modifiers {
-                    shift,
-                    ..Modifiers::default()
-                },
-                command: true,
-            }),
-        )
-        .collect();
-    let binding = EditorBinding::<Change>::new(
-        claims,
-        move |request: EditorKeyRequest<'_>| {
-            if !editable {
-                return wire::EditorDecision::Noop;
-            }
-            let tag = key_tag(&deciding, &decide_choices, request.state, request.key);
-            if tag == "send" && request.repeat {
-                wire::EditorDecision::Noop
-            } else {
-                deciding.decide(&tag, &decide_choices, request.state)
-            }
-        },
-        move |event| match event {
-            EditorTransactionEvent::Commit {
-                before,
-                after,
-                origin,
-                ..
-            } => {
-                let tag = match origin {
-                    Some(wire::EditorRequestInput::Key { key, .. }) => {
-                        key_tag(&observing, &observed_choices, before, key)
-                    }
-                    Some(wire::EditorRequestInput::Interaction {
-                        action: wire::editor_presentation::EditorInteraction::Action { tag },
-                    }) => tag.clone(),
-                    _ => String::new(),
-                };
-                Some(Change {
-                    before: before.text.into(),
-                    after: after.text.into(),
-                    cursor: before.cursor,
-                    tag,
-                })
-            }
-            EditorTransactionEvent::Interaction { .. }
-            | EditorTransactionEvent::Fault { .. }
-            | EditorTransactionEvent::Cancelled { .. } => None,
-        },
-    )
-    .on_interaction(move |request| {
-        if !editable {
-            return wire::EditorDecision::Noop;
-        }
-        match request.action {
-            wire::editor_presentation::EditorInteraction::Action { tag } => {
-                interacting.decide(tag, &interaction_choices, request.state)
-            }
-            _ => wire::EditorDecision::Noop,
-        }
-    });
-    let route_effect = effect;
-    let mut editor = EditorElement::new(
-        document_key.clone(),
-        &draft.editor,
-        document_key,
-        binding,
-        move |event| {
-            route_effect(match event {
-                EditorElementEvent::Document(update) => Event::Document(update),
-                EditorElementEvent::Observed(change) => Event::Committed(change),
-                EditorElementEvent::Transaction(transaction) => Event::Transaction(transaction),
+            .enumerate()
+            .map(|(index, choice)| MentionItem {
+                id: ElementId::Name(format!("{key}/mention/{}", choice.token).into()),
+                label: format!("@{}", choice.label).into(),
+                selected: index == selected,
+                on_click: press(editable, format!("mention:{}", choice.token), &handle, cx),
             })
-        },
-    )
-    .placeholder(hint)
-    .editable(editable)
-    .w_full()
-    .min_h(gpui::px(40.))
-    .max_h(gpui::px(200.));
-    if !hint.is_empty() {
-        editor = editor.label(hint);
+            .collect::<Vec<_>>();
+        if !menu.is_empty() {
+            rows.push(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .children(menu)
+                    .into_any_element(),
+            );
+        }
     }
-    let mut root = div()
-        .id(key.to_owned())
+    rows.push(editor.into_any_element());
+
+    if !draft.attachments.is_empty() {
+        let theme = *cx.global::<Theme>();
+        let chips = draft
+            .attachments
+            .iter()
+            .map(|held| {
+                let (note, note_color) = match &held.state {
+                    AttachmentState::Uploading => ("Uploading…".to_owned(), theme.muted),
+                    AttachmentState::Ready { uri } => (uri.clone(), theme.muted),
+                    AttachmentState::Failed { reason } => (reason.clone(), theme.danger),
+                    AttachmentState::Unavailable => {
+                        ("Select the file again".to_owned(), theme.warning)
+                    }
+                };
+                let id = format!("{key}/attachment/{}", held.token);
+                let mut chip = div().flex().items_center().gap_1().child(AttachmentChip {
+                    id: ElementId::Name(format!("{id}/chip").into()),
+                    remove_id: ElementId::Name(format!("{id}/remove").into()),
+                    name: held.name.clone().into(),
+                    note: note.into(),
+                    note_color,
+                    remove: press(editable, format!("remove:{}", held.token), &handle, cx),
+                });
+                if matches!(held.state, AttachmentState::Failed { .. }) {
+                    chip = chip.child(ActionButton {
+                        id: ElementId::Name(format!("{id}/retry").into()),
+                        label: "Retry".into(),
+                        primary: false,
+                        on_click: press(editable, format!("retry:{}", held.token), &handle, cx),
+                    });
+                }
+                chip.into_any_element()
+            })
+            .collect::<Vec<_>>();
+        rows.push(
+            div()
+                .mx(px(TEXT_INSET))
+                .flex()
+                .flex_wrap()
+                .gap_1()
+                .children(chips)
+                .into_any_element(),
+        );
+    }
+    if !draft.note.is_empty() {
+        rows.push(
+            div()
+                .mx(px(TEXT_INSET))
+                .text_sm()
+                .text_color(cx.global::<Theme>().danger)
+                .child(draft.note.clone())
+                .into_any_element(),
+        );
+    }
+    if draft.failed_send.is_some() {
+        rows.push(
+            div()
+                .mx(px(TEXT_INSET))
+                .flex()
+                .items_center()
+                .gap_2()
+                .p_2()
+                .rounded_sm()
+                .bg(cx.global::<Theme>().danger_soft)
+                .text_color(cx.global::<Theme>().danger)
+                .child(div().flex_1().child("An earlier message wasn’t sent"))
+                .child(ActionButton {
+                    id: ElementId::Name(format!("{key}/restore").into()),
+                    label: "Restore".into(),
+                    primary: false,
+                    on_click: press(editable, "restore".into(), &handle, cx),
+                })
+                .into_any_element(),
+        );
+    }
+
+    let mut toolbar = div().mx(px(CONTROL_INSET)).flex().items_center().gap_1();
+    if attach {
+        toolbar = toolbar.child(Mark {
+            id: ElementId::Name(format!("{key}/attach").into()),
+            sign: "+".into(),
+            label: "Attach a file".into(),
+            on_click: press(editable, "attach".into(), &handle, cx),
+        });
+    }
+    for (sign, label, tag) in [
+        ("B", "Bold", "bold"),
+        ("I", "Italic", "italic"),
+        ("<>", "Code", "code"),
+        ("”", "Quote", "quote"),
+    ] {
+        toolbar = toolbar.child(Mark {
+            id: ElementId::Name(format!("{key}/{tag}").into()),
+            sign: sign.into(),
+            label: label.into(),
+            on_click: press(editable, tag.into(), &handle, cx),
+        });
+    }
+    let sendable = editable && draft.can_send(draft.editor.state_view().text);
+    toolbar = toolbar.child(div().flex_1()).child(ActionButton {
+        id: ElementId::Name(format!("{key}/send").into()),
+        label: "Send".into(),
+        primary: true,
+        on_click: press(sendable, "send".into(), &handle, cx),
+    });
+    rows.push(toolbar.into_any_element());
+
+    div()
+        .id(ElementId::Name(key.into()))
         .flex()
         .flex_col()
         .gap_2()
         .rounded_md()
         .border_1()
-        .p_2()
-        .child(editor);
-    if let Some((_, partial)) = draft.query(draft.editor.state_view()) {
-        for choice in choices
-            .iter()
-            .filter(|choice| {
-                choice
-                    .label
-                    .to_lowercase()
-                    .starts_with(&partial.to_lowercase())
-            })
-            .take(32)
-        {
-            root = root.child(
-                div()
-                    .id(format!("{key}/mention/{}", choice.token))
-                    .px_2()
-                    .py_1()
-                    .child(format!("@{}", choice.label)),
-            );
-        }
-    }
-    if !draft.note.is_empty() {
-        root = root.child(
-            div()
-                .text_color(gpui::rgb(0xff0000))
-                .child(draft.note.clone()),
-        );
-    }
-    let sendable = editable && draft.can_send(draft.editor.state_view().text);
-    let send = div().id(format!("{key}/send")).px_2().py_1().child("Send");
-    if sendable {
-        let send_handle = handle.clone();
-        let click = cx.listener(move |view, _: &gpui::ClickEvent, window, cx| {
-            send_handle(view, Event::Action("send".into()), window, cx);
-            cx.notify();
-        });
-        root.child(send.on_click(click))
-    } else {
-        root.child(send)
-    }
+        .border_color(cx.global::<Theme>().border_strong)
+        .bg(cx.global::<Theme>().background)
+        .pb(px(CONTROL_INSET))
+        .children(rows)
 }
 
 #[cfg(test)]
