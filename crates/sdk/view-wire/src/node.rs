@@ -115,16 +115,6 @@ pub enum Node {
         options: TextOptions,
         on_link: Option<u32>,
     },
-    /// A child positioned in this widget's local coordinates. The host lays it out.
-    Pin {
-        key: String,
-        x: f32,
-        y: f32,
-        width: Option<Length>,
-        height: Option<Length>,
-        #[serde(deserialize_with = "decode_child")]
-        content: Box<Node>,
-    },
     /// A native GPUI anchored element. The host owns fitting and clipping.
     Anchored {
         anchor: Anchor,
@@ -145,23 +135,6 @@ pub enum Node {
         radius: Option<[f32; 4]>,
         #[serde(deserialize_with = "decode_child")]
         content: Box<Node>,
-    },
-    /// Copied keyed rows; the host owns widget state and optional virtualization.
-    KeyedColumn {
-        key: String,
-        #[serde(deserialize_with = "list::decode_optional_keys")]
-        keys: Option<Vec<ListKey>>,
-        background: Option<Rgba>,
-        border: Option<Border>,
-        spacing: Option<f32>,
-        padding: Option<Edges>,
-        width: Option<Length>,
-        height: Option<Length>,
-        max_width: Option<f32>,
-        align: Option<AlignX>,
-        virtual_row: Option<f32>,
-        #[serde(deserialize_with = "decode_children")]
-        children: Vec<Node>,
     },
     /// A GPUI uniform-height list. The host owns the native viewport; the
     /// guest carries only the row indices the host has requested.
@@ -244,51 +217,9 @@ pub enum Node {
         #[serde(deserialize_with = "decode_children")]
         children: Vec<Node>,
     },
-    Linear {
-        max_width: Option<f32>,
-        clip: bool,
-        key: String,
-        wrap: Option<Wrap>,
-        axis: Axis,
-        spacing: Option<f32>,
-        padding: Option<Edges>,
-        width: Option<Length>,
-        height: Option<Length>,
-        /// Cross-axis alignment of the children.
-        align: Option<AlignX>,
-        /// The surface behind the children: a layout paints nothing of its
-        /// own, so this is a box drawn around it.
-        background: Option<Rgba>,
-        border: Option<Border>,
-        #[serde(deserialize_with = "decode_children")]
-        children: Vec<Node>,
-    },
-    /// Equal cells in rows of `columns`, or of as many as fit at `fluid`
-    /// pixels each. A cell is `aspect` times as wide as it is tall unless
-    /// `height` gives the rows a length to share; without either the host
-    /// draws squares.
-    Grid {
-        key: String,
-        columns: Option<u32>,
-        /// The widest a cell may be; the column count follows the width.
-        /// Wins over `columns`.
-        fluid: Option<f32>,
-        spacing: Option<f32>,
-        padding: Option<Edges>,
-        width: Option<Length>,
-        height: Option<Length>,
-        /// Horizontal pixels per vertical pixel of a cell.
-        aspect: Option<f32>,
-        background: Option<Rgba>,
-        border: Option<Border>,
-        #[serde(deserialize_with = "decode_children")]
-        children: Vec<Node>,
-    },
     /// Supplies widget-local dimensions to descendant container conditions.
     Responsive {
         key: String,
-        width: Option<Length>,
-        height: Option<Length>,
         #[serde(deserialize_with = "decode_child")]
         content: Box<Node>,
     },
@@ -541,33 +472,6 @@ pub enum Node {
         bar: Option<Rgba>,
         border: Option<Border>,
     },
-    /// Union-sized layers, or native base/under layering when `under` is nonzero.
-    Stack {
-        key: String,
-        width: Option<Length>,
-        height: Option<Length>,
-        padding: Option<Edges>,
-        background: Option<Rgba>,
-        border: Option<Border>,
-        clip: bool,
-        under: u32,
-        #[serde(deserialize_with = "decode_children")]
-        children: Vec<Node>,
-    },
-    /// The host's draw-time base/reveal pair; `open` can hold the reveal visible.
-    Hover {
-        key: String,
-        width: Option<Length>,
-        height: Option<Length>,
-        padding: Option<Edges>,
-        background: Option<Rgba>,
-        border: Option<Border>,
-        tint: Option<Rgba>,
-        radius: f32,
-        open: bool,
-        #[serde(deserialize_with = "decode_children")]
-        children: Vec<Node>,
-    },
     /// A base plus an optional modal layer. Closing removes the second child.
     Overlay {
         key: String,
@@ -638,10 +542,6 @@ impl Node {
             Self::Input { id, .. } | Self::Editor { id, .. } | Self::UniformList { id, .. } => id.name(),
             Self::ResizeHandle { key, .. }
             | Self::MouseArea { key, .. }
-            | Self::Linear { key, .. }
-            | Self::Grid { key, .. }
-            | Self::KeyedColumn { key, .. }
-            | Self::Pin { key, .. }
             | Self::Float { key, .. }
             | Self::Responsive { key, .. }
             | Self::Lazy { key, .. }
@@ -659,8 +559,6 @@ impl Node {
             | Self::PickList { key, .. }
             | Self::ComboBox { key, .. }
             | Self::Progress { key, .. }
-            | Self::Stack { key, .. }
-            | Self::Hover { key, .. }
             | Self::Overlay { key, .. }
             | Self::Tooltip { key, .. }
             | Self::Surface { key, .. } => Some(key),
@@ -679,10 +577,6 @@ impl Node {
             Self::Input { id, .. } | Self::Editor { id, .. } | Self::UniformList { id, .. } => Some(IdentityKeyRef::Element(id)),
             Self::ResizeHandle { key, .. }
             | Self::MouseArea { key, .. }
-            | Self::Linear { key, .. }
-            | Self::Grid { key, .. }
-            | Self::KeyedColumn { key, .. }
-            | Self::Pin { key, .. }
             | Self::Float { key, .. }
             | Self::Responsive { key, .. }
             | Self::Lazy { key, .. }
@@ -700,8 +594,6 @@ impl Node {
             | Self::PickList { key, .. }
             | Self::ComboBox { key, .. }
             | Self::Progress { key, .. }
-            | Self::Stack { key, .. }
-            | Self::Hover { key, .. }
             | Self::Overlay { key, .. }
             | Self::Tooltip { key, .. }
             | Self::Surface { key, .. } => Some(IdentityKeyRef::Legacy(key)),
@@ -719,13 +611,8 @@ impl Node {
     pub fn children(&self) -> &[Node] {
         match self {
             Self::Container { children, .. }
-            | Self::Linear { children, .. }
-            | Self::Grid { children, .. }
-            | Self::Stack { children, .. }
-            | Self::Hover { children, .. }
             | Self::Tooltip { children, .. }
             | Self::Overlay { children, .. }
-            | Self::KeyedColumn { children, .. }
             | Self::UniformList { children, .. }
             | Self::When { children, .. }
             | Self::Anchored { children, .. }
@@ -733,8 +620,7 @@ impl Node {
                 state_children: children,
                 ..
             } => children,
-            Self::Pin { content, .. }
-            | Self::Float { content, .. }
+            Self::Float { content, .. }
             | Self::Responsive { content, .. }
             | Self::Lazy { content, .. }
             | Self::Deferred { content, .. }
@@ -778,13 +664,8 @@ impl Node {
     pub fn children_mut(&mut self) -> &mut [Node] {
         match self {
             Self::Container { children, .. }
-            | Self::Linear { children, .. }
-            | Self::Grid { children, .. }
-            | Self::Stack { children, .. }
-            | Self::Hover { children, .. }
             | Self::Tooltip { children, .. }
             | Self::Overlay { children, .. }
-            | Self::KeyedColumn { children, .. }
             | Self::UniformList { children, .. }
             | Self::When { children, .. }
             | Self::Anchored { children, .. }
@@ -792,8 +673,7 @@ impl Node {
                 state_children: children,
                 ..
             } => children,
-            Self::Pin { content, .. }
-            | Self::Float { content, .. }
+            Self::Float { content, .. }
             | Self::Responsive { content, .. }
             | Self::Lazy { content, .. }
             | Self::Deferred { content, .. }
@@ -832,13 +712,8 @@ impl Node {
     pub fn child_list_mut(&mut self) -> Option<&mut Vec<Node>> {
         match self {
             Self::Container { children, .. }
-            | Self::Linear { children, .. }
-            | Self::Grid { children, .. }
-            | Self::KeyedColumn { children, .. }
             | Self::UniformList { children, .. }
-            | Self::Stack { children, .. }
             | Self::When { children, .. }
-            | Self::Hover { children, .. }
             | Self::Tooltip { children, .. }
             | Self::Anchored { children, .. }
             | Self::Image {
@@ -846,8 +721,7 @@ impl Node {
                 ..
             }
             | Self::Overlay { children, .. } => Some(children),
-            Self::Pin { .. }
-            | Self::Float { .. }
+            Self::Float { .. }
             | Self::Responsive { .. }
             | Self::Lazy { .. }
             | Self::Deferred { .. }

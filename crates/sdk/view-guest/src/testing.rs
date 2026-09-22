@@ -19,7 +19,6 @@ fn collect_texts(node: &Node, out: &mut Vec<String>) {
             children.iter().for_each(|child| collect_texts(child, out))
         }
         Node::Sensor { child: content, .. }
-        | Node::Pin { content, .. }
         | Node::Float { content, .. }
         | Node::Deferred { content, .. }
         | Node::Responsive { content, .. }
@@ -27,13 +26,8 @@ fn collect_texts(node: &Node, out: &mut Vec<String>) {
         | Node::ResizeHandle { content, .. }
         | Node::MouseArea { content, .. }
         | Node::Scroll { content, .. } => collect_texts(content, out),
-        Node::Linear { children, .. }
-        | Node::Grid { children, .. }
-        | Node::Stack { children, .. }
-        | Node::Hover { children, .. }
-        | Node::Tooltip { children, .. }
+        Node::Tooltip { children, .. }
         | Node::Overlay { children, .. }
-        | Node::KeyedColumn { children, .. }
         | Node::UniformList { children, .. }
         | Node::Anchored { children, .. }
         | Node::When { children, .. } => {
@@ -137,7 +131,6 @@ fn find_by<'a>(node: &'a Node, matches: &dyn Fn(&Node) -> bool) -> Option<&'a No
             children.iter().find_map(|child| find_by(child, matches))
         }
         Node::Sensor { child: content, .. }
-        | Node::Pin { content, .. }
         | Node::Float { content, .. }
         | Node::Deferred { content, .. }
         | Node::Responsive { content, .. }
@@ -145,13 +138,8 @@ fn find_by<'a>(node: &'a Node, matches: &dyn Fn(&Node) -> bool) -> Option<&'a No
         | Node::ResizeHandle { content, .. }
         | Node::MouseArea { content, .. }
         | Node::Scroll { content, .. } => find_by(content, matches),
-        Node::Linear { children, .. }
-        | Node::Grid { children, .. }
-        | Node::Stack { children, .. }
-        | Node::Hover { children, .. }
-        | Node::Tooltip { children, .. }
+        Node::Tooltip { children, .. }
         | Node::Overlay { children, .. }
-        | Node::KeyedColumn { children, .. }
         | Node::UniformList { children, .. }
         | Node::Anchored { children, .. }
         | Node::When { children, .. } => children.iter().find_map(|child| find_by(child, matches)),
@@ -528,7 +516,6 @@ fn collect_keys(node: &Node, out: &mut Vec<String>) {
             children.iter().for_each(|child| collect_keys(child, out))
         }
         Node::Sensor { child: content, .. }
-        | Node::Pin { content, .. }
         | Node::Float { content, .. }
         | Node::Deferred { content, .. }
         | Node::Responsive { content, .. }
@@ -536,13 +523,8 @@ fn collect_keys(node: &Node, out: &mut Vec<String>) {
         | Node::ResizeHandle { content, .. }
         | Node::MouseArea { content, .. }
         | Node::Scroll { content, .. } => collect_keys(content, out),
-        Node::Linear { children, .. }
-        | Node::Grid { children, .. }
-        | Node::Stack { children, .. }
-        | Node::Hover { children, .. }
-        | Node::Tooltip { children, .. }
+        Node::Tooltip { children, .. }
         | Node::Overlay { children, .. }
-        | Node::KeyedColumn { children, .. }
         | Node::UniformList { children, .. }
         | Node::Anchored { children, .. }
         | Node::When { children, .. } => children.iter().for_each(|child| collect_keys(child, out)),

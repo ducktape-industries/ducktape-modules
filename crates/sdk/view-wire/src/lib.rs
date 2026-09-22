@@ -1065,56 +1065,6 @@ fn sanitize_node(
                 *group = name.into();
             }
         }
-        Node::Linear {
-            max_width,
-            key,
-            wrap,
-            spacing,
-            padding,
-            background,
-            border,
-            ..
-        } => {
-            claim(key, taken);
-            bound_optional(max_width);
-            bound_optional(spacing);
-            if let Some(wrap) = wrap {
-                bound_optional(&mut wrap.spacing);
-            }
-            bound_edges(padding);
-            bound_color(background);
-            bound_border(border);
-        }
-        Node::KeyedColumn {
-            key,
-            keys,
-            background,
-            border,
-            spacing,
-            padding,
-            max_width,
-            virtual_row,
-            children,
-            ..
-        } => {
-            claim(key, taken);
-            bound_color(background);
-            bound_border(border);
-            bound_optional(spacing);
-            bound_edges(padding);
-            bound_optional(max_width);
-            if let Some(estimate) = virtual_row {
-                *estimate = bounded(*estimate).max(1.0);
-            }
-            let count = keys
-                .as_ref()
-                .map_or(children.len(), |keys| keys.len().min(children.len()))
-                .min(MAX_NODES);
-            if let Some(keys) = keys {
-                keys.truncate(count);
-            }
-            children.truncate(count);
-        }
         Node::UniformList {
             id,
             path,
@@ -1179,24 +1129,6 @@ fn sanitize_node(
             *indices = kept_indices;
             *children = kept_children;
         }
-        Node::Grid {
-            key,
-            fluid,
-            spacing,
-            padding,
-            aspect,
-            background,
-            border,
-            ..
-        } => {
-            claim(key, taken);
-            bound_optional(fluid);
-            bound_optional(spacing);
-            bound_edges(padding);
-            bound_optional(aspect);
-            bound_color(background);
-            bound_border(border);
-        }
         Node::Sensor {
             key,
             reset,
@@ -1224,38 +1156,6 @@ fn sanitize_node(
         Node::ResizeHandle { key, .. } | Node::Responsive { key, .. } | Node::Lazy { key, .. } => {
             claim(key, taken)
         }
-        Node::Stack {
-            key,
-            padding,
-            background,
-            border,
-            under,
-            ..
-        } => {
-            claim(key, taken);
-            bound_edges(padding);
-            bound_color(background);
-            bound_border(border);
-            *under = (*under).min(MAX_NODES as u32);
-        }
-        Node::Hover {
-            key,
-            padding,
-            background,
-            border,
-            tint,
-            radius,
-            children,
-            ..
-        } => {
-            claim(key, taken);
-            bound_edges(padding);
-            bound_color(background);
-            bound_border(border);
-            bound_color(tint);
-            *radius = bounded(*radius);
-            children.truncate(2);
-        }
         Node::Float {
             key,
             x,
@@ -1275,11 +1175,6 @@ fn sanitize_node(
                     *corner = bounded(*corner);
                 }
             }
-        }
-        Node::Pin { key, x, y, .. } => {
-            claim(key, taken);
-            *x = finite(*x).clamp(-MAX_PIXELS, MAX_PIXELS);
-            *y = finite(*y).clamp(-MAX_PIXELS, MAX_PIXELS);
         }
         Node::Tooltip {
             key,
@@ -1754,11 +1649,9 @@ fn sanitize_node(
     // ten thousand rows becomes its first rows, which is what a host can
     // lay out, rather than ten thousand empty nodes it still has to walk.
     if let Node::Container { children, .. }
-    | Node::Linear { children, .. }
-    | Node::Grid { children, .. }
-    | Node::Stack { children, .. }
-    | Node::KeyedColumn { children, .. }
     | Node::When { children, .. }
+    | Node::Tooltip { children, .. }
+    | Node::Overlay { children, .. }
     | Node::Anchored { children, .. }
     | Node::Image { state_children: children, .. } = node
     {
@@ -1777,12 +1670,6 @@ fn sanitize_node(
                 *fallback = false;
                 state_children.clear();
             }
-        }
-        if let Node::KeyedColumn {
-            keys: Some(keys), ..
-        } = node
-        {
-            keys.truncate(kept);
         }
         finish_typed_scope(identity_scopes, typed_scope_started);
         if typed_scope_started {
@@ -1806,14 +1693,7 @@ fn sanitize_node(
 
 fn lengths_mut(node: &mut Node) -> Vec<&mut Length> {
     let slots: Vec<&mut Option<Length>> = match node {
-        Node::Linear { width, height, .. }
-        | Node::Grid { width, height, .. }
-        | Node::KeyedColumn { width, height, .. }
-        | Node::Pin { width, height, .. }
-        | Node::Responsive { width, height, .. }
-        | Node::Stack { width, height, .. }
-        | Node::Hover { width, height, .. }
-        | Node::Scroll { width, height, .. }
+        Node::Scroll { width, height, .. }
         | Node::Button { width, height, .. }
         | Node::ImageViewer { width, height, .. }
         | Node::Slider { width, height, .. }
@@ -1832,6 +1712,7 @@ fn lengths_mut(node: &mut Node) -> Vec<&mut Length> {
         | Node::Qr { .. }
         | Node::Rule { .. }
         | Node::Lazy { .. }
+        | Node::Responsive { .. }
         | Node::Sensor { .. }
         | Node::ResizeHandle { .. }
         | Node::MouseArea { .. }
@@ -3550,39 +3431,16 @@ mod tests {
     /// the pixel range and children past the node budget are dropped, not
     /// stood in for.
     #[test]
-    fn a_grid_is_pulled_into_range_and_cut_like_a_linear_layout() {
-        let root = sanitized_root(Node::Grid {
-            key: "App/cells".into(),
-            columns: Some(u32::MAX),
-            fluid: Some(f32::NAN),
-            spacing: Some(-3.0),
-            padding: Some(Edges::all(f32::INFINITY)),
-            width: Some(Length::Fixed(f32::MAX)),
-            height: None,
-            aspect: Some(f32::NEG_INFINITY),
-            background: None,
-            border: None,
+    fn a_container_is_pulled_into_range_and_cut_like_a_layout() {
+        let root = sanitized_root(Node::Container {
+            id: Some(ElementIdWire::Name("App/cells".into())),
+            style: gpui::StyleRefinement::default(),
+            interactivity: Interactivity::default(),
             children: (0..MAX_NODES + 5).map(|_| text("x")).collect(),
         });
-        let Node::Grid {
-            columns,
-            fluid,
-            spacing,
-            padding,
-            width,
-            aspect,
-            children,
-            ..
-        } = &root
-        else {
+        let Node::Container { children, .. } = &root else {
             panic!()
         };
-        assert_eq!(*columns, Some(u32::MAX));
-        assert_eq!(*fluid, Some(0.0));
-        assert_eq!(*spacing, Some(0.0));
-        assert_eq!(*padding, Some(Edges::all(MAX_PIXELS)));
-        assert_eq!(*width, Some(Length::Fixed(MAX_PIXELS)));
-        assert_eq!(*aspect, Some(0.0));
         assert_eq!(children.len(), MAX_NODES - 1);
         assert_eq!(root.count(), MAX_NODES);
     }
