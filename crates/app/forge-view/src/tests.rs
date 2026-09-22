@@ -45,6 +45,7 @@ fn answer(query: &Query, mode: &str) -> Reply {
         Query::Repos { .. } if mode == "empty" => reply("repos-empty"),
         Query::Repos { .. } => reply("repos"),
         Query::Repo { .. } => reply("repo"),
+        Query::Refs { cursor: None, .. } if mode == "unborn" => reply("refs-empty"),
         Query::Refs { cursor: None, .. } => reply("refs"),
         Query::Refs { .. } => reply("refs-empty"),
         Query::Activity { .. } => reply("activity"),
@@ -220,6 +221,13 @@ fn an_empty_program_explains_how_a_repository_begins() {
             .iter()
             .any(|text| text.contains("git push duck://"))
     );
+}
+
+#[test]
+fn an_unborn_repo_says_so_instead_of_resolving_forever() {
+    let (cx, _) = opened("unborn");
+    assert!(cx.has_text("No commits yet"), "{:?}", cx.texts());
+    assert!(!cx.has_text("Resolving the ref…"));
 }
 
 #[test]
