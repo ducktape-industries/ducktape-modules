@@ -527,6 +527,9 @@ pub fn uniform_list<R: IntoElement>(
 ) -> UniformList {
     let mut style = StyleRefinement::default();
     style.overflow.y = Some(Overflow::Scroll);
+    let mut interactivity = Interactivity::default();
+    interactivity.id = Some(id.into());
+    interactivity.base_style = style;
     UniformList {
         count,
         processor: Box::new(move |range, window, app| {
@@ -535,11 +538,7 @@ pub fn uniform_list<R: IntoElement>(
                 .map(IntoElement::into_any_element)
                 .collect()
         }),
-        interactivity: Interactivity {
-            id: Some(id.into()),
-            base_style: style,
-            ..Interactivity::default()
-        },
+        interactivity,
         measure_index: 0,
         sizing: wire::list::UniformListSizing::Auto,
         horizontal_sizing: wire::list::UniformListHorizontalSizing::FitList,

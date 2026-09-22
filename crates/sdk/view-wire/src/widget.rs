@@ -151,7 +151,12 @@ mod tests {
             command.validate().is_err(),
             "oversized target must be refused"
         );
-        assert_eq!(command, WidgetCommand::Focus { target: target(key) });
+        assert_eq!(
+            command,
+            WidgetCommand::Focus {
+                target: target(key)
+            }
+        );
         let expected = WidgetCommand::Focus {
             target: vec![
                 crate::ElementIdWire::Integer(1),

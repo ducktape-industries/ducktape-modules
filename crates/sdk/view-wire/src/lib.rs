@@ -1334,7 +1334,6 @@ fn sanitize_node(
         Node::ResizeHandle { id, .. } => id.validate_host()?,
         Node::Responsive { id, .. } => id.validate_host()?,
         Node::Lazy { key, .. } => claim(key, taken),
-        }
         Node::Float {
             key,
             x,
@@ -1515,6 +1514,7 @@ fn sanitize_node(
             transformation,
             label,
             style,
+            interactivity,
         } => {
             if let Some(id) = id {
                 id.validate_host()?;
@@ -1532,6 +1532,7 @@ fn sanitize_node(
             }
             transformation.rotate = signed_bounded(transformation.rotate);
             style_sanitize::sanitize(style);
+            sanitize_interactivity(interactivity);
 
             if let Some(label) = label {
                 spend_text(label, budgets);
@@ -1797,9 +1798,7 @@ fn sanitize_node(
             bound_color(bar);
             bound_border(border);
         }
-        Node::Surface {
-            id, name, args, ..
-        } => {
+        Node::Surface { id, name, args, .. } => {
             id.validate_host()?;
             spend_text(name, budgets);
             args.truncate(MAX_SURFACE_ARGS);
@@ -3180,8 +3179,8 @@ mod tests {
         // Typed duplicates are rejected rather than renamed into a different target.
         let mut duplicate = Frame {
             root: Some(column(vec![
-            mouse_area("App/m", None, text("a")),
-            mouse_area("App/m", None, text("b")),
+                mouse_area("App/m", None, text("a")),
+                mouse_area("App/m", None, text("b")),
             ])),
             ..Frame::default()
         };

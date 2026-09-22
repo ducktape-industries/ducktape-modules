@@ -66,11 +66,7 @@ fn window_controls_and_focus_refinements_are_bounded_inside_tooltips() {
                 Some(px(0.).into())
             );
             assert_eq!(
-                interaction
-                    .focus_visible
-                    .as_ref()
-                    .unwrap()
-                    .text.font_size,
+                interaction.focus_visible.as_ref().unwrap().text.font_size,
                 Some(px(512.).into())
             );
         }
