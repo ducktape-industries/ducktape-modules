@@ -27,27 +27,58 @@ pub fn card(
         chat.layout.press = (position.x.into(), position.y.into());
         chat.press_message(pane, seq);
     });
-    let chosen = !message.deleted && seq > 0 && chat.menu.as_ref().is_some_and(|menu| menu.pane == pane && menu.seq == seq);
+    let chosen = !message.deleted
+        && seq > 0
+        && chat
+            .menu
+            .as_ref()
+            .is_some_and(|menu| menu.pane == pane && menu.seq == seq);
     let ranged = !message.deleted && chat.copy.is_some_and(|range| range.holds(pane, seq));
     let group: ducktape_view_guest::SharedString = format!("chat-message-{id}").into();
     let avatar = if message.show_author {
-        div().id(ElementId::Name(format!("chat-message-{id}-avatar").into()))
-            .size_7().flex().items_center().justify_center().rounded_full()
-            .bg(if message.agent { theme.agent_soft } else { theme.surface })
-            .text_xs().child(message.initial.clone()).into_any_element()
+        div()
+            .id(ElementId::Name(format!("chat-message-{id}-avatar").into()))
+            .size_7()
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded_full()
+            .bg(if message.agent {
+                theme.agent_soft
+            } else {
+                theme.surface
+            })
+            .text_xs()
+            .child(message.initial.clone())
+            .into_any_element()
     } else {
         div().w_7().h(px(4.)).flex_shrink_0().into_any_element()
     };
     let card = div()
         .id(ElementId::Name(format!("chat-message-{id}").into()))
-        .relative().flex().gap_2().px_4()
-        .pt(px(if message.show_author { 12. } else { 3. })).pb(px(3.))
+        .relative()
+        .flex()
+        .gap_2()
+        .px_4()
+        .pt(px(if message.show_author { 12. } else { 3. }))
+        .pb(px(3.))
         .rounded_md()
-        .bg(if chosen { theme.accent_soft } else if ranged { theme.surface_raised } else { theme.background })
+        .bg(if chosen {
+            theme.accent_soft
+        } else if ranged {
+            theme.surface_raised
+        } else {
+            theme.background
+        })
         .hover(|style| style.bg(theme.surface_raised))
         .role(ducktape_view_guest::Role::Button)
-        .aria_label(format!("Select message, shows its actions: {}: {}", message.author, message.body))
-        .focusable().on_click(press).child(avatar)
+        .aria_label(format!(
+            "Select message, shows its actions: {}: {}",
+            message.author, message.body
+        ))
+        .focusable()
+        .on_click(press)
+        .child(avatar)
         .child(content(chat, message.clone(), cx, theme));
     // Controls are siblings of the selection target: their native click must
     // not also replace the opened menu with the message-selection toolbar.
@@ -55,30 +86,73 @@ pub fn card(
     if !message.pending && !message.deleted {
         let rev = message.rev;
         let writable = chat.may_write();
-        let mut actions = div().id(ElementId::Name(format!("chat-message-{id}-actions").into()))
-            .absolute().right_2().top_1().flex().gap_1().bg(theme.background)
-            .invisible().group_hover(group, |style| style.visible());
-        if chosen { actions = actions.visible(); }
-        if pane == Pane::Timeline && message.reply_count == 0 {
-            let open = cx.listener(move |chat, _: &ClickEvent, _, cx| { cx.notify(); chat.open_thread(seq, cx); });
-            actions = actions.child(action_button(ElementId::Name(format!("chat-message-{id}-thread").into()), "💬", "Open thread", theme, true, open));
+        let mut actions = div()
+            .id(ElementId::Name(format!("chat-message-{id}-actions").into()))
+            .absolute()
+            .right_2()
+            .top_1()
+            .flex()
+            .gap_1()
+            .bg(theme.background)
+            .invisible()
+            .group_hover(group, |style| style.visible());
+        if chosen {
+            actions = actions.visible();
         }
-        let thumbs = cx.listener(move |chat, _: &ClickEvent, _, cx| { cx.notify(); chat.react(seq, "👍".into(), true, cx); });
-        actions = actions.child(action_button(ElementId::Name(format!("chat-message-{id}-thumbs-up").into()), "👍", "React with 👍", theme, writable, thumbs));
+        if pane == Pane::Timeline && message.reply_count == 0 {
+            let open = cx.listener(move |chat, _: &ClickEvent, _, cx| {
+                cx.notify();
+                chat.open_thread(seq, cx);
+            });
+            actions = actions.child(action_button(
+                ElementId::Name(format!("chat-message-{id}-thread").into()),
+                "💬",
+                "Open thread",
+                theme,
+                true,
+                open,
+            ));
+        }
+        let thumbs = cx.listener(move |chat, _: &ClickEvent, _, cx| {
+            cx.notify();
+            chat.react(seq, "👍".into(), true, cx);
+        });
+        actions = actions.child(action_button(
+            ElementId::Name(format!("chat-message-{id}-thumbs-up").into()),
+            "👍",
+            "React with 👍",
+            theme,
+            writable,
+            thumbs,
+        ));
         let react = cx.listener(move |chat, event: &ClickEvent, window, cx| {
             cx.notify();
             let position = event.position();
             chat.layout.press = (position.x.into(), position.y.into());
             chat.open_menu(pane, seq, rev, Mode::Reactions, window, cx);
         });
-        actions = actions.child(action_button(ElementId::Name(format!("chat-message-{id}-react").into()), "😀", "Manage reactions", theme, writable, react));
+        actions = actions.child(action_button(
+            ElementId::Name(format!("chat-message-{id}-react").into()),
+            "😀",
+            "Manage reactions",
+            theme,
+            writable,
+            react,
+        ));
         let more = cx.listener(move |chat, event: &ClickEvent, window, cx| {
             cx.notify();
             let position = event.position();
             chat.layout.press = (position.x.into(), position.y.into());
             chat.open_menu(pane, seq, rev, Mode::More, window, cx);
         });
-        actions = actions.child(action_button(ElementId::Name(format!("chat-message-{id}-more").into()), "⋯", "More message actions", theme, true, more));
+        actions = actions.child(action_button(
+            ElementId::Name(format!("chat-message-{id}-more").into()),
+            "⋯",
+            "More message actions",
+            theme,
+            true,
+            more,
+        ));
         outer = outer.child(actions);
     }
     outer
@@ -173,7 +247,18 @@ fn content(
             );
             let label = format!("{} {}", reaction.emoji, reaction.count);
             reactions = if chat.may_write() {
-                reactions.child(action_button(id, label, if add { "Add reaction" } else { "Remove reaction" }, theme, true, click))
+                reactions.child(action_button(
+                    id,
+                    label,
+                    if add {
+                        "Add reaction"
+                    } else {
+                        "Remove reaction"
+                    },
+                    theme,
+                    true,
+                    click,
+                ))
             } else {
                 reactions.child(
                     div()
@@ -393,7 +478,11 @@ fn action_button(
         .aria_disabled(!enabled)
         .text_xs()
         .child(label.into());
-    if enabled { control.focusable().on_click(click) } else { control }
+    if enabled {
+        control.focusable().on_click(click)
+    } else {
+        control
+    }
 }
 
 fn plural(count: u64, one: &str, many: &str) -> String {
