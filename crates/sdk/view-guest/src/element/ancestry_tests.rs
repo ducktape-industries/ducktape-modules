@@ -142,3 +142,13 @@ fn identified_child_scope_is_popped_before_its_sibling() {
         vec![vec![named("root"), named("branch")], vec![named("root")]]
     );
 }
+
+#[test]
+fn uniform_list_opens_its_typed_registry_scope() {
+    let paths = Rc::new(RefCell::new(Vec::new()));
+    let row_paths = paths.clone();
+    lower(uniform_list("list", 1, move |_, _, _| {
+        vec![PathProbe::identified("row", &row_paths)]
+    }));
+    assert_eq!(*paths.borrow(), vec![vec![named("list"), named("row")]]);
+}

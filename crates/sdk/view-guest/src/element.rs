@@ -503,6 +503,10 @@ pub fn uniform_list<R: IntoElement>(
 }
 
 impl<R: IntoElement + 'static> Element for UniformList<R> {
+    fn id(&self) -> Option<ElementId> {
+        Some(self.id.clone())
+    }
+
     fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
         let Self {
             id,
