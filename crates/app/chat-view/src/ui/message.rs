@@ -42,13 +42,15 @@ pub fn card(
             .flex()
             .items_center()
             .justify_center()
-            .rounded_full()
+            .rounded(px(6.))
             .bg(if message.agent {
                 theme.agent_soft
             } else {
-                theme.surface
+                theme.surface_raised
             })
-            .text_xs()
+            .text_color(if message.agent { theme.agent } else { theme.muted })
+            .font_semibold()
+            .text_size(px(11.5))
             .child(message.initial.clone())
             .into_any_element()
     } else {
@@ -58,7 +60,7 @@ pub fn card(
         .id(ElementId::Name(format!("chat-message-{id}").into()))
         .relative()
         .flex()
-        .gap_2()
+        .gap(px(10.))
         .px_4()
         .pt(px(if message.show_author { 12. } else { 3. }))
         .pb(px(3.))
@@ -181,7 +183,7 @@ fn content(
             .flex()
             .items_center()
             .gap_1()
-            .child(div().text_sm().child(message.author.clone()));
+            .child(div().text_size(px(13.)).font_medium().child(message.author.clone()));
         if message.agent {
             header = header.child(badge(
                 ElementId::Name(format!("chat-message-{}-agent", message.id).into()),
@@ -193,7 +195,7 @@ fn content(
         if message.height > 0 {
             header = header.child(
                 div()
-                    .text_xs()
+                    .text_size(px(11.))
                     .text_color(theme.muted)
                     .child(format!("block {}", message.height)),
             );
@@ -213,7 +215,7 @@ fn content(
         );
     }
     if message.edited {
-        body = body.child(div().text_xs().text_color(theme.muted).child("edited"));
+        body = body.child(div().text_size(px(11.)).text_color(theme.muted).child("edited"));
     }
     if message.pending {
         body = body.child(
@@ -221,7 +223,7 @@ fn content(
                 .id(ElementId::Name(
                     format!("chat-message-{}-pending", message.id).into(),
                 ))
-                .text_xs()
+                .text_size(px(11.))
                 .text_color(theme.muted)
                 .child("sending…"),
         );
@@ -267,7 +269,7 @@ fn content(
                         .py_0p5()
                         .rounded_sm()
                         .bg(theme.surface)
-                        .text_xs()
+                        .text_size(px(11.))
                         .child(label),
                 )
             };
@@ -289,7 +291,7 @@ fn content(
                 .items_center()
                 .gap_1()
                 .pt_1()
-                .text_sm()
+                .text_size(px(12.))
                 .text_color(theme.accent_foreground)
                 .role(ducktape_view_guest::Role::Button)
                 .focusable()
@@ -331,7 +333,7 @@ fn block_view(
             if !block.lang.is_empty() {
                 code = code.child(
                     div()
-                        .text_xs()
+                        .text_size(px(11.))
                         .text_color(theme.muted)
                         .child(block.lang.clone()),
                 );
@@ -392,7 +394,7 @@ fn plain_line(id: ElementId, text: &str, mono: bool) -> InteractiveText {
     let styled = StyledText::new(text.to_owned());
     let mut text = InteractiveText::new(id, styled).w_full();
     if mono {
-        text = text.font_family("JetBrains Mono").text_sm();
+        text = text.font_family("JetBrains Mono").text_size(px(12.));
     }
     text
 }
@@ -477,7 +479,7 @@ fn action_button(
         .role(ducktape_view_guest::Role::Button)
         .aria_label(accessible)
         .aria_disabled(!enabled)
-        .text_xs()
+        .text_size(px(11.))
         .child(label.into());
     if enabled {
         control.focusable().on_click(click)

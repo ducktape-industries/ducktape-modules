@@ -51,10 +51,10 @@ pub fn channel_create(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Opt
         .border_color(theme.border)
         .bg(theme.background)
         .shadow_lg()
-        .child(div().text_lg().child("Create a channel"))
+        .child(div().text_size(px(16.)).child("Create a channel"))
         .child(
             div()
-                .text_sm()
+                .text_size(px(12.))
                 .text_color(theme.muted)
                 .child("Channel name"),
         )
@@ -95,7 +95,7 @@ pub fn channel_create(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Opt
     if !create.error.is_empty() {
         card = card.child(
             div()
-                .text_sm()
+                .text_size(px(12.))
                 .text_color(theme.danger)
                 .child(create.error.clone()),
         );
@@ -188,7 +188,7 @@ pub fn preview(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Option<Any
             card = card.child(
                 div()
                     .p_4()
-                    .text_sm()
+                    .text_size(px(12.))
                     .text_color(theme.muted)
                     .child("Reading the file…"),
             );
@@ -197,7 +197,7 @@ pub fn preview(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Option<Any
             card = card.child(
                 div()
                     .p_4()
-                    .text_sm()
+                    .text_size(px(12.))
                     .text_color(theme.danger)
                     .child(refusal.sentence.clone()),
             );

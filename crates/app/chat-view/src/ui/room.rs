@@ -95,7 +95,7 @@ fn header(chat: &Chat, room: &Room, cx: &mut Context<Chat>, theme: &Theme) -> im
         .flex()
         .items_center()
         .gap_2()
-        .child(div().text_lg().child(format!("#{}", name)));
+        .child(div().id("chat-room-title").text_size(px(13.5)).font_semibold().role(Role::Heading).aria_level(2).child(format!("#{}", name)));
     if info.is_some_and(|info| info.channel.archived) {
         title = title.child(badge(
             "chat-room-archived",
@@ -163,10 +163,10 @@ fn no_room(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement {
                 .flex_col()
                 .gap_2()
                 .p_6()
-                .child(div().text_base().child("No channels"))
+                .child(div().text_size(px(13.)).child("No channels"))
                 .child(
                     div()
-                        .text_sm()
+                        .text_size(px(12.))
                         .text_color(theme.muted)
                         .child("Create the first channel in this network."),
                 )
@@ -206,7 +206,7 @@ fn huddle(
         ))
         .child(
             div()
-                .text_sm()
+                .text_size(px(12.))
                 .text_color(theme.muted)
                 .child(format!("{} people", info.channel.huddle.len())),
         );
@@ -289,7 +289,7 @@ fn search_results(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl In
             ));
         }
         Loaded::Ready(hits) => {
-            content = content.child(div().text_sm().text_color(theme.muted).child(format!(
+            content = content.child(div().text_size(px(12.)).text_color(theme.muted).child(format!(
                 "{} result{} for “{}”",
                 hits.rows.len(),
                 if hits.rows.len() == 1 { "" } else { "s" },
@@ -315,10 +315,10 @@ fn search_results(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl In
                         .role(ducktape_view_guest::Role::Button)
                         .focusable()
                         .on_click(open)
-                        .child(div().text_sm().child(row.text.clone()))
+                        .child(div().text_size(px(12.)).child(row.text.clone()))
                         .child(
                             div()
-                                .text_xs()
+                                .text_size(px(11.))
                                 .text_color(theme.muted)
                                 .child(format!("message {}", row.seq)),
                         ),
@@ -414,7 +414,7 @@ pub fn composer(
 }
 
 fn quiet(text: impl Into<String>, theme: &Theme) -> impl IntoElement {
-    div().text_sm().text_color(theme.muted).child(text.into())
+    div().text_size(px(12.)).text_color(theme.muted).child(text.into())
 }
 
 fn short_id(id: &str, keep: usize) -> String {

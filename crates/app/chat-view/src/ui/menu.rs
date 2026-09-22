@@ -255,10 +255,10 @@ fn delete(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement {
         .flex_col()
         .gap_1()
         .p_3()
-        .child(div().text_base().child("Delete this message?"))
+        .child(div().text_size(px(13.)).child("Delete this message?"))
         .child(
             div()
-                .text_sm()
+                .text_size(px(12.))
                 .text_color(theme.muted)
                 .child("It leaves the room for everyone."),
         )
@@ -373,7 +373,7 @@ impl RenderOnce for Item {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .text_base()
+                    .text_size(px(13.))
                     .whitespace_nowrap()
                     .child(glyph),
             );

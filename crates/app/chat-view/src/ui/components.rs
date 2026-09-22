@@ -81,8 +81,8 @@ impl RenderOnce for EmptyState {
             .gap_1()
             .p_6()
             .max_w(px(420.))
-            .child(div().text_base().child(self.title))
-            .child(div().text_sm().text_color(self.muted).child(self.detail))
+            .child(div().text_size(px(13.5)).font_medium().child(self.title))
+            .child(div().text_size(px(12.)).text_color(self.muted).child(self.detail))
     }
 }
 
@@ -117,7 +117,7 @@ impl RenderOnce for Badge {
             .rounded_sm()
             .bg(self.background)
             .text_color(self.foreground)
-            .text_xs()
+            .text_size(px(11.))
             .child(self.label)
     }
 }

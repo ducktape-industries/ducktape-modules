@@ -31,7 +31,7 @@ pub fn thread(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
                 .p_3()
                 .border_b_1()
                 .border_color(theme.border)
-                .child(div().flex_1().text_lg().child("Thread"))
+                .child(div().id("chat-thread-title").flex_1().text_size(px(13.5)).font_semibold().role(Role::Heading).aria_level(2).child("Thread"))
                 .child(button(
                     ElementId::Name("chat-thread-close".into()),
                     "Close thread",
@@ -47,7 +47,7 @@ pub fn thread(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
             pane = pane.child(
                 div()
                     .p_2()
-                    .text_sm()
+                    .text_size(px(12.))
                     .text_color(theme.muted)
                     .child("Loading replies…"),
             );
@@ -131,7 +131,7 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
                 .id(ElementId::Name("chat-details-header".into()))
                 .flex()
                 .items_center()
-                .child(div().flex_1().text_lg().child("Channel details"))
+                .child(div().id("chat-details-title").flex_1().text_size(px(13.5)).font_semibold().role(Role::Heading).aria_level(2).child("Channel details"))
                 .child(button(
                     ElementId::Name("chat-details-close".into()),
                     "Close",
@@ -140,7 +140,7 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
                 )),
         )
         .child(div().h(px(1.)).w_full().bg(theme.border))
-        .child(div().text_sm().text_color(theme.muted).child("Name"))
+        .child(div().text_size(px(12.)).text_color(theme.muted).child("Name"))
         .child(
             Input::new(ElementId::Name("chat-details-name-input".into()))
                 .h(px(28.))
@@ -171,7 +171,7 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
             archive,
         ))
         .child(div().h(px(1.)).w_full().bg(theme.border))
-        .child(div().text_sm().text_color(theme.muted).child("Members"))
+        .child(div().text_size(px(12.)).text_color(theme.muted).child("Members"))
         .child(
             Input::new(ElementId::Name("chat-details-member-input".into()))
                 .h(px(28.))
@@ -193,7 +193,7 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
         ))
         .child(
             div()
-                .text_xs()
+                .text_size(px(11.))
                 .text_color(theme.faint)
                 .child("Select a member below to remove it from this channel."),
         );
@@ -202,7 +202,7 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
         content = content.child(
             div()
                 .id(ElementId::Name("chat-details-no-members".into()))
-                .text_xs()
+                .text_size(px(11.))
                 .text_color(theme.faint)
                 .child("No members added. An open channel needs none."),
         );
@@ -229,7 +229,7 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
             .flex()
             .items_center()
             .gap_2()
-            .child(div().flex_1().text_sm().child(member.label.clone()))
+            .child(div().flex_1().text_size(px(12.)).child(member.label.clone()))
             .child(remove_button);
         content = content.child(row);
     }

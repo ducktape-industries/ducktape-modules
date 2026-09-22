@@ -27,6 +27,7 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>) -> impl IntoElement {
         .size_full()
         .bg(theme.background)
         .text_color(theme.foreground)
+        .text_size(px(13.))
         .child(if chat.session.connected {
             connected(chat, cx, &theme).into_any_element()
         } else {
