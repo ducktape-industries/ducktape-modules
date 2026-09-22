@@ -20,6 +20,15 @@ fn action_strip_uses_native_group_visibility_and_is_not_inside_selection_target(
         interactivity.group_hover.as_ref().unwrap().style.visibility,
         StyleRefinement::default().visible().visibility
     );
+    // GPUI dispatches a click to every interactive element whose hitbox
+    // contains it, not just the topmost one — being a sibling of `card`
+    // (checked below) is not enough to keep a click here off `card`'s
+    // row-select handler too, which would clobber the mode `open_menu`
+    // just set back to `Mode::Toolbar`. Only `occlude` stops that.
+    assert!(
+        interactivity.occlude,
+        "action strip must occlude so its clicks don't also fire card's row-select"
+    );
     let card = cx.find("chat-message-m1").unwrap();
     fn has_actions(node: &wire::Node) -> bool {
         node.key() == Some("chat-message-m1-actions") || node.children().iter().any(has_actions)

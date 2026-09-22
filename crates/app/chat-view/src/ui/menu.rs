@@ -47,6 +47,11 @@ pub fn floating(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Option<An
         .border_color(theme.border)
         .bg(theme.background)
         .shadow_lg()
+        // Anchored near the row it was opened from, this popup can overlap
+        // the message card beneath it; without occlude a click here (e.g.
+        // "Delete") also fires the card's row-select handler, which resets
+        // `self.menu` before this popup's own handler gets to read it.
+        .occlude()
         .child(content);
     Some(
         anchored()
