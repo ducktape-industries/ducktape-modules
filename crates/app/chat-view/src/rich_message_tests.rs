@@ -182,7 +182,8 @@ fn file_attachment_keeps_type_caption_and_grouped_block_number() {
     let (mut cx, view) = opened();
     let link = files::file_address("testnet#0a1b2c3d", "/shared/attachments/deck.pdf").unwrap();
     view.update(&mut cx, |chat, _, cx| {
-        let mut file = row(3, "acct:8", "deck.pdf");
+        // Start a new author run so the original header grouping displays its block number.
+        let mut file = row(3, "acct:7", "deck.pdf");
         file.message_id = "file".into();
         file.height = 12_345;
         file.blocks = vec![chat::Block::Paragraph(vec![chat::Span {
