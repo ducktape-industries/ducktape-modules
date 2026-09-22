@@ -231,7 +231,7 @@ fn a_frame_round_trips() {
                 selected: None,
                 role: None,
                 description: None,
-                key: "App/b".into(),
+                id: ElementIdWire::Name("App/b".into()),
                 content: ButtonContent::Label("Go".into()),
                 label: None,
                 on_press: Some(3),

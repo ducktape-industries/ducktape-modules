@@ -224,7 +224,7 @@ mod tests {
     fn frame_sanitization_discards_nonfinite_conditions() {
         let mut frame = crate::Frame {
             root: Some(crate::Node::When {
-                key: "condition".into(),
+                id: crate::ElementIdWire::Name("condition".into()),
                 condition: ContainerQuery {
                     ops: vec![
                         QueryOp::Number(f64::INFINITY),

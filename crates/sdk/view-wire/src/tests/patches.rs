@@ -294,7 +294,7 @@ fn every_shaped_string_spends_the_same_budget() {
             selected: None,
             role: None,
             description: Some("Details".into()),
-            key: "App/b".into(),
+            id: ElementIdWire::Name("App/b".into()),
             content: ButtonContent::Label(long.clone()),
             label: Some(long),
             on_press: None,

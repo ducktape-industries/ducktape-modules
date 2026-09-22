@@ -105,7 +105,7 @@ fn form_controls_are_pulled_into_range() {
             style: gpui::StyleRefinement::default(),
         },
         Node::Toggle {
-            key: "App/pick".into(),
+            id: ElementIdWire::Name("App/toggle".into()),
             kind: ToggleKind::Switch,
             label: "x".repeat(MAX_STRING_BYTES + 1),
             checked: true,
@@ -139,10 +139,10 @@ fn form_controls_are_pulled_into_range() {
         (*value, *min, *max, *step),
         (0.0, f32::MIN, 1_000_000.0, f32::MAX)
     );
-    let Node::Toggle { key, label, .. } = &children[2] else {
+    let Node::Toggle { id, label, .. } = &children[2] else {
         panic!("{:?}", children[2])
     };
-    assert_eq!(key, "App/pick");
+    assert_eq!(id, &ElementIdWire::Name("App/toggle".into()));
     assert!(label.len() <= MAX_STRING_BYTES);
 }
 

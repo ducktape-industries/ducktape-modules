@@ -77,16 +77,6 @@ pub(crate) fn clear_pictures(context: &Context) {
     context.0.borrow_mut().pictures.clear();
 }
 
-/// Registers a message in the frame currently being built.
-pub fn message<M: 'static>(context: &Context, message: M) -> u32 {
-    let tables = context.tables();
-    let mut tables = tables.borrow_mut();
-    let message: Rc<dyn Any> = Rc::new(message);
-    let index = u32::try_from(tables.messages.len()).expect("too many message routes");
-    tables.messages.push(message);
-    index
-}
-
 /// A typed handler returns None for a value it cannot route.
 pub fn handler<A: 'static, M: 'static>(
     context: &Context,

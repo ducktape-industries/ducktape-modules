@@ -121,7 +121,7 @@ mod tests {
                 interactivity: Interactivity::default(),
                 children: (0..count)
                     .map(|id| Node::Qr {
-                        key: id.to_string(),
+                        id: ElementIdWire::Integer(id as u64),
                         style: Default::default(),
                         code: Qr {
                             payload: Some(payload.clone()),

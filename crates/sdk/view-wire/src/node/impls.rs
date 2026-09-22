@@ -48,17 +48,17 @@ impl Node {
             | Self::Slider { id, .. }
             | Self::PickList { id, .. }
             | Self::ComboBox { id, .. }
-            | Self::Surface { id, .. } => id.name(),
-            Self::Float { key, .. }
-            | Self::Lazy { key, .. }
-            | Self::When { key, .. }
-            | Self::Qr { key, .. }
-            | Self::Button { key, .. }
-            | Self::Rule { key, .. }
-            | Self::Toggle { key, .. }
-            | Self::Radio { key, .. }
-            | Self::Progress { key, .. }
-            | Self::Tooltip { key, .. } => Some(key),
+            | Self::Surface { id, .. }
+            | Self::Float { id, .. }
+            | Self::Lazy { id, .. }
+            | Self::When { id, .. }
+            | Self::Qr { id, .. }
+            | Self::Button { id, .. }
+            | Self::Rule { id, .. }
+            | Self::Toggle { id, .. }
+            | Self::Radio { id, .. }
+            | Self::Progress { id, .. }
+            | Self::Tooltip { id, .. } => id.name(),
             Self::List { .. }
             | Self::Space { .. }
             | Self::Anchored { .. }
@@ -88,17 +88,17 @@ impl Node {
             | Self::Slider { id, .. }
             | Self::PickList { id, .. }
             | Self::ComboBox { id, .. }
-            | Self::Surface { id, .. } => Some(IdentityKeyRef::Element(id)),
-            Self::Float { key, .. }
-            | Self::Lazy { key, .. }
-            | Self::When { key, .. }
-            | Self::Qr { key, .. }
-            | Self::Button { key, .. }
-            | Self::Rule { key, .. }
-            | Self::Toggle { key, .. }
-            | Self::Radio { key, .. }
-            | Self::Progress { key, .. }
-            | Self::Tooltip { key, .. } => Some(IdentityKeyRef::Legacy(key)),
+            | Self::Surface { id, .. }
+            | Self::Float { id, .. }
+            | Self::Lazy { id, .. }
+            | Self::When { id, .. }
+            | Self::Qr { id, .. }
+            | Self::Button { id, .. }
+            | Self::Rule { id, .. }
+            | Self::Toggle { id, .. }
+            | Self::Radio { id, .. }
+            | Self::Progress { id, .. }
+            | Self::Tooltip { id, .. } => Some(IdentityKeyRef::Element(id)),
             Self::List { .. }
             | Self::Space { .. }
             | Self::Anchored { .. }

@@ -55,9 +55,9 @@ pub(crate) const MAX_TEXT_PIXELS: f32 = 512.0;
 /// strings past [`MAX_STRING_BYTES`], shaped text past
 /// [`MAX_TEXT_BYTES_PER_FRAME`] in total, picture bytes past
 /// [`MAX_PICTURE_BYTES_PER_FRAME`] in total, text sizes to [`MAX_TEXT_PIXELS`],
-/// every other size, colour and spacing clamped to a finite range, and a key
-/// used twice moved off the one already taken. A frame from a well-behaved
-/// guest passes through unchanged.
+/// every other size, colour and spacing clamped to a finite range, and typed
+/// identity collisions refused. A frame from a well-behaved guest passes
+/// through unchanged.
 ///
 /// A frame that arrived as bytes has passed [`decode`] first, which refuses
 /// one nested deeper than this walk goes. A frame that carries `patches`
@@ -239,17 +239,9 @@ fn sanitize_tree_with(
     budgets: &mut Budgets,
 ) -> Result<SanitizeReport, &'static str> {
     let (documents, before) = text_amounts(root)?;
-    let mut taken = Taken::new();
     let mut identity_scopes = vec![std::collections::HashSet::new()];
     let mut authored_path = Vec::new();
-    sanitize_node(
-        root,
-        0,
-        budgets,
-        &mut taken,
-        &mut identity_scopes,
-        &mut authored_path,
-    )?;
+    sanitize_node(root, 0, budgets, &mut identity_scopes, &mut authored_path)?;
 
     let (after_documents, after) = text_amounts(root)?;
     if after_documents != documents {
@@ -259,13 +251,6 @@ fn sanitize_tree_with(
         display_text_truncated: after < before,
     })
 }
-
-/// Every key claimed in one tree, each with the suffix its next duplicate
-/// will try. Remembering the suffix is what keeps a tree of one key linear:
-/// searching upward from `#2` on every duplicate walks past every earlier
-/// one, and a screen of eight thousand nodes sharing a key — the guest's to
-/// send — took nine seconds of the window thread that way.
-type Taken = std::collections::HashMap<String, usize>;
 
 /// Typed IDs are unique among the children of the first containing element
 /// with an ID. An id-less wrapper is transparent to that GPUI scope; an
@@ -290,28 +275,6 @@ fn finish_typed_scope(scopes: &mut IdentityScopes, started: bool) {
     if started {
         scopes.pop();
     }
-}
-
-/// A key already used in this tree, made unique. A key is the node's
-/// identity — its widget state, its focus target, its accessibility id, and
-/// the [`Node::Input`] whose text the host owns — so two nodes sharing one
-/// share all of that: typing in either edits both. The tree the guest sent
-/// is kept, with the later node moved off the taken key.
-fn claim(key: &mut String, taken: &mut Taken) {
-    truncate_string(key);
-    let Some(mut nth) = taken.get(key.as_str()).copied() else {
-        taken.insert(key.clone(), 2);
-        return;
-    };
-    // The guest may itself have sent `key#2`: a suffix already taken is
-    // skipped, and the count moves past it for good.
-    let mut unique = format!("{key}#{nth}");
-    while taken.contains_key(unique.as_str()) {
-        nth += 1;
-        unique = format!("{key}#{nth}");
-    }
-    taken.insert(std::mem::replace(key, unique.clone()), nth + 1);
-    taken.insert(unique, 2);
 }
 
 /// What is left of a frame's per-frame budgets while its tree is walked.

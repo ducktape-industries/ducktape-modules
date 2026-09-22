@@ -133,7 +133,7 @@ pub(super) fn gen_button_label(rng: &mut Rng) -> Node {
         selected: rng.next_bool().then(|| rng.next_bool()),
         role: gen_opt_role(rng),
         description: rng.next_bool().then(|| gen_string(rng)),
-        key: gen_key(rng),
+        id: ElementIdWire::Name(gen_key(rng).into()),
         content: ButtonContent::Label(gen_string(rng)),
         label: rng.next_bool().then(|| gen_string(rng)),
         on_press: rng.next_bool().then(|| rng.next_u64() as u32),
@@ -202,7 +202,7 @@ pub(super) fn gen_editor(rng: &mut Rng) -> Node {
 
 pub(super) fn gen_rule(rng: &mut Rng) -> Node {
     Node::Rule {
-        key: gen_key(rng),
+        id: ElementIdWire::Name(gen_key(rng).into()),
         axis: gen_axis(rng),
         style: gen_native_style(rng),
     }
@@ -333,7 +333,7 @@ pub(super) fn gen_svg(rng: &mut Rng) -> Node {
 
 pub(super) fn gen_toggle(rng: &mut Rng) -> Node {
     Node::Toggle {
-        key: gen_key(rng),
+        id: ElementIdWire::Name(gen_key(rng).into()),
         kind: *rng.choose(&[ToggleKind::Checkbox, ToggleKind::Switch]),
         label: gen_string(rng),
         checked: rng.next_bool(),
@@ -344,7 +344,7 @@ pub(super) fn gen_toggle(rng: &mut Rng) -> Node {
 
 pub(super) fn gen_radio(rng: &mut Rng) -> Node {
     Node::Radio {
-        key: gen_key(rng),
+        id: ElementIdWire::Name(gen_key(rng).into()),
         label: gen_string(rng),
         selected: rng.next_bool(),
         on_select: rng.next_u64() as u32,
@@ -390,7 +390,7 @@ pub(super) fn gen_pick_list(rng: &mut Rng) -> Node {
 
 pub(super) fn gen_progress(rng: &mut Rng) -> Node {
     Node::Progress {
-        key: gen_key(rng),
+        id: ElementIdWire::Name(gen_key(rng).into()),
         value: gen_f32(rng),
         min: gen_f32(rng),
         max: gen_f32(rng),

@@ -21,7 +21,7 @@ fn gen_tree(rng: &mut Rng, depth: usize, width: usize) -> Node {
                 style: gpui::StyleRefinement::default(),
             },
             6 => Node::Tooltip {
-                key: gen_key(rng),
+                id: ElementIdWire::Name(gen_key(rng).into()),
                 position: TooltipPosition::Bottom,
                 delay_ms: rng.next_u64(),
                 snap: rng.next_bool(),
@@ -88,7 +88,7 @@ fn gen_tree(rng: &mut Rng, depth: usize, width: usize) -> Node {
                 selected: rng.next_bool().then(|| rng.next_bool()),
                 role: gen_opt_role(rng),
                 description: rng.next_bool().then(|| gen_string(rng)),
-                key: gen_key(rng),
+                id: ElementIdWire::Name(gen_key(rng).into()),
                 content: ButtonContent::Child(Box::new(node)),
                 label: rng.next_bool().then(|| gen_string(rng)),
                 on_press: rng.next_bool().then(|| rng.next_u64() as u32),
@@ -267,15 +267,9 @@ pub(super) fn gen_patch(rng: &mut Rng, root: &Node, hostile: bool) -> Patch {
 pub(super) fn gen_frame(rng: &mut Rng, i: usize) -> Frame {
     let (depth, width) = if i == 0 {
         // Exactly one tree per run goes just over each door, not far over
-        // it, and only once: `sanitize`'s key-collision renaming (`claim`
-        // in lib.rs) costs quadratic time in how many nodes share one base
-        // key once uniquing runs out of room, this file's key pool is
-        // deliberately tiny (collisions are the point), and `sanitize`
-        // stops at MAX_NODES regardless of how much wider the input tree
-        // claims to be — so paying that quadratic cost even once per
-        // saturating tree is unavoidable, and paying it many times over
-        // (the previous `3 * MAX_NODES`, every 25th tree) is just wasted
-        // wall clock, not more coverage.
+        // it, and only once. `sanitize` stops at MAX_NODES regardless of
+        // how much wider the input tree claims to be, so repeating the
+        // saturating case only wastes wall clock without adding coverage.
         (MAX_DEPTH + 8, MAX_NODES + 300)
     } else {
         // A cap and an exponent chosen so this branch, which runs for

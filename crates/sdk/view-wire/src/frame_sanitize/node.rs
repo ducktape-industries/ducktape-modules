@@ -4,7 +4,6 @@ pub(super) fn sanitize_node(
     node: &mut Node,
     depth: usize,
     budgets: &mut Budgets,
-    taken: &mut Taken,
     identity_scopes: &mut IdentityScopes,
     authored_path: &mut Vec<ElementIdWire>,
 ) -> Result<(), &'static str> {
@@ -38,7 +37,6 @@ pub(super) fn sanitize_node(
                     content,
                     depth + 1,
                     budgets,
-                    taken,
                     &mut vec![std::collections::HashSet::new()],
                     &mut Vec::new(),
                 )?;
@@ -170,29 +168,29 @@ pub(super) fn sanitize_node(
             style_sanitize::sanitize(style);
         }
         Node::Responsive { id, .. } => id.validate_host()?,
-        Node::Lazy { key, .. } => claim(key, taken),
+        Node::Lazy { id, .. } => id.validate_host()?,
         Node::Float {
-            key,
+            id,
             x,
             y,
             scale,
             style,
             ..
         } => {
-            claim(key, taken);
+            id.validate_host()?;
             *x = finite(*x).clamp(-MAX_PIXELS, MAX_PIXELS);
             *y = finite(*y).clamp(-MAX_PIXELS, MAX_PIXELS);
             *scale = finite(*scale).clamp(f32::EPSILON, MAX_PIXELS);
             style_sanitize::sanitize(style);
         }
         Node::Tooltip {
-            key,
+            id,
             delay_ms,
             style,
             children,
             ..
         } => {
-            claim(key, taken);
+            id.validate_host()?;
             style_sanitize::sanitize(style);
             *delay_ms = (*delay_ms).min(60_000);
             children.truncate(2);
@@ -234,8 +232,8 @@ pub(super) fn sanitize_node(
             }
         }
         Node::Deferred { priority, .. } => *priority = (*priority).min(16),
-        Node::When { key, condition, .. } => {
-            claim(key, taken);
+        Node::When { id, condition, .. } => {
+            id.validate_host()?;
             condition.sanitize();
         }
         Node::Scroll {
@@ -253,8 +251,8 @@ pub(super) fn sanitize_node(
             }
             style_sanitize::sanitize(style);
         }
-        Node::Qr { key, code, style } => {
-            claim(key, taken);
+        Node::Qr { id, code, style } => {
+            id.validate_host()?;
             code.sanitize(budgets);
             style_sanitize::sanitize(style);
         }
@@ -403,14 +401,14 @@ pub(super) fn sanitize_node(
             }
         }
         Node::Button {
-            key,
+            id,
             content,
             label,
             description,
             style,
             ..
         } => {
-            claim(key, taken);
+            id.validate_host()?;
             if let ButtonContent::Label(label) = content {
                 spend_text(label, budgets);
             }
@@ -423,21 +421,21 @@ pub(super) fn sanitize_node(
             style_sanitize::sanitize(style);
         }
         Node::Space { style } => style_sanitize::sanitize(style),
-        Node::Rule { key, style, .. } => {
-            claim(key, taken);
+        Node::Rule { id, style, .. } => {
+            id.validate_host()?;
             style_sanitize::sanitize(style);
         }
         Node::Toggle {
-            key, label, style, ..
+            id, label, style, ..
         } => {
-            claim(key, taken);
+            id.validate_host()?;
             spend_text(label, budgets);
             style_sanitize::sanitize(style);
         }
         Node::Radio {
-            key, label, style, ..
+            id, label, style, ..
         } => {
-            claim(key, taken);
+            id.validate_host()?;
             spend_text(label, budgets);
             style_sanitize::sanitize(style);
         }
@@ -515,14 +513,14 @@ pub(super) fn sanitize_node(
             }
         }
         Node::Progress {
-            key,
+            id,
             value,
             min,
             max,
             style,
             ..
         } => {
-            claim(key, taken);
+            id.validate_host()?;
             for number in [value, min, max] {
                 *number = finite(*number);
             }
@@ -571,14 +569,7 @@ pub(super) fn sanitize_node(
             if budgets.nodes == 0 {
                 break;
             }
-            sanitize_node(
-                child,
-                depth + 1,
-                budgets,
-                taken,
-                identity_scopes,
-                authored_path,
-            )?;
+            sanitize_node(child, depth + 1, budgets, identity_scopes, authored_path)?;
             kept += 1;
         }
         children.truncate(kept);
@@ -606,14 +597,7 @@ pub(super) fn sanitize_node(
             *child = Node::empty();
             continue;
         }
-        sanitize_node(
-            child,
-            depth + 1,
-            budgets,
-            taken,
-            identity_scopes,
-            authored_path,
-        )?;
+        sanitize_node(child, depth + 1, budgets, identity_scopes, authored_path)?;
     }
     finish_typed_scope(identity_scopes, typed_scope_started);
     if typed_scope_started {

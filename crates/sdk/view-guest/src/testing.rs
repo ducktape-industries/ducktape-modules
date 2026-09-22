@@ -201,12 +201,9 @@ fn button<'a>(frame: &'a Frame, name: &str) -> Option<&'a Node> {
                 || labels.iter().any(|label| label == name)
         }
         Node::Button {
-            key,
-            content,
-            label,
-            ..
+            id, content, label, ..
         } => {
-            key == name
+            id.name() == Some(name)
                 || label.as_deref() == Some(name)
                 || matches!(content, ButtonContent::Label(label) if label == name)
         }
@@ -326,8 +323,8 @@ pub(crate) fn submit(frame: &Frame, name: &str) -> Vec<Event> {
 fn control<'a>(frame: &'a Frame, name: &str) -> Option<&'a Node> {
     let root = frame.root.as_ref()?;
     find_by(root, &|node| match node {
-        Node::Toggle { key, label, .. } | Node::Radio { key, label, .. } => {
-            key == name || label == name
+        Node::Toggle { id, label, .. } | Node::Radio { id, label, .. } => {
+            id.name() == Some(name) || label == name
         }
         Node::Slider { id, .. } | Node::PickList { id, .. } | Node::ComboBox { id, .. } => {
             id.name() == Some(name)

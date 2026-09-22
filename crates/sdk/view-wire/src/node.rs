@@ -93,16 +93,14 @@ pub struct SvgTransformation {
     pub rotate: f32,
 }
 
-/// One widget. `key` is the node's identity across frames — the
-/// accessibility path the compiler already computes (`App/content/count`)
-/// — which the host uses for widget state (focus, caret, scroll) and for
-/// the accessibility tree.
+/// One widget. Retained elements carry their native typed identity across
+/// frames for host state, focus, and accessibility ancestry.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)]
 pub enum Node {
     /// A payload encoded and painted by the host.
     Qr {
-        key: String,
+        id: ElementIdWire,
         code: Qr,
         style: gpui::StyleRefinement,
     },
@@ -129,7 +127,7 @@ pub enum Node {
     },
     /// Floating content the host offsets from its own origin.
     Float {
-        key: String,
+        id: ElementIdWire,
         x: f32,
         y: f32,
         scale: f32,
@@ -228,7 +226,7 @@ pub enum Node {
         content: Box<Node>,
     },
     Tooltip {
-        key: String,
+        id: ElementIdWire,
         position: TooltipPosition,
         delay_ms: u64,
         snap: bool,
@@ -246,7 +244,7 @@ pub enum Node {
     /// A guest-memoized subtree. Generation changes whenever cached content or
     /// its callable routes are rebuilt, including a rebuild after eviction.
     Lazy {
-        key: String,
+        id: ElementIdWire,
         generation: u64,
         #[serde(deserialize_with = "decode_child")]
         content: Box<Node>,
@@ -259,7 +257,7 @@ pub enum Node {
     },
     /// Splices selected children into the surrounding layout. It adds no box.
     When {
-        key: String,
+        id: ElementIdWire,
         condition: ContainerQuery,
         #[serde(deserialize_with = "decode_children")]
         children: Vec<Node>,
@@ -376,7 +374,7 @@ pub enum Node {
         editable: bool,
     },
     Button {
-        key: String,
+        id: ElementIdWire,
         content: ButtonContent,
         /// The accessible name of a button whose content is not a plain
         /// label.
@@ -395,13 +393,13 @@ pub enum Node {
         style: gpui::StyleRefinement,
     },
     Rule {
-        key: String,
+        id: ElementIdWire,
         axis: Axis,
         style: gpui::StyleRefinement,
     },
     /// A checkbox or a toggler: a labelled bool.
     Toggle {
-        key: String,
+        id: ElementIdWire,
         kind: ToggleKind,
         label: String,
         checked: bool,
@@ -412,7 +410,7 @@ pub enum Node {
     /// One radio button. Its value is the guest's business: selecting it
     /// sends the message the guest queued for it.
     Radio {
-        key: String,
+        id: ElementIdWire,
         label: String,
         selected: bool,
         on_select: u32,
@@ -458,7 +456,7 @@ pub enum Node {
         style: gpui::StyleRefinement,
     },
     Progress {
-        key: String,
+        id: ElementIdWire,
         value: f32,
         min: f32,
         max: f32,

@@ -19,10 +19,6 @@ const MAX_DECODED_NODES: usize = 16 * MAX_NODES;
 /// Mirrors the wire's private `MAX_PIXELS`: every non-text size sanitize
 /// keeps is clamped to this range.
 const PIXEL_BOUND: f32 = 8192.0;
-/// Mirrors the wire's private `MAX_TEXT_PIXELS`: a text size is clamped
-/// tighter than any other length, since it drives glyph rasterization.
-const TEXT_PIXEL_BOUND: f32 = 512.0;
-
 mod hostile {
     use super::*;
 

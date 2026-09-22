@@ -75,13 +75,6 @@ pub(super) fn check_bounds(
         "{ctx}: a node sits at depth {depth}, over MAX_DEPTH"
     );
     match node.identity() {
-        Some(IdentityKeyRef::Legacy(key)) => {
-            check_string(key, ctx, "key");
-            assert!(
-                keys.insert(key.to_string()),
-                "{ctx}: legacy key aliases another node"
-            );
-        }
         Some(IdentityKeyRef::Element(id)) => {
             id.validate_host()
                 .expect("sanitized typed identity is portable and bounded");

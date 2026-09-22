@@ -139,11 +139,15 @@ mod protocol;
 pub use protocol::*;
 
 mod frame_sanitize;
+#[cfg(test)]
+pub(crate) use frame_sanitize::text_amounts;
 pub use frame_sanitize::*;
-pub(crate) use frame_sanitize::{bound_optional, bounded, finite, text_amounts};
+pub(crate) use frame_sanitize::{bound_optional, bounded, finite};
 
 mod codec;
-pub(crate) use codec::{MAX_DECODED_NODES, budget, decode_child, decode_children};
+#[cfg(test)]
+pub(crate) use codec::MAX_DECODED_NODES;
+pub(crate) use codec::{budget, decode_child, decode_children};
 pub use codec::{decode, encode, encoded_size};
 
 #[cfg(test)]

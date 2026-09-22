@@ -94,7 +94,7 @@ fn button(content: ButtonContent) -> Node {
         selected: None,
         role: None,
         description: None,
-        key: "App/b".into(),
+        id: ElementIdWire::Name("App/b".into()),
         content,
         label: None,
         on_press: Some(1),
@@ -133,7 +133,7 @@ fn deep_chain_bytes(depth: usize) -> Vec<u8> {
             let mut node = Node::empty();
             for _ in 0..depth {
                 node = Node::Lazy {
-                    key: String::new(),
+                    id: ElementIdWire::Integer(0),
                     generation: 0,
                     content: Box::new(node),
                 };
