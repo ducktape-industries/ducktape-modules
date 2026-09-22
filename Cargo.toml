@@ -28,6 +28,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/tools/view-pack",
     "crates/sdk/abi",
     "crates/sdk/guest",
     "crates/sdk/ducklink",

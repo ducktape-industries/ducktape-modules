@@ -4312,6 +4312,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "view-pack"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+ "view-wire",
+ "wasm-encoder 0.251.0",
+ "wasmparser 0.251.0",
+]
+
+[[package]]
 name = "view-wire"
 version = "0.1.0"
 dependencies = [
