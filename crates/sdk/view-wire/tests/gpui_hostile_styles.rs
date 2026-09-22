@@ -175,6 +175,16 @@ fn node(random: &mut Random) -> Node {
         },
         children: vec![Node::Text {
             id: None, style: random.style(), content: "kept".into(), heading: None, live: None,
+        }, Node::Editor {
+            id: view_wire::ElementIdWire::Integer(7),
+            style: random.style(),
+            options: Box::default(),
+            placeholder: "Write".into(), label: Some("Editor".into()),
+            document: view_wire::editor_document::EditorDocumentRef {
+                document: "hostile-style-document".into(), reset: 0,
+                text_revision: 0, revision: 0, cursor: Default::default(), byte_len: 0,
+            },
+            on_document: 0, editable: true,
         }],
     }
 }
@@ -187,6 +197,10 @@ fn check(node: &Node) {
     let Node::Text { style, content, .. } = &children[0] else { panic!("text") };
     assert_eq!(content, "kept");
     bounded(style);
+    let Node::Editor { style, document, .. } = &children[1] else { panic!("editor") };
+    bounded(style);
+    assert_eq!(document.document, "hostile-style-document");
+    assert!(document.validate().is_ok());
 }
 
 #[test]
