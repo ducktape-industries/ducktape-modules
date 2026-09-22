@@ -350,6 +350,31 @@ mod tests {
         assert_eq!(style, once);
     }
     #[test]
+    fn bounds_font_lookup_lists_and_custom_ellipsis_at_utf8_boundaries() {
+        let mut style = StyleRefinement::default().font_family("λ".repeat(200));
+        style.text.font_fallbacks =
+            Some(gpui::FontFallbacks::from_fonts(vec!["λ".repeat(200); 30]));
+        style.text.font_features = Some(gpui::FontFeatures(std::sync::Arc::new(vec![
+            (
+                "liga".into(),
+                1
+            );
+            100
+        ])));
+        style.text.text_overflow = Some(gpui::TextOverflow::Truncate("λ".repeat(100).into()));
+        sanitize(&mut style);
+        assert_eq!(style.text.font_family.unwrap().len(), 256);
+        let fonts = style.text.font_fallbacks.unwrap();
+        assert_eq!(fonts.fallback_list().len(), 16);
+        assert!(fonts.fallback_list().iter().all(|name| name.len() == 256));
+        assert_eq!(style.text.font_features.unwrap().tag_value_list().len(), 64);
+        assert_eq!(
+            style.text.text_overflow,
+            Some(gpui::TextOverflow::Truncate("λ".repeat(16).into()))
+        );
+    }
+
+    #[test]
     fn opaque_pattern_inputs_are_rejected_but_solid_colors_survive() {
         let mut style = StyleRefinement::default().bg(gpui::linear_gradient(
             0.,
