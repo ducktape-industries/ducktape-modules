@@ -1449,6 +1449,27 @@ fn check_bounds(
                 check_bounds(child, depth + 1, keys, svg_bytes, ctx);
             }
         }
+        Node::UniformList {
+            id,
+            path,
+            count,
+            measure_index,
+            indices,
+            children,
+            ..
+        } => {
+            id.validate_host().expect("sanitized list identity");
+            assert!(!path.is_empty() && path.len() <= 64);
+            assert_eq!(path.last(), Some(id));
+            assert!(*count <= view_wire::MAX_UNIFORM_LIST_COUNT);
+            assert!(*measure_index <= count.saturating_sub(1));
+            assert_eq!(indices.len(), children.len());
+            assert!(indices.len() <= view_wire::MAX_UNIFORM_LIST_ROWS);
+            assert!(indices.iter().all(|index| (*index as usize) < *count));
+            for child in children {
+                check_bounds(child, depth + 1, keys, svg_bytes, ctx);
+            }
+        }
         Node::Grid {
             fluid,
             spacing,

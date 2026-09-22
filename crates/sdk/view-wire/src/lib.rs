@@ -898,7 +898,8 @@ fn sanitize_tree(root: &mut Node) -> Result<SanitizeReport, &'static str> {
     let mut budgets = Budgets::frame();
     let mut taken = Taken::new();
     let mut identity_scopes = vec![std::collections::HashSet::new()];
-    sanitize_node(root, 0, &mut budgets, &mut taken, &mut identity_scopes)?;
+    let mut authored_path = Vec::new();
+    sanitize_node(root, 0, &mut budgets, &mut taken, &mut identity_scopes, &mut authored_path)?;
     let (after_documents, after) = text_amounts(root)?;
     if after_documents != documents {
         return Err("frame budget would remove an editor document projection");
@@ -1008,6 +1009,7 @@ fn sanitize_node(
     budgets: &mut Budgets,
     taken: &mut Taken,
     identity_scopes: &mut IdentityScopes,
+    authored_path: &mut Vec<ElementIdWire>,
 ) -> Result<(), &'static str> {
     // The caller guarantees one node of budget; a node too deep spends it
     // on the empty node that stands in for it.
@@ -1016,7 +1018,14 @@ fn sanitize_node(
         *node = Node::empty();
         return Ok(());
     }
+    let typed_id = match node.identity() {
+        Some(IdentityKeyRef::Element(id)) => Some(id.clone()),
+        _ => None,
+    };
     let typed_scope_started = claim_typed_scope(node, identity_scopes)?;
+    if let Some(id) = typed_id {
+        authored_path.push(id);
+    }
     match node {
         Node::Container {
             id,
@@ -1117,7 +1126,11 @@ fn sanitize_node(
         } => {
             style_sanitize::sanitize(style);
             id.validate_host()?;
-            if path.is_empty() || path.len() > 64 || path.last() != Some(id) {
+            if path.is_empty()
+                || path.len() > 64
+                || path.last() != Some(id)
+                || path != authored_path
+            {
                 return Err("uniform-list authored path is invalid");
             }
             for ancestor in path.iter() {
@@ -1712,7 +1725,7 @@ fn sanitize_node(
             if budgets.nodes == 0 {
                 break;
             }
-            sanitize_node(child, depth + 1, budgets, taken, identity_scopes)?;
+            sanitize_node(child, depth + 1, budgets, taken, identity_scopes, authored_path)?;
             kept += 1;
         }
         children.truncate(kept);
@@ -1723,6 +1736,9 @@ fn sanitize_node(
             keys.truncate(kept);
         }
         finish_typed_scope(identity_scopes, typed_scope_started);
+        if typed_scope_started {
+            authored_path.pop();
+        }
         return Ok(());
     }
     for child in node.children_mut() {
@@ -1730,9 +1746,12 @@ fn sanitize_node(
             *child = Node::empty();
             continue;
         }
-        sanitize_node(child, depth + 1, budgets, taken, identity_scopes)?;
+        sanitize_node(child, depth + 1, budgets, taken, identity_scopes, authored_path)?;
     }
     finish_typed_scope(identity_scopes, typed_scope_started);
+    if typed_scope_started {
+        authored_path.pop();
+    }
     Ok(())
 }
 
@@ -2462,6 +2481,24 @@ mod tests {
         };
         *id = Some(ElementIdWire::Name(key.into()));
         node
+    }
+
+    fn uniform(path: Vec<ElementIdWire>) -> Node {
+        Node::UniformList {
+            id: ElementIdWire::Name("list".into()),
+            path,
+            route: 1,
+            style: gpui::StyleRefinement::default(),
+            interactivity: Interactivity::default(),
+            count: 1,
+            measure_index: 0,
+            sizing: list::UniformListSizing::Auto,
+            horizontal_sizing: list::UniformListHorizontalSizing::FitList,
+            y_flipped: false,
+            scroll_request: None,
+            indices: vec![0],
+            children: vec![text("row")],
+        }
     }
 
     /// `diff` then `apply` is the identity on the new tree, and the patches
@@ -3235,6 +3272,31 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(error, "duplicate typed element identity among siblings");
+    }
+
+    #[test]
+    fn uniform_list_path_must_match_its_typed_tree_ancestry() {
+        let parent = ElementIdWire::Integer(7);
+        let list = ElementIdWire::Name("list".into());
+        let mut valid = Frame {
+            root: Some(Node::Container {
+                id: Some(parent.clone()),
+                style: gpui::StyleRefinement::default(),
+                interactivity: Interactivity::default(),
+                children: vec![uniform(vec![parent.clone(), list.clone()])],
+            }),
+            ..Default::default()
+        };
+        sanitize(&mut valid).unwrap();
+
+        let Node::Container { children, .. } = valid.root.as_mut().unwrap() else {
+            unreachable!()
+        };
+        let Node::UniformList { path, .. } = &mut children[0] else {
+            unreachable!()
+        };
+        *path = vec![ElementIdWire::Name("forged-parent".into()), list];
+        assert_eq!(sanitize(&mut valid).unwrap_err(), "uniform-list authored path is invalid");
     }
 
     /// A hostile screen cannot cause quadratic identity repair or alias state.
