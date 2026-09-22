@@ -446,7 +446,7 @@ fn notifying_during_render_requests_another_frame() {
                 self.0 = true;
                 cx.notify();
             }
-            wire::Node::empty()
+            div()
         }
     }
     let mut driver = Driver::<Again>::new();

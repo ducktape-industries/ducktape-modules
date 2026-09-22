@@ -1,7 +1,9 @@
 //! Widget commands use the mounted host's scoped request channel.
 #[cfg(test)]
 mod tests {
-    use crate::{Context, Driver, Host, Render, View, Window, host, wire};
+    use crate::{
+        Context, Driver, Host, InteractiveElement, Render, View, Window, host, wire,
+    };
     use serde::{Deserialize, Serialize};
 
     async fn perform(host: Host, command: wire::WidgetCommand) -> Result<Vec<u8>, host::Refusal> {
@@ -43,7 +45,7 @@ mod tests {
     }
     impl Render for WidgetView {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl crate::IntoElement {
-            wire::Node::empty()
+            crate::div().id("draft")
         }
     }
 

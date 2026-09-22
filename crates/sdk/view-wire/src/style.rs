@@ -331,4 +331,3 @@ pub struct GroupRefinement {
     pub group: SharedString,
     pub style: StyleRefinement,
 }
-

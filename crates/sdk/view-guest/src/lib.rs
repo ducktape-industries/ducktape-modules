@@ -35,12 +35,14 @@ pub mod prelude {
 mod editor;
 mod editor_binding;
 mod editor_documents;
+mod editor_element;
 pub use editor::Editor;
 pub use editor_binding::{
     EditorBinding, EditorInteractionRequest, EditorKeyRequest, EditorRichRequest, EditorStateView,
     EditorTransaction, EditorTransactionEvent,
 };
 pub use editor_documents::EditorDocumentUpdate;
+pub use editor_element::{EditorElement, EditorElementEvent};
 pub mod caps;
 pub mod composer;
 pub mod host;

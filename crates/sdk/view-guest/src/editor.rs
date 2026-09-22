@@ -1,8 +1,9 @@
 //! Plain document state; the host retains its native editor between observations.
 use crate::wire;
+use std::rc::Rc;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Editor(wire::EditorState, u64);
+pub struct Editor(Rc<wire::EditorState>, u64);
 impl Editor {
     pub fn new(text: impl Into<String>) -> Self {
         let mut state = wire::EditorState {
@@ -14,7 +15,7 @@ impl Editor {
             "editor document exceeds text limit"
         );
         state.cursor.clamp(&state.text);
-        Self(state, 0)
+        Self(Rc::new(state), 0)
     }
     pub fn text(&self) -> String {
         self.0.text.clone()
@@ -61,14 +62,15 @@ impl Editor {
     }
     /// An authoritative assignment, including an identical-text document replacement.
     pub fn replace(&mut self, mut next: Self, previous_reset: u64) {
-        next.0.reset = previous_reset
+        Rc::make_mut(&mut next.0).reset = previous_reset
             .checked_add(1)
             .expect("editor reset revisions exhausted");
         assert!(
             next.0.text.len() <= wire::editor_document::MAX_EDITOR_DOCUMENT_BYTES,
             "editor document exceeds text limit"
         );
-        next.0.cursor.clamp(&next.0.text);
+        let state = Rc::make_mut(&mut next.0);
+        state.cursor.clamp(&state.text);
         next.1 = 0;
         *self = next;
     }
@@ -85,7 +87,7 @@ impl Editor {
                     .checked_add(1)
                     .expect("editor text revisions exhausted");
             }
-            self.0 = state;
+            self.0 = Rc::new(state);
         }
     }
     pub(crate) fn install_mirror(
@@ -100,9 +102,10 @@ impl Editor {
         {
             return false;
         }
-        self.0.text = text;
-        self.0.cursor = target.cursor;
-        self.0.revision = target.revision;
+        let state = Rc::make_mut(&mut self.0);
+        state.text = text;
+        state.cursor = target.cursor;
+        state.revision = target.revision;
         self.1 = target.text_revision;
         true
     }
@@ -125,8 +128,9 @@ impl Editor {
             {
                 return None;
             }
-            self.0.cursor = after.cursor;
-            self.0.revision = after.revision;
+            let state = Rc::make_mut(&mut self.0);
+            state.cursor = after.cursor;
+            state.revision = after.revision;
             return Some(None);
         }
         let text =
@@ -138,24 +142,25 @@ impl Editor {
         if after.text_revision != expected || after.validate_text(&text).is_err() {
             return None;
         }
-        let old = std::mem::replace(&mut self.0.text, text);
-        self.0.cursor = after.cursor;
-        self.0.revision = after.revision;
+        let state = Rc::make_mut(&mut self.0);
+        let old = std::mem::replace(&mut state.text, text);
+        state.cursor = after.cursor;
+        state.revision = after.revision;
         self.1 = after.text_revision;
         Some(Some(old))
     }
     pub fn move_to(&mut self, mut cursor: wire::EditorCursor) {
         cursor.clamp(&self.0.text);
-        self.0.cursor = cursor;
-        self.0.reset = self
-            .0
+        let state = Rc::make_mut(&mut self.0);
+        state.cursor = cursor;
+        state.reset = state
             .reset
             .checked_add(1)
             .expect("editor reset revisions exhausted");
         self.1 = 0;
     }
     pub fn snapshot(&self) -> Vec<u8> {
-        wire::encode(&(&self.0, self.1))
+        wire::encode(&(&*self.0, self.1))
     }
     pub fn restore(bytes: &[u8]) -> Option<Self> {
         let (state, text_revision): (wire::EditorState, u64) = wire::decode(bytes).ok()?;
@@ -164,13 +169,31 @@ impl Editor {
         }
         let mut cursor = state.cursor;
         cursor.clamp(&state.text);
-        (cursor == state.cursor).then_some(Self(state, text_revision))
+        (cursor == state.cursor).then_some(Self(Rc::new(state), text_revision))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frame_snapshot_shares_immutable_text_and_detaches_before_mutation() {
+        let mut editor = Editor::new("before");
+        let frame = editor.clone();
+        assert!(Rc::ptr_eq(&editor.0, &frame.0));
+
+        editor.accept(wire::EditorState {
+            text: "after".into(),
+            revision: 1,
+            ..Default::default()
+        });
+
+        assert_eq!(frame.text_ref(), "before");
+        assert_eq!(editor.text_ref(), "after");
+        assert!(!Rc::ptr_eq(&editor.0, &frame.0));
+    }
+
     #[test]
     fn document_references_separate_text_revisions_from_caret_observations() {
         let mut editor = Editor::new("a");

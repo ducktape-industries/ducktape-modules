@@ -1,5 +1,5 @@
 //! Guest-local decisions borrow the canonical document owned by application state.
-use crate::{Editor, slots, wire};
+use crate::{slots, wire, Editor};
 use std::rc::Rc;
 
 pub use wire::EditorDecision;
@@ -76,6 +76,7 @@ type Interact = Rc<dyn for<'a> Fn(EditorInteractionRequest<'a>) -> EditorDecisio
 type Rich = Rc<dyn for<'a> Fn(EditorRichRequest<'a>) -> EditorDecision>;
 type Observe<P> = Rc<dyn for<'a> Fn(EditorTransactionEvent<'a>) -> Option<P>>;
 pub struct EditorBinding<P> {
+    authored: bool,
     claims: Vec<wire::EditorKeyClaim>,
     decide: Decide,
     interact: Option<Interact>,
@@ -99,6 +100,7 @@ impl<P: 'static> EditorBinding<P> {
             "editor claim limit"
         );
         Self {
+            authored: true,
             claims,
             decide: Rc::new(decide),
             interact: None,
@@ -120,7 +122,7 @@ impl<P: 'static> EditorBinding<P> {
         self.interact = Some(Rc::new(decide));
         self
     }
-    pub fn register<M: 'static>(
+    pub(crate) fn register<M: 'static>(
         self,
         context: &slots::Context,
         route: impl Fn(P) -> M + 'static,
@@ -167,7 +169,7 @@ impl<P: 'static> EditorBinding<P> {
             }),
         );
         wire::EditorBinding {
-            authored: true,
+            authored: self.authored,
             claims: self.claims,
             on_request,
             on_event,
@@ -175,16 +177,12 @@ impl<P: 'static> EditorBinding<P> {
     }
 }
 impl EditorBinding<()> {
-    pub fn plain<M: 'static>(
-        context: &slots::Context,
-        wrap: impl Fn(EditorTransaction<M>) -> M + 'static,
-    ) -> wire::EditorBinding {
-        let mut binding = EditorBinding::<M>::new(
+    pub fn plain() -> Self {
+        let mut binding = EditorBinding::new(
             Vec::new(),
             |_| EditorDecision::DefaultEditorAction,
             |_| None,
-        )
-        .register(context, std::convert::identity, wrap);
+        );
         binding.authored = false;
         binding
     }
@@ -228,17 +226,17 @@ impl<M: 'static> EditorTransaction<M> {
                 if editor.document_reference(request.id.document.clone()) != request.state {
                     if request.state.reset == editor.reset_revision() {
                         if let Err(reason) = slots::request_editor_mirror(&self.context, &request) {
-                        slots::editor_document_failure(
-                            &self.context,
-                            wire::editor_document::EditorTransferId {
-                                instance: request.id.instance,
-                                document: request.id.document.clone(),
-                                reset: request.id.reset,
-                                serial: request.id.sequence,
-                                attempt: request.id.attempt,
-                            },
-                            reason,
-                        );
+                            slots::editor_document_failure(
+                                &self.context,
+                                wire::editor_document::EditorTransferId {
+                                    instance: request.id.instance,
+                                    document: request.id.document.clone(),
+                                    reset: request.id.reset,
+                                    serial: request.id.sequence,
+                                    attempt: request.id.attempt,
+                                },
+                                reason,
+                            );
                         }
                     }
                     return None;

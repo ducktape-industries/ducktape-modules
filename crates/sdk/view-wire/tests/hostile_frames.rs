@@ -447,29 +447,11 @@ fn gen_editor(rng: &mut Rng) -> Node {
             rich: None,
             presentation: None,
             binding: None,
-            size: gen_opt_f32(rng),
-            padding: gen_opt_f32(rng),
-            line_height: Some(if rng.next_bool() {
-                LineHeight::Relative(gen_f32(rng))
-            } else {
-                LineHeight::Absolute(gen_f32(rng))
-            }),
-            wrapping: Some(Wrapping::Word),
-            font: Some(NamedFont {
-                family: FontFamily::Named(gen_string(rng)),
-                weight: Weight::Normal,
-                stretch: FontStretch::Normal,
-                style: FontStyle::Normal,
-            }),
-            style: gen_input_style(rng),
         }),
-        key: gen_key(rng),
+        id: ElementIdWire::Name(gen_key(rng).into()),
+        style: gpui::StyleRefinement::default(),
         placeholder: gen_string(rng),
         label: rng.next_bool().then(|| gen_string(rng)),
-        width: rng.next_bool().then(|| gen_f32(rng)),
-        height: gen_opt_length(rng),
-        min_height: rng.next_bool().then(|| gen_f32(rng)),
-        max_height: rng.next_bool().then(|| gen_f32(rng)),
     }
 }
 
@@ -2033,38 +2015,14 @@ fn check_bounds(
             }
         }
         Node::Editor {
-            options,
             placeholder,
             label,
             document,
-            width,
-            height,
-            min_height,
-            max_height,
             ..
         } => {
             if let Some(label) = label {
                 check_string(label, ctx, "accessible label");
             }
-            check_pixels(&options.padding, ctx, "editor padding");
-            if let Some(size) = options.size {
-                assert!(size.is_finite() && size > 0.0 && size <= TEXT_PIXEL_BOUND);
-            }
-            if let Some(line_height) = options.line_height {
-                let (value, max) = match line_height {
-                    LineHeight::Relative(v) => (v, PIXEL_BOUND / TEXT_PIXEL_BOUND),
-                    LineHeight::Absolute(v) => (v, PIXEL_BOUND),
-                };
-                assert!(value.is_finite() && value > 0.0 && value <= max);
-            }
-            if let Some(NamedFont {
-                family: FontFamily::Named(name),
-                ..
-            }) = &options.font
-            {
-                check_string(name, ctx, "editor font");
-            }
-            check_input_style(&options.style, ctx);
             check_string(placeholder, ctx, "editor placeholder");
             // A document is metadata: sanitize keeps a valid reference whole,
             // and never spends the display budget on the bytes it names.
@@ -2073,10 +2031,6 @@ fn check_bounds(
                 Ok(()),
                 "{ctx}: sanitize kept an invalid editor document reference"
             );
-            check_length(height, ctx);
-            for value in [width, min_height, max_height] {
-                check_pixels(value, ctx, "editor size");
-            }
         }
     }
 }

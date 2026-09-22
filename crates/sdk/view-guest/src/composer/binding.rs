@@ -3,9 +3,9 @@
 use super::{Draft, MentionChoice};
 use crate::context::Callback;
 use crate::{
-    Context, EditorBinding, EditorDocumentUpdate, EditorKeyRequest, EditorTransaction,
-    EditorTransactionEvent, InteractiveElement, IntoElement, ParentElement,
-    StatefulInteractiveElement, View, Window, div, wire,
+    div, wire, Context, EditorBinding, EditorDocumentUpdate, EditorElement, EditorElementEvent,
+    EditorKeyRequest, EditorTransaction, EditorTransactionEvent, InteractiveElement, IntoElement,
+    ParentElement, StatefulInteractiveElement, View, Window,
 };
 use gpui::Styled;
 use std::rc::Rc;
@@ -159,12 +159,7 @@ pub fn view<V: View + 'static>(
         );
         callback
     });
-    let slots = cx.app.inner.slots.clone();
     let document_key = format!("{key}/editor");
-    let document_effect = effect.clone();
-    let (document, on_document) = draft.editor.document(&slots, document_key, move |update| {
-        document_effect(Event::Document(update))
-    });
     let draft_for_decisions = draft.clone();
     let choices_for_decisions = choices.to_vec();
     let deciding = draft_for_decisions.clone();
@@ -264,29 +259,28 @@ pub fn view<V: View + 'static>(
             _ => wire::EditorDecision::Noop,
         }
     });
-    let committed_effect = effect.clone();
-    let transaction_effect = effect.clone();
-    let binding = binding.register(
-        &slots,
-        move |change| committed_effect(Event::Committed(change)),
-        move |transaction| transaction_effect(Event::Transaction(transaction)),
-    );
-    let editor = wire::Node::Editor {
-        options: Box::new(wire::EditorOptions {
-            binding: Some(Box::new(binding)),
-            ..Default::default()
-        }),
-        key: format!("{key}/editor"),
-        placeholder: hint.to_owned(),
-        label: (!hint.is_empty()).then(|| hint.to_owned()),
-        document,
-        on_document,
-        editable,
-        width: None,
-        height: None,
-        min_height: Some(40.),
-        max_height: Some(200.),
-    };
+    let route_effect = effect;
+    let mut editor = EditorElement::new(
+        document_key.clone(),
+        &draft.editor,
+        document_key,
+        binding,
+        move |event| {
+            route_effect(match event {
+                EditorElementEvent::Document(update) => Event::Document(update),
+                EditorElementEvent::Observed(change) => Event::Committed(change),
+                EditorElementEvent::Transaction(transaction) => Event::Transaction(transaction),
+            })
+        },
+    )
+    .placeholder(hint)
+    .editable(editable)
+    .w_full()
+    .min_h(gpui::px(40.))
+    .max_h(gpui::px(200.));
+    if !hint.is_empty() {
+        editor = editor.label(hint);
+    }
     let mut root = div()
         .id(key.to_owned())
         .flex()

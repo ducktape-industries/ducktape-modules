@@ -40,4 +40,3 @@ pub(crate) fn same_identity(
         _ => false,
     }
 }
-

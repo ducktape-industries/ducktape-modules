@@ -509,12 +509,6 @@ pub struct EditorOptions {
     pub rich: Option<Box<editor_rich::RichPresentation>>,
     pub binding: Option<Box<EditorBinding>>,
     pub presentation: Option<Box<editor_presentation::EditorPresentation>>,
-    pub size: Option<f32>,
-    pub padding: Option<f32>,
-    pub line_height: Option<LineHeight>,
-    pub wrapping: Option<Wrapping>,
-    pub font: Option<NamedFont>,
-    pub style: InputStyle,
 }
 
 impl InputStyle {
@@ -1383,14 +1377,14 @@ fn sanitize_node(
         }
         Node::Editor {
             options,
-            key,
+            id,
+            style,
             placeholder,
             label,
-            width,
-            min_height,
-            max_height,
             ..
         } => {
+            id.validate_host()?;
+            style_sanitize::sanitize(style);
             if let Some(presentation) = &mut options.presentation {
                 presentation.sanitize(budgets);
             }
@@ -1399,26 +1393,10 @@ fn sanitize_node(
                     spend_text(&mut item.label, budgets);
                 }
             }
-            bound_optional(&mut options.size);
-            if let Some(size) = &mut options.size {
-                *size = size.clamp(f32::EPSILON, MAX_TEXT_PIXELS);
-            }
-            bound_optional(&mut options.padding);
-            if let Some(line_height) = &mut options.line_height {
-                line_height.sanitize();
-            }
-            options.style.sanitize();
-            claim(key, taken);
             spend_text(placeholder, budgets);
             if let Some(label) = label {
-                truncate_string(label);
+                spend_text(label, budgets);
             }
-            if let Some(font) = &mut options.font {
-                font.sanitize(budgets);
-            }
-            bound_optional(width);
-            bound_optional(min_height);
-            bound_optional(max_height);
         }
         Node::Button {
             key,
@@ -1721,7 +1699,6 @@ fn lengths_mut(node: &mut Node) -> Vec<&mut Length> {
         | Node::Canvas { width, height, .. }
         | Node::Space { width, height } => vec![width, height],
         Node::Progress { length, girth, .. } => vec![length, girth],
-        Node::Editor { height, .. } => vec![height],
         Node::RichText { width, .. }
         | Node::Input { width, .. }
         | Node::Toggle { width, .. }
@@ -1730,6 +1707,7 @@ fn lengths_mut(node: &mut Node) -> Vec<&mut Length> {
         | Node::ComboBox { width, .. } => vec![width],
         Node::Container { .. }
         | Node::Text { .. }
+        | Node::Editor { .. }
         | Node::Qr { .. }
         | Node::Rule { .. }
         | Node::Lazy { .. }
@@ -2132,16 +2110,13 @@ mod tests {
     fn editor(key: &str, placeholder: &str, document: editor_document::EditorDocumentRef) -> Node {
         Node::Editor {
             options: Default::default(),
-            key: key.into(),
+            id: ElementIdWire::Name(key.into()),
+            style: gpui::StyleRefinement::default(),
             placeholder: placeholder.into(),
             label: None,
             document,
             on_document: 1,
             editable: true,
-            width: None,
-            height: None,
-            min_height: None,
-            max_height: None,
         }
     }
 
@@ -2324,16 +2299,13 @@ mod tests {
                 },
                 Node::Editor {
                     options: Default::default(),
-                    key: "App/e".into(),
+                    id: ElementIdWire::Name("App/e".into()),
+                    style: gpui::StyleRefinement::default(),
                     placeholder: "Notes".into(),
                     label: None,
                     document: document_reference("app:draft", 9),
                     on_document: 5,
                     editable: true,
-                    width: None,
-                    height: Some(Length::Fill),
-                    min_height: Some(80.0),
-                    max_height: None,
                 },
             ])),
             patches: vec![Patch::Remove {

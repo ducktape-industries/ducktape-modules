@@ -335,7 +335,8 @@ pub enum Node {
     /// [`Node::Input`]. Presentation crosses as copied data.
     Editor {
         options: Box<EditorOptions>,
-        key: String,
+        id: ElementIdWire,
+        style: gpui::StyleRefinement,
         placeholder: String,
         /// The accessible name.
         label: Option<String>,
@@ -344,11 +345,6 @@ pub enum Node {
         /// Mutable guest state route, present even while editing is disabled.
         on_document: u32,
         editable: bool,
-        /// Pixels; the editor fills its parent otherwise.
-        width: Option<f32>,
-        height: Option<Length>,
-        min_height: Option<f32>,
-        max_height: Option<f32>,
     },
     Button {
         key: String,
@@ -561,6 +557,7 @@ impl Node {
             Self::Container { id, .. } | Self::Text { id, .. } => {
                 id.as_ref().and_then(ElementIdWire::name)
             }
+            Self::Editor { id, .. } => id.name(),
             Self::ResizeHandle { key, .. }
             | Self::MouseArea { key, .. }
             | Self::Linear { key, .. }
@@ -579,7 +576,6 @@ impl Node {
             | Self::Image { key, .. }
             | Self::ImageViewer { key, .. }
             | Self::Input { key, .. }
-            | Self::Editor { key, .. }
             | Self::Button { key, .. }
             | Self::Rule { key, .. }
             | Self::Toggle { key, .. }
@@ -604,6 +600,7 @@ impl Node {
             Self::Container { id, .. } | Self::Text { id, .. } => {
                 id.as_ref().map(IdentityKeyRef::Element)
             }
+            Self::Editor { id, .. } => Some(IdentityKeyRef::Element(id)),
             Self::ResizeHandle { key, .. }
             | Self::MouseArea { key, .. }
             | Self::Linear { key, .. }
@@ -622,7 +619,6 @@ impl Node {
             | Self::Image { key, .. }
             | Self::ImageViewer { key, .. }
             | Self::Input { key, .. }
-            | Self::Editor { key, .. }
             | Self::Button { key, .. }
             | Self::Rule { key, .. }
             | Self::Toggle { key, .. }

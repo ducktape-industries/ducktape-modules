@@ -246,9 +246,7 @@ pub(crate) fn type_into(frame: &Frame, name: &str, text: &str) -> Vec<Event> {
 pub(crate) fn edit(frame: &Frame, name: &str, before_text: &str, text: &str) -> Vec<Event> {
     let editor = frame.root.as_ref().and_then(|root| {
         find_by(root, &|node| match node {
-            Node::Editor {
-                key, placeholder, ..
-            } => key == name || placeholder == name,
+            Node::Editor { placeholder, .. } => node.key() == Some(name) || placeholder == name,
             _ => false,
         })
     });

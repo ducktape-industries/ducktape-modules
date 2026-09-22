@@ -49,7 +49,7 @@ fn drawn_with_key(draft: &Draft, key: &str) -> wire::Node {
         |_: &mut ComposerView, _, _, _| {},
     );
     drop(cx);
-    element.into_node(&mut Lowering::new(&mut window, &mut app))
+    Lowering::new(&mut window, &mut app).lower(element)
 }
 
 fn find_editor(root: &wire::Node) -> Option<&wire::Node> {
@@ -83,12 +83,12 @@ fn two_draft_keys_are_two_documents_the_host_can_tell_apart() {
     let b = editor_node(&b_root);
     let (
         wire::Node::Editor {
-            key: a_key,
+            id: a_id,
             document: a_document,
             ..
         },
         wire::Node::Editor {
-            key: b_key,
+            id: b_id,
             document: b_document,
             ..
         },
@@ -96,7 +96,7 @@ fn two_draft_keys_are_two_documents_the_host_can_tell_apart() {
     else {
         unreachable!()
     };
-    assert_ne!(a_key, b_key, "each draft key owns its document identity");
+    assert_ne!(a_id, b_id, "each draft key owns its element identity");
     assert_ne!(
         a_document.document, b_document.document,
         "two drafts the host must not share text between"
