@@ -34,9 +34,7 @@ fn collect_texts(node: &Node, out: &mut Vec<String>) {
         | Node::When { children, .. } => {
             children.iter().for_each(|child| collect_texts(child, out))
         }
-        Node::RichText { spans, .. } => {
-            out.push(spans.iter().map(|span| span.content.as_str()).collect())
-        }
+        Node::RichText { text, .. } => out.push(text.clone()),
         Node::Text { content, .. } => out.push(content.clone()),
         Node::Input {
             value: text,
@@ -114,6 +112,18 @@ pub(crate) fn assert_accessible(tree: &Node) {
 
 pub(crate) fn has_text(frame: &Frame, content: &str) -> bool {
     texts(frame).iter().any(|text| text == content)
+}
+
+pub(crate) fn rich_click(frame: &Frame, key: &str, index: usize) -> Event {
+    let Some(Node::RichText { on_click: Some(handler), clickable_ranges, .. }) = find(frame, key)
+    else {
+        panic!("{key} is not interactive rich text");
+    };
+    assert!(index < clickable_ranges.len(), "rich text click index out of bounds");
+    Event::Select {
+        handler: *handler,
+        index: u32::try_from(index).expect("rich text click index fits the wire"),
+    }
 }
 
 /// The node under `key` (`App/content/count`), if the tree has one.

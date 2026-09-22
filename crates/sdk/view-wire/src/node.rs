@@ -102,18 +102,16 @@ pub struct SvgTransformation {
 pub enum Node {
     /// A payload encoded and painted by the host.
     Qr { key: String, code: Qr },
-    /// Styled spans form one native paragraph; link clicks carry a String handler payload.
+    /// One native GPUI paragraph with optional interactive byte ranges.
     RichText {
-        key: String,
-        #[serde(deserialize_with = "rich_text::decode_spans")]
-        spans: Vec<RichSpan>,
-        size: Option<f32>,
-        color: Option<Rgba>,
-        font: Font,
-        width: Option<Length>,
-        align_x: Option<AlignX>,
-        options: TextOptions,
-        on_link: Option<u32>,
+        id: Option<ElementIdWire>,
+        style: gpui::StyleRefinement,
+        text: String,
+        runs: RichTextRuns,
+        font_family_overrides: Vec<(std::ops::Range<usize>, gpui::SharedString)>,
+        clickable_ranges: Vec<std::ops::Range<usize>>,
+        on_click: Option<u32>,
+        on_hover: Option<u32>,
     },
     /// A native GPUI anchored element. The host owns fitting and clipping.
     Anchored {
@@ -564,6 +562,7 @@ impl Node {
             Self::Input { id, .. } | Self::Editor { id, .. } | Self::UniformList { id, .. } => {
                 id.name()
             }
+            Self::RichText { id, .. } => id.as_ref().and_then(ElementIdWire::name),
             Self::ResizeHandle { key, .. }
             | Self::MouseArea { key, .. }
             | Self::Float { key, .. }
@@ -573,7 +572,6 @@ impl Node {
             | Self::Sensor { key, .. }
             | Self::Scroll { key, .. }
             | Self::Qr { key, .. }
-            | Self::RichText { key, .. }
             | Self::ImageViewer { key, .. }
             | Self::Button { key, .. }
             | Self::Rule { key, .. }
@@ -604,6 +602,7 @@ impl Node {
             Self::Input { id, .. } | Self::Editor { id, .. } | Self::UniformList { id, .. } => {
                 Some(IdentityKeyRef::Element(id))
             }
+            Self::RichText { id, .. } => id.as_ref().map(IdentityKeyRef::Element),
             Self::ResizeHandle { key, .. }
             | Self::MouseArea { key, .. }
             | Self::Float { key, .. }
@@ -613,7 +612,6 @@ impl Node {
             | Self::Sensor { key, .. }
             | Self::Scroll { key, .. }
             | Self::Qr { key, .. }
-            | Self::RichText { key, .. }
             | Self::ImageViewer { key, .. }
             | Self::Button { key, .. }
             | Self::Rule { key, .. }

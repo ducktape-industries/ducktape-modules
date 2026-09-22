@@ -6,6 +6,7 @@ pub use gpui::{
     hsla, px, rems, rgb, Anchor, AnchoredFitMode, AnchoredPositionMode, ClickEvent, CursorStyle,
     Edges, ElementId, Global, Hsla, ListHorizontalSizingBehavior, ListSizingBehavior, ObjectFit,
     Pixels, Point, Resource, Role, ScrollStrategy, SharedString, StyleRefinement, Styled,
+    FontStyle, FontWeight, HighlightStyle, MouseMoveEvent, StrikethroughStyle, TextRun, TextStyle, UnderlineStyle,
 };
 pub use view_guest_derive::IntoElement;
 pub use view_wire as wire;
@@ -18,6 +19,7 @@ mod list;
 mod primitives;
 mod surface;
 mod view_element;
+mod rich_text;
 pub use behavior::{modal_overlay, resize_handle, sensor, ModalOverlay, ResizeHandle, Sensor};
 pub use element::{
     div, uniform_list, AnyElement, Div, Element, Input, IntoElement, Lowering, ParentElement,
@@ -33,6 +35,7 @@ pub use primitives::{
     StyledImage, Svg, Transformation,
 };
 pub use surface::{surface, Surface};
+pub use rich_text::{InteractiveText, StyledText};
 pub use view_element::ViewElement;
 
 /// Traits and primitives used to compose guest GPUI elements.
@@ -45,6 +48,7 @@ pub mod prelude {
         ListSizingBehavior, ListState, ParentElement, Pixels, Render, RenderOnce, Role,
         ScrollStrategy, SharedString, StatefulInteractiveElement, Styled, StyledImage, Theme,
         UniformListScrollHandle, Window,
+        InteractiveText, StyledText,
     };
 }
 mod editor;
@@ -248,6 +252,12 @@ impl<V: View> Driver<V> {
                 }
                 wire::Event::Select { handler, index } => {
                     slots::run_handler::<u32, Callback<V>>(&self.app.inner.slots, handler, index)
+                }
+                wire::Event::RichTextHover { handler, event } => {
+                    let slots = self.app.inner.slots.clone();
+                    let mut window = self.app.window();
+                    slots::run_route(&slots, handler, &event, &mut window, &mut self.app);
+                    None
                 }
                 wire::Event::Size {
                     handler,

@@ -97,7 +97,7 @@ mod qr;
 pub use qr::{MAX_QR_CODES, MAX_QR_PAYLOAD_BYTES, Qr, QrCorrection, QrSize, QrVersion};
 mod rich_text;
 mod text;
-pub use rich_text::RichSpan;
+pub use rich_text::{HighlightStyle as RichTextHighlightStyle, Runs as RichTextRuns, TextRun as RichTextRun};
 pub use text::{
     Align, FontFamily, FontStretch, FontStyle, LineHeight, NamedFont, Shaping, TextOptions,
     Wrapping,
@@ -139,6 +139,14 @@ pub use patch::{MAX_PATCHES, Patch, apply, diff};
 pub mod events;
 pub mod keyboard;
 pub mod mouse;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RichTextHover {
+    pub index: Option<u32>,
+    pub position: gpui::Point<gpui::Pixels>,
+    pub pressed_button: Option<click::MouseButton>,
+    pub modifiers: gpui::Modifiers,
+}
 
 /// Something the host tells the guest.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -192,6 +200,8 @@ pub enum Event {
     Slide { handler: u32, value: f32 },
     /// A pick list chose the option at `index` in the node's `options`.
     Select { handler: u32, index: u32 },
+    /// A native interactive-text hover changed character index.
+    RichTextHover { handler: u32, event: RichTextHover },
     /// A [`Node::Sensor`]'s child was measured: shown at, or resized to,
     /// `width` by `height` — the child's own laid-out size in logical
     /// pixels, never where it sits in the window. `handler` is the node's
@@ -769,11 +779,7 @@ fn text_amounts(root: &Node) -> Result<(usize, usize), &'static str> {
         let mut add = |text: &str| display = display.saturating_add(text.len());
         match node {
             Node::Text { content, .. } => add(content),
-            Node::RichText { spans, .. } => {
-                for span in spans {
-                    add(&span.content);
-                }
-            }
+            Node::RichText { text, .. } => add(text),
             Node::Input {
                 value,
                 placeholder,
@@ -1323,20 +1329,25 @@ fn sanitize_node(
             code.sanitize(budgets);
         }
         Node::RichText {
-            key,
-            spans,
-            size,
-            color,
-            options,
+            id,
+            style,
+            text,
+            runs,
+            font_family_overrides,
+            clickable_ranges,
             ..
         } => {
-            claim(key, taken);
-            options.sanitize(budgets);
-            rich_text::sanitize(spans, budgets);
-            if let Some(size) = size {
-                *size = bounded(*size).min(MAX_TEXT_PIXELS);
+            if let Some(id) = id {
+                id.validate_host()?;
             }
-            bound_color(color);
+            style_sanitize::sanitize(style);
+            rich_text::sanitize(
+                text,
+                runs,
+                font_family_overrides,
+                clickable_ranges,
+                budgets,
+            );
         }
         Node::Text {
             id,
@@ -1787,8 +1798,7 @@ fn lengths_mut(node: &mut Node) -> Vec<&mut Length> {
         | Node::Slider { width, height, .. }
         | Node::Space { width, height } => vec![width, height],
         Node::Progress { length, girth, .. } => vec![length, girth],
-        Node::RichText { width, .. }
-        | Node::Toggle { width, .. }
+        Node::Toggle { width, .. }
         | Node::Radio { width, .. }
         | Node::PickList { width, .. }
         | Node::ComboBox { width, .. } => vec![width],
@@ -1797,6 +1807,7 @@ fn lengths_mut(node: &mut Node) -> Vec<&mut Length> {
         | Node::List { .. }
         | Node::Text { .. }
         | Node::Input { .. }
+        | Node::RichText { .. }
         | Node::Editor { .. }
         | Node::Qr { .. }
         | Node::Rule { .. }
@@ -2146,18 +2157,14 @@ mod tests {
     #[test]
     fn applied_aggregate_text_and_rich_text_loss_is_reported_but_removal_is_not() {
         let rich = Node::RichText {
-            key: "rich".into(),
-            spans: vec![RichSpan {
-                content: "y".repeat(MAX_TEXT_BYTES_PER_FRAME / 2),
-                ..Default::default()
-            }],
-            size: None,
-            color: None,
-            font: Font::default(),
-            width: None,
-            align_x: None,
-            options: Default::default(),
-            on_link: None,
+            id: Some(ElementIdWire::Name("rich".into())),
+            style: gpui::StyleRefinement::default(),
+            text: "y".repeat(MAX_TEXT_BYTES_PER_FRAME / 2),
+            runs: RichTextRuns::default(),
+            font_family_overrides: vec![],
+            clickable_ranges: vec![],
+            on_click: None,
+            on_hover: None,
         };
         let mut root = Node::Container {
             id: Some(ElementIdWire::Name("root".into())),

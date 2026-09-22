@@ -1393,27 +1393,24 @@ fn check_bounds(
                 check_pixels(&Some(value), ctx, "QR size");
             }
         }
-        Node::RichText {
-            spans,
-            size,
-            color,
-            width,
-            ..
-        } => {
-            check_pixels(size, ctx, "rich text size");
-            check_color(color, ctx);
-            check_length(width, ctx);
-            for span in spans {
-                check_string(&span.content, ctx, "span content");
-                if let Some(link) = &span.link {
-                    check_string(link, ctx, "span link");
+        Node::RichText { text, runs, font_family_overrides, clickable_ranges, .. } => {
+            check_string(text, ctx, "rich text");
+            let valid = |range: &std::ops::Range<usize>| {
+                range.start <= range.end
+                    && range.end <= text.len()
+                    && text.is_char_boundary(range.start)
+                    && text.is_char_boundary(range.end)
+            };
+            match runs {
+                view_wire::RichTextRuns::Highlights(highlights) => {
+                    assert!(highlights.iter().all(|(range, _)| valid(range)));
                 }
-                check_pixels(&span.size, ctx, "span size");
-                check_color(&span.color, ctx);
-                check_color(&span.background, ctx);
-                check_edges(&span.padding, ctx);
-                check_border(&span.border, ctx);
+                view_wire::RichTextRuns::Runs(runs) => {
+                    assert_eq!(runs.iter().map(|run| run.len).sum::<usize>(), text.len());
+                }
             }
+            assert!(font_family_overrides.iter().all(|(range, _)| valid(range)));
+            assert!(clickable_ranges.iter().all(valid));
         }
         Node::Text {
             content, heading, ..

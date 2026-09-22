@@ -2,7 +2,9 @@
 
 use ducktape_view_guest::prelude::*;
 use ducktape_view_guest::{
-    AnyElement, ClickEvent, Context, ElementId, ParentElement, Styled, Theme, Window, div, img, px,
+    AnyElement, ClickEvent, Context, ElementId, FontStyle, FontWeight, HighlightStyle,
+    InteractiveText, ParentElement, Styled, StyledText, Theme, UnderlineStyle, Window, div, px,
+    surface, wire,
 };
 
 use crate::client::{ChatBlock, ChatMessage, SpanStyle};
@@ -66,7 +68,7 @@ pub fn card(
                 .text_xs()
                 .child(message.initial.clone()),
         )
-        .child(content(chat, message.clone(), pane, cx, theme));
+        .child(content(chat, message.clone(), cx, theme));
 
     if !message.pending && !message.deleted {
         let seq = message.seq;
@@ -92,21 +94,23 @@ pub fn card(
             .top_1()
             .flex()
             .gap_1()
-            .bg(theme.background)
-            .child(action_button(
+            .bg(theme.background);
+        if chat.may_write() {
+            actions = actions.child(action_button(
                 ElementId::Name(format!("chat-message-{}-react", message.id).into()),
                 "😀",
                 "Manage reactions",
                 theme,
                 react,
-            ))
-            .child(action_button(
-                ElementId::Name(format!("chat-message-{}-more", message.id).into()),
-                "⋯",
-                "More message actions",
-                theme,
-                more,
             ));
+        }
+        actions = actions.child(action_button(
+            ElementId::Name(format!("chat-message-{}-more", message.id).into()),
+            "⋯",
+            "More message actions",
+            theme,
+            more,
+        ));
         if pane == Pane::Timeline && message.reply_count == 0 {
             let open = cx.listener(move |chat, _: &ClickEvent, _window, cx| {
                 cx.notify();
@@ -128,7 +132,6 @@ pub fn card(
 fn content(
     chat: &Chat,
     message: ChatMessage,
-    pane: Pane,
     cx: &mut Context<Chat>,
     theme: &Theme,
 ) -> impl IntoElement {
@@ -210,15 +213,24 @@ fn content(
                 cx.notify();
                 chat.react(reaction_seq, emoji.clone(), add, cx)
             });
-            reactions = reactions.child(action_button(
-                ElementId::Name(
-                    format!("chat-message-{}-reaction-{}", message.id, reaction.emoji).into(),
-                ),
-                format!("{} {}", reaction.emoji, reaction.count),
-                "reaction",
-                theme,
-                click,
-            ));
+            let id = ElementId::Name(
+                format!("chat-message-{}-reaction-{}", message.id, reaction.emoji).into(),
+            );
+            let label = format!("{} {}", reaction.emoji, reaction.count);
+            reactions = if chat.may_write() {
+                reactions.child(action_button(id, label, "reaction", theme, click))
+            } else {
+                reactions.child(
+                    div()
+                        .id(id)
+                        .px_1()
+                        .py_0p5()
+                        .rounded_sm()
+                        .bg(theme.surface)
+                        .text_xs()
+                        .child(label),
+                )
+            };
         }
         body = body.child(reactions);
     }
@@ -267,25 +279,36 @@ fn block_view(
             .w_full()
             .bg(theme.border)
             .into_any_element(),
-        "code" => div()
-            .id(id)
-            .flex()
-            .flex_col()
-            .gap_1()
-            .p_2()
-            .rounded_md()
-            .bg(theme.surface)
-            .font_family("JetBrains Mono")
-            .text_sm()
-            .child(block.text.clone())
-            .into_any_element(),
+        "code" => {
+            let mut code = div()
+                .id(id)
+                .flex()
+                .flex_col()
+                .gap_1()
+                .p_2()
+                .rounded_md()
+                .bg(theme.surface);
+            if !block.lang.is_empty() {
+                code = code.child(
+                    div()
+                        .text_xs()
+                        .text_color(theme.muted)
+                        .child(block.lang.clone()),
+                );
+            }
+            code.child(plain_line(
+                ElementId::Name(format!("chat-message-{}-block-{index}-code", message.id).into()),
+                &block.text,
+                true,
+            ))
+            .into_any_element()
+        }
         "quote" => div()
-            .id(id)
             .border_l_2()
             .border_color(theme.border_strong)
             .pl_2()
             .text_color(theme.muted)
-            .child(block.text.clone())
+            .child(rich_line(id.clone(), block, cx, theme))
             .into_any_element(),
         "attachment" => {
             let link = block.link.clone();
@@ -307,48 +330,97 @@ fn block_view(
                 && width > 0
                 && height > 0
             {
-                card = card.child(
-                    div()
-                        .max_w(px(360.))
-                        .max_h(px(240.))
-                        .child(img(crate::files::attachment_file_path(&block.link))),
-                );
+                card = card.child(div().max_w(px(360.)).max_h(px(240.)).child(surface(
+                    ElementId::Name(
+                        format!("chat-message-{}-block-{index}-picture", message.id).into(),
+                    ),
+                    "picture",
+                    vec![
+                        wire::SurfaceValue::Str(crate::files::PICTURE_SURFACE.into()),
+                        wire::SurfaceValue::Str(crate::files::attachment_file_path(&block.link)),
+                    ],
+                )));
             }
             card.into_any_element()
         }
-        _ => {
-            let mut text = div().id(id).child(block_text(block));
-            if let Some(link) = block.spans.iter().find_map(|span| match &span.style {
-                SpanStyle::Link(link) => Some(link.clone()),
-                SpanStyle::Mention(account) => Some(account.clone()),
-                _ => None,
-            }) {
-                let open = cx.listener(move |chat, _: &ClickEvent, _window, cx| {
-                    cx.notify();
-                    chat.open_link(link.clone(), cx);
-                });
-                text = text
-                    .text_color(theme.link)
-                    .role(ducktape_view_guest::Role::Button)
-                    .focusable()
-                    .on_click(open);
-            }
-            text.into_any_element()
-        }
+        _ => rich_line(id, block, cx, theme).into_any_element(),
     }
 }
 
-fn block_text(block: &ChatBlock) -> String {
-    if block.spans.is_empty() {
-        return block.text.clone();
+fn plain_line(id: ElementId, text: &str, mono: bool) -> InteractiveText {
+    let styled = StyledText::new(text.to_owned());
+    let mut text = InteractiveText::new(id, styled).w_full();
+    if mono {
+        text = text.font_family("JetBrains Mono").text_sm();
     }
-    block.spans.iter().map(|span| span.text.as_str()).collect()
+    text
+}
+
+fn rich_line(
+    id: ElementId,
+    block: &ChatBlock,
+    cx: &mut Context<Chat>,
+    theme: &Theme,
+) -> InteractiveText {
+    if block.spans.is_empty() {
+        return plain_line(id, &block.text, false);
+    }
+    let mut text = String::new();
+    let mut highlights = Vec::new();
+    let mut clickable = Vec::new();
+    let mut targets = Vec::new();
+    for span in &block.spans {
+        let start = text.len();
+        text.push_str(&span.text);
+        let range = start..text.len();
+        let mut style = HighlightStyle::default();
+        match &span.style {
+            SpanStyle::Plain => {}
+            SpanStyle::Bold => style.font_weight = Some(FontWeight::BOLD),
+            SpanStyle::Italic => style.font_style = Some(FontStyle::Italic),
+            SpanStyle::BoldItalic => {
+                style.font_weight = Some(FontWeight::BOLD);
+                style.font_style = Some(FontStyle::Italic);
+            }
+            SpanStyle::Link(target) => {
+                style.color = Some(theme.link);
+                style.font_weight = Some(FontWeight::MEDIUM);
+                style.underline = Some(UnderlineStyle {
+                    thickness: px(1.),
+                    color: Some(theme.link),
+                    wavy: false,
+                });
+                if !target.is_empty() {
+                    clickable.push(range.clone());
+                    targets.push(target.clone());
+                }
+            }
+            SpanStyle::Mention(account) => {
+                style.color = Some(theme.link);
+                style.font_weight = Some(FontWeight::MEDIUM);
+                if !account.is_empty() {
+                    clickable.push(range.clone());
+                    targets.push(account.clone());
+                }
+            }
+        }
+        highlights.push((range, style));
+    }
+    let styled = StyledText::new(text).with_highlights(highlights);
+    let open = cx.processor(move |chat, index: usize, _window, cx| {
+        if let Some(target) = targets.get(index) {
+            chat.open_link(target.clone(), cx);
+        }
+    });
+    InteractiveText::new(id, styled)
+        .w_full()
+        .on_click(clickable, open)
 }
 
 fn action_button(
     id: impl Into<ElementId>,
     label: impl Into<String>,
-    _accessible: &str,
+    accessible: &str,
     theme: &Theme,
     click: impl Fn(&ClickEvent, &mut Window, &mut ducktape_view_guest::App) + 'static,
 ) -> impl IntoElement {
@@ -360,6 +432,7 @@ fn action_button(
         .bg(theme.surface)
         .hover(|s| s.bg(theme.surface_raised))
         .role(ducktape_view_guest::Role::Button)
+        .aria_label(accessible)
         .focusable()
         .on_click(click)
         .text_xs()

@@ -152,6 +152,9 @@ impl TestAppContext {
     pub fn simulate_select(&mut self, key: &str, option: &str) {
         self.dispatch(super::pick(&self.frame, key, option));
     }
+    pub fn simulate_rich_click(&mut self, key: &str, index: usize) {
+        self.dispatch(vec![super::rich_click(&self.frame, key, index)]);
+    }
     pub fn simulate_submit(&mut self, key: &str) {
         self.dispatch(super::submit(&self.frame, key));
     }
