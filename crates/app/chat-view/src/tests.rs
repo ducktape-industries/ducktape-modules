@@ -134,7 +134,7 @@ fn the_room_shows_its_rows_intro_and_actions() {
             .any(|t| t.starts_with("This is the very beginning of #General")),
         "{texts:?}"
     );
-    // Each paragraph remains rich text in the unchanged tree vocabulary.
+    // Each paragraph keeps a stable typed element id for interaction queries.
     for seq in [1, 2] {
         assert!(cx.find(&format!("chat-message-m{seq}-block-0")).is_some());
     }
