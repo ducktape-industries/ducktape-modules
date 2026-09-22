@@ -271,11 +271,6 @@ fn content(
             reactions = reactions.child(reaction_button(
                 id,
                 label,
-                if add {
-                    "Add reaction"
-                } else {
-                    "Remove reaction"
-                },
                 description,
                 mine,
                 theme,
@@ -524,7 +519,6 @@ fn action_button(
 fn reaction_button(
     id: impl Into<ElementId>,
     label: impl Into<String>,
-    accessible: &str,
     emoji: impl Into<String>,
     mine: bool,
     theme: &Theme,
@@ -549,7 +543,11 @@ fn reaction_button(
             theme.muted
         })
         .role(ducktape_view_guest::Role::Button)
-        .aria_label(accessible)
+        .aria_label(if mine {
+            "Remove reaction"
+        } else {
+            "Add reaction"
+        })
         .aria_description(emoji.into())
         .aria_toggled(mine.into())
         .aria_disabled(!enabled)
