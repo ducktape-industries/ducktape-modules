@@ -16,7 +16,7 @@ pub struct Account {
 pub struct Key {
     pub label: String,
     pub key: String,
-    pub standing: String,
+    pub validator: bool,
 }
 pub async fn read_account(host: Host, key: String) -> Result<Option<Account>, Refusal> {
     if key.is_empty() {
@@ -85,12 +85,23 @@ async fn read_key(host: &Host, key: &[u8], label: String) -> Result<Key, Refusal
     };
     Ok(Key {
         label,
-        key: abi::hex(key),
-        standing: match membership.map(|m| m.standing) {
-            Some(valset::Standing::Validator) => "Validator",
-            Some(valset::Standing::Resident) => "Resident",
-            None => "Not in the validator set",
-        }
-        .into(),
+        key: truncated_hex(key),
+        validator: matches!(
+            membership.map(|m| m.standing),
+            Some(valset::Standing::Validator)
+        ),
     })
+}
+
+/// A key for display: full hex when it's short enough to read, else the
+/// first 8 and last 4 hex characters. A 64-hex-char key on one line is
+/// noise no one reads; the truncated form is still enough to eyeball a
+/// match.
+fn truncated_hex(key: &[u8]) -> String {
+    let hex = abi::hex(key);
+    if hex.len() <= 12 {
+        hex
+    } else {
+        format!("{}…{}", &hex[..8], &hex[hex.len() - 4..])
+    }
 }
