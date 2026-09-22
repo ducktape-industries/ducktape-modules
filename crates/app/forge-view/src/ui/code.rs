@@ -22,8 +22,7 @@ fn tree_query(forge: &Forge) -> Option<Query> {
         repo: forge.nav().repo.clone()?,
         at: forge.head_oid()?,
         path: forge.nav().path.clone(),
-        cursor: None,
-        limit: PAGE,
+        page: PAGE,
     })
 }
 
