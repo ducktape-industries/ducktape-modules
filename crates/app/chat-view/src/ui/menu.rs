@@ -2,7 +2,7 @@
 
 use ducktape_view_guest::prelude::*;
 use ducktape_view_guest::{
-    AnyElement, ClickEvent, Context, ElementId, ParentElement, Styled, Theme, Window, div,
+    AnyElement, ClickEvent, Context, ElementId, ParentElement, Styled, Theme, div,
 };
 
 use crate::client::reaction_palette;

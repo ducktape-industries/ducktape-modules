@@ -3,10 +3,9 @@
 
 use ducktape_view_guest::prelude::*;
 use ducktape_view_guest::{
-    ClickEvent, Context, ElementId, ParentElement, Styled, Theme, Window, div, px, uniform_list,
+    ClickEvent, Context, ElementId, ParentElement, Styled, Theme, div, px, uniform_list,
 };
 
-use crate::client::ChatMessage;
 use crate::ui::message;
 use crate::ui::room::selection_bar;
 use crate::{Chat, Loaded, Pane};

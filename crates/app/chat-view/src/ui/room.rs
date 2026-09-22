@@ -1,9 +1,7 @@
 //! The open room, search results, notices, and composer.
 
 use ducktape_view_guest::prelude::*;
-use ducktape_view_guest::{
-    ClickEvent, Context, ElementId, ParentElement, Styled, Theme, Window, div, px,
-};
+use ducktape_view_guest::{ClickEvent, Context, ElementId, ParentElement, Styled, Theme, div, px};
 
 use crate::chat::ChannelInfo;
 use crate::composer::Target;
