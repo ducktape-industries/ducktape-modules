@@ -72,3 +72,34 @@ fn listeners_use_weak_entities() {
     let other = second.open::<Counter>();
     other.update(&mut second, |_, window, cx| listener(&ClickEvent::default(), window, cx));
 }
+
+#[derive(Serialize, Deserialize)]
+struct GlobalReader { initial: usize }
+struct Configuration(usize);
+impl Global for Configuration {}
+impl View for GlobalReader {
+    fn new(_: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self { initial: cx.global::<Configuration>().0 }
+    }
+    fn restored(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        self.initial = cx.global::<Configuration>().0;
+    }
+}
+impl Render for GlobalReader {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div().child(cx.global::<Configuration>().0.to_string())
+    }
+}
+#[test]
+fn test_globals_are_available_during_creation_and_restore_without_clone() {
+    let mut cx = TestAppContext::new();
+    cx.set_global(Configuration(13));
+    let entity = cx.open::<GlobalReader>();
+    entity.read(|view| assert_eq!(view.initial, 13));
+    let snapshot = cx.snapshot().unwrap();
+    cx.set_global(Configuration(21));
+    let restored = cx.restore::<GlobalReader>(&snapshot).unwrap();
+    restored.read(|view| assert_eq!(view.initial, 21));
+    let second = cx.open::<GlobalReader>();
+    second.read(|view| assert_eq!(view.initial, 21));
+}

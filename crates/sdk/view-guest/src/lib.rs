@@ -80,7 +80,9 @@ impl<V: View> Driver<V> {
         Self::initialize(macos, None).expect("view initializes")
     }
     pub(crate) fn initialize(macos: bool, restored: Option<V>) -> Result<Self, String> {
-        let mut app = App::new(macos);
+        Self::initialize_in(App::new(macos), restored)
+    }
+    pub(crate) fn initialize_in(mut app: App, restored: Option<V>) -> Result<Self, String> {
         let entity = Entity::reserve(&app);
         let mut window = app.window();
         let mut cx = Context {

@@ -7,7 +7,7 @@ use std::rc::{Rc, Weak};
 
 pub(crate) type Callback<V> = Rc<dyn Fn(&mut V, &mut Window, &mut Context<V>)>;
 
-type Globals = std::collections::HashMap<TypeId, Rc<dyn Any>>;
+pub(crate) type Globals = std::collections::HashMap<TypeId, Rc<dyn Any>>;
 
 pub struct App {
     pub(crate) inner: Rc<AppState>,
@@ -72,8 +72,11 @@ impl App {
         self.globals = self.inner.globals.borrow().clone();
     }
     pub fn set_global<G: gpui::Global>(&mut self, global: G) {
+        self.set_shared_global(TypeId::of::<G>(), Rc::new(global));
+    }
+    pub(crate) fn set_shared_global(&mut self, kind: TypeId, global: Rc<dyn Any>) {
         self.refresh_globals();
-        Rc::make_mut(&mut self.globals).insert(TypeId::of::<G>(), Rc::new(global));
+        Rc::make_mut(&mut self.globals).insert(kind, global);
         *self.inner.globals.borrow_mut() = self.globals.clone();
     }
     pub fn global<G: gpui::Global>(&self) -> &G {

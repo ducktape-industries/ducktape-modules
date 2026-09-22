@@ -1,7 +1,7 @@
 //! Helpers for a guest's own tests: build events the host would send, and
 //! read the tree a frame carries.
 
-use crate::wire::{ButtonContent, Event, Frame, Interactivity, Node};
+use crate::wire::{ButtonContent, Event, Frame, Node};
 
 /// Every text the tree shows, depth first: text nodes, button labels, and
 /// the value or placeholder of an input or editor.

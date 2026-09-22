@@ -32,6 +32,7 @@ pub struct TestAppContext {
     host: FakeHost,
     driver: Option<Box<dyn TestDriver>>,
     frame: Frame,
+    globals: crate::context::Globals,
 }
 
 impl TestAppContext {
@@ -45,7 +46,8 @@ impl TestAppContext {
         self.open_with_macos(false)
     }
     pub fn open_with_macos<V: View>(&mut self, macos: bool) -> Entity<V> {
-        let driver = Driver::<V>::with_macos(macos);
+        let driver = Driver::<V>::initialize_in(self.fresh_app(macos), None)
+            .expect("view initializes");
         let entity = driver.entity();
         self.host.reset_connection();
         self.driver = Some(Box::new(driver));
@@ -64,7 +66,8 @@ impl TestAppContext {
         bytes: &[u8],
         macos: bool,
     ) -> Result<Entity<V>, String> {
-        let driver = Driver::<V>::from_snapshot(bytes, macos)?;
+        let value = serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
+        let driver = Driver::<V>::initialize_in(self.fresh_app(macos), Some(value))?;
         let entity = driver.entity();
         self.host.reset_connection();
         self.driver = Some(Box::new(driver));
@@ -75,12 +78,24 @@ impl TestAppContext {
     pub(crate) fn app_mut(&mut self) -> &mut App {
         self.driver.as_mut().expect("open a view first").app_mut()
     }
-    /// Replace a global in the open view and render its new appearance.
+    fn fresh_app(&self, macos: bool) -> App {
+        let mut app = App::new(macos);
+        for (kind, value) in &self.globals {
+            app.set_shared_global(*kind, value.clone());
+        }
+        app
+    }
+    /// Set a global before opening a view, or rerender the current view with it.
     pub fn set_global<G: gpui::Global>(&mut self, global: G) {
-        let app = self.app_mut();
-        app.set_global(global);
-        app.notify();
-        self.run_until_parked();
+        let kind = std::any::TypeId::of::<G>();
+        let global: std::rc::Rc<dyn std::any::Any> = std::rc::Rc::new(global);
+        self.globals.insert(kind, global.clone());
+        if let Some(driver) = &mut self.driver {
+            let app = driver.app_mut();
+            app.set_shared_global(kind, global);
+            app.notify();
+            self.run_until_parked();
+        }
     }
     pub fn run_until_parked(&mut self) {
         self.dispatch(Vec::new());
