@@ -193,8 +193,8 @@ use ducktape_view_guest::export_view;
 use ducktape_view_guest::host::Refusal;
 use ducktape_view_guest::view::Loaded;
 use ducktape_view_guest::{
-    Context, Host, InteractiveElement, IntoElement, ParentElement, Render, Styled, Task, Theme,
-    View, Window, div, px,
+    Context, Host, InteractiveElement, IntoElement, ParentElement, Render,
+    StatefulInteractiveElement, Styled, Task, Theme, View, Window, div, px,
 };
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -342,4 +342,5 @@ Next:
 EOF
 }
 
-case "$kind" in program | view) "$kind" ;; *) echo "usage: tools/scaffold.sh program <name> | view <name>-view" >&2; exit 1 ;; esac
+# Import order and line width follow the name, so rustfmt has the last word.
+case "$kind" in program | view) "$kind" && ${CARGO:-cargo} fmt -p "$name" ;; *) echo "usage: tools/scaffold.sh program <name> | view <name>-view" >&2; exit 1 ;; esac
