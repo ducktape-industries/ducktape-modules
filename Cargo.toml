@@ -119,6 +119,12 @@ codegen-units = 1
 panic = "abort"
 strip = true
 
+# `make wasm-why`: the release bytes with their names, so twiggy can say
+# whose they are. Its own output dir; nothing ships from it.
+[profile.why]
+inherits = "release"
+strip = "none"
+
 [patch.crates-io]
 rmp-serde = { git = "https://github.com/ducktape-industries/gpui-pre", rev = "5545e0156ec81ef772c2af8c12283c67f646bd14" }
 gpui-pre-scheduler = { git = "https://github.com/ducktape-industries/gpui-pre", rev = "5545e0156ec81ef772c2af8c12283c67f646bd14" }

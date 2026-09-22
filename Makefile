@@ -23,6 +23,12 @@ PROGRAMS := module-registry valset identity chat forge
 # Settings rides the registry.
 VIEWS := chat-view members-view node-view explorer-view settings-view forge-view
 
+# A view's decimal size limit in bytes; the default is the system views'.
+LIMIT_chat-view := 2500000
+LIMIT_forge-view := 2500000
+LIMIT_settings-view := 1300000
+view_limit = $(or $(LIMIT_$1),1200000)
+
 # What a wasm32 view may link. A crate a view links must never reach the
 # signing/identity graph (blst does not build for wasm32, and a view has no
 # business holding keys). The system crates are here because the system views
@@ -44,9 +50,55 @@ ARTIFACTS := $(foreach a,$(PROGRAMS) $(VIEWS),$(subst -,_,$(a)).wasm)
 CARGO_HOME_DIR := $(or $(CARGO_HOME),$(HOME)/.cargo)
 SYSROOT := $(shell rustc --print sysroot)
 WASM_RUSTFLAGS := --remap-path-prefix=$(CURDIR)=/build --remap-path-prefix=$(CARGO_HOME_DIR)=/cargo --remap-path-prefix=$(SYSROOT)=/rustc
-WASM_BUILD := RUSTFLAGS="$(WASM_RUSTFLAGS)" $(CARGO) build --target-dir $(BUILD_TARGET) --target wasm32-unknown-unknown --release
+WASM_CARGO := RUSTFLAGS="$(WASM_RUSTFLAGS)" $(CARGO) build --target wasm32-unknown-unknown
+WASM_BUILD := $(WASM_CARGO) --release
 
+# A workspace member with a cdylib crate type gets no metadata hash in its
+# output name, so `chat` built with `program` (the program, a root) and `chat`
+# built without it (a dependency of chat-view, or of forge's program) are one
+# unit to cargo's fingerprint and rebuild each other on every invocation.
+# Each program therefore builds in its own target dir, where its crate only
+# ever appears with `program` on, and its artifact is copied into $(RELEASE)
+# beside the views (which build in $(BUILD_TARGET) itself: every view links
+# the program crates with `program` off, one unit).
+PROGRAM_TARGET = $(BUILD_TARGET)/programs/$1
+program_artifact = $(call PROGRAM_TARGET,$1)/wasm32-unknown-unknown/release/$(subst -,_,$1).wasm
+program_build = $(WASM_BUILD) --target-dir $(call PROGRAM_TARGET,$1) -p $1 --features program
+export CARGO BUILD_TARGET RELEASE WASM_BUILD WASM_OPT
+
+.PHONY: dev wasm-why new-program new-view
 .PHONY: program-wasm-check wasm-programs probe-fixture wasm-views view-wasm-check test
+
+# `make dev P=forge` / `V=forge-view` narrow the loop to one artifact.
+DEV_PROGRAMS = $(if $(or $P,$V),$P,$(PROGRAMS))
+DEV_VIEWS = $(if $(or $P,$V),$V,$(VIEWS))
+
+## the edit loop: rebuilds the programs and views cargo finds stale, gates
+## the rebuilt views (ABI, size), runs the native tests of the crates whose
+## test binaries cargo rebuilt; one line per artifact.
+dev:
+	@tools/dev.sh "$(DEV_PROGRAMS)" "$(foreach v,$(DEV_VIEWS),$(v):$(call view_limit,$(v)))"
+
+## where a view's bytes go: `twiggy top` over a release build that keeps its
+## names (`--profile why`: release + `strip = "none"`, its own output dir, so
+## the release artifact is untouched). Install: `cargo install twiggy`.
+wasm-why:
+	@test -n "$V" || { echo "usage: make wasm-why V=<view>"; exit 1; }
+	@command -v twiggy >/dev/null || { echo "twiggy is not on PATH: cargo install twiggy"; exit 1; }
+	@$(WASM_CARGO) --target-dir $(BUILD_TARGET) --profile why -p $V
+	twiggy top -n 25 $(BUILD_TARGET)/wasm32-unknown-unknown/why/$(subst -,_,$V).wasm
+
+## scaffolds crates/app/NAME in chat's shape and registers it (PROGRAMS,
+## workspace members and dependencies); `make dev P=NAME` must pass on it.
+new-program:
+	@test -n "$(NAME)" || { echo "usage: make new-program NAME=<program>"; exit 1; }
+	@tools/scaffold.sh program $(NAME)
+
+## scaffolds crates/app/NAME (NAME ends in -view) over the program it names,
+## in members-view's shape, and registers it (VIEWS, workspace members).
+new-view:
+	@test -n "$(NAME)" || { echo "usage: make new-view NAME=<program>-view"; exit 1; }
+	@tools/scaffold.sh view $(NAME)
 
 ## builds abi and guest for wasm32-unknown-unknown.
 program-wasm-check:
@@ -58,12 +110,11 @@ program-wasm-check:
 ## builds every program (with `program` on) into $(RELEASE)/<name>.wasm. The
 ## founding suite reads the boot set from there.
 wasm-programs:
-	@for p in $(PROGRAMS); do \
-	  $(WASM_BUILD) -p $$p --features program || exit 1; \
-	done
+	@mkdir -p $(RELEASE)
+	@$(foreach p,$(PROGRAMS),$(call program_build,$(p)) && cp $(call program_artifact,$(p)) $(RELEASE)/ || exit 1;)
 
-## the whole suite: the founding suite runs the bytes wasm-programs built.
-test: wasm-programs
+## the whole suite; the founding suite runs `make wasm-programs` itself.
+test:
 	$(CARGO) test --workspace
 
 .PHONY: wasm-modules wasm-reproducible
@@ -92,18 +143,11 @@ wasm-reproducible:
 probe-fixture:
 	cp $(DUCKTAPE)/crates/kernel/fixtures/wasm/fixture_probe.wasm crates/system/module-registry/tests/
 
-## builds every view for wasm32 under $(RELEASE)/.
+## builds every view for wasm32 under $(RELEASE)/, optimized (the bytes
+## before wasm-opt stay beside it as <name>.wasm.unoptimized), ABI-checked
+## and gated on its size: `name  bytes / limit  (pct%)`.
 wasm-views:
-	@for v in $(VIEWS); do \
-	  $(WASM_BUILD) -p $$v || exit 1; \
-	  artifact="$(RELEASE)/$$(echo $$v | tr - _).wasm"; \
-	  WASM_OPT="$(WASM_OPT)" tools/optimize-view.sh "$$artifact" || exit 1; \
-	  python3 tools/check-view-abi.py "$$artifact" || exit 1; \
-	  limit=1200000; case $$v in chat-view|forge-view) limit=2500000;; settings-view) limit=1300000;; esac; \
-	  bytes=$$(wc -c < "$$artifact"); \
-	  echo "$$v: $$bytes bytes (limit $$limit)"; \
-	  test "$$bytes" -le "$$limit" || exit 1; \
-	done
+	@$(foreach v,$(VIEWS),$(WASM_BUILD) --target-dir $(BUILD_TARGET) -p $(v) && tools/view-gate.sh $(v) $(RELEASE)/$(subst -,_,$(v)).wasm $(call view_limit,$(v)) || exit 1;)
 
 ## builds every VIEW_LINKABLE crate for wasm32-unknown-unknown, plus the
 ## exported view probe of view-guest, then fails if the normal wasm32 dependency

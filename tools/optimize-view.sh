@@ -11,6 +11,10 @@ esac
 if [ -f "$1.optimized" ] && [ "$1.optimized" -nt "$0" ] && cmp -s "$1" "$1.optimized"; then
     exit 0
 fi
+# The bytes cargo produced, kept beside the optimized artifact for a size
+# comparison (`wasm-tools objdump`); names are stripped in both, so
+# `make wasm-why` builds `--profile why` for twiggy instead.
+cp "$1" "$1.unoptimized"
 "$optimizer" "$1" -Oz --flatten --rereloop -Oz --converge \
     --enable-bulk-memory --enable-sign-ext --enable-nontrapping-float-to-int \
     --enable-multivalue --enable-reference-types -o "$1.optimized"

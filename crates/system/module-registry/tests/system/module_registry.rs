@@ -2,9 +2,6 @@ use super::*;
 
 #[test]
 fn a_published_program_is_scheduled_by_the_authority_and_seated_at_its_height() {
-    if !built() {
-        return;
-    }
     deterministic::Runner::default().start(|context| async move {
         let dir = tempfile::tempdir().unwrap();
         let mut net = Net::found(context, dir.path()).await;
@@ -182,9 +179,6 @@ fn a_published_program_is_scheduled_by_the_authority_and_seated_at_its_height() 
 
 #[test]
 fn schedule_pages_and_missing_programs_report_the_answering_height() {
-    if !built() {
-        return;
-    }
     deterministic::Runner::default().start(|context| async move {
         let dir = tempfile::tempdir().unwrap();
         let mut net = Net::found(context, dir.path()).await;

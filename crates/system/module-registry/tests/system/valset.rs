@@ -2,9 +2,6 @@ use super::*;
 
 #[test]
 fn the_authority_seats_members_and_the_next_epoch_reads_them() {
-    if !built() {
-        return;
-    }
     deterministic::Runner::default().start(|context| async move {
         let dir = tempfile::tempdir().unwrap();
         let mut net = Net::found(context, dir.path()).await;
@@ -85,9 +82,6 @@ fn the_authority_seats_members_and_the_next_epoch_reads_them() {
 
 #[test]
 fn memberships_resume_in_key_order_at_the_answering_height() {
-    if !built() {
-        return;
-    }
     deterministic::Runner::default().start(|context| async move {
         let dir = tempfile::tempdir().unwrap();
         let mut net = Net::found(context, dir.path()).await;
