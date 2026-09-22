@@ -1,30 +1,39 @@
 # modules
 
 The ducktape contract line and the programs written against it, one
-repository.
+repository. Only what compiles to wasm lives here, in three folders:
+
+```
+crates/sdk/     abi guest ducklink view-wire view-guest view-guest-derive design
+crates/system/  module-registry valset identity
+crates/app/     chat chat-view forge forge-view members-view node-view explorer-view settings-view
+```
 
 | Path | What |
 |---|---|
 | `crates/sdk/abi` | the borsh bytes ABI a program and the host share: `GuestCall`, `HostOp`/`HostReply`, `Env`, `Refusal`, the `module_registry` and `valset` contracts. A copy of ducktape's `crates/kernel/abi`, like `guest` beside it |
 | `crates/sdk/guest` | what a program compiles against: the `Program` trait, the `Execute` and `Query` contexts its entry points receive, `program!` |
 | `crates/sdk/ducklink` | the `duck://` link: `duck://<chain>/<program>/<tail…>`, one spelling per name, no program names known here |
-| `crates/sdk/view-wire`, `view-guest`, `design` | the host<->view wire, the runtime a wasm view is written against, the palette |
-| `crates/modules` | the boot set: the `modules` crate (each program's `Op`, `Query` and `Reply`, `AUTHORITY`, `Page`, the helpers a program builds on), `system/` (the wasm32 workspace of `module-registry`, `valset` and `identity`), and `tests/system.rs`, which founds ducktape's host over the bytes `make wasm-programs` built and drives every program |
+| `crates/sdk/view-wire`, `view-guest`, `view-guest-derive`, `design` | the host<->view wire, the runtime a wasm view is written against, the palette |
+| `crates/system/module-registry` | the boot set's root: the registry program (its `Op`, `Query`, `Reply`), `AUTHORITY`, `Page`/`PageReply` and the origin/key/refusal `helpers` every system program links. Its `tests/system.rs` founds ducktape's host over the bytes `make wasm-programs` built and drives every system program |
+| `crates/system/valset`, `identity` | the other two boot programs, the same shape: types always built, the wasm32 program behind `program`, the asks another program makes of them (`identity::account_of`, `valset::standing`) behind `guest` |
 | `crates/app/chat`, `chat-view` | the reference app module: `chat` is one crate whose types and rules over a `Read`/`Write` store are always built (native, tested), and whose wasm32 program over the host sits behind its `program` feature. `chat-view` links `chat` with the feature off: the types, no host import, no program export |
-| `crates/app/gitcore` | git as a `no_std` library over one `Objects` trait: objects, packs, walks, diff, merge, and the server side of the wire protocol (receive-pack v1, upload-pack v2) |
-| `crates/app/forge`, `forge-view` | the git server as a program, the same shape as `chat`: a push is one op whose input is the receive-pack body a client sent, a merge is an op, fetch and the ref advertisement are queries; a git object's blob id is its oid. The rules run natively over `MemorySandbox`, which is where `fixtures/` comes from; `forge-view` links `forge` with `program` off |
-| `crates/app/forge-harness` | a dev rig, not product: runs `forge.wasm` on ducktape's `runtime` over an in-memory host and speaks git smart HTTP, so real `git` pushes to and clones from the program without a network |
+| `crates/app/forge`, `forge-view` | the git server as a program, the same shape as `chat`: a push is one op whose input is the receive-pack body a client sent, a merge is an op that lands the commit the client built, fetch and the ref advertisement are queries; a git object's blob id is its oid. `forge::git` is the git it needs (objects, packs, walks, diff, the wire's server side) over one `Objects` trait; merging is the client's. The rules run natively over `MemorySandbox`, which is where `fixtures/` comes from; `forge-view` links `forge` with `program` off |
+| `crates/app/members-view`, `node-view`, `explorer-view`, `settings-view` | the system views, which link the system crates with `program` off |
 
 A view links its module by path and reads its types. A program is a cdylib
 for wasm32 the host loads by blob id; a view is a cdylib for wasm32 the
 desktop loads from a file. The host (runtime, state, blobs, node, consensus,
-the daemon and the CLI) lives in ducktape; the `modules` suite links it at
+the daemon and the CLI) lives in ducktape; the founding suite links it at
 the revision `Cargo.toml` pins, patched to compile against `crates/sdk/abi`
 and `crates/sdk/guest`, so a copy that drifts from the kernel fails to build.
+What is not wasm lives elsewhere: the forge smoke (real git against
+`forge.wasm` on ducktape's runtime) and `view-pack` (a view into its program)
+are in the qa repo, which packs and founds what this repo builds.
 
 `valset` and `module-registry` take their writes from the program named
-`modules::AUTHORITY` (`governance`); no program in this tree implements it.
-The eight system modules beyond the boot set are archived at
+`module_registry::AUTHORITY` (`governance`); no program in this tree
+implements it. The eight system modules beyond the boot set are archived at
 `ducktape-industries/ducktape-system-modules-archive`.
 
 ## A program
@@ -88,10 +97,11 @@ The tree vocabulary, manifests, and five-function Wasm ABI are unchanged.
 `make wasm-reproducible` are what CI runs. The toolchain is pinned in
 `rust-toolchain.toml`.
 
-Every wasm artifact is a build output: `make wasm-modules` builds the boot
-set, the app programs and the views and packs each view into its program
-under `$CARGO_TARGET_DIR/pack/`; nothing built is committed. `make
-wasm-reproducible` proves the bytes do not depend on the checkout.
+Every wasm artifact is a build output: `make wasm-modules` builds every
+program and every view under `$CARGO_TARGET_DIR/wasm32-unknown-unknown/release/`;
+nothing built is committed, and nothing is packed here (qa's `make pack` embeds
+each view in its program for a founding). `make wasm-reproducible` proves the
+bytes do not depend on the checkout.
 
 View releases require `wasm-tools`, Python 3, and
 [Binaryen wasm-opt 132](https://github.com/WebAssembly/binaryen/releases/tag/version_132).

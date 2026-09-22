@@ -35,10 +35,6 @@ VIEW_FORBIDDEN := blst commonware-cryptography wasm-bindgen js-sys web-sys
 # Cargo uses this directory for both workspaces.
 BUILD_TARGET := $(abspath $(or $(CARGO_TARGET_DIR),target))
 RELEASE := $(BUILD_TARGET)/wasm32-unknown-unknown/release
-# The packed programs (each with its view embedded): what genesis and qa
-# consume.
-PACK_DIR := $(BUILD_TARGET)/pack
-PACKER := $(BUILD_TARGET)/debug/view-pack
 
 # A wasm artifact must be the same bytes from any checkout on any machine:
 # panic locations would otherwise carry this checkout's, cargo's and the
@@ -70,32 +66,24 @@ test: wasm-programs
 
 .PHONY: wasm-modules wasm-reproducible
 
-## builds every program and view, then packs each view into its program under
-## $(PACK_DIR): module_registry (settings-view), chat (chat-view), forge
-## (forge-view), valset and identity as they are.
+## builds every program and every view under $(RELEASE)/, unpacked. Packing
+## a view into its program is genesis's job: qa's `make pack` runs view-pack
+## over these outputs.
 wasm-modules: wasm-programs wasm-views
-	$(CARGO) build -p view-pack --target-dir $(BUILD_TARGET)
-	@mkdir -p $(PACK_DIR)
-	@for name in module_registry valset identity chat forge; do \
-	  cp $(RELEASE)/$$name.wasm $(PACK_DIR)/$$name.wasm || exit 1; \
-	done
-	$(PACKER) $(PACK_DIR)/chat.wasm $(RELEASE)/chat_view.wasm $(PACK_DIR)/chat.wasm
-	$(PACKER) $(PACK_DIR)/module_registry.wasm $(RELEASE)/settings_view.wasm $(PACK_DIR)/module_registry.wasm
-	$(PACKER) $(PACK_DIR)/forge.wasm $(RELEASE)/forge_view.wasm $(PACK_DIR)/forge.wasm
-	@ls -l $(PACK_DIR)/*.wasm
+	@ls -l $(RELEASE)/*.wasm
 
-## builds the packed programs twice, the second time from a fresh target
+## builds every program and view twice, the second time from a fresh target
 ## directory, and requires the same sha256 for every artifact and no absolute
 ## path of this checkout or this home inside any of them.
 wasm-reproducible:
 	$(MAKE) wasm-modules
-	@cd $(PACK_DIR) && sha256sum *.wasm > first.sha256 && cat first.sha256
+	@cd $(RELEASE) && sha256sum *.wasm > first.sha256 && cat first.sha256
 	$(MAKE) wasm-modules CARGO_TARGET_DIR=$(BUILD_TARGET)/repro
-	@cd $(BUILD_TARGET)/repro/pack && sha256sum *.wasm > second.sha256 && cat second.sha256
-	@diff $(PACK_DIR)/first.sha256 $(BUILD_TARGET)/repro/pack/second.sha256 && echo "every packed program rebuilds to the same bytes"
-	@for f in $(PACK_DIR)/*.wasm; do \
+	@cd $(BUILD_TARGET)/repro/wasm32-unknown-unknown/release && sha256sum *.wasm > second.sha256 && cat second.sha256
+	@diff $(RELEASE)/first.sha256 $(BUILD_TARGET)/repro/wasm32-unknown-unknown/release/second.sha256 && echo "every program and view rebuilds to the same bytes"
+	@for f in $(RELEASE)/*.wasm; do \
 	  if strings $$f | grep -qE "$(CURDIR)|$(HOME)"; then echo "$$f embeds an absolute path"; strings $$f | grep -E "$(CURDIR)|$(HOME)" | head -3; exit 1; fi; \
-	done; echo "no packed program embeds a path of this checkout or home"
+	done; echo "no program or view embeds a path of this checkout or home"
 
 ## refreshes the probe fixture the founding suite seats as the authority,
 ## from the ducktape checkout at $(DUCKTAPE).
@@ -137,8 +125,3 @@ view-wasm-check:
 	  echo "view-linkable crates reach a forbidden dependency:$$reached"; \
 	  exit 1; \
 	fi
-
-# The forge harness needs only this app program.
-.PHONY: forge-wasm
-forge-wasm:
-	$(WASM_BUILD) -p forge --features program
