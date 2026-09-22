@@ -1918,7 +1918,18 @@ pub fn encode<T: Serialize>(value: &T) -> Vec<u8> {
 
 /// How many bytes [`encode`] would write, without writing them.
 pub fn encoded_size<T: Serialize>(value: &T) -> u64 {
-    encode(value).len() as u64
+    struct Count(u64);
+    impl std::io::Write for Count {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0 += bytes.len() as u64;
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+    }
+    let mut count = Count(0);
+    value.serialize(&mut rmp_serde::Serializer::new(&mut count).with_struct_map())
+        .expect("wire types are plain data");
+    count.0
 }
 
 pub fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, String> {
@@ -2237,6 +2248,17 @@ mod tests {
         assert_eq!(explicit, zero);
         assert_ne!(explicit, absent);
         assert_eq!(decode::<Option<Border>>(&encode(&explicit)).unwrap(), zero);
+    }
+
+    #[test]
+    fn encoded_size_matches_named_messagepack_without_a_second_buffer() {
+        for count in [0, 1, 16, 256, 2000] {
+            let frame = Frame {
+                root: Some(column((0..count).map(|index| keyed(&index.to_string(), "한é" )).collect())),
+                ..Default::default()
+            };
+            assert_eq!(encoded_size(&frame), encode(&frame).len() as u64);
+        }
     }
 
     #[test]
