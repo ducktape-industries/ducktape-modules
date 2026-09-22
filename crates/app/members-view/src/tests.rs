@@ -128,7 +128,7 @@ fn a_refusal_shows_its_sentence_and_retry_asks_again() {
     cx.run_until_parked();
     assert!(cx.has_text("identity is not running here"));
     respond(&mut cx);
-    cx.simulate_click("members/retry");
+    cx.simulate_click("members-retry");
     cx.run_until_parked();
     assert!(cx.has_text("eddy"));
     assert_eq!(cx.host().asked::<QueryBytes<Identity>>().len(), 2);
@@ -138,12 +138,12 @@ fn a_refusal_shows_its_sentence_and_retry_asks_again() {
 fn the_filter_narrows_the_list_without_asking_again() {
     let mut cx = ready();
     let reads = cx.host().asked::<QueryBytes<Identity>>().len();
-    cx.simulate_input("members/filter", "ed");
+    cx.simulate_input("members-filter", "ed");
     assert!(cx.has_text("eddy") && !cx.has_text("chat"));
     assert_eq!(cx.host().asked::<QueryBytes<Identity>>().len(), reads);
-    cx.simulate_input("members/filter", "8");
+    cx.simulate_input("members-filter", "8");
     assert!(cx.has_text("chat") && !cx.has_text("eddy"));
-    cx.simulate_input("members/filter", "nobody");
+    cx.simulate_input("members-filter", "nobody");
     assert!(cx.has_text("Nothing matches"));
 }
 
@@ -168,7 +168,7 @@ fn a_live_bump_re_reads_and_a_snapshot_restores_the_screen() {
     feed.push(());
     cx.run_until_parked();
     assert!(cx.has_text("newcomer") && !cx.has_text("eddy"));
-    cx.simulate_input("members/filter", "new");
+    cx.simulate_input("members-filter", "new");
     let bytes = cx.snapshot().unwrap();
     let mut restored = TestAppContext::new();
     restored.host().stream::<Live>();

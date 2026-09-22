@@ -82,14 +82,14 @@ pub fn card(
             .gap_1()
             .bg(theme.background)
             .child(action_button(
-                "chat-message-react",
+                ElementId::Name(format!("chat-message-{}-react", message.id).into()),
                 "😀",
                 "Manage reactions",
                 theme,
                 react,
             ))
             .child(action_button(
-                "chat-message-more",
+                ElementId::Name(format!("chat-message-{}-more", message.id).into()),
                 "⋯",
                 "More message actions",
                 theme,
@@ -99,7 +99,7 @@ pub fn card(
             let open =
                 cx.listener(move |chat, _: &ClickEvent, _window, cx| chat.open_thread(seq, cx));
             actions = actions.child(action_button(
-                "chat-message-thread",
+                ElementId::Name(format!("chat-message-{}-thread", message.id).into()),
                 "💬",
                 "Open thread",
                 theme,

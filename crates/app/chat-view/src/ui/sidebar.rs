@@ -1,5 +1,6 @@
 //! The channel and direct-message pane, authored as native GPUI elements.
 
+use ducktape_view_guest::AnyElement;
 use ducktape_view_guest::prelude::*;
 use ducktape_view_guest::{Context, ElementId, ParentElement, Styled, Theme, div, px};
 
@@ -198,7 +199,7 @@ fn channel_button(
     selected: bool,
     cx: &mut Context<Chat>,
     theme: &Theme,
-) -> impl IntoElement {
+) -> AnyElement {
     let id = info.channel.id.clone();
     let click =
         cx.listener(move |chat, _: &ClickEvent, window, cx| chat.choose(id.clone(), window, cx));
@@ -267,7 +268,7 @@ fn channel_button(
                 .bg(theme.accent),
         );
     }
-    row
+    with_seats(chat, info, row, theme)
 }
 
 fn voice_button(
@@ -275,7 +276,7 @@ fn voice_button(
     info: &ChannelInfo,
     cx: &mut Context<Chat>,
     theme: &Theme,
-) -> impl IntoElement {
+) -> AnyElement {
     let id = info.channel.id.clone();
     let click = cx.listener(move |chat, _: &ClickEvent, _window, cx| {
         cx.host()
@@ -284,7 +285,7 @@ fn voice_button(
         chat.notice.clear();
     });
     let selected = chat.session.huddle_joined && chat.session.huddle_channel == info.channel.id;
-    div()
+    let row = div()
         .id(ElementId::Name(
             format!("chat-sidebar-voice-{}", info.channel.id).into(),
         ))
@@ -305,7 +306,77 @@ fn voice_button(
         .child(div().flex_1().child(info.channel.name.clone()))
         .when(info.channel.archived, |el| {
             el.child(quiet("archived", "Archived", theme))
-        })
+        });
+    with_seats(chat, info, row, theme)
+}
+
+fn with_seats(chat: &Chat, info: &ChannelInfo, row: impl IntoElement, theme: &Theme) -> AnyElement {
+    let mut content = div()
+        .id(ElementId::Name(
+            format!("chat-sidebar-seats-{}", info.channel.id).into(),
+        ))
+        .flex()
+        .flex_col()
+        .child(row);
+    let Some(names) = chat.names.ready() else {
+        return content.into_any_element();
+    };
+    let me = chat.me_key();
+    for (index, seat) in info.channel.huddle.iter().enumerate() {
+        let label = names.member_label(&seat.party);
+        let is_you = names.owns_handle(&seat.party, &me);
+        let speaking = if is_you {
+            chat.session.call_speaking
+        } else {
+            chat.session
+                .call_peers
+                .iter()
+                .any(|peer| peer.peer == seat.node && peer.speaking && !peer.muted)
+        };
+        let note = if is_you {
+            if chat.session.call_muted {
+                "you · muted"
+            } else {
+                "you"
+            }
+        } else {
+            ""
+        };
+        content = content.child(
+            div()
+                .id(ElementId::named_usize("chat-sidebar-seat", index))
+                .flex()
+                .items_center()
+                .gap_1()
+                .pl_7()
+                .py_0p5()
+                .child(
+                    div()
+                        .size_5()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded_full()
+                        .bg(if speaking {
+                            theme.success_soft
+                        } else {
+                            theme.sidebar_raised
+                        })
+                        .text_xs()
+                        .text_color(if speaking {
+                            theme.success
+                        } else {
+                            theme.sidebar_muted
+                        })
+                        .child(initials(&label)),
+                )
+                .child(div().flex_1().text_xs().child(label))
+                .when(!note.is_empty(), |el| {
+                    el.child(div().text_xs().text_color(theme.sidebar_muted).child(note))
+                }),
+        );
+    }
+    content.into_any_element()
 }
 
 fn dm_button(

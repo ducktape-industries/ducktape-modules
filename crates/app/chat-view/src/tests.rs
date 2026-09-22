@@ -115,7 +115,7 @@ fn opened() -> (TestAppContext, Entity<Chat>) {
     assert!(cx.has_text("General"));
     assert!(cx.has_text("No channel open"));
     assert!(cx.has_text("Channels"));
-    cx.simulate_click("chat/sidebar/channel/general");
+    cx.simulate_click("chat-sidebar-channel-general");
     cx.run_until_parked();
     view.read(|chat| assert_eq!(chat.room.as_ref().unwrap().id, "general"));
     (cx, view)
@@ -136,14 +136,9 @@ fn the_room_shows_its_rows_intro_and_actions() {
     );
     // Each paragraph remains rich text in the unchanged tree vocabulary.
     for seq in [1, 2] {
-        assert!(
-            cx.find(&format!(
-                "message/Timeline/m{seq}/contents/body/block/0/text"
-            ))
-            .is_some()
-        );
+        assert!(cx.find(&format!("chat-message-m{seq}-block-0")).is_some());
     }
-    cx.simulate_click("Manage reactions");
+    cx.simulate_click("chat-message-m1-react");
     assert!(cx.host().asked::<ducktape_view_guest::caps::Widget>().iter().any(|command| {
         matches!(command, wire::WidgetCommand::Focus { target } if target == &ui::menu::focus_key(Pane::Timeline, Mode::Reactions))
     }));
@@ -154,7 +149,7 @@ fn the_room_shows_its_rows_intro_and_actions() {
                 .is_some_and(|m| m.mode == Mode::Reactions)
         )
     });
-    cx.simulate_click("chat/room/message-reaction/🔥");
+    cx.simulate_click("chat-message-m1-reaction-🔥");
     cx.run_until_parked();
     assert!(
         cx.host()
@@ -163,9 +158,9 @@ fn the_room_shows_its_rows_intro_and_actions() {
             .any(|op| matches!(op, ChatMsg::AddReaction { emoji, .. } if emoji == "🔥"))
     );
     view.read(|chat| assert!(chat.menu.is_none()));
-    cx.simulate_click("More message actions");
+    cx.simulate_click("chat-message-m1-more");
     assert!(cx.has_text("Reply in thread") && cx.has_text("Copy link"));
-    cx.simulate_click("chat/room/message-reply");
+    cx.simulate_click("chat-message-m1-thread");
     cx.run_until_parked();
     view.read(|chat| {
         assert_eq!(
@@ -174,12 +169,12 @@ fn the_room_shows_its_rows_intro_and_actions() {
         )
     });
     assert!(cx.has_text("Thread") && cx.has_text("Reply in thread"));
-    cx.simulate_click("Close thread");
+    cx.simulate_click("chat-thread-close");
     view.read(|chat| assert!(chat.room.as_ref().unwrap().thread.is_none()));
-    cx.simulate_click("Channel details");
+    cx.simulate_click("chat-room-details");
     assert!(cx.has_text("Archive channel"));
-    cx.simulate_input("chat/details/name-input", "Lobby");
-    cx.simulate_click("chat/details/rename-button");
+    cx.simulate_input("chat-details-name-input", "Lobby");
+    cx.simulate_click("chat-details-rename-button");
     cx.run_until_parked();
     assert!(
         cx.host()
@@ -215,22 +210,22 @@ fn a_send_shows_pending_then_lands_and_a_refusal_is_a_banner() {
     });
     cx.run_until_parked();
     assert!(cx.has_text("on its way") && !cx.has_text("sending…"));
-    cx.simulate_input("chat/sidebar/search", "hello");
-    cx.simulate_submit("chat/sidebar/search");
+    cx.simulate_input("chat-sidebar-search", "hello");
+    cx.simulate_submit("chat-sidebar-search");
     cx.run_until_parked();
     assert!(cx.has_text("1 result for “hello”"), "{:?}", cx.texts());
-    cx.simulate_click("Clear message search");
+    cx.simulate_click("chat-sidebar-clear-search");
     view.read(|chat| assert!(chat.search.query.is_empty()));
     cx.host().handle::<Id>(|kind| {
         assert_eq!(kind, "channel");
         Ok("chan-1".into())
     });
     cx.host().refuse::<Submit<ChatApi>>("no", "no");
-    cx.simulate_click("New channel");
+    cx.simulate_click("chat-sidebar-new-channel");
     assert!(cx.has_text("Create a channel"));
-    cx.simulate_input("chat/create/name", "random");
-    cx.simulate_click("chat/create/members");
-    cx.simulate_click("chat/create/submit");
+    cx.simulate_input("chat-create-name", "random");
+    cx.simulate_click("chat-create-members");
+    cx.simulate_click("chat-create-submit");
     cx.run_until_parked();
     assert!(cx.host().asked::<Submit<ChatApi>>().iter().any(|op| matches!(op, ChatMsg::CreateChannel { name, post_policy: PostPolicy::MembersOnly, .. } if name == "random")));
     assert!(cx.has_text("Couldn’t create this channel: no"));
@@ -257,7 +252,7 @@ fn unread_rooms_carry_a_dot_and_the_open_room_a_divider() {
         cx.notify();
     });
     cx.run_until_parked();
-    assert!(cx.find("chat/sidebar/channel/general/unread").is_some());
+    assert!(cx.find("chat-sidebar-channel-general-unread").is_some());
     view.update(&mut cx, |chat, _, cx| {
         chat.reads.entering = true;
         chat.room = Some(Room {

@@ -89,6 +89,24 @@ pub fn list(chat: &Chat, pane: Pane, cx: &mut Context<Chat>, theme: &Theme) -> i
         }
     }
     if !messages.is_empty() {
+        if matches!(pane, Pane::Timeline)
+            && chat
+                .room
+                .as_ref()
+                .is_some_and(|room| !room.has_older && !room.landed)
+        {
+            let room = chat.room.as_ref().expect("timeline room");
+            let name = chat
+                .info(&room.id)
+                .map_or_else(|| room.id.clone(), |info| info.channel.name.clone());
+            content = content.child(intro(
+                &name,
+                super::sidebar::dm_peer(chat)
+                    .as_ref()
+                    .map(|peer| peer.0.as_str()),
+                theme,
+            ));
+        }
         let count = messages.len();
         let pane_for_items = pane;
         let list_theme = theme.clone();
@@ -175,6 +193,10 @@ fn intro(name: &str, dm: Option<&str>, theme: &Theme) -> impl IntoElement {
         .child(div().h(px(1.)).w_full().bg(theme.border))
 }
 
-fn quiet(text: &str, theme: &Theme) -> impl IntoElement {
-    div().p_4().text_sm().text_color(theme.muted).child(text)
+fn quiet(text: impl Into<String>, theme: &Theme) -> impl IntoElement {
+    div()
+        .p_4()
+        .text_sm()
+        .text_color(theme.muted)
+        .child(text.into())
 }
