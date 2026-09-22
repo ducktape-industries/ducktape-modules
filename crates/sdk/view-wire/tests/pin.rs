@@ -8,7 +8,7 @@ fn anchored_preserves_local_offsets_and_bounds_untrusted_coordinates() {
         fit: AnchoredFitMode::SnapToWindow,
         position: Some([x, y]),
         position_mode: AnchoredPositionMode::Local,
-        offset: [0.; 2],
+        offset: Some([0.; 2]),
         children: vec![Node::Text {
             id: None,
             style: gpui::StyleRefinement::default().w(gpui::px(f32::INFINITY)).h(gpui::px(-1.0)),

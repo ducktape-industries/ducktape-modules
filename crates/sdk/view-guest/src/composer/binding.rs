@@ -4,13 +4,13 @@ use super::{AttachmentState, Draft, MentionChoice};
 use crate::context::Callback;
 use crate::prelude::*;
 use crate::{
-    wire, App, EditorBinding, EditorDocumentUpdate, EditorElement, EditorElementEvent,
-    EditorKeyRequest, EditorTransaction, EditorTransactionEvent, View,
+    wire, App, EditorDocumentUpdate, EditorElement, EditorElementEvent, EditorTransaction, View,
 };
 use std::rc::Rc;
 
 #[path = "binding_editor.rs"]
 mod binding_editor;
+#[cfg(test)]
 pub(crate) use binding_editor::key_tag;
 use binding_editor::{editor, matching_choices};
 

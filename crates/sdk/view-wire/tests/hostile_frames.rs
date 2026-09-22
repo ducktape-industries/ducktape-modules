@@ -1264,7 +1264,7 @@ fn check_bounds(
         }
     }
     match node {
-        Node::Container { children, .. } => {
+        Node::Container { children, .. } | Node::UniformList { children, .. } => {
             for child in children {
                 check_bounds(child, depth + 1, keys, svg_bytes, ctx);
             }
