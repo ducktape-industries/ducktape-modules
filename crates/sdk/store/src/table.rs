@@ -100,8 +100,10 @@ impl<K: KeyCodec, V: BorshSerialize + BorshDeserialize> Map<K, V> {
         page: &Page,
         height: u64,
     ) -> Result<PageReply<(K, V)>, Refusal> {
+        let prefix = self.key(head);
+        let listing = page.listing(prefix.clone(), height)?;
         let rows = store
-            .scan(page.scan_ahead(&self.key(head)))
+            .scan(listing.scan_ahead(&prefix))
             .into_iter()
             .map(|entry| {
                 let key = decode_key(self.prefix, &entry.key)?;
@@ -109,7 +111,7 @@ impl<K: KeyCodec, V: BorshSerialize + BorshDeserialize> Map<K, V> {
                 Ok((entry.key, (key, value)))
             })
             .collect::<Result<Vec<_>, Refusal>>()?;
-        Ok(page.reply(height, rows))
+        Ok(listing.reply(rows))
     }
 
     pub fn prefix(&self) -> &'static str {

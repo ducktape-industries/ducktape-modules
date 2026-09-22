@@ -187,8 +187,37 @@ pub enum Query {
 }
 
 impl Query {
+    /// The listing a page's cursor is bound to: this query with its page
+    /// taken out.
+    pub fn scope(&self) -> Vec<u8> {
+        let mut scope = self.clone();
+        if let Some(page) = scope.page_mut() {
+            *page = Page::default();
+        }
+        Page::scope_of(&scope)
+    }
+
     /// The page a listing asks for; an unpaged query has none.
     pub fn page(&self) -> Option<&Page> {
+        match self {
+            Query::Repos { page }
+            | Query::Repo { page, .. }
+            | Query::Refs { page, .. }
+            | Query::Log { page, .. }
+            | Query::Tree { page, .. }
+            | Query::Diff { page, .. }
+            | Query::Changes { page, .. }
+            | Query::Change { page, .. }
+            | Query::Judgment { page, .. } => Some(page),
+            Query::Advertise { .. }
+            | Query::Upload { .. }
+            | Query::Blob { .. }
+            | Query::Compare { .. }
+            | Query::Activity { .. } => None,
+        }
+    }
+
+    pub fn page_mut(&mut self) -> Option<&mut Page> {
         match self {
             Query::Repos { page }
             | Query::Repo { page, .. }

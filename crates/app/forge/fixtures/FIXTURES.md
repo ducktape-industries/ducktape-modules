@@ -53,7 +53,10 @@ fixtures`; without the variable the test must reproduce the committed bytes.
 | `upload-refs` | `Query` → `git smart HTTP` | Raw v2 ls-refs response, including HEAD. |
 | `refused-object-not-held` | `Query` → `Refusal` | Serving node cannot return the requested object (not_found). |
 | `refused-not-found` | `Query` → `Refusal` | Repository does not exist. |
-| `refused-invalid-input` | `Query` → `Refusal` | A list cursor that is not an 8-byte offset. |
+| `refused-invalid-input` | `Query` → `Refusal` | A page cursor that does not decode. |
+| `refs-before-update` | `Query` → `Reply` | One-ref page whose cursor is later invalidated. |
+| `refused-stale` | `Query` → `Refusal` | Continuation from an older answering height. |
+| `refused-other-listing` | `Query` → `Refusal` | A cursor used on a listing it does not belong to (stale). |
 | `op-change-open` | `Op` → `OpReply` | Assigned first item number. |
 | `change` | `Query` → `Reply` | Open record with body, channel, current endpoints and empty review page. |
 | `changes` | `Query` → `Reply` | Change summary list. |

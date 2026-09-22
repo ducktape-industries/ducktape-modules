@@ -22,7 +22,7 @@ use std::collections::BTreeSet;
 
 use abi::{Entry, Refusal, Scan, reason};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-pub use store::{Page, PageReply};
+pub use store::{Cursor, Page, PageReply};
 use store::{
     Reads, Writes, already_exists, capacity, invalid, not_found, unauthorized, wrong_state,
 };
@@ -62,9 +62,18 @@ fn root_key(ch: &str, seq: u64) -> String {
     format!("root/{ch}/{:016x}", u64::MAX - seq)
 }
 /// The `Roots` cursor that resumes below `seq`: `Page::after` for the page
-/// of roots older than the one on screen.
+/// of roots older than the one on screen. Chat's listings are append-only,
+/// so a cursor's height is not checked.
 pub fn roots_below(channel_id: &str, seq: u64) -> Vec<u8> {
-    root_key(channel_id, seq).into_bytes()
+    let scope = roots_prefix(channel_id).into_bytes();
+    abi::encode(&store::Cursor {
+        height: 0,
+        scope,
+        after: root_key(channel_id, seq).into_bytes(),
+    })
+}
+fn roots_prefix(ch: &str) -> String {
+    format!("root/{ch}/")
 }
 fn msgid_key(id: &str) -> String {
     format!("msgid/{id}")

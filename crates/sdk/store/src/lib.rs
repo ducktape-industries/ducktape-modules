@@ -15,7 +15,7 @@ mod table;
 pub use key::KeyCodec;
 #[cfg(not(target_arch = "wasm32"))]
 pub use memory::{Memory, Sibling, Verifier, blob_id};
-pub use page::{Page, PageReply};
+pub use page::{Cursor, Listing, Page, PageReply};
 pub use refuse::{
     already_exists, capacity, corrupt, decoded, invalid, not_found, stale, unauthorized,
     wrong_state,

@@ -382,6 +382,39 @@ fn replay(tape: &mut Tape) {
             },
         },
     );
+    let Reply::Refs { page, .. } = tape.capture(
+        &rig,
+        "refs-before-update",
+        Query::Refs {
+            repo: REPO.into(),
+            page: Page::first(1),
+        },
+    ) else {
+        panic!();
+    };
+    rig.advance();
+    tape.refusal(
+        &rig,
+        "refused-stale",
+        Query::Refs {
+            repo: REPO.into(),
+            page: Page {
+                after: page.next.clone(),
+                limit: Some(1),
+            },
+        },
+    );
+    tape.refusal(
+        &rig,
+        "refused-other-listing",
+        Query::Refs {
+            repo: "other".into(),
+            page: Page {
+                after: page.next,
+                limit: Some(1),
+            },
+        },
+    );
     tape.output(&mut rig, "op-change-open", story.open("Review this change"));
     tape.capture(&rig, "change", change(1));
     tape.capture(&rig, "changes", changes());

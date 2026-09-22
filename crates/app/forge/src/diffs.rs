@@ -4,7 +4,7 @@ use crate::ops::cap;
 use crate::reads::{Reading, entry_kind};
 use abi::Refusal;
 use gitcore::{Mode, Oid, diff};
-use store::{Reads, invalid};
+use store::{Listing, Reads, invalid};
 
 pub fn query<S: Reads>(
     r: &Reading<'_, S>,
@@ -12,7 +12,7 @@ pub fn query<S: Reads>(
     base: &Option<String>,
     head: &str,
     path: Option<&[u8]>,
-    paging: &Page,
+    paging: &Listing,
 ) -> Result<Reply, Refusal> {
     if let Some(path) = path {
         crate::changes::path(path, false)?;
@@ -24,7 +24,7 @@ pub fn query<S: Reads>(
         .into_iter()
         .filter(|c| path.is_none_or(|p| c.path == p))
         .collect();
-    let page = paging.slice(height, &changes)?.try_map(|c| file(r, &c))?;
+    let page = paging.slice(&changes)?.try_map(|c| file(r, &c))?;
     Ok(Reply::Diff {
         height,
         base: base

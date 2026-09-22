@@ -4,7 +4,7 @@ use crate::contract::*;
 use crate::ops::storage;
 use crate::repo::{load_ref, load_repo, repo_hash};
 use abi::{Refusal, Scan};
-use store::{Reads, capacity, invalid};
+use store::{Listing, Reads, capacity, invalid};
 
 fn summary(repo: &str, c: &Change) -> ChangeSummary {
     ChangeSummary {
@@ -37,14 +37,11 @@ fn heads<S: Reads>(
         load_ref(s, repo, &c.into, hash)?.map(|o| o.to_hex()),
     ))
 }
-pub fn answer<S: Reads>(s: &S, height: u64, q: &Query, p: &Page) -> Result<Reply, Refusal> {
+pub fn answer<S: Reads>(s: &S, height: u64, q: &Query, p: &Listing) -> Result<Reply, Refusal> {
     Ok(match q {
         Query::Changes { repo, filter, .. } => {
             load_repo(s, repo)?;
-            let entries = p.reply(
-                height,
-                s.records::<Change>(p.scan_ahead(&changes::prefix(repo)))?,
-            );
+            let entries = p.reply(s.records::<Change>(p.scan_ahead(&changes::prefix(repo)))?);
             let mut items = Vec::new();
             for c in entries.items {
                 if filter.state.is_some_and(|state| c.state != state)
@@ -70,10 +67,8 @@ pub fn answer<S: Reads>(s: &S, height: u64, q: &Query, p: &Page) -> Result<Reply
         Query::Change { repo, n, .. } => {
             let c = load(s, repo, *n)?;
             let (source_head, target_head) = heads(s, repo, &c)?;
-            let reviews = p.reply(
-                height,
-                s.records::<Review>(p.scan_ahead(&changes::reviews_prefix(repo, *n)))?,
-            );
+            let reviews =
+                p.reply(s.records::<Review>(p.scan_ahead(&changes::reviews_prefix(repo, *n)))?);
             Reply::Change {
                 height,
                 change: c,
@@ -88,7 +83,6 @@ pub fn answer<S: Reads>(s: &S, height: u64, q: &Query, p: &Page) -> Result<Reply
             }
             // Chat participants need not have submitted a forge op, so page all changes.
             let entries = p.reply(
-                height,
                 s.scan(p.scan_ahead(b"c/"))
                     .into_iter()
                     .map(|e| (e.key.clone(), e)),

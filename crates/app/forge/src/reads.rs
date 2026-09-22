@@ -6,7 +6,7 @@ use crate::store::Store;
 use abi::Refusal;
 use gitcore::{Commit, Hash, Kind, Mode, Objects, Oid, Signature, Tag, Tree};
 use std::collections::BTreeSet;
-use store::{Reads, invalid, not_found};
+use store::{Listing, Reads, invalid, not_found};
 
 pub struct Reading<'a, S: Reads> {
     pub store: Store<'a, S>,
@@ -128,7 +128,7 @@ pub fn answer<S: Reads>(
     height: u64,
     q: &Query,
     bounds: &Bounds,
-    page: Option<&Page>,
+    page: Option<&Listing>,
 ) -> Result<Reply, Refusal> {
     let name = match q {
         Query::Log { repo, .. }
@@ -164,7 +164,7 @@ pub fn answer<S: Reads>(
                 &[],
                 cap(bounds.log_walk),
             ))?;
-            let page = page().slice(height, &ids)?.try_map(|id| {
+            let page = page().slice(&ids)?.try_map(|id| {
                 let c = r.commit(&id)?;
                 Ok(CommitInfo {
                     oid: id.to_hex(),
@@ -199,7 +199,7 @@ pub fn answer<S: Reads>(
             Reply::Tree {
                 height,
                 tree: tree.to_hex(),
-                page: page().slice(height, &entries)?.map(|e| TreeInfo {
+                page: page().slice(&entries)?.map(|e| TreeInfo {
                     name: e.name,
                     oid: e.id.to_hex(),
                     kind: entry_kind(e.mode),

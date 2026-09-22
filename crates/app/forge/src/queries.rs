@@ -9,7 +9,7 @@ use gitcore::wire::smart_http_service_header;
 use gitcore::wire::upload::{
     Command, capability_advertisement, fetch, ls_refs_response, parse_command,
 };
-use store::{Reads, decoded};
+use store::{Listing, Reads, decoded, stale};
 const AGENT: &[u8] = b"ducktape-forge";
 
 /// A UI query's response bytes (one `Reply`), or a git protocol query's raw
@@ -24,13 +24,15 @@ pub fn query<S: Reads>(sandbox: &S, env: &Env, request: &[u8]) -> Result<Vec<u8>
 }
 fn answer<S: Reads>(s: &S, height: u64, q: &Query) -> Result<Reply, Refusal> {
     let bounds = load_bounds(s)?;
-    let paging = q.page().map(|p| p.bounded(bounds.page_size as u64));
+    let paging = q
+        .page()
+        .map(|p| listing(p.bounded(bounds.page_size as u64), q, height))
+        .transpose()?;
     let p = || paging.as_ref().expect("this query has pagination");
     Ok(match q {
         Query::Repos { .. } => {
             let page = p()
                 .reply(
-                    height,
                     s.scan(p().scan_ahead(b"a/"))
                         .into_iter()
                         .map(|e| (e.key, e.value)),
@@ -49,7 +51,6 @@ fn answer<S: Reads>(s: &S, height: u64, q: &Query) -> Result<Reply, Refusal> {
             let record = load_repo(s, repo)?;
             let prefix = writers_prefix(repo);
             let writers = p().reply(
-                height,
                 s.scan(p().scan_ahead(&prefix))
                     .into_iter()
                     .map(|e| (e.key.clone(), e.key[prefix.len()..].to_vec())),
@@ -69,7 +70,6 @@ fn answer<S: Reads>(s: &S, height: u64, q: &Query) -> Result<Reply, Refusal> {
             let prefix = refs_prefix(repo);
             let page = p()
                 .reply(
-                    height,
                     s.scan(p().scan_ahead(&prefix))
                         .into_iter()
                         .map(|e| (e.key.clone(), e)),
@@ -93,6 +93,16 @@ fn answer<S: Reads>(s: &S, height: u64, q: &Query) -> Result<Reply, Refusal> {
         }
         _ => crate::reads::answer(s, height, q, &bounds, paging.as_ref())?,
     })
+}
+
+/// A forge listing can be rewritten by a push, so a cursor is good for the
+/// height that answered it and no other.
+fn listing(page: Page, q: &Query, height: u64) -> Result<Listing, Refusal> {
+    let listing = page.listing(q.scope(), height)?;
+    if listing.cursor_height.is_some_and(|h| h != height) {
+        return Err(stale("cursor height changed; restart the listing"));
+    }
+    Ok(listing)
 }
 
 fn advertise<S: Reads>(sandbox: &S, name: &str, service: Service) -> Result<Vec<u8>, Refusal> {

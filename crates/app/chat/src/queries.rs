@@ -2,14 +2,24 @@ use super::*;
 
 // ── query ───────────────────────────────────────────────────────────────────
 
-/// One page of the entries under `prefix`, the raw key beside each value
-/// so `Page::reply` can resume from it.
-fn paged(store: &impl Reads, prefix: impl AsRef<[u8]>, page: &Page) -> Vec<(Vec<u8>, Vec<u8>)> {
-    store
-        .scan(page.scan_ahead(prefix.as_ref()))
+type Raw = (Vec<u8>, Vec<u8>);
+
+/// One page of the entries under `prefix`, which is also the listing a
+/// cursor is bound to (chat accepts a cursor from any height: its lists
+/// are append-only).
+fn paged(
+    store: &impl Reads,
+    prefix: impl AsRef<[u8]>,
+    page: &Page,
+    height: u64,
+) -> Result<PageReply<Raw>, Refusal> {
+    let prefix = prefix.as_ref();
+    let listing = page.listing(prefix.to_vec(), height)?;
+    let rows = store
+        .scan(listing.scan_ahead(prefix))
         .into_iter()
-        .map(|e| (e.key, e.value))
-        .collect()
+        .map(|e| (e.key.clone(), (e.key, e.value)));
+    Ok(listing.reply(rows))
 }
 
 /// One page of the keys under `prefix`.
@@ -18,13 +28,8 @@ fn keys_page(
     prefix: impl AsRef<[u8]>,
     page: &Page,
     height: u64,
-) -> PageReply<Vec<u8>> {
-    page.reply(
-        height,
-        paged(store, prefix, page)
-            .into_iter()
-            .map(|(key, _)| (key.clone(), key)),
-    )
+) -> Result<PageReply<Vec<u8>>, Refusal> {
+    Ok(paged(store, prefix, page, height)?.map(|(key, _)| key))
 }
 
 /// The rows the postings under `prefix` name, one page.
@@ -34,12 +39,11 @@ fn posted_page(
     page: &Page,
     height: u64,
 ) -> Result<PageReply<MsgRow>, Refusal> {
-    page.reply(height, paged(store, prefix, page))
-        .try_map(|posting| {
-            let (ch, seq): (String, u64) = serde_json::from_slice(&posting)
-                .map_err(|e| Refusal::new(reason::CORRUPT, e.to_string()))?;
-            row(store, &ch, seq)
-        })
+    paged(store, prefix, page, height)?.try_map(|(_, posting)| {
+        let (ch, seq): (String, u64) = serde_json::from_slice(&posting)
+            .map_err(|e| Refusal::new(reason::CORRUPT, e.to_string()))?;
+        row(store, &ch, seq)
+    })
 }
 
 fn rows_at(
@@ -86,15 +90,14 @@ pub fn query(store: &impl Reads, height: u64, q: ChatViewQuery) -> Result<ChatVi
             ));
         }
         ChatViewQuery::Channels { page } => ChatViewReply::Channels(
-            page.reply(height, paged(store, b"chan/", &page))
-                .try_map(|value| {
-                    let channel: ChannelRow = serde_json::from_slice(&value)
-                        .map_err(|e| Refusal::new(reason::CORRUPT, e.to_string()))?;
-                    Ok(ChannelInfo {
-                        head_seq: head_seq(store, &channel.id),
-                        channel,
-                    })
-                })?,
+            paged(store, b"chan/", &page, height)?.try_map(|(_, value)| {
+                let channel: ChannelRow = serde_json::from_slice(&value)
+                    .map_err(|e| Refusal::new(reason::CORRUPT, e.to_string()))?;
+                Ok(ChannelInfo {
+                    head_seq: head_seq(store, &channel.id),
+                    channel,
+                })
+            })?,
         ),
         ChatViewQuery::ThreadAttention { channel_id, author } => {
             let entries = store
@@ -126,7 +129,7 @@ pub fn query(store: &impl Reads, height: u64, q: ChatViewQuery) -> Result<ChatVi
             viewer_handles,
             page,
         } => {
-            let keyed = keys_page(store, format!("root/{channel_id}/"), &page, height);
+            let keyed = keys_page(store, roots_prefix(&channel_id), &page, height)?;
             let seqs = keyed
                 .items
                 .iter()
@@ -165,7 +168,7 @@ pub fn query(store: &impl Reads, height: u64, q: ChatViewQuery) -> Result<ChatVi
         } => {
             let mut root = load::<MsgRow>(store, &msg_key(&channel_id, root_seq))?;
             let prefix = format!("thread/{channel_id}/{root_seq:016x}/");
-            let keyed = keys_page(store, prefix, &page, height);
+            let keyed = keys_page(store, prefix, &page, height)?;
             let seqs = keyed
                 .items
                 .iter()
@@ -185,11 +188,10 @@ pub fn query(store: &impl Reads, height: u64, q: ChatViewQuery) -> Result<ChatVi
             }
         }
         ChatViewQuery::Members { channel_id, page } => ChatViewReply::Members(
-            page.reply(height, paged(store, member_key(&channel_id, ""), &page))
-                .try_map(|value| {
-                    serde_json::from_slice(&value)
-                        .map_err(|e| Refusal::new(reason::CORRUPT, e.to_string()))
-                })?,
+            paged(store, member_key(&channel_id, ""), &page, height)?.try_map(|(_, value)| {
+                serde_json::from_slice(&value)
+                    .map_err(|e| Refusal::new(reason::CORRUPT, e.to_string()))
+            })?,
         ),
         ChatViewQuery::Search {
             text,
