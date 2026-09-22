@@ -79,7 +79,7 @@ impl TestAppContext {
         self.driver.as_mut().expect("open a view first").app_mut()
     }
     fn fresh_app(&self, macos: bool) -> App {
-        let mut app = App::new(macos);
+        let mut app = App::for_driver(macos);
         for (kind, value) in &self.globals {
             app.set_shared_global(*kind, value.clone());
         }

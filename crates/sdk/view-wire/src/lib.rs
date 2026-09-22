@@ -118,7 +118,7 @@ mod query;
 pub use query::{ContainerQuery, MAX_QUERY_OPS, QueryOp};
 
 mod window;
-pub use window::WindowCommand;
+pub use window::{WindowCommand, WindowControlArea};
 
 mod widget;
 pub use widget::WidgetCommand;
@@ -137,8 +137,10 @@ mod patch;
 pub use patch::{MAX_PATCHES, Patch, apply, diff};
 
 pub mod events;
+pub mod interactivity;
 pub mod keyboard;
 pub mod mouse;
+pub use interactivity::{DispatchPhase, HoverListenerMode, Tooltip, TooltipResponse};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RichTextHover {
@@ -157,7 +159,10 @@ pub enum Event {
         captured: bool,
     },
     /// A mouse interaction in logical coordinates local to the guest surface.
-    Mouse { event: mouse::Event, captured: bool },
+    Mouse {
+        event: mouse::Event,
+        captured: bool,
+    },
     /// A keyboard interaction after the mounted native widgets handled it.
     Keyboard {
         event: keyboard::Event,
@@ -169,13 +174,95 @@ pub enum Event {
     /// last sent.
     Message(u32),
     /// A GPUI click, kept distinct from message routes and carrying its input data.
-    Click { handler: u32, event: click::Click },
+    Click {
+        handler: u32,
+        event: click::Click,
+    },
+    /// GPUI element listener payloads. These routes are allocated per frame.
+    MouseDown {
+        handler: u32,
+        phase: interactivity::DispatchPhase,
+        event: interactivity::MouseDown,
+    },
+    MouseUp {
+        handler: u32,
+        phase: interactivity::DispatchPhase,
+        event: interactivity::MouseUp,
+    },
+    MouseDownOut {
+        handler: u32,
+        event: interactivity::MouseDown,
+    },
+    MouseUpOut {
+        handler: u32,
+        event: interactivity::MouseUp,
+    },
+    MousePressure {
+        handler: u32,
+        phase: interactivity::DispatchPhase,
+        event: interactivity::MousePressure,
+    },
+    MouseMove {
+        handler: u32,
+        phase: interactivity::DispatchPhase,
+        event: interactivity::MouseMove,
+    },
+    MouseExit {
+        handler: u32,
+        phase: interactivity::DispatchPhase,
+        event: interactivity::MouseExit,
+    },
+    ScrollWheel {
+        handler: u32,
+        phase: interactivity::DispatchPhase,
+        event: interactivity::ScrollWheel,
+    },
+    Pinch {
+        handler: u32,
+        phase: interactivity::DispatchPhase,
+        event: interactivity::Pinch,
+    },
+    KeyDown {
+        handler: u32,
+        phase: interactivity::DispatchPhase,
+        event: interactivity::KeyDown,
+    },
+    KeyUp {
+        handler: u32,
+        phase: interactivity::DispatchPhase,
+        event: interactivity::KeyUp,
+    },
+    ModifiersChanged {
+        handler: u32,
+        event: interactivity::ModifiersChanged,
+    },
+    Hover {
+        handler: u32,
+        hovered: bool,
+    },
+    FileDropExit {
+        handler: u32,
+    },
+    AuxClick {
+        handler: u32,
+        event: click::Click,
+    },
+    /// Native hover asked the guest to build a tooltip for the displayed frame.
+    TooltipRequest {
+        request: u32,
+    },
     /// A registered host surface emitted its declared result value.
-    Surface { handler: u32, value: SurfaceValue },
+    Surface {
+        handler: u32,
+        value: SurfaceValue,
+    },
     /// A text field's content changed. `handler` indexes the guest's
     /// per-frame input-handler table; `text` is the whole value the host now
     /// holds.
-    Input { handler: u32, text: String },
+    Input {
+        handler: u32,
+        text: String,
+    },
     /// An editor's text or cursor changed. `reset` fences document replacements;
     /// `revision` orders host observations. Caret-only changes are included.
     /// Initial assignment, mirror repair and exact transfer acknowledgments.
@@ -192,12 +279,20 @@ pub enum Event {
         event: EditorTransactionEvent,
     },
     /// The host theme changed; the guest stores the corresponding `Theme` global.
-    Theme { dark: bool },
+    Theme {
+        dark: bool,
+    },
     /// A checkbox or toggler flipped. `handler` indexes the guest's
     /// per-frame handler table; `on` is the state it now shows.
-    Toggle { handler: u32, on: bool },
+    Toggle {
+        handler: u32,
+        on: bool,
+    },
     /// A slider moved to `value`.
-    Slide { handler: u32, value: f32 },
+    Slide {
+        handler: u32,
+        value: f32,
+    },
     /// A pick list chose the option at `index` in the node's `options`.
     Select { handler: u32, index: u32 },
     /// A native interactive-text hover changed character index.
@@ -226,9 +321,17 @@ pub enum Event {
     /// position it saw, as a browser delivers one `pointermove` per frame:
     /// the pointer crosses a thousand pixels a second and every event is a
     /// guest tick. A press is never coalesced.
-    Pointer { handler: u32, x: f32, y: f32 },
+    Pointer {
+        handler: u32,
+        x: f32,
+        y: f32,
+    },
     /// Accumulated logical-pixel movement of a grabbed resize handle.
-    Drag { handler: u32, dx: f64, dy: f64 },
+    Drag {
+        handler: u32,
+        dx: f64,
+        dy: f64,
+    },
     /// The wheel turned over a [`Node::MouseArea`] by (`dx`, `dy`), in
     /// pixels when `pixels` is set and in lines otherwise.
     Scroll {
@@ -342,6 +445,8 @@ pub struct Frame {
     /// One bounded document message, independent of display text budgets.
     #[serde(deserialize_with = "editor_document::decode_messages")]
     pub editor_documents: Vec<editor_document::EditorDocumentMessage>,
+    /// Tooltip subtrees built only after a native hover request.
+    pub tooltip_responses: Vec<TooltipResponse>,
     /// The current subscription requests guest-local mouse observations.
     pub mouse_interest: bool,
     /// Live subscriptions opt into each copied event category.
@@ -757,11 +862,15 @@ const MAX_TEXT_PIXELS: f32 = 512.0;
 /// instead of a tree is bounded by [`apply`], since every bound is on the
 /// tree the patches make and only the host holds it.
 pub fn sanitize(frame: &mut Frame) -> Result<SanitizeReport, &'static str> {
-    let report = if let Some(root) = &mut frame.root {
+    let mut report = if let Some(root) = &mut frame.root {
         sanitize_tree(root)?
     } else {
         SanitizeReport::default()
     };
+    frame.tooltip_responses.truncate(MAX_PATCHES);
+    for response in &mut frame.tooltip_responses {
+        report.merge(sanitize_tree(&mut response.content)?);
+    }
     frame.upstream_sanitization.merge(report);
     for request in &mut frame.requests {
         truncate_string(&mut request.kind);
@@ -1085,6 +1194,17 @@ fn sanitize_node(
                 let mut name = group.to_string();
                 truncate_string(&mut name);
                 *group = name.into();
+            }
+            if let Some(context) = &mut interactivity.key_context {
+                let mut value = context.to_string();
+                truncate_string(&mut value);
+                *context = value.into();
+            }
+            if let Some(tooltip) = &mut interactivity.tooltip {
+                tooltip.delay_ms = tooltip.delay_ms.min(60_000);
+                if let Some(content) = &mut tooltip.content {
+                    sanitize_node(content, depth + 1, budgets, taken, identity_scopes)?;
+                }
             }
         }
         Node::UniformList {

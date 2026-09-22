@@ -8,6 +8,7 @@ pub struct Aria {
     pub label: Option<SharedString>,
     pub description: Option<SharedString>,
     pub keyshortcuts: Option<SharedString>,
+    pub active_descendant: bool,
     pub value: Option<SharedString>,
     pub placeholder: Option<SharedString>,
     pub selected: Option<bool>,

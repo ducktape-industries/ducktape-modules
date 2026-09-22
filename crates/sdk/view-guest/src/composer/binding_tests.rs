@@ -65,7 +65,7 @@ fn drawn(draft: &Draft) -> wire::Node {
 }
 
 fn drawn_with(draft: &Draft, key: &str, attach: bool, choices: &[MentionChoice]) -> wire::Node {
-    let mut app = App::new(false);
+    let mut app = App::for_driver(false);
     let entity = Entity::reserve(&app);
     let mut window = app.window();
     let mut cx = Context {

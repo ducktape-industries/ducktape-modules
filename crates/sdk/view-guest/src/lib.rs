@@ -3,10 +3,7 @@ pub use gpui::prelude::FluentBuilder;
 extern crate self as ducktape_view_guest;
 
 pub use gpui::{
-    hsla, px, rems, rgb, Anchor, AnchoredFitMode, AnchoredPositionMode, ClickEvent, CursorStyle,
-    Edges, ElementId, Global, Hsla, ListHorizontalSizingBehavior, ListSizingBehavior, ObjectFit,
-    Pixels, Point, Resource, Role, ScrollStrategy, SharedString, StyleRefinement, Styled,
-    FontStyle, FontWeight, HighlightStyle, MouseMoveEvent, StrikethroughStyle, TextRun, TextStyle, UnderlineStyle,
+    hsla, px, rems, rgb, Anchor, AnchoredFitMode, AnchoredPositionMode, ClickEvent, CursorStyle, Edges, ElementId, Global, Hsla, ListHorizontalSizingBehavior, ListSizingBehavior, ObjectFit, Pixels, Point, Resource, Role, ScrollStrategy, SharedString, StyleRefinement, Styled, FontStyle, FontWeight, HighlightStyle, MouseMoveEvent, StrikethroughStyle, TextRun, TextStyle, UnderlineStyle, FileDropEvent, HoverListenerMode, KeyDownEvent, KeyUpEvent, ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseExitEvent, MousePressureEvent, MouseUpEvent, PinchEvent, ScrollWheelEvent, WindowControlArea,
 };
 pub use view_guest_derive::IntoElement;
 pub use view_wire as wire;
@@ -25,7 +22,7 @@ pub use element::{
     div, uniform_list, AnyElement, Div, Element, Input, IntoElement, Lowering, ParentElement,
     RenderOnce, UniformList, UniformListScrollHandle,
 };
-pub use interactivity::{InteractiveElement, Interactivity, Stateful, StatefulInteractiveElement};
+pub use interactivity::{FocusHandle, InteractiveElement, Interactivity, Stateful, StatefulInteractiveElement};
 pub use list::{
     list, FollowMode, List, ListAlignment, ListOffset, ListScrollEvent,
     ListState,
@@ -36,19 +33,12 @@ pub use primitives::{
 };
 pub use surface::{surface, Surface};
 pub use rich_text::{InteractiveText, StyledText};
-pub use view_element::ViewElement;
+pub use view_element::{AnyView, ViewElement};
 
 /// Traits and primitives used to compose guest GPUI elements.
 pub mod prelude {
     pub use crate::{
-        anchored, canvas, deferred, div, hsla, img, list, modal_overlay, px, rems, resize_handle,
-        rgb, sensor, surface, svg, uniform_list, AnyElement, App, ClickEvent, Context, Element,
-        ElementId, FluentBuilder, FollowMode, Global, Hsla, Input, InteractiveElement, IntoElement,
-        List, ListAlignment, ListHorizontalSizingBehavior, ListOffset, ListScrollEvent,
-        ListSizingBehavior, ListState, ParentElement, Pixels, Render, RenderOnce, Role,
-        ScrollStrategy, SharedString, StatefulInteractiveElement, Styled, StyledImage, Theme,
-        UniformListScrollHandle, Window,
-        InteractiveText, StyledText,
+    anchored, canvas, deferred, div, hsla, img, list, modal_overlay, px, rems, resize_handle, rgb, sensor, surface, svg, uniform_list, AnyElement, App, ClickEvent, Context, Element, ElementId, FluentBuilder, FollowMode, Global, Hsla, Input, InteractiveElement, IntoElement, List, ListAlignment, ListHorizontalSizingBehavior, ListOffset, ListScrollEvent, ListSizingBehavior, ListState, ParentElement, Pixels, Render, RenderOnce, Role, ScrollStrategy, SharedString, StatefulInteractiveElement, Styled, StyledImage, Theme, UniformListScrollHandle, Window, InteractiveText, StyledText, AnyView, FileDropEvent, FocusHandle, HoverListenerMode, WindowControlArea,
     };
 }
 mod editor;
@@ -112,7 +102,7 @@ impl<V: View> Driver<V> {
         Self::initialize(macos, None).expect("view initializes")
     }
     pub(crate) fn initialize(macos: bool, restored: Option<V>) -> Result<Self, String> {
-        Self::initialize_in(App::new(macos), restored)
+        Self::initialize_in(App::for_driver(macos), restored)
     }
     pub(crate) fn initialize_in(mut app: App, restored: Option<V>) -> Result<Self, String> {
         let entity = Entity::reserve(&app);
@@ -172,6 +162,84 @@ impl<V: View> Driver<V> {
                     let slots = self.app.inner.slots.clone();
                     let mut window = self.app.window();
                     slots::run_click(&slots, handler, &event.into(), &mut window, &mut self.app);
+                    None
+                }
+                wire::Event::AuxClick { handler, event } => {
+                    let slots = self.app.inner.slots.clone();
+                    let mut window = self.app.window();
+                    slots::run_click(&slots, handler, &event.into(), &mut window, &mut self.app);
+                    None
+                }
+                wire::Event::MouseDown { handler, event, .. } => {
+                    self.run_route(handler, &event.into_gpui());
+                    None
+                }
+                wire::Event::MouseUp { handler, event, .. } => {
+                    self.run_route(handler, &event.into_gpui());
+                    None
+                }
+                wire::Event::MouseDownOut { handler, event } => {
+                    self.run_route(handler, &event.into_gpui());
+                    None
+                }
+                wire::Event::MouseUpOut { handler, event } => {
+                    self.run_route(handler, &event.into_gpui());
+                    None
+                }
+                wire::Event::MousePressure { handler, event, .. } => {
+                    self.run_route(handler, &event.into_gpui());
+                    None
+                }
+                wire::Event::MouseMove { handler, event, .. } => {
+                    self.run_route(handler, &event.into_gpui());
+                    None
+                }
+                wire::Event::MouseExit { handler, event, .. } => {
+                    self.run_route(handler, &event.into_gpui());
+                    None
+                }
+                wire::Event::ScrollWheel { handler, event, .. } => {
+                    self.run_route(handler, &event.into_gpui());
+                    None
+                }
+                wire::Event::Pinch { handler, event, .. } => {
+                    self.run_route(handler, &event.into_gpui());
+                    None
+                }
+                wire::Event::KeyDown { handler, event, .. } => {
+                    self.run_route(handler, &event.into_gpui());
+                    None
+                }
+                wire::Event::KeyUp { handler, event, .. } => {
+                    self.run_route(handler, &event.into_gpui());
+                    None
+                }
+                wire::Event::ModifiersChanged { handler, event } => {
+                    self.run_route(handler, &event.into_gpui());
+                    None
+                }
+                wire::Event::Hover { handler, hovered } => {
+                    self.run_route(handler, &hovered);
+                    None
+                }
+                wire::Event::FileDropExit { handler } => {
+                    self.run_route(handler, &gpui::FileDropEvent::Exited);
+                    None
+                }
+                wire::Event::TooltipRequest { request } => {
+                    let slots = self.app.inner.slots.clone();
+                    if let Some(build) = slots::tooltip_route(&slots, request) {
+                        let mut window = self.app.window();
+                        let view = build(&mut window, &mut self.app);
+                        let content = Lowering::new(&mut window, &mut self.app).lower(view);
+                        slots::tooltip_response(
+                            &slots,
+                            wire::TooltipResponse {
+                                request,
+                                content: Box::new(content),
+                            },
+                        );
+                    }
                     None
                 }
                 wire::Event::Surface { handler, value } => {
@@ -452,6 +520,7 @@ impl<V: View> Driver<V> {
             upstream_sanitization: Default::default(),
             editor_decisions,
             editor_documents: slots::take_editor_documents(&self.app.inner.slots),
+            tooltip_responses: slots::take_tooltip_responses(&self.app.inner.slots),
             mouse_interest: slots::mouse_interest(&self.app.inner.slots),
             event_interest: slots::event_interest(&self.app.inner.slots),
             root: Some(root),
@@ -461,6 +530,12 @@ impl<V: View> Driver<V> {
             unchanged,
             busy: self.busy,
         }
+    }
+
+    fn run_route<E: 'static>(&mut self, handler: u32, event: &E) {
+        let slots = self.app.inner.slots.clone();
+        let mut window = self.app.window();
+        slots::run_route(&slots, handler, event, &mut window, &mut self.app);
     }
 
     fn settle(&mut self) {

@@ -1,5 +1,5 @@
 //! Contexts and handles for the single root entity.
-use crate::{executor, slots, Host, Task, View, Window};
+use crate::{executor, slots, FocusHandle, Host, Task, View, Window};
 use std::any::{Any, TypeId};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -30,6 +30,7 @@ pub(crate) struct AppState {
     pub slots: slots::Context,
     pub tasks: RefCell<Vec<executor::Running>>,
     pub generation: Cell<u64>,
+    pub next_focus_id: Cell<u64>,
     pub dirty: Cell<bool>,
     pub macos: bool,
     pub alive: Cell<bool>,
@@ -38,7 +39,7 @@ pub(crate) struct AppState {
     next_uniform_route: Cell<u32>,
 }
 impl App {
-    pub(crate) fn new(macos: bool) -> Self {
+    pub(crate) fn for_driver(macos: bool) -> Self {
         let host = Host::default();
         let slots = slots::Context::with_host(macos, host.clone());
         let mut globals = std::collections::HashMap::new();
@@ -54,6 +55,7 @@ impl App {
                 slots,
                 tasks: RefCell::default(),
                 generation: Cell::new(0),
+                next_focus_id: Cell::new(0),
                 dirty: Cell::new(true),
                 macos,
                 alive: Cell::new(true),
@@ -208,6 +210,22 @@ impl App {
             scroll.scrollable = scrollable;
             scroll.scrolled_to_end = scrolled_to_end;
         }
+    }
+
+    pub fn focus_handle(&mut self) -> FocusHandle {
+        let id = self.inner.next_focus_id.get();
+        self.inner.next_focus_id.set(id.wrapping_add(1));
+        FocusHandle::new(id)
+    }
+
+    pub fn new<V: View>(&mut self, build: impl FnOnce(&mut Context<V>) -> V) -> Entity<V> {
+        let entity = Entity::reserve(self);
+        let value = build(&mut Context {
+            app: self,
+            entity: entity.clone(),
+        });
+        *entity.value.borrow_mut() = Some(value);
+        entity
     }
 }
 #[derive(Clone)]
@@ -410,7 +428,7 @@ mod global_tests {
 
     #[test]
     fn globals_need_not_clone_and_app_snapshots_refresh_safely() {
-        let mut driver = App::new(false);
+        let mut driver = App::for_driver(false);
         driver.set_global(Counter(1));
         let mut task = App::from_state(driver.inner.clone());
         let old = driver.global::<Counter>();
@@ -424,7 +442,7 @@ mod global_tests {
     fn updating_a_global_preserves_other_tasks_updates() {
         struct Other(usize);
         impl gpui::Global for Other {}
-        let mut driver = App::new(false);
+        let mut driver = App::for_driver(false);
         let mut task = App::from_state(driver.inner.clone());
         task.set_global(Other(7));
         driver.set_global(Counter(3));

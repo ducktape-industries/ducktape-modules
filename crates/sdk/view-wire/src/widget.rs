@@ -17,6 +17,9 @@ pub enum WidgetCommand {
     Focus {
         target: String,
     },
+    FocusHandle {
+        handle: u64,
+    },
     Focused {
         target: String,
     },
@@ -66,7 +69,7 @@ impl WidgetCommand {
     /// Bound a decoded request without changing its target identity.
     pub fn validate(&mut self) -> Result<(), String> {
         let target = match self {
-            Self::FocusPrevious | Self::FocusNext => return Ok(()),
+            Self::FocusPrevious | Self::FocusNext | Self::FocusHandle { .. } => return Ok(()),
             Self::EditorAction { target, .. }
             | Self::Focus { target }
             | Self::Focused { target }

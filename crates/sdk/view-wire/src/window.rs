@@ -1,6 +1,14 @@
 //! Commands for the requesting guest's own host window. No native window ID crosses.
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WindowControlArea {
+    Drag,
+    Close,
+    Max,
+    Min,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum WindowCommand {
     Focus,

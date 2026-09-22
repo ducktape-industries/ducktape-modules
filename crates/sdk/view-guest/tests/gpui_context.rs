@@ -1,20 +1,25 @@
 use serde::{Deserialize, Serialize};
-use view_guest::{Driver, View, wire, testing::TestAppContext};
 use view_guest::prelude::*;
+use view_guest::{testing::TestAppContext, wire, Driver, View};
 
 #[derive(Default, Serialize, Deserialize)]
 struct Counter {
     clicks: usize,
 }
 impl View for Counter {
-    fn new(_: &mut Window, _: &mut Context<Self>) -> Self { Self::default() }
+    fn new(_: &mut Window, _: &mut Context<Self>) -> Self {
+        Self::default()
+    }
 }
 impl Render for Counter {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div().id("button").on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-            this.clicks += 1;
-            cx.notify();
-        })).child("Click")
+        div()
+            .id("button")
+            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                this.clicks += 1;
+                cx.notify();
+            }))
+            .child("Click")
     }
 }
 fn route(frame: &wire::Frame) -> u32 {
@@ -24,7 +29,110 @@ fn route(frame: &wire::Frame) -> u32 {
     interactivity.on_click.unwrap()
 }
 fn click(handler: u32) -> wire::Event {
-    wire::Event::Click { handler, event: (&ClickEvent::default()).into() }
+    wire::Event::Click {
+        handler,
+        event: (&ClickEvent::default()).into(),
+    }
+}
+
+#[derive(Default, Serialize, Deserialize)]
+struct PointerSurface {
+    seen: Vec<(usize, bool, f32)>,
+}
+impl View for PointerSurface {
+    fn new(_: &mut Window, _: &mut Context<Self>) -> Self {
+        Self::default()
+    }
+}
+impl Render for PointerSurface {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div().id("surface").on_mouse_down(
+            MouseButton::Right,
+            cx.listener(|this, event: &MouseDownEvent, _, cx| {
+                this.seen.push((
+                    event.click_count,
+                    event.modifiers.shift,
+                    event.position.x.as_f32(),
+                ));
+                cx.notify();
+            }),
+        )
+    }
+}
+
+#[test]
+fn pointer_listener_preserves_payload_and_routes_after_frame_reset() {
+    let mut driver = Driver::<PointerSurface>::new();
+    let mut other = Driver::<PointerSurface>::new();
+    let first = driver.tick(vec![]);
+    let other_frame = other.tick(vec![]);
+    let wire::Node::Container { interactivity, .. } = first.root.as_ref().unwrap() else {
+        panic!("a container")
+    };
+    let handler = interactivity.on_mouse_down.expect("mouse route");
+    let wire::Node::Container { interactivity, .. } = other_frame.root.as_ref().unwrap() else {
+        panic!("a container")
+    };
+    assert_eq!(interactivity.on_mouse_down, Some(handler));
+    let event = wire::interactivity::MouseDown {
+        button: wire::click::MouseButton::Right,
+        position: wire::interactivity::point(12.5, 7.0),
+        modifiers: wire::keyboard::Modifiers {
+            shift: true,
+            ..Default::default()
+        },
+        click_count: 2,
+        first_mouse: true,
+    };
+    let next = driver.tick(vec![wire::Event::MouseDown {
+        handler,
+        phase: wire::DispatchPhase::Bubble,
+        event,
+    }]);
+    driver.entity().read(|view| {
+        assert_eq!(view.seen, vec![(2, true, 12.5)]);
+    });
+    other.tick(vec![wire::Event::MouseDown {
+        handler: handler + 1,
+        phase: wire::DispatchPhase::Bubble,
+        event,
+    }]);
+    other.entity().read(|view| assert!(view.seen.is_empty()));
+    let wire::Node::Container { interactivity, .. } = next.root.as_ref().unwrap() else {
+        panic!("a container")
+    };
+    assert_eq!(interactivity.on_mouse_down, Some(handler));
+}
+
+#[derive(Serialize, Deserialize)]
+struct TooltipSurface;
+impl View for TooltipSurface {
+    fn new(_: &mut Window, _: &mut Context<Self>) -> Self { Self }
+}
+impl Render for TooltipSurface {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .id("target")
+            .hoverable_tooltip(|_, _| AnyView::new(div().id("tip").child("Help")))
+            .tooltip_show_delay(std::time::Duration::from_millis(250))
+    }
+}
+
+#[test]
+fn tooltip_lowers_a_guest_subtree_with_native_delay_and_hoverability() {
+    let mut driver = Driver::<TooltipSurface>::new();
+    let frame = driver.tick(vec![]);
+    let wire::Node::Container { interactivity, .. } = frame.root.as_ref().unwrap() else {
+        panic!("a container")
+    };
+    let tooltip = interactivity.tooltip.as_ref().expect("tooltip recipe");
+    assert!(tooltip.hoverable);
+    assert_eq!(tooltip.delay_ms, 250);
+    let wire::Node::Container { id, children, .. } = tooltip.content.as_ref() else {
+        panic!("tooltip content is a lowered container")
+    };
+    assert_eq!(id, &Some(wire::ElementIdWire::Name("tip".into())));
+    assert_eq!(children.len(), 1);
 }
 
 #[test]
@@ -36,14 +144,22 @@ fn click_routes_are_frame_owned_and_driver_isolated() {
     assert_eq!(first_id, second_id);
     for expected in 1..=20 {
         let frame = first.tick(vec![click(first_id)]);
-        assert_eq!(route(&frame), first_id, "reset must release previous frame routes");
-        first.entity().read(|view| assert_eq!(view.clicks, expected));
+        assert_eq!(
+            route(&frame),
+            first_id,
+            "reset must release previous frame routes"
+        );
+        first
+            .entity()
+            .read(|view| assert_eq!(view.clicks, expected));
         second.entity().read(|view| assert_eq!(view.clicks, 0));
     }
     second.tick(vec![click(second_id)]);
     second.entity().read(|view| assert_eq!(view.clicks, 1));
     first.tick(vec![wire::Event::Message(first_id)]);
-    first.entity().read(|view| assert_eq!(view.clicks, 20, "message and click routes differ"));
+    first
+        .entity()
+        .read(|view| assert_eq!(view.clicks, 20, "message and click routes differ"));
 }
 
 #[test]
@@ -70,7 +186,9 @@ fn listeners_use_weak_entities() {
     drop(first);
     let mut second = TestAppContext::new();
     let other = second.open::<Counter>();
-    other.update(&mut second, |_, window, cx| listener(&ClickEvent::default(), window, cx));
+    other.update(&mut second, |_, window, cx| {
+        listener(&ClickEvent::default(), window, cx)
+    });
 }
 
 #[derive(Serialize, Deserialize)]

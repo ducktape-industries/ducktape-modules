@@ -167,6 +167,13 @@ impl<'a> Lowering<'a> {
     pub(crate) fn picture(&mut self, bytes: impl AsRef<[u8]>) -> (u64, Option<Vec<u8>>) {
         slots::picture(&self.app.inner.slots, bytes)
     }
+
+    pub(crate) fn tooltip(
+        &mut self,
+        build: Box<dyn Fn(&mut Window, &mut App) -> crate::AnyView + 'static>,
+    ) -> u32 {
+        slots::tooltip(&self.app.inner.slots, build)
+    }
 }
 
 /// A guest container backed by a real GPUI style refinement.
@@ -200,38 +207,22 @@ impl Element for Div {
             interactivity,
             children,
         } = *self;
-        let id = interactivity.id.map(|_| {
+        let id = interactivity.id.as_ref().map(|_| {
             lowering
                 .current_path()
                 .last()
                 .cloned()
                 .expect("identified div must lower inside its authored scope")
         });
-        let on_click = interactivity
-            .on_click
-            .map(|listener| lowering.click(listener));
-        let wire_interactivity = wire::Interactivity {
-            role: interactivity.role,
-            aria: interactivity.aria,
-            focusable: interactivity.focusable,
-            group: interactivity.group,
-            hover: interactivity.hover,
-            active: interactivity.active,
-            group_hover: interactivity
-                .group_hover
-                .map(|(group, style)| wire::GroupRefinement { group, style }),
-            group_active: interactivity
-                .group_active
-                .map(|(group, style)| wire::GroupRefinement { group, style }),
-            on_click,
-        };
+        let style = interactivity.base_style.clone();
+        let (_, wire_interactivity) = interactivity.into_wire(lowering);
         let children = children
             .into_iter()
             .map(|child| lowering.lower_element(child))
             .collect();
         wire::Node::Container {
             id,
-            style: interactivity.base_style,
+            style,
             interactivity: wire_interactivity,
             children,
         }

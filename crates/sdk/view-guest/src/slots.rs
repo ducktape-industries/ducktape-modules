@@ -6,6 +6,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Weak};
 
 type ClickRoute = Rc<dyn Fn(&gpui::ClickEvent, &mut crate::Window, &mut crate::App)>;
+type TooltipRoute = Rc<dyn Fn(&mut crate::Window, &mut crate::App) -> crate::AnyView>;
 
 struct EventRoute<A>(Rc<dyn Fn(&A, &mut crate::Window, &mut crate::App)>);
 
@@ -27,6 +28,8 @@ struct Tables {
     messages: Vec<Rc<dyn Any>>,
     handlers: Vec<Rc<dyn Any>>,
     clicks: Vec<ClickRoute>,
+    tooltips: Vec<TooltipRoute>,
+    tooltip_responses: Vec<crate::wire::TooltipResponse>,
     pictures: HashSet<(bool, u64)>,
 }
 
@@ -105,9 +108,32 @@ pub(crate) fn reset(context: &Context) {
             std::mem::take(&mut tables.messages),
             std::mem::take(&mut tables.handlers),
             std::mem::take(&mut tables.clicks),
+            std::mem::take(&mut tables.tooltips),
         )
     };
     drop(old);
+}
+
+pub(crate) fn tooltip(
+    context: &Context,
+    build: Box<dyn Fn(&mut crate::Window, &mut crate::App) -> crate::AnyView + 'static>,
+) -> u32 {
+    let mut tables = context.0.borrow_mut();
+    let index = u32::try_from(tables.tooltips.len()).expect("too many tooltip routes");
+    tables.tooltips.push(Rc::from(build));
+    index
+}
+
+pub(crate) fn tooltip_route(context: &Context, index: u32) -> Option<TooltipRoute> {
+    context.0.borrow().tooltips.get(index as usize).cloned()
+}
+
+pub(crate) fn tooltip_response(context: &Context, response: crate::wire::TooltipResponse) {
+    context.0.borrow_mut().tooltip_responses.push(response);
+}
+
+pub(crate) fn take_tooltip_responses(context: &Context) -> Vec<crate::wire::TooltipResponse> {
+    std::mem::take(&mut context.0.borrow_mut().tooltip_responses)
 }
 
 pub(crate) fn take_message<M: Clone + 'static>(context: &Context, index: u32) -> Option<M> {

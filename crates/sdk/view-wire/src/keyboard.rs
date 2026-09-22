@@ -345,6 +345,7 @@ pub struct Modifiers {
     pub control: bool,
     pub alt: bool,
     pub logo: bool,
+    pub function: bool,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KeyState {
