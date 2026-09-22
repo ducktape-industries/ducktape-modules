@@ -84,13 +84,15 @@ fn node_joins(ctx: &impl Reads, env: &Env, msg: &ChatMsg) -> Result<(), Refusal>
 
 /// Identity's roster as the view reads it: one door, chat's.
 fn accounts(ctx: &impl Reads, limit: Option<usize>) -> Result<ChatViewReply, Refusal> {
-    // ponytail: one page; page on identity's cursor once modules spells its key.
+    // The chat roster asks for one bounded page.
     let page = Page {
         after: None,
         limit: Some(chat::page(limit) as u64),
     };
-    let identity::Reply::Accounts(accounts) =
-        ctx.ask::<identity::Query, identity::Reply>(identity::PROGRAM, &identity::Query::List { page })?
+    let identity::Reply::Accounts(accounts) = ctx.ask::<identity::Query, identity::Reply>(
+        identity::PROGRAM,
+        &identity::Query::List { page },
+    )?
     else {
         return Err(Refusal::new(
             reason::UNEXPECTED_REPLY,
@@ -99,6 +101,7 @@ fn accounts(ctx: &impl Reads, limit: Option<usize>) -> Result<ChatViewReply, Ref
     };
     Ok(ChatViewReply::Accounts(
         accounts
+            .items
             .into_iter()
             .map(|a| AccountRow {
                 number: a.number,

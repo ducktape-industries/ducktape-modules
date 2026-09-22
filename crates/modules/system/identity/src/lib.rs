@@ -64,7 +64,7 @@ impl Program for Identity {
         }
     }
 
-    fn query(ctx: &mut QueryCtx, _env: &Env, request: &[u8]) -> Result<(), Refusal> {
+    fn query(ctx: &mut QueryCtx, env: &Env, request: &[u8]) -> Result<(), Refusal> {
         let reply = match abi::decode(request)? {
             Query::Get { number } => Reply::Account(ctx.record(account_key(number))?),
             Query::OfKey { key } => Reply::Number(ctx.record(of_key(&key))?),
@@ -75,14 +75,12 @@ impl Program for Identity {
                     .map(|reference| resolve(ctx, reference))
                     .collect::<Result<Vec<_>, _>>()?,
             ),
-            Query::List { page } => Reply::Accounts(
-                ctx.records::<Account>(page.scan(ACCOUNT.as_bytes()))?
-                    .into_iter()
-                    .map(|(_, account)| account)
-                    .collect(),
-            ),
+            Query::List { page } => Reply::Accounts(page.reply(
+                env.height,
+                ctx.records::<Account>(page.scan_ahead(ACCOUNT.as_bytes()))?,
+            )),
             Query::Controlled { by, page } => {
-                let keys = ctx.scan(page.scan(&controlled_prefix(by)));
+                let keys = ctx.scan(page.scan_ahead(&controlled_prefix(by)));
                 let mut accounts = Vec::new();
                 for entry in keys {
                     let number = u64::from_be_bytes(
@@ -90,9 +88,9 @@ impl Program for Identity {
                             .try_into()
                             .map_err(|_| invalid("a controlled key names no account"))?,
                     );
-                    accounts.push(account(ctx, number)?);
+                    accounts.push((entry.key, account(ctx, number)?));
                 }
-                Reply::Accounts(accounts)
+                Reply::Accounts(page.reply(env.height, accounts))
             }
         };
         ctx.reply(&reply);

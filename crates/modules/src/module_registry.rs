@@ -36,13 +36,13 @@ pub enum Op {
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Query {
     At(u64),
-    Scheduled,
+    Scheduled { page: crate::Page },
     Program(ProgramId),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Reply {
     Programs(Vec<Entry>),
-    Scheduled(Vec<Scheduled>),
-    Program(Option<Entry>),
+    Scheduled(crate::PageReply<Scheduled>),
+    Program { height: u64, entry: Option<Entry> },
 }

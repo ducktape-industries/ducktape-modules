@@ -34,6 +34,23 @@ program-wasm-check:
 	done; \
 	echo "abi and guest build for wasm32"
 
+# Respect the caller's isolated Cargo target directory.
+SYSTEM_TARGET = $(if $(CARGO_TARGET_DIR),$(CARGO_TARGET_DIR),$(SYSTEM)/target)
+SYSTEM_NAMES := identity valset module_registry
+
+.PHONY: wasm-modules wasm-modules-check
+wasm-modules:
+	$(CARGO) build --manifest-path $(SYSTEM)/Cargo.toml --target wasm32-unknown-unknown --release
+	@for name in $(SYSTEM_NAMES); do \
+	  cp $(SYSTEM_TARGET)/wasm32-unknown-unknown/release/$$name.wasm $(SYSTEM)/wasm/$$name.wasm || exit 1; \
+	done
+
+wasm-modules-check:
+	$(CARGO) build --manifest-path $(SYSTEM)/Cargo.toml --target wasm32-unknown-unknown --release
+	@for name in $(SYSTEM_NAMES); do \
+	  cmp $(SYSTEM_TARGET)/wasm32-unknown-unknown/release/$$name.wasm $(SYSTEM)/wasm/$$name.wasm || exit 1; \
+	done
+
 ## builds the boot set for wasm32 and refreshes its committed bytes, which a
 ## founding file names and the `modules` suite loads; then the app programs.
 wasm-programs:

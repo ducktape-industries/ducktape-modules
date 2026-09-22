@@ -35,7 +35,7 @@ impl Program for Valset {
         }
     }
 
-    fn query(ctx: &mut QueryCtx, _env: &Env, request: &[u8]) -> Result<(), Refusal> {
+    fn query(ctx: &mut QueryCtx, env: &Env, request: &[u8]) -> Result<(), Refusal> {
         let reply = match abi::decode(request)? {
             Query::Validators => Reply::Validators(
                 memberships(ctx)?
@@ -47,7 +47,10 @@ impl Program for Valset {
             Query::Members => {
                 Reply::Members(memberships(ctx)?.iter().map(Membership::member).collect())
             }
-            Query::Memberships => Reply::Memberships(memberships(ctx)?),
+            Query::Memberships { page } => Reply::Memberships(page.reply(
+                env.height,
+                ctx.records::<Membership>(page.scan_ahead(MEMBER.as_bytes()))?,
+            )),
             Query::Membership { key: member } => Reply::Membership(ctx.record(key(&member))?),
         };
         ctx.reply(&reply);
