@@ -5,10 +5,11 @@
 //! The contract is borsh and this view's state is a serde snapshot, so a
 //! reply is folded to rows as it lands.
 use abi::hex;
-use ducktape_view_guest::caps::{Program, QueryBytes};
+use ducktape_view_guest::doors::Live;
+use ducktape_view_guest::doors::{Program, Query};
 use ducktape_view_guest::export_view;
 use ducktape_view_guest::host::{Refusal, malformed};
-use ducktape_view_guest::view::{Live, Loaded};
+use ducktape_view_guest::view::Loaded;
 use ducktape_view_guest::{
     AnyElement, ClickEvent, Context, ElementId, Host, InteractiveElement, IntoElement,
     ParentElement, Render, StatefulInteractiveElement, Styled, Task, Theme, View, Window, div, px,
@@ -22,8 +23,9 @@ use serde::{Deserialize, Serialize};
 /// The validator set's query surface, as this view reads it.
 struct Valset;
 impl Program for Valset {
-    const PROGRAM: &'static str = valset::PROGRAM;
-    type Request = valset::Query;
+    const NAME: &'static str = valset::PROGRAM;
+    type Op = ();
+    type Query = valset::Query;
     type Reply = valset::Reply;
 }
 
@@ -293,10 +295,7 @@ fn plural(count: usize, one: &str, many: &str) -> String {
 /// The set, read twice: the consensus keys the program answers, then every
 /// membership behind them.
 async fn set(host: Host) -> Result<Set, Refusal> {
-    let validators = match host
-        .ask::<QueryBytes<Valset>>(valset::Query::Validators)
-        .await?
-    {
+    let validators = match host.ask::<Query<Valset>>(valset::Query::Validators).await? {
         valset::Reply::Validators(keys) => keys,
         other => return Err(unexpected(&other)),
     };
@@ -305,7 +304,7 @@ async fn set(host: Host) -> Result<Set, Refusal> {
     loop {
         let page = module_registry::Page { after, limit: None };
         let reply = match host
-            .ask::<QueryBytes<Valset>>(valset::Query::Memberships { page })
+            .ask::<Query<Valset>>(valset::Query::Memberships { page })
             .await?
         {
             valset::Reply::Memberships(reply) => reply,

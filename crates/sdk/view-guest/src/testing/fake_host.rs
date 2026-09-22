@@ -1,6 +1,6 @@
 use crate::{
-    host::Refusal,
-    view::Capability,
+    doors::{self, Door},
+    host::{malformed, Refusal},
     wire::{Event, Frame, Request},
 };
 use std::{cell::RefCell, collections::HashMap, marker::PhantomData, rc::Rc};
@@ -23,13 +23,13 @@ struct State {
 pub struct FakeHost(Rc<RefCell<State>>);
 
 impl FakeHost {
-    pub fn handle<C: Capability>(
+    pub fn handle<C: Door>(
         &self,
         handler: impl FnMut(C::Request) -> Result<C::Reply, Refusal> + 'static,
     ) {
         self.register::<C>(handler, false);
     }
-    fn register<C: Capability>(
+    fn register<C: Door>(
         &self,
         mut handler: impl FnMut(C::Request) -> Result<C::Reply, Refusal> + 'static,
         stream: bool,
@@ -38,6 +38,7 @@ impl FakeHost {
             (C::KIND, C::TARGET, stream),
             Box::new(move |request| {
                 let result = C::decode_request(&request.payload)
+                    .map_err(malformed)
                     .and_then(&mut handler)
                     .map(|reply| C::encode_reply(&reply));
                 Some(Event::Response {
@@ -49,7 +50,7 @@ impl FakeHost {
         );
     }
 
-    pub fn never<C: Capability>(&self) {
+    pub fn never<C: Door>(&self) {
         for stream in [false, true] {
             self.0.borrow_mut().handlers.insert(
                 (C::KIND, C::TARGET, stream),
@@ -61,7 +62,7 @@ impl FakeHost {
         }
     }
 
-    pub fn refuse<C: Capability>(&self, reason: &str, sentence: &str) {
+    pub fn refuse<C: Door>(&self, reason: &str, sentence: &str) {
         let refusal = Refusal::new(reason, sentence);
         self.handle::<C>({
             let refusal = refusal.clone();
@@ -70,7 +71,7 @@ impl FakeHost {
         self.register::<C>(move |_| Err(refusal.clone()), true);
     }
 
-    pub fn stream<C: Capability>(&self) -> Feed<C> {
+    pub fn stream<C: Door>(&self) -> Feed<C> {
         let state = Rc::new(RefCell::new(StreamState::default()));
         let subscription = state.clone();
         self.0.borrow_mut().streams.push(state.clone());
@@ -97,7 +98,7 @@ impl FakeHost {
         }
     }
 
-    pub fn asked<C: Capability>(&self) -> Vec<C::Request> {
+    pub fn asked<C: Door>(&self) -> Vec<C::Request> {
         self.0
             .borrow()
             .requests
@@ -138,25 +139,21 @@ impl FakeHost {
         for request in &frame.requests {
             state.requests.push(request.clone());
             match request.kind.as_str() {
-                "host.log" => {
+                doors::Log::KIND => {
                     state
                         .logs
-                        .push(String::from_utf8_lossy(&request.payload).into_owned());
+                        .push(doors::Log::decode_request(&request.payload).expect("log line"));
                     continue;
                 }
-                "host.open_link" => {
-                    let value: serde_json::Value =
-                        serde_json::from_slice(&request.payload).expect("link request");
+                doors::OpenLink::KIND => {
                     state
                         .links
-                        .push(value["link"].as_str().expect("link").into());
+                        .push(doors::OpenLink::decode_request(&request.payload).expect("link"));
                     continue;
                 }
                 _ => {}
             }
-            let target = serde_json::from_slice::<serde_json::Value>(&request.payload)
-                .ok()
-                .and_then(|value| value["target"].as_str().map(str::to_owned));
+            let target = target_of(request);
             let stream = host.is_stream(request.id);
             let key = state
                 .handlers
@@ -187,13 +184,16 @@ impl FakeHost {
     }
 }
 
-fn matches<C: Capability>(request: &Request) -> bool {
+/// The program a node door addresses, read off its [`doors::Call`] envelope.
+fn target_of(request: &Request) -> Option<String> {
+    doors::decode::<doors::Call>(&request.payload)
+        .ok()
+        .map(|call| call.target)
+}
+
+fn matches<C: Door>(request: &Request) -> bool {
     request.kind == C::KIND
-        && C::TARGET.is_none_or(|target| {
-            serde_json::from_slice::<serde_json::Value>(&request.payload)
-                .ok()
-                .is_some_and(|value| value["target"].as_str() == Some(target))
-        })
+        && C::TARGET.is_none_or(|target| target_of(request).as_deref() == Some(target))
 }
 
 #[derive(Default)]
@@ -203,12 +203,12 @@ struct StreamState {
     host: Option<crate::host::Host>,
 }
 
-pub struct Feed<C: Capability> {
+pub struct Feed<C: Door> {
     state: Rc<RefCell<StreamState>>,
     host: FakeHost,
     marker: PhantomData<C>,
 }
-impl<C: Capability> Feed<C> {
+impl<C: Door> Feed<C> {
     pub fn push(&self, item: C::Reply) {
         let state = self.state.borrow();
         assert!(!state.closed, "cannot push to a closed stream");
@@ -236,65 +236,63 @@ impl<C: Capability> Feed<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::view::{Module, ViewOf};
+    use crate::doors::{Live, Program, Query};
 
     struct First;
     struct Second;
     macro_rules! module {
         ($name:ident, $target:literal) => {
-            impl Module for $name {
+            impl Program for $name {
                 const NAME: &'static str = $target;
                 type Op = ();
                 type Query = String;
                 type Reply = String;
-                type ViewQuery = String;
-                type ViewReply = String;
             }
         };
     }
     module!(First, "first");
     module!(Second, "second");
 
-    fn request<C: Capability>(id: u64, value: C::Request) -> Request {
+    fn request<C: Door>(id: u64, value: C::Request) -> Request {
         Request {
             id,
             kind: C::KIND.into(),
-            payload: C::encode(&value),
+            payload: C::encode_request(&value),
         }
     }
 
     #[test]
     fn handlers_and_request_history_distinguish_envelope_targets() {
         let host = FakeHost::default();
-        host.handle::<ViewOf<First>>(|query| Ok(format!("first:{query}")));
-        host.handle::<ViewOf<Second>>(|query| Ok(format!("second:{query}")));
+        host.handle::<Query<First>>(|query| Ok(format!("first:{query}")));
+        host.handle::<Query<Second>>(|query| Ok(format!("second:{query}")));
         host.accept(
             &Frame {
                 requests: vec![
-                    request::<ViewOf<First>>(1, "one".into()),
-                    request::<ViewOf<Second>>(2, "two".into()),
+                    request::<Query<First>>(1, "one".into()),
+                    request::<Query<Second>>(2, "two".into()),
                 ],
                 ..Frame::default()
             },
             &crate::host::Host::default(),
         );
-        assert_eq!(host.asked::<ViewOf<First>>(), ["one"]);
-        assert_eq!(host.asked::<ViewOf<Second>>(), ["two"]);
+        assert_eq!(host.asked::<Query<First>>(), ["one"]);
+        assert_eq!(host.asked::<Query<Second>>(), ["two"]);
         let events = host.take_events();
         assert!(
-            matches!(&events[0], Event::Response { id: 1, result: Ok(bytes), done: true } if ViewOf::<First>::decode(bytes).unwrap() == "first:one")
+            matches!(&events[0], Event::Response { id: 1, result: Ok(bytes), done: true } if Query::<First>::decode_reply(bytes).unwrap() == "first:one")
         );
         assert!(
-            matches!(&events[1], Event::Response { id: 2, result: Ok(bytes), done: true } if ViewOf::<Second>::decode(bytes).unwrap() == "second:two")
+            matches!(&events[1], Event::Response { id: 2, result: Ok(bytes), done: true } if Query::<Second>::decode_reply(bytes).unwrap() == "second:two")
         );
     }
 
     #[test]
     fn streams_stop_delivering_to_cancelled_subscriptions() {
         let host = FakeHost::default();
-        let feed = host.stream::<crate::view::Live>();
+        let feed = host.stream::<Live>();
         let channel = crate::host::Host::default();
-        let stream = channel.subscribe::<crate::view::Live>("first".into());
+        let stream = channel.subscribe::<Live>("first".into());
         host.accept(
             &Frame {
                 requests: channel.drain_outbox(),
@@ -302,7 +300,7 @@ mod tests {
             },
             &channel,
         );
-        feed.push(());
+        feed.push(None);
         assert_eq!(host.take_events().len(), 1);
         drop(stream);
         host.accept(
@@ -312,18 +310,18 @@ mod tests {
             },
             &channel,
         );
-        feed.push(());
+        feed.push(None);
         assert!(host.take_events().is_empty());
     }
 
     #[test]
     fn one_capability_can_handle_asks_and_subscriptions_independently() {
         let host = FakeHost::default();
-        host.handle::<ViewOf<First>>(|query| Ok(format!("answer:{query}")));
-        let feed = host.stream::<ViewOf<First>>();
+        host.handle::<Query<First>>(|query| Ok(format!("answer:{query}")));
+        let feed = host.stream::<Query<First>>();
         let channel = crate::host::Host::default();
-        let _ask = channel.ask::<ViewOf<First>>("ask".into());
-        let _stream = channel.subscribe::<ViewOf<First>>("subscribe".into());
+        let _ask = channel.ask::<Query<First>>("ask".into());
+        let _stream = channel.subscribe::<Query<First>>("subscribe".into());
         host.accept(
             &Frame {
                 requests: channel.drain_outbox(),
@@ -355,9 +353,9 @@ mod tests {
     fn closing_a_feed_finishes_without_fabricating_an_item_or_refusal() {
         use futures::StreamExt;
         let host = FakeHost::default();
-        let feed = host.stream::<crate::view::Live>();
+        let feed = host.stream::<Live>();
         let channel = crate::host::Host::default();
-        let mut stream = channel.subscribe::<crate::view::Live>("first".into());
+        let mut stream = channel.subscribe::<Live>("first".into());
         host.accept(
             &Frame {
                 requests: channel.drain_outbox(),
@@ -370,11 +368,11 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "unhandled rpc.view request")]
+    #[should_panic(expected = "unhandled rpc.query request")]
     fn unexpected_requests_fail_at_the_host_boundary() {
         FakeHost::default().accept(
             &Frame {
-                requests: vec![request::<ViewOf<First>>(1, "unexpected".into())],
+                requests: vec![request::<Query<First>>(1, "unexpected".into())],
                 ..Frame::default()
             },
             &crate::host::Host::default(),

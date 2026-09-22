@@ -78,7 +78,7 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
                 .child(search),
         );
 
-    let busy = chat.session.loading || chat.session.busy;
+    let busy = false;
     let door = div()
         .id("chat-sidebar-new-channel")
         .px_1()
@@ -292,13 +292,13 @@ fn voice_button(
     theme: &Theme,
 ) -> AnyElement {
     let id = info.channel.id.clone();
-    let click = cx.listener(move |chat, _: &ClickEvent, _window, cx| {
-        cx.host()
-            .notify::<crate::api::JoinVoice>(serde_json::json!({"id": id}));
-        cx.notify();
-        chat.notice.clear();
+    let click = cx.listener(move |chat, _: &ClickEvent, window, cx| {
+        chat.open(id.clone(), window, cx);
     });
-    let selected = chat.session.huddle_joined && chat.session.huddle_channel == info.channel.id;
+    let selected = chat
+        .room
+        .as_ref()
+        .is_some_and(|room| room.id == info.channel.id);
     let row = div()
         .id(format!("chat-sidebar-voice-{}", info.channel.id))
         .flex()
@@ -335,27 +335,11 @@ fn with_seats(chat: &Chat, info: &ChannelInfo, row: impl IntoElement, theme: &Th
     let Some(names) = chat.names.ready() else {
         return content.into_any_element();
     };
-    let me = chat.me_key();
     for (index, seat) in info.channel.huddle.iter().enumerate() {
         let label = names.member_label(&seat.party);
-        let is_you = names.owns_handle(&seat.party, &me);
-        let speaking = if is_you {
-            chat.session.call_speaking
-        } else {
-            chat.session
-                .call_peers
-                .iter()
-                .any(|peer| peer.peer == seat.node && peer.speaking && !peer.muted)
-        };
-        let note = if is_you {
-            if chat.session.call_muted {
-                "you · muted"
-            } else {
-                "you"
-            }
-        } else {
-            ""
-        };
+        let is_you = seat.party == chat.session.account;
+        let speaking = false;
+        let note = if is_you { "you" } else { "" };
         content = content.child(
             div()
                 .id(ElementId::named_usize("chat-sidebar-seat", index))

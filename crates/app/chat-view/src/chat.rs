@@ -3,8 +3,8 @@
 //! in `crates/app/chat`.
 pub use chat::{
     AccountRow, Block, ChannelInfo, ChatMsg, ChatViewQuery, ChatViewReply, Mark, MemberRow,
-    MessageHits, MsgRow, Party, PostPolicy, ReactionSummary, Span, TagPage, dm_channel_id,
-    dm_peers, hex, parse_message, party_handle,
+    MessageHits, MsgRow, Party, PostPolicy, ReactionSummary, Span, TagPage, dm_peers, hex,
+    parse_message,
 };
 
 pub fn members_only(info: &ChannelInfo) -> bool {

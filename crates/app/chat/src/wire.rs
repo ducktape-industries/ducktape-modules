@@ -1,15 +1,18 @@
 use super::*;
+use borsh::{BorshDeserialize, BorshSerialize};
 
 // ── wire ────────────────────────────────────────────────────────────────────
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    BorshSerialize, BorshDeserialize, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq,
+)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum PostPolicy {
     Open,
     MembersOnly,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum ChatMsg {
     CreateChannel {
@@ -78,7 +81,9 @@ pub enum ChatMsg {
     },
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(
+    BorshSerialize, BorshDeserialize, Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq,
+)]
 pub struct MsgRow {
     pub channel_id: String,
     pub seq: u64,
@@ -104,7 +109,7 @@ pub struct MsgRow {
     pub tags: Vec<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(BorshSerialize, BorshDeserialize, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ReactionSummary {
     pub emoji: String,
     pub count: u64,
@@ -112,7 +117,7 @@ pub struct ReactionSummary {
     pub reacted_by_me: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(BorshSerialize, BorshDeserialize, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChannelRow {
     pub id: String,
     pub name: String,
@@ -124,7 +129,7 @@ pub struct ChannelRow {
     pub voice: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(BorshSerialize, BorshDeserialize, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HuddleEntry {
     pub party: String,
     /// the node key, hex
@@ -132,27 +137,27 @@ pub struct HuddleEntry {
     pub joined_at: u64,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(BorshSerialize, BorshDeserialize, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChannelInfo {
     #[serde(flatten)]
     pub channel: ChannelRow,
     pub head_seq: u64,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(BorshSerialize, BorshDeserialize, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MemberRow {
     pub party: String,
     pub height: u64,
     pub time: u64,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(BorshSerialize, BorshDeserialize, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MessageHits {
     pub hits: Vec<MsgRow>,
     pub capped: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(BorshSerialize, BorshDeserialize, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TagPage {
     pub hits: Vec<MsgRow>,
     pub has_more: bool,
@@ -161,7 +166,7 @@ pub struct TagPage {
 }
 
 /// `viewer_handles` are the reader's handles; they decide `reacted_by_me`.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(BorshSerialize, BorshDeserialize, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum ChatViewQuery {
     Channels {
@@ -243,7 +248,7 @@ pub enum ChatViewQuery {
     },
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(BorshSerialize, BorshDeserialize, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AccountRow {
     pub number: AccountNumber,
     pub name: String,
@@ -253,7 +258,7 @@ pub struct AccountRow {
     pub keys: Vec<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(BorshSerialize, BorshDeserialize, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum ChatViewReply {
     Channels {

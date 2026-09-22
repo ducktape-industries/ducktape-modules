@@ -5,8 +5,8 @@ use crate::Forge;
 use crate::api::{Ask, ChatApi, Props};
 use crate::state::ChangeTab;
 use ducktape_view_guest::Theme;
+use ducktape_view_guest::doors::{Live, Query, Visible};
 use ducktape_view_guest::testing::TestAppContext;
-use ducktape_view_guest::view::{Live, ViewOf, Visible};
 
 /// `FORGE_SCREEN_EXPORT=1` writes each screen's tree for the app's
 /// node-less renderer (`ducktape-app --render-tree <json>`), light and dark.
@@ -72,7 +72,7 @@ fn screen(state: &str) -> TestAppContext {
             let mut cx = TestAppContext::new();
             cx.host().handle::<Ask>(|_| Ok(reply("refused-not-found")));
             cx.host()
-                .handle::<ViewOf<ChatApi>>(|_| Ok(chat::ChatViewReply::Accounts(accounts())));
+                .handle::<Query<ChatApi>>(|_| Ok(chat::ChatViewReply::Accounts(accounts())));
             cx.host().never::<Live>();
             cx.host().never::<Visible>();
             cx.host().never::<Props>();

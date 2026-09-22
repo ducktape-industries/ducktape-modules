@@ -20,7 +20,7 @@ fn emit<S: Sandbox>(s: &S, message: ChatMsg) {
     // Chat's existing wire is JSON. Forge's contract and all forge records remain Borsh.
     s.emit(
         CHAT,
-        serde_json::to_vec(&message).expect("a chat message serializes"),
+        borsh::to_vec(&message).expect("a chat message serializes"),
     );
 }
 pub fn message_id<S: Sandbox>(s: &S) -> Result<String, Refusal> {
@@ -48,12 +48,12 @@ pub fn post<S: Sandbox>(s: &S, change: &Change, message_id: String, text: String
     );
 }
 pub fn message<S: Sandbox>(s: &S, id: &str) -> Result<Option<chat::MsgRow>, Refusal> {
-    let request = serde_json::to_vec(&ChatViewQuery::MessageById {
+    let request = borsh::to_vec(&ChatViewQuery::MessageById {
         message_id: id.into(),
     })
     .expect("a chat query serializes");
     let bytes = s.query(CHAT, request)?;
-    match serde_json::from_slice::<ChatViewReply>(&bytes).map_err(|e| storage(e.to_string()))? {
+    match borsh::from_slice::<ChatViewReply>(&bytes).map_err(|e| storage(e.to_string()))? {
         ChatViewReply::Message(row) => Ok(row),
         _ => Err(Refusal::new(
             abi::reason::UNEXPECTED_REPLY,
@@ -67,13 +67,13 @@ pub fn attention<S: Sandbox>(
     channel: &str,
     key: &[u8],
 ) -> Result<Option<chat::MsgRow>, Refusal> {
-    let request = serde_json::to_vec(&ChatViewQuery::ThreadAttention {
+    let request = borsh::to_vec(&ChatViewQuery::ThreadAttention {
         channel_id: channel.into(),
         author: chat::Party::Key(key.to_vec()),
     })
     .expect("chat query");
     let bytes = s.query(CHAT, request)?;
-    match serde_json::from_slice::<ChatViewReply>(&bytes).map_err(|e| storage(e.to_string()))? {
+    match borsh::from_slice::<ChatViewReply>(&bytes).map_err(|e| storage(e.to_string()))? {
         ChatViewReply::Attention(row) => Ok(row),
         _ => Err(Refusal::new(
             abi::reason::UNEXPECTED_REPLY,

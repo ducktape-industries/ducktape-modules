@@ -159,7 +159,7 @@ impl TestAppContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{view::Live, Context, InteractiveElement, ParentElement, Render, Task, Window};
+    use crate::{doors::Live, Context, InteractiveElement, ParentElement, Render, Task, Window};
     use futures::StreamExt;
     use serde::{Deserialize, Serialize};
 
@@ -200,14 +200,14 @@ mod tests {
         let mut cx = TestAppContext::new();
         let feed = cx.host().stream::<Live>();
         cx.open::<LiveView>();
-        feed.push(());
+        feed.push(None);
         cx.run_until_parked();
         assert!(cx.has_text("1"));
         let snapshot = cx.snapshot().unwrap();
-        feed.push(());
+        feed.push(None);
         let restored = cx.restore::<LiveView>(&snapshot).unwrap();
         restored.read(|view| assert_eq!(view.items, 1));
-        feed.push(());
+        feed.push(None);
         cx.run_until_parked();
         restored.read(|view| assert_eq!(view.items, 2));
         assert_eq!(cx.host().asked::<Live>().len(), 2);

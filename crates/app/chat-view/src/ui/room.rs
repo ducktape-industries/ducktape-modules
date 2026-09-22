@@ -55,7 +55,7 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
         if let Some(info) = chat.room_info()
             && !info.channel.huddle.is_empty()
         {
-            pane = pane.child(huddle(chat, info, cx, theme));
+            pane = pane.child(huddle(info, theme));
         }
         let refusal = chat.write_refusal();
         if refusal.is_empty() {
@@ -73,7 +73,7 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
                     format!("Message #{name}")
                 }
             };
-            let editable = !chat.session.loading && chat.session.connected;
+            let editable = chat.session.connected;
             pane = pane.child(composer(chat, target, &hint, editable, cx));
         } else {
             pane = pane.child(gate(chat, refusal, cx, theme));
@@ -194,13 +194,8 @@ fn no_room(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement {
     .into_any_element()
 }
 
-fn huddle(
-    chat: &Chat,
-    info: &ChannelInfo,
-    cx: &mut Context<Chat>,
-    theme: &Theme,
-) -> impl IntoElement {
-    let mut row = div()
+fn huddle(info: &ChannelInfo, theme: &Theme) -> impl IntoElement {
+    div()
         .id("chat-room-huddle")
         .flex()
         .items_center()
@@ -221,49 +216,7 @@ fn huddle(
                 .text_size(px(12.))
                 .text_color(theme.muted)
                 .child(format!("{} people", info.channel.huddle.len())),
-        );
-    if chat.session.huddle_joined && chat.session.huddle_channel == info.channel.id {
-        row = row.child(badge(
-            "chat-room-huddle-joined",
-            "Joined",
-            theme.accent_foreground,
-            theme.accent_soft,
-        ));
-        let show = cx.listener(|_chat, _: &ClickEvent, _window, cx| {
-            cx.host().notify::<crate::api::ShowHuddle>(());
-            cx.notify();
-        });
-        let leave = cx.listener(|_chat, _: &ClickEvent, _window, cx| {
-            cx.host().notify::<crate::api::LeaveHuddle>(());
-            cx.notify();
-        });
-        row = row
-            .child(button("chat-room-huddle-show", "Show", theme, show))
-            .child(button("chat-room-huddle-leave", "Leave", theme, leave));
-    } else {
-        let channel = info.channel.id.clone();
-        let voice = info.channel.voice;
-        let join = cx.listener(move |_chat, _: &ClickEvent, _window, cx| {
-            if voice {
-                cx.host()
-                    .notify::<crate::api::JoinVoice>(serde_json::json!({"id": channel}));
-            } else {
-                cx.host().notify::<crate::api::JoinHuddle>(());
-            }
-            cx.notify();
-        });
-        row = row.child(button(
-            "chat-room-huddle-join",
-            if info.channel.huddle.is_empty() {
-                "Call"
-            } else {
-                "Join"
-            },
-            theme,
-            join,
-        ));
-    }
-    row
+        )
 }
 
 fn search_results(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement {

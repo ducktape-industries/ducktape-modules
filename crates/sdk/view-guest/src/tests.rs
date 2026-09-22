@@ -193,7 +193,7 @@ fn two_drivers_on_one_thread_have_independent_hosts() {
     assert!(second.tick(vec![]).requests.is_empty());
     let frame = first.tick(vec![]);
     assert_eq!(frame.requests.len(), 1);
-    assert_eq!(frame.requests[0].payload, b"only first");
+    assert_eq!(frame.requests[0].payload, doors::encode(&"only first"));
 }
 
 #[test]

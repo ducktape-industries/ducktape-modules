@@ -63,7 +63,7 @@ fn scheduled() -> registry::Reply {
 }
 
 fn respond(cx: &mut TestAppContext) {
-    cx.host().handle::<QueryBytes<Registry>>(|query| {
+    cx.host().handle::<Query<Registry>>(|query| {
         Ok(match query {
             registry::Query::At(0) => programs(),
             registry::Query::Scheduled { .. } => scheduled(),
@@ -79,7 +79,7 @@ fn ready() -> TestAppContext {
     cx.open::<Explorer>();
     cx.run_until_parked();
     assert_eq!(
-        cx.host().asked::<QueryBytes<Registry>>(),
+        cx.host().asked::<Query<Registry>>(),
         vec![
             registry::Query::At(0),
             registry::Query::Scheduled {
@@ -119,7 +119,7 @@ fn the_registry_lists_what_runs_and_what_is_scheduled() {
 fn loading_waits_for_the_host() {
     let mut cx = TestAppContext::new();
     cx.host().stream::<Live>();
-    cx.host().never::<QueryBytes<Registry>>();
+    cx.host().never::<Query<Registry>>();
     cx.open::<Explorer>();
     cx.run_until_parked();
     assert!(cx.has_text("Reading the registry…"));
@@ -129,7 +129,7 @@ fn loading_waits_for_the_host() {
 fn an_empty_set_says_so() {
     let mut cx = TestAppContext::new();
     cx.host().stream::<Live>();
-    cx.host().handle::<QueryBytes<Registry>>(|query| {
+    cx.host().handle::<Query<Registry>>(|query| {
         Ok(match query {
             registry::Query::At(0) => registry::Reply::Programs(vec![]),
             registry::Query::Scheduled { .. } => registry::Reply::Scheduled(page(vec![])),
@@ -146,7 +146,7 @@ fn a_refusal_shows_its_sentence_and_retry_asks_again() {
     let mut cx = TestAppContext::new();
     cx.host().stream::<Live>();
     cx.host()
-        .refuse::<QueryBytes<Registry>>("unavailable", "the registry is not running here");
+        .refuse::<Query<Registry>>("unavailable", "the registry is not running here");
     cx.open::<Explorer>();
     cx.run_until_parked();
     assert!(cx.has_text("the registry is not running here"));
@@ -154,7 +154,7 @@ fn a_refusal_shows_its_sentence_and_retry_asks_again() {
     cx.simulate_click("explorer-retry");
     cx.run_until_parked();
     assert!(cx.has_text("identity"));
-    assert_eq!(cx.host().asked::<QueryBytes<Registry>>().len(), 3);
+    assert_eq!(cx.host().asked::<Query<Registry>>().len(), 3);
 }
 
 #[test]
@@ -165,19 +165,19 @@ fn a_live_bump_re_reads_and_a_snapshot_restores_the_screen() {
     cx.open::<Explorer>();
     cx.run_until_parked();
     cx.host()
-        .refuse::<QueryBytes<Registry>>("unavailable", "refresh temporarily unavailable");
-    feed.push(());
+        .refuse::<Query<Registry>>("unavailable", "refresh temporarily unavailable");
+    feed.push(None);
     cx.run_until_parked();
     assert!(cx.has_text("identity"));
-    assert_eq!(cx.host().asked::<QueryBytes<Registry>>().len(), 3);
-    cx.host().handle::<QueryBytes<Registry>>(|query| {
+    assert_eq!(cx.host().asked::<Query<Registry>>().len(), 3);
+    cx.host().handle::<Query<Registry>>(|query| {
         Ok(match query {
             registry::Query::At(0) => registry::Reply::Programs(vec![entry("forge", 0x11)]),
             registry::Query::Scheduled { .. } => registry::Reply::Scheduled(page(vec![])),
             other => panic!("unexpected query: {other:?}"),
         })
     });
-    feed.push(());
+    feed.push(None);
     cx.run_until_parked();
     assert!(cx.has_text("forge") && !cx.has_text("identity"));
     assert!(cx.has_text("Nothing is scheduled against the registry."));
@@ -185,11 +185,11 @@ fn a_live_bump_re_reads_and_a_snapshot_restores_the_screen() {
     let bytes = cx.snapshot().unwrap();
     let mut restored = TestAppContext::new();
     restored.host().stream::<Live>();
-    restored.host().never::<QueryBytes<Registry>>();
+    restored.host().never::<Query<Registry>>();
     restored.restore::<Explorer>(&bytes).unwrap();
     restored.run_until_parked();
     assert!(restored.has_text("forge"));
-    assert_eq!(restored.host().asked::<QueryBytes<Registry>>().len(), 1);
+    assert_eq!(restored.host().asked::<Query<Registry>>().len(), 1);
     assert_eq!(
         restored.host().asked::<Live>(),
         vec![registry::PROGRAM.to_string()]

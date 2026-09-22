@@ -7,9 +7,9 @@
 use super::*;
 use crate::api::{Ask, Props, Session, SubmitForge};
 use crate::state::{ChangeTab, Filter, RepoTab};
-use ducktape_view_guest::caps::Id;
+use ducktape_view_guest::doors::Id;
+use ducktape_view_guest::doors::{Query as Door, Submit};
 use ducktape_view_guest::testing::TestAppContext;
-use ducktape_view_guest::view::{Submit, ViewOf};
 use ducktape_view_guest::{Entity, Theme, wire};
 use forge::{ChangeFilter, ChangeState, Op, Query, Reply};
 
@@ -123,7 +123,7 @@ pub(crate) fn configure(cx: &mut TestAppContext, mode: &'static str) {
         }
         Ok(answer(&query, mode))
     });
-    cx.host().handle::<ViewOf<ChatApi>>(|query| {
+    cx.host().handle::<Door<ChatApi>>(|query| {
         Ok(match query {
             chat::ChatViewQuery::Accounts { .. } => chat::ChatViewReply::Accounts(accounts()),
             chat::ChatViewQuery::Roots { channel_id, .. } => chat::ChatViewReply::Roots {
@@ -141,9 +141,8 @@ pub(crate) fn configure(cx: &mut TestAppContext, mode: &'static str) {
             other => panic!("unexpected chat query: {other:?}"),
         })
     });
-    cx.host()
-        .handle::<Submit<ChatApi>>(|_| Ok(serde_json::Value::Null));
-    cx.host().handle::<SubmitForge>(|_| Ok(()));
+    cx.host().handle::<Submit<ChatApi>>(|_| Ok(Vec::new()));
+    cx.host().handle::<SubmitForge>(|_| Ok(Vec::new()));
     cx.host().handle::<Id>(|kind| Ok(format!("{kind}-1")));
     cx.host().never::<Live>();
     cx.host().never::<Visible>();
@@ -160,7 +159,6 @@ pub(crate) fn booted(mode: &'static str) -> (TestAppContext, Entity<Forge>) {
         account: "acct:8".into(),
         connected: true,
         chain: "testnet#0a1b2c3d".into(),
-        network_name: "duck".into(),
         ..Session::default()
     });
     cx.run_until_parked();
@@ -230,7 +228,7 @@ fn a_refused_read_keeps_its_reason_and_offers_one_retry() {
     cx.host()
         .handle::<Ask>(|_| Ok(reply("refused-object-not-held")));
     cx.host()
-        .handle::<ViewOf<ChatApi>>(|_| Ok(chat::ChatViewReply::Accounts(accounts())));
+        .handle::<Door<ChatApi>>(|_| Ok(chat::ChatViewReply::Accounts(accounts())));
     cx.host().never::<Live>();
     cx.host().never::<Visible>();
     cx.host().never::<Props>();

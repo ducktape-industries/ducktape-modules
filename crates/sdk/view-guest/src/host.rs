@@ -6,7 +6,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 
-use crate::Capability;
+use crate::doors::{self, Door};
 use futures::{Stream, StreamExt};
 use std::rc::Rc;
 
@@ -107,50 +107,48 @@ impl Host {
             host: self.clone(),
         }
     }
-    pub(crate) fn raw_notify(&self, kind: &str, payload: &[u8]) {
-        self.0.borrow_mut().ask(kind, payload);
-    }
-    pub fn ask<C: Capability>(
+    /// One request, answered once. The door names the kind and both codecs;
+    /// there is no other way to ask, so there is no other codec.
+    pub fn ask<D: Door>(
         &self,
-        request: C::Request,
-    ) -> impl Future<Output = Result<C::Reply, Refusal>> + 'static {
-        let response = self.request(C::KIND, &C::encode(&request));
+        request: D::Request,
+    ) -> impl Future<Output = Result<D::Reply, Refusal>> + 'static {
+        let response = self.request(D::KIND, &D::encode_request(&request));
         self.0
             .borrow_mut()
             .diagnostics
             .insert(response.id, format!("{request:?}"));
-        async move { C::decode(&response.await?) }
+        async move { D::decode_reply(&response.await?).map_err(malformed) }
     }
-    pub fn subscribe<C: Capability>(
+    /// A subscription: an item per answer until the stream is dropped.
+    pub fn subscribe<D: Door>(
         &self,
-        request: C::Request,
-    ) -> impl Stream<Item = Result<C::Reply, Refusal>> + Unpin + 'static {
-        let response = self.raw_subscribe(C::KIND, &C::encode(&request));
+        request: D::Request,
+    ) -> impl Stream<Item = Result<D::Reply, Refusal>> + Unpin + 'static {
+        let subscription = self.raw_subscribe(D::KIND, &D::encode_request(&request));
         self.0
             .borrow_mut()
             .diagnostics
-            .insert(response.id, format!("{request:?}"));
-        response.map(|answer| answer.and_then(|bytes| C::decode(&bytes)))
+            .insert(subscription.id, format!("{request:?}"));
+        subscription
+            .map(|answer| answer.and_then(|bytes| D::decode_reply(&bytes).map_err(malformed)))
     }
-    pub fn notify<C: Capability>(&self, request: C::Request) {
-        let id = self.0.borrow_mut().ask(C::KIND, &C::encode(&request));
+    /// A request whose answer nobody waits for.
+    pub fn notify<D: Door>(&self, request: D::Request) {
+        let id = self
+            .0
+            .borrow_mut()
+            .ask(D::KIND, &D::encode_request(&request));
         self.0
             .borrow_mut()
             .diagnostics
             .insert(id, format!("{request:?}"));
     }
     pub fn log(&self, message: impl AsRef<str>) {
-        self.raw_notify("host.log", message.as_ref().as_bytes());
+        self.notify::<doors::Log>(message.as_ref().to_owned());
     }
     pub fn open_link(&self, link: &str) {
-        self.raw_notify(
-            "host.open_link",
-            &serde_json::to_vec(&serde_json::json!({"link":link})).unwrap(),
-        );
-    }
-    pub fn finish_response(&self, bytes: &[u8]) {
-        self.raw_notify("host.emit", bytes);
-        self.raw_notify("host.finish", &[]);
+        self.notify::<doors::OpenLink>(link.to_owned());
     }
     pub(crate) fn diagnostic(&self, id: u64) -> Option<String> {
         self.0.borrow().diagnostics.get(&id).cloned()

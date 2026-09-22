@@ -46,8 +46,7 @@ fn dialog_button(
 pub fn channel_create(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Option<AnyElement> {
     let create = chat.create.as_ref()?;
     let busy = create.busy;
-    let can_submit =
-        !busy && chat.session.connected && !chat.session.busy && chat.session.holds_account();
+    let can_submit = !busy && chat.session.connected && crate::api::holds_account(&chat.session);
     let typed = cx.listener(|chat, event: &String, _window, cx| {
         if let Some(create) = &mut chat.create {
             create.name = event.clone();
@@ -147,7 +146,7 @@ pub fn channel_create(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Opt
                 .child(create.error.clone()),
         );
     }
-    if !chat.session.holds_account() {
+    if !crate::api::holds_account(&chat.session) {
         card = card.child(
             div()
                 .text_size(px(12.))

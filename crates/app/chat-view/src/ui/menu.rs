@@ -110,7 +110,7 @@ pub fn editing(
                         chat,
                         target,
                         "Edit message",
-                        !chat.session.busy,
+                        true,
                         cx,
                     ))
                     .child(div().flex().justify_end().child(Item::text(
@@ -239,12 +239,12 @@ fn reactions(chat: &Chat, menu: &Menu, cx: &mut Context<Chat>, theme: &Theme) ->
     grid.into_any_element()
 }
 
-fn delete(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement {
+fn delete(_chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement {
     let cancel = cx.listener(|chat, _: &ClickEvent, _, cx| {
         chat.close_menu();
         cx.notify();
     });
-    let confirm = (!chat.session.busy).then(|| {
+    let confirm = Some({
         Box::new(cx.listener(|chat, _: &ClickEvent, _, cx| {
             cx.notify();
             chat.delete_armed(cx)

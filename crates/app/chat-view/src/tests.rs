@@ -1,4 +1,5 @@
 use super::*;
+use ducktape_view_guest::doors::Query as ViewOf;
 use ducktape_view_guest::testing::TestAppContext;
 use ducktape_view_guest::wire;
 use ducktape_view_guest::{Entity, StyleRefinement, Styled};
@@ -61,7 +62,7 @@ fn row(seq: u64, author: &str, text: &str) -> MsgRow {
 
 fn configure(cx: &mut TestAppContext) {
     cx.host()
-        .handle::<ducktape_view_guest::caps::Widget>(|command| {
+        .handle::<ducktape_view_guest::doors::Widget>(|command| {
             assert!(matches!(command, wire::WidgetCommand::Focus { .. }));
             Ok(())
         });
@@ -117,8 +118,7 @@ fn configure(cx: &mut TestAppContext) {
         })
     });
     cx.host().never::<LiveChanges>();
-    cx.host()
-        .handle::<Submit<ChatApi>>(|_| Ok(serde_json::Value::Null));
+    cx.host().handle::<Submit<ChatApi>>(|_| Ok(Vec::new()));
 }
 
 /// Boots, seats a reader, lists rooms and opens `general` with two rows.
@@ -130,14 +130,12 @@ fn opened() -> (TestAppContext, Entity<Chat>) {
     let view = cx.open::<Chat>();
     cx.run_until_parked();
     assert!(cx.has_text("Not connected"));
-    props.push(PropsItem::Session(Box::new(Session {
-        me: "acct:7".into(),
-        me_key: "0102".into(),
+    props.push(Session {
+        account: "acct:7".into(),
         connected: true,
-        network_name: "duck".into(),
         chain: "testnet#0a1b2c3d".into(),
         ..Session::default()
-    })));
+    });
     visible.push(true);
     cx.run_until_parked();
     assert!(cx.has_text("General"));
@@ -189,11 +187,11 @@ fn the_room_shows_its_rows_intro_and_actions() {
     );
     assert!(
         cx.host()
-            .asked::<ducktape_view_guest::caps::Widget>()
+            .asked::<ducktape_view_guest::doors::Widget>()
             .iter()
             .any(|command| {
                 matches!(command, wire::WidgetCommand::Focus { target }
-                if target == &vec![wire::ElementIdWire::Name(
+                if *target == vec![wire::ElementIdWire::Name(
                     ui::menu::focus_key(Pane::Timeline, Mode::Reactions).into()
                 )])
             })
@@ -344,7 +342,7 @@ fn message_menu_preserves_disabled_actions_and_executes_enabled_routes() {
             mode: Mode::More,
             at: (611., 455.),
         });
-        chat.session.me.clear();
+        chat.session.account.clear();
         cx.notify();
     });
     cx.run_until_parked();
@@ -366,30 +364,12 @@ fn message_menu_preserves_disabled_actions_and_executes_enabled_routes() {
     assert!(cx.has_text("😀") && cx.has_text("✎") && cx.has_text("🗑"));
 
     view.update(&mut cx, |chat, _, cx| {
-        chat.session.me = "acct:7".into();
+        chat.session.account = "acct:7".into();
         cx.notify();
     });
     cx.run_until_parked();
     cx.simulate_click("chat-menu-delete");
     assert!(cx.has_text("Delete this message?"));
-    view.update(&mut cx, |chat, _, cx| {
-        chat.session.busy = true;
-        cx.notify();
-    });
-    cx.run_until_parked();
-    let Some(wire::Node::Container(ducktape_view_guest::wire::ContainerNode {
-        interactivity, ..
-    })) = cx.find("chat-menu-confirm-delete")
-    else {
-        panic!("busy delete confirmation remains visible");
-    };
-    assert_eq!(interactivity.aria.disabled, Some(true));
-    assert!(interactivity.on_click.is_none());
-    view.update(&mut cx, |chat, _, cx| {
-        chat.session.busy = false;
-        cx.notify();
-    });
-    cx.run_until_parked();
     cx.simulate_click("chat-menu-confirm-delete");
     cx.run_until_parked();
     assert!(cx.host().asked::<Submit<ChatApi>>().iter().any(|op| {
@@ -526,7 +506,7 @@ fn channel_create_preserves_busy_account_and_voice_gates() {
         let create = chat.create.as_mut().unwrap();
         create.busy = false;
         create.voice = true;
-        chat.session.me = "user:0102".into();
+        chat.session.account = "user:0102".into();
         cx.notify();
     });
     cx.run_until_parked();
@@ -540,15 +520,8 @@ fn channel_create_preserves_busy_account_and_voice_gates() {
     assert_eq!(cx.host().asked::<Submit<ChatApi>>().len(), submitted);
 
     view.update(&mut cx, |chat, _, cx| {
-        chat.session.me = "acct:7".into();
+        chat.session.account = "acct:7".into();
         chat.session.connected = false;
-        cx.notify();
-    });
-    cx.run_until_parked();
-    assert!(disabled(&cx, "chat-create-submit"));
-    view.update(&mut cx, |chat, _, cx| {
-        chat.session.connected = true;
-        chat.session.busy = true;
         cx.notify();
     });
     cx.run_until_parked();

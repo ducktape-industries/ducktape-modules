@@ -3,10 +3,10 @@
 //! hands the screen a single reply. A typed refusal becomes a `Refusal`, so
 //! the four states of a `Loaded` slot stay honest.
 use ducktape_view_guest::Host;
+use ducktape_view_guest::doors::Query as Ask;
 use ducktape_view_guest::host::{Refusal, malformed};
-use ducktape_view_guest::view::ViewOf;
 
-use crate::api::{Ask, ChatApi};
+use crate::api::{Ask as Forge, ChatApi};
 use crate::state::Names;
 use forge::{Cursor, Page, Query, Reply};
 
@@ -43,7 +43,7 @@ pub(crate) async fn fetch(host: Host, query: Query) -> Result<Reply, Refusal> {
 }
 
 async fn ask(host: &Host, query: Query) -> Result<Reply, Refusal> {
-    match host.ask::<Ask>(query).await? {
+    match host.ask::<Forge>(query).await? {
         Reply::Refused {
             reason, sentence, ..
         } => Err(Refusal::new(&reason, &sentence)),
@@ -118,7 +118,7 @@ fn extend(into: &mut Reply, more: Reply) {
 /// accounts, their names and the keys they hold.
 pub(crate) async fn roster(host: Host) -> Result<Names, Refusal> {
     match host
-        .ask::<ViewOf<ChatApi>>(chat::ChatViewQuery::Accounts { limit: Some(256) })
+        .ask::<Ask<ChatApi>>(chat::ChatViewQuery::Accounts { limit: Some(256) })
         .await?
     {
         chat::ChatViewReply::Accounts(rows) => Ok(Names::new(rows)),
@@ -140,7 +140,7 @@ pub(crate) async fn conversation(
             has_more,
             next_before_seq,
         } = host
-            .ask::<ViewOf<ChatApi>>(chat::ChatViewQuery::Roots {
+            .ask::<Ask<ChatApi>>(chat::ChatViewQuery::Roots {
                 channel_id: channel_id.clone(),
                 viewer_handles: viewer.clone(),
                 before_seq,

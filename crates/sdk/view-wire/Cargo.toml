@@ -25,6 +25,9 @@ serde = { version = "1", features = ["derive"] }
 gpui.workspace = true
 accesskit = { version = "0.24.0", features = ["serde"] }
 rmp-serde = "1"
+# The data plane: every host door carries borsh, the codec the program abi is
+# written in, so a program's bytes ride a door without a second encoding.
+borsh = { version = "1", default-features = false, features = ["derive", "std"] }
 slotmap = "1.0.6"
 uuid = "1.1.2"
 # `task` and `subscription` share the SDK futures runtime.

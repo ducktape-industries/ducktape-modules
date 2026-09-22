@@ -1,5 +1,5 @@
 use super::*;
-use ducktape_view_guest::{caps::QueryBytes, testing::TestAppContext};
+use ducktape_view_guest::{doors::Query, testing::TestAppContext};
 
 fn status() -> Status {
     Status {
@@ -17,7 +17,7 @@ fn status() -> Status {
 }
 fn respond(cx: &TestAppContext) {
     cx.host().handle::<NodeStatus>(|()| Ok(status()));
-    cx.host().handle::<QueryBytes<Identity>>(|q| {
+    cx.host().handle::<Query<Identity>>(|q| {
         Ok(match q {
             identity::Query::OfKey { key } => {
                 assert_eq!(key, vec![0xab, 0xcd]);
@@ -42,7 +42,7 @@ fn respond(cx: &TestAppContext) {
             q => panic!("unexpected query: {q:?}"),
         })
     });
-    cx.host().handle::<QueryBytes<Valset>>(|q| {
+    cx.host().handle::<Query<Valset>>(|q| {
         Ok(match q {
             valset::Query::Membership { key } => {
                 valset::Reply::Membership(Some(valset::Membership {
@@ -62,19 +62,19 @@ fn fixture(state: &str, dark: bool) -> TestAppContext {
     let props = cx.host().stream::<Props>();
     respond(&cx);
     match state {
-        "unregistered" => cx.host().handle::<QueryBytes<Identity>>(|q| {
+        "unregistered" => cx.host().handle::<Query<Identity>>(|q| {
             assert!(matches!(q, identity::Query::OfKey { .. }));
             Ok(identity::Reply::Number(None))
         }),
         "loading" => {
             cx.host().never::<NodeStatus>();
-            cx.host().never::<QueryBytes<Identity>>();
+            cx.host().never::<Query<Identity>>();
         }
         "refused" => {
             cx.host()
                 .refuse::<NodeStatus>("unavailable", "The node is unavailable. Try again.");
             cx.host()
-                .refuse::<QueryBytes<Identity>>("unavailable", "Account query refused.");
+                .refuse::<Query<Identity>>("unavailable", "Account query refused.");
         }
         _ => {}
     }
@@ -88,6 +88,7 @@ fn fixture(state: &str, dark: bool) -> TestAppContext {
         },
         dark,
         endpoint: "http://127.0.0.1:19001".into(),
+        ..Session::default()
     });
     cx.run_until_parked();
     if state.starts_with("invite") {
@@ -100,7 +101,7 @@ fn fixture(state: &str, dark: bool) -> TestAppContext {
                 assert_eq!(request.ttl_days, 7);
                 Ok(Invite {
                     invite: "duck-invite:workshop-loopback-example".into(),
-                    notes: vec![Note {
+                    notes: vec![ducktape_view_guest::doors::Note {
                         reason: "expires".into(),
                         sentence: "This invite expires in 7 days.".into(),
                     }],

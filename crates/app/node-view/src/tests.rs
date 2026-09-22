@@ -56,7 +56,7 @@ fn memberships() -> valset::Reply {
 }
 
 fn respond(cx: &mut TestAppContext) {
-    cx.host().handle::<QueryBytes<Valset>>(|query| {
+    cx.host().handle::<Query<Valset>>(|query| {
         Ok(match query {
             valset::Query::Validators => validators(),
             valset::Query::Memberships { .. } => memberships(),
@@ -72,7 +72,7 @@ fn ready() -> TestAppContext {
     cx.open::<Nodes>();
     cx.run_until_parked();
     assert_eq!(
-        cx.host().asked::<QueryBytes<Valset>>(),
+        cx.host().asked::<Query<Valset>>(),
         vec![
             valset::Query::Validators,
             valset::Query::Memberships {
@@ -135,7 +135,7 @@ fn short_ids_cut_on_unicode_boundaries_and_mark_only_a_cut() {
 fn loading_waits_for_the_host() {
     let mut cx = TestAppContext::new();
     cx.host().stream::<Live>();
-    cx.host().never::<QueryBytes<Valset>>();
+    cx.host().never::<Query<Valset>>();
     cx.open::<Nodes>();
     cx.run_until_parked();
     assert!(cx.has_text("Reading the validator set…"));
@@ -145,7 +145,7 @@ fn loading_waits_for_the_host() {
 fn an_empty_set_says_so() {
     let mut cx = TestAppContext::new();
     cx.host().stream::<Live>();
-    cx.host().handle::<QueryBytes<Valset>>(|query| {
+    cx.host().handle::<Query<Valset>>(|query| {
         Ok(match query {
             valset::Query::Validators => valset::Reply::Validators(vec![]),
             valset::Query::Memberships { .. } => valset::Reply::Memberships(page(vec![])),
@@ -162,7 +162,7 @@ fn a_refusal_shows_its_sentence_and_retry_asks_again() {
     let mut cx = TestAppContext::new();
     cx.host().stream::<Live>();
     cx.host()
-        .refuse::<QueryBytes<Valset>>("unavailable", "valset is not running here");
+        .refuse::<Query<Valset>>("unavailable", "valset is not running here");
     cx.open::<Nodes>();
     cx.run_until_parked();
     assert!(cx.has_text("valset is not running here"));
@@ -180,7 +180,7 @@ fn a_refusal_shows_its_sentence_and_retry_asks_again() {
     cx.simulate_click("nodes-retry");
     cx.run_until_parked();
     assert!(cx.has_text("10.0.0.1:4000"));
-    assert_eq!(cx.host().asked::<QueryBytes<Valset>>().len(), 3);
+    assert_eq!(cx.host().asked::<Query<Valset>>().len(), 3);
 }
 
 #[test]
@@ -191,12 +191,12 @@ fn a_live_bump_re_reads_and_a_snapshot_restores_the_screen() {
     cx.open::<Nodes>();
     cx.run_until_parked();
     cx.host()
-        .refuse::<QueryBytes<Valset>>("unavailable", "refresh temporarily unavailable");
-    feed.push(());
+        .refuse::<Query<Valset>>("unavailable", "refresh temporarily unavailable");
+    feed.push(None);
     cx.run_until_parked();
     assert!(cx.has_text("10.0.0.1:4000"));
-    assert_eq!(cx.host().asked::<QueryBytes<Valset>>().len(), 3);
-    cx.host().handle::<QueryBytes<Valset>>(|query| {
+    assert_eq!(cx.host().asked::<Query<Valset>>().len(), 3);
+    cx.host().handle::<Query<Valset>>(|query| {
         Ok(match query {
             valset::Query::Validators => validators(),
             valset::Query::Memberships { .. } => {
@@ -209,18 +209,18 @@ fn a_live_bump_re_reads_and_a_snapshot_restores_the_screen() {
             other => panic!("unexpected query: {other:?}"),
         })
     });
-    feed.push(());
+    feed.push(None);
     cx.run_until_parked();
     assert!(cx.has_text("10.9.9.9:4000") && !cx.has_text("10.0.0.1:4000"));
 
     let bytes = cx.snapshot().unwrap();
     let mut restored = TestAppContext::new();
     restored.host().stream::<Live>();
-    restored.host().never::<QueryBytes<Valset>>();
+    restored.host().never::<Query<Valset>>();
     restored.restore::<Nodes>(&bytes).unwrap();
     restored.run_until_parked();
     assert!(restored.has_text("10.9.9.9:4000"));
-    assert_eq!(restored.host().asked::<QueryBytes<Valset>>().len(), 1);
+    assert_eq!(restored.host().asked::<Query<Valset>>().len(), 1);
     assert_eq!(
         restored.host().asked::<Live>(),
         vec![valset::PROGRAM.to_string()]
