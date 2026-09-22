@@ -60,7 +60,7 @@ design = { path = "crates/sdk/design" }
 view-wire = { path = "crates/sdk/view-wire" }
 view-guest = { path = "crates/sdk/view-guest" }
 ducktape-view-guest = { path = "crates/sdk/view-guest", package = "view-guest" }
-gpui = { package = "gpui-pre", git = "https://github.com/ducktape-industries/gpui-pre", rev = "021b436617db8bf377ad384b464cd1b34692f35e", default-features = false }
+gpui = { package = "gpui-pre", git = "https://github.com/ducktape-industries/gpui-pre", rev = "4b4207b341a6ea2655a883d91b3001e74d7b8dfd", default-features = false }
 modules = { path = "crates/modules" }
 gitcore = { path = "crates/app/gitcore" }
 forge = { path = "crates/app/forge" }
@@ -109,8 +109,13 @@ opt-level = 2
 # a view and a program ship as cdylibs for wasm32-unknown-unknown; the release
 # profile is what their bytes come out of.
 [profile.release]
-opt-level = 3
+# Wire serde visitors dominate guests; optimize their shared code for size.
+opt-level = "z"
 lto = "fat"
 codegen-units = 1
 panic = "abort"
 strip = true
+
+[patch.crates-io]
+gpui-pre-scheduler = { git = "https://github.com/ducktape-industries/gpui-pre", rev = "4b4207b341a6ea2655a883d91b3001e74d7b8dfd" }
+gpui-pre-zlog = { git = "https://github.com/ducktape-industries/gpui-pre", rev = "4b4207b341a6ea2655a883d91b3001e74d7b8dfd" }

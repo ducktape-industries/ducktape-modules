@@ -25,7 +25,7 @@ VIEWS := chat-view members-view node-view explorer-view
 # boot set's contracts: its signing deps are dev-only, and `-e normal` below
 # is what says so.
 VIEW_LINKABLE := ducklink view-wire view-guest design modules
-VIEW_FORBIDDEN := blst commonware-cryptography
+VIEW_FORBIDDEN := blst commonware-cryptography wasm-bindgen js-sys web-sys
 
 .PHONY: program-wasm-check wasm-programs probe-fixture wasm-views view-wasm-check
 
@@ -53,7 +53,10 @@ probe-fixture:
 
 ## builds every view for wasm32 under target/wasm32-unknown-unknown/release/.
 wasm-views:
-	@for v in $(VIEWS); do $(CARGO) build --release --target wasm32-unknown-unknown -p $$v || exit 1; done
+	@for v in $(VIEWS); do \
+	  $(CARGO) build --release --target wasm32-unknown-unknown -p $$v || exit 1; \
+	  python3 tools/check-view-abi.py $${CARGO_TARGET_DIR:-target}/wasm32-unknown-unknown/release/$$(echo $$v | tr - _).wasm || exit 1; \
+	done
 
 ## builds every VIEW_LINKABLE crate for wasm32-unknown-unknown, plus the
 ## exported view probe of view-guest, then fails if the normal wasm32 dependency

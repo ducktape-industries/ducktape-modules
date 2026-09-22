@@ -196,7 +196,10 @@ fn encoded_size_matches_named_messagepack_without_a_second_buffer() {
             )),
             ..Default::default()
         };
-        assert_eq!(encoded_size(&frame), encode(&frame).len() as u64);
+        let bytes = encode(&frame);
+        assert_eq!(bytes, rmp_serde::to_vec_named(&frame).unwrap());
+        assert_eq!(encoded_size(&frame), bytes.len() as u64);
+        assert_eq!(decode::<Frame>(&bytes).unwrap(), frame);
     }
 }
 

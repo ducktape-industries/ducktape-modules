@@ -106,7 +106,18 @@ pub(crate) fn decode_children<'de, D: serde::Deserializer<'de>>(
 }
 
 pub fn encode<T: Serialize>(value: &T) -> Vec<u8> {
-    rmp_serde::to_vec_named(value).expect("wire types are plain data")
+    let mut bytes = Vec::new();
+    write(value, &mut bytes);
+    bytes
+}
+
+// Share one serializer instantiation for buffers and allocation-free counting.
+// Distinct writer types otherwise duplicate the entire node serialization graph.
+#[inline(never)]
+fn write<T: Serialize>(value: &T, writer: &mut dyn std::io::Write) {
+    value
+        .serialize(&mut rmp_serde::Serializer::new(writer).with_struct_map())
+        .expect("wire types are plain data");
 }
 
 /// How many bytes [`encode`] would write, without writing them.
@@ -122,9 +133,7 @@ pub fn encoded_size<T: Serialize>(value: &T) -> u64 {
         }
     }
     let mut count = Count(0);
-    value
-        .serialize(&mut rmp_serde::Serializer::new(&mut count).with_struct_map())
-        .expect("wire types are plain data");
+    write(value, &mut count);
     count.0
 }
 
