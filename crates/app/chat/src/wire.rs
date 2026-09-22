@@ -157,23 +157,15 @@ pub struct MessageHits {
     pub capped: bool,
 }
 
-#[derive(BorshSerialize, BorshDeserialize, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct TagPage {
-    pub hits: Vec<MsgRow>,
-    pub has_more: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub next_after: Option<String>,
-}
-
 /// `viewer_handles` are the reader's handles; they decide `reacted_by_me`.
+/// Every list takes a [`Page`] and answers a [`PageReply`]: `page.after` is
+/// the `next` of the previous reply, `page.limit` the rows wanted.
 #[derive(BorshSerialize, BorshDeserialize, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum ChatViewQuery {
     Channels {
         #[serde(default)]
-        after: Option<String>,
-        #[serde(default)]
-        limit: Option<usize>,
+        page: Page,
     },
     Channel {
         channel_id: String,
@@ -187,48 +179,42 @@ pub enum ChatViewQuery {
         channel_id: String,
         author: Party,
     },
-    /// one page of timeline roots older than `before_seq`, oldest first
+    /// one page of timeline roots, newest first
     Roots {
         channel_id: String,
         viewer_handles: Vec<String>,
         #[serde(default)]
-        before_seq: Option<u64>,
-        #[serde(default)]
-        limit: Option<usize>,
+        page: Page,
     },
-    /// `limit` messages centred on `seq`
+    /// `page.limit` messages centred on `seq`
     MessagesAround {
         channel_id: String,
         seq: u64,
         viewer_handles: Vec<String>,
         #[serde(default)]
-        limit: Option<usize>,
+        page: Page,
     },
-    /// the root plus one page of replies after `after_reply_seq`, post order
+    /// the root plus one page of replies, post order
     Thread {
         channel_id: String,
         root_seq: u64,
         viewer_handles: Vec<String>,
         #[serde(default)]
-        after_reply_seq: Option<u64>,
-        #[serde(default)]
-        limit: Option<usize>,
+        page: Page,
     },
     Members {
         channel_id: String,
         #[serde(default)]
-        after: Option<String>,
-        #[serde(default)]
-        limit: Option<usize>,
+        page: Page,
     },
-    /// every token of `text`, newest first
+    /// every token of `text`, newest first, at most `page.limit` hits
     Search {
         text: String,
         viewer_handles: Vec<String>,
         #[serde(default)]
         channel_id: Option<String>,
         #[serde(default)]
-        limit: Option<usize>,
+        page: Page,
     },
     TagSearch {
         tag: String,
@@ -236,15 +222,13 @@ pub enum ChatViewQuery {
         #[serde(default)]
         channel_id: Option<String>,
         #[serde(default)]
-        after: Option<String>,
-        #[serde(default)]
-        limit: Option<usize>,
+        page: Page,
     },
     /// the identity roster, ascending by number: the program asks identity
     /// so the view links one module
     Accounts {
         #[serde(default)]
-        limit: Option<usize>,
+        page: Page,
     },
 }
 
@@ -261,37 +245,19 @@ pub struct AccountRow {
 #[derive(BorshSerialize, BorshDeserialize, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum ChatViewReply {
-    Channels {
-        channels: Vec<ChannelInfo>,
-        has_more: bool,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        next_after: Option<String>,
-    },
+    Channels(PageReply<ChannelInfo>),
     Channel(Option<ChannelInfo>),
     Message(Option<MsgRow>),
     Attention(Option<MsgRow>),
-    Roots {
-        roots: Vec<MsgRow>,
-        has_more: bool,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        next_before_seq: Option<u64>,
-    },
+    Roots(PageReply<MsgRow>),
     Messages(Vec<MsgRow>),
     Thread {
         root: Option<MsgRow>,
-        replies: Vec<MsgRow>,
-        has_more: bool,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        next_reply_seq: Option<u64>,
+        replies: PageReply<MsgRow>,
     },
-    Members {
-        members: Vec<MemberRow>,
-        has_more: bool,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        next_after: Option<String>,
-    },
+    Members(PageReply<MemberRow>),
     Hits(MessageHits),
-    TagHits(TagPage),
+    TagHits(PageReply<MsgRow>),
     Accounts(Vec<AccountRow>),
 }
 

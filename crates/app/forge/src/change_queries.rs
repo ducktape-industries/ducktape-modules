@@ -1,10 +1,10 @@
 //! Bounded record pages; judgment joins the latest authored review with its chat root.
-use crate::Sandbox;
 use crate::changes::{self, involved_key, latest_key, load, review_key};
 use crate::contract::*;
-use crate::paging::Paging;
+use crate::ops::storage;
 use crate::repo::{load_ref, load_repo, repo_hash};
 use abi::{Refusal, Scan};
+use store::{Listing, Reads, capacity, invalid};
 
 fn summary(repo: &str, c: &Change) -> ChangeSummary {
     ChangeSummary {
@@ -21,7 +21,7 @@ fn summary(repo: &str, c: &Change) -> ChangeSummary {
         verdicts: c.verdicts,
     }
 }
-fn heads<S: Sandbox>(
+fn heads<S: Reads>(
     s: &S,
     repo: &str,
     c: &Change,
@@ -37,20 +37,19 @@ fn heads<S: Sandbox>(
         load_ref(s, repo, &c.into, hash)?.map(|o| o.to_hex()),
     ))
 }
-pub fn answer<S: Sandbox>(s: &S, height: u64, q: &Query, p: &Paging) -> Result<Reply, Refusal> {
+pub fn answer<S: Reads>(s: &S, height: u64, q: &Query, p: &Listing) -> Result<Reply, Refusal> {
     Ok(match q {
         Query::Changes { repo, filter, .. } => {
             load_repo(s, repo)?;
-            let entries = p.entries(s, &changes::prefix(repo))?;
+            let entries = p.reply(s.records::<Change>(p.scan_ahead(&changes::prefix(repo)))?);
             let mut items = Vec::new();
-            for entry in entries.items {
-                let c: Change = abi::decode(&entry.value)?;
+            for c in entries.items {
                 if filter.state.is_some_and(|state| c.state != state)
                     || filter.author.as_ref().is_some_and(|a| &c.author != a)
                     || filter
                         .involves
                         .as_ref()
-                        .is_some_and(|a| s.get(&involved_key(a, repo, c.n)).is_none())
+                        .is_some_and(|a| s.get(involved_key(a, repo, c.n)).is_none())
                 {
                     continue;
                 }
@@ -58,7 +57,8 @@ pub fn answer<S: Sandbox>(s: &S, height: u64, q: &Query, p: &Paging) -> Result<R
             }
             Reply::Changes {
                 height,
-                page: Page {
+                page: PageReply {
+                    height,
                     items,
                     next: entries.next,
                 },
@@ -67,29 +67,26 @@ pub fn answer<S: Sandbox>(s: &S, height: u64, q: &Query, p: &Paging) -> Result<R
         Query::Change { repo, n, .. } => {
             let c = load(s, repo, *n)?;
             let (source_head, target_head) = heads(s, repo, &c)?;
-            let entries = p.entries(s, &changes::reviews_prefix(repo, *n))?;
-            let items = entries
-                .items
-                .into_iter()
-                .map(|e| abi::decode(&e.value))
-                .collect::<Result<_, _>>()?;
+            let reviews =
+                p.reply(s.records::<Review>(p.scan_ahead(&changes::reviews_prefix(repo, *n)))?);
             Reply::Change {
                 height,
                 change: c,
                 source_head,
                 target_head,
-                reviews: Page {
-                    items,
-                    next: entries.next,
-                },
+                reviews,
             }
         }
         Query::Judgment { key, .. } => {
             if key.is_empty() {
-                return Err(crate::refuse::invalid("judgment needs a key"));
+                return Err(invalid("judgment needs a key"));
             }
             // Chat participants need not have submitted a forge op, so page all changes.
-            let entries = p.entries(s, b"c/")?;
+            let entries = p.reply(
+                s.scan(p.scan_ahead(b"c/"))
+                    .into_iter()
+                    .map(|e| (e.key.clone(), e)),
+            );
             let mut remaining = crate::repo::load_bounds(s)?.log_walk;
             let mut items = Vec::new();
             for entry in entries.items {
@@ -98,21 +95,21 @@ pub fn answer<S: Sandbox>(s: &S, height: u64, q: &Query, p: &Paging) -> Result<R
                 let slash = rest
                     .iter()
                     .position(|b| *b == b'/')
-                    .ok_or_else(|| crate::refuse::storage("invalid change key"))?;
+                    .ok_or_else(|| storage("invalid change key"))?;
                 let repo = std::str::from_utf8(&rest[..slash])
-                    .map_err(|_| crate::refuse::storage("invalid repo key"))?
+                    .map_err(|_| storage("invalid repo key"))?
                     .to_owned();
                 let n = c.n;
                 if c.state != ChangeState::Open {
                     continue;
                 }
                 let (source, _) = heads(s, &repo, &c)?;
-                let latest: Option<Review> = match s.get(&latest_key(&repo, n, key)) {
+                let latest: Option<Review> = match s.get(latest_key(&repo, n, key)) {
                     Some(bytes) => {
                         let id: u64 = abi::decode(&bytes)?;
                         let bytes = s
-                            .get(&review_key(&repo, n, id))
-                            .ok_or_else(|| crate::refuse::storage("latest review missing"))?;
+                            .get(review_key(&repo, n, id))
+                            .ok_or_else(|| storage("latest review missing"))?;
                         Some(abi::decode(&bytes)?)
                     }
                     None => None,
@@ -135,16 +132,14 @@ pub fn answer<S: Sandbox>(s: &S, height: u64, q: &Query, p: &Paging) -> Result<R
                         .limit(remaining.saturating_add(1)),
                 );
                 if authored.len() as u64 > remaining {
-                    return Err(crate::refuse::capacity(
-                        "judgment review walk exceeds Bounds.log_walk",
-                    ));
+                    return Err(capacity("judgment review walk exceeds Bounds.log_walk"));
                 }
                 remaining -= authored.len() as u64;
                 for entry in authored {
                     let id: u64 = abi::decode(&entry.value)?;
                     let bytes = s
-                        .get(&review_key(&repo, n, id))
-                        .ok_or_else(|| crate::refuse::storage("authored review missing"))?;
+                        .get(review_key(&repo, n, id))
+                        .ok_or_else(|| storage("authored review missing"))?;
                     let review: Review = abi::decode(&bytes)?;
                     if let Some(root) = crate::discussion::message(s, &review.message_id)?
                         && let Some(last_reply_seq) = root.last_reply_seq
@@ -169,12 +164,13 @@ pub fn answer<S: Sandbox>(s: &S, height: u64, q: &Query, p: &Paging) -> Result<R
             }
             Reply::Judgment {
                 height,
-                page: Page {
+                page: PageReply {
+                    height,
                     items,
                     next: entries.next,
                 },
             }
         }
-        _ => return Err(crate::refuse::invalid("not a change query")),
+        _ => return Err(invalid("not a change query")),
     })
 }

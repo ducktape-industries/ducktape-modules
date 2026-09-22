@@ -4,7 +4,7 @@ The ducktape contract line and the programs written against it, one
 repository. Only what compiles to wasm lives here, in three folders:
 
 ```
-crates/sdk/     abi guest ducklink view-wire view-guest view-guest-derive design
+crates/sdk/     abi guest store ducklink view-wire view-guest view-guest-derive design
 crates/system/  module-registry valset identity
 crates/app/     chat chat-view forge forge-view members-view node-view explorer-view settings-view
 crates/lib/     gitcore
@@ -14,6 +14,7 @@ crates/lib/     gitcore
 |---|---|
 | `crates/sdk/abi` | the borsh bytes ABI a program and the host share: `GuestCall`, `HostOp`/`HostReply`, `Env`, `Refusal`, the `module_registry` and `valset` contracts. A copy of ducktape's `crates/kernel/abi`, like `guest` beside it |
 | `crates/sdk/guest` | what a program compiles against: the `Program` trait, the `Execute` and `Query` contexts its entry points receive, `program!` |
+| `crates/sdk/store` | what a program's rules are written over: `Reads`/`Writes` (the guest context's surface, implemented for `guest`'s contexts behind `program` and for `Memory` natively), the typed `Map`/`Set`/`Item` descriptors with `KeyCodec`, `Page`/`PageReply`, the refusal constructors and `decoded`. Every program links it; a view links it with `program` off |
 | `crates/sdk/ducklink` | the `duck://` link: `duck://<chain>/<program>/<tail…>`, one spelling per name, no program names known here |
 | `crates/sdk/view-wire`, `view-guest`, `view-guest-derive`, `design` | the host<->view wire, the runtime a wasm view is written against, the palette |
 | `crates/system/module-registry` | the boot set's root: the registry program (its `Op`, `Query`, `Reply`), `AUTHORITY`, `Page`/`PageReply` and the origin/key/refusal `helpers` every system program links. Its `tests/system.rs` founds ducktape's host over the bytes `make wasm-programs` built and drives every system program |

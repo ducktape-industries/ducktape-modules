@@ -233,6 +233,21 @@ impl Net {
         self.sent_by(AUTHORITY, target, op).await
     }
 
+    /// A query the program refuses.
+    async fn refused<Q: BorshSerialize>(&self, program: &str, query: &Q) -> abi::Refusal {
+        self.host
+            .query(
+                Layer::Confirmed,
+                self.time(),
+                Origin::External(public(1)),
+                program,
+                abi::encode(query),
+            )
+            .await
+            .unwrap()
+            .unwrap_err()
+    }
+
     async fn ask<Q: BorshSerialize, R: BorshDeserialize>(&self, program: &str, query: &Q) -> R {
         let answer = self
             .host

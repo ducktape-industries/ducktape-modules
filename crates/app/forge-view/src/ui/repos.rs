@@ -11,10 +11,7 @@ use crate::ui::{pending, scroller, staged};
 use forge::{Query, Reply, RepoInfo};
 
 fn query() -> Query {
-    Query::Repos {
-        cursor: None,
-        limit: PAGE,
-    }
+    Query::Repos { page: PAGE }
 }
 
 fn listed<'a>(forge: &'a Forge, reply: &'a Reply) -> Vec<&'a RepoInfo> {

@@ -1,12 +1,11 @@
 //! Consensus changes use refs and records only. No object possession influences acceptance.
-use crate::Sandbox;
 use crate::contract::*;
 use crate::discussion;
 use crate::ops::require_writer;
-use crate::refuse::{capacity, invalid, not_found, stale, unauthorized, wrong_state};
 use crate::repo::{load_bounds, load_ref, load_repo, parse_oid, repo_hash, resolve, set_ref};
 use abi::{Env, Refusal};
 use std::collections::BTreeSet;
+use store::{Reads, Writes, capacity, invalid, not_found, stale, unauthorized, wrong_state};
 
 pub fn prefix(repo: &str) -> Vec<u8> {
     format!("c/{repo}/").into_bytes()
@@ -36,19 +35,19 @@ pub fn authored_prefix(repo: &str, n: u64, actor: &[u8]) -> Vec<u8> {
 pub fn latest_key(repo: &str, n: u64, actor: &[u8]) -> Vec<u8> {
     format!("l/{repo}/{n:016x}/{}", abi::hex(actor)).into_bytes()
 }
-pub fn load<S: Sandbox>(s: &S, repo: &str, n: u64) -> Result<Change, Refusal> {
+pub fn load<S: Reads>(s: &S, repo: &str, n: u64) -> Result<Change, Refusal> {
     let bytes = s
-        .get(&key(repo, n))
+        .get(key(repo, n))
         .ok_or_else(|| not_found(format!("no change {repo}#{n}")))?;
     abi::decode(&bytes)
 }
-pub fn save<S: Sandbox>(s: &S, repo: &str, change: &Change) {
+pub fn save<S: Writes>(s: &mut S, repo: &str, change: &Change) {
     s.set(key(repo, change.n), abi::encode(change));
     for actor in std::iter::once(&change.author).chain(&change.reviewers) {
         involve(s, actor, repo, change.n);
     }
 }
-fn involve<S: Sandbox>(s: &S, actor: &[u8], repo: &str, n: u64) {
+fn involve<S: Writes>(s: &mut S, actor: &[u8], repo: &str, n: u64) {
     s.set(involved_key(actor, repo, n), abi::encode(&(repo, n)));
 }
 fn fits(value: &impl borsh::BorshSerialize, bound: u64) -> Result<(), Refusal> {
@@ -120,7 +119,7 @@ fn next(n: u64) -> Result<u64, Refusal> {
         .ok_or_else(|| Refusal::new(abi::reason::EXHAUSTED, "counter exhausted"))
 }
 
-pub fn execute<S: Sandbox>(s: &S, env: &Env, actor: &[u8], op: Op) -> Result<(), Refusal> {
+pub fn execute<S: Writes>(s: &mut S, env: &Env, actor: &[u8], op: Op) -> Result<(), Refusal> {
     let bounds = load_bounds(s)?;
     let reply = match op {
         Op::ChangeOpen {

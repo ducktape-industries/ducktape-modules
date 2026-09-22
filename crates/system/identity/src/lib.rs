@@ -1,9 +1,14 @@
 //! The `identity` program: accounts, the keys and programs that control them,
-//! and the consent by which a key joins an account. The types are always
-//! built; a view links them with `program` off. The `program` feature adds the
-//! wasm32 program over the host (`program.rs`).
+//! and the consent by which a key joins an account. The types and rules are
+//! always built; a view links them with `program` off. The `program` feature
+//! adds the wasm32 program over the host (`program.rs`).
 #[cfg(feature = "program")]
 mod program;
+mod rules;
+#[cfg(test)]
+mod tests;
+
+pub use rules::{execute, query};
 
 use abi::{BlobId, ProgramId, Scheme};
 use borsh::{BorshDeserialize, BorshSerialize};
@@ -169,9 +174,9 @@ pub fn account_of_principal(bytes: &[u8]) -> Option<AccountNumber> {
     <[u8; 8]>::try_from(bytes).ok().map(u64::from_le_bytes)
 }
 
-#[cfg(feature = "guest")]
+/// The asks another program makes of identity.
 pub fn account_of(
-    ctx: &impl guest::Reads,
+    ctx: &impl store::Reads,
     key: &[u8],
 ) -> Result<Option<AccountNumber>, abi::Refusal> {
     match ctx.ask::<Query, Reply>(PROGRAM, &Query::OfKey { key: key.to_vec() })? {
@@ -183,9 +188,8 @@ pub fn account_of(
     }
 }
 
-#[cfg(feature = "guest")]
 pub fn account(
-    ctx: &impl guest::Reads,
+    ctx: &impl store::Reads,
     number: AccountNumber,
 ) -> Result<Option<Account>, abi::Refusal> {
     match ctx.ask::<Query, Reply>(PROGRAM, &Query::Get { number })? {

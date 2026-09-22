@@ -338,8 +338,10 @@ fn account_lists_resume_with_the_answering_height() {
                 }
             );
         }
-        let identity::Reply::Accounts(reply) = net
-            .ask(
+        // A cursor is opaque and bound to its listing: bytes that are not
+        // one are refused, and a Controlled cursor does not open a List.
+        let garbage = net
+            .refused(
                 identity::PROGRAM,
                 &identity::Query::List {
                     page: Page {
@@ -348,12 +350,31 @@ fn account_lists_resume_with_the_answering_height() {
                     },
                 },
             )
+            .await;
+        assert_eq!(garbage.reason, abi::reason::INVALID_INPUT);
+        let identity::Reply::Accounts(controlled) = net
+            .ask(
+                identity::PROGRAM,
+                &identity::Query::Controlled {
+                    by: 1,
+                    page: Page::first(1),
+                },
+            )
             .await
         else {
             panic!()
         };
-        assert_eq!(reply.height, net.height);
-        assert!(reply.items.is_empty());
-        assert_eq!(reply.next, None);
+        let other_listing = net
+            .refused(
+                identity::PROGRAM,
+                &identity::Query::List {
+                    page: Page {
+                        after: controlled.next,
+                        limit: Some(1),
+                    },
+                },
+            )
+            .await;
+        assert_eq!(other_listing.reason, abi::reason::STALE);
     });
 }

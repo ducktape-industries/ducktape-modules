@@ -1,31 +1,6 @@
-use abi::{Entry, Scan, reason};
-use chat::{ChatMsg, Frame, Party, PostPolicy, Read, Write};
-use std::collections::BTreeMap;
-#[derive(Default)]
-struct Memory(BTreeMap<Vec<u8>, Vec<u8>>);
-impl Read for Memory {
-    fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
-        self.0.get(key).cloned()
-    }
-    fn scan(&self, scan: Scan) -> Vec<Entry> {
-        self.0
-            .iter()
-            .filter(|(k, _)| scan.admits(k))
-            .map(|(k, v)| Entry {
-                key: k.clone(),
-                value: v.clone(),
-            })
-            .collect()
-    }
-}
-impl Write for Memory {
-    fn set(&mut self, key: Vec<u8>, value: Vec<u8>) {
-        self.0.insert(key, value);
-    }
-    fn delete(&mut self, key: &[u8]) {
-        self.0.remove(key);
-    }
-}
+use abi::reason;
+use chat::{ChatMsg, Frame, Party, PostPolicy};
+use store::Memory;
 #[test]
 fn channel_and_system_message_ids_belong_to_the_exact_program_prefix() {
     let mut store = Memory::default();
@@ -59,7 +34,7 @@ fn channel_and_system_message_ids_belong_to_the_exact_program_prefix() {
             )
             .unwrap_err();
             assert_eq!(error.reason, reason::UNAUTHORIZED);
-            assert!(store.0.is_empty());
+            assert!(store.state.is_empty());
         }
     }
     let forge = Frame {
@@ -83,7 +58,7 @@ fn channel_and_system_message_ids_belong_to_the_exact_program_prefix() {
         blocks: vec![chat::Block::paragraph("opened")],
         thread: None,
     };
-    let before = store.0.clone();
+    let before = store.state.clone();
     assert_eq!(
         chat::execute(
             &mut store,
@@ -98,10 +73,11 @@ fn channel_and_system_message_ids_belong_to_the_exact_program_prefix() {
         .reason,
         reason::UNAUTHORIZED
     );
-    assert_eq!(store.0, before);
+    assert_eq!(store.state, before);
     chat::execute(&mut store, &forge, message).unwrap();
     let chat::ChatViewReply::Message(Some(row)) = chat::query(
         &store,
+        1,
         chat::ChatViewQuery::MessageById {
             message_id: "forge:0001".into(),
         },
@@ -129,7 +105,7 @@ fn channel_and_system_message_ids_belong_to_the_exact_program_prefix() {
         channel_id: "forge:repo:1".into(),
         author: Party::Module("forge".into()),
     };
-    let chat::ChatViewReply::Attention(Some(root)) = chat::query(&store, attention()).unwrap()
+    let chat::ChatViewReply::Attention(Some(root)) = chat::query(&store, 1, attention()).unwrap()
     else {
         panic!();
     };
@@ -144,7 +120,7 @@ fn channel_and_system_message_ids_belong_to_the_exact_program_prefix() {
     )
     .unwrap();
     assert!(matches!(
-        chat::query(&store, attention()).unwrap(),
+        chat::query(&store, 1, attention()).unwrap(),
         chat::ChatViewReply::Attention(None)
     ));
     for party in [Party::Key(vec![2]), Party::System] {

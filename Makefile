@@ -3,8 +3,8 @@
 CARGO ?= cargo
 WASM_OPT ?= wasm-opt
 
-# What a program links: abi and guest build for wasm32 with nothing else.
-PROGRAM_LINKABLE := abi guest
+# What a program links: abi, guest and store build for wasm32 with nothing else.
+PROGRAM_LINKABLE := abi guest store
 
 # The ducktape checkout the probe fixture the founding suite seats is copied
 # from (crates/kernel/fixtures, `make kernel-fixtures` there). The probe is a
@@ -29,7 +29,7 @@ VIEWS := chat-view members-view node-view explorer-view settings-view forge-view
 # read their contracts: module-registry's signing deps are dev-only, and `-e
 # normal` below is what says so. Every program crate is linked with `program`
 # off, which is what a plain `-p` build below checks.
-VIEW_LINKABLE := ducklink view-wire view-guest design module-registry valset identity settings-view chat forge
+VIEW_LINKABLE := ducklink view-wire view-guest design store module-registry valset identity settings-view chat forge
 VIEW_FORBIDDEN := blst commonware-cryptography wasm-bindgen js-sys web-sys
 
 # Cargo uses this directory for both workspaces.
@@ -53,7 +53,7 @@ program-wasm-check:
 	@for crate in $(PROGRAM_LINKABLE); do \
 	  $(CARGO) build --target wasm32-unknown-unknown -p $$crate || exit 1; \
 	done; \
-	echo "abi and guest build for wasm32"
+	echo "abi, guest and store build for wasm32"
 
 ## builds every program (with `program` on) into $(RELEASE)/<name>.wasm. The
 ## founding suite reads the boot set from there.

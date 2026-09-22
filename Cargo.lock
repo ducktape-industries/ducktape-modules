@@ -660,9 +660,9 @@ dependencies = [
  "borsh",
  "guest",
  "identity",
- "module-registry",
  "serde",
  "serde_json",
+ "store",
  "unicode-normalization",
 ]
 
@@ -2195,6 +2195,7 @@ dependencies = [
  "guest",
  "serde_json",
  "sha2 0.10.9",
+ "store",
 ]
 
 [[package]]
@@ -3067,6 +3068,7 @@ dependencies = [
  "borsh",
  "guest",
  "module-registry",
+ "store",
 ]
 
 [[package]]
@@ -3662,6 +3664,7 @@ dependencies = [
  "host",
  "identity",
  "keyscheme",
+ "store",
  "tempfile",
  "valset",
 ]
@@ -5488,6 +5491,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
+name = "store"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "borsh",
+ "guest",
+ "serde",
+ "sha1",
+ "sha2 0.10.9",
+]
+
+[[package]]
 name = "strict-num"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6285,6 +6300,7 @@ dependencies = [
  "borsh",
  "guest",
  "module-registry",
+ "store",
 ]
 
 [[package]]

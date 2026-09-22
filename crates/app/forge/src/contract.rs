@@ -4,6 +4,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 
 pub use crate::read_contract::*;
 pub use crate::review_contract::*;
+pub use store::{Page, PageReply};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct Bounds {
@@ -118,19 +119,16 @@ pub enum Service {
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Query {
     Repos {
-        cursor: Option<Cursor>,
-        limit: u32,
+        page: Page,
     },
     /// Settings plus a page of granted keys; the owner is on the repo record.
     Repo {
         repo: String,
-        cursor: Option<Cursor>,
-        limit: u32,
+        page: Page,
     },
     Refs {
         repo: String,
-        cursor: Option<Cursor>,
-        limit: u32,
+        page: Page,
     },
     Advertise {
         repo: String,
@@ -143,15 +141,13 @@ pub enum Query {
     Log {
         repo: String,
         from: Revision,
-        cursor: Option<Cursor>,
-        limit: u32,
+        page: Page,
     },
     Tree {
         repo: String,
         at: String,
         path: Vec<u8>,
-        cursor: Option<Cursor>,
-        limit: u32,
+        page: Page,
     },
     Blob {
         repo: String,
@@ -164,8 +160,7 @@ pub enum Query {
         base: Option<String>,
         head: String,
         path: Option<Vec<u8>>,
-        cursor: Option<Cursor>,
-        limit: u32,
+        page: Page,
     },
     Compare {
         repo: String,
@@ -178,20 +173,68 @@ pub enum Query {
     Changes {
         repo: String,
         filter: ChangeFilter,
-        cursor: Option<Cursor>,
-        limit: u32,
+        page: Page,
     },
     Change {
         repo: String,
         n: u64,
-        cursor: Option<Cursor>,
-        limit: u32,
+        page: Page,
     },
     Judgment {
         key: Vec<u8>,
-        cursor: Option<Cursor>,
-        limit: u32,
+        page: Page,
     },
+}
+
+impl Query {
+    /// The listing a page's cursor is bound to: this query with its page
+    /// taken out.
+    pub fn scope(&self) -> Vec<u8> {
+        let mut scope = self.clone();
+        if let Some(page) = scope.page_mut() {
+            *page = Page::default();
+        }
+        Page::scope_of(&scope)
+    }
+
+    /// The page a listing asks for; an unpaged query has none.
+    pub fn page(&self) -> Option<&Page> {
+        match self {
+            Query::Repos { page }
+            | Query::Repo { page, .. }
+            | Query::Refs { page, .. }
+            | Query::Log { page, .. }
+            | Query::Tree { page, .. }
+            | Query::Diff { page, .. }
+            | Query::Changes { page, .. }
+            | Query::Change { page, .. }
+            | Query::Judgment { page, .. } => Some(page),
+            Query::Advertise { .. }
+            | Query::Upload { .. }
+            | Query::Blob { .. }
+            | Query::Compare { .. }
+            | Query::Activity { .. } => None,
+        }
+    }
+
+    pub fn page_mut(&mut self) -> Option<&mut Page> {
+        match self {
+            Query::Repos { page }
+            | Query::Repo { page, .. }
+            | Query::Refs { page, .. }
+            | Query::Log { page, .. }
+            | Query::Tree { page, .. }
+            | Query::Diff { page, .. }
+            | Query::Changes { page, .. }
+            | Query::Change { page, .. }
+            | Query::Judgment { page, .. } => Some(page),
+            Query::Advertise { .. }
+            | Query::Upload { .. }
+            | Query::Blob { .. }
+            | Query::Compare { .. }
+            | Query::Activity { .. } => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
@@ -209,27 +252,27 @@ pub struct RefInfo {
 pub enum Reply {
     Repos {
         height: u64,
-        page: Page<RepoInfo>,
+        page: PageReply<RepoInfo>,
     },
     Repo {
         height: u64,
         repo: RepoInfo,
         bounds: Bounds,
-        writers: Page<Vec<u8>>,
+        writers: PageReply<Vec<u8>>,
     },
     Refs {
         height: u64,
-        page: Page<RefInfo>,
+        page: PageReply<RefInfo>,
     },
     Log {
         height: u64,
         tip: String,
-        page: Page<CommitInfo>,
+        page: PageReply<CommitInfo>,
     },
     Tree {
         height: u64,
         tree: String,
-        page: Page<TreeInfo>,
+        page: PageReply<TreeInfo>,
     },
     Blob {
         height: u64,
@@ -240,7 +283,7 @@ pub enum Reply {
         base: Option<String>,
         head: String,
         total_files: u64,
-        page: Page<FileDiff>,
+        page: PageReply<FileDiff>,
     },
     Compare {
         height: u64,
@@ -252,23 +295,18 @@ pub enum Reply {
     },
     Changes {
         height: u64,
-        page: Page<ChangeSummary>,
+        page: PageReply<ChangeSummary>,
     },
     Change {
         height: u64,
         change: Change,
         source_head: Option<String>,
         target_head: Option<String>,
-        reviews: Page<Review>,
+        reviews: PageReply<Review>,
     },
     Judgment {
         height: u64,
-        page: Page<Judgment>,
-    },
-    Refused {
-        height: u64,
-        reason: String,
-        sentence: String,
+        page: PageReply<Judgment>,
     },
 }
 

@@ -376,12 +376,12 @@ impl Chat {
         let host = cx.host();
         self.search.hits = cx.load(
             async move {
-                let (rows, capped, has_more, next_after) =
+                let (rows, capped, next_after) =
                     crate::search_hits(host, text, None, viewer, None).await?;
                 Ok(Hits {
                     rows,
                     capped,
-                    has_more,
+                    has_more: next_after.is_some(),
                     next_after,
                 })
             },
@@ -404,7 +404,7 @@ impl Chat {
             let _ = this.update(cx, |chat, cx| {
                 cx.notify();
                 chat.search.more_loading = false;
-                let Ok((rows, _, has_more, next_after)) = result else {
+                let Ok((rows, _, next_after)) = result else {
                     return;
                 };
                 if let Some(hits) = chat.search.hits.ready_mut() {
@@ -417,7 +417,7 @@ impl Chat {
                             hits.rows.push(row);
                         }
                     }
-                    hits.has_more = has_more;
+                    hits.has_more = next_after.is_some();
                     hits.next_after = next_after;
                 }
             });

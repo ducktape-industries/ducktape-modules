@@ -3,8 +3,8 @@ use common::*;
 
 #[test]
 fn client_merge_fast_forwards_or_lands_the_merge_commit_the_client_built() {
-    let sandbox = founded();
-    create(&sandbox, "project", HashKind::Sha1);
+    let mut sandbox = founded();
+    create(&mut sandbox, "project", HashKind::Sha1);
     let mut source = MemoryObjects::new(Hash::Sha1);
     let root = file_commit(&mut source, &[], 1, &[("a", b"1\n"), ("b", b"1\n")]);
     let feature = file_commit(&mut source, &[root], 2, &[("a", b"1\n"), ("b", b"2\n")]);
@@ -12,7 +12,7 @@ fn client_merge_fast_forwards_or_lands_the_merge_commit_the_client_built() {
     let clash = file_commit(&mut source, &[root], 4, &[("a", b"3\n"), ("b", b"1\n")]);
     let zero = Hash::Sha1.zero();
     push(
-        &sandbox,
+        &mut sandbox,
         OWNER,
         "project",
         &[
@@ -23,9 +23,9 @@ fn client_merge_fast_forwards_or_lands_the_merge_commit_the_client_built() {
         &pack_of(&source, &all_ids(&source)),
     )
     .unwrap();
-    let merge = |from: &str, old: Oid, expected: Oid, result: Oid| {
+    let merge = |sandbox: &mut MemorySandbox, from: &str, old: Oid, expected: Oid, result: Oid| {
         act(
-            &sandbox,
+            sandbox,
             OWNER,
             &Op::Merge {
                 repo: "project".into(),
@@ -38,10 +38,10 @@ fn client_merge_fast_forwards_or_lands_the_merge_commit_the_client_built() {
             },
         )
     };
-    let compare = |from: &str| {
+    let compare = |sandbox: &MemorySandbox, from: &str| {
         let reply: Reply = abi::decode(
             &ask(
-                &sandbox,
+                sandbox,
                 &Query::Compare {
                     repo: "project".into(),
                     from: forge::Revision::Ref(from.as_bytes().to_vec()),
@@ -57,11 +57,12 @@ fn client_merge_fast_forwards_or_lands_the_merge_commit_the_client_built() {
         comparison
     };
     assert_eq!(
-        compare("refs/heads/feature").mergeability,
+        compare(&sandbox, "refs/heads/feature").mergeability,
         forge::Mergeability::FastForward
     );
     let forwarded: forge::OpReply =
-        abi::decode(&merge("refs/heads/feature", root, feature, feature).unwrap()).unwrap();
+        abi::decode(&merge(&mut sandbox, "refs/heads/feature", root, feature, feature).unwrap())
+            .unwrap();
     assert_eq!(
         forwarded,
         forge::OpReply::Merged {
@@ -75,13 +76,19 @@ fn client_merge_fast_forwards_or_lands_the_merge_commit_the_client_built() {
         feature.to_hex()
     );
     assert_eq!(
-        merge("refs/heads/feature", feature, feature, feature)
-            .unwrap_err()
-            .reason,
+        merge(
+            &mut sandbox,
+            "refs/heads/feature",
+            feature,
+            feature,
+            feature
+        )
+        .unwrap_err()
+        .reason,
         reason::WRONG_STATE
     );
     let diverged = push(
-        &sandbox,
+        &mut sandbox,
         OWNER,
         "project",
         &[(feature, main, "refs/heads/main")],
@@ -90,7 +97,7 @@ fn client_merge_fast_forwards_or_lands_the_merge_commit_the_client_built() {
     .unwrap();
     assert_eq!(diverged[1], "ng refs/heads/main non-fast-forward");
     act(
-        &sandbox,
+        &mut sandbox,
         OWNER,
         &Op::Configure {
             repo: "project".into(),
@@ -102,14 +109,14 @@ fn client_merge_fast_forwards_or_lands_the_merge_commit_the_client_built() {
     )
     .unwrap();
     push(
-        &sandbox,
+        &mut sandbox,
         OWNER,
         "project",
         &[(feature, main, "refs/heads/main")],
         b"",
     )
     .unwrap();
-    let diverged = compare("refs/heads/feature");
+    let diverged = compare(&sandbox, "refs/heads/feature");
     assert_eq!(diverged.mergeability, forge::Mergeability::Diverged);
     assert_eq!((diverged.ahead, diverged.behind), (1, 1));
     assert_eq!(diverged.base, Some(root.to_hex()));
@@ -137,14 +144,14 @@ fn client_merge_fast_forwards_or_lands_the_merge_commit_the_client_built() {
         .put(Kind::Commit, &merged_commit.serialize())
         .unwrap();
     push(
-        &sandbox,
+        &mut sandbox,
         OWNER,
         "project",
         &[(zero, merged_id, "refs/heads/merge-result")],
         &pack_of(&source, &all_ids(&source)),
     )
     .unwrap();
-    merge("refs/heads/feature", main, feature, merged_id).unwrap();
+    merge(&mut sandbox, "refs/heads/feature", main, feature, merged_id).unwrap();
     assert_eq!(
         refs_of(&sandbox, "project")["refs/heads/main"],
         merged_id.to_hex()
@@ -161,7 +168,7 @@ fn client_merge_fast_forwards_or_lands_the_merge_commit_the_client_built() {
     assert_eq!(actual.author.name, abi::hex(OWNER).into_bytes());
     assert_eq!(actual.author.time, TIME as i64);
     assert_eq!(
-        compare("refs/heads/clash").mergeability,
+        compare(&sandbox, "refs/heads/clash").mergeability,
         forge::Mergeability::Diverged
     );
     assert_eq!(
@@ -172,13 +179,13 @@ fn client_merge_fast_forwards_or_lands_the_merge_commit_the_client_built() {
 
 #[test]
 fn a_sha256_repository_keeps_its_own_ids() {
-    let sandbox = founded();
-    create(&sandbox, "modern", HashKind::Sha256);
+    let mut sandbox = founded();
+    create(&mut sandbox, "modern", HashKind::Sha256);
     let mut source = MemoryObjects::new(Hash::Sha256);
     let tip = file_commit(&mut source, &[], 1, &[("a", b"1")]);
     let zero = Hash::Sha256.zero();
     let report = push(
-        &sandbox,
+        &mut sandbox,
         OWNER,
         "modern",
         &[(zero, tip, "refs/heads/main")],
@@ -210,8 +217,8 @@ fn a_sha256_repository_keeps_its_own_ids() {
 
 #[test]
 fn a_sha1_pack_is_refused_by_a_sha256_repository() {
-    let sandbox = founded();
-    create(&sandbox, "modern", HashKind::Sha256);
+    let mut sandbox = founded();
+    create(&mut sandbox, "modern", HashKind::Sha256);
     let mut source = MemoryObjects::new(Hash::Sha1);
     let tip = file_commit(&mut source, &[], 1, &[("a", b"1")]);
     let request = push_request(
@@ -219,7 +226,7 @@ fn a_sha1_pack_is_refused_by_a_sha256_repository() {
         &pack_of(&source, &all_ids(&source)),
     );
     let refused = act(
-        &sandbox,
+        &mut sandbox,
         OWNER,
         &Op::Push {
             repo: "modern".into(),

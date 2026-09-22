@@ -4,14 +4,17 @@
 pub use std::collections::{BTreeMap, BTreeSet};
 
 pub use abi::{Cause, Env, HashKind, Origin, reason};
-pub use forge::{Bounds, MemorySandbox, Op, Query, Reply, Sandbox, Service, Settings};
+pub use forge::{Bounds, Op, Page, Query, Reply, Service, Settings};
 pub use gitcore::wire::pktline::{self, Pkt, Reader};
 pub use gitcore::{
     Commit, Hash, Kind, Limits, MemoryObjects, Mode, Object, Objects, Oid, Signature, Tree,
     TreeEntry, pack,
 };
+pub use store::{Memory, Reads, Writes};
 
+pub mod sandbox;
 pub mod story;
+pub use sandbox::MemorySandbox;
 
 pub const OWNER: &[u8] = b"owner-key";
 pub const WRITER: &[u8] = b"writer-key";
@@ -47,22 +50,21 @@ pub fn bounds() -> Bounds {
 }
 
 pub fn founded() -> MemorySandbox {
-    let sandbox = MemorySandbox::default();
-    forge::init(&sandbox, &abi::encode(&bounds())).unwrap();
+    let mut sandbox = MemorySandbox::default();
+    forge::init(&mut sandbox, &abi::encode(&bounds())).unwrap();
     sandbox
 }
 
-pub fn act(sandbox: &MemorySandbox, actor: &[u8], op: &Op) -> Result<Vec<u8>, abi::Refusal> {
+pub fn act(sandbox: &mut MemorySandbox, actor: &[u8], op: &Op) -> Result<Vec<u8>, abi::Refusal> {
     forge::execute(sandbox, &env(actor), &abi::encode(op))?;
-    Ok(sandbox.take_output())
+    Ok(sandbox.forge.take_output())
 }
 
 pub fn ask(sandbox: &MemorySandbox, query: &Query) -> Result<Vec<u8>, abi::Refusal> {
-    forge::query(sandbox, &env(OWNER), &abi::encode(query))?;
-    Ok(sandbox.take_response())
+    forge::query(sandbox, &env(OWNER), &abi::encode(query))
 }
 
-pub fn create(sandbox: &MemorySandbox, name: &str, hash: HashKind) {
+pub fn create(sandbox: &mut MemorySandbox, name: &str, hash: HashKind) {
     act(
         sandbox,
         OWNER,
@@ -162,7 +164,7 @@ pub fn push_request(commands: &[(Oid, Oid, &str)], pack_bytes: &[u8]) -> Vec<u8>
 }
 
 pub fn push(
-    sandbox: &MemorySandbox,
+    sandbox: &mut MemorySandbox,
     actor: &[u8],
     repo: &str,
     commands: &[(Oid, Oid, &str)],
@@ -201,8 +203,7 @@ pub fn refs_of(sandbox: &MemorySandbox, repo: &str) -> BTreeMap<String, String> 
             sandbox,
             &Query::Refs {
                 repo: repo.into(),
-                cursor: None,
-                limit: 128,
+                page: Page::first(128),
             },
         )
         .unwrap(),

@@ -1,6 +1,6 @@
 //! The node-less screen dumps: one tree per screen of the plan, light and
 //! dark, for the app's renderer (`ducktape-app --render-tree <json>`).
-use super::{accounts, booted, change_screen, opened, reply};
+use super::{accounts, booted, change_screen, opened, refusal};
 use crate::Forge;
 use crate::api::{Ask, ChatApi, Props};
 use crate::state::ChangeTab;
@@ -70,7 +70,8 @@ fn screen(state: &str) -> TestAppContext {
         "repos-empty" => booted("empty").0,
         "repos-refused" => {
             let mut cx = TestAppContext::new();
-            cx.host().handle::<Ask>(|_| Ok(reply("refused-not-found")));
+            cx.host()
+                .handle::<Ask>(|_| Err(refusal("refused-not-found")));
             cx.host()
                 .handle::<Query<ChatApi>>(|_| Ok(chat::ChatViewReply::Accounts(accounts())));
             cx.host().never::<Live>();
