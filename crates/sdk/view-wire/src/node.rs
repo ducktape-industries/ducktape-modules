@@ -607,8 +607,7 @@ impl Node {
             | Self::Tooltip { key, .. }
             | Self::Canvas { key, .. }
             | Self::Surface { key, .. } => Some(key),
-            Self::UniformList { id, .. } => id.name(),
-            Self::Space { .. } => None,
+            Self::UniformList { .. } | Self::Space { .. } => None,
         }
     }
 
@@ -618,7 +617,9 @@ impl Node {
             Self::Container { id, .. } | Self::Text { id, .. } => {
                 id.as_ref().map(IdentityKeyRef::Element)
             }
-            Self::Input { id, .. } | Self::Editor { id, .. } => Some(IdentityKeyRef::Element(id)),
+            Self::Input { id, .. } | Self::Editor { id, .. } | Self::UniformList { id, .. } => {
+                Some(IdentityKeyRef::Element(id))
+            }
             Self::ResizeHandle { key, .. }
             | Self::MouseArea { key, .. }
             | Self::Linear { key, .. }

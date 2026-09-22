@@ -75,8 +75,8 @@ pub use image::{ImageData, ViewerOptions, viewer_scale_bounds};
 mod snapshot;
 pub use snapshot::{MAX_SNAPSHOT_BYTES, Snapshot, SnapshotValue};
 
-pub mod click;
 mod aria;
+pub mod click;
 pub use aria::Aria;
 mod identity;
 mod style;
@@ -105,7 +105,7 @@ pub use text::{
 mod button;
 pub use button::{ButtonPreset, ButtonRecipe};
 mod canvas;
-mod list;
+pub mod list;
 pub use canvas::{
     CanvasCommand, CanvasLineCap, CanvasLineJoin, CanvasSegment, CanvasShape, CanvasStroke,
     MAX_CANVAS_PARTS,
@@ -898,13 +898,7 @@ fn sanitize_tree(root: &mut Node) -> Result<SanitizeReport, &'static str> {
     let mut budgets = Budgets::frame();
     let mut taken = Taken::new();
     let mut identity_scopes = vec![std::collections::HashSet::new()];
-    sanitize_node(
-        root,
-        0,
-        &mut budgets,
-        &mut taken,
-        &mut identity_scopes,
-    )?;
+    sanitize_node(root, 0, &mut budgets, &mut taken, &mut identity_scopes)?;
     let (after_documents, after) = text_amounts(root)?;
     if after_documents != documents {
         return Err("frame budget would remove an editor document projection");
@@ -926,10 +920,7 @@ type Taken = std::collections::HashMap<String, usize>;
 /// identified node starts a fresh scope for its descendants.
 type IdentityScopes = Vec<std::collections::HashSet<IdentityKey>>;
 
-fn claim_typed_scope(
-    node: &Node,
-    scopes: &mut IdentityScopes,
-) -> Result<bool, &'static str> {
+fn claim_typed_scope(node: &Node, scopes: &mut IdentityScopes) -> Result<bool, &'static str> {
     let Some(IdentityKeyRef::Element(id)) = node.identity() else {
         return Ok(false);
     };
@@ -1114,15 +1105,24 @@ fn sanitize_node(
         }
         Node::UniformList {
             id,
+            path,
             style,
             interactivity,
             count,
+            measure_index,
+            scroll_request,
             indices,
             children,
             ..
         } => {
             style_sanitize::sanitize(style);
-            claim_id_value(id, taken);
+            id.validate_host()?;
+            if path.is_empty() || path.len() > 64 || path.last() != Some(id) {
+                return Err("uniform-list authored path is invalid");
+            }
+            for ancestor in path.iter() {
+                ancestor.validate_host()?;
+            }
             interactivity.aria.sanitize();
             for refinement in [&mut interactivity.hover, &mut interactivity.active]
                 .into_iter()
@@ -1130,7 +1130,10 @@ fn sanitize_node(
             {
                 style_sanitize::sanitize(refinement);
             }
-            for refinement in [&mut interactivity.group_hover, &mut interactivity.group_active]
+            for refinement in [
+                &mut interactivity.group_hover,
+                &mut interactivity.group_active,
+            ]
                 .into_iter()
                 .flatten()
             {
@@ -1144,10 +1147,11 @@ fn sanitize_node(
                 truncate_string(&mut name);
                 *group = name.into();
             }
-            if let Some(interactivity_id) = &mut interactivity.id {
-                claim_id_value(interactivity_id, taken);
-            }
             *count = (*count).min(MAX_UNIFORM_LIST_COUNT);
+            *measure_index = (*measure_index).min(count.saturating_sub(1));
+            if let Some(request) = scroll_request {
+                request.offset = request.offset.min(MAX_UNIFORM_LIST_COUNT);
+            }
             let mut kept_indices = Vec::with_capacity(indices.len().min(MAX_UNIFORM_LIST_ROWS));
             let mut kept_children = Vec::with_capacity(children.len().min(MAX_UNIFORM_LIST_ROWS));
             for (index, child) in indices.drain(..).zip(children.drain(..)) {
@@ -1979,10 +1983,13 @@ pub fn encoded_size<T: Serialize>(value: &T) -> u64 {
             self.0 += bytes.len() as u64;
             Ok(bytes.len())
         }
-        fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
     }
     let mut count = Count(0);
-    value.serialize(&mut rmp_serde::Serializer::new(&mut count).with_struct_map())
+    value
+        .serialize(&mut rmp_serde::Serializer::new(&mut count).with_struct_map())
         .expect("wire types are plain data");
     count.0
 }
@@ -2306,7 +2313,11 @@ mod tests {
     fn encoded_size_matches_named_messagepack_without_a_second_buffer() {
         for count in [0, 1, 16, 256, 2000] {
             let frame = Frame {
-                root: Some(column((0..count).map(|index| keyed(&index.to_string(), "한é" )).collect())),
+                root: Some(column(
+                    (0..count)
+                        .map(|index| keyed(&index.to_string(), "한é"))
+                        .collect(),
+                )),
                 ..Default::default()
             };
             assert_eq!(encoded_size(&frame), encode(&frame).len() as u64);
@@ -2446,7 +2457,9 @@ mod tests {
 
     fn keyed(key: &str, content: &str) -> Node {
         let mut node = text(content);
-        let Node::Text { id, .. } = &mut node else { unreachable!() };
+        let Node::Text { id, .. } = &mut node else {
+            unreachable!()
+        };
         *id = Some(ElementIdWire::Name(key.into()));
         node
     }
@@ -2822,7 +2835,10 @@ mod tests {
             root: Some(keyed(&"k".repeat(MAX_STRING_BYTES + 3), "text")),
             ..Default::default()
         };
-        assert_eq!(sanitize(&mut frame).unwrap_err(), "element identity name is too long");
+        assert_eq!(
+            sanitize(&mut frame).unwrap_err(),
+            "element identity name is too long"
+        );
     }
 
     #[test]
@@ -3109,7 +3125,11 @@ mod tests {
             .spawn(move || {
                 let mut node = Node::empty();
                 for _ in 0..depth {
-                    node = Node::Lazy { key: String::new(), generation: 0, content: Box::new(node) };
+                    node = Node::Lazy {
+                        key: String::new(),
+                        generation: 0,
+                        content: Box::new(node),
+                    };
                 }
                 let frame = Frame {
                     root: Some(node),
@@ -3200,11 +3220,20 @@ mod tests {
             root: Some(column(vec![keyed("same", "one"), keyed("same", "two")])),
             ..Default::default()
         };
-        assert_eq!(sanitize(&mut frame).unwrap_err(), "duplicate typed element identity among siblings");
+        assert_eq!(
+            sanitize(&mut frame).unwrap_err(),
+            "duplicate typed element identity among siblings"
+        );
         let mut root = column(vec![keyed("same", "one")]);
-        let error = apply(&mut root, vec![Patch::Insert {
-            path: vec![], index: 1, node: keyed("same", "two"),
-        }]).unwrap_err();
+        let error = apply(
+            &mut root,
+            vec![Patch::Insert {
+                path: vec![],
+                index: 1,
+                node: keyed("same", "two"),
+            }],
+        )
+        .unwrap_err();
         assert_eq!(error, "duplicate typed element identity among siblings");
     }
 
@@ -3212,11 +3241,16 @@ mod tests {
     #[test]
     fn a_screen_of_one_typed_id_is_refused_in_linear_time() {
         let mut frame = Frame {
-            root: Some(column((0..MAX_NODES - 1).map(|_| keyed("same", "x")).collect())),
+            root: Some(column(
+                (0..MAX_NODES - 1).map(|_| keyed("same", "x")).collect(),
+            )),
             ..Default::default()
         };
         let started = std::time::Instant::now();
-        assert_eq!(sanitize(&mut frame).unwrap_err(), "duplicate typed element identity among siblings");
+        assert_eq!(
+            sanitize(&mut frame).unwrap_err(),
+            "duplicate typed element identity among siblings"
+        );
         if cfg!(not(debug_assertions)) {
             assert!(started.elapsed() < std::time::Duration::from_millis(200));
         }

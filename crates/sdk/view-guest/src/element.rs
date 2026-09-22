@@ -595,11 +595,11 @@ pub struct UniformListScrollHandle(Rc<RefCell<UniformListScrollState>>);
 
 #[derive(Default)]
 pub(crate) struct UniformListScrollState {
-    request: Option<wire::list::UniformListScrollRequest>,
-    y_flipped: bool,
-    top_index: usize,
-    scrollable: bool,
-    scrolled_to_end: Option<bool>,
+    pub(crate) request: Option<wire::list::UniformListScrollRequest>,
+    pub(crate) y_flipped: bool,
+    pub(crate) top_index: usize,
+    pub(crate) scrollable: bool,
+    pub(crate) scrolled_to_end: Option<bool>,
 }
 
 impl UniformListScrollHandle {
