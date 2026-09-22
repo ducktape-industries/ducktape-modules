@@ -56,6 +56,7 @@ impl Element for Surface {
             name: self.name,
             args: self.args,
             on_event: self.on_event.map(|listener| lowering.route(listener)),
+            style: gpui::StyleRefinement::default(),
         }
     }
 }

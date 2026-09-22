@@ -39,7 +39,7 @@ fn length(value: &mut Length) {
         definite(value, MAX_PIXELS);
     }
 }
-fn color(value: &mut Hsla) {
+pub(crate) fn sanitize_hsla(value: &mut Hsla) {
     for number in [&mut value.h, &mut value.s, &mut value.l, &mut value.a] {
         finite(number, 0., 1.);
     }
@@ -129,21 +129,21 @@ pub(crate) fn sanitize(style: &mut StyleRefinement) {
         finite(value, 0., 1.);
     }
     if let Some(value) = &mut style.border_color {
-        color(value);
+        sanitize_hsla(value);
     }
     // Background's pattern/gradient payload is private in pinned GPUI. Only
     // solids expose the numeric values needed for validation; reject opaque
     // pattern parameters rather than forwarding unchecked shader inputs.
     style.background = style.background.take().and_then(|Fill::Color(background)| {
         background.as_solid().map(|mut value| {
-            color(&mut value);
+            sanitize_hsla(&mut value);
             Fill::from(value)
         })
     });
     if let Some(shadows) = &mut style.box_shadow {
         shadows.truncate(MAX_SHADOWS);
         for shadow in shadows {
-            color(&mut shadow.color);
+            sanitize_hsla(&mut shadow.color);
             for offset in [&mut shadow.offset.x, &mut shadow.offset.y] {
                 let mut number = f32::from(*offset);
                 finite(&mut number, -128., 128.);
@@ -174,10 +174,10 @@ pub(crate) fn sanitize(style: &mut StyleRefinement) {
     }
     let text = &mut style.text;
     if let Some(value) = &mut text.color {
-        color(value);
+        sanitize_hsla(value);
     }
     if let Some(value) = &mut text.background_color {
-        color(value);
+        sanitize_hsla(value);
     }
     if let Some(value) = &mut text.font_size {
         absolute(value, MAX_FONT_PIXELS);
@@ -224,7 +224,7 @@ pub(crate) fn sanitize(style: &mut StyleRefinement) {
         finite(&mut thickness, 0., 32.);
         value.thickness = px(thickness);
         if let Some(value) = &mut value.color {
-            color(value);
+            sanitize_hsla(value);
         }
     }
     if let Some(value) = &mut text.strikethrough {
@@ -232,7 +232,7 @@ pub(crate) fn sanitize(style: &mut StyleRefinement) {
         finite(&mut thickness, 0., 32.);
         value.thickness = px(thickness);
         if let Some(value) = &mut value.color {
-            color(value);
+            sanitize_hsla(value);
         }
     }
     #[cfg(debug_assertions)]

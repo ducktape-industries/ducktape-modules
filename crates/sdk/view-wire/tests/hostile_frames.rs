@@ -123,53 +123,6 @@ fn gen_string(rng: &mut Rng) -> String {
     s
 }
 
-fn gen_opt_length(rng: &mut Rng) -> Option<Length> {
-    rng.next_bool().then(|| match rng.next_range(4) {
-        0 => Length::Fill,
-        1 => Length::FillPortion(rng.next_range(1000) as u16),
-        2 => Length::Shrink,
-        _ => Length::Fixed(gen_f32(rng)),
-    })
-}
-
-fn gen_opt_edges(rng: &mut Rng) -> Option<Edges> {
-    rng.next_bool().then(|| Edges {
-        top: gen_f32(rng),
-        right: gen_f32(rng),
-        bottom: gen_f32(rng),
-        left: gen_f32(rng),
-    })
-}
-
-fn gen_opt_color(rng: &mut Rng) -> Option<Rgba> {
-    rng.next_bool()
-        .then(|| Rgba([gen_f32(rng), gen_f32(rng), gen_f32(rng), gen_f32(rng)]))
-}
-
-fn gen_border(rng: &mut Rng) -> Border {
-    Border {
-        color: gen_opt_color(rng),
-        width: gen_opt_f32(rng),
-        radius: rng
-            .next_bool()
-            .then(|| [gen_f32(rng), gen_f32(rng), gen_f32(rng), gen_f32(rng)]),
-    }
-}
-
-fn gen_opt_border(rng: &mut Rng) -> Option<Border> {
-    rng.next_bool().then(|| gen_border(rng))
-}
-
-fn gen_opt_align_x(rng: &mut Rng) -> Option<AlignX> {
-    rng.next_bool()
-        .then(|| *rng.choose(&[AlignX::Left, AlignX::Center, AlignX::Right]))
-}
-
-fn gen_opt_align_y(rng: &mut Rng) -> Option<AlignY> {
-    rng.next_bool()
-        .then(|| *rng.choose(&[AlignY::Top, AlignY::Center, AlignY::Bottom]))
-}
-
 fn gen_opt_role(rng: &mut Rng) -> Option<Role> {
     rng.next_bool().then(|| {
         *rng.choose(&[
@@ -192,37 +145,6 @@ fn gen_axis(rng: &mut Rng) -> Axis {
     }
 }
 
-
-
-fn gen_opt_bool(rng: &mut Rng) -> Option<bool> {
-    rng.next_bool().then(|| rng.next_bool())
-}
-
-
-
-
-
-fn gen_opt_background(rng: &mut Rng) -> Option<Background> {
-    rng.next_bool().then(|| {
-        if rng.next_bool() {
-            Background::Color(gen_opt_color(rng).unwrap_or(Rgba([0.0; 4])))
-        } else {
-            Background::Linear {
-                angle: gen_f32(rng),
-                stops: std::array::from_fn(|_| {
-                    rng.next_bool().then(|| ColorStop {
-                        offset: gen_f32(rng),
-                        color: gen_opt_color(rng).unwrap_or(Rgba([0.0; 4])),
-                    })
-                }),
-            }
-        }
-    })
-}
-
-
-
-
 fn gen_anchor(rng: &mut Rng) -> ScrollAnchor {
     *rng.choose(&[ScrollAnchor::Start, ScrollAnchor::End, ScrollAnchor::Keep])
 }
@@ -238,7 +160,7 @@ fn gen_button_label(rng: &mut Rng) -> Node {
         content: ButtonContent::Label(gen_string(rng)),
         label: rng.next_bool().then(|| gen_string(rng)),
         on_press: rng.next_bool().then(|| rng.next_u64() as u32),
-        style: gpui::StyleRefinement::default(),
+        style: gen_native_style(rng),
     }
 }
 
@@ -305,13 +227,7 @@ fn gen_rule(rng: &mut Rng) -> Node {
     Node::Rule {
         key: gen_key(rng),
         axis: gen_axis(rng),
-        thickness: gen_f32(rng),
-        color: gen_opt_color(rng),
-        weak: rng.next_bool(),
-        radius: rng
-            .next_bool()
-            .then(|| [gen_f32(rng), gen_f32(rng), gen_f32(rng), gen_f32(rng)]),
-        snap: gen_opt_bool(rng),
+        style: gen_native_style(rng),
     }
 }
 
@@ -528,8 +444,7 @@ fn gen_leaf(rng: &mut Rng) -> Node {
         10 => gen_svg(rng),
         11 => gen_editor(rng),
         1 => Node::Space {
-            width: gen_opt_length(rng),
-            height: gen_opt_length(rng),
+            style: gen_native_style(rng),
         },
         2 => gen_input(rng),
         3 => gen_rule(rng),
@@ -604,23 +519,9 @@ fn gen_tree(rng: &mut Rng, depth: usize, width: usize) -> Node {
             6 => Node::Tooltip {
                 key: gen_key(rng),
                 position: TooltipPosition::Bottom,
-                gap: gen_f32(rng),
-                padding: gen_f32(rng),
                 delay_ms: rng.next_u64(),
                 snap: rng.next_bool(),
-                style: TooltipStyle {
-                    preset: TooltipPreset::Transparent,
-                    background: gen_opt_color(rng),
-                    text: gen_opt_color(rng),
-                    border: gen_opt_border(rng),
-                    shadow: Shadow {
-                        color: gen_opt_color(rng),
-                        x: gen_opt_f32(rng),
-                        y: gen_opt_f32(rng),
-                        blur: gen_opt_f32(rng),
-                    },
-                    pixel_snap: gen_opt_bool(rng),
-                },
+                style: gen_native_style(rng),
                 children: vec![node, gen_leaf(rng)],
             },
             4 => Node::Sensor {
@@ -666,8 +567,7 @@ fn gen_tree(rng: &mut Rng, depth: usize, width: usize) -> Node {
                     ScrollDirection::Horizontal,
                     ScrollDirection::Both,
                 ]),
-                width: gen_opt_length(rng),
-                height: gen_opt_length(rng),
+                style: gen_native_style(rng),
                 bar_hidden: rng.next_bool(),
                 bar_width: gen_opt_f32(rng),
                 bar_margin: gen_opt_f32(rng),
@@ -676,8 +576,6 @@ fn gen_tree(rng: &mut Rng, depth: usize, width: usize) -> Node {
                 anchor_x: gen_anchor(rng),
                 anchor_y: gen_anchor(rng),
                 auto_scroll: rng.next_bool(),
-                background: gen_opt_color(rng),
-                border: gen_opt_border(rng),
                 content: Box::new(node),
             },
             _ => Node::Button {
@@ -975,52 +873,6 @@ fn tree_depth(node: &Node) -> usize {
     }
 }
 
-fn check_length(length: &Option<Length>, ctx: &str) {
-    if let Some(Length::Fixed(value)) = length {
-        assert!(
-            value.is_finite() && (0.0..=PIXEL_BOUND).contains(value),
-            "{ctx}: length {value} outside 0..={PIXEL_BOUND}"
-        );
-    }
-}
-
-fn check_edges(edges: &Option<Edges>, ctx: &str) {
-    let Some(edges) = edges else { return };
-    for value in [edges.top, edges.right, edges.bottom, edges.left] {
-        assert!(
-            value.is_finite() && (0.0..=PIXEL_BOUND).contains(&value),
-            "{ctx}: edge {value} outside 0..={PIXEL_BOUND}"
-        );
-    }
-}
-
-fn check_color(color: &Option<Rgba>, ctx: &str) {
-    let Some(Rgba(channels)) = color else { return };
-    for value in channels {
-        assert!(
-            value.is_finite() && (0.0..=1.0).contains(value),
-            "{ctx}: colour channel {value} outside 0..=1"
-        );
-    }
-}
-
-fn check_border(border: &Option<Border>, ctx: &str) {
-    let Some(border) = border else { return };
-    check_color(&border.color, ctx);
-    if let Some(width) = border.width {
-        assert!(
-            width.is_finite() && (0.0..=PIXEL_BOUND).contains(&width),
-            "{ctx}: border width {width} outside 0..={PIXEL_BOUND}"
-        );
-    }
-    for radius in border.radius.into_iter().flatten() {
-        assert!(
-            radius.is_finite() && (0.0..=PIXEL_BOUND).contains(&radius),
-            "{ctx}: border radius {radius} outside 0..={PIXEL_BOUND}"
-        );
-    }
-}
-
 /// A slider or progress number: finite, and nothing more is promised.
 fn check_finite(value: f32, ctx: &str, field: &str) {
     assert!(value.is_finite(), "{ctx}: {field} {value} is not finite");
@@ -1114,41 +966,22 @@ fn check_bounds(
         }
         Node::Float {
             scale,
-            shadow,
-            radius,
+            style,
             content,
             ..
         } => {
             assert!(scale.is_finite() && (f32::EPSILON..=PIXEL_BOUND).contains(scale));
-            check_color(&shadow.color, ctx);
-            check_pixels(&shadow.blur, ctx, "float shadow blur");
-            for value in [shadow.x, shadow.y].into_iter().flatten() {
-                assert!(value.is_finite() && (-PIXEL_BOUND..=PIXEL_BOUND).contains(&value));
-            }
-            for value in radius.iter().flatten() {
-                check_pixels(&Some(*value), ctx, "float shadow radius");
-            }
+            check_native_style(style);
             check_bounds(content, depth + 1, keys, svg_bytes, ctx);
         }
         Node::Tooltip {
-            gap,
-            padding,
             delay_ms,
             style,
             children,
             ..
         } => {
-            check_pixels(&Some(*gap), ctx, "tooltip gap");
-            check_pixels(&Some(*padding), ctx, "tooltip padding");
             assert!(*delay_ms <= 60_000);
-            check_color(&style.background, ctx);
-            check_color(&style.text, ctx);
-            check_color(&style.shadow.color, ctx);
-            check_border(&style.border, ctx);
-            check_pixels(&style.shadow.blur, ctx, "tooltip blur");
-            for value in [style.shadow.x, style.shadow.y].into_iter().flatten() {
-                assert!(value.is_finite() && value.abs() <= PIXEL_BOUND);
-            }
+            check_native_style(style);
             assert!(children.len() <= 2);
             for child in children {
                 check_bounds(child, depth + 1, keys, svg_bytes, ctx);
@@ -1170,21 +1003,15 @@ fn check_bounds(
             check_bounds(child, depth + 1, keys, svg_bytes, ctx);
         }
         Node::Scroll {
-            width,
-            height,
+            style,
             bar_width,
             bar_margin,
             scroller_width,
             bar_spacing,
-            background,
-            border,
             content,
             ..
         } => {
-            check_length(width, ctx);
-            check_length(height, ctx);
-            check_color(background, ctx);
-            check_border(border, ctx);
+            check_native_style(style);
             for (value, field) in [
                 (bar_width, "bar width"),
                 (bar_margin, "bar margin"),
@@ -1208,8 +1035,11 @@ fn check_bounds(
             if let Some(payload) = &code.payload {
                 assert!(payload.len() <= view_wire::MAX_QR_PAYLOAD_BYTES);
             }
-            check_color(&code.cell, ctx);
-            check_color(&code.background, ctx);
+            for color in [code.cell, code.background].into_iter().flatten() {
+                for value in [color.h, color.s, color.l, color.a] {
+                    assert!(value.is_finite() && (0.0..=1.0).contains(&value));
+                }
+            }
             if let Some(view_wire::QrSize::Cell(value) | view_wire::QrSize::Total(value)) =
                 code.size
             {
@@ -1366,22 +1196,7 @@ fn check_bounds(
                 check_string(description, ctx, "button description");
             }
         }
-        Node::Space { width, height } => {
-            check_length(width, ctx);
-            check_length(height, ctx);
-        }
-        Node::Rule {
-            thickness,
-            color,
-            radius,
-            ..
-        } => {
-            check_pixels(&Some(*thickness), ctx, "rule thickness");
-            check_color(color, ctx);
-            for corner in radius.iter().flatten() {
-                check_pixels(&Some(*corner), ctx, "rule radius");
-            }
-        }
+        Node::Space { style } | Node::Rule { style, .. } => check_native_style(style),
         Node::Toggle { label, .. } => {
             check_string(label, ctx, "control label");
         }
@@ -1460,19 +1275,14 @@ fn check_bounds(
             }
         }
         Node::Progress {
-            value,
-            min,
-            max,
-            ..
+            value, min, max, ..
         } => {
             for (number, field) in [(value, "value"), (min, "min"), (max, "max")] {
                 check_finite(*number, ctx, field);
             }
         }
         Node::Overlay {
-            label,
-            children,
-            ..
+            label, children, ..
         } => {
             if let Some(label) = label {
                 check_string(label, ctx, "accessible label");
@@ -2013,8 +1823,7 @@ fn resize_handle_round_trip_retains_routes_and_checks_its_child() {
         on_drag: Some(u32::MAX),
         cursor: Some(mouse::Cursor::ResizingHorizontally),
         content: Box::new(Node::Space {
-            width: Some(Length::Fixed(f32::INFINITY)),
-            height: Some(Length::Fixed(-10.0)),
+            style: gen_native_style(&mut Rng::new(99)),
         }),
         style: gpui::StyleRefinement::default(),
     });

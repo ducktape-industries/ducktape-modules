@@ -30,8 +30,8 @@ pub struct Qr {
     pub correction: Option<QrCorrection>,
     pub version: Option<QrVersion>,
     pub size: Option<QrSize>,
-    pub cell: Option<Rgba>,
-    pub background: Option<Rgba>,
+    pub cell: Option<gpui::Hsla>,
+    pub background: Option<gpui::Hsla>,
 }
 
 impl Qr {
@@ -59,8 +59,9 @@ impl Qr {
                 QrSize::Total(value) => *value = bounded(*value).min(MAX_PIXELS / 3.0),
             }
         }
-        bound_color(&mut self.cell);
-        bound_color(&mut self.background);
+        for color in [&mut self.cell, &mut self.background].into_iter().flatten() {
+            style_sanitize::sanitize_hsla(color);
+        }
     }
 }
 

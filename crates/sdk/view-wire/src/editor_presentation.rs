@@ -1,5 +1,5 @@
 //! Declarative editor formatting. Document identity is the enclosing Editor node's reference.
-use crate::{Align, Border, Edges, LineHeight, NamedFont, Rgba};
+use crate::{Align, LineHeight, NamedFont};
 use serde::{Deserialize, Serialize};
 
 /// Presentation is bounded independently of the canonical document bytes.
@@ -205,22 +205,17 @@ impl EditorAffordances {
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct EditorFormat {
-    pub color: Option<Rgba>,
+    pub style: gpui::StyleRefinement,
+    pub line_style: gpui::StyleRefinement,
     pub font: Option<NamedFont>,
     pub size: Option<f32>,
     pub line_height: Option<LineHeight>,
-    pub background: Option<Rgba>,
-    pub border: Option<Border>,
-    pub line_background: Option<Rgba>,
-    pub line_border: Option<Border>,
-    pub line_padding: Edges,
-    pub line_rule: Option<Rgba>,
+    pub line_rule: Option<gpui::Hsla>,
     /// Where every visual line holding this span sits in the column.
     pub line_align: Option<Align>,
-    pub strikethrough: Option<Rgba>,
+    pub strikethrough: Option<gpui::Hsla>,
     /// Underline color, drawn along the span's baseline.
-    pub underline: Option<Rgba>,
-    pub padding: Edges,
+    pub underline: Option<gpui::Hsla>,
 }
 
 /// A source range, in UTF-8 byte offsets within a logical line.
@@ -239,8 +234,8 @@ pub struct EditorPresentation {
     /// Ordered by line, then start; overlapping ranges are rejected.
     #[serde(deserialize_with = "decode_spans")]
     pub spans: Vec<EditorSpan>,
-    /// Local editor insets, including any gutter and margin space.
-    pub padding: Option<Edges>,
+    /// Local editor box presentation, including gutter and margin insets.
+    pub style: gpui::StyleRefinement,
     pub affordances: EditorAffordances,
 }
 
@@ -253,20 +248,20 @@ pub enum PresentationError {
 
 impl EditorPresentation {
     pub(super) fn sanitize(&mut self, budgets: &mut crate::Budgets) {
-        crate::bound_edges(&mut self.padding);
+        crate::style_sanitize::sanitize(&mut self.style);
         for format in &mut self.formats {
+            crate::style_sanitize::sanitize(&mut format.style);
+            crate::style_sanitize::sanitize(&mut format.line_style);
             for color in [
-                &mut format.color,
-                &mut format.background,
-                &mut format.line_background,
                 &mut format.line_rule,
                 &mut format.strikethrough,
                 &mut format.underline,
-            ] {
-                crate::bound_color(color);
+            ]
+            .into_iter()
+            .flatten()
+            {
+                crate::style_sanitize::sanitize_hsla(color);
             }
-            crate::bound_border(&mut format.border);
-            crate::bound_border(&mut format.line_border);
             if let Some(size) = &mut format.size {
                 *size = crate::bounded(*size).clamp(f32::EPSILON, crate::MAX_TEXT_PIXELS);
             }
@@ -276,21 +271,6 @@ impl EditorPresentation {
             if let Some(font) = &mut format.font {
                 font.sanitize(budgets);
             }
-            // `line_padding` moves layout, so it stays non-negative. A span's
-            // `padding` only grows or shrinks its highlight quad around the
-            // glyph run, so a negative edge is legitimate: it is how a guest
-            // draws a box smaller than the line (a todo's checkbox hugging
-            // its glyph row instead of spanning the full line height).
-            let line_padding = &mut format.line_padding;
-            line_padding.top = crate::bounded(line_padding.top);
-            line_padding.right = crate::bounded(line_padding.right);
-            line_padding.bottom = crate::bounded(line_padding.bottom);
-            line_padding.left = crate::bounded(line_padding.left);
-            let padding = &mut format.padding;
-            padding.top = crate::signed_bounded(padding.top);
-            padding.right = crate::signed_bounded(padding.right);
-            padding.bottom = crate::signed_bounded(padding.bottom);
-            padding.left = crate::signed_bounded(padding.left);
         }
         // Interaction tags/ranges are semantic data: never shorten them.
         // Over-limit metadata is rejected by the bounded decoder, preserving

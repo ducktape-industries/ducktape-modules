@@ -62,31 +62,6 @@ pub struct NamedFont {
     pub stretch: FontStretch,
     pub style: FontStyle,
 }
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct TextOptions {
-    pub height: Option<Length>,
-    pub align_y: Option<AlignY>,
-    pub line_height: Option<LineHeight>,
-    pub shaping: Option<Shaping>,
-    pub wrapping: Option<Wrapping>,
-    pub tracking: f32,
-    pub font: Option<NamedFont>,
-}
-impl TextOptions {
-    pub(super) fn sanitize(&mut self, budgets: &mut Budgets) {
-        if let Some(Length::Fixed(height)) = &mut self.height {
-            *height = bounded(*height);
-        }
-        if let Some(line_height) = &mut self.line_height {
-            line_height.sanitize();
-        }
-        self.tracking = bounded(self.tracking).min(MAX_TEXT_PIXELS);
-        if let Some(font) = &mut self.font {
-            font.sanitize(budgets);
-        }
-    }
-}
-
 impl LineHeight {
     pub(super) fn sanitize(&mut self) {
         match self {
@@ -109,35 +84,6 @@ impl NamedFont {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn copied_text_metadata_is_bounded_before_native_layout() {
-        let mut options = TextOptions {
-            height: Some(Length::Fixed(f32::INFINITY)),
-            line_height: Some(LineHeight::Relative(f32::MAX)),
-            tracking: f32::NAN,
-            font: Some(NamedFont {
-                family: FontFamily::Named("é".repeat(64)),
-                weight: Weight::Normal,
-                stretch: FontStretch::Normal,
-                style: FontStyle::Normal,
-            }),
-            ..TextOptions::default()
-        };
-        let mut budget = Budgets::frame();
-        budget.text = 7;
-        options.sanitize(&mut budget);
-        assert_eq!(options.line_height, Some(LineHeight::Relative(16.0)));
-        assert_eq!(options.tracking, 0.0);
-        assert!(
-            matches!(options.height, Some(Length::Fixed(value)) if value.is_finite() && value <= MAX_PIXELS)
-        );
-        let FontFamily::Named(name) = &options.font.unwrap().family else {
-            panic!()
-        };
-        assert_eq!(name, "ééé");
-        assert_eq!(budget.text, 1);
-    }
 
     #[test]
     fn tracked_graphemes_share_the_frame_node_budget() {

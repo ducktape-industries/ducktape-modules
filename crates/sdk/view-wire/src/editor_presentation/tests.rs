@@ -1,4 +1,5 @@
 use super::*;
+use gpui::Styled as _;
 
 #[test]
 fn overflow_is_rejected_instead_of_silently_truncating_interactions() {
@@ -23,45 +24,31 @@ fn overflow_is_rejected_instead_of_silently_truncating_interactions() {
 }
 
 #[test]
-fn span_padding_may_shrink_its_highlight_but_line_padding_never_goes_negative() {
+fn native_span_and_line_styles_bound_untrusted_padding() {
     let mut value = EditorPresentation::default();
     value.formats.push(EditorFormat {
-        padding: Edges {
-            top: -4.5,
-            right: 2.0,
-            bottom: -1e9,
-            left: f32::NAN,
-        },
-        line_padding: Edges {
-            top: -4.5,
-            right: 2.0,
-            bottom: -1e9,
-            left: f32::NAN,
-        },
+        style: gpui::StyleRefinement::default()
+            .pt(gpui::px(-4.5))
+            .pr(gpui::px(2.0))
+            .pb(gpui::px(-1e9))
+            .pl(gpui::px(f32::NAN)),
+        line_style: gpui::StyleRefinement::default()
+            .pt(gpui::px(-4.5))
+            .pr(gpui::px(2.0))
+            .pb(gpui::px(-1e9))
+            .pl(gpui::px(f32::NAN)),
         ..Default::default()
     });
     let mut budget = crate::Budgets::frame();
     budget.text = crate::MAX_STRING_BYTES;
     value.sanitize(&mut budget);
     let format = &value.formats[0];
-    assert_eq!(
-        format.padding.top, -4.5,
-        "a paint-only inset keeps its sign"
-    );
-    assert_eq!(format.padding.right, 2.0);
-    assert_eq!(
-        format.padding.bottom,
-        -crate::MAX_PIXELS,
-        "bounded on the negative side too"
-    );
-    assert_eq!(format.padding.left, 0.0, "NaN reads as 0");
-    assert_eq!(
-        format.line_padding.top, 0.0,
-        "line padding moves layout: never negative"
-    );
-    assert_eq!(format.line_padding.right, 2.0);
-    assert_eq!(format.line_padding.bottom, 0.0);
-    assert_eq!(format.line_padding.left, 0.0);
+    for style in [&format.style, &format.line_style] {
+        assert_eq!(style.padding.top, Some(gpui::px(0.).into()));
+        assert_eq!(style.padding.right, Some(gpui::px(2.).into()));
+        assert_eq!(style.padding.bottom, Some(gpui::px(0.).into()));
+        assert_eq!(style.padding.left, Some(gpui::px(0.).into()));
+    }
 }
 
 fn presentation(spans: Vec<EditorSpan>) -> EditorPresentation {

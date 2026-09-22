@@ -228,8 +228,7 @@ mod variable_tests {
             style: gpui::StyleRefinement::default(),
             children: (0..children)
                 .map(|_| Node::Space {
-                    width: None,
-                    height: None,
+                    style: gpui::StyleRefinement::default(),
                 })
                 .collect(),
         }

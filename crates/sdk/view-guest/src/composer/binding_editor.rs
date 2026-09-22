@@ -187,7 +187,7 @@ pub(super) fn editor<V: 'static>(
     });
     let mut presentation = wire::editor_presentation::EditorPresentation {
         formats: vec![wire::editor_presentation::EditorFormat {
-            color: Some(crate::behavior::wire_rgba(accent)),
+            style: gpui::StyleRefinement::default().text_color(accent),
             ..Default::default()
         }],
         ..Default::default()

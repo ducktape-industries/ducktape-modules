@@ -53,8 +53,6 @@ pub use task::Task;
 
 use serde::{Deserialize, Serialize};
 
-mod background;
-pub use background::{Background, ColorStop};
 mod editor;
 pub mod editor_document;
 pub mod editor_presentation;
@@ -92,7 +90,7 @@ mod pick;
 pub use pick::{PickHandle, PickIcon, PickOptions};
 
 mod tooltip;
-pub use tooltip::{TooltipPosition, TooltipPreset, TooltipStyle};
+pub use tooltip::TooltipPosition;
 mod qr;
 pub use qr::{MAX_QR_CODES, MAX_QR_PAYLOAD_BYTES, Qr, QrCorrection, QrSize, QrVersion};
 mod rich_text;
@@ -101,8 +99,7 @@ pub use rich_text::{
     HighlightStyle as RichTextHighlightStyle, Runs as RichTextRuns, TextRun as RichTextRun,
 };
 pub use text::{
-    Align, FontFamily, FontStretch, FontStyle, LineHeight, NamedFont, Shaping, TextOptions,
-    Wrapping,
+    Align, FontFamily, FontStretch, FontStyle, LineHeight, NamedFont, Shaping, Wrapping,
 };
 mod canvas;
 pub mod list;
@@ -484,71 +481,6 @@ pub struct Frame {
     pub busy: bool,
 }
 
-/// Red, green, blue, alpha in `0.0..=1.0`. The guest resolves its own
-/// palette; the host paints what it is told.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Rgba(pub [f32; 4]);
-
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub enum Length {
-    Fill,
-    FillPortion(u16),
-    Shrink,
-    Fixed(f32),
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct Edges {
-    pub top: f32,
-    pub right: f32,
-    pub bottom: f32,
-    pub left: f32,
-}
-
-impl Edges {
-    pub const fn all(value: f32) -> Self {
-        Self {
-            top: value,
-            right: value,
-            bottom: value,
-            left: value,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Border {
-    /// Unspecified fields retain the host style, including earlier faces.
-    pub color: Option<Rgba>,
-    pub width: Option<f32>,
-    /// top-left, top-right, bottom-right, bottom-left. `Some([0.0; 4])`
-    /// explicitly squares the corners; `None` preserves their radius.
-    pub radius: Option<[f32; 4]>,
-}
-
-/// Optional native shadow fields; omission retains the host style.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct Shadow {
-    pub color: Option<Rgba>,
-    pub x: Option<f32>,
-    pub y: Option<f32>,
-    pub blur: Option<f32>,
-}
-
-impl Shadow {
-    fn sanitize(&mut self) {
-        bound_color(&mut self.color);
-        bound_optional(&mut self.blur);
-        for value in [&mut self.x, &mut self.y].into_iter().flatten() {
-            *value = if value.is_finite() {
-                value.clamp(-MAX_PIXELS, MAX_PIXELS)
-            } else {
-                0.0
-            };
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum AlignX {
     Left,
@@ -567,13 +499,6 @@ pub enum AlignY {
 pub enum Axis {
     Column,
     Row,
-}
-
-/// Optional native row/column wrapping configuration.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct Wrap {
-    pub spacing: Option<f32>,
-    pub align: Option<AlignX>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -595,12 +520,6 @@ pub enum Weight {
     Light,
     ExtraBold,
     Black,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct Font {
-    pub monospace: bool,
-    pub weight: Weight,
 }
 
 /// Copied input accessibility and native layout options.
@@ -1176,34 +1095,24 @@ fn sanitize_node(
             x,
             y,
             scale,
-            shadow,
-            radius,
+            style,
             ..
         } => {
             claim(key, taken);
             *x = finite(*x).clamp(-MAX_PIXELS, MAX_PIXELS);
             *y = finite(*y).clamp(-MAX_PIXELS, MAX_PIXELS);
             *scale = finite(*scale).clamp(f32::EPSILON, MAX_PIXELS);
-            shadow.sanitize();
-            if let Some(corners) = radius {
-                for corner in corners {
-                    *corner = bounded(*corner);
-                }
-            }
+            style_sanitize::sanitize(style);
         }
         Node::Tooltip {
             key,
-            gap,
-            padding,
             delay_ms,
             style,
             children,
             ..
         } => {
             claim(key, taken);
-            *gap = bounded(*gap);
-            *padding = bounded(*padding);
-            style.sanitize();
+            style_sanitize::sanitize(style);
             *delay_ms = (*delay_ms).min(60_000);
             children.truncate(2);
         }
@@ -1254,16 +1163,14 @@ fn sanitize_node(
             bar_margin,
             scroller_width,
             bar_spacing,
-            background,
-            border,
+            style,
             ..
         } => {
             id.validate_host()?;
             for number in [bar_width, bar_margin, scroller_width, bar_spacing] {
                 bound_optional(number);
             }
-            bound_color(background);
-            bound_border(border);
+            style_sanitize::sanitize(style);
         }
         Node::Qr { key, code, style } => {
             claim(key, taken);
@@ -1434,24 +1341,14 @@ fn sanitize_node(
             }
             style_sanitize::sanitize(style);
         }
-        Node::Space { .. } => {}
-        Node::Rule {
-            key,
-            thickness,
-            color,
-            radius,
-            ..
-        } => {
+        Node::Space { style } => style_sanitize::sanitize(style),
+        Node::Rule { key, style, .. } => {
             claim(key, taken);
-            *thickness = bounded(*thickness);
-            bound_color(color);
-            if let Some(radius) = radius {
-                for corner in radius {
-                    *corner = bounded(*corner);
-                }
-            }
+            style_sanitize::sanitize(style);
         }
-        Node::Toggle { key, label, style, .. } => {
+        Node::Toggle {
+            key, label, style, ..
+        } => {
             claim(key, taken);
             spend_text(label, budgets);
             style_sanitize::sanitize(style);
@@ -1568,11 +1465,6 @@ fn sanitize_node(
             args.truncate(kept);
         }
     }
-    for length in lengths_mut(node) {
-        if let Length::Fixed(value) = length {
-            *value = bounded(*value);
-        }
-    }
     // Children past the budget are dropped, not stood in for: a layout of
     // ten thousand rows becomes its first rows, which is what a host can
     // lay out, rather than ten thousand empty nodes it still has to walk.
@@ -1643,46 +1535,6 @@ fn sanitize_node(
     Ok(())
 }
 
-fn lengths_mut(node: &mut Node) -> Vec<&mut Length> {
-    let slots: Vec<&mut Option<Length>> = match node {
-        Node::Scroll { width, height, .. }
-        | Node::Space { width, height } => vec![width, height],
-        Node::Container { .. }
-        | Node::UniformList { .. }
-        | Node::List { .. }
-        | Node::Text { .. }
-        | Node::Input { .. }
-        | Node::RichText { .. }
-        | Node::Editor { .. }
-        | Node::ImageViewer { .. }
-        | Node::Button { .. }
-        | Node::Toggle { .. }
-        | Node::Radio { .. }
-        | Node::Slider { .. }
-        | Node::ComboBox { .. }
-        | Node::PickList { .. }
-        | Node::Progress { .. }
-        | Node::Qr { .. }
-        | Node::Rule { .. }
-        | Node::Lazy { .. }
-        | Node::Responsive { .. }
-        | Node::Sensor { .. }
-        | Node::ResizeHandle { .. }
-        | Node::MouseArea { .. }
-        | Node::Overlay { .. }
-        | Node::Tooltip { .. }
-        | Node::When { .. }
-        | Node::Float { .. }
-        | Node::Surface { .. }
-        | Node::Anchored { .. }
-        | Node::Deferred { .. }
-        | Node::Image { .. }
-        | Node::Svg { .. }
-        | Node::Canvas { .. } => Vec::new(),
-    };
-    slots.into_iter().flatten().collect()
-}
-
 /// Cuts `text` down to [`MAX_STRING_BYTES`] on a char boundary, in place.
 /// Shared by [`sanitize`] (a guest's outbound frame) and the host's inbound
 /// edit path (a user's keystroke or paste into an [`Node::Input`]) — one
@@ -1731,15 +1583,6 @@ fn finite(value: f32) -> f32 {
 fn bound_optional(value: &mut Option<f32>) {
     if let Some(value) = value {
         *value = bounded(*value);
-    }
-}
-
-fn bound_edges(edges: &mut Option<Edges>) {
-    if let Some(edges) = edges {
-        edges.top = bounded(edges.top);
-        edges.right = bounded(edges.right);
-        edges.bottom = bounded(edges.bottom);
-        edges.left = bounded(edges.left);
     }
 }
 
@@ -1793,29 +1636,6 @@ fn sanitize_interactivity(interactivity: &mut Interactivity) {
         let mut name = group.to_string();
         truncate_string(&mut name);
         *group = name.into();
-    }
-}
-
-fn bound_color(color: &mut Option<Rgba>) {
-    if let Some(Rgba(channels)) = color {
-        for channel in channels {
-            *channel = match channel.is_nan() {
-                true => 0.0,
-                false => channel.clamp(0.0, 1.0),
-            };
-        }
-    }
-}
-
-fn bound_border(border: &mut Option<Border>) {
-    if let Some(border) = border {
-        bound_color(&mut border.color);
-        if let Some(width) = &mut border.width {
-            *width = bounded(*width);
-        }
-        for radius in border.radius.iter_mut().flatten() {
-            *radius = bounded(*radius);
-        }
     }
 }
 
@@ -2074,34 +1894,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn shadow_sanitization_preserves_signed_offsets_and_bounds_untrusted_values() {
-        let mut shadow = Shadow {
-            color: Some(Rgba([f32::NAN, -1.0, 2.0, 0.5])),
-            x: Some(-12.0),
-            y: Some(f32::INFINITY),
-            blur: Some(-1.0),
-        };
-        shadow.sanitize();
-        assert_eq!(
-            shadow,
-            Shadow {
-                color: Some(Rgba([0.0, 0.0, 1.0, 0.5])),
-                x: Some(-12.0),
-                y: Some(0.0),
-                blur: Some(0.0)
-            }
-        );
-        shadow.x = Some(-f32::MAX);
-        shadow.y = Some(f32::MAX);
-        shadow.blur = Some(f32::MAX);
-        shadow.sanitize();
-        assert_eq!(
-            (shadow.x, shadow.y, shadow.blur),
-            (Some(-MAX_PIXELS), Some(MAX_PIXELS), Some(MAX_PIXELS))
-        );
-    }
-
     fn document_reference(document: &str, byte_len: u32) -> editor_document::EditorDocumentRef {
         editor_document::EditorDocumentRef {
             document: document.into(),
@@ -2230,33 +2022,6 @@ mod tests {
             })
             .sum::<usize>();
         assert!(bytes + name.len() <= MAX_TEXT_BYTES_PER_FRAME);
-    }
-
-    #[test]
-    fn border_sanitization_preserves_absence_and_explicit_zero() {
-        let absent = Some(Border {
-            color: None,
-            width: None,
-            radius: None,
-        });
-        let mut bounded = absent;
-        bound_border(&mut bounded);
-        assert_eq!(bounded, absent);
-        assert_eq!(decode::<Option<Border>>(&encode(&bounded)).unwrap(), absent);
-        let mut explicit = Some(Border {
-            color: Some(Rgba([0.0; 4])),
-            width: Some(f32::NAN),
-            radius: Some([-1.0; 4]),
-        });
-        bound_border(&mut explicit);
-        let zero = Some(Border {
-            color: Some(Rgba([0.0; 4])),
-            width: Some(0.0),
-            radius: Some([0.0; 4]),
-        });
-        assert_eq!(explicit, zero);
-        assert_ne!(explicit, absent);
-        assert_eq!(decode::<Option<Border>>(&encode(&explicit)).unwrap(), zero);
     }
 
     #[test]

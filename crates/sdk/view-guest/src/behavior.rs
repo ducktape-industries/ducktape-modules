@@ -2,10 +2,7 @@
 use crate::Element;
 
 use crate::{wire, AnyElement, App, ElementId, IntoElement, Lowering, Window};
-use gpui::{
-    AbsoluteLength, AlignContent, AlignItems, CursorStyle, DefiniteLength, Hsla, Pixels,
-    StyleRefinement, Styled,
-};
+use gpui::{CursorStyle, Hsla, Pixels, StyleRefinement, Styled};
 
 type SizeListener = Box<dyn Fn(&(Pixels, Pixels), &mut Window, &mut App)>;
 type DragListener = Box<dyn Fn(&(Pixels, Pixels), &mut Window, &mut App)>;
@@ -72,6 +69,7 @@ impl Element for Sensor {
             anticipate: None,
             delay: None,
             child: Box::new(lowering.lower(self.child)),
+            style: StyleRefinement::default(),
         }
     }
 }
@@ -127,6 +125,7 @@ impl Element for ResizeHandle {
             on_drag: self.on_drag.map(|listener| lowering.route(listener)),
             cursor: self.cursor.map(wire_cursor),
             content: Box::new(lowering.lower(self.child)),
+            style: StyleRefinement::default(),
         }
     }
 }
@@ -188,18 +187,7 @@ impl Element for ModalOverlay {
         wire::Node::Overlay {
             id: wire_id(self.id),
             label: self.label,
-            padding: pixel_padding(self.style.padding.top),
-            backdrop: wire_rgba(self.backdrop),
-            align_x: if self.style.justify_content == Some(AlignContent::Center) {
-                wire::AlignX::Center
-            } else {
-                wire::AlignX::Left
-            },
-            align_y: if self.style.align_items == Some(AlignItems::Center) {
-                wire::AlignY::Center
-            } else {
-                wire::AlignY::Top
-            },
+            style: self.style.bg(self.backdrop),
             on_dismiss: self
                 .on_dismiss
                 .map(|listener| lowering.message_route(listener)),
@@ -212,18 +200,6 @@ impl Styled for ModalOverlay {
     fn style(&mut self) -> &mut StyleRefinement {
         &mut self.style
     }
-}
-
-fn pixel_padding(length: Option<DefiniteLength>) -> f32 {
-    match length {
-        Some(DefiniteLength::Absolute(AbsoluteLength::Pixels(value))) => value.into(),
-        _ => 0.,
-    }
-}
-
-pub(crate) fn wire_rgba(color: Hsla) -> wire::Rgba {
-    let color: gpui::Rgba = color.into();
-    wire::Rgba([color.r, color.g, color.b, color.a])
 }
 
 fn wire_cursor(cursor: CursorStyle) -> wire::mouse::Cursor {

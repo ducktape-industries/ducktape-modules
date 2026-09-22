@@ -101,7 +101,11 @@ pub struct SvgTransformation {
 #[allow(clippy::large_enum_variant)]
 pub enum Node {
     /// A payload encoded and painted by the host.
-    Qr { key: String, code: Qr, style: gpui::StyleRefinement },
+    Qr {
+        key: String,
+        code: Qr,
+        style: gpui::StyleRefinement,
+    },
     /// One native GPUI paragraph with optional interactive byte ranges.
     RichText {
         id: Option<ElementIdWire>,
@@ -129,8 +133,7 @@ pub enum Node {
         x: f32,
         y: f32,
         scale: f32,
-        shadow: Shadow,
-        radius: Option<[f32; 4]>,
+        style: gpui::StyleRefinement,
         #[serde(deserialize_with = "decode_child")]
         content: Box<Node>,
     },
@@ -227,11 +230,9 @@ pub enum Node {
     Tooltip {
         key: String,
         position: TooltipPosition,
-        gap: f32,
-        padding: f32,
         delay_ms: u64,
         snap: bool,
-        style: TooltipStyle,
+        style: gpui::StyleRefinement,
         /// Content followed by tip; extra children are discarded by sanitization.
         #[serde(deserialize_with = "decode_children")]
         children: Vec<Node>,
@@ -286,8 +287,7 @@ pub enum Node {
         virtual_rows: bool,
         id: ElementIdWire,
         direction: ScrollDirection,
-        width: Option<Length>,
-        height: Option<Length>,
+        style: gpui::StyleRefinement,
         /// No scroll bar is drawn; the content still scrolls.
         bar_hidden: bool,
         bar_width: Option<f32>,
@@ -299,8 +299,6 @@ pub enum Node {
         anchor_y: ScrollAnchor,
         /// Follow content that grows while the reader sits at the end.
         auto_scroll: bool,
-        background: Option<Rgba>,
-        border: Option<Border>,
         #[serde(deserialize_with = "decode_child")]
         content: Box<Node>,
     },
@@ -394,21 +392,12 @@ pub enum Node {
         style: gpui::StyleRefinement,
     },
     Space {
-        width: Option<Length>,
-        height: Option<Length>,
+        style: gpui::StyleRefinement,
     },
     Rule {
         key: String,
         axis: Axis,
-        thickness: f32,
-        color: Option<Rgba>,
-        /// The theme's weak rule colour instead of its strong one, under
-        /// `color` when both are given.
-        weak: bool,
-        /// top-left, top-right, bottom-right, bottom-left.
-        radius: Option<[f32; 4]>,
-        /// Round the rule to whole pixels; `None` is the host's default.
-        snap: Option<bool>,
+        style: gpui::StyleRefinement,
     },
     /// A checkbox or a toggler: a labelled bool.
     Toggle {
@@ -512,8 +501,7 @@ impl Node {
     /// The node an empty view renders as.
     pub fn empty() -> Self {
         Self::Space {
-            width: None,
-            height: None,
+            style: gpui::StyleRefinement::default(),
         }
     }
 
