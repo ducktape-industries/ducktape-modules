@@ -12,7 +12,12 @@ use modules::{AUTHORITY, AccountNumber, Page, identity, module_registry, valset}
 
 macro_rules! program {
     ($name:literal) => {
-        include_bytes!(concat!("../system/wasm/", $name, ".wasm"))
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/system/wasm/",
+            $name,
+            ".wasm"
+        ))
     };
 }
 
