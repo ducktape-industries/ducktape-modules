@@ -10,8 +10,9 @@ use ducktape_view_guest::export_view;
 use ducktape_view_guest::host::{Refusal, malformed};
 use ducktape_view_guest::view::{Live, Loaded};
 use ducktape_view_guest::{
-    App, ClickEvent, Context, ElementId, Host, InteractiveElement, IntoElement, ParentElement,
-    Render, RenderOnce, StatefulInteractiveElement, Styled, Task, Theme, View, Window, div, px,
+    App, ClickEvent, Context, ElementId, Host, Input, InteractiveElement, IntoElement,
+    ParentElement, Render, RenderOnce, StatefulInteractiveElement, Styled, Task, Theme, View,
+    Window, div, px,
 };
 use futures::StreamExt;
 use modules::{Page, identity, valset};
@@ -104,8 +105,7 @@ impl Render for Members {
                     .child(div().text_sm().text_color(theme.muted).child(self.count())),
             )
             .child(
-                div()
-                    .id(ElementId::Name("members-filter".into()))
+                Input::new(ElementId::Name("members-filter".into()))
                     .h(px(28.))
                     .w_full()
                     .px_2()
@@ -115,11 +115,9 @@ impl Render for Members {
                     .border_color(theme.border_strong)
                     .bg(theme.surface)
                     .text_color(theme.foreground)
-                    .child(if self.filter.is_empty() {
-                        "Filter by name or number".into()
-                    } else {
-                        self.filter.clone()
-                    })
+                    .value(self.filter.clone())
+                    .placeholder("Filter by name or number")
+                    .label("Filter members")
                     .on_input(typed),
             )
             .child(body)

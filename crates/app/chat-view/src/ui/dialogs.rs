@@ -59,8 +59,7 @@ pub fn channel_create(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Opt
                 .child("Channel name"),
         )
         .child(
-            div()
-                .id(ElementId::Name("chat-create-name".into()))
+            Input::new(ElementId::Name("chat-create-name".into()))
                 .h(px(28.))
                 .px_2()
                 .py_1()
@@ -68,11 +67,9 @@ pub fn channel_create(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Opt
                 .border_1()
                 .border_color(theme.border_strong)
                 .bg(theme.surface)
-                .child(if create.name.is_empty() {
-                    "Channel name".into()
-                } else {
-                    create.name.clone()
-                })
+                .value(create.name.clone())
+                .placeholder("Channel name")
+                .label("Channel name")
                 .on_input(typed),
         )
         .child(button(

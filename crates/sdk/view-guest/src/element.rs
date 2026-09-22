@@ -238,6 +238,110 @@ pub fn div() -> Div {
     Div::default()
 }
 
+/// A single-line host text input. GPUI core has no text-input element, so this
+/// recipe carries a typed identity and lowers to the host's native field.
+pub struct Input {
+    id: ElementId,
+    value: String,
+    placeholder: String,
+    options: wire::InputOptions,
+    secure: bool,
+    style: StyleRefinement,
+    on_input: Option<Box<dyn Fn(&String, &mut Window, &mut App)>>,
+    on_submit: Option<Box<dyn Fn(&(), &mut Window, &mut App)>>,
+}
+
+impl Input {
+    pub fn new(id: impl Into<ElementId>) -> Self {
+        Self {
+            id: id.into(),
+            value: String::new(),
+            placeholder: String::new(),
+            options: wire::InputOptions::default(),
+            secure: false,
+            style: StyleRefinement::default(),
+            on_input: None,
+            on_submit: None,
+        }
+    }
+
+    pub fn value(mut self, value: impl Into<String>) -> Self {
+        self.value = value.into();
+        self
+    }
+
+    pub fn placeholder(mut self, placeholder: impl Into<String>) -> Self {
+        self.placeholder = placeholder.into();
+        self
+    }
+
+    pub fn label(mut self, label: impl Into<String>) -> Self {
+        self.options.label = label.into();
+        self
+    }
+
+    pub fn description(mut self, description: impl Into<String>) -> Self {
+        self.options.description = Some(description.into());
+        self
+    }
+
+    pub fn disabled(mut self, disabled: bool) -> Self {
+        self.options.disabled = disabled;
+        self
+    }
+
+    pub fn secure(mut self, secure: bool) -> Self {
+        self.secure = secure;
+        self
+    }
+
+    pub fn on_input(mut self, listener: impl Fn(&String, &mut Window, &mut App) + 'static) -> Self {
+        self.on_input = Some(Box::new(listener));
+        self
+    }
+
+    pub fn on_submit(mut self, listener: impl Fn(&(), &mut Window, &mut App) + 'static) -> Self {
+        self.on_submit = Some(Box::new(listener));
+        self
+    }
+}
+
+impl Styled for Input {
+    fn style(&mut self) -> &mut StyleRefinement {
+        &mut self.style
+    }
+}
+
+impl Element for Input {
+    fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
+        let this = *self;
+        let id = wire::ElementIdWire::from_gpui(this.id)
+            .expect("input element ID must be portable across the view boundary");
+        let on_input = this.on_input.map(|listener| lowering.route(listener));
+        let on_submit = this
+            .on_submit
+            .map(|listener| lowering.message_route(listener));
+        wire::Node::Input {
+            options: this.options,
+            id,
+            placeholder: this.placeholder,
+            value: this.value,
+            on_input: on_input.unwrap_or(u32::MAX),
+            on_submit,
+            secure: this.secure,
+            style: this.style,
+        }
+    }
+}
+
+impl IntoElement for Input {
+    type Element = Self;
+
+    fn into_element(self) -> Self {
+        self
+    }
+}
+
 /// Add children to an element recipe.
 pub trait ParentElement {
     fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>);
@@ -554,6 +658,7 @@ fn stable_hash(bytes: &[u8]) -> u64 {
 }
 
 impl gpui::prelude::FluentBuilder for Div {}
+impl gpui::prelude::FluentBuilder for Input {}
 impl gpui::prelude::FluentBuilder for AnyElement {}
 impl gpui::prelude::FluentBuilder for Img {}
 impl gpui::prelude::FluentBuilder for Svg {}

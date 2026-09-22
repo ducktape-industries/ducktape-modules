@@ -142,8 +142,7 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
         .child(div().h(px(1.)).w_full().bg(theme.border))
         .child(div().text_sm().text_color(theme.muted).child("Name"))
         .child(
-            div()
-                .id(ElementId::Name("chat-details-name-input".into()))
+            Input::new(ElementId::Name("chat-details-name-input".into()))
                 .h(px(28.))
                 .px_2()
                 .py_1()
@@ -151,7 +150,8 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
                 .border_1()
                 .border_color(theme.border_strong)
                 .bg(theme.background)
-                .child(details.name_draft.clone())
+                .value(details.name_draft.clone())
+                .label("Channel name")
                 .on_input(typed_name),
         )
         .child(button(
@@ -173,8 +173,7 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
         .child(div().h(px(1.)).w_full().bg(theme.border))
         .child(div().text_sm().text_color(theme.muted).child("Members"))
         .child(
-            div()
-                .id(ElementId::Name("chat-details-member-input".into()))
+            Input::new(ElementId::Name("chat-details-member-input".into()))
                 .h(px(28.))
                 .px_2()
                 .py_1()
@@ -182,7 +181,8 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
                 .border_1()
                 .border_color(theme.border_strong)
                 .bg(theme.background)
-                .child(details.member_draft.clone())
+                .value(details.member_draft.clone())
+                .label("Add member")
                 .on_input(typed_member),
         )
         .child(button(

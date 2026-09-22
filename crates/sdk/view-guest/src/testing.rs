@@ -206,8 +206,8 @@ fn input<'a>(frame: &'a Frame, name: &str) -> Option<&'a Node> {
     let root = frame.root.as_ref()?;
     find_by(root, &|node| match node {
         Node::Input {
-            key, placeholder, ..
-        } => key == name || placeholder == name,
+            id, placeholder, ..
+        } => id.name() == Some(name) || placeholder == name,
         _ => false,
     })
 }

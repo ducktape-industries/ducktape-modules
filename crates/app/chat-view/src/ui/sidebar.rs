@@ -16,8 +16,7 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
         cx.notify();
         chat.search_submit(cx)
     });
-    let mut search = div()
-        .id(ElementId::Name("chat-sidebar-search".into()))
+    let search_input = Input::new(ElementId::Name("chat-sidebar-search".into()))
         .h(px(28.))
         .flex_1()
         .px_2()
@@ -27,13 +26,12 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
         .border_color(theme.sidebar_border)
         .bg(theme.sidebar_raised)
         .text_color(theme.sidebar_foreground)
-        .child(if chat.search.draft.is_empty() {
-            "Search messages…".into()
-        } else {
-            chat.search.draft.clone()
-        })
+        .value(chat.search.draft.clone())
+        .placeholder("Search messages…")
+        .label("Search messages")
         .on_input(typed)
         .on_submit(submit);
+    let mut search = div().flex().items_center().gap_1().flex_1().child(search_input);
     if !chat.search.query.is_empty() || !chat.search.draft.trim().is_empty() {
         let clear = cx.listener(|chat, _: &ClickEvent, _window, cx| {
             chat.search_clear();

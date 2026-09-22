@@ -391,25 +391,14 @@ fn gen_input(rng: &mut Rng) -> Node {
             label: gen_string(rng),
             description: Some(gen_string(rng)),
             disabled: rng.next_bool(),
-            padding: gen_opt_edges(rng),
-            text_size: gen_opt_f32(rng),
-            line_height: gen_opt_f32(rng),
-            align: Some(AlignX::Center),
-            font: Some(NamedFont {
-                family: FontFamily::Named(gen_string(rng)),
-                weight: Weight::Normal,
-                stretch: FontStretch::Normal,
-                style: FontStyle::Normal,
-            }),
         },
-        key: gen_key(rng),
+        id: ElementIdWire::Name(gen_key(rng).into()),
         placeholder: gen_string(rng),
         value: gen_string(rng),
         on_input: rng.next_u64() as u32,
         on_submit: rng.next_bool().then(|| rng.next_u64() as u32),
-        width: gen_opt_length(rng),
         secure: rng.next_bool(),
-        style: Box::new(gen_input_style(rng)),
+        style: gpui::StyleRefinement::default(),
     }
 }
 
@@ -1325,17 +1314,24 @@ fn check_bounds(
     match node.identity() {
         Some(IdentityKeyRef::Legacy(key)) => {
             check_string(key, ctx, "key");
-            assert!(keys.insert(key.to_string()), "{ctx}: legacy key aliases another node");
+            assert!(
+                keys.insert(key.to_string()),
+                "{ctx}: legacy key aliases another node"
+            );
         }
         Some(IdentityKeyRef::Element(id)) => {
-            id.validate_host().expect("sanitized typed identity is portable and bounded");
+            id.validate_host()
+                .expect("sanitized typed identity is portable and bounded");
         }
         None => {}
     }
     let mut sibling_ids = HashSet::new();
     for child in node.children() {
         if let Some(IdentityKeyRef::Element(id)) = child.identity() {
-            assert!(sibling_ids.insert(id), "{ctx}: typed sibling identity aliases state");
+            assert!(
+                sibling_ids.insert(id),
+                "{ctx}: typed sibling identity aliases state"
+            );
         }
     }
     match node {
@@ -1648,36 +1644,19 @@ fn check_bounds(
             check_length(height, ctx);
         }
         Node::Input {
+            id,
             options,
             placeholder,
             value,
-            width,
-            style,
             ..
         } => {
+            assert!(id.validate_host().is_ok(), "{ctx}: invalid input identity");
             check_string(placeholder, ctx, "placeholder");
             check_string(value, ctx, "input value");
-            check_length(width, ctx);
             check_string(&options.label, ctx, "input label");
             if let Some(value) = &options.description {
                 check_string(value, ctx, "input description");
             }
-            check_edges(&options.padding, ctx);
-            if let Some(value) = options.text_size {
-                assert!(value.is_finite() && (f32::EPSILON..=TEXT_PIXEL_BOUND).contains(&value));
-            }
-            if let Some(value) = options.line_height {
-                assert!(value.is_finite() && (f32::EPSILON..=16.0).contains(&value));
-            }
-            if let Some(NamedFont {
-                family: FontFamily::Named(name),
-                ..
-            }) = &options.font
-            {
-                check_string(name, ctx, "input font");
-            }
-            check_color(&style.focus_border, ctx);
-            check_input_style(style, ctx);
         }
         Node::Button {
             content,
@@ -2054,7 +2033,10 @@ fn document_refs(root: &Node) -> Vec<editor_document::EditorDocumentRef> {
 
 fn check_frame(frame: &Frame, ctx: &str) {
     if let Some(root) = &frame.root {
-        assert!(!has_duplicate_typed_siblings(root), "{ctx}: authored identity scope aliases state");
+        assert!(
+            !has_duplicate_typed_siblings(root),
+            "{ctx}: authored identity scope aliases state"
+        );
     }
 
     if let Some(root) = &frame.root {
@@ -2079,9 +2061,13 @@ fn check_frame(frame: &Frame, ctx: &str) {
 fn has_duplicate_typed_siblings(node: &Node) -> bool {
     fn walk<'a>(node: &'a Node, scope: &mut HashSet<&'a ElementIdWire>) -> bool {
         if let Some(IdentityKeyRef::Element(id)) = node.identity() {
-            if !scope.insert(id) { return true; }
+            if !scope.insert(id) {
+                return true;
+            }
             let mut child_scope = HashSet::new();
-            node.children().iter().any(|child| walk(child, &mut child_scope))
+            node.children()
+                .iter()
+                .any(|child| walk(child, &mut child_scope))
         } else {
             node.children().iter().any(|child| walk(child, scope))
         }
@@ -2126,7 +2112,10 @@ fn random_trees_come_out_of_sanitize_inside_every_bound() {
                 assert!(names_the_door, "{ctx}: unexpected refusal: {message}");
             }
             Ok(mut decoded) => {
-                let duplicate_ids = decoded.root.as_ref().is_some_and(has_duplicate_typed_siblings);
+                let duplicate_ids = decoded
+                    .root
+                    .as_ref()
+                    .is_some_and(has_duplicate_typed_siblings);
                 let before = decoded.root.as_ref().map(document_refs).unwrap_or_default();
                 match sanitize(&mut decoded) {
                     Ok(_) => {
@@ -2138,7 +2127,10 @@ fn random_trees_come_out_of_sanitize_inside_every_bound() {
                         );
                     }
                     Err("duplicate typed element identity among siblings") => {
-                        assert!(duplicate_ids, "{ctx}: identity refusal must name an actual collision");
+                        assert!(
+                            duplicate_ids,
+                            "{ctx}: identity refusal must name an actual collision"
+                        );
                     }
                     // Other refusals protect editor
                     // documents it could not keep whole; every other bound is
@@ -2286,7 +2278,10 @@ fn a_patched_sanitized_tree_is_a_sanitized_tree() {
                 let mut candidate = staged.clone();
                 let applied = view_wire::apply(&mut candidate, vec![patch.clone()]);
                 if applied == Err("duplicate typed element identity among siblings") {
-                    assert!(has_duplicate_typed_siblings(&candidate), "{ctx}: missing collision");
+                    assert!(
+                        has_duplicate_typed_siblings(&candidate),
+                        "{ctx}: missing collision"
+                    );
                     continue;
                 }
                 if matches!(
@@ -2406,7 +2401,10 @@ fn a_diff_applied_to_the_old_tree_is_the_new_tree_for_random_pairs() {
                                 | "frame budget would remove an editor document projection",
                             ) => {}
                             Err("duplicate typed element identity among siblings") => {
-                                assert!(has_duplicate_typed_siblings(&candidate), "{ctx}: missing collision");
+                                assert!(
+                                    has_duplicate_typed_siblings(&candidate),
+                                    "{ctx}: missing collision"
+                                );
                             }
                             Err(refused) => panic!("{ctx}: {refused}"),
                         }
@@ -2439,8 +2437,10 @@ fn a_diff_applied_to_the_old_tree_is_the_new_tree_for_random_pairs() {
 fn a_length_prefix_bomb_is_refused_without_the_allocation() {
     let frame = |children| Frame {
         root: Some(Node::Container {
-            id: None, style: gpui::StyleRefinement::default(),
-            interactivity: Interactivity::default(), children,
+            id: None,
+            style: gpui::StyleRefinement::default(),
+            interactivity: Interactivity::default(),
+            children,
         }),
         ..Default::default()
     };
@@ -2454,10 +2454,14 @@ fn a_length_prefix_bomb_is_refused_without_the_allocation() {
     bomb.extend_from_slice(&u32::MAX.to_be_bytes());
     let start = std::time::Instant::now();
     let error = decode::<Frame>(&bomb).unwrap_err();
-    assert!(error.contains("IO error while reading marker"),
-        "must enter the array and refuse the missing child, not reject malformed encoding: {error}");
-    assert!(start.elapsed() < std::time::Duration::from_secs(1),
-        "the hostile size hint must never cause allocation");
+    assert!(
+        error.contains("IO error while reading marker"),
+        "must enter the array and refuse the missing child, not reject malformed encoding: {error}"
+    );
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(1),
+        "the hostile size hint must never cause allocation"
+    );
 }
 
 // --------------------------------------------------------------- test 4

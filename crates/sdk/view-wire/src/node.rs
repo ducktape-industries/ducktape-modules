@@ -320,15 +320,14 @@ pub enum Node {
     },
     Input {
         options: InputOptions,
-        key: String,
+        id: ElementIdWire,
         placeholder: String,
         /// Copied document state, adopted by reset and host observation revision.
         value: String,
         on_input: u32,
         on_submit: Option<u32>,
-        width: Option<Length>,
         secure: bool,
-        style: Box<InputStyle>,
+        style: gpui::StyleRefinement,
     },
     /// A multiline text editor. The host owns the `text_editor::Content` —
     /// native widget interaction — and the guest sees document state, unlike
@@ -557,7 +556,7 @@ impl Node {
             Self::Container { id, .. } | Self::Text { id, .. } => {
                 id.as_ref().and_then(ElementIdWire::name)
             }
-            Self::Editor { id, .. } => id.name(),
+            Self::Input { id, .. } | Self::Editor { id, .. } => id.name(),
             Self::ResizeHandle { key, .. }
             | Self::MouseArea { key, .. }
             | Self::Linear { key, .. }
@@ -575,7 +574,6 @@ impl Node {
             | Self::Svg { key, .. }
             | Self::Image { key, .. }
             | Self::ImageViewer { key, .. }
-            | Self::Input { key, .. }
             | Self::Button { key, .. }
             | Self::Rule { key, .. }
             | Self::Toggle { key, .. }
@@ -600,7 +598,7 @@ impl Node {
             Self::Container { id, .. } | Self::Text { id, .. } => {
                 id.as_ref().map(IdentityKeyRef::Element)
             }
-            Self::Editor { id, .. } => Some(IdentityKeyRef::Element(id)),
+            Self::Input { id, .. } | Self::Editor { id, .. } => Some(IdentityKeyRef::Element(id)),
             Self::ResizeHandle { key, .. }
             | Self::MouseArea { key, .. }
             | Self::Linear { key, .. }
@@ -618,7 +616,6 @@ impl Node {
             | Self::Svg { key, .. }
             | Self::Image { key, .. }
             | Self::ImageViewer { key, .. }
-            | Self::Input { key, .. }
             | Self::Button { key, .. }
             | Self::Rule { key, .. }
             | Self::Toggle { key, .. }

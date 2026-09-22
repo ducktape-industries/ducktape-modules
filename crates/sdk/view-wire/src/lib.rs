@@ -496,11 +496,6 @@ pub struct InputOptions {
     pub label: String,
     pub description: Option<String>,
     pub disabled: bool,
-    pub padding: Option<Edges>,
-    pub text_size: Option<f32>,
-    pub line_height: Option<f32>,
-    pub align: Option<AlignX>,
-    pub font: Option<NamedFont>,
 }
 
 /// Copied native multiline editor presentation; state faces share input semantics.
@@ -1348,32 +1343,21 @@ fn sanitize_node(
             }
         }
         Node::Input {
-            key,
+            id,
             placeholder,
             value,
             options,
             style,
             ..
         } => {
-            claim(key, taken);
+            id.validate_host()?;
             spend_text(placeholder, budgets);
             spend_text(value, budgets);
             spend_text(&mut options.label, budgets);
             if let Some(description) = &mut options.description {
                 spend_text(description, budgets);
             }
-            bound_edges(&mut options.padding);
-            if let Some(size) = &mut options.text_size {
-                *size = bounded(*size).clamp(f32::EPSILON, MAX_TEXT_PIXELS);
-            }
-            if let Some(height) = &mut options.line_height {
-                *height = bounded(*height).clamp(f32::EPSILON, MAX_PIXELS / MAX_TEXT_PIXELS);
-            }
-            if let Some(font) = &mut options.font {
-                font.sanitize(budgets);
-            }
-
-            style.sanitize();
+            style_sanitize::sanitize(style);
         }
         Node::Editor {
             options,
@@ -1700,13 +1684,13 @@ fn lengths_mut(node: &mut Node) -> Vec<&mut Length> {
         | Node::Space { width, height } => vec![width, height],
         Node::Progress { length, girth, .. } => vec![length, girth],
         Node::RichText { width, .. }
-        | Node::Input { width, .. }
         | Node::Toggle { width, .. }
         | Node::Radio { width, .. }
         | Node::PickList { width, .. }
         | Node::ComboBox { width, .. } => vec![width],
         Node::Container { .. }
         | Node::Text { .. }
+        | Node::Input { .. }
         | Node::Editor { .. }
         | Node::Qr { .. }
         | Node::Rule { .. }
@@ -2288,14 +2272,13 @@ mod tests {
                 },
                 Node::Input {
                     options: Default::default(),
-                    key: "App/i".into(),
+                    id: ElementIdWire::Name("App/i".into()),
                     placeholder: "Name".into(),
                     value: "x".into(),
                     on_input: 0,
                     on_submit: Some(4),
-                    width: Some(Length::Fixed(200.0)),
                     secure: false,
-                    style: Box::default(),
+                    style: gpui::StyleRefinement::default(),
                 },
                 Node::Editor {
                     options: Default::default(),
@@ -2680,14 +2663,13 @@ mod tests {
         let children = sanitized_children(column(vec![
             Node::Input {
                 options: Default::default(),
-                key: "App/i".into(),
+                id: ElementIdWire::Name("App/i".into()),
                 placeholder: long.clone(),
                 value: long.clone(),
                 on_input: 0,
                 on_submit: None,
-                width: None,
                 secure: false,
-                style: Box::default(),
+                style: gpui::StyleRefinement::default(),
             },
             Node::Button {
                 checked: None,
