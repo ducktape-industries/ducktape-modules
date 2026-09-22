@@ -22,7 +22,6 @@ re-encode exactly and, by default, compares both files to committed content.
 From the workspace root, with Git and the wasm32 Rust target installed:
 
 ```sh
-export CARGO_TARGET_DIR=/home/eddy/dev/ducktape/target-w3 RUSTC_WRAPPER=
 mkdir -p target/forge-a
 FORGE_REGENERATE_FIXTURES=1 cargo test -p forge-harness --test fixtures > target/forge-a/fixtures.log 2>&1
 fixture_status=$?
