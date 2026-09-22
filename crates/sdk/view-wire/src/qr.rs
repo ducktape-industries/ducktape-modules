@@ -114,15 +114,10 @@ mod tests {
                 MAX_TEXT_BYTES_PER_FRAME / MAX_QR_PAYLOAD_BYTES,
             ),
         ] {
-            let root = Node::Stack {
-                key: "codes".into(),
-                width: None,
-                height: None,
-                padding: None,
-                background: None,
-                border: None,
-                clip: false,
-                under: 0,
+            let root = Node::Container {
+                id: Some(ElementIdWire::Name("codes".into())),
+                style: gpui::StyleRefinement::default(),
+                interactivity: Interactivity::default(),
                 children: (0..count)
                     .map(|id| Node::Qr {
                         key: id.to_string(),
