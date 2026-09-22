@@ -1940,7 +1940,7 @@ mod tests {
 
     fn text(content: &str) -> Node {
         Node::Text {
-            id: Some(ElementIdWire::Name("App/t".into())),
+            id: None,
             style: gpui::StyleRefinement::default(),
             content: content.into(),
             heading: None,
@@ -2130,7 +2130,7 @@ mod tests {
 
     fn column(children: Vec<Node>) -> Node {
         Node::Container {
-            id: Some(ElementIdWire::Name("App/col".into())),
+            id: None,
             style: gpui::StyleRefinement::default(),
             interactivity: Interactivity::default(),
             children,
@@ -2376,14 +2376,8 @@ mod tests {
 
     fn keyed(key: &str, content: &str) -> Node {
         let mut node = text(content);
-        let Node::Text {
-            id: Some(ElementIdWire::Name(slot)),
-            ..
-        } = &mut node
-        else {
-            panic!()
-        };
-        *slot = key.into();
+        let Node::Text { id, .. } = &mut node else { unreachable!() };
+        *id = Some(ElementIdWire::Name(key.into()));
         node
     }
 
@@ -2509,7 +2503,7 @@ mod tests {
                 Patch::Insert {
                     path: vec![],
                     index: 0,
-                    node: keyed("1", &"y".repeat(MAX_STRING_BYTES + 1)),
+                    node: keyed("inserted", &"y".repeat(MAX_STRING_BYTES + 1)),
                 },
                 Patch::Replace {
                     path: vec![1],
@@ -2522,10 +2516,9 @@ mod tests {
         let Node::Container { children, .. } = &tree else {
             panic!()
         };
-        // The inserted key was already in the tree: walked first now, it
-        // keeps the key and the one that had it moves off.
-        assert_eq!(children[0].key(), Some("1"));
-        assert_eq!(children[2].key(), Some("1#2"));
+        // A new typed ID leaves every existing sibling identity unchanged.
+        assert_eq!(children[0].key(), Some("inserted"));
+        assert_eq!(children[2].key(), Some("1"));
         let Node::Text { content, .. } = &children[0] else {
             panic!()
         };
@@ -2729,7 +2722,7 @@ mod tests {
         let wide = column((0..MAX_NODES + 5).map(|_| text("x")).collect());
         let root = sanitized_root(column(vec![
             Node::Text {
-                id: Some(ElementIdWire::Name("k".repeat(MAX_STRING_BYTES + 3).into())),
+                id: Some(ElementIdWire::Name("k".repeat(MAX_STRING_BYTES).into())),
                 style: gpui::StyleRefinement::default(),
                 content: "é".repeat(MAX_STRING_BYTES),
                 heading: None,
@@ -2752,6 +2745,15 @@ mod tests {
             MAX_STRING_BYTES
         );
         assert!(content.len() <= MAX_STRING_BYTES && content.is_char_boundary(content.len()));
+    }
+
+    #[test]
+    fn oversized_typed_identity_is_refused_whole_instead_of_truncated() {
+        let mut frame = Frame {
+            root: Some(keyed(&"k".repeat(MAX_STRING_BYTES + 3), "text")),
+            ..Default::default()
+        };
+        assert_eq!(sanitize(&mut frame).unwrap_err(), "element identity name is too long");
     }
 
     #[test]
@@ -3038,7 +3040,7 @@ mod tests {
             .spawn(move || {
                 let mut node = Node::empty();
                 for _ in 0..depth {
-                    node = column(vec![node]);
+                    node = Node::Lazy { key: String::new(), generation: 0, content: Box::new(node) };
                 }
                 let frame = Frame {
                     root: Some(node),
@@ -3124,56 +3126,30 @@ mod tests {
     }
 
     #[test]
-    fn a_key_used_twice_is_moved_off_the_one_already_taken() {
-        let children = sanitized_children(column(vec![text("one"), text("two"), text("three")]));
-        let keys: Vec<&str> = children.iter().filter_map(Node::key).collect();
-        assert_eq!(keys, ["App/t", "App/t#2", "App/t#3"]);
+    fn duplicate_typed_ids_are_refused_instead_of_silently_renamed() {
+        let mut frame = Frame {
+            root: Some(column(vec![keyed("same", "one"), keyed("same", "two")])),
+            ..Default::default()
+        };
+        assert_eq!(sanitize(&mut frame).unwrap_err(), "duplicate typed element identity among siblings");
+        let mut root = column(vec![keyed("same", "one")]);
+        let error = apply(&mut root, vec![Patch::Insert {
+            path: vec![], index: 1, node: keyed("same", "two"),
+        }]).unwrap_err();
+        assert_eq!(error, "duplicate typed element identity among siblings");
     }
 
-    /// A screen where every node claims the same key, and one where the
-    /// guest pre-empted the suffixes: each duplicate must cost one lookup,
-    /// not a walk past every earlier one. Measured, not asserted, in debug;
-    /// in release a quadratic claim took nine seconds here and a linear one
-    /// takes a few milliseconds.
+    /// A hostile screen cannot cause quadratic identity repair or alias state.
     #[test]
-    fn a_screen_of_one_key_is_claimed_in_linear_time() {
-        let mut same = text("x");
-        let Node::Text {
-            id: Some(ElementIdWire::Name(key)),
-            ..
-        } = &mut same
-        else {
-            panic!()
-        };
-        *key = "App/t".into();
-        let mut children: Vec<Node> = (0..MAX_NODES - 1).map(|_| same.clone()).collect();
-        // The guest sent `App/t#2` and `App/t#3` itself: the count skips them.
-        for (child, taken) in children.iter_mut().zip(["App/t#2", "App/t#3"]) {
-            let Node::Text {
-                id: Some(ElementIdWire::Name(key)),
-                ..
-            } = child
-            else {
-                panic!()
-            };
-            *key = taken.into();
-        }
+    fn a_screen_of_one_typed_id_is_refused_in_linear_time() {
         let mut frame = Frame {
-            root: Some(column(children)),
-            ..Frame::default()
+            root: Some(column((0..MAX_NODES - 1).map(|_| keyed("same", "x")).collect())),
+            ..Default::default()
         };
         let started = std::time::Instant::now();
-        sanitize(&mut frame).unwrap();
-        let took = started.elapsed();
-        let Some(Node::Container { children, .. }) = &frame.root else {
-            panic!()
-        };
-        let keys: std::collections::HashSet<&str> = children.iter().filter_map(Node::key).collect();
-        assert_eq!(keys.len(), children.len(), "every key unique");
-        assert_eq!(children[2].key(), Some("App/t"));
-        assert_eq!(children[3].key(), Some("App/t#4"));
+        assert_eq!(sanitize(&mut frame).unwrap_err(), "duplicate typed element identity among siblings");
         if cfg!(not(debug_assertions)) {
-            assert!(took < std::time::Duration::from_millis(200), "{took:?}");
+            assert!(started.elapsed() < std::time::Duration::from_millis(200));
         }
     }
 

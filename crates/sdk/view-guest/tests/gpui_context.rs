@@ -103,3 +103,26 @@ fn test_globals_are_available_during_creation_and_restore_without_clone() {
     let second = cx.open::<GlobalReader>();
     second.read(|view| assert_eq!(view.initial, 21));
 }
+
+#[derive(Default, Serialize, Deserialize)]
+struct ThemeReader;
+impl View for ThemeReader {
+    fn new(_: &mut Window, _: &mut Context<Self>) -> Self { Self }
+}
+impl Render for ThemeReader {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div().bg(cx.global::<Theme>().surface)
+    }
+}
+#[test]
+fn host_theme_updates_the_global_and_emits_a_style_patch() {
+    let mut driver = Driver::<ThemeReader>::new();
+    let first = driver.tick(vec![]);
+    let mut root = first.root.unwrap();
+    let changed = driver.tick(vec![wire::Event::Theme { dark: true }]);
+    assert!(matches!(changed.patches.as_slice(), [wire::Patch::Props { .. }]));
+    wire::apply(&mut root, changed.patches).unwrap();
+    let wire::Node::Container { style, .. } = root else { panic!("container") };
+    assert_eq!(style.background, Some(Theme::dark().surface.into()));
+    assert_ne!(Theme::dark().surface, Theme::light().surface);
+}

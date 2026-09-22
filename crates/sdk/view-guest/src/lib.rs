@@ -304,12 +304,14 @@ impl<V: View> Driver<V> {
         let mut patches = Vec::new();
         if !unchanged {
             // Patches against the last tree, unless there is none — a first
-            // frame, or one after the host asked to resync — or the patches
-            // would cross bigger than the tree itself.
+            // frame or a resync. Property changes remain patches even for
+            // tiny trees; replacing their identity would discard native state.
+            // Structural edits may use a whole tree when that is smaller.
             if let Some(last) = &mut self.last_root {
                 patches = wire::diff(last, &mut root);
+                let only_props = patches.iter().all(|patch| matches!(patch, wire::Patch::Props { .. }));
                 if patches.len() > wire::MAX_PATCHES
-                    || wire::encoded_size(&patches) >= wire::encoded_size(&root)
+                    || (!only_props && wire::encoded_size(&patches) >= wire::encoded_size(&root))
                 {
                     patches.clear();
                 }

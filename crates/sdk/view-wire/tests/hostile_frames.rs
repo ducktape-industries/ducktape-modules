@@ -1340,12 +1340,21 @@ fn check_bounds(
         depth <= MAX_DEPTH,
         "{ctx}: a node sits at depth {depth}, over MAX_DEPTH"
     );
-    if let Some(key) = node.key() {
-        check_string(key, ctx, "key");
-        assert!(
-            keys.insert(key.to_string()),
-            "{ctx}: key {key:?} used more than once after sanitize"
-        );
+    match node.identity() {
+        Some(IdentityKeyRef::Legacy(key)) => {
+            check_string(key, ctx, "key");
+            assert!(keys.insert(key.to_string()), "{ctx}: legacy key aliases another node");
+        }
+        Some(IdentityKeyRef::Element(id)) => {
+            id.validate_host().expect("sanitized typed identity is portable and bounded");
+        }
+        None => {}
+    }
+    let mut sibling_ids = HashSet::new();
+    for child in node.children() {
+        if let Some(IdentityKeyRef::Element(id)) = child.identity() {
+            assert!(sibling_ids.insert(id), "{ctx}: typed sibling identity aliases state");
+        }
     }
     match node {
         Node::Container { children, .. } => {
@@ -2109,6 +2118,14 @@ fn check_frame(frame: &Frame, ctx: &str) {
     }
 }
 
+fn has_duplicate_typed_siblings(node: &Node) -> bool {
+    let mut siblings = HashSet::new();
+    node.children().iter().any(|child| {
+        matches!(child.identity(), Some(IdentityKeyRef::Element(id)) if !siblings.insert(id))
+            || has_duplicate_typed_siblings(child)
+    })
+}
+
 // --------------------------------------------------------------- test 1
 
 /// Random trees, decoded and sanitized, always land inside every bound
@@ -2146,6 +2163,7 @@ fn random_trees_come_out_of_sanitize_inside_every_bound() {
                 assert!(names_the_door, "{ctx}: unexpected refusal: {message}");
             }
             Ok(mut decoded) => {
+                let duplicate_ids = decoded.root.as_ref().is_some_and(has_duplicate_typed_siblings);
                 let before = decoded.root.as_ref().map(document_refs).unwrap_or_default();
                 match sanitize(&mut decoded) {
                     Ok(_) => {
@@ -2156,7 +2174,10 @@ fn random_trees_come_out_of_sanitize_inside_every_bound() {
                             "{ctx}: sanitize rewrote an editor document reference"
                         );
                     }
-                    // The only frame sanitize refuses is one whose editor
+                    Err("duplicate typed element identity among siblings") => {
+                        assert!(duplicate_ids, "{ctx}: identity refusal must name an actual collision");
+                    }
+                    // Other refusals protect editor
                     // documents it could not keep whole; every other bound is
                     // pulled into range instead.
                     Err(refused) => assert!(
@@ -2301,6 +2322,10 @@ fn a_patched_sanitized_tree_is_a_sanitized_tree() {
                 // a hostile one is refused somewhere along it.
                 let mut candidate = staged.clone();
                 let applied = view_wire::apply(&mut candidate, vec![patch.clone()]);
+                if applied == Err("duplicate typed element identity among siblings") {
+                    assert!(has_duplicate_typed_siblings(&candidate), "{ctx}: missing collision");
+                    continue;
+                }
                 if matches!(
                     applied,
                     Err("invalid editor document references or budget"
@@ -2417,6 +2442,9 @@ fn a_diff_applied_to_the_old_tree_is_the_new_tree_for_random_pairs() {
                                 "invalid editor document references or budget"
                                 | "frame budget would remove an editor document projection",
                             ) => {}
+                            Err("duplicate typed element identity among siblings") => {
+                                assert!(has_duplicate_typed_siblings(&candidate), "{ctx}: missing collision");
+                            }
                             Err(refused) => panic!("{ctx}: {refused}"),
                         }
                     }
@@ -2442,75 +2470,31 @@ fn a_diff_applied_to_the_old_tree_is_the_new_tree_for_random_pairs() {
 
 // --------------------------------------------------------------- test 3
 
-/// A hand-crafted length-prefix bomb — a `Frame` whose root is a `Linear`
-/// claiming `2^40` children, with the buffer cut off a few bytes later — is
-/// refused without decode trying to build any of it.
-///
-/// The layout is worked out rather than hand-counted: encoding a `Linear`
-/// with zero children and one with a single child differ only in the
-/// 8-byte little-endian length prefix bincode writes ahead of a `Vec`'s
-/// elements (everything before it — the enum discriminant, the key string,
-/// the `Option` tags for `spacing`/`padding`/`width`/`height`/`align` — is
-/// byte-for-byte identical either way, and the first divergent byte is
-/// that prefix's low byte, 0x00 vs 0x01). Taking the common prefix length
-/// of the two encodings finds that offset without hard-coding it.
+/// A valid MessagePack array32 header claims u32::MAX children with no
+/// payload. Decode must refuse without preallocating the claimed vector.
 #[test]
 fn a_length_prefix_bomb_is_refused_without_the_allocation() {
-    fn linear(children: Vec<Node>) -> Frame {
-        Frame {
-            root: Some(Node::Linear {
-                max_width: None,
-                clip: false,
-                wrap: None,
-                key: "k".into(),
-                axis: Axis::Column,
-                spacing: None,
-                padding: None,
-                width: None,
-                height: None,
-                align: None,
-                background: None,
-                border: None,
-                children,
-            }),
-            ..Frame::default()
-        }
-    }
-    let empty_children = linear(vec![]);
-    let one_child = linear(vec![Node::empty()]);
-
-    let bytes_empty = encode(&empty_children);
-    let bytes_one = encode(&one_child);
-    let offset = bytes_empty
-        .iter()
-        .zip(bytes_one.iter())
-        .take_while(|(a, b)| a == b)
-        .count();
-    assert!(
-        offset > 0 && offset + 8 <= bytes_empty.len(),
-        "could not locate the children length prefix (offset {offset})"
-    );
-
-    let mut bomb = bytes_empty[..offset].to_vec();
-    bomb.extend_from_slice(&(1u64 << 40).to_le_bytes());
-    // The buffer ends a handful of bytes after the claimed count — nowhere
-    // near what 2^40 elements would take — which is the whole point: a
-    // decoder that trusted the prefix enough to preallocate would already
-    // have tried and failed before it noticed.
-    bomb.extend_from_slice(&[0u8; 4]);
-
+    let frame = |children| Frame {
+        root: Some(Node::Container {
+            id: None, style: gpui::StyleRefinement::default(),
+            interactivity: Interactivity::default(), children,
+        }),
+        ..Default::default()
+    };
+    let empty = encode(&frame(vec![]));
+    let one = encode(&frame(vec![Node::empty()]));
+    let offset = empty.iter().zip(&one).take_while(|(a, b)| a == b).count();
+    assert_eq!(empty[offset], 0x90, "empty fixarray marker");
+    assert_eq!(one[offset], 0x91, "one-child fixarray marker");
+    let mut bomb = empty[..offset].to_vec();
+    bomb.push(0xdd); // array32, followed by its big-endian length
+    bomb.extend_from_slice(&u32::MAX.to_be_bytes());
     let start = std::time::Instant::now();
-    let result = decode::<Frame>(&bomb);
-    let elapsed = start.elapsed();
-
-    assert!(
-        result.is_err(),
-        "a 2^40-child claim with no data was accepted"
-    );
-    assert!(
-        elapsed < std::time::Duration::from_secs(1),
-        "refusing the bomb took {elapsed:?}, which means something tried to act on the claimed count"
-    );
+    let error = decode::<Frame>(&bomb).unwrap_err();
+    assert!(error.contains("IO error while reading marker"),
+        "must enter the array and refuse the missing child, not reject malformed encoding: {error}");
+    assert!(start.elapsed() < std::time::Duration::from_secs(1),
+        "the hostile size hint must never cause allocation");
 }
 
 // --------------------------------------------------------------- test 4
