@@ -299,6 +299,7 @@ fn search_results(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl In
                 let id = row.channel_id.clone();
                 let seq = row.seq;
                 let open = cx.listener(move |chat, _: &ClickEvent, window, cx| {
+                    cx.notify();
                     chat.open_hit(id.clone(), seq, window, cx)
                 });
                 content = content.child(
@@ -311,7 +312,9 @@ fn search_results(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl In
                         .rounded_md()
                         .bg(theme.surface)
                         .hover(|s| s.bg(theme.surface_raised))
-                        .role(ducktape_view_guest::Role::Button).focusable().on_click(open)
+                        .role(ducktape_view_guest::Role::Button)
+                        .focusable()
+                        .on_click(open)
                         .child(div().text_sm().child(row.text.clone()))
                         .child(
                             div()
@@ -322,7 +325,10 @@ fn search_results(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl In
                 );
             }
             if hits.has_more {
-                let more = cx.listener(|chat, _: &ClickEvent, _window, cx| chat.search_more(cx));
+                let more = cx.listener(|chat, _: &ClickEvent, _window, cx| {
+                    cx.notify();
+                    chat.search_more(cx)
+                });
                 content = content.child(button(
                     ElementId::Name("chat-search-more".into()),
                     "More results",
@@ -371,6 +377,7 @@ fn gate(chat: &Chat, refusal: &str, cx: &mut Context<Chat>, theme: &Theme) -> An
         }));
     if refusal == "channel_archived" {
         let reopen = cx.listener(|chat, _: &ClickEvent, _window, cx| {
+            cx.notify();
             chat.set_archived(false, cx);
         });
         notice = notice.child(button(
@@ -429,7 +436,10 @@ pub fn selection_bar(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl
     if count == 0 {
         return div().into_any_element();
     }
-    let copy = cx.listener(|chat, _: &ClickEvent, _window, cx| chat.copy_range(cx));
+    let copy = cx.listener(|chat, _: &ClickEvent, _window, cx| {
+        cx.notify();
+        chat.copy_range(cx)
+    });
     div()
         .id(ElementId::Name("chat-selection-bar".into()))
         .flex()

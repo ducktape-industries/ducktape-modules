@@ -93,9 +93,13 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
         }
         cx.notify();
     });
-    let rename = cx.listener(|chat, _: &ClickEvent, _window, cx| chat.rename(cx));
+    let rename = cx.listener(|chat, _: &ClickEvent, _window, cx| {
+        cx.notify();
+        chat.rename(cx)
+    });
     let archived = info.channel.archived;
     let archive = cx.listener(move |chat, _: &ClickEvent, _window, cx| {
+        cx.notify();
         chat.set_archived(!archived, cx);
     });
     let typed_member = cx.listener(|chat, event: &String, _window, cx| {
@@ -105,6 +109,7 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
         cx.notify();
     });
     let add_member = cx.listener(|chat, _: &ClickEvent, _window, cx| {
+        cx.notify();
         let text = chat
             .details
             .as_ref()
@@ -205,6 +210,7 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
     for (index, member) in roster.iter().enumerate() {
         let party = member.key.clone();
         let remove = cx.listener(move |chat, _: &ClickEvent, _window, cx| {
+            cx.notify();
             chat.set_member(&party, false, cx);
         });
         let mut remove_button = div()

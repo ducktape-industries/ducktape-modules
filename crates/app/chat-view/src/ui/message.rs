@@ -19,7 +19,8 @@ pub fn card(
 ) -> impl IntoElement {
     let id = message.id.clone();
     let seq = message.seq;
-    let press = cx.listener(move |chat, event: &ClickEvent, _window, _cx| {
+    let press = cx.listener(move |chat, event: &ClickEvent, _window, cx| {
+        cx.notify();
         let position = event.position();
         chat.layout.press = (position.x.into(), position.y.into());
         chat.press_message(pane, seq);
@@ -44,7 +45,9 @@ pub fn card(
             },
         )
         .hover(|s| s.bg(theme.surface_raised))
-        .role(ducktape_view_guest::Role::Button).focusable().on_click(press)
+        .role(ducktape_view_guest::Role::Button)
+        .focusable()
+        .on_click(press)
         .child(
             div()
                 .id(ElementId::Name(
@@ -69,11 +72,13 @@ pub fn card(
         let seq = message.seq;
         let rev = message.rev;
         let react = cx.listener(move |chat, event: &ClickEvent, window, cx| {
+            cx.notify();
             let position = event.position();
             chat.layout.press = (position.x.into(), position.y.into());
             chat.open_menu(pane, seq, rev, Mode::Reactions, window, cx)
         });
         let more = cx.listener(move |chat, event: &ClickEvent, window, cx| {
+            cx.notify();
             let position = event.position();
             chat.layout.press = (position.x.into(), position.y.into());
             chat.open_menu(pane, seq, rev, Mode::More, window, cx)
@@ -103,8 +108,10 @@ pub fn card(
                 more,
             ));
         if pane == Pane::Timeline && message.reply_count == 0 {
-            let open =
-                cx.listener(move |chat, _: &ClickEvent, _window, cx| chat.open_thread(seq, cx));
+            let open = cx.listener(move |chat, _: &ClickEvent, _window, cx| {
+                cx.notify();
+                chat.open_thread(seq, cx)
+            });
             actions = actions.child(action_button(
                 ElementId::Name(format!("chat-message-{}-thread", message.id).into()),
                 "💬",
@@ -200,6 +207,7 @@ fn content(
             let emoji = reaction.emoji.clone();
             let add = !reaction.reacted_by_me;
             let click = cx.listener(move |chat, _: &ClickEvent, _window, cx| {
+                cx.notify();
                 chat.react(reaction_seq, emoji.clone(), add, cx)
             });
             reactions = reactions.child(action_button(
@@ -216,7 +224,10 @@ fn content(
     }
     if message.reply_count > 0 {
         let root = message.seq;
-        let open = cx.listener(move |chat, _: &ClickEvent, _window, cx| chat.open_thread(root, cx));
+        let open = cx.listener(move |chat, _: &ClickEvent, _window, cx| {
+            cx.notify();
+            chat.open_thread(root, cx)
+        });
         body = body.child(
             div()
                 .id(ElementId::Name(
@@ -228,7 +239,9 @@ fn content(
                 .pt_1()
                 .text_sm()
                 .text_color(theme.accent_foreground)
-                .role(ducktape_view_guest::Role::Button).focusable().on_click(open)
+                .role(ducktape_view_guest::Role::Button)
+                .focusable()
+                .on_click(open)
                 .child(format!(
                     "{} · View thread ›",
                     plural(message.reply_count, "reply", "replies")
@@ -277,6 +290,7 @@ fn block_view(
         "attachment" => {
             let link = block.link.clone();
             let open = cx.listener(move |chat, _: &ClickEvent, _window, cx| {
+                cx.notify();
                 chat.open_preview(link.clone(), cx);
             });
             let mut card = div()
@@ -285,7 +299,9 @@ fn block_view(
                 .rounded_md()
                 .bg(theme.surface)
                 .hover(|s| s.bg(theme.surface_raised))
-                .role(ducktape_view_guest::Role::Button).focusable().on_click(open)
+                .role(ducktape_view_guest::Role::Button)
+                .focusable()
+                .on_click(open)
                 .child(format!("📄 {}", block.text));
             if let Some(&(width, height)) = chat.pictures.get(&block.link)
                 && width > 0
@@ -308,9 +324,14 @@ fn block_view(
                 _ => None,
             }) {
                 let open = cx.listener(move |chat, _: &ClickEvent, _window, cx| {
+                    cx.notify();
                     chat.open_link(link.clone(), cx);
                 });
-                text = text.text_color(theme.link).role(ducktape_view_guest::Role::Button).focusable().on_click(open);
+                text = text
+                    .text_color(theme.link)
+                    .role(ducktape_view_guest::Role::Button)
+                    .focusable()
+                    .on_click(open);
             }
             text.into_any_element()
         }
@@ -338,7 +359,9 @@ fn action_button(
         .rounded_sm()
         .bg(theme.surface)
         .hover(|s| s.bg(theme.surface_raised))
-        .role(ducktape_view_guest::Role::Button).focusable().on_click(click)
+        .role(ducktape_view_guest::Role::Button)
+        .focusable()
+        .on_click(click)
         .text_xs()
         .child(label.into())
 }

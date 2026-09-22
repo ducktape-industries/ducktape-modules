@@ -17,7 +17,10 @@ pub fn channel_create(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Opt
         }
         cx.notify();
     });
-    let submit = cx.listener(|chat, _: &ClickEvent, _window, cx| chat.create_channel(cx));
+    let submit = cx.listener(|chat, _: &ClickEvent, _window, cx| {
+        cx.notify();
+        chat.create_channel(cx)
+    });
     let voice = cx.listener(|chat, _: &ClickEvent, _window, cx| {
         if let Some(create) = &mut chat.create {
             create.voice = !create.voice;
@@ -121,8 +124,10 @@ pub fn preview(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Option<Any
     let link = preview.link.clone();
     let path = crate::files::attachment_file_path(&link);
     let name = path.rsplit('/').next().unwrap_or_default().to_owned();
-    let open =
-        cx.listener(move |chat, _: &ClickEvent, _window, cx| chat.open_link(link.clone(), cx));
+    let open = cx.listener(move |chat, _: &ClickEvent, _window, cx| {
+        cx.notify();
+        chat.open_link(link.clone(), cx)
+    });
     let close = cx.listener(|chat, _: &ClickEvent, _window, cx| {
         chat.preview = None;
         cx.notify();
@@ -212,6 +217,7 @@ pub fn preview(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Option<Any
                 let (width, height) = crate::files::preview_room(chat.layout.viewport);
                 let document = if crate::files::markdown_path(&path) {
                     let open = cx.listener(|chat, event: &wire::SurfaceValue, _window, cx| {
+                        cx.notify();
                         if let wire::SurfaceValue::Str(link) = event {
                             chat.open_link(link.clone(), cx);
                         }

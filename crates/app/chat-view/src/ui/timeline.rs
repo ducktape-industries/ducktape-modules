@@ -67,7 +67,10 @@ pub fn list(chat: &Chat, pane: Pane, cx: &mut Context<Chat>, theme: &Theme) -> i
     }
     if let Some(room) = &chat.room {
         if matches!(pane, Pane::Timeline) && room.has_older && !room.landed {
-            let older = cx.listener(|chat, _: &ClickEvent, _window, cx| chat.load_older(cx));
+            let older = cx.listener(|chat, _: &ClickEvent, _window, cx| {
+                cx.notify();
+                chat.load_older(cx)
+            });
             content = content.child(
                 div()
                     .id(ElementId::Name("chat-load-older".into()))
@@ -146,8 +149,10 @@ pub fn list(chat: &Chat, pane: Pane, cx: &mut Context<Chat>, theme: &Theme) -> i
             .as_ref()
             .map(|room| room.id.clone())
             .unwrap_or_default();
-        let latest =
-            cx.listener(move |chat, _: &ClickEvent, window, cx| chat.open(id.clone(), window, cx));
+        let latest = cx.listener(move |chat, _: &ClickEvent, window, cx| {
+            cx.notify();
+            chat.open(id.clone(), window, cx)
+        });
         content = content.child(
             div()
                 .id(ElementId::Name("chat-jump-latest".into()))

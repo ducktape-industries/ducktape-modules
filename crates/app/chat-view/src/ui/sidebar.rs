@@ -12,7 +12,10 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
         chat.search.draft = event.clone();
         cx.notify();
     });
-    let submit = cx.listener(|chat, _: &(), _window, cx| chat.search_submit(cx));
+    let submit = cx.listener(|chat, _: &(), _window, cx| {
+        cx.notify();
+        chat.search_submit(cx)
+    });
     let mut search = div()
         .id(ElementId::Name("chat-sidebar-search".into()))
         .h(px(28.))
@@ -40,7 +43,9 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
             div()
                 .id(ElementId::Name("chat-sidebar-clear-search".into()))
                 .px_1()
-                .role(ducktape_view_guest::Role::Button).focusable().on_click(clear)
+                .role(ducktape_view_guest::Role::Button)
+                .focusable()
+                .on_click(clear)
                 .child("✕"),
         );
     }
@@ -77,7 +82,11 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
         .py_0p5()
         .rounded_sm()
         .hover(|s| s.bg(theme.sidebar_raised))
-        .when(!busy || chat.create.is_some(), |el| el.role(ducktape_view_guest::Role::Button).focusable().on_click(toggle))
+        .when(!busy || chat.create.is_some(), |el| {
+            el.role(ducktape_view_guest::Role::Button)
+                .focusable()
+                .on_click(toggle)
+        })
         .child(if chat.create.is_some() {
             "✕ Close"
         } else {
@@ -201,8 +210,10 @@ fn channel_button(
     theme: &Theme,
 ) -> AnyElement {
     let id = info.channel.id.clone();
-    let click =
-        cx.listener(move |chat, _: &ClickEvent, window, cx| chat.choose(id.clone(), window, cx));
+    let click = cx.listener(move |chat, _: &ClickEvent, window, cx| {
+        cx.notify();
+        chat.choose(id.clone(), window, cx)
+    });
     let unread = chat.unread(info) && !selected;
     let mut row = div()
         .id(ElementId::Name(
@@ -305,7 +316,11 @@ fn voice_button(
             theme.sidebar
         })
         .hover(|s| s.bg(theme.sidebar_raised))
-        .when(!info.channel.archived, |el| el.role(ducktape_view_guest::Role::Button).focusable().on_click(click))
+        .when(!info.channel.archived, |el| {
+            el.role(ducktape_view_guest::Role::Button)
+                .focusable()
+                .on_click(click)
+        })
         .child("🔊")
         .child(div().flex_1().child(info.channel.name.clone()))
         .when(info.channel.archived, |el| {
@@ -399,8 +414,10 @@ fn dm_button(
     let agent = names.is_some_and(|n| n.is_program(peer));
     let unread = chat.unread(info) && !selected;
     let id = info.channel.id.clone();
-    let click =
-        cx.listener(move |chat, _: &ClickEvent, window, cx| chat.choose(id.clone(), window, cx));
+    let click = cx.listener(move |chat, _: &ClickEvent, window, cx| {
+        cx.notify();
+        chat.choose(id.clone(), window, cx)
+    });
     let mut row = div()
         .id(ElementId::Name(format!("chat-sidebar-dm-{peer}").into()))
         .flex()
@@ -415,7 +432,9 @@ fn dm_button(
             theme.sidebar
         })
         .hover(|s| s.bg(theme.sidebar_raised))
-        .role(ducktape_view_guest::Role::Button).focusable().on_click(click)
+        .role(ducktape_view_guest::Role::Button)
+        .focusable()
+        .on_click(click)
         .child(
             div()
                 .size_6()

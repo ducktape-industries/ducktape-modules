@@ -113,8 +113,10 @@ fn message_menu(chat: &Chat, menu: &Menu, cx: &mut Context<Chat>, theme: &Theme)
     match menu.mode {
         Mode::More | Mode::Toolbar => {
             if pane == Pane::Timeline {
-                let open =
-                    cx.listener(move |chat, _: &ClickEvent, _window, cx| chat.open_thread(seq, cx));
+                let open = cx.listener(move |chat, _: &ClickEvent, _window, cx| {
+                    cx.notify();
+                    chat.open_thread(seq, cx)
+                });
                 content = content.child(button(
                     ElementId::Name("chat-menu-reply".into()),
                     "Reply in thread",
@@ -125,6 +127,7 @@ fn message_menu(chat: &Chat, menu: &Menu, cx: &mut Context<Chat>, theme: &Theme)
             let link = chat.message_link(seq);
             if !link.is_empty() {
                 let copy = cx.listener(move |chat, _: &ClickEvent, _window, cx| {
+                    cx.notify();
                     chat.close_menu();
                     chat.copy_text(link.clone(), "Message link copied", cx);
                 });
@@ -137,6 +140,7 @@ fn message_menu(chat: &Chat, menu: &Menu, cx: &mut Context<Chat>, theme: &Theme)
             }
             if chat.may_write() {
                 let react = cx.listener(move |chat, _: &ClickEvent, window, cx| {
+                    cx.notify();
                     chat.open_menu(pane, seq, rev, Mode::Reactions, window, cx)
                 });
                 content = content.child(button(
@@ -146,6 +150,7 @@ fn message_menu(chat: &Chat, menu: &Menu, cx: &mut Context<Chat>, theme: &Theme)
                     react,
                 ));
                 let edit = cx.listener(move |chat, _: &ClickEvent, window, cx| {
+                    cx.notify();
                     chat.open_menu(pane, seq, rev, Mode::Editing, window, cx)
                 });
                 content = content.child(button(
@@ -155,6 +160,7 @@ fn message_menu(chat: &Chat, menu: &Menu, cx: &mut Context<Chat>, theme: &Theme)
                     edit,
                 ));
                 let delete = cx.listener(move |chat, _: &ClickEvent, window, cx| {
+                    cx.notify();
                     chat.open_menu(pane, seq, rev, Mode::Delete, window, cx)
                 });
                 content = content.child(button(
@@ -175,6 +181,7 @@ fn message_menu(chat: &Chat, menu: &Menu, cx: &mut Context<Chat>, theme: &Theme)
                 let emoji = emoji.to_owned();
                 let reaction = emoji.clone();
                 let click = cx.listener(move |chat, _: &ClickEvent, _window, cx| {
+                    cx.notify();
                     chat.react(seq, reaction.clone(), true, cx)
                 });
                 grid = grid.child(
@@ -207,7 +214,10 @@ fn message_menu(chat: &Chat, menu: &Menu, cx: &mut Context<Chat>, theme: &Theme)
                 chat.close_menu();
                 cx.notify();
             });
-            let confirm = cx.listener(|chat, _: &ClickEvent, _window, cx| chat.delete_armed(cx));
+            let confirm = cx.listener(|chat, _: &ClickEvent, _window, cx| {
+                cx.notify();
+                chat.delete_armed(cx)
+            });
             content = content
                 .child(button(
                     ElementId::Name("chat-menu-cancel-delete".into()),
