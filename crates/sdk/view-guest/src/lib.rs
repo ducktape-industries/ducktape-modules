@@ -14,10 +14,10 @@ mod theme;
 pub use theme::Theme;
 mod behavior;
 mod element;
-mod view_element;
 mod interactivity;
 mod primitives;
 mod surface;
+mod view_element;
 pub use behavior::{modal_overlay, resize_handle, sensor, ModalOverlay, ResizeHandle, Sensor};
 pub use element::{
     div, uniform_list, AnyElement, Div, Element, Input, IntoElement, Lowering, ParentElement,
@@ -25,8 +25,8 @@ pub use element::{
 };
 pub use interactivity::{InteractiveElement, Interactivity, Stateful, StatefulInteractiveElement};
 pub use primitives::{
-    anchored, canvas, deferred, img, svg, Anchored, Canvas, Deferred, ImageSource, Img, StyledImage,
-    Svg,
+    anchored, canvas, deferred, img, svg, Anchored, Canvas, Deferred, ImageSource, ImageStyle, Img,
+    StyledImage, Svg, Transformation,
 };
 pub use surface::{surface, Surface};
 pub use view_element::ViewElement;
@@ -349,6 +349,7 @@ impl<V: View> Driver<V> {
                 // The host dropped the tree the patches build on.
                 wire::Event::Resync => {
                     self.last_root = None;
+                    slots::clear_pictures(&self.app.inner.slots);
                     self.app.notify();
                     None
                 }
@@ -395,7 +396,9 @@ impl<V: View> Driver<V> {
             // Structural edits may use a whole tree when that is smaller.
             if let Some(last) = &mut self.last_root {
                 patches = wire::diff(last, &mut root);
-                let only_props = patches.iter().all(|patch| matches!(patch, wire::Patch::Props { .. }));
+                let only_props = patches
+                    .iter()
+                    .all(|patch| matches!(patch, wire::Patch::Props { .. }));
                 if patches.len() > wire::MAX_PATCHES
                     || (!only_props && wire::encoded_size(&patches) >= wire::encoded_size(&root))
                 {
@@ -408,7 +411,10 @@ impl<V: View> Driver<V> {
             // bytes the same way once it has the pictures.
             let mut kept = root.clone();
             kept.for_each_mut(&mut |node| match node {
-                wire::Node::Svg { bytes, .. } => *bytes = None,
+                wire::Node::Svg {
+                    source: wire::SvgSource::Data { bytes, .. },
+                    ..
+                } => *bytes = None,
                 wire::Node::Image { data, .. } | wire::Node::ImageViewer { data, .. } => {
                     *data = None
                 }

@@ -124,7 +124,10 @@ mod surface;
 pub use surface::{MAX_SURFACE_DEPTH, MAX_SURFACE_VALUES, SurfaceValue, sanitize_surface_event};
 
 mod node;
-pub use node::{Anchor, AnchoredFitMode, AnchoredPositionMode, ButtonContent, Live, Node, Role};
+pub use node::{
+    Anchor, AnchoredFitMode, AnchoredPositionMode, ButtonContent, ImageObjectFit, ImageStyle, Live,
+    Node, Role, SvgSource, SvgTransformation,
+};
 mod accessibility;
 pub use accessibility::{Fault, FaultKind, accessibility_faults};
 mod patch;
@@ -1313,16 +1316,28 @@ fn sanitize_node(
             }
         }
 
-        Node::Canvas {
-            key,
-            style,
-            commands,
-            ..
-        } => {
-            claim(key, taken);
+        Node::Canvas { style, commands } => {
             style_sanitize::sanitize(style);
             canvas::sanitize(commands, budgets);
         }
+        Node::Anchored {
+            fit,
+            position,
+            offset,
+            ..
+        } => {
+            for point in [position, offset].into_iter().flatten() {
+                for value in point {
+                    *value = signed_bounded(*value);
+                }
+            }
+            if let AnchoredFitMode::SnapToWindowWithMargin(edges) = fit {
+                for edge in edges {
+                    *edge = bounded(*edge);
+                }
+            }
+        }
+        Node::Deferred { priority, .. } => *priority = (*priority).min(16),
         Node::When { key, condition, .. } => {
             claim(key, taken);
             condition.sanitize();
@@ -1395,41 +1410,60 @@ fn sanitize_node(
             options.sanitize();
         }
         Node::Image {
-            key,
+            id,
             data,
             label,
-            opacity,
+            style,
+            interactivity,
+            loading,
+            fallback,
+            state_children,
             ..
         } => {
-            claim(key, taken);
+            if let Some(id) = id {
+                id.validate_host()?;
+            }
             ImageData::sanitize(data, budgets);
+            style_sanitize::sanitize(style);
+            sanitize_interactivity(interactivity);
             if let Some(label) = label {
                 truncate_string(label);
             }
-            if let Some(opacity) = opacity {
-                *opacity = finite(*opacity).clamp(0.0, 1.0);
+            let expected = usize::from(*loading) + usize::from(*fallback);
+            state_children.truncate(expected);
+            if state_children.len() < expected {
+                *loading = false;
+                *fallback = false;
+                state_children.clear();
             }
         }
         Node::Svg {
-            key,
-            bytes,
+            id,
+            source,
+            transformation,
             label,
-            color,
-            hover,
-            opacity,
-            ..
+            style,
+            interactivity,
         } => {
-            claim(key, taken);
-            spend_svg(bytes, budgets);
+            if let Some(id) = id {
+                id.validate_host()?;
+            }
+            match source {
+                SvgSource::Data { bytes, .. } => spend_svg(bytes, budgets),
+                SvgSource::Asset(path) | SvgSource::External(path) => truncate_string(path),
+                SvgSource::None => {}
+            }
+            for value in &mut transformation.scale {
+                *value = signed_bounded(*value);
+            }
+            for value in &mut transformation.translate {
+                *value = signed_bounded(*value);
+            }
+            transformation.rotate = signed_bounded(transformation.rotate);
+            style_sanitize::sanitize(style);
+            sanitize_interactivity(interactivity);
             if let Some(label) = label {
                 truncate_string(label);
-            }
-            bound_color(color);
-            if let Some(hover) = hover {
-                bound_color(hover);
-            }
-            if let Some(opacity) = opacity {
-                *opacity = bounded(*opacity).min(1.0);
             }
         }
         Node::Input {
@@ -1772,11 +1806,8 @@ fn lengths_mut(node: &mut Node) -> Vec<&mut Length> {
         | Node::Hover { width, height, .. }
         | Node::Scroll { width, height, .. }
         | Node::Button { width, height, .. }
-        | Node::Svg { width, height, .. }
-        | Node::Image { width, height, .. }
         | Node::ImageViewer { width, height, .. }
         | Node::Slider { width, height, .. }
-        | Node::Canvas { width, height, .. }
         | Node::Space { width, height } => vec![width, height],
         Node::Progress { length, girth, .. } => vec![length, girth],
         Node::RichText { width, .. }
@@ -1799,7 +1830,12 @@ fn lengths_mut(node: &mut Node) -> Vec<&mut Length> {
         | Node::Tooltip { .. }
         | Node::When { .. }
         | Node::Float { .. }
-        | Node::Surface { .. } => Vec::new(),
+        | Node::Surface { .. }
+        | Node::Anchored { .. }
+        | Node::Deferred { .. }
+        | Node::Image { .. }
+        | Node::Svg { .. }
+        | Node::Canvas { .. } => Vec::new(),
     };
     slots.into_iter().flatten().collect()
 }
@@ -1861,6 +1897,33 @@ fn bound_edges(edges: &mut Option<Edges>) {
         edges.right = bounded(edges.right);
         edges.bottom = bounded(edges.bottom);
         edges.left = bounded(edges.left);
+    }
+}
+
+fn sanitize_interactivity(interactivity: &mut Interactivity) {
+    interactivity.aria.sanitize();
+    for style in [&mut interactivity.hover, &mut interactivity.active]
+        .into_iter()
+        .flatten()
+    {
+        style_sanitize::sanitize(style);
+    }
+    for group in [
+        &mut interactivity.group_hover,
+        &mut interactivity.group_active,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        style_sanitize::sanitize(&mut group.style);
+        let mut name = group.group.to_string();
+        truncate_string(&mut name);
+        group.group = name.into();
+    }
+    if let Some(group) = &mut interactivity.group {
+        let mut name = group.to_string();
+        truncate_string(&mut name);
+        *group = name.into();
     }
 }
 
@@ -3517,34 +3580,38 @@ mod tests {
 
     fn picture(bytes: Option<Vec<u8>>) -> Node {
         Node::Svg {
-            inherit_button_ink: false,
-            key: "App/icon".into(),
-            hash: 7,
-            bytes,
+            id: None,
+            source: SvgSource::Data { hash: 7, bytes },
+            transformation: SvgTransformation {
+                scale: [1., 1.],
+                translate: [0., 0.],
+                rotate: 0.,
+            },
             label: None,
-            color: None,
-            hover: None,
-            fit: None,
-            opacity: None,
-            width: Some(Length::Fixed(24.0)),
-            height: Some(Length::Fixed(24.0)),
+            style: gpui::StyleRefinement::default(),
+            interactivity: Interactivity::default(),
         }
     }
 
     #[test]
     fn svg_and_raster_images_share_the_frame_picture_budget() {
         let image = Node::Image {
-            key: "App/raster".into(),
+            id: Some(ElementIdWire::Name("App/raster".into())),
             hash: 8,
             data: Some(ImageData::Encoded(vec![
                 0;
                 MAX_PICTURE_BYTES_PER_FRAME / 2 + 1
             ])),
             label: None,
-            fit: None,
-            opacity: None,
-            width: None,
-            height: None,
+            image_style: ImageStyle {
+                grayscale: false,
+                object_fit: ImageObjectFit::Contain,
+            },
+            loading: false,
+            fallback: false,
+            state_children: vec![],
+            style: gpui::StyleRefinement::default(),
+            interactivity: Interactivity::default(),
         };
         let mut frame = Frame {
             root: Some(column(vec![
@@ -3555,12 +3622,100 @@ mod tests {
         };
         sanitize(&mut frame).unwrap();
         let children = frame.root.as_ref().unwrap().children();
-        assert!(matches!(children[0], Node::Svg { bytes: Some(_), .. }));
+        assert!(matches!(
+            children[0],
+            Node::Svg {
+                source: SvgSource::Data { bytes: Some(_), .. },
+                ..
+            }
+        ));
         assert!(
             matches!(children[1], Node::Image { data: None, .. }),
             "SVG consumption must reduce raster admission"
         );
         assert!(decode::<Frame>(&encode(&frame)).is_ok());
+    }
+
+    #[test]
+    fn primitive_geometry_and_state_children_are_bounded_in_the_main_walk() {
+        let image = Node::Image {
+            id: Some(ElementIdWire::Integer(1)),
+            hash: 1,
+            data: Some(ImageData::Refusal("x".repeat(MAX_STRING_BYTES + 1))),
+            label: None,
+            image_style: ImageStyle {
+                grayscale: false,
+                object_fit: ImageObjectFit::Contain,
+            },
+            loading: true,
+            fallback: true,
+            state_children: vec![text("loading"), text("fallback"), text("extra")],
+            style: Default::default(),
+            interactivity: Default::default(),
+        };
+        let svg = Node::Svg {
+            id: Some(ElementIdWire::Integer(2)),
+            source: SvgSource::External("x".repeat(MAX_STRING_BYTES + 1)),
+            transformation: SvgTransformation {
+                scale: [f32::NAN, f32::INFINITY],
+                translate: [f32::NEG_INFINITY, f32::INFINITY],
+                rotate: f32::NAN,
+            },
+            label: None,
+            style: Default::default(),
+            interactivity: Default::default(),
+        };
+        let anchored = Node::Anchored {
+            anchor: Anchor::TopLeft,
+            fit: AnchoredFitMode::SnapToWindowWithMargin([f32::NAN, f32::INFINITY, -1., 4.]),
+            position: Some([f32::INFINITY, f32::NEG_INFINITY]),
+            position_mode: AnchoredPositionMode::Local,
+            offset: Some([f32::NAN, 3.]),
+            children: vec![Node::Deferred {
+                priority: usize::MAX,
+                content: Box::new(text("child")),
+            }],
+        };
+        let children = sanitized_children(column(vec![image, svg, anchored]));
+        let Node::Image {
+            data: Some(ImageData::Refusal(reason)),
+            state_children,
+            ..
+        } = &children[0]
+        else {
+            panic!()
+        };
+        assert!(reason.len() <= MAX_STRING_BYTES);
+        assert_eq!(state_children.len(), 2);
+        let Node::Svg {
+            source: SvgSource::External(path),
+            transformation,
+            ..
+        } = &children[1]
+        else {
+            panic!()
+        };
+        assert!(path.len() <= MAX_STRING_BYTES);
+        assert_eq!(transformation.scale, [0., MAX_PIXELS]);
+        assert_eq!(transformation.translate, [-MAX_PIXELS, MAX_PIXELS]);
+        assert_eq!(transformation.rotate, 0.);
+        let Node::Anchored {
+            fit,
+            position,
+            offset,
+            children,
+            ..
+        } = &children[2]
+        else {
+            panic!()
+        };
+        assert_eq!(*position, Some([MAX_PIXELS, -MAX_PIXELS]));
+        assert_eq!(*offset, Some([0., 3.]));
+        assert_eq!(
+            *fit,
+            AnchoredFitMode::SnapToWindowWithMargin([0., MAX_PIXELS, 0., 4.])
+        );
+        assert!(matches!(children[0], Node::Deferred { priority: 16, .. }));
     }
 
     /// A picture past what is left of the frame's budget is dropped whole,
@@ -3578,7 +3733,10 @@ mod tests {
         let carried: Vec<Option<usize>> = children
             .iter()
             .map(|child| match child {
-                Node::Svg { bytes, .. } => bytes.as_ref().map(Vec::len),
+                Node::Svg {
+                    source: SvgSource::Data { bytes, .. },
+                    ..
+                } => bytes.as_ref().map(Vec::len),
                 other => panic!("{other:?}"),
             })
             .collect();

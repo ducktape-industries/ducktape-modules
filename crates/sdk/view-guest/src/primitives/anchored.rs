@@ -1,4 +1,4 @@
-use crate::{AnyElement, IntoElement, Lowering, ParentElement, wire};
+use crate::{wire, AnyElement, Element, IntoElement, Lowering, ParentElement};
 use gpui::{Anchor, AnchoredPositionMode, Edges, Pixels, Point};
 
 /// A native GPUI anchored element lowered as a bounded host primitive.
@@ -51,12 +51,12 @@ impl Anchored {
 
     pub fn snap_to_window_with_margin(mut self, edges: impl Into<Edges<Pixels>>) -> Self {
         let edges = edges.into();
-        self.fit = wire::AnchoredFitMode::SnapToWindowWithMargin(wire::Edges {
-            top: f32::from(edges.top),
-            right: f32::from(edges.right),
-            bottom: f32::from(edges.bottom),
-            left: f32::from(edges.left),
-        });
+        self.fit = wire::AnchoredFitMode::SnapToWindowWithMargin([
+            f32::from(edges.top),
+            f32::from(edges.right),
+            f32::from(edges.bottom),
+            f32::from(edges.left),
+        ]);
         self
     }
 }
@@ -67,27 +67,28 @@ impl ParentElement for Anchored {
     }
 }
 
-impl IntoElement for Anchored {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
-    }
-
-    fn into_node(self, lowering: &mut Lowering<'_>) -> wire::Node {
+impl Element for Anchored {
+    fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
+        let this = *self;
         wire::Node::Anchored {
-            key: "anchored".into(),
-            anchor: self.anchor,
-            fit: self.fit,
-            position: self.position,
-            position_mode: self.position_mode,
-            offset: self.offset,
-            children: self
+            anchor: this.anchor,
+            fit: this.fit,
+            position: this.position,
+            position_mode: this.position_mode,
+            offset: this.offset,
+            children: this
                 .children
                 .into_iter()
-                .map(|child| child.into_node(lowering))
+                .map(|child| lowering.lower_element(child))
                 .collect(),
         }
+    }
+}
+
+impl IntoElement for Anchored {
+    type Element = Self;
+    fn into_element(self) -> Self {
+        self
     }
 }
 

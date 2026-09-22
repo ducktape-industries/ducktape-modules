@@ -4,11 +4,11 @@ mod deferred;
 mod img;
 mod svg;
 
-pub use anchored::Anchored;
 pub use anchored::anchored;
-pub use canvas::Canvas;
+pub use anchored::Anchored;
 pub use canvas::canvas;
-pub use deferred::Deferred;
+pub use canvas::Canvas;
 pub use deferred::deferred;
-pub use img::{ImageSource, Img, StyledImage, img};
-pub use svg::{Svg, svg};
+pub use deferred::Deferred;
+pub use img::{img, ImageSource, ImageStyle, Img, StyledImage};
+pub use svg::{svg, Svg, Transformation};

@@ -1,4 +1,4 @@
-use crate::{AnyElement, IntoElement, Lowering, wire};
+use crate::{wire, AnyElement, Element, IntoElement, Lowering};
 
 /// A native deferred draw. It is not the guest subtree cache represented by `Node::Lazy`.
 pub struct Deferred {
@@ -25,19 +25,20 @@ impl Deferred {
     }
 }
 
+impl Element for Deferred {
+    fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
+        let this = *self;
+        wire::Node::Deferred {
+            priority: this.priority,
+            content: Box::new(lowering.lower_element(this.child)),
+        }
+    }
+}
+
 impl IntoElement for Deferred {
     type Element = Self;
-
     fn into_element(self) -> Self {
         self
-    }
-
-    fn into_node(self, lowering: &mut Lowering<'_>) -> wire::Node {
-        wire::Node::Deferred {
-            key: "deferred".into(),
-            priority: self.priority.min(16),
-            content: Box::new(self.child.into_node(lowering)),
-        }
     }
 }
 

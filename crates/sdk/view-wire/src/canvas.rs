@@ -1,5 +1,6 @@
 //! Declarative geometry. Commands contain copied values, never host callbacks.
-use crate::{Budgets, Rgba};
+use crate::Budgets;
+use gpui::Hsla;
 use serde::{Deserialize, Serialize};
 use std::cell::Cell;
 
@@ -9,7 +10,7 @@ pub const MAX_CANVAS_PARTS: usize = 4096;
 pub enum CanvasCommand {
     Draw {
         shape: CanvasShape,
-        fill: Option<Rgba>,
+        fill: Option<Hsla>,
         even_odd: bool,
         stroke: Option<CanvasStroke>,
     },
@@ -85,7 +86,7 @@ pub enum CanvasSegment {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CanvasStroke {
-    pub color: Rgba,
+    pub color: Hsla,
     pub width: f32,
     pub cap: CanvasLineCap,
     pub join: CanvasLineJoin,
@@ -201,10 +202,10 @@ pub(super) fn sanitize(commands: &mut Vec<CanvasCommand>, budgets: &mut Budgets)
                 ..
             } => {
                 if let Some(color) = fill {
-                    rgba(color);
+                    hsla(color);
                 }
                 if let Some(stroke) = stroke {
-                    rgba(&mut stroke.color);
+                    hsla(&mut stroke.color);
                     size(&mut stroke.width);
                     stroke.dash.truncate(budgets.canvas_parts.min(256));
                     budgets.canvas_parts -= stroke.dash.len();
@@ -315,10 +316,11 @@ fn angle(value: &mut f32) {
 fn point(value: &mut [f32; 2]) {
     value.iter_mut().for_each(coordinate);
 }
-fn rgba(value: &mut Rgba) {
-    for channel in &mut value.0 {
-        *channel = finite(*channel).clamp(0.0, 1.0);
-    }
+fn hsla(value: &mut Hsla) {
+    value.h = finite(value.h).clamp(0.0, 1.0);
+    value.s = finite(value.s).clamp(0.0, 1.0);
+    value.l = finite(value.l).clamp(0.0, 1.0);
+    value.a = finite(value.a).clamp(0.0, 1.0);
 }
 
 #[cfg(test)]
@@ -328,9 +330,6 @@ mod tests {
 
     fn node(commands: Vec<CanvasCommand>) -> Node {
         Node::Canvas {
-            key: "geometry".into(),
-            width: None,
-            height: None,
             commands,
             style: Default::default(),
         }
@@ -338,7 +337,7 @@ mod tests {
     fn path(parts: usize) -> CanvasCommand {
         CanvasCommand::Draw {
             shape: CanvasShape::Path(vec![CanvasSegment::Close; parts]),
-            fill: Some(Rgba([1.0; 4])),
+            fill: Some(Hsla { h: 0.5, s: 1., l: 1., a: 1. }),
             even_odd: false,
             stroke: None,
         }
@@ -395,7 +394,7 @@ mod tests {
                     center: [f32::NAN, f32::MAX],
                     radius: -1.0,
                 },
-                fill: Some(Rgba([f32::INFINITY, -1.0, 2.0, 1.0])),
+                fill: Some(Hsla { h: f32::INFINITY, s: -1., l: 2., a: 1. }),
                 even_odd: false,
                 stroke: None,
             },
@@ -410,7 +409,7 @@ mod tests {
                     center: [0.0, 8192.0],
                     radius: 0.0
                 },
-                fill: Some(Rgba([0.0, 0.0, 1.0, 1.0])),
+                fill: Some(Hsla { h: 0., s: 0., l: 1., a: 1. }),
                 even_odd: false,
                 stroke: None,
             }]

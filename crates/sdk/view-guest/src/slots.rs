@@ -62,8 +62,16 @@ pub fn picture(context: &Context, bytes: impl AsRef<[u8]>) -> (u64, Option<Vec<u
     let mut hasher = std::hash::DefaultHasher::new();
     bytes.hash(&mut hasher);
     let hash = hasher.finish();
-    let first = context.0.borrow_mut().pictures.insert((false, hash));
+    let mut tables = context.0.borrow_mut();
+    if tables.pictures.len() >= 4_096 && !tables.pictures.contains(&(false, hash)) {
+        tables.pictures.clear();
+    }
+    let first = tables.pictures.insert((false, hash));
     (hash, first.then(|| bytes.to_vec()))
+}
+
+pub(crate) fn clear_pictures(context: &Context) {
+    context.0.borrow_mut().pictures.clear();
 }
 
 /// Registers a message in the frame currently being built.
@@ -521,6 +529,18 @@ mod tests {
         assert!(
             picture(&first, b"svg").1.is_none(),
             "returning to the first driver preserves its picture history"
+        );
+    }
+
+    #[test]
+    fn clearing_picture_history_resends_content() {
+        let context = Context::default();
+        assert!(picture(&context, b"image").1.is_some());
+        assert!(picture(&context, b"image").1.is_none());
+        clear_pictures(&context);
+        assert_eq!(
+            picture(&context, b"image").1.as_deref(),
+            Some(b"image".as_slice())
         );
     }
 }

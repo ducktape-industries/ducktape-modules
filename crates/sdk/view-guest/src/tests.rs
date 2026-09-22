@@ -1,8 +1,10 @@
 use super::*;
 use futures::StreamExt;
+use gpui::{Image, ImageFormat};
 use serde::{Deserialize, Serialize};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::Arc;
 
 #[derive(Default, Serialize, Deserialize)]
 struct Probe {
@@ -467,7 +469,10 @@ fn patches_reconstruct_the_rendered_tree_and_picture_bytes_are_not_retained() {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
             div()
                 .id("picture-view")
-                .child(img("shared-image"))
+                .child(img(Arc::new(Image::from_bytes(
+                    ImageFormat::Png,
+                    b"shared-image".to_vec(),
+                ))))
                 .children((0..20).map(|i| {
                     div()
                         .id(format!("row/{i}"))
@@ -504,6 +509,86 @@ fn patches_reconstruct_the_rendered_tree_and_picture_bytes_are_not_retained() {
         }
     });
     assert_eq!(driver.last_root.as_ref(), Some(&mounted));
+
+    let resent = driver.tick(vec![wire::Event::Resync]);
+    assert!(
+        resent.root.as_ref().is_some_and(|root| {
+            let mut found = false;
+            root.clone().for_each_mut(&mut |node| {
+                if matches!(
+                    node,
+                    wire::Node::Image {
+                        data: Some(wire::ImageData::Encoded(_)),
+                        ..
+                    }
+                ) {
+                    found = true;
+                }
+            });
+            found
+        }),
+        "resync must resend bytes from a dropped first frame"
+    );
+}
+
+#[test]
+fn primitive_sources_fallbacks_transformations_and_typed_ids_survive_lowering() {
+    #[derive(Serialize, Deserialize)]
+    struct Primitives;
+    impl View for Primitives {
+        fn new(_: &mut Window, _: &mut Context<Self>) -> Self {
+            Self
+        }
+    }
+    impl Render for Primitives {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let empty = gpui::RenderImage::new(Vec::new());
+            div().children([
+                img(Arc::new(empty))
+                    .with_fallback(|| "fallback".into_any_element())
+                    .id(gpui::ElementId::Integer(9))
+                    .into_any_element(),
+                svg()
+                    .data(b"<svg/>")
+                    .with_transformation(Transformation::translate(gpui::point(px(3.), px(4.))))
+                    .id(gpui::ElementId::Integer(10))
+                    .into_any_element(),
+            ])
+        }
+    }
+
+    let frame = Driver::<Primitives>::new().tick(vec![]);
+    let children = frame.root.unwrap().children().to_vec();
+    let wire::Node::Image {
+        id,
+        data,
+        fallback,
+        state_children,
+        ..
+    } = &children[0]
+    else {
+        panic!()
+    };
+    assert_eq!(id, &Some(wire::ElementIdWire::Integer(9)));
+    assert!(matches!(data, Some(wire::ImageData::Refusal(reason)) if reason.contains("no frames")));
+    assert!(*fallback);
+    assert!(
+        matches!(&state_children[0], wire::Node::Text { content, .. } if content == "fallback")
+    );
+    let wire::Node::Svg {
+        id,
+        source,
+        transformation,
+        ..
+    } = &children[1]
+    else {
+        panic!()
+    };
+    assert_eq!(id, &Some(wire::ElementIdWire::Integer(10)));
+    assert!(
+        matches!(source, wire::SvgSource::Data { bytes: Some(bytes), .. } if bytes == b"<svg/>")
+    );
+    assert_eq!(transformation.translate, [3., 4.]);
 }
 
 #[test]

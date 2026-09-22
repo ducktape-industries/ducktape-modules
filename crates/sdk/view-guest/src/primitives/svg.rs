@@ -1,109 +1,156 @@
 use crate::interactivity::{InteractiveElement, Interactivity, StatefulInteractiveElement};
-use crate::{IntoElement, Lowering, wire};
-use gpui::{SharedString, StyleRefinement, Styled};
+use crate::{wire, Element, IntoElement, Lowering};
+use gpui::{
+    point, px, radians, size, Pixels, Point, Radians, SharedString, Size, StyleRefinement, Styled,
+};
 
-/// A bounded SVG host primitive. Raw bytes are cached by content hash.
+enum Source {
+    None,
+    Data(Vec<u8>),
+    Asset(SharedString),
+    External(SharedString),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Transformation {
+    scale: Size<f32>,
+    translate: Point<Pixels>,
+    rotate: Radians,
+}
+
+impl Default for Transformation {
+    fn default() -> Self {
+        Self {
+            scale: size(1., 1.),
+            translate: point(px(0.), px(0.)),
+            rotate: radians(0.),
+        }
+    }
+}
+
+impl Transformation {
+    pub fn scale(value: Size<f32>) -> Self {
+        Self {
+            scale: value,
+            ..Default::default()
+        }
+    }
+    pub fn translate(value: Point<Pixels>) -> Self {
+        Self {
+            translate: value,
+            ..Default::default()
+        }
+    }
+    pub fn rotate(value: impl Into<Radians>) -> Self {
+        Self {
+            rotate: value.into(),
+            ..Default::default()
+        }
+    }
+    pub fn with_scaling(mut self, value: Size<f32>) -> Self {
+        self.scale = value;
+        self
+    }
+    pub fn with_translation(mut self, value: Point<Pixels>) -> Self {
+        self.translate = value;
+        self
+    }
+    pub fn with_rotation(mut self, value: impl Into<Radians>) -> Self {
+        self.rotate = value.into();
+        self
+    }
+    fn wire(self) -> wire::SvgTransformation {
+        wire::SvgTransformation {
+            scale: [self.scale.width, self.scale.height],
+            translate: [f32::from(self.translate.x), f32::from(self.translate.y)],
+            rotate: self.rotate.0,
+        }
+    }
+}
+
 pub struct Svg {
     pub(crate) interactivity: Interactivity,
-    bytes: Option<Vec<u8>>,
-    path: Option<SharedString>,
-    style: StyleRefinement,
+    source: Source,
+    transformation: Transformation,
 }
 
 #[track_caller]
 pub fn svg() -> Svg {
     Svg {
         interactivity: Interactivity::default(),
-        bytes: None,
-        path: None,
-        style: StyleRefinement::default(),
+        source: Source::None,
+        transformation: Transformation::default(),
     }
 }
 
 impl Svg {
     pub fn path(mut self, path: impl Into<SharedString>) -> Self {
-        self.path = Some(path.into());
-        self.bytes = None;
+        self.source = Source::Asset(path.into());
         self
     }
-
-    pub fn external_path(self, path: impl Into<SharedString>) -> Self {
-        self.path(path)
+    pub fn external_path(mut self, path: impl Into<SharedString>) -> Self {
+        self.source = Source::External(path.into());
+        self
     }
-
     pub fn data(mut self, data: &[u8]) -> Self {
-        self.bytes = Some(data.to_vec());
-        self.path = None;
+        self.source = Source::Data(data.to_vec());
+        self
+    }
+    pub fn with_transformation(mut self, value: Transformation) -> Self {
+        self.transformation = value;
         self
     }
 }
 
 impl Styled for Svg {
     fn style(&mut self) -> &mut StyleRefinement {
-        &mut self.style
+        &mut self.interactivity.base_style
     }
 }
-
 impl InteractiveElement for Svg {
     fn interactivity(&mut self) -> &mut Interactivity {
         &mut self.interactivity
     }
 }
-
 impl StatefulInteractiveElement for Svg {}
 
-impl IntoElement for Svg {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
+impl Element for Svg {
+    fn id(&self) -> Option<gpui::ElementId> {
+        self.interactivity.id.clone()
     }
-
-    fn into_node(self, lowering: &mut Lowering<'_>) -> wire::Node {
-        let hash = stable_hash(self.bytes.as_deref(), self.path.as_deref());
-        let key = self
-            .interactivity
-            .id
-            .as_ref()
-            .map(|id| wire::ElementIdWire::from_gpui(id.clone()))
-            .and_then(|id| id.name().map(str::to_owned))
-            .unwrap_or_else(|| format!("svg:{hash}"));
-        let label = self
-            .interactivity
-            .aria
-            .label
-            .as_ref()
-            .map(ToString::to_string);
-        let color = self.style.text.color.map(|color| {
-            let color = color.to_rgb();
-            wire::Rgba([color.r, color.g, color.b, color.a])
-        });
-        let interactivity = self.interactivity.into_wire(lowering);
+    fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
+        let Self {
+            interactivity,
+            source,
+            transformation,
+        } = *self;
+        let style = interactivity.base_style.clone();
+        let label = interactivity.aria.label.as_ref().map(ToString::to_string);
+        let (id, interactivity) = interactivity.into_wire(lowering);
+        let source = match source {
+            Source::None => wire::SvgSource::None,
+            Source::Data(bytes) => {
+                let (hash, bytes) = lowering.picture(bytes);
+                wire::SvgSource::Data { hash, bytes }
+            }
+            Source::Asset(path) => wire::SvgSource::Asset(path.to_string()),
+            Source::External(path) => wire::SvgSource::External(path.to_string()),
+        };
         wire::Node::Svg {
-            key,
-            inherit_button_ink: false,
-            hash,
-            bytes: self.bytes,
-            path: self.path.map(|path| path.to_string()),
+            id,
+            source,
+            transformation: transformation.wire(),
             label,
-            color,
-            hover: None,
-            fit: None,
-            opacity: None,
-            width: None,
-            height: None,
-            style: self.style,
+            style,
             interactivity,
         }
     }
 }
 
-fn stable_hash(bytes: Option<&[u8]>, path: Option<&str>) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::hash::DefaultHasher::new();
-    bytes.hash(&mut hasher);
-    path.hash(&mut hasher);
-    hasher.finish()
+impl IntoElement for Svg {
+    type Element = Self;
+    fn into_element(self) -> Self {
+        self
+    }
 }
-
 impl gpui::prelude::FluentBuilder for Svg {}

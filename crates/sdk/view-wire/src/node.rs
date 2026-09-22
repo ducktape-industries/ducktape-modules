@@ -52,7 +52,7 @@ pub enum Anchor {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum AnchoredFitMode {
     SnapToWindow,
-    SnapToWindowWithMargin(Edges),
+    SnapToWindowWithMargin([f32; 4]),
     SwitchAnchor,
 }
 
@@ -61,6 +61,36 @@ pub enum AnchoredFitMode {
 pub enum AnchoredPositionMode {
     Window,
     Local,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ImageObjectFit {
+    Fill,
+    Contain,
+    Cover,
+    ScaleDown,
+    None,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ImageStyle {
+    pub grayscale: bool,
+    pub object_fit: ImageObjectFit,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SvgSource {
+    None,
+    Data { hash: u64, bytes: Option<Vec<u8>> },
+    Asset(String),
+    External(String),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SvgTransformation {
+    pub scale: [f32; 2],
+    pub translate: [f32; 2],
+    pub rotate: f32,
 }
 
 /// One widget. `key` is the node's identity across frames — the
@@ -97,7 +127,6 @@ pub enum Node {
     },
     /// A native GPUI anchored element. The host owns fitting and clipping.
     Anchored {
-        key: String,
         anchor: Anchor,
         fit: AnchoredFitMode,
         position: Option<[f32; 2]>,
@@ -273,7 +302,6 @@ pub enum Node {
     },
     /// A deferred draw. Unlike [`Node::Lazy`], this is never a guest cache.
     Deferred {
-        key: String,
         priority: usize,
         #[serde(deserialize_with = "decode_child")]
         content: Box<Node>,
@@ -336,19 +364,16 @@ pub enum Node {
     },
     /// A raster picture sent once per typed content hash.
     Image {
-        key: String,
+        id: Option<ElementIdWire>,
         hash: u64,
         data: Option<ImageData>,
         label: Option<String>,
-        fit: Option<ContentFit>,
-        opacity: Option<f32>,
-        width: Option<Length>,
-        height: Option<Length>,
-        #[serde(default)]
-        grayscale: bool,
-        #[serde(default)]
+        image_style: ImageStyle,
+        loading: bool,
+        fallback: bool,
+        #[serde(deserialize_with = "decode_children")]
+        state_children: Vec<Node>,
         style: gpui::StyleRefinement,
-        #[serde(default)]
         interactivity: Interactivity,
     },
     /// A native zoom/pan viewer sharing the raster picture cache and budgets.
@@ -368,32 +393,11 @@ pub enum Node {
     /// it decoded by hash for as long as the guest runs; a hash it has not
     /// seen draws as empty space of the node's size.
     Svg {
-        key: String,
-        /// Use the nearest button's final status text color at draw time.
-        inherit_button_ink: bool,
-        /// The guest's content hash of the picture: an opaque cache key,
-        /// not something the host recomputes.
-        hash: u64,
-        /// The picture, on the first frame it is shown.
-        bytes: Option<Vec<u8>>,
-        /// A safe host-owned asset path. The host refuses arbitrary paths.
-        #[serde(default)]
-        path: Option<String>,
-        /// The accessible name of the picture.
+        id: Option<ElementIdWire>,
+        source: SvgSource,
+        transformation: SvgTransformation,
         label: Option<String>,
-        /// A tint for the whole picture, over its own colours.
-        color: Option<Rgba>,
-        /// The tint while hovered: `None` keeps `color`, `Some(None)` drops
-        /// the tint, `Some(Some(_))` is another one.
-        hover: Option<Option<Rgba>>,
-        fit: Option<ContentFit>,
-        /// `0.0..=1.0`; `None` is opaque.
-        opacity: Option<f32>,
-        width: Option<Length>,
-        height: Option<Length>,
-        #[serde(default)]
         style: gpui::StyleRefinement,
-        #[serde(default)]
         interactivity: Interactivity,
     },
     Input {
@@ -579,10 +583,6 @@ pub enum Node {
     },
     /// Bounded geometry painted by the host, in widget-local coordinates.
     Canvas {
-        key: String,
-        width: Option<Length>,
-        height: Option<Length>,
-        #[serde(default)]
         style: gpui::StyleRefinement,
         #[serde(deserialize_with = "canvas::decode_parts")]
         commands: Vec<CanvasCommand>,
@@ -633,9 +633,8 @@ impl Node {
 
     pub fn key(&self) -> Option<&str> {
         match self {
-            Self::Container { id, .. } | Self::Text { id, .. } => {
-                id.as_ref().and_then(ElementIdWire::name)
-            }
+            Self::Container { id, .. } | Self::Text { id, .. }
+            | Self::Image { id, .. } | Self::Svg { id, .. } => id.as_ref().and_then(ElementIdWire::name),
             Self::Input { id, .. } | Self::Editor { id, .. } | Self::UniformList { id, .. } => id.name(),
             Self::ResizeHandle { key, .. }
             | Self::MouseArea { key, .. }
@@ -643,18 +642,14 @@ impl Node {
             | Self::Grid { key, .. }
             | Self::KeyedColumn { key, .. }
             | Self::Pin { key, .. }
-            | Self::Anchored { key, .. }
             | Self::Float { key, .. }
             | Self::Responsive { key, .. }
             | Self::Lazy { key, .. }
-            | Self::Deferred { key, .. }
             | Self::When { key, .. }
             | Self::Sensor { key, .. }
             | Self::Scroll { key, .. }
             | Self::Qr { key, .. }
             | Self::RichText { key, .. }
-            | Self::Svg { key, .. }
-            | Self::Image { key, .. }
             | Self::ImageViewer { key, .. }
             | Self::Button { key, .. }
             | Self::Rule { key, .. }
@@ -668,21 +663,20 @@ impl Node {
             | Self::Hover { key, .. }
             | Self::Overlay { key, .. }
             | Self::Tooltip { key, .. }
-            | Self::Canvas { key, .. }
             | Self::Surface { key, .. } => Some(key),
-            Self::Space { .. } => None,
+            Self::Space { .. }
+            | Self::Anchored { .. }
+            | Self::Deferred { .. }
+            | Self::Canvas { .. } => None,
         }
     }
 
     /// The node's identity without reducing a typed GPUI ID to text.
     pub fn identity(&self) -> Option<IdentityKeyRef<'_>> {
         match self {
-            Self::Container { id, .. } | Self::Text { id, .. } => {
-                id.as_ref().map(IdentityKeyRef::Element)
-            }
-            Self::Input { id, .. } | Self::Editor { id, .. } | Self::UniformList { id, .. } => {
-                Some(IdentityKeyRef::Element(id))
-            }
+            Self::Container { id, .. } | Self::Text { id, .. }
+            | Self::Image { id, .. } | Self::Svg { id, .. } => id.as_ref().map(IdentityKeyRef::Element),
+            Self::Input { id, .. } | Self::Editor { id, .. } | Self::UniformList { id, .. } => Some(IdentityKeyRef::Element(id)),
             Self::ResizeHandle { key, .. }
             | Self::MouseArea { key, .. }
             | Self::Linear { key, .. }
@@ -697,8 +691,6 @@ impl Node {
             | Self::Scroll { key, .. }
             | Self::Qr { key, .. }
             | Self::RichText { key, .. }
-            | Self::Svg { key, .. }
-            | Self::Image { key, .. }
             | Self::ImageViewer { key, .. }
             | Self::Button { key, .. }
             | Self::Rule { key, .. }
@@ -712,9 +704,11 @@ impl Node {
             | Self::Hover { key, .. }
             | Self::Overlay { key, .. }
             | Self::Tooltip { key, .. }
-            | Self::Canvas { key, .. }
             | Self::Surface { key, .. } => Some(IdentityKeyRef::Legacy(key)),
-            Self::Space { .. } => None,
+            Self::Space { .. }
+            | Self::Anchored { .. }
+            | Self::Deferred { .. }
+            | Self::Canvas { .. } => None,
         }
     }
 
@@ -734,7 +728,11 @@ impl Node {
             | Self::KeyedColumn { children, .. }
             | Self::UniformList { children, .. }
             | Self::When { children, .. }
-            | Self::Anchored { children, .. } => children,
+            | Self::Anchored { children, .. }
+            | Self::Image {
+                state_children: children,
+                ..
+            } => children,
             Self::Pin { content, .. }
             | Self::Float { content, .. }
             | Self::Responsive { content, .. }
@@ -753,7 +751,6 @@ impl Node {
             | Self::RichText { .. }
             | Self::Text { .. }
             | Self::Svg { .. }
-            | Self::Image { .. }
             | Self::ImageViewer { .. }
             | Self::Input { .. }
             | Self::Editor { .. }
@@ -790,7 +787,11 @@ impl Node {
             | Self::KeyedColumn { children, .. }
             | Self::UniformList { children, .. }
             | Self::When { children, .. }
-            | Self::Anchored { children, .. } => children,
+            | Self::Anchored { children, .. }
+            | Self::Image {
+                state_children: children,
+                ..
+            } => children,
             Self::Pin { content, .. }
             | Self::Float { content, .. }
             | Self::Responsive { content, .. }
@@ -819,7 +820,6 @@ impl Node {
             | Self::ComboBox { .. }
             | Self::Progress { .. }
             | Self::Svg { .. }
-            | Self::Image { .. }
             | Self::ImageViewer { .. }
             | Self::Canvas { .. }
             | Self::Surface { .. } => &mut [],
@@ -841,6 +841,10 @@ impl Node {
             | Self::Hover { children, .. }
             | Self::Tooltip { children, .. }
             | Self::Anchored { children, .. }
+            | Self::Image {
+                state_children: children,
+                ..
+            }
             | Self::Overlay { children, .. } => Some(children),
             Self::Pin { .. }
             | Self::Float { .. }
@@ -866,7 +870,6 @@ impl Node {
             | Self::ComboBox { .. }
             | Self::Progress { .. }
             | Self::Svg { .. }
-            | Self::Image { .. }
             | Self::ImageViewer { .. }
             | Self::Canvas { .. }
             | Self::Surface { .. } => None,

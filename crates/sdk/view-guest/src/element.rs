@@ -142,7 +142,7 @@ impl<'a> Lowering<'a> {
         &self.authored_path
     }
 
-    fn click(&mut self, listener: ClickListener) -> u32 {
+    pub(crate) fn click(&mut self, listener: ClickListener) -> u32 {
         slots::click(&self.app.inner.slots, listener)
     }
 
@@ -433,169 +433,6 @@ pub trait RenderOnce: 'static {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement;
 }
 
-/// An image host primitive. Decoding and painting remain host-owned.
-pub struct Img {
-    source: String,
-}
-
-pub fn img(source: impl Into<String>) -> Img {
-    Img {
-        source: source.into(),
-    }
-}
-
-impl Element for Img {
-    fn lower(self: Box<Self>, _lowering: &mut Lowering<'_>) -> wire::Node {
-        wire::Node::Image {
-            key: self.source.clone(),
-            hash: stable_hash(self.source.as_bytes()),
-            data: Some(wire::ImageData::Resource(self.source.clone())),
-            label: None,
-            fit: None,
-            opacity: None,
-            width: None,
-            height: None,
-        }
-    }
-}
-
-impl IntoElement for Img {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
-    }
-}
-
-/// An SVG host primitive carrying bytes through the existing bounded cache.
-pub struct Svg {
-    bytes: Vec<u8>,
-}
-
-pub fn svg(bytes: impl Into<Vec<u8>>) -> Svg {
-    Svg {
-        bytes: bytes.into(),
-    }
-}
-
-impl Element for Svg {
-    fn lower(self: Box<Self>, _lowering: &mut Lowering<'_>) -> wire::Node {
-        let hash = stable_hash(&self.bytes);
-        wire::Node::Svg {
-            key: format!("svg:{hash}"),
-            inherit_button_ink: false,
-            hash,
-            bytes: Some(self.bytes.clone()),
-            label: None,
-            color: None,
-            hover: None,
-            fit: None,
-            opacity: None,
-            width: None,
-            height: None,
-        }
-    }
-}
-
-impl IntoElement for Svg {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
-    }
-}
-
-/// A host-positioned child primitive.
-pub struct Anchored {
-    child: AnyElement,
-}
-
-pub fn anchored(child: impl IntoElement) -> Anchored {
-    Anchored {
-        child: child.into_any_element(),
-    }
-}
-
-impl Element for Anchored {
-    fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
-        wire::Node::Pin {
-            key: "anchored".into(),
-            x: 0.0,
-            y: 0.0,
-            width: None,
-            height: None,
-            content: Box::new(lowering.lower_element(self.child)),
-        }
-    }
-}
-
-impl IntoElement for Anchored {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
-    }
-}
-
-/// A deferred child primitive. The host controls when it is painted.
-pub struct Deferred {
-    child: AnyElement,
-}
-
-pub fn deferred(child: impl IntoElement) -> Deferred {
-    Deferred {
-        child: child.into_any_element(),
-    }
-}
-
-impl Element for Deferred {
-    fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
-        wire::Node::Lazy {
-            key: "deferred".into(),
-            generation: 0,
-            content: Box::new(lowering.lower_element(self.child)),
-        }
-    }
-}
-
-impl IntoElement for Deferred {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
-    }
-}
-
-/// A bounded host canvas command list.
-pub struct Canvas {
-    commands: Vec<wire::CanvasCommand>,
-}
-
-pub fn canvas(commands: impl Into<Vec<wire::CanvasCommand>>) -> Canvas {
-    Canvas {
-        commands: commands.into(),
-    }
-}
-
-impl Element for Canvas {
-    fn lower(self: Box<Self>, _lowering: &mut Lowering<'_>) -> wire::Node {
-        wire::Node::Canvas {
-            key: "canvas".into(),
-            width: None,
-            height: None,
-            commands: self.commands,
-        }
-    }
-}
-
-impl IntoElement for Canvas {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
-    }
-}
-
 /// A handle for controlling a guest uniform list across frames.
 #[derive(Clone, Default)]
 pub struct UniformListScrollHandle(Rc<RefCell<UniformListScrollState>>);
@@ -859,21 +696,9 @@ impl IntoElement for UniformList {
     }
 }
 
-fn stable_hash(bytes: &[u8]) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::hash::DefaultHasher::new();
-    bytes.hash(&mut hasher);
-    hasher.finish()
-}
-
 impl gpui::prelude::FluentBuilder for Div {}
 impl gpui::prelude::FluentBuilder for Input {}
 impl gpui::prelude::FluentBuilder for AnyElement {}
-impl gpui::prelude::FluentBuilder for Img {}
-impl gpui::prelude::FluentBuilder for Svg {}
-impl gpui::prelude::FluentBuilder for Deferred {}
-impl gpui::prelude::FluentBuilder for Anchored {}
-impl gpui::prelude::FluentBuilder for Canvas {}
 impl gpui::prelude::FluentBuilder for UniformList {}
 
 #[cfg(test)]

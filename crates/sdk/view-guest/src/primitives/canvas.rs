@@ -1,4 +1,4 @@
-use crate::{IntoElement, Lowering, wire};
+use crate::{wire, Element, IntoElement, Lowering};
 use gpui::{StyleRefinement, Styled};
 
 /// A bounded declarative host canvas. Native GPUI closures cannot cross the guest ABI.
@@ -20,21 +20,20 @@ impl Styled for Canvas {
     }
 }
 
+impl Element for Canvas {
+    fn lower(self: Box<Self>, _lowering: &mut Lowering<'_>) -> wire::Node {
+        let this = *self;
+        wire::Node::Canvas {
+            style: this.style,
+            commands: this.commands,
+        }
+    }
+}
+
 impl IntoElement for Canvas {
     type Element = Self;
-
     fn into_element(self) -> Self {
         self
-    }
-
-    fn into_node(self, _lowering: &mut Lowering<'_>) -> wire::Node {
-        wire::Node::Canvas {
-            key: "canvas".into(),
-            width: None,
-            height: None,
-            style: self.style,
-            commands: self.commands,
-        }
     }
 }
 

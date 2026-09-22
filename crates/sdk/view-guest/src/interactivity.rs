@@ -1,5 +1,5 @@
 //! GPUI-shaped interaction recipes, lowered into driver-owned frame routes.
-use crate::{AnyElement, App, Div, Element, IntoElement, Lowering, ParentElement, Window, wire};
+use crate::{wire, AnyElement, App, Div, Element, IntoElement, Lowering, ParentElement, Window};
 use gpui::{ClickEvent, ElementId, SharedString, StyleRefinement, Styled};
 
 pub(crate) type ClickListener = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
