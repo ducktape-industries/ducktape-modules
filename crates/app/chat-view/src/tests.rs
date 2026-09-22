@@ -185,9 +185,17 @@ fn the_room_shows_its_rows_intro_and_actions() {
             .is_some(),
         "the host focus target must exist in the open menu"
     );
-    assert!(cx.host().asked::<ducktape_view_guest::caps::Widget>().iter().any(|command| {
-        matches!(command, wire::WidgetCommand::Focus { target } if target == &ui::menu::focus_key(Pane::Timeline, Mode::Reactions))
-    }));
+    assert!(
+        cx.host()
+            .asked::<ducktape_view_guest::caps::Widget>()
+            .iter()
+            .any(|command| {
+                matches!(command, wire::WidgetCommand::Focus { target }
+                if target == &vec![wire::ElementIdWire::Name(
+                    ui::menu::focus_key(Pane::Timeline, Mode::Reactions).into()
+                )])
+            })
+    );
     view.read(|chat| {
         assert!(
             chat.menu
@@ -434,7 +442,10 @@ fn attachment_preview_keeps_host_surfaces_and_markdown_link_events() {
     );
     assert_eq!(
         cx.host().opened_links(),
-        vec!["duck://testnet-0a1b2c3d/chat/general", "https://example.test"],
+        vec![
+            "duck://testnet-0a1b2c3d/chat/general",
+            "https://example.test"
+        ],
         "choosing the room informs the host before the preview link opens"
     );
 }

@@ -166,7 +166,7 @@ mod tests {
 
     fn area(key: &str, role: Option<Role>, on_press: Option<u32>, content: Node) -> Node {
         Node::MouseArea {
-            key: key.into(),
+            id: ElementIdWire::Name(key.into()),
             role,
             label: None,
             expanded: None,
@@ -197,7 +197,7 @@ mod tests {
                 text("App/dup", "a"),
                 text("App/dup", "b"),
                 Node::Overlay {
-                    key: "App/ask".into(),
+                    id: ElementIdWire::Name("ask".into()),
                     label: Some(String::new()),
                     padding: 0.0,
                     backdrop: crate::Rgba([0.0; 4]),

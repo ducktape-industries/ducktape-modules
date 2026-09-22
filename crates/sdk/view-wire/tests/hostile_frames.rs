@@ -532,7 +532,7 @@ fn gen_svg(rng: &mut Rng) -> Node {
         });
         if rng.next_bool() {
             return Node::ImageViewer {
-                key: gen_key(rng),
+                id: ElementIdWire::Name(gen_key(rng).into()),
                 hash: rng.next_u64(),
                 data,
                 label: rng.next_bool().then(|| gen_string(rng)),
@@ -607,7 +607,7 @@ fn gen_radio(rng: &mut Rng) -> Node {
 
 fn gen_slider(rng: &mut Rng) -> Node {
     Node::Slider {
-        key: gen_key(rng),
+        id: ElementIdWire::Name(gen_key(rng).into()),
         label: rng.next_bool().then(|| gen_string(rng)),
         value: gen_f32(rng),
         min: gen_f32(rng),
@@ -631,7 +631,7 @@ fn gen_pick_list(rng: &mut Rng) -> Node {
     };
     Node::PickList {
         settings: Default::default(),
-        key: gen_key(rng),
+        id: ElementIdWire::Name(gen_key(rng).into()),
         options: (0..count).map(|_| gen_string(rng)).collect(),
         selected: rng
             .next_bool()
@@ -665,7 +665,7 @@ fn gen_progress(rng: &mut Rng) -> Node {
 /// pulling into range.
 fn gen_surface(rng: &mut Rng) -> Node {
     Node::Surface {
-        key: gen_key(rng),
+        id: ElementIdWire::Name(gen_key(rng).into()),
         name: gen_string(rng),
         args: vec![
             view_wire::SurfaceValue::Str(gen_string(rng)),
@@ -722,7 +722,7 @@ fn gen_list(rng: &mut Rng, children: Vec<Node>) -> Node {
         }
         1 => {
             return Node::Overlay {
-                key: gen_key(rng),
+                id: ElementIdWire::Name(gen_key(rng).into()),
                 label: rng.next_bool().then(|| gen_string(rng)),
                 padding: gen_f32(rng),
                 backdrop: Rgba([gen_f32(rng), gen_f32(rng), gen_f32(rng), gen_f32(rng)]),
@@ -749,7 +749,7 @@ fn gen_tree(rng: &mut Rng, depth: usize, width: usize) -> Node {
         }
         node = match rng.next_range(8) {
             7 => Node::ResizeHandle {
-                key: gen_key(rng),
+                id: ElementIdWire::Name(gen_key(rng).into()),
                 on_press: rng.next_bool().then(|| rng.next_u64() as u32),
                 on_release: rng.next_bool().then(|| rng.next_u64() as u32),
                 on_drag: rng.next_bool().then(|| rng.next_u64() as u32),
@@ -779,7 +779,7 @@ fn gen_tree(rng: &mut Rng, depth: usize, width: usize) -> Node {
                 children: vec![node, gen_leaf(rng)],
             },
             4 => Node::Sensor {
-                key: gen_key(rng),
+                id: ElementIdWire::Name(gen_key(rng).into()),
                 reset: None,
                 on_show: rng.next_bool().then(|| rng.next_u64() as u32),
                 on_resize: rng.next_bool().then(|| rng.next_u64() as u32),
@@ -789,7 +789,7 @@ fn gen_tree(rng: &mut Rng, depth: usize, width: usize) -> Node {
                 child: Box::new(node),
             },
             5 => Node::MouseArea {
-                key: gen_key(rng),
+                id: ElementIdWire::Name(gen_key(rng).into()),
                 role: gen_opt_role(rng),
                 label: rng.next_bool().then(|| gen_string(rng)),
                 expanded: rng.next_bool().then(|| rng.next_bool()),
@@ -814,7 +814,7 @@ fn gen_tree(rng: &mut Rng, depth: usize, width: usize) -> Node {
             2 => Node::Scroll {
                 on_scroll: Some(7),
                 virtual_rows: rng.next_bool(),
-                key: gen_key(rng),
+                id: ElementIdWire::Name(gen_key(rng).into()),
                 direction: *rng.choose(&[
                     ScrollDirection::Vertical,
                     ScrollDirection::Horizontal,
@@ -2353,7 +2353,7 @@ fn sanitize_is_idempotent() {
 fn resize_handle_round_trip_retains_routes_and_checks_its_child() {
     let mut frame = gen_frame_with(&mut Rng::new(17), 0, 0);
     frame.root = Some(Node::ResizeHandle {
-        key: "divider".into(),
+        id: ElementIdWire::Name("divider".into()),
         on_press: Some(1),
         on_release: Some(2),
         on_drag: Some(u32::MAX),

@@ -237,7 +237,7 @@ pub enum Node {
     },
     /// Supplies widget-local dimensions to descendant container conditions.
     Responsive {
-        key: String,
+        id: ElementIdWire,
         #[serde(deserialize_with = "decode_child")]
         content: Box<Node>,
     },
@@ -282,7 +282,7 @@ pub enum Node {
     Scroll {
         on_scroll: Option<u32>,
         virtual_rows: bool,
-        key: String,
+        id: ElementIdWire,
         direction: ScrollDirection,
         width: Option<Length>,
         height: Option<Length>,
@@ -327,7 +327,7 @@ pub enum Node {
     },
     /// A native zoom/pan viewer sharing the raster picture cache and budgets.
     ImageViewer {
-        key: String,
+        id: ElementIdWire,
         hash: u64,
         data: Option<ImageData>,
         label: Option<String>,
@@ -434,7 +434,7 @@ pub enum Node {
         style: RadioStyle,
     },
     Slider {
-        key: String,
+        id: ElementIdWire,
         /// The accessible name.
         label: Option<String>,
         value: f32,
@@ -449,7 +449,7 @@ pub enum Node {
         style: SliderStyle,
     },
     ComboBox {
-        key: String,
+        id: ElementIdWire,
         state_key: String,
         options: Vec<String>,
         selected: Option<u32>,
@@ -463,7 +463,7 @@ pub enum Node {
     },
     PickList {
         settings: Box<PickOptions>,
-        key: String,
+        id: ElementIdWire,
         /// Every option as the guest shows it; the host answers with an
         /// index into this list.
         options: Vec<String>,
@@ -517,7 +517,7 @@ pub enum Node {
     /// a visible placeholder. It takes the size its parent gives it: wrap it
     /// in a sized [`Node::Container`] to set one.
     Surface {
-        key: String,
+        id: ElementIdWire,
         name: String,
         args: Vec<SurfaceValue>,
         on_event: Option<u32>,
@@ -566,24 +566,24 @@ impl Node {
             | Self::ResizeHandle { id, .. }
             | Self::MouseArea { id, .. }
             | Self::Sensor { id, .. }
-            | Self::Overlay { id, .. } => id.name(),
+            | Self::Responsive { id, .. }
+            | Self::Scroll { id, .. }
+            | Self::Overlay { id, .. }
+            | Self::ImageViewer { id, .. }
+            | Self::Slider { id, .. }
+            | Self::PickList { id, .. }
+            | Self::ComboBox { id, .. }
+            | Self::Surface { id, .. } => id.name(),
             Self::Float { key, .. }
-            | Self::Responsive { key, .. }
             | Self::Lazy { key, .. }
             | Self::When { key, .. }
-            | Self::Scroll { key, .. }
             | Self::Qr { key, .. }
-            | Self::ImageViewer { key, .. }
             | Self::Button { key, .. }
             | Self::Rule { key, .. }
             | Self::Toggle { key, .. }
             | Self::Radio { key, .. }
-            | Self::Slider { key, .. }
-            | Self::PickList { key, .. }
-            | Self::ComboBox { key, .. }
             | Self::Progress { key, .. }
-            | Self::Tooltip { key, .. }
-            | Self::Surface { key, .. } => Some(key),
+            | Self::Tooltip { key, .. } => Some(key),
             Self::List { .. }
             | Self::Space { .. }
             | Self::Anchored { .. }
@@ -606,24 +606,24 @@ impl Node {
             | Self::ResizeHandle { id, .. }
             | Self::MouseArea { id, .. }
             | Self::Sensor { id, .. }
-            | Self::Overlay { id, .. } => Some(IdentityKeyRef::Element(id)),
+            | Self::Responsive { id, .. }
+            | Self::Scroll { id, .. }
+            | Self::Overlay { id, .. }
+            | Self::ImageViewer { id, .. }
+            | Self::Slider { id, .. }
+            | Self::PickList { id, .. }
+            | Self::ComboBox { id, .. }
+            | Self::Surface { id, .. } => Some(IdentityKeyRef::Element(id)),
             Self::Float { key, .. }
-            | Self::Responsive { key, .. }
             | Self::Lazy { key, .. }
             | Self::When { key, .. }
-            | Self::Scroll { key, .. }
             | Self::Qr { key, .. }
-            | Self::ImageViewer { key, .. }
             | Self::Button { key, .. }
             | Self::Rule { key, .. }
             | Self::Toggle { key, .. }
             | Self::Radio { key, .. }
-            | Self::Slider { key, .. }
-            | Self::PickList { key, .. }
-            | Self::ComboBox { key, .. }
             | Self::Progress { key, .. }
-            | Self::Tooltip { key, .. }
-            | Self::Surface { key, .. } => Some(IdentityKeyRef::Legacy(key)),
+            | Self::Tooltip { key, .. } => Some(IdentityKeyRef::Legacy(key)),
             Self::List { .. }
             | Self::Space { .. }
             | Self::Anchored { .. }

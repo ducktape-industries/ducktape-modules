@@ -49,13 +49,10 @@ impl Element for Surface {
     }
 
     fn lower(self: Box<Self>, lowering: &mut Lowering<'_>) -> wire::Node {
-        let key = wire::ElementIdWire::from_gpui(self.id)
-            .expect("element ID must be portable across the view boundary")
-            .name()
-            .expect("surface IDs require names until retained nodes carry ElementIdWire")
-            .to_owned();
+        let id = wire::ElementIdWire::from_gpui(self.id)
+            .expect("element ID must be portable across the view boundary");
         wire::Node::Surface {
-            key,
+            id,
             name: self.name,
             args: self.args,
             on_event: self.on_event.map(|listener| lowering.route(listener)),

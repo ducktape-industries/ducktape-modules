@@ -329,8 +329,8 @@ fn control<'a>(frame: &'a Frame, name: &str) -> Option<&'a Node> {
         Node::Toggle { key, label, .. } | Node::Radio { key, label, .. } => {
             key == name || label == name
         }
-        Node::Slider { key, .. } | Node::PickList { key, .. } | Node::ComboBox { key, .. } => {
-            key == name
+        Node::Slider { id, .. } | Node::PickList { id, .. } | Node::ComboBox { id, .. } => {
+            id.name() == Some(name)
         }
         _ => false,
     })
@@ -463,7 +463,7 @@ fn mouse_area<'a>(frame: &'a Frame, name: &str) -> &'a Node {
     let found = frame.root.as_ref().and_then(|root| {
         find_by(
             root,
-            &|node| matches!(node, Node::MouseArea { key, .. } if key == name),
+            &|node| matches!(node, Node::MouseArea { id, .. } if id.name() == Some(name)),
         )
     });
     match found {

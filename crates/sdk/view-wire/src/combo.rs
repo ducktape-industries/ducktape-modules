@@ -66,7 +66,7 @@ mod tests {
     #[test]
     fn combo_hostile_options_indices_and_styles_are_bounded() {
         let node = Node::ComboBox {
-            key: "combo".into(),
+            id: ElementIdWire::Name("combo".into()),
             state_key: "state".into(),
             options: (0..MAX_OPTIONS + 2).map(|i| i.to_string()).collect(),
             selected: Some(MAX_OPTIONS as u32),

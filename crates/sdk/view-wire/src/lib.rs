@@ -1062,6 +1062,7 @@ fn sanitize_tree_with(
         &mut identity_scopes,
         &mut authored_path,
     )?;
+
     let (after_documents, after) = text_amounts(root)?;
     if after_documents != documents {
         return Err("frame budget would remove an editor document projection");
@@ -1331,7 +1332,8 @@ fn sanitize_node(
             }
         }
         Node::ResizeHandle { id, .. } => id.validate_host()?,
-        Node::Responsive { key, .. } | Node::Lazy { key, .. } => claim(key, taken),
+        Node::Responsive { id, .. } => id.validate_host()?,
+        Node::Lazy { key, .. } => claim(key, taken),
         }
         Node::Float {
             key,
@@ -1415,7 +1417,7 @@ fn sanitize_node(
             condition.sanitize();
         }
         Node::Scroll {
-            key,
+            id,
             bar_width,
             bar_margin,
             scroller_width,
@@ -1424,7 +1426,7 @@ fn sanitize_node(
             border,
             ..
         } => {
-            claim(key, taken);
+            id.validate_host()?;
             for number in [bar_width, bar_margin, scroller_width, bar_spacing] {
                 bound_optional(number);
             }
@@ -1467,13 +1469,13 @@ fn sanitize_node(
             }
         }
         Node::ImageViewer {
-            key,
+            id,
             data,
             label,
             options,
             ..
         } => {
-            claim(key, taken);
+            id.validate_host()?;
             ImageData::sanitize(data, budgets);
             if let Some(label) = label {
                 truncate_string(label);
@@ -1666,7 +1668,7 @@ fn sanitize_node(
             }
         }
         Node::Slider {
-            key,
+            id,
             label,
             value,
             min,
@@ -1675,7 +1677,7 @@ fn sanitize_node(
             style,
             ..
         } => {
-            claim(key, taken);
+            id.validate_host()?;
             if let Some(label) = label {
                 truncate_string(label);
             }
@@ -1704,7 +1706,7 @@ fn sanitize_node(
             }
         }
         Node::ComboBox {
-            key,
+            id,
             state_key,
             options,
             selected,
@@ -1713,7 +1715,7 @@ fn sanitize_node(
             settings,
             ..
         } => {
-            claim(key, taken);
+            id.validate_host()?;
             spend_text(state_key, budgets);
             settings.sanitize(budgets);
             options.truncate(MAX_OPTIONS);
@@ -1730,7 +1732,7 @@ fn sanitize_node(
         }
         Node::PickList {
             settings,
-            key,
+            id,
             options,
             selected,
             placeholder,
@@ -1738,7 +1740,7 @@ fn sanitize_node(
             style,
             ..
         } => {
-            claim(key, taken);
+            id.validate_host()?;
             if let Some(label) = label {
                 truncate_string(label);
             }
@@ -1796,9 +1798,9 @@ fn sanitize_node(
             bound_border(border);
         }
         Node::Surface {
-            key, name, args, ..
+            id, name, args, ..
         } => {
-            claim(key, taken);
+            id.validate_host()?;
             spend_text(name, budgets);
             args.truncate(MAX_SURFACE_ARGS);
             let mut kept = 0;
@@ -2257,7 +2259,7 @@ mod tests {
     fn text_passed_to_a_host_surface_reports_actual_loss() {
         let mut frame = Frame {
             root: Some(Node::Surface {
-                key: "preview".into(),
+                id: ElementIdWire::Name("preview".into()),
                 name: "forge_code".into(),
                 args: vec![SurfaceValue::Record {
                     name: "Preview".into(),
@@ -2412,7 +2414,7 @@ mod tests {
             root: Some(column(
                 (0..20)
                     .map(|i| Node::Surface {
-                        key: format!("surface-{i}"),
+                        id: ElementIdWire::Name(format!("surface-{i}").into()),
                         name: "many".into(),
                         args: vec![SurfaceValue::Unit; MAX_SURFACE_ARGS],
                         on_event: None,
@@ -2437,7 +2439,7 @@ mod tests {
             V::Str("link".into()),
         ];
         let node = Node::Surface {
-            key: "view".into(),
+            id: ElementIdWire::Name("view".into()),
             name: "preview".into(),
             args: values.clone(),
             on_event: Some(4),
@@ -2457,7 +2459,7 @@ mod tests {
         apply(&mut applied, patches).unwrap();
         assert_eq!(applied, changed);
         let Node::Surface { name, args, .. } = sanitized_root(Node::Surface {
-            key: "view".into(),
+            id: ElementIdWire::Name("view".into()),
             name: "preview".into(),
             args: std::iter::once(V::F64(f64::NAN))
                 .chain(std::iter::repeat_n(
@@ -3131,7 +3133,7 @@ mod tests {
 
     fn mouse_area(key: &str, on_move: Option<u32>, content: Node) -> Node {
         Node::MouseArea {
-            key: key.into(),
+            id: ElementIdWire::Name(key.into()),
             role: None,
             label: None,
             expanded: None,
@@ -3154,7 +3156,7 @@ mod tests {
     }
 
     /// A mouse area recurses like a container, is diffed as a node with
-    /// one fixed child, and claims its key like every other node.
+    /// one fixed child, and keeps typed identity exact.
     #[test]
     fn a_mouse_area_round_trips_diffs_by_props_and_claims_its_key() {
         let frame = Frame {
@@ -3175,13 +3177,18 @@ mod tests {
         apply(&mut old, patches).unwrap();
         assert_eq!(old, new);
 
-        // Two areas on one key: the second is moved off it, its child kept.
-        let children = sanitized_children(column(vec![
+        // Typed duplicates are rejected rather than renamed into a different target.
+        let mut duplicate = Frame {
+            root: Some(column(vec![
             mouse_area("App/m", None, text("a")),
             mouse_area("App/m", None, text("b")),
-        ]));
-        assert_eq!(children[1].key(), Some("App/m#2"));
-        assert_eq!(children[1].children().len(), 1);
+            ])),
+            ..Frame::default()
+        };
+        assert_eq!(
+            sanitize(&mut duplicate).unwrap_err(),
+            "duplicate typed element identity among siblings"
+        );
     }
 
     #[test]
@@ -3195,7 +3202,7 @@ mod tests {
             root: Some(column(vec![
                 notes,
                 Node::Slider {
-                    key: "App/s".into(),
+                    id: ElementIdWire::Name("App/s".into()),
                     label: Some("Volume".into()),
                     value: 0.5,
                     min: 0.0,
@@ -3209,7 +3216,7 @@ mod tests {
                     style: SliderStyle::default(),
                 },
                 Node::ComboBox {
-                    key: "App/c".into(),
+                    id: ElementIdWire::Name("App/c".into()),
                     state_key: "App/c".into(),
                     options: vec!["Serif".into()],
                     selected: None,
@@ -3222,7 +3229,7 @@ mod tests {
                 },
                 Node::PickList {
                     settings: Default::default(),
-                    key: "App/p".into(),
+                    id: ElementIdWire::Name("App/p".into()),
                     options: vec!["Dark".into()],
                     selected: Some(0),
                     placeholder: None,
@@ -3315,7 +3322,7 @@ mod tests {
     fn an_overlays_label_round_trips() {
         let frame = Frame {
             root: Some(Node::Overlay {
-                key: "App/ask".into(),
+                id: ElementIdWire::Name("ask".into()),
                 label: Some("Delete page".into()),
                 padding: 16.0,
                 backdrop: Rgba([0.0, 0.0, 0.0, 0.4]),
@@ -3521,7 +3528,7 @@ mod tests {
     #[test]
     fn sensor_reset_values_share_the_frame_budget() {
         let sensor = |key: &str| Node::Sensor {
-            key: key.into(),
+            id: ElementIdWire::Name(key.into()),
             reset: Some(SurfaceValue::List(vec![SurfaceValue::Unit; 3000])),
             on_show: Some(3),
             on_resize: None,
@@ -3541,7 +3548,7 @@ mod tests {
         };
         for (index, node) in children.iter().enumerate() {
             let Node::Sensor {
-                key,
+                id,
                 reset,
                 on_show,
                 child,
@@ -3555,7 +3562,7 @@ mod tests {
                 index == 0,
                 "individually valid reset values must share one frame budget"
             );
-            assert_eq!(key, if index == 0 { "first" } else { "second" });
+            assert_eq!(id.name(), Some(if index == 0 { "first" } else { "second" }));
             assert_eq!(*on_show, Some(3));
             assert!(matches!(&**child, Node::Text { content, .. } if content == "child"));
         }
@@ -3568,7 +3575,7 @@ mod tests {
     #[test]
     fn a_sensor_is_pulled_into_range_and_keeps_its_child() {
         let root = sanitized_root(Node::Sensor {
-            key: "App/watch".into(),
+            id: ElementIdWire::Name("watch".into()),
             reset: None,
             on_show: Some(0),
             on_resize: Some(0),
@@ -3600,7 +3607,7 @@ mod tests {
         let children = sanitized_children(column(vec![
             Node::PickList {
                 settings: Default::default(),
-                key: "App/pick".into(),
+                id: ElementIdWire::Name("App/pick".into()),
                 options: (0..MAX_OPTIONS + 3).map(|i| i.to_string()).collect(),
                 selected: Some((MAX_OPTIONS + 1) as u32),
                 placeholder: Some("é".repeat(MAX_STRING_BYTES)),
@@ -3610,7 +3617,7 @@ mod tests {
                 style: PickListStyle::default(),
             },
             Node::Slider {
-                key: "App/slide".into(),
+                id: ElementIdWire::Name("App/slide".into()),
                 label: None,
                 value: f32::NAN,
                 min: f32::NEG_INFINITY,
@@ -3664,7 +3671,7 @@ mod tests {
         let Node::Toggle { key, label, .. } = &children[2] else {
             panic!("{:?}", children[2])
         };
-        assert_eq!(key, "App/pick#2");
+        assert_eq!(key, "App/pick");
         assert!(label.len() <= MAX_STRING_BYTES);
     }
 

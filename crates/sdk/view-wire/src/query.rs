@@ -205,11 +205,20 @@ mod tests {
             ],
         };
         let containers = HashMap::from([
-            ("outer".into(), [800.0, 600.0]),
-            ("inner".into(), [300.0, 200.0]),
+            (
+                (vec![crate::ElementIdWire::Name("outer".into())]),
+                [800.0, 600.0],
+            ),
+            (
+                (vec![crate::ElementIdWire::Name("inner".into())]),
+                [300.0, 200.0],
+            ),
         ]);
         assert!(query.matches(&containers));
-        assert!(!query.matches(&HashMap::from([("inner".into(), [300.0, 200.0])])));
+        assert!(!query.matches(&HashMap::from([(
+            vec![crate::ElementIdWire::Name("inner".into())],
+            [300.0, 200.0],
+        )])));
     }
     #[test]
     fn frame_sanitization_discards_nonfinite_conditions() {
