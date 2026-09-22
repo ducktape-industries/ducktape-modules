@@ -4,6 +4,8 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
 
+type ClickRoute = Rc<dyn Fn(&gpui::ClickEvent, &mut crate::Window, &mut crate::App)>;
+
 #[derive(Default)]
 struct Tables {
     editor_responses: Vec<crate::wire::EditorResponse>,
@@ -20,7 +22,7 @@ struct Tables {
     event_interest: crate::wire::events::Interest,
     messages: Vec<Rc<dyn Any>>,
     handlers: Vec<Rc<dyn Any>>,
-    clicks: Vec<Rc<dyn Fn(&gpui::ClickEvent, &mut crate::Window, &mut crate::App)>>,
+    clicks: Vec<ClickRoute>,
     pictures: HashSet<(bool, u64)>,
 }
 
@@ -161,7 +163,10 @@ pub(crate) fn editor_response(context: &Context, response: crate::wire::EditorRe
 }
 /// A native commit may have no decision, but an outstanding decision must
 /// match its complete attempt/version before any state or route is accepted.
-pub(crate) fn editor_request_current(context: &Context, id: &crate::wire::EditorTransactionId) -> bool {
+pub(crate) fn editor_request_current(
+    context: &Context,
+    id: &crate::wire::EditorTransactionId,
+) -> bool {
     context.0.borrow().editor_pending.iter().all(|pending| {
         pending.instance != id.instance
             || pending.document != id.document
@@ -169,7 +174,10 @@ pub(crate) fn editor_request_current(context: &Context, id: &crate::wire::Editor
             || pending.attempt <= id.attempt
     })
 }
-pub(crate) fn editor_matches_pending(context: &Context, id: &crate::wire::EditorTransactionId) -> bool {
+pub(crate) fn editor_matches_pending(
+    context: &Context,
+    id: &crate::wire::EditorTransactionId,
+) -> bool {
     context.0.borrow().editor_pending.iter().all(|pending| {
         pending.instance != id.instance
             || pending.document != id.document
@@ -414,29 +422,29 @@ mod tests {
     #[test]
     fn nested_contexts_restore_typed_routes_and_picture_history() {
         let first = Context::default();
-        let _first = first.enter();
-        let first_route = handler::<String, String>(Box::new(|text| Some(format!("first:{text}"))));
-        assert!(picture(b"svg").1.is_some());
+        let first_route =
+            handler::<String, String>(&first, Box::new(|text| Some(format!("first:{text}"))));
+        assert!(picture(&first, b"svg").1.is_some());
         {
             let second = Context::default();
-            let _second = second.enter();
-            let route = handler::<String, String>(Box::new(|text| Some(format!("second:{text}"))));
+            let route =
+                handler::<String, String>(&second, Box::new(|text| Some(format!("second:{text}"))));
             assert_eq!(route, 0, "each driver starts its own typed route table");
             assert_eq!(
-                run_handler::<String, String>(route, "x".into()).as_deref(),
+                run_handler::<String, String>(&second, route, "x".into()).as_deref(),
                 Some("second:x")
             );
             assert!(
-                picture(b"svg").1.is_some(),
+                picture(&second, b"svg").1.is_some(),
                 "a new host needs its own picture bytes"
             );
         }
         assert_eq!(
-            run_handler::<String, String>(first_route, "x".into()).as_deref(),
+            run_handler::<String, String>(&first, first_route, "x".into()).as_deref(),
             Some("first:x")
         );
         assert!(
-            picture(b"svg").1.is_none(),
+            picture(&first, b"svg").1.is_none(),
             "returning to the first driver preserves its picture history"
         );
     }
@@ -452,32 +460,35 @@ mod response_budget_tests {
     #[test]
     fn independent_large_responses_cross_decodable_frames_without_losing_identity() {
         let context = Context::default();
-        let _entered = context.enter();
         for sequence in 1..=2 {
-            editor_response(EditorResponse {
-                id: EditorTransactionId {
-                    instance: 1,
-                    document: format!("app:doc{sequence}"),
-                    reset: 0,
-                    sequence,
-                    attempt: 1,
-                    text_revision: 0,
-                    revision: 0,
+            editor_response(
+                &context,
+                EditorResponse {
+                    id: EditorTransactionId {
+                        instance: 1,
+                        document: format!("app:doc{sequence}"),
+                        reset: 0,
+                        sequence,
+                        attempt: 1,
+                        text_revision: 0,
+                        revision: 0,
+                    },
+                    decision: EditorDecision::Apply {
+                        patches: vec![EditorPatch {
+                            start_byte: 0,
+                            end_byte: 0,
+                            replacement: "x"
+                                .repeat(wire::editor_transaction::MAX_EDITOR_PATCH_BYTES),
+                        }],
+                        cursor: Default::default(),
+                        history: EditorHistoryEffect::NewGroup,
+                    },
                 },
-                decision: EditorDecision::Apply {
-                    patches: vec![EditorPatch {
-                        start_byte: 0,
-                        end_byte: 0,
-                        replacement: "x".repeat(wire::editor_transaction::MAX_EDITOR_PATCH_BYTES),
-                    }],
-                    cursor: Default::default(),
-                    history: EditorHistoryEffect::NewGroup,
-                },
-            });
+            );
         }
         for sequence in 1..=2 {
             let frame = wire::Frame {
-                editor_decisions: take_editor_responses(),
+                editor_decisions: take_editor_responses(&context),
                 ..Default::default()
             };
             assert_eq!(
@@ -488,15 +499,15 @@ mod response_budget_tests {
             assert_eq!(frame.editor_decisions[0].id.sequence, sequence);
             assert!(wire::decode::<wire::Frame>(&wire::encode(&frame)).is_ok());
             assert_eq!(
-                tables().borrow().editor_responses.len(),
+                context.0.borrow().editor_responses.len(),
                 (2 - sequence) as usize
             );
             assert!(
-                editor_pending(),
+                editor_pending(&context),
                 "sent responses remain outstanding until their commits"
             );
         }
-        assert!(take_editor_responses().is_empty());
+        assert!(take_editor_responses(&context).is_empty());
     }
 }
 

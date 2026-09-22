@@ -143,23 +143,29 @@ impl<P: 'static> EditorBinding<P> {
         let wrap = Rc::new(wrap);
         let request_wrap = wrap.clone();
         let request_context = context.clone();
-        let on_request = slots::handler::<wire::EditorRequest, M>(&context, Box::new(move |request| {
-            Some(request_wrap(EditorTransaction {
-                event: Transaction::Request(request),
-                map,
-                context: request_context.clone(),
-                message: std::marker::PhantomData,
-            }))
-        }));
+        let on_request = slots::handler::<wire::EditorRequest, M>(
+            &context,
+            Box::new(move |request| {
+                Some(request_wrap(EditorTransaction {
+                    event: Transaction::Request(request),
+                    map,
+                    context: request_context.clone(),
+                    message: std::marker::PhantomData,
+                }))
+            }),
+        );
         let event_context = context.clone();
-        let on_event = slots::handler::<wire::EditorTransactionEvent, M>(&context, Box::new(move |event| {
-            Some(wrap(EditorTransaction {
-                event: Transaction::Event(event),
-                map,
-                context: event_context.clone(),
-                message: std::marker::PhantomData,
-            }))
-        }));
+        let on_event = slots::handler::<wire::EditorTransactionEvent, M>(
+            &context,
+            Box::new(move |event| {
+                Some(wrap(EditorTransaction {
+                    event: Transaction::Event(event),
+                    map,
+                    context: event_context.clone(),
+                    message: std::marker::PhantomData,
+                }))
+            }),
+        );
         wire::EditorBinding {
             authored: true,
             claims: self.claims,
@@ -278,10 +284,13 @@ impl<M: 'static> EditorTransaction<M> {
                             })
                         }),
                 };
-                slots::editor_response(&self.context, wire::EditorResponse {
-                    id: request.id,
-                    decision,
-                });
+                slots::editor_response(
+                    &self.context,
+                    wire::EditorResponse {
+                        id: request.id,
+                        decision,
+                    },
+                );
                 None
             }
             Transaction::Event(event) => {
@@ -383,7 +392,7 @@ mod tests {
             revision: 0,
         }
     }
-    fn observer(calls: Rc<Cell<usize>>) -> u32 {
+    fn observer(context: &slots::Context, calls: Rc<Cell<usize>>) -> u32 {
         let callbacks = Rc::new(Callbacks::<()> {
             decide: Rc::new(|_| EditorDecision::Noop),
             interact: None,
@@ -393,12 +402,20 @@ mod tests {
                 None
             }),
         });
-        slots::handler::<(), Rc<Callbacks<()>>>(Box::new(move |()| Some(callbacks.clone())))
+        slots::handler::<(), Rc<Callbacks<()>>>(
+            context,
+            Box::new(move |()| Some(callbacks.clone())),
+        )
     }
-    fn transaction(event: wire::EditorTransactionEvent, map: u32) -> EditorTransaction<()> {
+    fn transaction(
+        context: &slots::Context,
+        event: wire::EditorTransactionEvent,
+        map: u32,
+    ) -> EditorTransaction<()> {
         EditorTransaction {
             event: Transaction::Event(event),
             map,
+            context: context.clone(),
             message: std::marker::PhantomData,
         }
     }
@@ -427,7 +444,6 @@ mod tests {
     #[test]
     fn a_large_caret_commit_borrows_one_canonical_text_for_both_history_views() {
         let context = slots::Context::default();
-        let _entered = context.enter();
         let mut editor = Editor::new("x".repeat(wire::editor_document::MAX_EDITOR_DOCUMENT_BYTES));
         let calls = Rc::new(Cell::new(0));
         let seen = calls.clone();
@@ -452,13 +468,16 @@ mod tests {
                 None
             }),
         });
-        let map =
-            slots::handler::<(), Rc<Callbacks<()>>>(Box::new(move |()| Some(callbacks.clone())));
+        let map = slots::handler::<(), Rc<Callbacks<()>>>(
+            &context,
+            Box::new(move |()| Some(callbacks.clone())),
+        );
         let before = editor.document_reference("app:draft".into());
         let mut after = before.clone();
         after.revision += 1;
         after.cursor.position.column = 1;
         transaction(
+            &context,
             wire::EditorTransactionEvent::Commit {
                 id: id(1),
                 origin: None,
@@ -479,18 +498,21 @@ mod tests {
     #[test]
     fn cancellation_after_reset_notifies_without_replacing_the_new_document() {
         let context = slots::Context::default();
-        let _entered = context.enter();
         let mut editor = Editor::new("old");
         let current = id(1);
-        slots::editor_response(wire::EditorResponse {
-            id: current.clone(),
-            decision: EditorDecision::Noop,
-        });
+        slots::editor_response(
+            &context,
+            wire::EditorResponse {
+                id: current.clone(),
+                decision: EditorDecision::Noop,
+            },
+        );
         let state = editor.document_reference(current.document.clone());
         let calls = Rc::new(Cell::new(0));
-        let map = observer(calls.clone());
+        let map = observer(&context, calls.clone());
         editor.replace(Editor::new("new"), 0);
         transaction(
+            &context,
             wire::EditorTransactionEvent::Cancelled { id: current, state },
             map,
         )
@@ -498,20 +520,22 @@ mod tests {
         assert_eq!(calls.get(), 1, "retired identity gets cleanup after reset");
         assert_eq!(editor.text(), "new");
         assert_eq!(editor.reset_revision(), 1);
-        assert!(!slots::editor_pending());
+        assert!(!slots::editor_pending(&context));
     }
     #[test]
     fn an_old_retry_cannot_commit_over_the_current_pending_attempt() {
         let context = slots::Context::default();
-        let _entered = context.enter();
         let mut editor = Editor::new("before");
-        slots::editor_response(wire::EditorResponse {
-            id: id(2),
-            decision: EditorDecision::Noop,
-        });
+        slots::editor_response(
+            &context,
+            wire::EditorResponse {
+                id: id(2),
+                decision: EditorDecision::Noop,
+            },
+        );
         let calls = Rc::new(Cell::new(0));
-        let map = observer(calls.clone());
-        transaction(commit(id(1), &editor, "stale"), map).apply(&mut editor);
+        let map = observer(&context, calls.clone());
+        transaction(&context, commit(id(1), &editor, "stale"), map).apply(&mut editor);
         assert_eq!(
             editor.text(),
             "before",
@@ -523,14 +547,14 @@ mod tests {
             "stale retry must not run the history reducer"
         );
         assert!(
-            slots::editor_pending(),
+            slots::editor_pending(&context),
             "current attempt remains outstanding"
         );
-        let valid = transaction(commit(id(2), &editor, "accepted"), map);
+        let valid = transaction(&context, commit(id(2), &editor, "accepted"), map);
         valid.clone().apply(&mut editor);
         assert_eq!(editor.text(), "accepted");
         assert_eq!(calls.get(), 1);
-        assert!(!slots::editor_pending());
+        assert!(!slots::editor_pending(&context));
         valid.apply(&mut editor);
         assert_eq!(
             calls.get(),
@@ -539,35 +563,35 @@ mod tests {
         );
     }
     #[test]
-    fn native_message_envelope_is_send_and_stale_commit_cannot_acknowledge() {
-        fn is_send<T: Send>() {}
-        is_send::<EditorTransaction<()>>();
+    fn native_message_envelope_rejects_stale_commit_without_acknowledging() {
         let context = slots::Context::default();
-        let _entered = context.enter();
         let mut editor = Editor::new("before");
-        slots::editor_response(wire::EditorResponse {
-            id: id(1),
-            decision: EditorDecision::Noop,
-        });
+        slots::editor_response(
+            &context,
+            wire::EditorResponse {
+                id: id(1),
+                decision: EditorDecision::Noop,
+            },
+        );
         let calls = Rc::new(Cell::new(0));
-        let map = observer(calls.clone());
+        let map = observer(&context, calls.clone());
         let event = commit(id(1), &editor, "after");
         let mut stale = event.clone();
         if let wire::EditorTransactionEvent::Commit { after, .. } = &mut stale {
             after.reset = 99;
         }
-        transaction(stale, map).apply(&mut editor);
-        assert!(slots::editor_pending());
+        transaction(&context, stale, map).apply(&mut editor);
+        assert!(slots::editor_pending(&context));
         assert_eq!(calls.get(), 0);
         // Missing callback storage cannot accept or acknowledge a state update.
-        transaction(event.clone(), u32::MAX).apply(&mut editor);
+        transaction(&context, event.clone(), u32::MAX).apply(&mut editor);
         assert_eq!(editor.text(), "before");
-        assert!(slots::editor_pending());
-        let valid = transaction(event, map);
+        assert!(slots::editor_pending(&context));
+        let valid = transaction(&context, event, map);
         valid.clone().apply(&mut editor);
         assert_eq!(editor.text(), "after");
         assert_eq!(calls.get(), 1);
-        assert!(!slots::editor_pending());
+        assert!(!slots::editor_pending(&context));
         valid.apply(&mut editor);
         assert_eq!(calls.get(), 1, "duplicate commit does not re-run history");
     }

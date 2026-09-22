@@ -104,8 +104,10 @@ mod tests {
                 image
             );
         }
-        let mut malicious = 0u32.to_le_bytes().to_vec();
-        malicious.extend_from_slice(&u64::MAX.to_le_bytes());
+        let mut malicious = vec![0x81, 0xa7];
+        malicious.extend_from_slice(b"Encoded");
+        malicious.push(0xdd);
+        malicious.extend_from_slice(&((8u32 << 20) + 1).to_be_bytes());
         let error = crate::decode::<ImageData>(&malicious)
             .unwrap_err()
             .to_string();

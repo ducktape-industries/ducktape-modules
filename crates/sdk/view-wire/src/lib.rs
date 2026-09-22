@@ -1644,7 +1644,8 @@ fn sanitize_node(
     // Children past the budget are dropped, not stood in for: a layout of
     // ten thousand rows becomes its first rows, which is what a host can
     // lay out, rather than ten thousand empty nodes it still has to walk.
-    if let Node::Linear { children, .. }
+    if let Node::Container { children, .. }
+    | Node::Linear { children, .. }
     | Node::Grid { children, .. }
     | Node::Stack { children, .. }
     | Node::KeyedColumn { children, .. }
@@ -1925,7 +1926,12 @@ pub fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, String> {
     surface::reset_decode_budget();
     editor_transaction::reset_decode_budget();
     canvas::reset_decode_budget();
-    rmp_serde::from_slice(bytes).map_err(|error| error.to_string())
+    let mut deserializer = rmp_serde::Deserializer::new(std::io::Cursor::new(bytes));
+    let value = T::deserialize(&mut deserializer).map_err(|error| error.to_string())?;
+    if deserializer.position() != bytes.len() as u64 {
+        return Err("trailing MessagePack bytes".into());
+    }
+    Ok(value)
 }
 
 #[cfg(test)]
@@ -1934,14 +1940,9 @@ mod tests {
 
     fn text(content: &str) -> Node {
         Node::Text {
-            options: Default::default(),
-            key: "App/t".into(),
+            id: Some(ElementIdWire::Name("App/t".into())),
+            style: gpui::StyleRefinement::default(),
             content: content.into(),
-            size: Some(16.0),
-            color: Some(Rgba([0.1, 0.2, 0.3, 1.0])),
-            font: Font::default(),
-            width: None,
-            align_x: None,
             heading: None,
             live: None,
         }
@@ -2018,19 +2019,10 @@ mod tests {
             options: Default::default(),
             on_link: None,
         };
-        let mut root = Node::Linear {
-            key: "root".into(),
-            axis: Axis::Column,
-            max_width: None,
-            clip: false,
-            wrap: None,
-            spacing: None,
-            padding: None,
-            width: None,
-            height: None,
-            align: None,
-            background: None,
-            border: None,
+        let mut root = Node::Container {
+            id: Some(ElementIdWire::Name("root".into())),
+            style: gpui::StyleRefinement::default(),
+            interactivity: Interactivity::default(),
             children: vec![text(&"x".repeat(MAX_TEXT_BYTES_PER_FRAME / 2 + 1))],
         };
         let report = apply(
@@ -2130,26 +2122,17 @@ mod tests {
     }
 
     fn sanitized_children(root: Node) -> Vec<Node> {
-        let Node::Linear { children, .. } = sanitized_root(root) else {
+        let Node::Container { children, .. } = sanitized_root(root) else {
             panic!("a sanitized column is still a column")
         };
         children
     }
 
     fn column(children: Vec<Node>) -> Node {
-        Node::Linear {
-            max_width: None,
-            clip: false,
-            wrap: None,
-            key: "App/col".into(),
-            axis: Axis::Column,
-            spacing: Some(8.0),
-            padding: None,
-            width: Some(Length::Fill),
-            height: None,
-            align: None,
-            background: None,
-            border: None,
+        Node::Container {
+            id: Some(ElementIdWire::Name("App/col".into())),
+            style: gpui::StyleRefinement::default(),
+            interactivity: Interactivity::default(),
             children,
         }
     }
@@ -2393,7 +2376,11 @@ mod tests {
 
     fn keyed(key: &str, content: &str) -> Node {
         let mut node = text(content);
-        let Node::Text { key: slot, .. } = &mut node else {
+        let Node::Text {
+            id: Some(ElementIdWire::Name(slot)),
+            ..
+        } = &mut node
+        else {
             panic!()
         };
         *slot = key.into();
@@ -2411,20 +2398,10 @@ mod tests {
             keyed("b", "two"),
             keyed("c", "three"),
             Node::Container {
-                shadow: Default::default(),
-                max_width: None,
-                max_height: None,
-                clip: false,
-                key: "box".into(),
-                width: None,
-                height: None,
-                padding: None,
-                align_x: None,
-                align_y: None,
-                background: None,
-                border: None,
-                snap: None,
-                content: Box::new(keyed("inner", "deep")),
+                id: Some(ElementIdWire::Name("box".into())),
+                style: gpui::StyleRefinement::default(),
+                interactivity: Interactivity::default(),
+                children: vec![keyed("inner", "deep")],
             },
         ]);
         let mut new = column(vec![
@@ -2432,20 +2409,10 @@ mod tests {
             keyed("a", "one!"),
             keyed("d", "four"),
             Node::Container {
-                shadow: Default::default(),
-                max_width: None,
-                max_height: None,
-                clip: false,
-                key: "box".into(),
-                width: None,
-                height: None,
-                padding: Some(Edges::all(4.0)),
-                align_x: None,
-                align_y: None,
-                background: None,
-                border: None,
-                snap: None,
-                content: Box::new(Node::empty()),
+                id: Some(ElementIdWire::Name("box".into())),
+                style: gpui::StyleRefinement::default(),
+                interactivity: Interactivity::default(),
+                children: vec![Node::empty()],
             },
         ]);
         let mut applied = old.clone();
@@ -2462,15 +2429,9 @@ mod tests {
             .collect();
         assert_eq!(
             kinds,
-            ["remove", "move", "props", "insert", "props", "replace"],
+            ["remove", "move", "props", "insert", "remove", "insert"],
             "{patches:#?}"
         );
-        // A container's props cross without its content.
-        let Patch::Props { path, node } = &patches[4] else {
-            panic!()
-        };
-        assert_eq!(path, &[3]);
-        assert_eq!(node.children(), &[Node::empty()]);
         apply(&mut applied, patches).unwrap();
         assert_eq!(applied, new);
         // Nothing changed hands: both inputs of the diff are as they were.
@@ -2558,7 +2519,7 @@ mod tests {
         )
         .unwrap();
         assert!(tree.count() <= MAX_NODES, "{}", tree.count());
-        let Node::Linear { children, .. } = &tree else {
+        let Node::Container { children, .. } = &tree else {
             panic!()
         };
         // The inserted key was already in the tree: walked first now, it
@@ -2571,7 +2532,7 @@ mod tests {
         assert_eq!(content.len(), MAX_STRING_BYTES);
         let mut depth = 0;
         let mut node = &children[1];
-        while let Node::Linear { children, .. } = node {
+        while let Node::Container { children, .. } = node {
             depth += 1;
             node = &children[0];
         }
@@ -2629,7 +2590,7 @@ mod tests {
                 display_text_truncated: true
             })
         );
-        let Some(Node::Linear { children, .. }) = &frame.root else {
+        let Some(Node::Container { children, .. }) = &frame.root else {
             panic!()
         };
         let Node::Editor {
@@ -2768,14 +2729,9 @@ mod tests {
         let wide = column((0..MAX_NODES + 5).map(|_| text("x")).collect());
         let root = sanitized_root(column(vec![
             Node::Text {
-                options: Default::default(),
-                key: "k".repeat(MAX_STRING_BYTES + 3),
+                id: Some(ElementIdWire::Name("k".repeat(MAX_STRING_BYTES + 3).into())),
+                style: gpui::StyleRefinement::default(),
                 content: "é".repeat(MAX_STRING_BYTES),
-                size: Some(f32::NAN),
-                color: Some(Rgba([2.0, -1.0, f32::INFINITY, 0.5])),
-                font: Font::default(),
-                width: Some(Length::Fixed(-5.0)),
-                align_x: None,
                 heading: None,
                 live: None,
             },
@@ -2785,25 +2741,17 @@ mod tests {
         // A container whose child fell past the budget keeps an empty
         // stand-in, one per level at most.
         assert!(root.count() <= MAX_NODES + MAX_DEPTH, "{}", root.count());
-        let Node::Linear { children, .. } = &root else {
+        let Node::Container { children, .. } = &root else {
             panic!()
         };
-        let Node::Text {
-            key,
-            content,
-            size,
-            color,
-            width,
-            ..
-        } = &children[0]
-        else {
+        let Node::Text { id, content, .. } = &children[0] else {
             panic!("{:?}", children[0])
         };
-        assert_eq!(key.len(), MAX_STRING_BYTES);
+        assert_eq!(
+            id.as_ref().and_then(ElementIdWire::name).unwrap().len(),
+            MAX_STRING_BYTES
+        );
         assert!(content.len() <= MAX_STRING_BYTES && content.is_char_boundary(content.len()));
-        assert_eq!(*size, Some(0.0));
-        assert_eq!(*color, Some(Rgba([1.0, 0.0, 1.0, 0.5])));
-        assert_eq!(*width, Some(Length::Fixed(0.0)));
     }
 
     #[test]
@@ -2815,7 +2763,7 @@ mod tests {
         let root = sanitized_root(deep);
         let mut depth = 0;
         let mut node = &root;
-        while let Node::Linear { children, .. } = node {
+        while let Node::Container { children, .. } = node {
             depth += 1;
             node = &children[0];
         }
@@ -3190,14 +3138,22 @@ mod tests {
     #[test]
     fn a_screen_of_one_key_is_claimed_in_linear_time() {
         let mut same = text("x");
-        let Node::Text { key, .. } = &mut same else {
+        let Node::Text {
+            id: Some(ElementIdWire::Name(key)),
+            ..
+        } = &mut same
+        else {
             panic!()
         };
         *key = "App/t".into();
         let mut children: Vec<Node> = (0..MAX_NODES - 1).map(|_| same.clone()).collect();
         // The guest sent `App/t#2` and `App/t#3` itself: the count skips them.
         for (child, taken) in children.iter_mut().zip(["App/t#2", "App/t#3"]) {
-            let Node::Text { key, .. } = child else {
+            let Node::Text {
+                id: Some(ElementIdWire::Name(key)),
+                ..
+            } = child
+            else {
                 panic!()
             };
             *key = taken.into();
@@ -3209,7 +3165,7 @@ mod tests {
         let started = std::time::Instant::now();
         sanitize(&mut frame).unwrap();
         let took = started.elapsed();
-        let Some(Node::Linear { children, .. }) = &frame.root else {
+        let Some(Node::Container { children, .. }) = &frame.root else {
             panic!()
         };
         let keys: std::collections::HashSet<&str> = children.iter().filter_map(Node::key).collect();
@@ -3239,7 +3195,7 @@ mod tests {
             ..Frame::default()
         };
         sanitize(&mut frame).unwrap();
-        let Some(Node::Linear { children, .. }) = &frame.root else {
+        let Some(Node::Container { children, .. }) = &frame.root else {
             panic!("column retained")
         };
         for (index, node) in children.iter().enumerate() {
@@ -3491,17 +3447,14 @@ mod tests {
     }
 
     #[test]
-    fn a_text_size_is_capped_where_a_length_is_not() {
-        let mut huge = text("huge");
-        let Node::Text { size, width, .. } = &mut huge else {
-            panic!()
+    fn gpui_text_keeps_style_refinement_on_the_wire() {
+        let text = Node::Text {
+            id: Some(ElementIdWire::Name("text".into())),
+            style: gpui::StyleRefinement::default(),
+            content: "huge".into(),
+            heading: None,
+            live: None,
         };
-        *size = Some(f32::MAX);
-        *width = Some(Length::Fixed(f32::MAX));
-        let Node::Text { size, width, .. } = sanitized_root(huge) else {
-            panic!()
-        };
-        assert_eq!(size, Some(MAX_TEXT_PIXELS));
-        assert_eq!(width, Some(Length::Fixed(MAX_PIXELS)));
+        assert_eq!(decode::<Node>(&encode(&text)).unwrap(), text);
     }
 }

@@ -2,7 +2,10 @@
 //! wasm32 probe for the entity-and-listeners shape.
 
 use serde::{Deserialize, Serialize};
-use view_guest::{Context, Render, View, Window, wire};
+use view_guest::{
+    ClickEvent, Context, InteractiveElement, IntoElement, ParentElement, Render,
+    StatefulInteractiveElement, View, Window, div,
+};
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct Exported {
@@ -16,17 +19,15 @@ impl View for Exported {
 }
 
 impl Render for Exported {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> wire::Node {
-        let press = cx.listener(|view, _: &(), _, cx| {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let press = cx.listener(|view, _: &ClickEvent, _, cx| {
             view.presses += 1;
             cx.notify();
         });
-        wire::kit::button(
-            "press",
-            self.presses.to_string(),
-            Some(press),
-            Default::default(),
-        )
+        div()
+            .id("press")
+            .on_click(press)
+            .child(self.presses.to_string())
     }
 }
 

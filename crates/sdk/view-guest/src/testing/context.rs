@@ -163,7 +163,7 @@ impl TestAppContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Context, Render, Task, Window, view::Live};
+    use crate::{Context, InteractiveElement, ParentElement, Render, Task, Window, view::Live};
     use futures::StreamExt;
     use serde::{Deserialize, Serialize};
 
@@ -194,8 +194,8 @@ mod tests {
         }
     }
     impl Render for LiveView {
-        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> Node {
-            crate::wire::kit::text("items", self.items.to_string())
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl crate::IntoElement {
+            crate::div().id("items").child(self.items.to_string())
         }
     }
 

@@ -40,6 +40,7 @@ pub enum Live {
 /// — which the host uses for widget state (focus, caret, scroll) and for
 /// the accessibility tree.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum Node {
     /// A payload encoded and painted by the host.
     Qr { key: String, code: Qr },

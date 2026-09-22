@@ -62,13 +62,16 @@ impl Editor {
         slots::editor_document_frame(context, &reference, self.text_ref());
         let context = context.clone();
         let route_context = context.clone();
-        let handler = slots::handler::<EditorDocumentMessage, M>(&route_context, Box::new(move |message| {
-            Some(wrap(EditorDocumentUpdate {
-                document: document.clone(),
-                message,
-                context: context.clone(),
-            }))
-        }));
+        let handler = slots::handler::<EditorDocumentMessage, M>(
+            &route_context,
+            Box::new(move |message| {
+                Some(wrap(EditorDocumentUpdate {
+                    document: document.clone(),
+                    message,
+                    context: context.clone(),
+                }))
+            }),
+        );
         (reference, handler)
     }
 }
@@ -112,15 +115,16 @@ mod tests {
         }
     }
     impl Render for DocumentApp {
-        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> wire::Node {
-            let (_, route) = self
-                .editor
-                .document(&cx.app.inner.slots, "app:draft".into(), |update| {
-                let callback: crate::context::Callback<Self> = Rc::new(move |view, _, _| {
-                    update.clone().apply(&mut view.editor);
-                });
-                callback
-                });
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl crate::IntoElement {
+            let (_, route) =
+                self.editor
+                    .document(&cx.app.inner.slots, "app:draft".into(), |update| {
+                        let callback: crate::context::Callback<Self> =
+                            Rc::new(move |view, _, _| {
+                                update.clone().apply(&mut view.editor);
+                            });
+                        callback
+                    });
             self.route = route;
             wire::Node::empty()
         }

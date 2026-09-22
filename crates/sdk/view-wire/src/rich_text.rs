@@ -129,12 +129,10 @@ mod tests {
         #[derive(Debug, Deserialize)]
         struct Spans(#[serde(deserialize_with = "decode_spans")] Vec<RichSpan>);
         let count = MAX_DECODED_NODES / 2 + 1;
-        let mut bytes = 2u64.to_le_bytes().to_vec();
-        let payload = encode(&RichSpan::default()).repeat(count);
-        for _ in 0..2 {
-            bytes.extend((count as u64).to_le_bytes());
-            bytes.extend(&payload);
-        }
+        let bytes = encode(&vec![
+            vec![RichSpan::default(); count],
+            vec![RichSpan::default(); count],
+        ]);
         let result = decode::<Vec<Spans>>(&bytes);
         assert!(
             matches!(result, Err(ref error) if error.contains("more nodes than the host holds")),
@@ -153,7 +151,8 @@ mod tests {
         };
         let parsed: Spans = decode(&encode(&vec![one.clone()])).unwrap();
         assert_eq!(parsed.0, vec![one]);
-        let error = decode::<Spans>(&(MAX_DECODED_NODES as u64 + 1).to_le_bytes()).unwrap_err();
+        let error = decode::<Spans>(&encode(&vec![RichSpan::default(); MAX_DECODED_NODES + 1]))
+            .unwrap_err();
         assert!(
             error.to_string().contains("too many rich text spans"),
             "{error}"

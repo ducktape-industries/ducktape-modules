@@ -1,7 +1,7 @@
 //! Helpers for a guest's own tests: build events the host would send, and
 //! read the tree a frame carries.
 
-use crate::wire::{ButtonContent, Event, Frame, Node};
+use crate::wire::{ButtonContent, Event, Frame, Interactivity, Node};
 
 /// Every text the tree shows, depth first: text nodes, button labels, and
 /// the value or placeholder of an input or editor.
@@ -15,7 +15,9 @@ pub(crate) fn texts(frame: &Frame) -> Vec<String> {
 
 fn collect_texts(node: &Node, out: &mut Vec<String>) {
     match node {
-        Node::Container { children, .. } => children.iter().for_each(|child| collect_texts(child, out)),
+        Node::Container { children, .. } => {
+            children.iter().for_each(|child| collect_texts(child, out))
+        }
         Node::Sensor { child: content, .. }
         | Node::Pin { content, .. }
         | Node::Float { content, .. }
@@ -128,7 +130,9 @@ fn find_by<'a>(node: &'a Node, matches: &dyn Fn(&Node) -> bool) -> Option<&'a No
         return Some(node);
     }
     match node {
-        Node::Container { children, .. } => children.iter().find_map(|child| find_by(child, matches)),
+        Node::Container { children, .. } => {
+            children.iter().find_map(|child| find_by(child, matches))
+        }
         Node::Sensor { child: content, .. }
         | Node::Pin { content, .. }
         | Node::Float { content, .. }
@@ -473,7 +477,9 @@ fn collect_keys(node: &Node, out: &mut Vec<String>) {
         out.push(key.to_string());
     }
     match node {
-        Node::Container { children, .. } => children.iter().for_each(|child| collect_keys(child, out)),
+        Node::Container { children, .. } => {
+            children.iter().for_each(|child| collect_keys(child, out))
+        }
         Node::Sensor { child: content, .. }
         | Node::Pin { content, .. }
         | Node::Float { content, .. }

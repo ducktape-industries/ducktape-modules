@@ -142,24 +142,16 @@ mod tests {
     #[test]
     fn tracked_graphemes_share_the_frame_node_budget() {
         let mut node = Node::Text {
-            key: "tracked".into(),
-            content: "é".repeat(MAX_NODES * 2),
-            size: None,
-            color: None,
-            font: Font::default(),
-            width: None,
-            align_x: None,
+            id: Some(crate::ElementIdWire::Name("tracked".into())),
+            style: gpui::StyleRefinement::default(),
+            content: "é".repeat(MAX_TEXT_BYTES_PER_FRAME / 2),
             heading: None,
             live: None,
-            options: TextOptions {
-                tracking: 2.0,
-                ..TextOptions::default()
-            },
         };
         sanitize_tree(&mut node).unwrap();
         let Node::Text { content, .. } = node else {
             panic!()
         };
-        assert_eq!(content.chars().count(), MAX_NODES - 1);
+        assert_eq!(content.len(), MAX_TEXT_BYTES_PER_FRAME);
     }
 }

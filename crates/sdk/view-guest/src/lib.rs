@@ -134,13 +134,12 @@ impl<V: View> Driver<V> {
                     slots::run_click(&slots, handler, &event.into(), &mut window, &mut self.app);
                     None
                 }
-                wire::Event::Surface { handler, value } => {
-                    slots::run_handler::<wire::SurfaceValue, Callback<V>>(
-                        &self.app.inner.slots,
-                        handler,
-                        value,
-                    )
-                }
+                wire::Event::Surface { handler, value } => slots::run_handler::<
+                    wire::SurfaceValue,
+                    Callback<V>,
+                >(
+                    &self.app.inner.slots, handler, value
+                ),
                 wire::Event::Input { handler, text } => {
                     slots::run_handler::<String, Callback<V>>(&self.app.inner.slots, handler, text)
                 }
@@ -155,7 +154,9 @@ impl<V: View> Driver<V> {
                         continue;
                     }
                     slots::run_handler::<wire::editor_document::EditorDocumentMessage, Callback<V>>(
-                        &self.app.inner.slots, handler, message,
+                        &self.app.inner.slots,
+                        handler,
+                        message,
                     )
                 }
                 wire::Event::EditorRequest { handler, request } => {
@@ -169,13 +170,16 @@ impl<V: View> Driver<V> {
                     if let wire::EditorTransactionEvent::Fault { id, .. }
                     | wire::EditorTransactionEvent::Cancelled { id, .. } = &event
                     {
-                        slots::finish_editor_transfer(&self.app.inner.slots, &wire::editor_document::EditorTransferId {
-                            instance: id.instance,
-                            document: id.document.clone(),
-                            reset: id.reset,
-                            serial: id.sequence,
-                            attempt: id.attempt,
-                        });
+                        slots::finish_editor_transfer(
+                            &self.app.inner.slots,
+                            &wire::editor_document::EditorTransferId {
+                                instance: id.instance,
+                                document: id.document.clone(),
+                                reset: id.reset,
+                                serial: id.sequence,
+                                attempt: id.attempt,
+                            },
+                        );
                     }
                     if let wire::EditorTransactionEvent::Cancelled { id, .. } = &event {
                         if !slots::editor_matches_pending(&self.app.inner.slots, id) {
@@ -207,20 +211,18 @@ impl<V: View> Driver<V> {
                     handler,
                     (width, height),
                 ),
-                wire::Event::Drag { handler, dx, dy } => {
-                    slots::run_handler::<(f64, f64), Callback<V>>(
-                        &self.app.inner.slots,
-                        handler,
-                        (dx, dy),
-                    )
-                }
-                wire::Event::Pointer { handler, x, y } => {
-                    slots::run_handler::<(f32, f32), Callback<V>>(
-                        &self.app.inner.slots,
-                        handler,
-                        (x, y),
-                    )
-                }
+                wire::Event::Drag { handler, dx, dy } => slots::run_handler::<
+                    (f64, f64),
+                    Callback<V>,
+                >(
+                    &self.app.inner.slots, handler, (dx, dy)
+                ),
+                wire::Event::Pointer { handler, x, y } => slots::run_handler::<
+                    (f32, f32),
+                    Callback<V>,
+                >(
+                    &self.app.inner.slots, handler, (x, y)
+                ),
                 wire::Event::Scroll {
                     handler,
                     dx,
@@ -243,7 +245,8 @@ impl<V: View> Driver<V> {
                     (x, y, relative_x, relative_y),
                 ),
                 wire::Event::Theme { dark } => {
-                    self.app.set_global(if dark { Theme::dark() } else { Theme::light() });
+                    self.app
+                        .set_global(if dark { Theme::dark() } else { Theme::light() });
                     self.app.notify();
                     None
                 }

@@ -305,24 +305,6 @@ fn gen_radio_style(rng: &mut Rng) -> RadioStyle {
     }
 }
 
-fn gen_opt_background(rng: &mut Rng) -> Option<Background> {
-    rng.next_bool().then(|| {
-        if rng.next_bool() {
-            Background::Color(gen_opt_color(rng).unwrap_or(Rgba([0.0; 4])))
-        } else {
-            Background::Linear {
-                angle: gen_f32(rng),
-                stops: std::array::from_fn(|_| {
-                    rng.next_bool().then(|| ColorStop {
-                        offset: gen_f32(rng),
-                        color: gen_opt_color(rng).unwrap_or(Rgba([0.0; 4])),
-                    })
-                }),
-            }
-        }
-    })
-}
-
 fn gen_slider_face(rng: &mut Rng) -> Option<SliderFace> {
     rng.next_bool().then(|| SliderFace {
         rail_start: gen_opt_color(rng),
@@ -507,22 +489,9 @@ fn gen_rule(rng: &mut Rng) -> Node {
 
 fn gen_text(rng: &mut Rng) -> Node {
     Node::Text {
-        options: Default::default(),
-        key: gen_key(rng),
+        id: Some(ElementIdWire::Name(gen_key(rng).into())),
+        style: gpui::StyleRefinement::default(),
         content: gen_string(rng),
-        size: gen_opt_f32(rng),
-        color: gen_opt_color(rng),
-        font: Font {
-            monospace: rng.next_bool(),
-            weight: *rng.choose(&[
-                Weight::Normal,
-                Weight::Medium,
-                Weight::Semibold,
-                Weight::Bold,
-            ]),
-        },
-        width: gen_opt_length(rng),
-        align_x: gen_opt_align_x(rng),
         // 0 and 7 are outside 1..=6, for the sanitizer to drop.
         heading: rng.next_bool().then(|| rng.next_range(8) as u8),
         live: rng
@@ -896,25 +865,10 @@ fn gen_tree(rng: &mut Rng, depth: usize, width: usize) -> Node {
                 content: Box::new(node),
             },
             0 => Node::Container {
-                shadow: Shadow {
-                    color: gen_opt_color(rng),
-                    x: gen_opt_f32(rng),
-                    y: gen_opt_f32(rng),
-                    blur: gen_opt_f32(rng),
-                },
-                max_width: None,
-                max_height: None,
-                clip: false,
-                key: gen_key(rng),
-                width: gen_opt_length(rng),
-                height: gen_opt_length(rng),
-                padding: gen_opt_edges(rng),
-                align_x: gen_opt_align_x(rng),
-                align_y: gen_opt_align_y(rng),
-                background: gen_opt_background(rng),
-                border: gen_opt_border(rng),
-                snap: gen_opt_bool(rng),
-                content: Box::new(node),
+                id: Some(ElementIdWire::Name(gen_key(rng).into())),
+                style: gpui::StyleRefinement::default(),
+                interactivity: Interactivity::default(),
+                children: vec![node],
             },
             1 => gen_list(rng, vec![node]),
             2 => Node::Scroll {
@@ -1041,10 +995,10 @@ fn gen_patch_tree(rng: &mut Rng) -> Node {
 fn is_list_node(node: &Node) -> bool {
     matches!(
         node,
-        Node::Linear { .. }
+        Node::Container { .. }
+            | Node::Linear { .. }
             | Node::Grid { .. }
             | Node::KeyedColumn { .. }
-            | Node::Flex { .. }
             | Node::Stack { .. }
             | Node::Hover { .. }
             | Node::Overlay { .. }
@@ -1213,8 +1167,8 @@ fn build_and_encode_bounded(seed: u64) -> (Frame, Vec<u8>) {
 /// really over the door" evidence when `decode` refuses one.
 fn tree_depth(node: &Node) -> usize {
     match node {
-        Node::Container { content, .. }
-        | Node::Sensor { child: content, .. }
+        Node::Container { children, .. } => 1 + children.iter().map(tree_depth).max().unwrap_or(0),
+        Node::Sensor { child: content, .. }
         | Node::MouseArea { content, .. }
         | Node::ResizeHandle { content, .. }
         | Node::Pin { content, .. }
@@ -1225,7 +1179,6 @@ fn tree_depth(node: &Node) -> usize {
         Node::Linear { children, .. }
         | Node::Grid { children, .. }
         | Node::KeyedColumn { children, .. }
-        | Node::Flex { children, .. }
         | Node::Stack { children, .. }
         | Node::Hover { children, .. }
         | Node::Tooltip { children, .. }
@@ -1331,29 +1284,6 @@ fn check_control_face(face: &Option<ControlFace>, ctx: &str) {
     check_border(&face.border, ctx);
 }
 
-fn check_background(value: &Option<Background>, ctx: &str) {
-    match value {
-        Some(Background::Color(color)) => check_color(&Some(*color), ctx),
-        Some(Background::Linear { angle, stops }) => {
-            assert!(angle.is_finite(), "{ctx}: gradient angle must be finite");
-            let mut previous = None;
-            for stop in stops.iter().flatten() {
-                assert!(
-                    stop.offset.is_finite() && (0.0..=1.0).contains(&stop.offset),
-                    "{ctx}: gradient stop must be finite and within 0..=1"
-                );
-                assert!(
-                    previous.is_none_or(|offset| stop.offset > offset),
-                    "{ctx}: gradient stops must increase"
-                );
-                previous = Some(stop.offset);
-                check_color(&Some(stop.color), ctx);
-            }
-        }
-        None => {}
-    }
-}
-
 fn check_slider_face(face: &Option<SliderFace>, ctx: &str) {
     let Some(face) = face else { return };
     check_color(&face.rail_start, ctx);
@@ -1418,28 +1348,10 @@ fn check_bounds(
         );
     }
     match node {
-        Node::Container {
-            shadow,
-            width,
-            height,
-            padding,
-            background,
-            border,
-            content,
-            snap: _,
-            ..
-        } => {
-            check_color(&shadow.color, ctx);
-            check_pixels(&shadow.blur, ctx, "box shadow blur");
-            for value in [shadow.x, shadow.y].into_iter().flatten() {
-                assert!(value.is_finite() && (-PIXEL_BOUND..=PIXEL_BOUND).contains(&value));
+        Node::Container { children, .. } => {
+            for child in children {
+                check_bounds(child, depth + 1, keys, svg_bytes, ctx);
             }
-            check_length(width, ctx);
-            check_length(height, ctx);
-            check_edges(padding, ctx);
-            check_background(background, ctx);
-            check_border(border, ctx);
-            check_bounds(content, depth + 1, keys, svg_bytes, ctx);
         }
         Node::Float {
             scale,
@@ -1519,31 +1431,6 @@ fn check_bounds(
             check_length(height, ctx);
             check_color(background, ctx);
             check_border(border, ctx);
-            for child in children {
-                check_bounds(child, depth + 1, keys, svg_bytes, ctx);
-            }
-        }
-        Node::Flex {
-            layout,
-            items,
-            children,
-            background,
-            border,
-            ..
-        } => {
-            check_pixels(&layout.row_gap, ctx, "row gap");
-            check_pixels(&layout.column_gap, ctx, "column gap");
-            check_pixels(&layout.max_width, ctx, "max width");
-            check_pixels(&layout.max_height, ctx, "max height");
-            check_pixels(&layout.surface_max_width, ctx, "surface max width");
-            check_length(&layout.surface_width, ctx);
-            check_length(&layout.surface_height, ctx);
-            check_length(&layout.width, ctx);
-            check_length(&layout.height, ctx);
-            check_edges(&layout.padding, ctx);
-            check_color(background, ctx);
-            check_border(border, ctx);
-            assert_eq!(items.len(), children.len(), "{ctx}: flex item cardinality");
             for child in children {
                 check_bounds(child, depth + 1, keys, svg_bytes, ctx);
             }
@@ -1688,26 +1575,13 @@ fn check_bounds(
             }
         }
         Node::Text {
-            content,
-            size,
-            color,
-            width,
-            heading,
-            ..
+            content, heading, ..
         } => {
             check_string(content, ctx, "text content");
             assert!(
                 heading.is_none_or(|level| (1..=6).contains(&level)),
                 "{ctx}: heading level {heading:?} outside 1..=6"
             );
-            if let Some(size) = size {
-                assert!(
-                    size.is_finite() && (0.0..=TEXT_PIXEL_BOUND).contains(size),
-                    "{ctx}: text size {size} outside 0..={TEXT_PIXEL_BOUND}"
-                );
-            }
-            check_color(color, ctx);
-            check_length(width, ctx);
         }
         Node::ImageViewer {
             data,

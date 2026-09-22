@@ -42,7 +42,7 @@ mod tests {
         }
     }
     impl Render for WidgetView {
-        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> wire::Node {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl crate::IntoElement {
             wire::Node::empty()
         }
     }

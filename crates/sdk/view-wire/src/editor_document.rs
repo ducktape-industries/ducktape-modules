@@ -955,8 +955,10 @@ mod tests {
         let (id, _) = metadata(0);
         let event = chunk(&id, 0, vec![]);
         let mut encoded = crate::encode(&event);
-        let end = encoded.len();
-        encoded[end - 8..].copy_from_slice(&((MAX_EDITOR_CHUNK_BYTES + 1) as u64).to_le_bytes());
+        assert_eq!(encoded.last(), Some(&0x90));
+        encoded.pop();
+        encoded.push(0xdd);
+        encoded.extend_from_slice(&((MAX_EDITOR_CHUNK_BYTES as u32) + 1).to_be_bytes());
         let error = crate::decode::<EditorTransfer>(&encoded)
             .unwrap_err()
             .to_string();

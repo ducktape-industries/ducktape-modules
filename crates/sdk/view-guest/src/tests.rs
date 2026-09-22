@@ -11,8 +11,6 @@ struct Probe {
     streams: Vec<Task<()>>,
     #[serde(skip)]
     renders: usize,
-    #[serde(skip)]
-    listener: u32,
 }
 impl Probe {
     fn watch(&mut self, cx: &mut Context<Self>, kind: &'static str) {
@@ -45,18 +43,16 @@ impl View for Probe {
     }
 }
 impl Render for Probe {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> wire::Node {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.renders += 1;
-        self.listener = cx.listener(|view, _: &(), _, cx| {
+        let press = cx.listener(|view, _: &ClickEvent, _, cx| {
             view.received.push("press".into());
             cx.notify();
         });
-        wire::kit::button(
-            "press",
-            self.received.len().to_string(),
-            Some(self.listener),
-            Default::default(),
-        )
+        div()
+            .id("press")
+            .on_click(press)
+            .child(self.received.len().to_string())
     }
 }
 fn response(id: u64, done: bool) -> wire::Event {
@@ -151,14 +147,15 @@ fn stream_updates_follow_response_order_instead_of_spawn_order() {
 fn unchanged_frames_preserve_listener_tables_and_resync_renders() {
     let mut driver = Driver::<Probe>::new();
     assert!(driver.tick(vec![]).root.is_some());
-    let (listener, renders) = driver.entity().read(|view| (view.listener, view.renders));
+    let first = driver.tick(vec![]);
+    let renders = driver.entity().read(|view| view.renders);
     for _ in 0..3 {
         assert!(driver.tick(vec![]).unchanged);
     }
     driver
         .entity()
         .read(|view| assert_eq!(view.renders, renders));
-    let frame = driver.tick(vec![wire::Event::Message(listener)]);
+    let frame = driver.tick(crate::testing::press(&first, "press"));
     assert!(!frame.unchanged);
     driver
         .entity()
@@ -321,25 +318,25 @@ fn listener_guard_detects_missing_notify() {
         }
     }
     impl Render for Silent {
-        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> wire::Node {
-            let press = cx.listener(|view, _: &(), _, _| view.0 = true);
-            wire::kit::button("silent", "Silent", Some(press), Default::default())
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let press = cx.listener(|view, _: &ClickEvent, _, _| view.0 = true);
+            div().id("silent").on_click(press).child("Silent")
         }
     }
     let mut driver = Driver::<Silent>::new();
     let frame = driver.tick(vec![]);
-    driver.tick(crate::testing::press(&frame, "Silent"));
+    driver.tick(crate::testing::press(&frame, "silent"));
 }
 
 #[test]
 fn messages_and_responses_settle_in_input_order() {
     let mut driver = Driver::<Probe>::new();
     let requests = driver.tick(vec![]).requests;
-    let listener = driver.entity().read(|view| view.listener);
+    let first = driver.tick(vec![]);
     driver.tick(vec![
-        wire::Event::Message(listener),
+        crate::testing::press(&first, "press")[0].clone(),
         response(requests[1].id, false),
-        wire::Event::Message(listener),
+        crate::testing::press(&first, "press")[0].clone(),
     ]);
     driver
         .entity()
@@ -392,15 +389,15 @@ fn patches_reconstruct_the_rendered_tree_and_picture_bytes_are_not_retained() {
         }
     }
     impl Render for Picture {
-        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> wire::Node {
-            let mut children = vec![wire::kit::image_resource("picture", "shared-image")];
-            children.extend((0..20).map(|i| {
-                wire::kit::text(
-                    format!("row/{i}"),
-                    format!("Row {i}: {}", if i == 0 { self.0 } else { 0 }),
-                )
-            }));
-            wire::kit::column("picture-view", children)
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .id("picture-view")
+                .child(img("shared-image"))
+                .children((0..20).map(|i| {
+                    div()
+                        .id(format!("row/{i}"))
+                        .child(format!("Row {i}: {}", if i == 0 { self.0 } else { 0 }))
+                }))
         }
     }
     let mut driver = Driver::<Picture>::new();
@@ -444,7 +441,7 @@ fn notifying_during_render_requests_another_frame() {
         }
     }
     impl Render for Again {
-        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> wire::Node {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
             if !self.0 {
                 self.0 = true;
                 cx.notify();
