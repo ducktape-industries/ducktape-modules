@@ -1,5 +1,7 @@
 //! Renderer-independent execution of dynamically loaded WASM views.
 pub use gpui::prelude::FluentBuilder;
+extern crate self as ducktape_view_guest;
+
 pub use gpui::{
     hsla, px, rems, rgb, ClickEvent, CursorStyle, ElementId, Global, Hsla, Pixels, Role,
     SharedString, StyleRefinement, Styled,
@@ -10,6 +12,7 @@ mod theme;
 pub use theme::Theme;
 mod behavior;
 mod element;
+mod view_element;
 mod interactivity;
 mod surface;
 pub use behavior::{modal_overlay, resize_handle, sensor, ModalOverlay, ResizeHandle, Sensor};
@@ -19,6 +22,7 @@ pub use element::{
 };
 pub use interactivity::{InteractiveElement, Interactivity, Stateful, StatefulInteractiveElement};
 pub use surface::{surface, Surface};
+pub use view_element::ViewElement;
 
 /// Traits and primitives used to compose guest GPUI elements.
 pub mod prelude {
