@@ -6,7 +6,8 @@ use std::rc::Rc;
 use std::sync::{Arc, Weak};
 
 type ClickRoute = Rc<dyn Fn(&gpui::ClickEvent, &mut crate::Window, &mut crate::App)>;
-type TooltipRoute = Rc<dyn Fn(&mut crate::Window, &mut crate::App) -> crate::AnyView>;
+type TooltipRoute =
+    Rc<dyn Fn(Option<usize>, &mut crate::Window, &mut crate::App) -> Option<crate::AnyView>>;
 
 struct EventRoute<A>(Rc<dyn Fn(&A, &mut crate::Window, &mut crate::App)>);
 
@@ -110,7 +111,23 @@ pub(crate) fn tooltip(
 ) -> u32 {
     let mut tables = context.0.borrow_mut();
     let index = u32::try_from(tables.tooltips.len()).expect("too many tooltip routes");
-    tables.tooltips.push(Rc::from(build));
+    tables
+        .tooltips
+        .push(Rc::new(move |_, window, cx| Some(build(window, cx))));
+    index
+}
+
+pub(crate) fn rich_text_tooltip(
+    context: &Context,
+    build: Box<
+        dyn Fn(usize, &mut crate::Window, &mut crate::App) -> Option<crate::AnyView> + 'static,
+    >,
+) -> u32 {
+    let mut tables = context.0.borrow_mut();
+    let index = u32::try_from(tables.tooltips.len()).expect("too many tooltip routes");
+    tables.tooltips.push(Rc::new(move |index, window, cx| {
+        index.and_then(|index| build(index, window, cx))
+    }));
     index
 }
 

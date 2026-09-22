@@ -263,6 +263,7 @@ pub(super) fn sanitize_node(
             runs,
             font_family_overrides,
             clickable_ranges,
+            tooltip,
             ..
         } => {
             if let Some(id) = id {
@@ -270,6 +271,22 @@ pub(super) fn sanitize_node(
             }
             style_sanitize::sanitize(style);
             rich_text::sanitize(text, runs, font_family_overrides, clickable_ranges, budgets);
+            if budgets.nodes == 0 {
+                if let Some(tooltip) = tooltip {
+                    tooltip.content = None;
+                }
+            } else if let Some(content) = tooltip
+                .as_mut()
+                .and_then(|tooltip| tooltip.content.as_mut())
+            {
+                sanitize_node(
+                    content,
+                    depth + 1,
+                    budgets,
+                    &mut vec![std::collections::HashSet::new()],
+                    &mut Vec::new(),
+                )?;
+            }
         }
         Node::Text {
             id,

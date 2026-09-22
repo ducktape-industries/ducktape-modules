@@ -1,5 +1,5 @@
 //! GPUI-shaped rich text recipes lowered into one native host paragraph.
-use crate::{wire, App, Element, ElementId, IntoElement, Lowering, Window};
+use crate::{App, Element, ElementId, IntoElement, Lowering, Window, wire};
 use gpui::{
     HighlightStyle, MouseMoveEvent, SharedString, StyleRefinement, Styled, TextRun, TextStyle,
 };
@@ -7,6 +7,7 @@ use std::ops::Range;
 
 type ClickListener = Box<dyn Fn(usize, &mut Window, &mut App)>;
 type HoverListener = Box<dyn Fn(Option<usize>, MouseMoveEvent, &mut Window, &mut App)>;
+type TooltipBuilder = Box<dyn Fn(usize, &mut Window, &mut App) -> Option<crate::AnyView>>;
 
 pub struct StyledText {
     text: SharedString,
@@ -91,6 +92,7 @@ impl StyledText {
         clickable_ranges: Vec<Range<usize>>,
         on_click: Option<u32>,
         on_hover: Option<u32>,
+        tooltip: Option<wire::RichTextTooltip>,
     ) -> wire::Node {
         let runs = match self.runs {
             Some(runs) => wire::RichTextRuns::Runs(runs.into_iter().map(Into::into).collect()),
@@ -111,6 +113,7 @@ impl StyledText {
             clickable_ranges,
             on_click,
             on_hover,
+            tooltip,
         }
     }
 }
@@ -130,7 +133,7 @@ impl IntoElement for StyledText {
 
 impl Element for StyledText {
     fn lower(self: Box<Self>, _lowering: &mut Lowering<'_>) -> wire::Node {
-        (*self).lower(None, Vec::new(), None, None)
+        (*self).lower(None, Vec::new(), None, None, None)
     }
 }
 
@@ -140,6 +143,7 @@ pub struct InteractiveText {
     clickable_ranges: Vec<Range<usize>>,
     on_click: Option<ClickListener>,
     on_hover: Option<HoverListener>,
+    tooltip: Option<TooltipBuilder>,
 }
 
 impl InteractiveText {
@@ -150,6 +154,7 @@ impl InteractiveText {
             clickable_ranges: Vec::new(),
             on_click: None,
             on_hover: None,
+            tooltip: None,
         }
     }
 
@@ -168,6 +173,14 @@ impl InteractiveText {
         listener: impl Fn(Option<usize>, MouseMoveEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
         self.on_hover = Some(Box::new(listener));
+        self
+    }
+
+    pub fn tooltip(
+        mut self,
+        builder: impl Fn(usize, &mut Window, &mut App) -> Option<crate::AnyView> + 'static,
+    ) -> Self {
+        self.tooltip = Some(Box::new(builder));
         self
     }
 }
@@ -196,6 +209,7 @@ impl Element for InteractiveText {
             clickable_ranges,
             on_click,
             on_hover,
+            tooltip,
             ..
         } = *self;
         let id = lowering.current_path().last().cloned();
@@ -216,7 +230,12 @@ impl Element for InteractiveText {
                 )
             })
         });
-        text.lower(id, clickable_ranges, on_click, on_hover)
+        let tooltip = tooltip.map(|builder| wire::RichTextTooltip {
+            request: lowering.rich_text_tooltip(builder),
+            character_index: None,
+            content: None,
+        });
+        text.lower(id, clickable_ranges, on_click, on_hover, tooltip)
     }
 }
 

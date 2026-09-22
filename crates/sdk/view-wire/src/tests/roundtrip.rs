@@ -67,6 +67,7 @@ fn applied_aggregate_text_and_rich_text_loss_is_reported_but_removal_is_not() {
         clickable_ranges: vec![],
         on_click: None,
         on_hover: None,
+        tooltip: None,
     };
     let mut root = Node::Container {
         id: Some(ElementIdWire::Name("root".into())),
@@ -203,7 +204,10 @@ fn encoded_size_matches_named_messagepack_without_a_second_buffer() {
 fn tooltip_responses_share_the_frame_node_budget() {
     let response = || TooltipResponse {
         request: 1,
-        content: Box::new(column((0..MAX_NODES).map(|_| Node::empty()).collect())),
+        character_index: None,
+        content: Some(Box::new(column(
+            (0..MAX_NODES).map(|_| Node::empty()).collect(),
+        ))),
     };
     let mut frame = Frame {
         tooltip_responses: vec![response(), response()],
@@ -211,7 +215,57 @@ fn tooltip_responses_share_the_frame_node_budget() {
     };
     sanitize(&mut frame).unwrap();
     assert_eq!(frame.tooltip_responses.len(), 1);
-    assert!(frame.tooltip_responses[0].content.count() <= MAX_NODES);
+    assert!(
+        frame.tooltip_responses[0]
+            .content
+            .as_ref()
+            .is_some_and(|content| content.count() <= MAX_NODES)
+    );
+}
+
+#[test]
+fn rich_tooltip_cache_and_explicit_none_share_the_frame_budget() {
+    let mut frame = Frame {
+        root: Some(Node::RichText {
+            id: Some(ElementIdWire::Name("rich".into())),
+            style: gpui::StyleRefinement::default(),
+            text: "text".into(),
+            runs: RichTextRuns::default(),
+            font_family_overrides: Vec::new(),
+            clickable_ranges: Vec::new(),
+            on_click: None,
+            on_hover: None,
+            tooltip: Some(RichTextTooltip {
+                request: 2,
+                character_index: Some(0),
+                content: Some(Box::new(column(
+                    (0..MAX_NODES).map(|_| Node::empty()).collect(),
+                ))),
+            }),
+        }),
+        tooltip_responses: vec![TooltipResponse {
+            request: 2,
+            character_index: Some(1),
+            content: None,
+        }],
+        ..Default::default()
+    };
+    sanitize(&mut frame).unwrap();
+    let Node::RichText {
+        tooltip: Some(tooltip),
+        ..
+    } = frame.root.unwrap()
+    else {
+        panic!("rich tooltip")
+    };
+    assert!(
+        tooltip
+            .content
+            .as_ref()
+            .is_some_and(|content| content.count() < MAX_NODES)
+    );
+    assert_eq!(frame.tooltip_responses.len(), 1);
+    assert!(frame.tooltip_responses[0].content.is_none());
 }
 
 #[test]

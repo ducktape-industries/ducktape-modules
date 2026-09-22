@@ -109,6 +109,8 @@ pub enum Event {
     /// Native hover asked the guest to build a tooltip for the displayed frame.
     TooltipRequest {
         request: u32,
+        /// Native InteractiveText byte index; ordinary tooltips use None.
+        character_index: Option<u32>,
     },
     /// A registered host surface emitted its declared result value.
     Surface {

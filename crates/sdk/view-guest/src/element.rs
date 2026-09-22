@@ -7,7 +7,7 @@
 //! data once per frame.
 
 use crate::interactivity::{ClickListener, Interactivity};
-use crate::{slots, wire, App, Window};
+use crate::{App, Window, slots, wire};
 use gpui::{
     ElementId, ListHorizontalSizingBehavior, ListSizingBehavior, Overflow, ScrollStrategy,
     SharedString, StyleRefinement, Styled,
@@ -173,6 +173,13 @@ impl<'a> Lowering<'a> {
         build: Box<dyn Fn(&mut Window, &mut App) -> crate::AnyView + 'static>,
     ) -> u32 {
         slots::tooltip(&self.app.inner.slots, build)
+    }
+
+    pub(crate) fn rich_text_tooltip(
+        &mut self,
+        build: Box<dyn Fn(usize, &mut Window, &mut App) -> Option<crate::AnyView> + 'static>,
+    ) -> u32 {
+        slots::rich_text_tooltip(&self.app.inner.slots, build)
     }
 }
 

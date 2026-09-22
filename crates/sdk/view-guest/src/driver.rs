@@ -151,17 +151,27 @@ impl<V: View> Driver<V> {
                     self.run_route(handler, &gpui::FileDropEvent::Exited);
                     None
                 }
-                wire::Event::TooltipRequest { request } => {
+                wire::Event::TooltipRequest {
+                    request,
+                    character_index,
+                } => {
                     let slots = self.app.inner.slots.clone();
                     if let Some(build) = slots::tooltip_route(&slots, request) {
                         let mut window = self.app.window();
-                        let view = build(&mut window, &mut self.app);
-                        let content = Lowering::new(&mut window, &mut self.app).lower(view);
+                        let content = build(
+                            character_index.map(|index| index as usize),
+                            &mut window,
+                            &mut self.app,
+                        )
+                        .map(|view| {
+                            Box::new(Lowering::new(&mut window, &mut self.app).lower(view))
+                        });
                         slots::tooltip_response(
                             &slots,
                             wire::TooltipResponse {
                                 request,
-                                content: Box::new(content),
+                                character_index,
+                                content,
                             },
                         );
                     }

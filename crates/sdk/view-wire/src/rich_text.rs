@@ -256,6 +256,7 @@ mod tests {
             clickable_ranges: vec![],
             on_click: None,
             on_hover: None,
+            tooltip: None,
         };
         let mut duplicate = Frame {
             root: Some(Node::Container {

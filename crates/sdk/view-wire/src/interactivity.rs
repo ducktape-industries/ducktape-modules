@@ -164,7 +164,18 @@ pub struct Tooltip {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TooltipResponse {
     pub request: u32,
-    pub content: Box<crate::Node>,
+    /// Echoes the rich-text character index; ordinary tooltips use `None`.
+    pub character_index: Option<u32>,
+    /// `None` is an explicit result from an index-sensitive builder.
+    pub content: Option<Box<crate::Node>>,
+}
+
+/// One bounded response cache for a native `InteractiveText` tooltip.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RichTextTooltip {
+    pub request: u32,
+    pub character_index: Option<u32>,
+    pub content: Option<Box<crate::Node>>,
 }
 
 pub fn point(x: f32, y: f32) -> Point<Pixels> {

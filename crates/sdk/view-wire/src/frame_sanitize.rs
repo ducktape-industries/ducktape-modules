@@ -71,18 +71,17 @@ pub fn sanitize(frame: &mut Frame) -> Result<SanitizeReport, &'static str> {
         SanitizeReport::default()
     };
     frame.tooltip_responses.truncate(MAX_PATCHES);
-    let mut kept = 0;
-    for index in 0..frame.tooltip_responses.len() {
-        if budgets.nodes == 0 {
-            break;
+    let mut responses = Vec::with_capacity(frame.tooltip_responses.len());
+    for mut response in frame.tooltip_responses.drain(..) {
+        if let Some(content) = &mut response.content {
+            if budgets.nodes == 0 {
+                continue;
+            }
+            report.merge(sanitize_tree_with(content, &mut budgets)?);
         }
-        report.merge(sanitize_tree_with(
-            &mut frame.tooltip_responses[index].content,
-            &mut budgets,
-        )?);
-        kept += 1;
+        responses.push(response);
     }
-    frame.tooltip_responses.truncate(kept);
+    frame.tooltip_responses = responses;
     frame.upstream_sanitization.merge(report);
     for request in &mut frame.requests {
         truncate_string(&mut request.kind);

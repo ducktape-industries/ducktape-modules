@@ -133,7 +133,7 @@ pub mod events;
 pub mod interactivity;
 pub mod keyboard;
 pub mod mouse;
-pub use interactivity::{DispatchPhase, HoverListenerMode, KeyContext, Tooltip, TooltipResponse};
+pub use interactivity::{DispatchPhase, HoverListenerMode, KeyContext, RichTextTooltip, Tooltip, TooltipResponse};
 
 mod protocol;
 pub use protocol::*;

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use view_guest::prelude::*;
-use view_guest::{testing::TestAppContext, wire, Driver, View};
+use view_guest::{Driver, View, testing::TestAppContext, wire};
 
 #[derive(Default, Serialize, Deserialize)]
 struct Counter {
@@ -154,16 +154,68 @@ fn tooltip_delay_is_order_independent_and_builder_runs_only_after_request() {
     );
     let response = driver.tick(vec![wire::Event::TooltipRequest {
         request: tooltip.request,
+        character_index: None,
     }]);
     let [response] = response.tooltip_responses.as_slice() else {
         panic!("one tooltip response")
     };
     assert_eq!(response.request, tooltip.request);
-    let wire::Node::Container { id, children, .. } = response.content.as_ref() else {
+    assert_eq!(response.character_index, None);
+    let Some(content) = response.content.as_deref() else {
+        panic!("ordinary tooltip has content")
+    };
+    let wire::Node::Container { id, children, .. } = content else {
         panic!("tooltip content is a lowered container")
     };
     assert_eq!(id, &Some(wire::ElementIdWire::Name("tip".into())));
     assert_eq!(children.len(), 1);
+}
+
+#[derive(Serialize, Deserialize)]
+struct RichTooltipSurface;
+impl View for RichTooltipSurface {
+    fn new(_: &mut Window, _: &mut Context<Self>) -> Self {
+        Self
+    }
+}
+impl Render for RichTooltipSurface {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        InteractiveText::new("rich-tip", StyledText::new("alpha beta"))
+            .tooltip(|index, _, cx| (index == 6).then(|| cx.new(|_| TooltipContent).into()))
+    }
+}
+
+#[test]
+fn rich_text_tooltip_routes_character_index_and_explicit_none() {
+    let mut driver = Driver::<RichTooltipSurface>::new();
+    let frame = driver.tick(vec![]);
+    let wire::Node::RichText {
+        tooltip: Some(tooltip),
+        ..
+    } = frame.root.as_ref().unwrap()
+    else {
+        panic!("a rich text tooltip recipe")
+    };
+
+    let some = driver.tick(vec![wire::Event::TooltipRequest {
+        request: tooltip.request,
+        character_index: Some(6),
+    }]);
+    let [some] = some.tooltip_responses.as_slice() else {
+        panic!("one tooltip response")
+    };
+    assert_eq!(some.character_index, Some(6));
+    assert!(some.content.is_some());
+
+    let none = driver.tick(vec![wire::Event::TooltipRequest {
+        request: tooltip.request,
+        character_index: Some(0),
+    }]);
+    let [none] = none.tooltip_responses.as_slice() else {
+        panic!("one explicit empty tooltip response")
+    };
+    assert_eq!(none.character_index, Some(0));
+    assert!(none.content.is_none());
 }
 
 #[derive(Serialize, Deserialize)]
