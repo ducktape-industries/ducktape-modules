@@ -67,3 +67,14 @@ fn text_styles_are_bounded_in_the_same_walk() {
     assert_eq!(style.size.width, Some(px(8192.).into()));
     assert_eq!(style.text.font_size, Some(px(512.).into()));
 }
+
+#[test]
+fn fingerprints_keep_refinement_field_names() {
+    let width = container(StyleRefinement::default().w(px(12.)));
+    let height = container(StyleRefinement::default().h(px(12.)));
+    let padding = container(StyleRefinement::default().pl(px(12.)));
+    let margin = container(StyleRefinement::default().ml(px(12.)));
+    assert_ne!(width.fingerprint(), height.fingerprint());
+    assert_ne!(padding.fingerprint(), margin.fingerprint());
+    assert_eq!(width.fingerprint(), width.clone().fingerprint());
+}

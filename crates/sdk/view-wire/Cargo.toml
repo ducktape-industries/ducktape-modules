@@ -27,11 +27,8 @@ accesskit = { version = "0.24.0", features = ["serde"] }
 rmp-serde = "1"
 slotmap = "1.0.6"
 uuid = "1.1.2"
-# `task` and `subscription` are futures glue, and `kit` composes the tree
-# below out of the shared palette. Both are already in every graph that
-# reaches this crate.
+# `task` and `subscription` share the SDK futures runtime.
 futures = "0.3"
 design = { path = "../design" }
-bincode = "1.3"
 memchr = "2"
 unicode-segmentation = "1"

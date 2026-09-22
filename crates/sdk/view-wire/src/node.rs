@@ -627,7 +627,7 @@ impl Node {
             }
         }
         let mut sink = Sink(std::hash::DefaultHasher::new());
-        bincode::serialize_into(&mut sink, self).expect("node fingerprint sink cannot fail");
+        rmp_serde::encode::write_named(&mut sink, self).expect("node fingerprint sink cannot fail");
         sink.0.finish()
     }
 

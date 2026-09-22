@@ -279,19 +279,21 @@ fn presentation_limits_do_not_consume_or_truncate_document_text() {
 
 #[test]
 fn decoder_rejects_oversized_collections_before_host_validation() {
+    let valid = EditorPresentation::default();
+    assert!(crate::decode::<EditorPresentation>(&crate::encode(&valid)).is_ok());
     let oversized = EditorPresentation {
         formats: vec![EditorFormat::default(); MAX_EDITOR_FORMATS + 1],
         spans: vec![],
         ..Default::default()
     };
-    let bytes = bincode::serialize(&oversized).unwrap();
-    assert!(bincode::deserialize::<EditorPresentation>(&bytes).is_err());
+    let bytes = crate::encode(&oversized);
+    assert!(crate::decode::<EditorPresentation>(&bytes).is_err());
     let span = EditorSpan {
         line: 0,
         start: 0,
         end: 0,
         format: 0,
     };
-    let bytes = bincode::serialize(&presentation(vec![span; MAX_EDITOR_SPANS + 1])).unwrap();
-    assert!(bincode::deserialize::<EditorPresentation>(&bytes).is_err());
+    let bytes = crate::encode(&presentation(vec![span; MAX_EDITOR_SPANS + 1]));
+    assert!(crate::decode::<EditorPresentation>(&bytes).is_err());
 }
