@@ -57,7 +57,18 @@ impl<V: View> Driver<V> {
     pub(crate) fn app_mut(&mut self) -> &mut App {
         &mut self.app
     }
+    /// A frame with the whole tree in it, patched or not: what a test reads.
+    /// The host gets [`Driver::tick_wire`]'s, which leaves the tree out
+    /// when the host can keep or patch its own.
     pub fn tick(&mut self, events: Vec<wire::Event>) -> wire::Frame {
+        let mut frame = self.tick_wire(events);
+        if frame.root.is_none() {
+            frame.root = self.last_root.clone();
+        }
+        frame
+    }
+
+    pub(crate) fn tick_wire(&mut self, events: Vec<wire::Event>) -> wire::Frame {
         self.busy = false;
         self.settle();
         for event in events {
@@ -398,7 +409,7 @@ impl<V: View> Driver<V> {
         let render = self.app.inner.dirty.replace(false)
             || self.last_root.is_none()
             || slots::editor_transferring(&self.app.inner.slots);
-        let mut root = if render {
+        let mut root = render.then(|| {
             slots::reset(&self.app.inner.slots);
             let mut window = self.app.window();
             let element = {
@@ -413,33 +424,51 @@ impl<V: View> Driver<V> {
                     .into_element()
             };
             Lowering::new(&mut window, &mut self.app).lower_element(element)
-        } else {
-            self.last_root.clone().expect("rendered tree")
-        };
+        });
         self.busy |= self.app.inner.dirty.get() || executor::ready(&self.app.inner.tasks.borrow());
-        let unchanged = self.last_root.as_ref() == Some(&root);
+        // Patches against the last tree, unless there is none — a first
+        // frame or a resync. Nothing lowered is nothing changed, and a
+        // lowered tree that diffs to no patches is the same tree
+        // (`apply(old, diff(old, new))` leaves `old == new`).
         let mut patches = Vec::new();
-        if !unchanged {
-            // Patches against the last tree, unless there is none — a first
-            // frame or a resync. Property changes remain patches even for
-            // tiny trees; replacing their identity would discard native state.
-            // Structural edits may use a whole tree when that is smaller.
-            if let Some(last) = &mut self.last_root {
-                patches = wire::diff(last, &mut root);
-                let only_props = patches
-                    .iter()
-                    .all(|patch| matches!(patch, wire::Patch::Props { .. }));
-                if patches.len() > wire::MAX_PATCHES
-                    || (!only_props && wire::encoded_size(&patches) >= wire::encoded_size(&root))
-                {
-                    patches.clear();
-                }
+        let unchanged = match (&mut root, &mut self.last_root) {
+            (None, _) => true,
+            (Some(root), Some(last)) => {
+                patches = wire::diff(last, root);
+                patches.is_empty()
+            }
+            (Some(_), None) => false,
+        };
+        if let Some(tree) = root.take().filter(|_| !unchanged) {
+            // Property changes remain patches even for tiny trees; replacing
+            // their identity would discard native state. Structural edits
+            // use the whole tree when it has no more nodes than the patches
+            // carry (counted, not encoded: sizing both by encoding them was
+            // most of a frame's cost).
+            let only_props = patches
+                .iter()
+                .all(|patch| matches!(patch, wire::Patch::Props { .. }));
+            let carried: usize = patches
+                .iter()
+                .map(|patch| match patch {
+                    wire::Patch::Replace { node, .. } | wire::Patch::Insert { node, .. } => {
+                        node.count()
+                    }
+                    _ => 1,
+                })
+                .sum();
+            if patches.len() > wire::MAX_PATCHES || (!only_props && carried >= tree.count()) {
+                patches.clear();
             }
             // Remembered without the picture bytes this frame carried: the
             // next view names those pictures by hash alone, and that is
             // the same tree — and the tree the host keeps, which drops the
-            // bytes the same way once it has the pictures.
-            let mut kept = root.clone();
+            // bytes the same way once it has the pictures. A frame that
+            // carries patches sends no tree, so the tree itself is kept.
+            let (mut kept, sent) = match patches.is_empty() {
+                true => (tree.clone(), Some(tree)),
+                false => (tree, None),
+            };
             kept.for_each_mut(&mut |node| match node {
                 wire::Node::Svg {
                     source: wire::SvgSource::Data { bytes, .. },
@@ -451,6 +480,7 @@ impl<V: View> Driver<V> {
                 _ => {}
             });
             self.last_root = Some(kept);
+            root = sent;
         }
         let editor_decisions = slots::take_editor_responses(&self.app.inner.slots);
         self.busy |= slots::editor_responses_ready(&self.app.inner.slots);
@@ -461,7 +491,7 @@ impl<V: View> Driver<V> {
             tooltip_responses: slots::take_tooltip_responses(&self.app.inner.slots),
             mouse_interest: slots::mouse_interest(&self.app.inner.slots),
             event_interest: slots::event_interest(&self.app.inner.slots),
-            root: Some(root),
+            root,
             patches,
             requests: self.app.host().drain_outbox(),
             cancels: self.app.host().drain_cancels(),

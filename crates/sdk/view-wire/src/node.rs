@@ -143,6 +143,7 @@ pub enum Node {
         path: Vec<ElementIdWire>,
         route: u32,
         style: gpui::StyleRefinement,
+        #[serde(default, skip_serializing_if = "crate::is_default")]
         interactivity: Interactivity,
         count: usize,
         measure_index: usize,
@@ -306,6 +307,7 @@ pub enum Node {
         #[serde(deserialize_with = "decode_children")]
         state_children: Vec<Node>,
         style: gpui::StyleRefinement,
+        #[serde(default, skip_serializing_if = "crate::is_default")]
         interactivity: Interactivity,
     },
     /// A native zoom/pan viewer sharing the raster picture cache and budgets.
@@ -329,6 +331,7 @@ pub enum Node {
         transformation: SvgTransformation,
         label: Option<String>,
         style: gpui::StyleRefinement,
+        #[serde(default, skip_serializing_if = "crate::is_default")]
         interactivity: Interactivity,
     },
     Input {

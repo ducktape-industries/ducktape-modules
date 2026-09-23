@@ -39,7 +39,16 @@
 /// 1: reset with the two-codec rule — the tree and `Frame` are named
 ///    MessagePack, every door in [`doors`] is borsh. Epochs 1–11 of the
 ///    development era before it are not honoured.
-pub const WIRE_EPOCH: u32 = 1;
+/// 2: a node's `Interactivity` and its `Aria` leave out what is unset (`None`,
+///    `false`, the default hover mode, an empty `Aria`), and a container leaves
+///    out a default `Interactivity`: an empty one was ~900 bytes of field
+///    names, so a room of chat rows ran past a view's per-tick fuel.
+pub const WIRE_EPOCH: u32 = 2;
+
+/// For `skip_serializing_if`: a value that says nothing is left out.
+pub(crate) fn is_default<T: Default + PartialEq>(value: &T) -> bool {
+    *value == T::default()
+}
 
 pub mod abi;
 pub mod doors;
@@ -154,7 +163,7 @@ mod codec;
 #[cfg(test)]
 pub(crate) use codec::MAX_DECODED_NODES;
 pub(crate) use codec::{budget, decode_child, decode_children};
-pub use codec::{decode, encode, encoded_size};
+pub use codec::{decode, encode, encoded_size, encoded_size_exceeds};
 
 #[cfg(test)]
 mod tests;

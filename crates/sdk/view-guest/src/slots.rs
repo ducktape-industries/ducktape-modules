@@ -32,12 +32,80 @@ struct Tables {
     host: crate::Host,
     mouse_interest: bool,
     event_interest: crate::wire::events::Interest,
-    messages: Vec<Rc<dyn Any>>,
-    handlers: Vec<Rc<dyn Any>>,
-    clicks: Vec<ClickRoute>,
-    tooltips: Vec<TooltipRoute>,
+    messages: Routes<Rc<dyn Any>>,
+    handlers: Routes<Rc<dyn Any>>,
+    clicks: Routes<ClickRoute>,
+    tooltips: Routes<TooltipRoute>,
+    row: Option<Row>,
     tooltip_responses: Vec<crate::wire::TooltipResponse>,
     pictures: HashSet<(bool, u64)>,
+}
+
+/// A route table. Routes taken while a list row lowers get ids from the row
+/// and their order in it, not from the order of the whole frame: a row
+/// scrolled in above the others renumbered every route after it otherwise,
+/// and every node carrying one went out again as a props patch.
+struct Routes<T> {
+    frame: Vec<T>,
+    rows: std::collections::HashMap<u32, T>,
+}
+
+impl<T> Default for Routes<T> {
+    fn default() -> Self {
+        Self {
+            frame: Vec::new(),
+            rows: std::collections::HashMap::new(),
+        }
+    }
+}
+
+/// The list row being lowered: its key, and how many routes it has taken.
+#[derive(Clone, Copy)]
+pub(crate) struct Row {
+    key: u64,
+    taken: u32,
+}
+
+/// Row ids have the top bit set; frame ids never get that far.
+const ROW_IDS: u32 = 1 << 31;
+
+impl<T: Clone> Routes<T> {
+    fn push(&mut self, row: &mut Option<Row>, route: T, what: &str) -> u32 {
+        if let Some(row) = row {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::hash::DefaultHasher::new();
+            (row.key, row.taken).hash(&mut hasher);
+            row.taken += 1;
+            let id = ROW_IDS | hasher.finish() as u32;
+            // A collision only costs the stable id: the route takes a frame id.
+            if let std::collections::hash_map::Entry::Vacant(slot) = self.rows.entry(id) {
+                slot.insert(route);
+                return id;
+            }
+        }
+        let id = u32::try_from(self.frame.len())
+            .ok()
+            .filter(|id| *id < ROW_IDS)
+            .unwrap_or_else(|| panic!("too many {what} routes"));
+        self.frame.push(route);
+        id
+    }
+
+    fn get(&self, id: u32) -> Option<T> {
+        match id & ROW_IDS {
+            0 => self.frame.get(id as usize).cloned(),
+            _ => self.rows.get(&id).cloned(),
+        }
+    }
+}
+
+/// Routes taken from here to [`leave_row`] are keyed by `key`.
+pub(crate) fn enter_row(context: &Context, key: u64) -> Option<Row> {
+    context.0.borrow_mut().row.replace(Row { key, taken: 0 })
+}
+
+pub(crate) fn leave_row(context: &Context, outer: Option<Row>) {
+    context.0.borrow_mut().row = outer;
 }
 
 #[derive(Clone, Default)]
@@ -85,10 +153,9 @@ pub fn handler<A: 'static, M: 'static>(
 ) -> u32 {
     let tables = context.tables();
     let mut tables = tables.borrow_mut();
+    let tables = &mut *tables;
     let handler: Rc<dyn Any> = Rc::new(handler);
-    let index = u32::try_from(tables.handlers.len()).expect("too many handler routes");
-    tables.handlers.push(handler);
-    index
+    tables.handlers.push(&mut tables.row, handler, "handler")
 }
 
 pub(crate) fn reset(context: &Context) {
@@ -106,25 +173,20 @@ pub(crate) fn reset(context: &Context) {
 }
 
 pub(crate) fn tooltip(context: &Context, build: TooltipBuilder) -> u32 {
-    let mut tables = context.0.borrow_mut();
-    let index = u32::try_from(tables.tooltips.len()).expect("too many tooltip routes");
-    tables
-        .tooltips
-        .push(Rc::new(move |_, window, cx| Some(build(window, cx))));
-    index
+    let tables = &mut *context.0.borrow_mut();
+    let route: TooltipRoute = Rc::new(move |_, window, cx| Some(build(window, cx)));
+    tables.tooltips.push(&mut tables.row, route, "tooltip")
 }
 
 pub(crate) fn rich_text_tooltip(context: &Context, build: RichTextTooltipBuilder) -> u32 {
-    let mut tables = context.0.borrow_mut();
-    let index = u32::try_from(tables.tooltips.len()).expect("too many tooltip routes");
-    tables.tooltips.push(Rc::new(move |index, window, cx| {
-        index.and_then(|index| build(index, window, cx))
-    }));
-    index
+    let tables = &mut *context.0.borrow_mut();
+    let route: TooltipRoute =
+        Rc::new(move |index, window, cx| index.and_then(|index| build(index, window, cx)));
+    tables.tooltips.push(&mut tables.row, route, "tooltip")
 }
 
 pub(crate) fn tooltip_route(context: &Context, index: u32) -> Option<TooltipRoute> {
-    context.0.borrow().tooltips.get(index as usize).cloned()
+    context.0.borrow().tooltips.get(index)
 }
 
 pub(crate) fn tooltip_response(context: &Context, response: crate::wire::TooltipResponse) {
@@ -139,7 +201,7 @@ pub(crate) fn take_message<M: Clone + 'static>(context: &Context, index: u32) ->
     let tables = context.tables();
     let message = {
         let tables = tables.borrow();
-        tables.messages.get(index as usize).cloned()?
+        tables.messages.get(index)?
     };
     message.downcast_ref::<M>().cloned()
 }
@@ -152,7 +214,7 @@ pub(crate) fn run_handler<A: 'static, M: 'static>(
     let tables = context.tables();
     let handler = {
         let tables = tables.borrow();
-        tables.handlers.get(index as usize).cloned()?
+        tables.handlers.get(index)?
     };
     handler.downcast_ref::<Box<dyn Fn(A) -> Option<M>>>()?(value)
 }
@@ -162,12 +224,9 @@ pub(crate) fn route<A: 'static>(
     listener: impl Fn(&A, &mut crate::Window, &mut crate::App) + 'static,
 ) -> u32 {
     let tables = context.tables();
-    let mut tables = tables.borrow_mut();
-    let index = u32::try_from(tables.handlers.len()).expect("too many handler routes");
-    tables
-        .handlers
-        .push(Rc::new(EventRoute::<A>(Rc::new(listener))));
-    index
+    let tables = &mut *tables.borrow_mut();
+    let route: Rc<dyn Any> = Rc::new(EventRoute::<A>(Rc::new(listener)));
+    tables.handlers.push(&mut tables.row, route, "handler")
 }
 
 pub(crate) fn message_route(
@@ -175,12 +234,9 @@ pub(crate) fn message_route(
     listener: impl Fn(&(), &mut crate::Window, &mut crate::App) + 'static,
 ) -> u32 {
     let tables = context.tables();
-    let mut tables = tables.borrow_mut();
-    let index = u32::try_from(tables.messages.len()).expect("too many message routes");
-    tables
-        .messages
-        .push(Rc::new(EventRoute::<()>(Rc::new(listener))));
-    index
+    let tables = &mut *tables.borrow_mut();
+    let route: Rc<dyn Any> = Rc::new(EventRoute::<()>(Rc::new(listener)));
+    tables.messages.push(&mut tables.row, route, "message")
 }
 
 pub(crate) fn run_route<A: 'static>(
@@ -193,7 +249,7 @@ pub(crate) fn run_route<A: 'static>(
     let tables = context.tables();
     let handler = {
         let tables = tables.borrow();
-        tables.handlers.get(index as usize).cloned()
+        tables.handlers.get(index)
     };
     let Some(route) =
         handler.and_then(|route| route.downcast_ref::<EventRoute<A>>().map(|r| r.0.clone()))
@@ -213,11 +269,11 @@ pub(crate) fn run_message_route(
     let tables = context.tables();
     let route = {
         let tables = tables.borrow();
-        tables
-            .messages
-            .get(index as usize)
-            .and_then(|route| route.downcast_ref::<EventRoute<()>>())
-            .map(|route| route.0.clone())
+        tables.messages.get(index).and_then(|route| {
+            route
+                .downcast_ref::<EventRoute<()>>()
+                .map(|route| route.0.clone())
+        })
     };
     let Some(route) = route else { return false };
     route(&(), window, app);
@@ -236,10 +292,10 @@ pub(crate) fn click(
     context: &Context,
     listener: impl Fn(&gpui::ClickEvent, &mut crate::Window, &mut crate::App) + 'static,
 ) -> u32 {
-    let mut tables = context.0.borrow_mut();
-    let index = u32::try_from(tables.clicks.len()).expect("too many click routes");
-    tables.clicks.push(Rc::new(listener));
-    index
+    let tables = &mut *context.0.borrow_mut();
+    tables
+        .clicks
+        .push(&mut tables.row, Rc::new(listener), "click")
 }
 
 pub(crate) fn run_click(
@@ -249,7 +305,7 @@ pub(crate) fn run_click(
     window: &mut crate::Window,
     app: &mut crate::App,
 ) -> bool {
-    let listener = context.0.borrow().clicks.get(index as usize).cloned();
+    let listener = context.0.borrow().clicks.get(index);
     if let Some(listener) = listener {
         listener(event, window, app);
         true

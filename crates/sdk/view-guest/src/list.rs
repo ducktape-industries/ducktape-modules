@@ -166,15 +166,39 @@ impl ListState {
     pub fn is_following_tail(&self) -> bool {
         self.0.inner.borrow().following_tail
     }
+    /// A request next to the window grows it rather than replacing it: the
+    /// host asks for the rows it is missing, not for all it shows, so
+    /// replacing dropped the rows on screen and the next frame asked for those
+    /// back. A request away from the window is a jump, and replaces it.
     fn request(&self, request: &wire::ListRequest) {
         let mut inner = self.0.inner.borrow_mut();
-        inner.requested = bounded_window(request.start, request.end, inner.item_count);
+        let count = inner.item_count;
+        let asked = bounded_range(request.start..request.end, count);
+        let held = inner.requested.clone();
+        let touches = asked.start <= held.end && held.start <= asked.end;
+        let (start, end) = (held.start.min(asked.start), held.end.max(asked.end));
+        inner.requested = match (touches, end - start <= wire::MAX_LIST_ROWS) {
+            (false, _) => bounded_window(asked.start, asked.end, count),
+            (true, true) => start..end,
+            (true, false) if asked.start < held.start => bounded_window(start, end, count),
+            (true, false) => end - wire::MAX_LIST_ROWS..end,
+        };
     }
     fn observe(&self, event: &wire::ListScroll, window: &mut Window, app: &mut App) {
         {
             let mut inner = self.0.inner.borrow_mut();
             inner.logical_scroll_top = from_wire_offset(event.offset);
             inner.following_tail = event.is_following_tail;
+            // Rows well off screen leave the window, so scrolling through a
+            // long list keeps its tick near a screenful rather than growing
+            // to the cap. The margin outreaches the host's overdraw.
+            let keep = event.visible_start.saturating_sub(MARGIN_ROWS)
+                ..event.visible_end.saturating_add(MARGIN_ROWS);
+            let held = inner.requested.clone();
+            let trimmed = held.start.max(keep.start)..held.end.min(keep.end);
+            if !trimmed.is_empty() && event.visible_start < event.visible_end {
+                inner.requested = trimmed;
+            }
         }
         let mut handler = self.0.scroll_handler.borrow_mut().take();
         if let Some(callback) = handler.as_mut() {
@@ -260,9 +284,11 @@ impl Element for List {
         };
         let mut children = Vec::with_capacity(range.len().min(wire::MAX_LIST_ROWS));
         for index in range.clone().take(wire::MAX_LIST_ROWS) {
+            let outer = lowering.enter_row(state.0.id << 32 ^ index as u64);
             let (window, app) = lowering.parts();
             let row = render_item(index, window, app);
             children.push(lowering.lower_element(row));
+            lowering.leave_row(outer);
         }
         wire::Node::List {
             state: state.0.id,
@@ -290,10 +316,17 @@ impl IntoElement for List {
 }
 impl gpui::prelude::FluentBuilder for List {}
 
+/// Rows a list renders before the host says what it shows: a screenful of
+/// short rows. The host asks for more as they come into view — each row the
+/// guest renders is paid for on every tick.
+const INITIAL_ROWS: usize = 24;
+/// Rows kept past each edge of what the host shows.
+const MARGIN_ROWS: usize = 12;
+
 fn initial_range(count: usize, alignment: ListAlignment) -> Range<usize> {
     match alignment {
-        ListAlignment::Top => 0..count.min(wire::MAX_LIST_ROWS),
-        ListAlignment::Bottom => count.saturating_sub(wire::MAX_LIST_ROWS)..count,
+        ListAlignment::Top => 0..count.min(INITIAL_ROWS),
+        ListAlignment::Bottom => count.saturating_sub(INITIAL_ROWS)..count,
     }
 }
 fn bounded_range(range: Range<usize>, count: usize) -> Range<usize> {
@@ -335,7 +368,10 @@ fn from_wire_offset(v: wire::ListOffset) -> ListOffset {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{div, Context, Driver, InteractiveElement, ParentElement, Render, View};
+    use crate::{
+        div, Context, Driver, InteractiveElement, ParentElement, Render,
+        StatefulInteractiveElement, View,
+    };
     use serde::{Deserialize, Serialize};
 
     #[derive(Serialize, Deserialize)]
@@ -369,6 +405,7 @@ mod tests {
                     view.rendered.push(index);
                     div()
                         .id(format!("row-{index}"))
+                        .on_click(|_, _, _| {})
                         .child(index.to_string())
                         .into_any_element()
                 }),
@@ -378,6 +415,39 @@ mod tests {
 
     fn list_node(frame: &wire::Frame) -> &wire::Node {
         frame.root.as_ref().expect("list root")
+    }
+
+    #[test]
+    fn a_row_scrolled_in_leaves_the_other_rows_routes_alone() {
+        let mut driver = Driver::<ListView>::new();
+        let first = driver.tick(vec![]);
+        let wire::Node::List {
+            request_handler,
+            range_start,
+            ..
+        } = list_node(&first)
+        else {
+            panic!("expected list")
+        };
+        let (handler, start) = (*request_handler, *range_start);
+        let frame = driver.tick_wire(vec![wire::Event::ListRequest {
+            handler,
+            request: wire::ListRequest {
+                start: start - 1,
+                end: start,
+            },
+        }]);
+        let props = frame
+            .patches
+            .iter()
+            .filter(|patch| matches!(patch, wire::Patch::Props { path, .. } if !path.is_empty()))
+            .count();
+        let inserts = frame
+            .patches
+            .iter()
+            .filter(|patch| matches!(patch, wire::Patch::Insert { .. }))
+            .count();
+        assert_eq!((props, inserts), (0, 1), "{:?}", frame.patches);
     }
 
     #[test]
@@ -394,8 +464,8 @@ mod tests {
                 ..
             } => {
                 assert_eq!(*item_count, 2_000);
-                assert_eq!(*range_start, 2_000 - wire::MAX_LIST_ROWS);
-                assert_eq!(children.len(), wire::MAX_LIST_ROWS);
+                assert_eq!(*range_start, 2_000 - INITIAL_ROWS);
+                assert_eq!(children.len(), INITIAL_ROWS);
                 (
                     *request_handler,
                     scroll_handler.expect("settled scroll route"),
@@ -405,7 +475,7 @@ mod tests {
         };
         driver
             .entity()
-            .read(|view| assert_eq!(view.rendered.len(), wire::MAX_LIST_ROWS));
+            .read(|view| assert_eq!(view.rendered.len(), INITIAL_ROWS));
 
         let second = driver.tick(vec![wire::Event::ListRequest {
             handler,
@@ -427,7 +497,7 @@ mod tests {
         }
         driver
             .entity()
-            .read(|view| assert_eq!(view.rendered.len(), 2 * wire::MAX_LIST_ROWS));
+            .read(|view| assert_eq!(view.rendered.len(), INITIAL_ROWS + wire::MAX_LIST_ROWS));
 
         driver.tick(vec![wire::Event::ListScroll {
             handler: scroll_handler,

@@ -3,29 +3,53 @@ use gpui::SharedString;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Aria {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub author_id: Option<SharedString>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<SharedString>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<SharedString>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub keyshortcuts: Option<SharedString>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub active_descendant: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<SharedString>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub placeholder: Option<SharedString>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub selected: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub expanded: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub disabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub numeric_value: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub numeric_value_step: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub min_numeric_value: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub max_numeric_value: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub level: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub position_in_set: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub size_of_set: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub row_index: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub column_index: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub row_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub column_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub toggled: Option<gpui::Toggled>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub orientation: Option<gpui::Orientation>,
 }
 impl Aria {

@@ -230,12 +230,9 @@ pub mod exports {
     pub fn tick<A: View>(ptr: u32, len: u32) -> u64 {
         let events: Vec<wire::Event> =
             wire::decode(&take(ptr, len)).expect("invalid host event frame");
-        let mut frame = driver::<A, _>(|driver| driver.tick(events));
+        let frame = driver::<A, _>(|driver| driver.tick_wire(events));
         // The host keeps the tree it has, or patches it; the whole tree
-        // crosses only when neither will do.
-        if frame.unchanged || !frame.patches.is_empty() {
-            frame.root = None;
-        }
+        // crosses only when neither will do (the driver leaves it out then).
         answer(wire::encode(&frame))
     }
 
