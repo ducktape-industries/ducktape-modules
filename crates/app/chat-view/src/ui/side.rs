@@ -29,6 +29,7 @@ pub fn thread(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
                 .items_center()
                 .gap_2()
                 .p_3()
+                .pr(px(PANE_CONTROLS))
                 .border_b_1()
                 .border_color(theme.border)
                 .child(
@@ -135,6 +136,7 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
                 .id("chat-details-header")
                 .flex()
                 .items_center()
+                .pr(px(PANE_CONTROLS))
                 .child(
                     div()
                         .id("chat-details-title")
@@ -159,7 +161,6 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
                 .h(px(28.))
                 .px_2()
                 .py_1()
-                .rounded_md()
                 .border_1()
                 .border_color(theme.border_strong)
                 .bg(theme.background)
@@ -195,7 +196,6 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
                 .h(px(28.))
                 .px_2()
                 .py_1()
-                .rounded_md()
                 .border_1()
                 .border_color(theme.border_strong)
                 .bg(theme.background)
@@ -235,7 +235,6 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
             .id(ElementId::named_usize("chat-details-remove", index))
             .px_2()
             .py_1()
-            .rounded_md()
             .bg(theme.surface)
             .hover(|s| s.bg(theme.surface_raised))
             .child("Remove");

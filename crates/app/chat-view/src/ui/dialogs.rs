@@ -22,7 +22,6 @@ fn dialog_button(
         .id(id)
         .px_2()
         .py_1()
-        .rounded_md()
         .bg(theme.surface)
         .text_color(if enabled {
             theme.foreground
@@ -79,7 +78,6 @@ pub fn channel_create(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Opt
         .h(px(28.))
         .px_2()
         .py_1()
-        .rounded_md()
         .border_1()
         .border_color(theme.border_strong)
         .bg(theme.surface)
@@ -105,7 +103,6 @@ pub fn channel_create(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Opt
         .flex_col()
         .gap_2()
         .p_5()
-        .rounded_md()
         .border_1()
         .border_color(theme.border)
         .bg(theme.background)
@@ -186,7 +183,6 @@ pub fn preview(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Option<Any
         .flex_col()
         .gap_2()
         .p_4()
-        .rounded_md()
         .border_1()
         .border_color(theme.border)
         .bg(theme.background)

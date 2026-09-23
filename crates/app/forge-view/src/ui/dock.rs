@@ -52,7 +52,6 @@ pub(crate) fn comments(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) ->
                 div()
                     .id(id(format!("forge-comment-draft-{}", staged.anchor())))
                     .p_2()
-                    .rounded_md()
                     .bg(theme.accent_soft)
                     .text_size(px(12.))
                     .child(format!("pending · {} — {}", staged.anchor(), staged.body)),
@@ -79,7 +78,6 @@ pub(crate) fn comments(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) ->
                         comment.line
                     )))
                     .p_2()
-                    .rounded_md()
                     .bg(theme.surface_raised)
                     .text_size(px(12.))
                     .role(Role::Button)

@@ -52,7 +52,6 @@ fn tree(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
                         .h(px(26.))
                         .w_full()
                         .px_2()
-                        .rounded_md()
                         .border_1()
                         .border_color(theme.border_strong)
                         .bg(theme.surface)

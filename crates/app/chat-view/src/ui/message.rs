@@ -70,7 +70,6 @@ pub fn card(
         .px_4()
         .pt(px(if message.show_author { 12. } else { 3. }))
         .pb(px(3.))
-        .rounded_md()
         .bg(if chosen {
             theme.accent_soft
         } else if ranged {
@@ -355,7 +354,6 @@ fn block_view(
                 .flex_col()
                 .gap_1()
                 .p_2()
-                .rounded_md()
                 .bg(theme.surface);
             if !block.lang.is_empty() {
                 code = code.child(
@@ -387,7 +385,6 @@ fn block_view(
             });
             let card = div()
                 .id(id)
-                .rounded_md()
                 .hover(|s| s.bg(theme.surface_raised))
                 .role(ducktape_view_guest::Role::Button)
                 .aria_label(format!("Open {}", block.text))
@@ -411,7 +408,6 @@ fn block_view(
                                     .overflow_hidden()
                                     .border_1()
                                     .border_color(theme.border)
-                                    .rounded_md()
                                     .child(surface(
                                         format!(
                                             "chat-message-{}-block-{index}-picture",
@@ -488,7 +484,6 @@ fn action_button(
         .id(id)
         .px_1()
         .py_0p5()
-        .rounded_sm()
         .bg(theme.surface)
         .hover(|s| s.bg(theme.surface_raised))
         .role(ducktape_view_guest::Role::Button)
@@ -516,7 +511,6 @@ fn reaction_button(
         .id(id)
         .px_1()
         .py_0p5()
-        .rounded_sm()
         .bg(if mine {
             theme.accent_soft
         } else {

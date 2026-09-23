@@ -236,7 +236,6 @@ impl Settings {
             .h(px(28.))
             .px_2()
             .py_1()
-            .rounded_md()
             .border_1()
             .border_color(theme.border_strong)
             .bg(theme.surface)
@@ -505,7 +504,6 @@ fn section(key: &str, title: &str, body: impl IntoElement, theme: &Theme) -> imp
         .bg(theme.background)
         .border_1()
         .border_color(theme.border)
-        .rounded_md()
         .p_3()
         .child(
             div()
@@ -545,7 +543,6 @@ fn refusal(key: &str, sentence: &str, theme: &Theme) -> impl IntoElement {
         .bg(theme.danger_soft)
         .border_1()
         .border_color(theme.danger)
-        .rounded_md()
         .px_3()
         .py_2()
         .child(
@@ -567,7 +564,6 @@ fn button(id: impl Into<String>, label: impl Into<String>, theme: &Theme) -> Sta
         .id(id.into())
         .px_2()
         .py_1()
-        .rounded_md()
         .bg(theme.surface)
         .border_1()
         .border_color(theme.border)
