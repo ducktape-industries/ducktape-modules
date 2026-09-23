@@ -437,7 +437,6 @@ fn gutter(
             path_text(&row.path),
             if new_side { "new" } else { "old" }
         )))
-        .rounded_sm()
         .hover(|style| style.bg(theme.accent_soft))
         .role(Role::Button)
         .aria_label("Comment on this line")
@@ -467,7 +466,6 @@ pub(crate) fn composer(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) ->
         .gap_2()
         .m_2()
         .p_2()
-        .rounded_md()
         .border_1()
         .border_color(theme.border_strong)
         .bg(theme.surface)
@@ -477,7 +475,6 @@ pub(crate) fn composer(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) ->
                 .h(px(28.))
                 .w_full()
                 .px_2()
-                .rounded_md()
                 .border_1()
                 .border_color(theme.border_strong)
                 .bg(theme.background)

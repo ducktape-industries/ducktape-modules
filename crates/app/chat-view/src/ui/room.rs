@@ -32,7 +32,6 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
                     .mx_3()
                     .my_2()
                     .p_2()
-                    .rounded_md()
                     .bg(theme.danger_soft)
                     .text_color(theme.danger)
                     .flex()
@@ -132,6 +131,7 @@ fn header(chat: &Chat, room: &Room, cx: &mut Context<Chat>, theme: &Theme) -> im
         .p_3()
         .border_b_1()
         .border_color(theme.border)
+        .pr(px(PANE_CONTROLS))
         .child(div().flex_1().child(title))
         .child(button(
             "chat-room-details",
@@ -203,7 +203,6 @@ fn huddle(info: &ChannelInfo, theme: &Theme) -> impl IntoElement {
         .mx_3()
         .my_1()
         .p_2()
-        .rounded_md()
         .bg(theme.surface)
         .child(badge(
             "chat-room-huddle-live",
@@ -266,7 +265,6 @@ fn search_results(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl In
                         .flex_col()
                         .gap_1()
                         .p_2()
-                        .rounded_md()
                         .bg(theme.surface)
                         .hover(|s| s.bg(theme.surface_raised))
                         .role(ducktape_view_guest::Role::Button)
@@ -308,7 +306,6 @@ fn gate(_chat: &Chat, refusal: &str, cx: &mut Context<Chat>, theme: &Theme) -> A
         .mx_3()
         .my_2()
         .p_3()
-        .rounded_md()
         .bg(if refusal == "channel_archived" {
             theme.surface
         } else {

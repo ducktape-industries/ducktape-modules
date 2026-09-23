@@ -21,7 +21,6 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
         .flex_1()
         .px_2()
         .py_1()
-        .rounded_md()
         .border_1()
         .border_color(theme.sidebar_border)
         .bg(theme.sidebar_raised)
@@ -83,7 +82,6 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
         .id("chat-sidebar-new-channel")
         .px_1()
         .py_0p5()
-        .rounded_sm()
         .hover(|s| s.bg(theme.sidebar_raised))
         .when(!busy || chat.create.is_some(), |el| {
             el.role(ducktape_view_guest::Role::Button)
@@ -226,7 +224,6 @@ fn channel_button(
         .gap_1()
         .min_h(px(28.))
         .px_1()
-        .rounded_md()
         .bg(if selected {
             theme.sidebar_raised
         } else {
@@ -306,7 +303,6 @@ fn voice_button(
         .gap_1()
         .min_h(px(28.))
         .px_1()
-        .rounded_md()
         .bg(if selected {
             theme.sidebar_raised
         } else {
@@ -410,7 +406,6 @@ fn dm_button(
         .gap_1()
         .min_h(px(28.))
         .px_1()
-        .rounded_md()
         .bg(if selected {
             theme.sidebar_raised
         } else {

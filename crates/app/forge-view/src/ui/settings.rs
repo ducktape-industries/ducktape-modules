@@ -123,7 +123,6 @@ pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
                     .h(px(28.))
                     .flex_1()
                     .px_2()
-                    .rounded_md()
                     .border_1()
                     .border_color(theme.border_strong)
                     .bg(theme.surface)

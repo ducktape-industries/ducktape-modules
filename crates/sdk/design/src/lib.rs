@@ -64,15 +64,27 @@ pub mod type_scale {
     pub const MONO: f64 = 12.;
 }
 
-/// Corner radii, in pixels. Tight: a control is barely rounded, a card a
-/// touch more, and only an avatar is a circle.
+/// Corner radii, in pixels. The shell's canvas is square: a control, a
+/// card and a modal have corners, and only an avatar or a dot is a circle.
 pub mod radius {
     /// a control: a button, an input, a list row
-    pub const CONTROL: f64 = 4.;
+    pub const CONTROL: f64 = 0.;
     /// a card, a panel, a modal
-    pub const CARD: f64 = 6.;
+    pub const CARD: f64 = 0.;
     /// a pill: an avatar
     pub const PILL: f64 = 999.;
+}
+
+/// The pane a view is seated in. The shell draws no title strip over a
+/// view: its controls (split, pop out, close) float over the view's
+/// top-right corner. A view keeps that corner free — a header row that
+/// runs to the right edge pads its right end by [`pane::CONTROLS`].
+pub mod pane {
+    /// Width the pane's controls cover from the view's right edge: three
+    /// 28px buttons, their 2px gaps and the 8px inset, and a margin.
+    pub const CONTROLS: f64 = 112.;
+    /// Height they cover from the view's top edge (8px inset, 28px, 8px).
+    pub const CONTROLS_HEIGHT: f64 = 44.;
 }
 
 /// Gaps and insets, in pixels. One ladder: every gap the kit's builders open

@@ -72,7 +72,6 @@ fn main(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
                 .id(id("forge-notice"))
                 .m_2()
                 .p_2()
-                .rounded_md()
                 .bg(theme.danger_soft)
                 .text_color(theme.foreground)
                 .text_size(px(12.))
@@ -100,7 +99,8 @@ fn repo(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
         .pt_3()
         .pb_2()
         .border_b_1()
-        .border_color(theme.border);
+        .border_color(theme.border)
+        .pr(px(PANE_CONTROLS));
     let mut title = div()
         .id(id("forge-repo-title"))
         .flex()
@@ -266,6 +266,7 @@ fn panel(forge: &Forge, dock: Dock, cx: &mut Context<Forge>, theme: &Theme) -> A
                 .gap_2()
                 .px_3()
                 .py_2()
+                .pr(px(PANE_CONTROLS))
                 .child(heading(id("forge-dock-title"), dock.label(), 2, theme))
                 .child(div().flex_1())
                 .child(button(id("forge-dock-close"), "Close", theme, close)),
@@ -373,7 +374,6 @@ pub(crate) fn pending(forge: &Forge, scope: &str, theme: &Theme) -> AnyElement {
                 .items_center()
                 .gap_2()
                 .p_1()
-                .rounded_md()
                 .bg(if failed {
                     theme.danger_soft
                 } else {

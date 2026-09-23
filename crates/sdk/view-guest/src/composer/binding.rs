@@ -113,7 +113,6 @@ impl RenderOnce for Mark {
             .justify_center()
             .w(px(MARK))
             .h(px(MARK))
-            .rounded_sm()
             .border_1()
             .border_color(theme.border)
             .text_size(px(design::type_scale::BODY as f32))
@@ -152,7 +151,6 @@ impl RenderOnce for ActionButton {
             .justify_center()
             .h(px(design::height::CONTROL as f32))
             .px_2()
-            .rounded_sm()
             .border_1()
             .border_color(border)
             .bg(background)
@@ -187,7 +185,6 @@ impl RenderOnce for MentionItem {
             .items_center()
             .min_h(px(design::height::ROW as f32))
             .px_2()
-            .rounded_sm()
             .bg(if self.selected {
                 theme.accent_soft
             } else {
@@ -228,7 +225,6 @@ impl RenderOnce for AttachmentChip {
             .max_w(px(320.))
             .p_1()
             .pl_2()
-            .rounded_sm()
             .border_1()
             .border_color(theme.border)
             .bg(theme.surface)
@@ -386,7 +382,6 @@ pub fn view<V: View + 'static>(
                 .items_center()
                 .gap_2()
                 .p_2()
-                .rounded_sm()
                 .bg(cx.global::<Theme>().danger_soft)
                 .text_color(cx.global::<Theme>().danger)
                 .child(div().flex_1().child("An earlier message wasn’t sent"))
@@ -436,7 +431,6 @@ pub fn view<V: View + 'static>(
         .flex()
         .flex_col()
         .gap_2()
-        .rounded_md()
         .border_1()
         .border_color(cx.global::<Theme>().border_strong)
         .bg(cx.global::<Theme>().background)

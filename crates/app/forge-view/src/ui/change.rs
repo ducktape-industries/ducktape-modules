@@ -140,6 +140,7 @@ fn header(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
         .pb_2()
         .border_b_1()
         .border_color(theme.border)
+        .pr(px(PANE_CONTROLS))
         .child(top);
     if !refusal.is_empty() {
         column = column.child(
@@ -165,7 +166,6 @@ fn conversation(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyEle
             div()
                 .id(id("forge-change-body"))
                 .p_2()
-                .rounded_md()
                 .bg(theme.surface)
                 .child(prose("forge-change-body-text", &change.body)),
         );
@@ -183,7 +183,6 @@ fn conversation(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyEle
             .flex_col()
             .gap_1()
             .p_2()
-            .rounded_md()
             .border_1()
             .border_color(theme.border)
             .child(
@@ -255,7 +254,6 @@ fn messages(forge: &Forge, theme: &Theme) -> AnyElement {
         Some(ducktape_view_guest::view::Loaded::Failed(refusal)) => div()
             .id(id("forge-conversation-refused"))
             .p_2()
-            .rounded_md()
             .bg(theme.danger_soft)
             .text_size(px(12.))
             .child(refusal.sentence.clone())
@@ -285,7 +283,6 @@ fn messages(forge: &Forge, theme: &Theme) -> AnyElement {
                         .flex_col()
                         .gap_0p5()
                         .p_2()
-                        .rounded_md()
                         .bg(theme.surface)
                         .child(
                             div()
@@ -319,7 +316,6 @@ fn composer(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement
                 .h(px(30.))
                 .flex_1()
                 .px_2()
-                .rounded_md()
                 .border_1()
                 .border_color(theme.border_strong)
                 .bg(theme.surface)
@@ -555,7 +551,6 @@ fn review_bar(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyEleme
             .h(px(28.))
             .w_full()
             .px_2()
-            .rounded_md()
             .border_1()
             .border_color(theme.border_strong)
             .bg(theme.background)
