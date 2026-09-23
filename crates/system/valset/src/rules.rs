@@ -1,7 +1,7 @@
-// The rules over any store: governance-only writes, the last validator kept seated.
+// The rules over any store: admission-only writes, the last validator kept seated.
 
 use abi::{Env, Refusal};
-use module_registry::AUTHORITY;
+use module_registry::ADMISSION;
 use store::{Map, Reads, Writes, invalid, wrong_state};
 
 use crate::{Genesis, Membership, Op, Query, Reply, Standing};
@@ -24,7 +24,7 @@ pub fn init(store: &mut impl Writes, genesis: Genesis) -> Result<(), Refusal> {
 }
 
 pub fn execute(store: &mut impl Writes, env: &Env, op: Op) -> Result<(), Refusal> {
-    module_registry::helpers::from(env, AUTHORITY)?;
+    module_registry::helpers::from(env, ADMISSION)?;
     match op {
         Op::Set(membership) => set(store, membership),
         Op::Remove { key } => remove(store, &key),

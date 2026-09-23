@@ -1,7 +1,7 @@
 // The rules natively over `store::Memory`: what the founding suite checks on the host, without the host.
 
 use abi::{Cause, Env, Origin, reason};
-use module_registry::AUTHORITY;
+use module_registry::ADMISSION;
 use store::{Memory, Page};
 
 use crate::{Genesis, Member, Membership, Op, Query, Reply, Standing};
@@ -43,7 +43,7 @@ fn founded() -> Memory {
 }
 
 fn govern(store: &mut Memory, op: Op) -> Result<(), abi::Refusal> {
-    crate::execute(store, &env(Origin::Program(AUTHORITY.into())), op)
+    crate::execute(store, &env(Origin::Program(ADMISSION.into())), op)
 }
 
 fn ask(store: &Memory, query: Query) -> Reply {
@@ -72,7 +72,7 @@ fn founding_seats_the_validators_in_key_order() {
 }
 
 #[test]
-fn only_the_authority_writes_and_a_key_is_32_bytes() {
+fn only_admission_writes_and_a_key_is_32_bytes() {
     let mut store = founded();
     let stranger = crate::execute(
         &mut store,
