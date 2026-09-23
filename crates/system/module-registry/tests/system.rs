@@ -250,6 +250,27 @@ impl Net {
     async fn as_admission(&mut self, op: &valset::Op) -> Receipt {
         self.sent_by(admission::PROGRAM, valset::PROGRAM, op).await
     }
+    /// A signed `Enroll` through the real admission program; the valset receipt.
+    async fn enroll(&mut self, seed: u64, address: &str) -> Receipt {
+        let signer = public(seed);
+        let op = admission::Op::Enroll {
+            address: address.to_owned(),
+        };
+        let submission = self.submission(&signer, admission::PROGRAM, abi::encode(&op));
+        let applied = self.block(vec![submission]).await;
+        self.consumed(&signer, &applied.submissions[0]);
+        match &applied.submissions[0].outcome {
+            Outcome::Applied { .. } => {}
+            Outcome::Rejected(refusal) => panic!("admission rejected the enroll: {refusal}"),
+        }
+        let applied = self.tick().await;
+        applied
+            .deliveries
+            .into_iter()
+            .map(|delivered| delivered.receipt)
+            .find(|receipt| receipt.program == valset::PROGRAM)
+            .unwrap()
+    }
 
     /// A query the program refuses.
     async fn refused<Q: BorshSerialize>(&self, program: &str, query: &Q) -> abi::Refusal {
@@ -319,6 +340,8 @@ fn refusal_of(receipt: &Receipt) -> &str {
     }
 }
 
+#[path = "system/admission.rs"]
+mod admission_tests;
 #[path = "system/founding.rs"]
 mod founding_tests;
 #[path = "system/identity.rs"]
