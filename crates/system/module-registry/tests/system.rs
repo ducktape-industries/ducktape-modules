@@ -21,25 +21,26 @@ fn release_dir() -> std::path::PathBuf {
         .join("wasm32-unknown-unknown/release")
 }
 
-/// False, with the one line that says what to run, when the boot set has not
-/// been built; every test returns early on it instead of failing.
-fn built() -> bool {
-    let missing: Vec<String> = ["module_registry", "valset", "identity"]
-        .into_iter()
-        .filter(|name| !release_dir().join(format!("{name}.wasm")).exists())
-        .map(str::to_owned)
-        .collect();
-    if !missing.is_empty() {
-        println!(
-            "skipping: {} not built under {}; run `make wasm-programs` first",
-            missing.join(", "),
-            release_dir().display()
-        );
-    }
-    missing.is_empty()
+/// Builds the boot set once per test binary: `make wasm-programs` at the
+/// repo root, which is cargo's own freshness (a missing or stale artifact
+/// rebuilds, a fresh one costs a fingerprint check). The suite never skips;
+/// a failed build fails every test that reads the bytes.
+fn build() {
+    static ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    ONCE.get_or_init(|| {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let status = std::process::Command::new("make")
+            .arg("-C")
+            .arg(&root)
+            .arg("wasm-programs")
+            .status()
+            .expect("make is on PATH");
+        assert!(status.success(), "`make wasm-programs` failed: {status}");
+    });
 }
 
 fn program(name: &str) -> Vec<u8> {
+    build();
     let path = release_dir().join(format!("{name}.wasm"));
     std::fs::read(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
 }
@@ -231,6 +232,21 @@ impl Net {
 
     async fn as_authority<T: BorshSerialize>(&mut self, target: &str, op: &T) -> Receipt {
         self.sent_by(AUTHORITY, target, op).await
+    }
+
+    /// A query the program refuses.
+    async fn refused<Q: BorshSerialize>(&self, program: &str, query: &Q) -> abi::Refusal {
+        self.host
+            .query(
+                Layer::Confirmed,
+                self.time(),
+                Origin::External(public(1)),
+                program,
+                abi::encode(query),
+            )
+            .await
+            .unwrap()
+            .unwrap_err()
     }
 
     async fn ask<Q: BorshSerialize, R: BorshDeserialize>(&self, program: &str, query: &Q) -> R {

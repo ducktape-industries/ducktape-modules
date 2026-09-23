@@ -25,8 +25,8 @@ use futures::StreamExt;
 
 use api::Props;
 use forge::{
-    Bounds, Change, ChangeFilter, ChangeState, Comparison, Page, Query, RefInfo, Reply, RepoInfo,
-    Review, Revision,
+    Bounds, Change, ChangeFilter, ChangeState, Comparison, PageReply, Query, RefInfo, Reply,
+    RepoInfo, Review, Revision,
 };
 use queries::PAGE;
 pub use state::Forge;
@@ -118,7 +118,7 @@ pub(crate) type OpenChange<'a> = (
     &'a Change,
     &'a Option<String>,
     &'a Option<String>,
-    &'a Page<Review>,
+    &'a PageReply<Review>,
 );
 
 /// A read, in the three states a screen draws.
@@ -265,22 +265,17 @@ impl Forge {
     /// not known yet (a tree needs its commit) simply is not asked until the
     /// read that answers it lands.
     fn needed(&self) -> Vec<Query> {
-        let mut wanted = vec![Query::Repos {
-            cursor: None,
-            limit: PAGE,
-        }];
+        let mut wanted = vec![Query::Repos { page: PAGE }];
         let Some(repo) = self.nav.repo.clone() else {
             return wanted;
         };
         wanted.push(Query::Repo {
             repo: repo.clone(),
-            cursor: None,
-            limit: PAGE,
+            page: PAGE,
         });
         wanted.push(Query::Refs {
             repo: repo.clone(),
-            cursor: None,
-            limit: PAGE,
+            page: PAGE,
         });
         wanted.push(Query::Activity { repo: repo.clone() });
         if let Some(n) = self.nav.change {
@@ -294,8 +289,7 @@ impl Forge {
                         repo: repo.clone(),
                         at,
                         path: self.nav.path.clone(),
-                        cursor: None,
-                        limit: PAGE,
+                        page: PAGE,
                     });
                 }
                 match (&self.nav.blob, self.readme()) {
@@ -316,8 +310,7 @@ impl Forge {
                 wanted.push(Query::Log {
                     repo: repo.clone(),
                     from: self.revision(),
-                    cursor: None,
-                    limit: PAGE,
+                    page: PAGE,
                 });
                 if let Some(commit) = self.nav.commit.clone() {
                     let base = self.commit_parent(&commit);
@@ -326,8 +319,7 @@ impl Forge {
                         base,
                         head: commit,
                         path: None,
-                        cursor: None,
-                        limit: PAGE,
+                        page: PAGE,
                     });
                 }
             }
@@ -356,8 +348,7 @@ impl Forge {
         let mut wanted = vec![Query::Change {
             repo: repo.to_owned(),
             n,
-            cursor: None,
-            limit: PAGE,
+            page: PAGE,
         }];
         let Some((change, source_head, _, _)) = self.change() else {
             return wanted;
@@ -371,8 +362,7 @@ impl Forge {
             wanted.push(Query::Log {
                 repo: repo.to_owned(),
                 from: change.from.clone(),
-                cursor: None,
-                limit: PAGE,
+                page: PAGE,
             });
         }
         if let (ChangeTab::Files, Some(head), Some(comparison)) =
@@ -383,8 +373,7 @@ impl Forge {
                 base: comparison.base.clone(),
                 head,
                 path: None,
-                cursor: None,
-                limit: PAGE,
+                page: PAGE,
             });
         }
         wanted
@@ -395,8 +384,7 @@ impl Forge {
         match self.filter {
             Filter::Judgment => Query::Judgment {
                 key: me.unwrap_or_default(),
-                cursor: None,
-                limit: PAGE,
+                page: PAGE,
             },
             other => Query::Changes {
                 repo: repo.to_owned(),
@@ -410,8 +398,7 @@ impl Forge {
                     author: (other == Filter::Authored).then(|| me.clone().unwrap_or_default()),
                     involves: (other == Filter::Involves).then(|| me.unwrap_or_default()),
                 },
-                cursor: None,
-                limit: PAGE,
+                page: PAGE,
             },
         }
     }
@@ -440,20 +427,18 @@ impl Forge {
     pub(crate) fn repo_query(&self) -> Query {
         Query::Repo {
             repo: self.repo_name(),
-            cursor: None,
-            limit: PAGE,
+            page: PAGE,
         }
     }
 
     pub(crate) fn refs_query(&self) -> Query {
         Query::Refs {
             repo: self.repo_name(),
-            cursor: None,
-            limit: PAGE,
+            page: PAGE,
         }
     }
 
-    pub(crate) fn repo(&self) -> Option<(&RepoInfo, &Bounds, &Page<Vec<u8>>)> {
+    pub(crate) fn repo(&self) -> Option<(&RepoInfo, &Bounds, &PageReply<Vec<u8>>)> {
         match self.ready(&self.repo_query())? {
             Reply::Repo {
                 repo,
@@ -515,8 +500,7 @@ impl Forge {
             repo: self.nav.repo.clone()?,
             at: self.head_oid()?,
             path: Vec::new(),
-            cursor: None,
-            limit: PAGE,
+            page: PAGE,
         })?
         else {
             return None;
@@ -535,8 +519,7 @@ impl Forge {
         let log = self.ready(&Query::Log {
             repo: self.repo_name(),
             from: self.revision(),
-            cursor: None,
-            limit: PAGE,
+            page: PAGE,
         })?;
         let Reply::Log { page, .. } = log else {
             return None;
@@ -553,8 +536,7 @@ impl Forge {
         Some(Query::Change {
             repo: self.nav.repo.clone()?,
             n: self.nav.change?,
-            cursor: None,
-            limit: PAGE,
+            page: PAGE,
         })
     }
 
@@ -594,8 +576,7 @@ impl Forge {
             base: self.compare()?.base.clone(),
             head: source_head.clone()?,
             path: None,
-            cursor: None,
-            limit: PAGE,
+            page: PAGE,
         })
     }
 
@@ -634,7 +615,7 @@ export_view!(
     Forge,
     "Forge",
     "Repositories, code, commits and the changes waiting on your judgment.",
-    ["rpc", "chat"]
+    ["rpc", "op", "host"]
 );
 
 #[cfg(test)]

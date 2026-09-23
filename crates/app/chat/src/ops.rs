@@ -2,7 +2,7 @@ use super::*;
 
 // ── execute ─────────────────────────────────────────────────────────────────
 
-pub fn execute(store: &mut impl Write, frame: &Frame, msg: ChatMsg) -> Result<(), Refusal> {
+pub fn execute(store: &mut impl Writes, frame: &Frame, msg: ChatMsg) -> Result<(), Refusal> {
     let actor = party_handle(&frame.party);
     match msg {
         ChatMsg::CreateChannel {
@@ -15,10 +15,10 @@ pub fn execute(store: &mut impl Write, frame: &Frame, msg: ChatMsg) -> Result<()
         }
         ChatMsg::CreateDmChannel { counterpart, name } => {
             let Party::Account(me) = frame.party else {
-                return Err(refuse(reason::UNAUTHORIZED, "only an account opens a dm"));
+                return Err(unauthorized("only an account opens a dm"));
             };
             if me == counterpart {
-                return Err(refuse(reason::INVALID_INPUT, "a dm needs two accounts"));
+                return Err(invalid("a dm needs two accounts"));
             }
             let id = dm_channel_id(me, counterpart);
             if load::<ChannelRow>(store, &chan_key(&id))?.is_some() {
@@ -66,22 +66,16 @@ pub fn execute(store: &mut impl Write, frame: &Frame, msg: ChatMsg) -> Result<()
             let ch = channel(store, &channel_id)?;
             writable(store, &ch, &frame.party)?;
             if store.get(msgid_key(&message_id).as_bytes()).is_some() {
-                return Err(refuse(
-                    reason::ALREADY_EXISTS,
-                    format!("message {message_id} exists"),
-                ));
+                return Err(already_exists(format!("message {message_id} exists")));
             }
             let seq = head_seq(store, &channel_id) + 1;
             if let Some(root_seq) = thread {
                 let mut root = row(store, &channel_id, root_seq)?;
                 if root.thread.is_some() {
-                    return Err(refuse(
-                        reason::INVALID_INPUT,
-                        "a reply cannot be a thread root",
-                    ));
+                    return Err(invalid("a reply cannot be a thread root"));
                 }
                 if root.reply_count >= MAX_THREAD_REPLIES {
-                    return Err(refuse(reason::CAPACITY, "this thread is full"));
+                    return Err(capacity("this thread is full"));
                 }
                 if let Some(last) = root.last_reply_seq {
                     store.delete(attention_key(&channel_id, &root.author, last).as_bytes());
@@ -127,16 +121,13 @@ pub fn execute(store: &mut impl Write, frame: &Frame, msg: ChatMsg) -> Result<()
             writable(store, &ch, &frame.party)?;
             let mut row = row(store, &channel_id, seq)?;
             if row.author != actor {
-                return Err(refuse(reason::UNAUTHORIZED, "only the author edits"));
+                return Err(unauthorized("only the author edits"));
             }
             if row.deleted {
-                return Err(refuse(reason::WRONG_STATE, "the message is deleted"));
+                return Err(wrong_state("the message is deleted"));
             }
             if row.rev >= MAX_REVISIONS {
-                return Err(refuse(
-                    reason::CAPACITY,
-                    "the message has no revisions left",
-                ));
+                return Err(capacity("the message has no revisions left"));
             }
             index(store, &row, false);
             row.text = plain_text(&blocks);
@@ -154,10 +145,7 @@ pub fn execute(store: &mut impl Write, frame: &Frame, msg: ChatMsg) -> Result<()
             let ch = channel(store, &channel_id)?;
             let mut row = row(store, &channel_id, seq)?;
             if row.author != actor && ch.owner != actor {
-                return Err(refuse(
-                    reason::UNAUTHORIZED,
-                    "only the author or the owner deletes",
-                ));
+                return Err(unauthorized("only the author or the owner deletes"));
             }
             if row.deleted {
                 return Ok(());
@@ -167,7 +155,7 @@ pub fn execute(store: &mut impl Write, frame: &Frame, msg: ChatMsg) -> Result<()
                 store.delete(attention_key(&channel_id, &row.author, last).as_bytes());
             }
             for entry in store.scan(Scan::prefix(react_key(&channel_id, seq, "", ""))) {
-                store.delete(&entry.key);
+                store.delete(entry.key);
             }
             row = MsgRow {
                 blocks: Vec::new(),
@@ -203,13 +191,12 @@ pub fn execute(store: &mut impl Write, frame: &Frame, msg: ChatMsg) -> Result<()
             channel_id, node, ..
         } => {
             if !frame.party.is_person() {
-                return Err(refuse(reason::UNAUTHORIZED, "only people join a huddle"));
+                return Err(unauthorized("only people join a huddle"));
             }
             if node.len() != HUDDLE_NODE_KEY_BYTES {
-                return Err(refuse(
-                    reason::INVALID_INPUT,
-                    format!("a node key is {HUDDLE_NODE_KEY_BYTES} bytes"),
-                ));
+                return Err(invalid(format!(
+                    "a node key is {HUDDLE_NODE_KEY_BYTES} bytes"
+                )));
             }
             let mut ch = channel(store, &channel_id)?;
             writable(store, &ch, &frame.party)?;
@@ -221,7 +208,7 @@ pub fn execute(store: &mut impl Write, frame: &Frame, msg: ChatMsg) -> Result<()
             match ch.huddle.iter().position(|e| e.party == actor) {
                 Some(seat) => ch.huddle[seat] = entry,
                 None if ch.huddle.len() >= MAX_HUDDLE_MEMBERS => {
-                    return Err(refuse(reason::CAPACITY, "the huddle is full"));
+                    return Err(capacity("the huddle is full"));
                 }
                 None => ch.huddle.push(entry),
             }
@@ -246,17 +233,14 @@ fn reserved_id(id: &str, party: &Party) -> Result<(), Refusal> {
             Party::Account(_) | Party::Key(_) => false,
         };
         if !allowed {
-            return Err(refuse(
-                reason::UNAUTHORIZED,
-                "colon ids belong to their program namespace",
-            ));
+            return Err(unauthorized("colon ids belong to their program namespace"));
         }
     }
     Ok(())
 }
 
 fn create_channel(
-    store: &mut impl Write,
+    store: &mut impl Writes,
     frame: &Frame,
     id: String,
     name: String,
@@ -267,10 +251,7 @@ fn create_channel(
     reserved_id(&id, &frame.party)?;
     checked_name(&name)?;
     if load::<ChannelRow>(store, &chan_key(&id))?.is_some() {
-        return Err(refuse(
-            reason::ALREADY_EXISTS,
-            format!("channel {id} exists"),
-        ));
+        return Err(already_exists(format!("channel {id} exists")));
     }
     let ch = ChannelRow {
         id: id.clone(),
@@ -286,7 +267,7 @@ fn create_channel(
     Ok(())
 }
 
-fn set_member(store: &mut impl Write, frame: &Frame, ch: &str, party: &Party, member: bool) {
+fn set_member(store: &mut impl Writes, frame: &Frame, ch: &str, party: &Party, member: bool) {
     let key = member_key(ch, &party_handle(party));
     if member {
         let row = MemberRow {
@@ -301,7 +282,7 @@ fn set_member(store: &mut impl Write, frame: &Frame, ch: &str, party: &Party, me
 }
 
 fn react(
-    store: &mut impl Write,
+    store: &mut impl Writes,
     frame: &Frame,
     channel_id: &str,
     seq: u64,
@@ -309,13 +290,13 @@ fn react(
     on: bool,
 ) -> Result<(), Refusal> {
     if emoji.is_empty() || emoji.len() > MAX_EMOJI_BYTES || emoji.contains('/') {
-        return Err(refuse(reason::INVALID_INPUT, "not an emoji"));
+        return Err(invalid("not an emoji"));
     }
     let ch = channel(store, channel_id)?;
     writable(store, &ch, &frame.party)?;
     let mut row = row(store, channel_id, seq)?;
     if row.deleted {
-        return Err(refuse(reason::WRONG_STATE, "the message is deleted"));
+        return Err(wrong_state("the message is deleted"));
     }
     let key = react_key(channel_id, seq, emoji, &party_handle(&frame.party));
     if store.get(key.as_bytes()).is_some() == on {
@@ -326,7 +307,7 @@ fn react(
         (true, Some(i)) => row.reactions[i].count += 1,
         (true, None) => {
             if row.reactions.len() >= MAX_REACTION_EMOJIS {
-                return Err(refuse(reason::CAPACITY, "no room for another emoji"));
+                return Err(capacity("no room for another emoji"));
             }
             row.reactions.push(ReactionSummary {
                 emoji: emoji.to_string(),

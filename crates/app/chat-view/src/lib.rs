@@ -20,7 +20,6 @@ mod ui;
 
 use chat::{
     ChannelInfo, ChatMsg, ChatViewQuery, ChatViewReply, MemberRow, MessageHits, MsgRow, PostPolicy,
-    TagPage,
 };
 use client::{NameDirectory, mention_token};
 use ducktape_view_guest::Context;
@@ -424,7 +423,7 @@ export_view!(
     Chat,
     "Chat",
     "Channels, direct messages, threads, search and the live call of this workspace.",
-    ["chat"]
+    ["rpc", "op", "host", "fs", "clipboard"]
 );
 
 #[cfg(test)]

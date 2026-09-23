@@ -8,11 +8,11 @@ use ducktape_view_guest::host::{Refusal, malformed};
 
 use crate::api::{Ask as Forge, ChatApi};
 use crate::state::Names;
-use forge::{Cursor, Page, Query, Reply};
+use forge::{Page, PageReply, Query, Reply};
 
-/// What one page asks for. Every founded `Bounds.page_size` seen so far is
-/// at least this, and a limit above it is refused rather than clamped.
-pub(crate) const PAGE: u32 = 64;
+/// What one page asks for: 64 rows, from the start. A limit above the
+/// program's `Bounds.page_size` is clamped to it.
+pub(crate) const PAGE: Page = Page::first(64);
 /// How many pages one read follows. A history longer than this shows what
 /// it read and says more follows, rather than walking a repository forever.
 const MAX_PAGES: usize = 16;
@@ -26,32 +26,23 @@ fn wrong_reply() -> Refusal {
     malformed("the module answered another question".into())
 }
 
-/// One read of forge, cursors followed.
+/// One read of forge, `next` followed.
 pub(crate) async fn fetch(host: Host, query: Query) -> Result<Reply, Refusal> {
-    let mut reply = ask(&host, query.clone()).await?;
+    let mut reply = host.ask::<Forge>(query.clone()).await?;
     for _ in 1..MAX_PAGES {
-        let Some(cursor) = next_cursor(&reply).cloned() else {
+        let Some(after) = next_cursor(&reply).cloned() else {
             break;
         };
-        let Some(query) = with_cursor(&query, cursor) else {
+        let Some(query) = with_cursor(&query, after) else {
             break;
         };
-        let more = ask(&host, query).await?;
+        let more = host.ask::<Forge>(query).await?;
         extend(&mut reply, more);
     }
     Ok(reply)
 }
 
-async fn ask(host: &Host, query: Query) -> Result<Reply, Refusal> {
-    match host.ask::<Forge>(query).await? {
-        Reply::Refused {
-            reason, sentence, ..
-        } => Err(Refusal::new(&reason, &sentence)),
-        reply => Ok(reply),
-    }
-}
-
-fn next_cursor(reply: &Reply) -> Option<&Cursor> {
+fn next_cursor(reply: &Reply) -> Option<&Vec<u8>> {
     match reply {
         Reply::Repos { page, .. } => page.next.as_ref(),
         Reply::Repo { writers, .. } => writers.next.as_ref(),
@@ -62,37 +53,34 @@ fn next_cursor(reply: &Reply) -> Option<&Cursor> {
         Reply::Changes { page, .. } => page.next.as_ref(),
         Reply::Change { reviews, .. } => reviews.next.as_ref(),
         Reply::Judgment { page, .. } => page.next.as_ref(),
-        Reply::Compare { .. }
-        | Reply::Blob { .. }
-        | Reply::Activity { .. }
-        | Reply::Refused { .. } => None,
+        Reply::Compare { .. } | Reply::Blob { .. } | Reply::Activity { .. } => None,
     }
 }
 
 /// The same question, continued. An unpaged query has no continuation.
-fn with_cursor(query: &Query, next: Cursor) -> Option<Query> {
+fn with_cursor(query: &Query, after: Vec<u8>) -> Option<Query> {
     let mut query = query.clone();
     let slot = match &mut query {
-        Query::Repos { cursor, .. }
-        | Query::Repo { cursor, .. }
-        | Query::Refs { cursor, .. }
-        | Query::Log { cursor, .. }
-        | Query::Tree { cursor, .. }
-        | Query::Diff { cursor, .. }
-        | Query::Changes { cursor, .. }
-        | Query::Change { cursor, .. }
-        | Query::Judgment { cursor, .. } => cursor,
+        Query::Repos { page, .. }
+        | Query::Repo { page, .. }
+        | Query::Refs { page, .. }
+        | Query::Log { page, .. }
+        | Query::Tree { page, .. }
+        | Query::Diff { page, .. }
+        | Query::Changes { page, .. }
+        | Query::Change { page, .. }
+        | Query::Judgment { page, .. } => page,
         Query::Compare { .. }
         | Query::Blob { .. }
         | Query::Activity { .. }
         | Query::Advertise { .. }
         | Query::Upload { .. } => return None,
     };
-    *slot = Some(next);
+    slot.after = Some(after);
     Some(query)
 }
 
-fn absorb<T>(page: &mut Page<T>, more: Page<T>) {
+fn absorb<T>(page: &mut PageReply<T>, more: PageReply<T>) {
     page.items.extend(more.items);
     page.next = more.next;
 }
@@ -118,7 +106,9 @@ fn extend(into: &mut Reply, more: Reply) {
 /// accounts, their names and the keys they hold.
 pub(crate) async fn roster(host: Host) -> Result<Names, Refusal> {
     match host
-        .ask::<Ask<ChatApi>>(chat::ChatViewQuery::Accounts { limit: Some(256) })
+        .ask::<Ask<ChatApi>>(chat::ChatViewQuery::Accounts {
+            page: Page::first(256),
+        })
         .await?
     {
         chat::ChatViewReply::Accounts(rows) => Ok(Names::new(rows)),
@@ -133,27 +123,22 @@ pub(crate) async fn conversation(
     viewer: Vec<String>,
 ) -> Result<Vec<chat::MsgRow>, Refusal> {
     let mut all: Vec<chat::MsgRow> = Vec::new();
-    let mut before_seq = None;
+    let mut page = PAGE;
     for _ in 0..MAX_PAGES {
-        let chat::ChatViewReply::Roots {
-            roots,
-            has_more,
-            next_before_seq,
-        } = host
+        let chat::ChatViewReply::Roots(roots) = host
             .ask::<Ask<ChatApi>>(chat::ChatViewQuery::Roots {
                 channel_id: channel_id.clone(),
                 viewer_handles: viewer.clone(),
-                before_seq,
-                limit: Some(PAGE as usize),
+                page: page.clone(),
             })
             .await?
         else {
             return Err(wrong_reply());
         };
-        all.extend(roots);
-        match next_before_seq {
-            Some(next) if has_more => before_seq = Some(next),
-            _ => break,
+        all.extend(roots.items);
+        match roots.next {
+            Some(next) => page.after = Some(next),
+            None => break,
         }
     }
     all.sort_by_key(|row| row.seq);

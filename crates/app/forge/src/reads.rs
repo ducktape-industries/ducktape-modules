@@ -1,23 +1,21 @@
 //! Object reads over the existing loose-object store; no pack parsing and no persistent writes.
-use crate::Sandbox;
 use crate::contract::*;
-use crate::ops::{cap, refusal_of};
-use crate::paging::Paging;
-use crate::refuse::{invalid, not_found};
+use crate::ops::{cap, object_not_held, refusal_of};
 use crate::repo::{load_repo, parse_oid, repo_hash, resolve};
 use crate::store::Store;
 use abi::Refusal;
 use gitcore::{Commit, Hash, Kind, Mode, Objects, Oid, Signature, Tag, Tree};
 use std::collections::BTreeSet;
+use store::{Listing, Reads, invalid, not_found};
 
-pub struct Reading<'a, S: Sandbox> {
+pub struct Reading<'a, S: Reads> {
     pub store: Store<'a, S>,
     pub hash: Hash,
     pub bounds: &'a Bounds,
 }
-impl<S: Sandbox> Reading<'_, S> {
+impl<S: Reads> Reading<'_, S> {
     pub fn result<T>(&self, r: gitcore::Result<T>) -> Result<T, Refusal> {
-        r.map_err(|e| refusal_of(&self.store, e))
+        r.map_err(refusal_of)
     }
     pub fn oid(&self, s: &str) -> Result<Oid, Refusal> {
         parse_oid(self.hash, s)
@@ -26,7 +24,7 @@ impl<S: Sandbox> Reading<'_, S> {
         loop {
             let object = self
                 .result(self.store.get(&id))?
-                .ok_or_else(|| crate::refuse::object_not_held(id))?;
+                .ok_or_else(|| object_not_held(id))?;
             match object.kind {
                 Kind::Tag => id = self.result(Tag::parse(&object.body, self.hash))?.object,
                 Kind::Commit => return Ok(id),
@@ -37,7 +35,7 @@ impl<S: Sandbox> Reading<'_, S> {
     pub fn commit(&self, id: &Oid) -> Result<Commit, Refusal> {
         let object = self
             .result(self.store.get(id))?
-            .ok_or_else(|| crate::refuse::object_not_held(id))?;
+            .ok_or_else(|| object_not_held(id))?;
         if object.kind != Kind::Commit {
             return Err(invalid("expected a commit object"));
         }
@@ -46,7 +44,7 @@ impl<S: Sandbox> Reading<'_, S> {
     pub fn tree(&self, id: &Oid) -> Result<Tree, Refusal> {
         let object = self
             .result(self.store.get(id))?
-            .ok_or_else(|| crate::refuse::object_not_held(id))?;
+            .ok_or_else(|| object_not_held(id))?;
         if object.kind != Kind::Tree {
             return Err(invalid("expected a tree object"));
         }
@@ -56,7 +54,7 @@ impl<S: Sandbox> Reading<'_, S> {
         let id = self.oid(at)?;
         let object = self
             .result(self.store.get(&id))?
-            .ok_or_else(|| crate::refuse::object_not_held(id))?;
+            .ok_or_else(|| object_not_held(id))?;
         match object.kind {
             Kind::Tree => Ok(id),
             Kind::Commit => Ok(self.result(Commit::parse(&object.body, self.hash))?.tree),
@@ -93,7 +91,7 @@ impl<S: Sandbox> Reading<'_, S> {
         }
         let object = self
             .result(self.store.get(id))?
-            .ok_or_else(|| crate::refuse::object_not_held(id))?;
+            .ok_or_else(|| object_not_held(id))?;
         if object.body.contains(&0) || std::str::from_utf8(&object.body).is_err() {
             blob.content = Content::Binary;
             return Ok(blob);
@@ -125,12 +123,12 @@ pub fn entry_kind(mode: Mode) -> EntryKind {
         Mode::Gitlink => EntryKind::Gitlink,
     }
 }
-pub fn answer<S: Sandbox>(
+pub fn answer<S: Reads>(
     s: &S,
     height: u64,
     q: &Query,
     bounds: &Bounds,
-    page: Option<&Paging>,
+    page: Option<&Listing>,
 ) -> Result<Reply, Refusal> {
     let name = match q {
         Query::Log { repo, .. }
@@ -166,29 +164,21 @@ pub fn answer<S: Sandbox>(
                 &[],
                 cap(bounds.log_walk),
             ))?;
-            let selected = page().slice(&ids)?;
-            let items = selected
-                .items
-                .into_iter()
-                .map(|id| {
-                    let c = r.commit(&id)?;
-                    Ok(CommitInfo {
-                        oid: id.to_hex(),
-                        tree: c.tree.to_hex(),
-                        parents: c.parents.iter().map(Oid::to_hex).collect(),
-                        author: signature(c.author),
-                        committer: signature(c.committer),
-                        message: c.message,
-                    })
+            let page = page().slice(&ids)?.try_map(|id| {
+                let c = r.commit(&id)?;
+                Ok(CommitInfo {
+                    oid: id.to_hex(),
+                    tree: c.tree.to_hex(),
+                    parents: c.parents.iter().map(Oid::to_hex).collect(),
+                    author: signature(c.author),
+                    committer: signature(c.committer),
+                    message: c.message,
                 })
-                .collect::<Result<_, Refusal>>()?;
+            })?;
             Reply::Log {
                 height,
                 tip: tip.to_hex(),
-                page: Page {
-                    items,
-                    next: selected.next,
-                },
+                page,
             }
         }
         Query::Tree { at, path, .. } => {
@@ -206,22 +196,14 @@ pub fn answer<S: Sandbox>(
                 entry.id
             };
             let entries = r.tree(&tree)?.entries;
-            let selected = page().slice(&entries)?;
             Reply::Tree {
                 height,
                 tree: tree.to_hex(),
-                page: Page {
-                    next: selected.next,
-                    items: selected
-                        .items
-                        .into_iter()
-                        .map(|e| TreeInfo {
-                            name: e.name,
-                            oid: e.id.to_hex(),
-                            kind: entry_kind(e.mode),
-                        })
-                        .collect(),
-                },
+                page: page().slice(&entries)?.map(|e| TreeInfo {
+                    name: e.name,
+                    oid: e.id.to_hex(),
+                    kind: entry_kind(e.mode),
+                }),
             }
         }
         Query::Blob { oid, range, .. } => Reply::Blob {
@@ -239,7 +221,7 @@ pub fn answer<S: Sandbox>(
         _ => unreachable!(),
     })
 }
-fn compare<S: Sandbox>(
+fn compare<S: Reads>(
     r: &mut Reading<'_, S>,
     height: u64,
     from: Oid,

@@ -1,8 +1,10 @@
-//! Typed reads of the chat module.
+//! Typed reads of the chat module. Every list takes a `Page` and answers a
+//! `PageReply`; `next` is the cursor of the page after it.
 use super::{
     ChannelInfo, ChatApi, ChatViewQuery, ChatViewReply, MemberRow, MessageHits, MsgRow,
-    NameDirectory, PAGE, TagPage, WINDOW,
+    NameDirectory, PAGE, WINDOW,
 };
+use chat::{Page, PageReply};
 use ducktape_view_guest::doors::Query as ViewOf;
 use ducktape_view_guest::host::{Refusal, malformed};
 
@@ -10,63 +12,60 @@ fn wrong_reply() -> Refusal {
     malformed("the chat module answered another question".into())
 }
 
+fn page(after: Option<Vec<u8>>, limit: usize) -> Page {
+    Page {
+        after,
+        limit: Some(limit as u64),
+    }
+}
+
 pub(crate) async fn channels(host: ducktape_view_guest::Host) -> Result<Vec<ChannelInfo>, Refusal> {
     let mut all = Vec::new();
     let mut after = None;
     loop {
-        let ChatViewReply::Channels {
-            channels,
-            has_more,
-            next_after,
-        } = host
+        let ChatViewReply::Channels(reply) = host
             .ask::<ViewOf<ChatApi>>(ChatViewQuery::Channels {
-                after,
-                limit: Some(PAGE),
+                page: page(after, PAGE),
             })
             .await?
         else {
             return Err(wrong_reply());
         };
-        all.extend(channels);
-        if !has_more || next_after.is_none() {
-            return Ok(all);
+        all.extend(reply.items);
+        match reply.next {
+            Some(next) => after = Some(next),
+            None => return Ok(all),
         }
-        after = next_after;
     }
 }
 
-/// One page of roots older than `before` (or the newest), oldest first,
-/// with whether older ones remain.
+/// One page of roots below `below` (or the newest), oldest first, with
+/// whether older ones remain.
 pub(crate) async fn roots(
     host: ducktape_view_guest::Host,
     channel_id: String,
     viewer: Vec<String>,
-    before: Option<u64>,
+    below: Option<Vec<u8>>,
     limit: usize,
 ) -> Result<(Vec<MsgRow>, bool), Refusal> {
     let mut all = Vec::new();
-    let mut before_seq = before;
+    let mut after = below;
     loop {
-        let ChatViewReply::Roots {
-            roots,
-            has_more,
-            next_before_seq,
-        } = host
+        let ChatViewReply::Roots(reply) = host
             .ask::<ViewOf<ChatApi>>(ChatViewQuery::Roots {
                 channel_id: channel_id.clone(),
                 viewer_handles: viewer.clone(),
-                before_seq,
-                limit: Some(PAGE),
+                page: page(after, PAGE),
             })
             .await?
         else {
             return Err(wrong_reply());
         };
-        all.extend(roots);
-        if !has_more || next_before_seq.is_none() || all.len() >= limit {
-            return Ok((sorted(all), has_more && next_before_seq.is_some()));
+        all.extend(reply.items);
+        match reply.next {
+            Some(next) if all.len() < limit => after = Some(next),
+            next => return Ok((sorted(all), next.is_some())),
         }
-        before_seq = next_before_seq;
     }
 }
 
@@ -82,7 +81,7 @@ pub(crate) async fn around(
             channel_id,
             seq,
             viewer_handles: viewer,
-            limit: Some(WINDOW / 2),
+            page: page(None, WINDOW / 2),
         })
         .await?
     {
@@ -103,75 +102,67 @@ pub(crate) async fn members(
     match host
         .ask::<ViewOf<ChatApi>>(ChatViewQuery::Members {
             channel_id,
-            after: None,
-            limit: Some(WINDOW),
+            page: page(None, WINDOW),
         })
         .await?
     {
-        ChatViewReply::Members { members, .. } => Ok(members),
+        ChatViewReply::Members(reply) => Ok(reply.items),
         _ => Err(wrong_reply()),
     }
 }
 
-/// One page of a thread's replies after `after`, and how to page on.
+/// One page of a thread's replies after `after`, and the cursor to page on.
 pub(crate) async fn thread(
     host: ducktape_view_guest::Host,
     channel_id: String,
     root_seq: u64,
     viewer: Vec<String>,
-    after: Option<u64>,
-) -> Result<(Vec<MsgRow>, bool, Option<u64>), Refusal> {
+    after: Option<Vec<u8>>,
+) -> Result<(Vec<MsgRow>, Option<Vec<u8>>), Refusal> {
     match host
         .ask::<ViewOf<ChatApi>>(ChatViewQuery::Thread {
             channel_id,
             root_seq,
             viewer_handles: viewer,
-            after_reply_seq: after,
-            limit: Some(WINDOW),
+            page: page(after, WINDOW),
         })
         .await?
     {
         ChatViewReply::Thread {
-            replies,
-            has_more,
-            next_reply_seq,
+            replies: PageReply { items, next, .. },
             ..
-        } => Ok((sorted(replies), has_more, next_reply_seq)),
+        } => Ok((sorted(items), next)),
         _ => Err(wrong_reply()),
     }
 }
 
 /// A search: `#tag` pages through the tag index, anything else is a
-/// full-text search capped by the module.
+/// full-text search capped by the module. Returns the hits, whether the
+/// search was capped, and the cursor of the next tag page.
 pub(crate) async fn search_hits(
     host: ducktape_view_guest::Host,
     text: String,
     channel_id: Option<String>,
     viewer: Vec<String>,
-    after: Option<String>,
-) -> Result<(Vec<MsgRow>, bool, bool, Option<String>), Refusal> {
+    after: Option<Vec<u8>>,
+) -> Result<(Vec<MsgRow>, bool, Option<Vec<u8>>), Refusal> {
     let query = match text.strip_prefix('#') {
         Some(tag) if !tag.is_empty() => ChatViewQuery::TagSearch {
             tag: tag.to_owned(),
             viewer_handles: viewer,
             channel_id,
-            after,
-            limit: Some(PAGE),
+            page: page(after, PAGE),
         },
         _ => ChatViewQuery::Search {
             text,
             viewer_handles: viewer,
             channel_id,
-            limit: Some(PAGE),
+            page: page(None, PAGE),
         },
     };
     match host.ask::<ViewOf<ChatApi>>(query).await? {
-        ChatViewReply::Hits(MessageHits { hits, capped }) => Ok((hits, capped, false, None)),
-        ChatViewReply::TagHits(TagPage {
-            hits,
-            has_more,
-            next_after,
-        }) => Ok((hits, false, has_more, next_after)),
+        ChatViewReply::Hits(MessageHits { hits, capped }) => Ok((hits, capped, None)),
+        ChatViewReply::TagHits(PageReply { items, next, .. }) => Ok((items, false, next)),
         _ => Err(wrong_reply()),
     }
 }
@@ -179,7 +170,9 @@ pub(crate) async fn search_hits(
 /// The identity roster, paged through chat, folded into the name directory.
 pub(crate) async fn roster(host: ducktape_view_guest::Host) -> Result<NameDirectory, Refusal> {
     match host
-        .ask::<ViewOf<ChatApi>>(ChatViewQuery::Accounts { limit: Some(256) })
+        .ask::<ViewOf<ChatApi>>(ChatViewQuery::Accounts {
+            page: page(None, 256),
+        })
         .await?
     {
         ChatViewReply::Accounts(accounts) => Ok(NameDirectory::from_roster(accounts)),

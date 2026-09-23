@@ -14,8 +14,7 @@ pub(crate) fn query(forge: &Forge, from: forge::Revision) -> Query {
     Query::Log {
         repo: forge.repo_name(),
         from,
-        cursor: None,
-        limit: PAGE,
+        page: PAGE,
     }
 }
 
@@ -188,8 +187,7 @@ fn detail(forge: &Forge, oid: &str, cx: &mut Context<Forge>, theme: &Theme) -> A
         base: forge.commit_parent(oid),
         head: oid.to_owned(),
         path: None,
-        cursor: None,
-        limit: PAGE,
+        page: PAGE,
     };
     column
         .child(diff::render(

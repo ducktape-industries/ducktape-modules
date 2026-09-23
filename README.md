@@ -4,7 +4,7 @@ The ducktape contract line and the programs written against it, one
 repository. Only what compiles to wasm lives here, in three folders:
 
 ```
-crates/sdk/     abi guest ducklink view-wire view-guest view-guest-derive design
+crates/sdk/     abi guest store ducklink view-wire view-guest view-guest-derive design
 crates/system/  module-registry valset identity
 crates/app/     chat chat-view forge forge-view members-view node-view explorer-view settings-view
 crates/lib/     gitcore
@@ -14,6 +14,7 @@ crates/lib/     gitcore
 |---|---|
 | `crates/sdk/abi` | the borsh bytes ABI a program and the host share: `GuestCall`, `HostOp`/`HostReply`, `Env`, `Refusal`, the `module_registry` and `valset` contracts. A copy of ducktape's `crates/kernel/abi`, like `guest` beside it |
 | `crates/sdk/guest` | what a program compiles against: the `Program` trait, the `Execute` and `Query` contexts its entry points receive, `program!` |
+| `crates/sdk/store` | what a program's rules are written over: `Reads`/`Writes` (the guest context's surface, implemented for `guest`'s contexts behind `program` and for `Memory` natively), the typed `Map`/`Set`/`Item` descriptors with `KeyCodec`, `Page`/`PageReply`, the refusal constructors and `decoded`. Every program links it; a view links it with `program` off |
 | `crates/sdk/ducklink` | the `duck://` link: `duck://<chain>/<program>/<tail…>`, one spelling per name, no program names known here |
 | `crates/sdk/view-wire`, `view-guest`, `view-guest-derive`, `design` | the host<->view wire, the runtime a wasm view is written against, the palette |
 | `crates/system/module-registry` | the boot set's root: the registry program (its `Op`, `Query`, `Reply`), `AUTHORITY`, `Page`/`PageReply` and the origin/key/refusal `helpers` every system program links. Its `tests/system.rs` founds ducktape's host over the bytes `make wasm-programs` built and drives every system program |
@@ -92,12 +93,26 @@ Snapshots wait for ordinary work to settle; parked host streams restart in
 future sharing a stream waiter cannot expose whether its other work is pending.
 The tree vocabulary, manifests, and five-function Wasm ABI are unchanged.
 
+## Loop
+
+1. Edit a program or a view.
+2. `make dev`: rebuilds what cargo finds stale (one line per artifact:
+   `name  1,181,498 B  (98.5% of limit)` or `unchanged`), gates the rebuilt
+   views (ABI, size) and runs the native tests of the crates cargo rebuilt.
+   `P=forge` / `V=forge-view` narrow it to one.
+3. `kit build NAME && kit up NAME` in qa packs and founds these artifacts,
+   then the app opens on them.
+4. A view over its limit: `make wasm-why V=members-view` (`twiggy top`, `cargo install twiggy`).
+5. A new module: `make new-program NAME=x`, then `make new-view NAME=x-view`;
+   each prints what to do next. `make test` runs everything; the founding
+   suite builds the boot set itself.
+
 ## Building
 
-`make test` (`make wasm-programs`, then `cargo test --workspace`), clippy,
-`make program-wasm-check`, `make view-wasm-check`, `make wasm-views` and
-`make wasm-reproducible` are what CI runs. The toolchain is pinned in
-`rust-toolchain.toml`.
+`make test` (`cargo test --workspace`; the founding suite runs `make
+wasm-programs` itself), clippy, `make program-wasm-check`,
+`make view-wasm-check`, `make wasm-views` and `make wasm-reproducible` are
+what CI runs. The toolchain is pinned in `rust-toolchain.toml`.
 
 Every wasm artifact is a build output: `make wasm-modules` builds every
 program and every view under `$CARGO_TARGET_DIR/wasm32-unknown-unknown/release/`;
@@ -108,9 +123,15 @@ bytes do not depend on the checkout.
 View releases require `wasm-tools`, Python 3, and
 [Binaryen wasm-opt 132](https://github.com/WebAssembly/binaryen/releases/tag/version_132).
 `make wasm-views` builds, optimizes, and checks the exact guest ABI and decimal
-size limits (1,200,000 bytes for Members/Node/Explorer; 2,500,000 for Chat).
-`WASM_OPT=/path/to/wasm-opt` can select the pinned optimizer. It preserves the
-view manifest and never supplies imports or removes capabilities.
+size limits (`LIMIT_<view>` in the Makefile: 1,200,000 bytes for the system
+views, 1,300,000 for Settings, 2,500,000 for Chat and Forge), printing
+`name  bytes / limit  (pct%)`. The bytes before wasm-opt stay beside each
+artifact as `<name>.wasm.unoptimized`. `WASM_OPT=/path/to/wasm-opt` can
+select the pinned optimizer. It preserves the view manifest and never
+supplies imports or removes capabilities. `make wasm-why V=<view>` builds the
+view with `--profile why` (release plus names, its own output dir) and runs
+`twiggy top -n 25` over it; the release profile strips names, which is why
+twiggy cannot read the shipped bytes.
 
 GPUI uses the fork's default-off consumer configuration: `web` is disabled for
 guests and remains default-on in the native app. The root patches select the

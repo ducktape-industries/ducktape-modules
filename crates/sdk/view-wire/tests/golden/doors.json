@@ -1,0 +1,369 @@
+[
+  {
+    "kind": "rpc.query",
+    "request": [
+      7,
+      "q"
+    ],
+    "reply": [
+      1,
+      2,
+      3
+    ]
+  },
+  {
+    "kind": "op.submit",
+    "request": "op",
+    "reply": [
+      114,
+      101,
+      99,
+      101,
+      105,
+      112,
+      116
+    ]
+  },
+  {
+    "kind": "rpc.status",
+    "request": null,
+    "reply": {
+      "network": "local#1",
+      "time": 1,
+      "block_time_ms": 500,
+      "epoch_length": 100,
+      "height": 9,
+      "tip": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "root": [
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "epoch": 0,
+      "identity": [
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3
+      ],
+      "contract": 1
+    }
+  },
+  {
+    "kind": "rpc.invite",
+    "request": {
+      "ttl_days": 7
+    },
+    "reply": {
+      "invite": "duck://invite/x",
+      "notes": [
+        {
+          "reason": "not_yet",
+          "sentence": "the invite is not indexed yet"
+        }
+      ]
+    }
+  },
+  {
+    "kind": "rpc.live",
+    "request": "chat",
+    "reply": 9
+  },
+  {
+    "kind": "blob.get",
+    "request": "sha256:00",
+    "reply": [
+      98,
+      108,
+      111,
+      98
+    ]
+  },
+  {
+    "kind": "host.props",
+    "request": null,
+    "reply": {
+      "connected": true,
+      "dark": false,
+      "chain": "local#1",
+      "account": "alice",
+      "endpoint": "http://127.0.0.1:1"
+    }
+  },
+  {
+    "kind": "host.visible",
+    "request": null,
+    "reply": true
+  },
+  {
+    "kind": "host.badge",
+    "request": 3,
+    "reply": null
+  },
+  {
+    "kind": "host.open_link",
+    "request": "duck://chat/room",
+    "reply": null
+  },
+  {
+    "kind": "host.chord",
+    "request": "cmd-k",
+    "reply": null
+  },
+  {
+    "kind": "host.id",
+    "request": "msg",
+    "reply": "msg-1"
+  },
+  {
+    "kind": "clock.ticks",
+    "request": 1000,
+    "reply": null
+  },
+  {
+    "kind": "host.log",
+    "request": "hello",
+    "reply": null
+  },
+  {
+    "kind": "host.widget",
+    "request": {
+      "Focus": {
+        "target": [
+          {
+            "Name": "input"
+          }
+        ]
+      }
+    },
+    "reply": null
+  },
+  {
+    "kind": "fs.pick",
+    "request": null,
+    "reply": [
+      {
+        "token": "t1",
+        "name": "a.txt",
+        "bytes": 5
+      }
+    ]
+  },
+  {
+    "kind": "fs.drops",
+    "request": null,
+    "reply": [
+      {
+        "token": "t1",
+        "name": "a.txt",
+        "bytes": 5
+      }
+    ]
+  },
+  {
+    "kind": "fs.read",
+    "request": {
+      "token": "t1",
+      "offset": 0,
+      "len": 5
+    },
+    "reply": [
+      104,
+      101,
+      108,
+      108,
+      111
+    ]
+  },
+  {
+    "kind": "fs.release",
+    "request": "t1",
+    "reply": null
+  },
+  {
+    "kind": "clipboard.read",
+    "request": null,
+    "reply": {
+      "text": "copied",
+      "files": [
+        {
+          "token": "t1",
+          "name": "a.txt",
+          "bytes": 5
+        }
+      ]
+    }
+  },
+  {
+    "kind": "clipboard.write",
+    "request": "copied",
+    "reply": null
+  },
+  {
+    "kind": "media.devices",
+    "request": null,
+    "reply": [
+      {
+        "id": "mic0",
+        "kind": "microphone",
+        "name": "Built-in"
+      }
+    ]
+  },
+  {
+    "kind": "audio.capture",
+    "request": {
+      "device": "mic0",
+      "rate": 48000,
+      "channels": 1
+    },
+    "reply": {
+      "Samples": [
+        0,
+        1
+      ]
+    }
+  },
+  {
+    "kind": "video.capture",
+    "request": {
+      "device": null,
+      "width": 640,
+      "height": 480,
+      "fps": 30
+    },
+    "reply": {
+      "Opened": {
+        "width": 640,
+        "height": 480,
+        "fps": 30,
+        "format": "rgba8"
+      }
+    }
+  },
+  {
+    "kind": "audio.play",
+    "request": {
+      "rate": 48000,
+      "channels": 2
+    },
+    "reply": {
+      "rate": 48000,
+      "channels": 2
+    }
+  },
+  {
+    "kind": "audio.write",
+    "request": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "reply": null
+  },
+  {
+    "kind": "audio.stop",
+    "request": null,
+    "reply": null
+  },
+  {
+    "kind": "notify.show",
+    "request": {
+      "title": "Chat",
+      "body": "alice: hi",
+      "tag": "room"
+    },
+    "reply": true
+  }
+]

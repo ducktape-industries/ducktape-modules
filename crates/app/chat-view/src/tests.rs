@@ -4,6 +4,14 @@ use ducktape_view_guest::testing::TestAppContext;
 use ducktape_view_guest::wire;
 use ducktape_view_guest::{Entity, StyleRefinement, Styled};
 
+fn page<T>(items: Vec<T>) -> ::chat::PageReply<T> {
+    ::chat::PageReply {
+        height: 1,
+        items,
+        next: None,
+    }
+}
+
 fn channel(id: &str, name: &str, head_seq: u64) -> ChannelInfo {
     ChannelInfo {
         channel: ::chat::ChannelRow {
@@ -82,30 +90,21 @@ fn configure(cx: &mut TestAppContext) {
                     keys: Vec::new(),
                 },
             ]),
-            ChatViewQuery::Channels { .. } => ChatViewReply::Channels {
-                channels: vec![channel("general", "General", 3), channel("dm-7-8", "dm", 1)],
-                has_more: false,
-                next_after: None,
-            },
-            ChatViewQuery::Roots { channel_id, .. } => ChatViewReply::Roots {
-                roots: if channel_id == "general" {
+            ChatViewQuery::Channels { .. } => ChatViewReply::Channels(page(vec![
+                channel("general", "General", 3),
+                channel("dm-7-8", "dm", 1),
+            ])),
+            ChatViewQuery::Roots { channel_id, .. } => {
+                ChatViewReply::Roots(page(if channel_id == "general" {
                     vec![row(1, "acct:7", "hello"), row(2, "acct:8", "**hi** there")]
                 } else {
                     Vec::new()
-                },
-                has_more: false,
-                next_before_seq: None,
-            },
-            ChatViewQuery::Members { .. } => ChatViewReply::Members {
-                members: Vec::new(),
-                has_more: false,
-                next_after: None,
-            },
+                }))
+            }
+            ChatViewQuery::Members { .. } => ChatViewReply::Members(page(Vec::new())),
             ChatViewQuery::Thread { .. } => ChatViewReply::Thread {
                 root: None,
-                replies: Vec::new(),
-                has_more: false,
-                next_reply_seq: None,
+                replies: page(Vec::new()),
             },
             ChatViewQuery::Search { text, .. } => {
                 assert_eq!(text, "hello");
@@ -700,21 +699,14 @@ fn a_peers_name_gained_later_replaces_its_numeric_fallback() {
                 }
                 ChatViewReply::Accounts(accounts)
             }
-            ChatViewQuery::Channels { .. } => ChatViewReply::Channels {
-                channels: vec![channel("general", "General", 2)],
-                has_more: false,
-                next_after: None,
-            },
-            ChatViewQuery::Roots { .. } => ChatViewReply::Roots {
-                roots: vec![row(1, "acct:7", "hello"), row(2, "acct:9", "hi from gary")],
-                has_more: false,
-                next_before_seq: None,
-            },
-            ChatViewQuery::Members { .. } => ChatViewReply::Members {
-                members: Vec::new(),
-                has_more: false,
-                next_after: None,
-            },
+            ChatViewQuery::Channels { .. } => {
+                ChatViewReply::Channels(page(vec![channel("general", "General", 2)]))
+            }
+            ChatViewQuery::Roots { .. } => ChatViewReply::Roots(page(vec![
+                row(1, "acct:7", "hello"),
+                row(2, "acct:9", "hi from gary"),
+            ])),
+            ChatViewQuery::Members { .. } => ChatViewReply::Members(page(Vec::new())),
             query => panic!("unexpected chat query: {query:?}"),
         })
     });
@@ -799,21 +791,11 @@ fn a_peers_mention_becomes_offerable_once_their_account_is_known() {
                 }
                 ChatViewReply::Accounts(accounts)
             }
-            ChatViewQuery::Channels { .. } => ChatViewReply::Channels {
-                channels: vec![channel("general", "General", 0)],
-                has_more: false,
-                next_after: None,
-            },
-            ChatViewQuery::Roots { .. } => ChatViewReply::Roots {
-                roots: Vec::new(),
-                has_more: false,
-                next_before_seq: None,
-            },
-            ChatViewQuery::Members { .. } => ChatViewReply::Members {
-                members: Vec::new(),
-                has_more: false,
-                next_after: None,
-            },
+            ChatViewQuery::Channels { .. } => {
+                ChatViewReply::Channels(page(vec![channel("general", "General", 0)]))
+            }
+            ChatViewQuery::Roots { .. } => ChatViewReply::Roots(page(Vec::new())),
+            ChatViewQuery::Members { .. } => ChatViewReply::Members(page(Vec::new())),
             query => panic!("unexpected chat query: {query:?}"),
         })
     });

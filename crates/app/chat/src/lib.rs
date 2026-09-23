@@ -5,9 +5,9 @@
 //! [`ChatViewQuery`] answered by a [`ChatViewReply`] (borsh) — the same
 //! types `chat-view` links. The acting [`Party`] is the frame's origin: an
 //! external key resolved through the `identity` program to its account.
-//! The rules run over any [`Read`]/[`Write`] store; the `program` feature
-//! adds the wasm32 program over the host (`program.rs`), which a view never
-//! enables.
+//! The rules run over any [`store::Reads`]/[`store::Writes`] store; the
+//! `program` feature adds the wasm32 program over the host (`program.rs`),
+//! which a view never enables.
 //!
 //! Keys: `chan/<id>` → [`ChannelRow`], `seq/<id>` → head seq,
 //! `msg/<ch>/<seq>` → [`MsgRow`], `root/<ch>/<!seq>` timeline roots newest
@@ -22,6 +22,10 @@ use std::collections::BTreeSet;
 
 use abi::{Entry, Refusal, Scan, reason};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+pub use store::{Cursor, Page, PageReply};
+use store::{
+    Reads, Writes, already_exists, capacity, invalid, not_found, unauthorized, wrong_state,
+};
 use unicode_normalization::UnicodeNormalization;
 
 pub use message::{AccountNumber, Block, Mark, Party, Span, parse_message};
@@ -40,8 +44,6 @@ pub const HUDDLE_NODE_KEY_BYTES: usize = 32;
 pub const HUDDLE_JOIN_NS: &[u8] = b"ducktape/huddle-join/v1";
 pub const MAX_TAGS_PER_MESSAGE: usize = 16;
 pub const MAX_TAG_CHARS: usize = 64;
-pub const MAX_PAGE: usize = 256;
-pub const DEFAULT_PAGE: usize = 50;
 /// How many postings a search reads before it reports `capped`.
 pub const SEARCH_POSTING_CAP: usize = 1024;
 
@@ -58,6 +60,20 @@ fn msg_key(ch: &str, seq: u64) -> String {
 }
 fn root_key(ch: &str, seq: u64) -> String {
     format!("root/{ch}/{:016x}", u64::MAX - seq)
+}
+/// The `Roots` cursor that resumes below `seq`: `Page::after` for the page
+/// of roots older than the one on screen. Chat's listings are append-only,
+/// so a cursor's height is not checked.
+pub fn roots_below(channel_id: &str, seq: u64) -> Vec<u8> {
+    let scope = roots_prefix(channel_id).into_bytes();
+    abi::encode(&store::Cursor {
+        height: 0,
+        scope,
+        after: root_key(channel_id, seq).into_bytes(),
+    })
+}
+fn roots_prefix(ch: &str) -> String {
+    format!("root/{ch}/")
 }
 fn msgid_key(id: &str) -> String {
     format!("msgid/{id}")
@@ -91,101 +107,76 @@ fn tagc_key(ch: &str, label: &str, seq: u64) -> String {
     format!("tagc/{ch}/{label}/{:016x}", u64::MAX - seq)
 }
 
-// ── the store ───────────────────────────────────────────────────────────────
-
-pub trait Read {
-    fn get(&self, key: &[u8]) -> Option<Vec<u8>>;
-    fn scan(&self, scan: Scan) -> Vec<Entry>;
-}
-
-pub trait Write: Read {
-    fn set(&mut self, key: Vec<u8>, value: Vec<u8>);
-    fn delete(&mut self, key: &[u8]);
-}
-
 // ── store helpers ───────────────────────────────────────────────────────────
 
-fn refuse(reason: &str, sentence: impl Into<String>) -> Refusal {
-    Refusal::new(reason, sentence)
-}
-
-fn load<T: DeserializeOwned>(store: &impl Read, key: &str) -> Result<Option<T>, Refusal> {
+fn load<T: DeserializeOwned>(store: &impl Reads, key: &str) -> Result<Option<T>, Refusal> {
     store
         .get(key.as_bytes())
-        .map(|b| serde_json::from_slice(&b).map_err(|e| refuse(reason::CORRUPT, e.to_string())))
+        .map(|b| {
+            serde_json::from_slice(&b).map_err(|e| Refusal::new(reason::CORRUPT, e.to_string()))
+        })
         .transpose()
 }
 
-fn save<T: Serialize>(store: &mut impl Write, key: String, value: &T) {
+fn save<T: Serialize>(store: &mut impl Writes, key: String, value: &T) {
     store.set(
         key.into_bytes(),
         serde_json::to_vec(value).expect("a chat row serializes"),
     );
 }
 
-fn mark(store: &mut impl Write, key: String) {
+fn mark(store: &mut impl Writes, key: String) {
     store.set(key.into_bytes(), Vec::new());
 }
 
-fn channel(store: &impl Read, id: &str) -> Result<ChannelRow, Refusal> {
-    load(store, &chan_key(id))?.ok_or_else(|| refuse(reason::NOT_FOUND, format!("no channel {id}")))
+fn channel(store: &impl Reads, id: &str) -> Result<ChannelRow, Refusal> {
+    load(store, &chan_key(id))?.ok_or_else(|| not_found(format!("no channel {id}")))
 }
 
-fn head_seq(store: &impl Read, id: &str) -> u64 {
+fn head_seq(store: &impl Reads, id: &str) -> u64 {
     load(store, &seq_key(id)).ok().flatten().unwrap_or(0)
 }
 
-fn row(store: &impl Read, ch: &str, seq: u64) -> Result<MsgRow, Refusal> {
-    load(store, &msg_key(ch, seq))?
-        .ok_or_else(|| refuse(reason::NOT_FOUND, format!("no message {ch}/{seq}")))
+fn row(store: &impl Reads, ch: &str, seq: u64) -> Result<MsgRow, Refusal> {
+    load(store, &msg_key(ch, seq))?.ok_or_else(|| not_found(format!("no message {ch}/{seq}")))
 }
 
 fn checked_id(what: &str, id: &str) -> Result<(), Refusal> {
     if id.is_empty() || id.len() > MAX_ID_BYTES || id.contains('/') {
-        return Err(refuse(
-            reason::INVALID_INPUT,
-            format!("{what} is 1..={MAX_ID_BYTES} bytes without '/'"),
-        ));
+        return Err(invalid(format!(
+            "{what} is 1..={MAX_ID_BYTES} bytes without '/'"
+        )));
     }
     Ok(())
 }
 
 fn checked_name(name: &str) -> Result<(), Refusal> {
     if name.trim().is_empty() || name.len() > MAX_NAME_BYTES {
-        return Err(refuse(
-            reason::INVALID_INPUT,
-            format!("a name is 1..={MAX_NAME_BYTES} bytes"),
-        ));
+        return Err(invalid(format!("a name is 1..={MAX_NAME_BYTES} bytes")));
     }
     Ok(())
 }
 
-fn writable(store: &impl Read, ch: &ChannelRow, party: &Party) -> Result<(), Refusal> {
+fn writable(store: &impl Reads, ch: &ChannelRow, party: &Party) -> Result<(), Refusal> {
     if ch.archived {
-        return Err(refuse(
-            reason::WRONG_STATE,
-            format!("{} is archived", ch.id),
-        ));
+        return Err(wrong_state(format!("{} is archived", ch.id)));
     }
     let handle = party_handle(party);
     let allowed = ch.post_policy == PostPolicy::Open
         || ch.owner == handle
         || store.get(member_key(&ch.id, &handle).as_bytes()).is_some();
     if !allowed {
-        return Err(refuse(
-            reason::UNAUTHORIZED,
-            format!("{handle} is not a member of {}", ch.id),
-        ));
+        return Err(unauthorized(format!(
+            "{handle} is not a member of {}",
+            ch.id
+        )));
     }
     Ok(())
 }
 
 fn owned(ch: &ChannelRow, party: &Party) -> Result<(), Refusal> {
     if ch.owner != party_handle(party) {
-        return Err(refuse(
-            reason::UNAUTHORIZED,
-            format!("only the owner of {} may", ch.id),
-        ));
+        return Err(unauthorized(format!("only the owner of {} may", ch.id)));
     }
     Ok(())
 }
@@ -265,7 +256,7 @@ pub fn tags(blocks: &[Block]) -> Vec<String> {
     out
 }
 
-fn index(store: &mut impl Write, row: &MsgRow, on: bool) {
+fn index(store: &mut impl Writes, row: &MsgRow, on: bool) {
     let posting = serde_json::to_vec(&(&row.channel_id, row.seq)).expect("a posting serializes");
     let mut keys: Vec<String> = tokens(&row.text)
         .iter()
@@ -284,13 +275,12 @@ fn index(store: &mut impl Write, row: &MsgRow, on: bool) {
     }
 }
 
-fn put_row(store: &mut impl Write, row: &MsgRow) -> Result<(), Refusal> {
+fn put_row(store: &mut impl Writes, row: &MsgRow) -> Result<(), Refusal> {
     let bytes = serde_json::to_vec(row).expect("a chat row serializes");
     if bytes.len() > MAX_MESSAGE_BYTES {
-        return Err(refuse(
-            reason::CAPACITY,
-            format!("a message is at most {MAX_MESSAGE_BYTES} bytes"),
-        ));
+        return Err(capacity(format!(
+            "a message is at most {MAX_MESSAGE_BYTES} bytes"
+        )));
     }
     store.set(msg_key(&row.channel_id, row.seq).into_bytes(), bytes);
     Ok(())
@@ -302,7 +292,7 @@ mod program;
 mod queries;
 mod wire;
 pub use ops::execute;
-pub use queries::{page, query};
+pub use queries::query;
 pub use wire::*;
 #[cfg(test)]
 mod tests;

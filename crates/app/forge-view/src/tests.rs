@@ -11,7 +11,7 @@ use ducktape_view_guest::doors::Id;
 use ducktape_view_guest::doors::{Query as Door, Submit};
 use ducktape_view_guest::testing::TestAppContext;
 use ducktape_view_guest::{Entity, Theme, wire};
-use forge::{ChangeFilter, ChangeState, Op, Query, Reply};
+use forge::{ChangeFilter, ChangeState, Op, Page, PageReply, Query, Reply};
 
 use crate::api::ChatApi;
 
@@ -26,6 +26,13 @@ pub(crate) fn bytes(name: &str) -> Vec<u8> {
 
 fn reply(name: &str) -> Reply {
     borsh::from_slice(&bytes(name)).unwrap_or_else(|error| panic!("decode {name}: {error}"))
+}
+
+/// One committed refusal, as the host hands the program's `Err` to a view.
+fn refusal(name: &str) -> ducktape_view_guest::host::Refusal {
+    let refusal: abi::Refusal =
+        borsh::from_slice(&bytes(name)).unwrap_or_else(|error| panic!("decode {name}: {error}"));
+    ducktape_view_guest::host::Refusal::new(&refusal.reason, &refusal.sentence)
 }
 
 /// Which change record the program is holding in a given scenario.
@@ -45,12 +52,20 @@ fn answer(query: &Query, mode: &str) -> Reply {
         Query::Repos { .. } if mode == "empty" => reply("repos-empty"),
         Query::Repos { .. } => reply("repos"),
         Query::Repo { .. } => reply("repo"),
-        Query::Refs { cursor: None, .. } if mode == "unborn" => reply("refs-empty"),
-        Query::Refs { cursor: None, .. } => reply("refs"),
+        Query::Refs {
+            page: Page { after: None, .. },
+            ..
+        } if mode == "unborn" => reply("refs-empty"),
+        Query::Refs {
+            page: Page { after: None, .. },
+            ..
+        } => reply("refs"),
         Query::Refs { .. } => reply("refs-empty"),
         Query::Activity { .. } => reply("activity"),
         Query::Tree {
-            cursor: None, path, ..
+            page: Page { after: None, .. },
+            path,
+            ..
         } if path.is_empty() => reply("tree"),
         Query::Tree { .. } => reply("tree-directory"),
         Query::Blob { oid, .. } => match oid.as_str() {
@@ -58,7 +73,10 @@ fn answer(query: &Query, mode: &str) -> Reply {
             "b90a09e55e43808905fe881245853c1b35b3fb82" => reply("blob-oversize"),
             _ => reply("blob"),
         },
-        Query::Log { cursor: None, .. } => reply("log"),
+        Query::Log {
+            page: Page { after: None, .. },
+            ..
+        } => reply("log"),
         Query::Log { .. } => reply("log-next"),
         Query::Diff { .. } if mode == "binary" => reply("diff-binary"),
         Query::Diff { .. } => reply("diff-text"),
@@ -74,7 +92,10 @@ fn answer(query: &Query, mode: &str) -> Reply {
         } => reply("changes-filtered"),
         Query::Changes { .. } if mode == "empty" => reply("changes-empty"),
         Query::Changes { .. } => reply("changes"),
-        Query::Change { cursor: None, .. } => reply(change_fixture(mode)),
+        Query::Change {
+            page: Page { after: None, .. },
+            ..
+        } => reply(change_fixture(mode)),
         Query::Change { .. } => reply("change-reviews-next"),
         Query::Judgment { .. } if mode == "judgment-empty" => reply("judgment-empty"),
         Query::Judgment { .. } => reply("judgment"),
@@ -120,25 +141,27 @@ fn message(seq: u64, author: &str, text: &str) -> chat::MsgRow {
 pub(crate) fn configure(cx: &mut TestAppContext, mode: &'static str) {
     cx.host().handle::<Ask>(move |query| {
         if mode == "refused" && !matches!(query, Query::Repos { .. }) {
-            return Ok(reply("refused-not-found"));
+            return Err(refusal("refused-not-found"));
         }
         Ok(answer(&query, mode))
     });
     cx.host().handle::<Door<ChatApi>>(|query| {
         Ok(match query {
             chat::ChatViewQuery::Accounts { .. } => chat::ChatViewReply::Accounts(accounts()),
-            chat::ChatViewQuery::Roots { channel_id, .. } => chat::ChatViewReply::Roots {
-                roots: if channel_id == "forge:project:1" {
-                    vec![
-                        message(1, "system", "Ada opened this change"),
-                        message(2, "acct:8", "Reading it now"),
-                    ]
-                } else {
-                    Vec::new()
-                },
-                has_more: false,
-                next_before_seq: None,
-            },
+            chat::ChatViewQuery::Roots { channel_id, .. } => {
+                chat::ChatViewReply::Roots(PageReply {
+                    height: 1,
+                    items: if channel_id == "forge:project:1" {
+                        vec![
+                            message(1, "system", "Ada opened this change"),
+                            message(2, "acct:8", "Reading it now"),
+                        ]
+                    } else {
+                        Vec::new()
+                    },
+                    next: None,
+                })
+            }
             other => panic!("unexpected chat query: {other:?}"),
         })
     });
@@ -335,7 +358,7 @@ fn an_unborn_repo_says_so_instead_of_resolving_forever() {
 fn a_refused_read_keeps_its_reason_and_offers_one_retry() {
     let mut cx = TestAppContext::new();
     cx.host()
-        .handle::<Ask>(|_| Ok(reply("refused-object-not-held")));
+        .handle::<Ask>(|_| Err(refusal("refused-object-not-held")));
     cx.host()
         .handle::<Door<ChatApi>>(|_| Ok(chat::ChatViewReply::Accounts(accounts())));
     cx.host().never::<Live>();
@@ -478,7 +501,7 @@ fn commits_follows_the_cursor_and_opens_one_commit_with_its_diff() {
         asked.iter().any(|query| matches!(
             query,
             Query::Log {
-                cursor: Some(_),
+                page: Page { after: Some(_), .. },
                 ..
             }
         )),
@@ -488,8 +511,7 @@ fn commits_follows_the_cursor_and_opens_one_commit_with_its_diff() {
         let Some(Reply::Log { page, .. }) = forge.ready(&Query::Log {
             repo: "project".into(),
             from: forge.revision(),
-            cursor: None,
-            limit: crate::queries::PAGE,
+            page: crate::queries::PAGE,
         }) else {
             panic!("the log landed");
         };

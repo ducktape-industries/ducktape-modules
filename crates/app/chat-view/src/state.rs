@@ -67,7 +67,7 @@ pub struct Thread {
     pub(crate) root: u64,
     pub(crate) replies: Loaded<Vec<MsgRow>>,
     pub(crate) has_more: bool,
-    pub(crate) next: Option<u64>,
+    pub(crate) next: Option<Vec<u8>>,
     #[serde(skip)]
     pub(crate) more_loading: bool,
 }
@@ -87,7 +87,7 @@ pub struct Hits {
     pub(crate) rows: Vec<MsgRow>,
     pub(crate) capped: bool,
     pub(crate) has_more: bool,
-    pub(crate) next_after: Option<String>,
+    pub(crate) next_after: Option<Vec<u8>>,
 }
 
 #[derive(Serialize, Deserialize, Default)]

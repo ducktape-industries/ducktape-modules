@@ -7,18 +7,6 @@ pub enum Revision {
     Oid(String),
 }
 
-/// Opaque to clients. Bound to the query arguments and answering height.
-#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
-pub struct Cursor {
-    pub height: u64,
-    pub scope: Vec<u8>,
-    pub after: Vec<u8>,
-}
-#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
-pub struct Page<T> {
-    pub items: Vec<T>,
-    pub next: Option<Cursor>,
-}
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct GitSignature {
     pub name: Vec<u8>,
