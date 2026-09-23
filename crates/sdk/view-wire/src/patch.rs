@@ -159,10 +159,10 @@ pub fn diff(old: &mut Node, new: &mut Node) -> Vec<Patch> {
     patches
 }
 
+/// Each node's own fields are compared once, on the way down: comparing a
+/// whole subtree first at every level compared a deep changed subtree once
+/// per level above it.
 fn diff_node(old: &mut Node, new: &mut Node, path: &mut Vec<u32>, out: &mut Vec<Patch>) {
-    if old == new {
-        return;
-    }
     let same_kind = std::mem::discriminant(old) == std::mem::discriminant(new);
     let same_arity = new.child_list_mut().is_some() || old.children().len() == new.children().len();
     if !(same_kind && same_arity) {
@@ -182,9 +182,14 @@ fn diff_node(old: &mut Node, new: &mut Node, path: &mut Vec<u32>, out: &mut Vec<
     }
     let mut old_children = old_children;
     let mut new_children = new_children;
-    match old.child_list_mut().is_some() {
-        true => diff_list(&mut old_children, &mut new_children, path, out),
-        false => {
+    let rows = match (&*old, &*new) {
+        (Node::List { range_start: a, .. }, Node::List { range_start: b, .. }) => Some((*a, *b)),
+        _ => None,
+    };
+    match (old.child_list_mut().is_some(), rows) {
+        (true, Some((a, b))) => diff_rows(&mut old_children, &mut new_children, a, b, path, out),
+        (true, None) => diff_list(&mut old_children, &mut new_children, path, out),
+        (false, _) => {
             for (index, (old_child, new_child)) in
                 old_children.iter_mut().zip(&mut new_children).enumerate()
             {
@@ -196,6 +201,50 @@ fn diff_node(old: &mut Node, new: &mut Node, path: &mut Vec<u32>, out: &mut Vec<
     }
     old.attach(old_children).expect("its own children");
     new.attach(new_children).expect("its own children");
+}
+
+/// A list's rows are its item indices from `range_start` on: rows at the
+/// same index are the same row, whatever their keys. Scrolling a row into
+/// the window is one insert, not the whole window sent again.
+fn diff_rows(
+    old: &mut [Node],
+    new: &mut [Node],
+    old_start: usize,
+    new_start: usize,
+    path: &mut Vec<u32>,
+    out: &mut Vec<Patch>,
+) {
+    let old_end = old_start + old.len();
+    let new_end = new_start + new.len();
+    let (start, end) = (old_start.max(new_start), old_end.min(new_end));
+    if start >= end {
+        return diff_list(old, new, path, out);
+    }
+    let remove = |count: usize, index: usize, out: &mut Vec<Patch>| {
+        for _ in 0..count {
+            out.push(Patch::Remove {
+                path: path.clone(),
+                index: index as u32,
+            });
+        }
+    };
+    remove(old_end - end, end - old_start, out);
+    remove(start - old_start, 0, out);
+    for (index, row) in new.iter_mut().enumerate() {
+        let item = new_start + index;
+        match (start..end).contains(&item) {
+            true => {
+                path.push(index as u32);
+                diff_node(&mut old[item - old_start], row, path, out);
+                path.pop();
+            }
+            false => out.push(Patch::Insert {
+                path: path.clone(),
+                index: index as u32,
+                node: row.clone(),
+            }),
+        }
+    }
 }
 
 fn diff_list(old: &mut [Node], new: &mut [Node], path: &mut Vec<u32>, out: &mut Vec<Patch>) {

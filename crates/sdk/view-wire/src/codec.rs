@@ -114,27 +114,51 @@ pub fn encode<T: Serialize>(value: &T) -> Vec<u8> {
 // Share one serializer instantiation for buffers, size counting, and subtree fingerprints.
 // Distinct writer types otherwise duplicate the entire node serialization graph.
 #[inline(never)]
+fn try_write<T: Serialize>(
+    value: &T,
+    writer: &mut dyn std::io::Write,
+) -> Result<(), rmp_serde::encode::Error> {
+    value.serialize(&mut rmp_serde::Serializer::new(writer).with_struct_map())
+}
+
 pub(crate) fn write<T: Serialize>(value: &T, writer: &mut dyn std::io::Write) {
-    value
-        .serialize(&mut rmp_serde::Serializer::new(writer).with_struct_map())
-        .expect("wire types are plain data");
+    try_write(value, writer).expect("wire types are plain data");
+}
+
+/// Counts bytes, and refuses them past `limit`.
+struct Count {
+    bytes: u64,
+    limit: u64,
+}
+
+impl std::io::Write for Count {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.bytes += bytes.len() as u64;
+        if self.bytes > self.limit {
+            return Err(std::io::ErrorKind::FileTooLarge.into());
+        }
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 /// How many bytes [`encode`] would write, without writing them.
 pub fn encoded_size<T: Serialize>(value: &T) -> u64 {
-    struct Count(u64);
-    impl std::io::Write for Count {
-        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            self.0 += bytes.len() as u64;
-            Ok(bytes.len())
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-    let mut count = Count(0);
+    let mut count = Count {
+        bytes: 0,
+        limit: u64::MAX,
+    };
     write(value, &mut count);
-    count.0
+    count.bytes
+}
+
+/// Whether [`encode`] would write more than `limit` bytes: it stops counting
+/// there, so asking about a large tree costs no more than `limit`.
+pub fn encoded_size_exceeds<T: Serialize>(value: &T, limit: u64) -> bool {
+    let mut count = Count { bytes: 0, limit };
+    try_write(value, &mut count).is_err()
 }
 
 pub fn decode<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T, String> {

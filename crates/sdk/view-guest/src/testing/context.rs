@@ -12,8 +12,9 @@ trait TestDriver {
     fn snapshot(&self) -> Result<Vec<u8>, String>;
 }
 impl<V: View> TestDriver for Driver<V> {
+    // what the host gets: the context patches its tree as the host does
     fn tick(&mut self, events: Vec<Event>) -> Frame {
-        self.tick(events)
+        self.tick_wire(events)
     }
     fn app_mut(&mut self) -> &mut App {
         self.app_mut()

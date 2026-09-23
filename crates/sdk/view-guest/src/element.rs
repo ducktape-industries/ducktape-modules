@@ -162,6 +162,14 @@ impl<'a> Lowering<'a> {
         slots::route(&self.app.inner.slots, listener)
     }
 
+    pub(crate) fn enter_row(&mut self, key: u64) -> Option<slots::Row> {
+        slots::enter_row(&self.app.inner.slots, key)
+    }
+
+    pub(crate) fn leave_row(&mut self, outer: Option<slots::Row>) {
+        slots::leave_row(&self.app.inner.slots, outer)
+    }
+
     pub(crate) fn message_route(
         &mut self,
         listener: impl Fn(&(), &mut Window, &mut App) + 'static,
