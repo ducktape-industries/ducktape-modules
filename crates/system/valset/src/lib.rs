@@ -12,7 +12,7 @@ pub use rules::{execute, init, query};
 use borsh::{BorshDeserialize, BorshSerialize};
 use module_registry::{Page, PageReply};
 
-pub use abi::valset::{Genesis, Member, PROGRAM};
+pub use abi::valset::{Genesis, MAX_MEMBERS, Member, PROGRAM};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Standing {
@@ -58,13 +58,35 @@ pub enum Reply {
     Membership(Option<Membership>),
 }
 
-/// The ask another program makes of valset.
+/// The asks another program makes of valset.
 pub fn standing(ctx: &impl store::Reads, key: &[u8]) -> Result<Option<Standing>, abi::Refusal> {
+    Ok(membership(ctx, key)?.map(|membership| membership.standing))
+}
+
+pub fn membership(ctx: &impl store::Reads, key: &[u8]) -> Result<Option<Membership>, abi::Refusal> {
     match ctx.ask::<Query, Reply>(PROGRAM, &Query::Membership { key: key.to_vec() })? {
-        Reply::Membership(membership) => Ok(membership.map(|membership| membership.standing)),
-        other => Err(abi::Refusal::new(
-            abi::reason::UNEXPECTED_REPLY,
-            format!("valset answered Membership with {other:?}"),
-        )),
+        Reply::Membership(membership) => Ok(membership),
+        other => Err(unexpected("Membership", &other)),
     }
+}
+
+pub fn validators(ctx: &impl store::Reads) -> Result<Vec<Vec<u8>>, abi::Refusal> {
+    match ctx.ask::<Query, Reply>(PROGRAM, &Query::Validators)? {
+        Reply::Validators(validators) => Ok(validators),
+        other => Err(unexpected("Validators", &other)),
+    }
+}
+
+pub fn members(ctx: &impl store::Reads) -> Result<Vec<Member>, abi::Refusal> {
+    match ctx.ask::<Query, Reply>(PROGRAM, &Query::Members)? {
+        Reply::Members(members) => Ok(members),
+        other => Err(unexpected("Members", &other)),
+    }
+}
+
+fn unexpected(asked: &str, other: &Reply) -> abi::Refusal {
+    abi::Refusal::new(
+        abi::reason::UNEXPECTED_REPLY,
+        format!("valset answered {asked} with {other:?}"),
+    )
 }

@@ -1,10 +1,10 @@
-// The rules over any store: admission-only writes, the last validator kept seated.
+// The rules over any store: admission-only writes, at most MAX_MEMBERS members, the last validator kept seated.
 
 use abi::{Env, Refusal};
 use module_registry::ADMISSION;
-use store::{Map, Reads, Writes, invalid, wrong_state};
+use store::{Map, Reads, Writes, capacity, invalid, wrong_state};
 
-use crate::{Genesis, Membership, Op, Query, Reply, Standing};
+use crate::{Genesis, MAX_MEMBERS, Membership, Op, Query, Reply, Standing};
 
 const MEMBERS: Map<Vec<u8>, Membership> = Map::new("m/");
 const KEY_LEN: usize = 32;
@@ -64,6 +64,13 @@ fn set(store: &mut impl Writes, membership: Membership) -> Result<(), Refusal> {
     let key_is_ed25519 = membership.key.len() == KEY_LEN;
     if !key_is_ed25519 {
         return Err(invalid("a member key is a 32-byte ed25519 public key"));
+    }
+    let joins = !MEMBERS.has(store, &membership.key);
+    let full = joins && memberships(store)?.len() >= MAX_MEMBERS;
+    if full {
+        return Err(capacity(format!(
+            "the valset holds its {MAX_MEMBERS} members"
+        )));
     }
     let demotes = membership.standing == Standing::Resident;
     if demotes {

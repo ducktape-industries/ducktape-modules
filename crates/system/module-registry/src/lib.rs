@@ -20,7 +20,7 @@ pub use store::{Page, PageReply};
 /// The program whose frames this registry accepts as governance.
 pub const AUTHORITY: &str = "governance";
 /// The program whose frames `valset` accepts: the one that enrolls a joiner.
-pub const ADMISSION: &str = "admission";
+pub const ADMISSION: &str = abi::admission::PROGRAM;
 
 use abi::ProgramId;
 use borsh::{BorshDeserialize, BorshSerialize};

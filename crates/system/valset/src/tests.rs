@@ -171,3 +171,23 @@ fn the_host_contract_is_a_prefix_of_the_program_contract() {
         abi::encode(&super::Reply::Members(vec![member]))
     );
 }
+
+#[test]
+fn a_full_valset_refuses_a_new_member_and_still_moves_one() {
+    let mut store = founded();
+    for n in 0..crate::MAX_MEMBERS as u64 - 2 {
+        let resident = Membership {
+            key: n.to_be_bytes().repeat(4),
+            address: format!("node-{n}"),
+            standing: Standing::Resident,
+        };
+        govern(&mut store, Op::Set(resident)).unwrap();
+    }
+    let refused = govern(&mut store, Op::Set(membership(9, Standing::Resident))).unwrap_err();
+    assert_eq!(refused.reason, abi::reason::CAPACITY);
+    let moved = Membership {
+        address: "moved".into(),
+        ..membership(1, Standing::Validator)
+    };
+    govern(&mut store, Op::Set(moved)).unwrap();
+}

@@ -251,18 +251,21 @@ impl Net {
         self.sent_by(admission::PROGRAM, valset::PROGRAM, op).await
     }
     /// A signed `Enroll` through the real admission program; the valset receipt.
-    async fn enroll(&mut self, seed: u64, address: &str) -> Receipt {
-        let signer = public(seed);
+    async fn enroll(
+        &mut self,
+        seed: u64,
+        address: &str,
+        invite: Option<admission::Invite>,
+    ) -> Receipt {
         let op = admission::Op::Enroll {
             address: address.to_owned(),
+            invite,
         };
-        let submission = self.submission(&signer, admission::PROGRAM, abi::encode(&op));
-        let applied = self.block(vec![submission]).await;
-        self.consumed(&signer, &applied.submissions[0]);
-        match &applied.submissions[0].outcome {
-            Outcome::Applied { .. } => {}
-            Outcome::Rejected(refusal) => panic!("admission rejected the enroll: {refusal}"),
-        }
+        self.apply(&public(seed), admission::PROGRAM, &op).await;
+        self.delivered_to_valset().await
+    }
+
+    async fn delivered_to_valset(&mut self) -> Receipt {
         let applied = self.tick().await;
         applied
             .deliveries
@@ -270,6 +273,33 @@ impl Net {
             .map(|delivered| delivered.receipt)
             .find(|receipt| receipt.program == valset::PROGRAM)
             .unwrap()
+    }
+
+    async fn vote(&mut self, seed: u64, motion: admission::Motion) -> admission::Voted {
+        let op = admission::Op::Vote(motion);
+        let output = self.apply(&public(seed), admission::PROGRAM, &op).await;
+        let voted = abi::decode(&output).unwrap();
+        if voted == admission::Voted::Enacted {
+            self.tick().await;
+        }
+        voted
+    }
+
+    fn invite(&self, issuer: u64, nonce: u8) -> admission::Invite {
+        let grant = admission::Grant {
+            network: NETWORK.to_vec(),
+            nonce: vec![nonce; 16],
+            expires: self.time() + 60_000,
+        };
+        let signature = key(issuer)
+            .sign(admission::INVITE_NAMESPACE, &grant.preimage())
+            .as_ref()
+            .to_vec();
+        admission::Invite {
+            issuer: public(issuer),
+            grant,
+            signature,
+        }
     }
 
     /// A query the program refuses.

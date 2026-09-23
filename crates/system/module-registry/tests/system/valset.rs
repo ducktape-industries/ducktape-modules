@@ -39,10 +39,12 @@ fn admission_seats_members_and_the_next_epoch_reads_them() {
         output_of(&promoted);
         assert_eq!(net.validators().await.len(), 3);
         let epoch = (net.height + EPOCH_LENGTH) / EPOCH_LENGTH;
-        while net.host.epoch_members(epoch).unwrap().is_none() {
+        while net.host.epoch_seating(epoch).unwrap().is_none() {
             net.tick().await;
         }
-        assert_eq!(net.host.epoch_members(epoch).unwrap().unwrap().len(), 3);
+        let seating = net.host.epoch_seating(epoch).unwrap().unwrap();
+        assert_eq!(seating.validators.len(), 3);
+        assert_eq!(seating.members.len(), 3);
         for seed in [1, 2] {
             let removed = net
                 .as_admission(&valset::Op::Remove { key: public(seed) })
