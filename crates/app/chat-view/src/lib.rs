@@ -107,13 +107,17 @@ impl View for Chat {
         }));
         // identity is program-agnostic: a key that gains an account while
         // this view is open (Settings, then back to Chat) writes no session
-        // change of its own, only an identity block. Re-resolve on it too.
+        // change of its own, only an identity block. Re-resolve on it too —
+        // and re-read the roster, or a name ANOTHER signer claims while this
+        // room stays open never replaces the "account N" fallback their
+        // messages render under (they show up, just unnamed).
         let mut identity_live = cx.host().subscribe::<LiveChanges>(identity::PROGRAM.into());
         self.watches.identity = Some(cx.spawn(async move |this, cx| {
             while identity_live.next().await.is_some() {
                 if this
                     .update(cx, |chat, cx| {
                         cx.notify();
+                        chat.names = cx.load(roster(cx.host()), |chat| &mut chat.names);
                         chat.refresh_me(cx);
                     })
                     .is_err()
