@@ -8,7 +8,7 @@
 #                   `Memory` runs them natively), `ducklink` (the `duck://`
 #                   grammar), and the view contract (`view-wire`,
 #                   `view-guest`, `design`)
-#   crates/system/  the boot set: module-registry, valset and identity, one
+#   crates/system/  the boot set: module-registry, valset, admission and identity, one
 #                   crate each in the same shape as the app programs; the
 #                   suite under module-registry/tests founds ducktape's host
 #                   over the bytes `make wasm-programs` built
@@ -41,6 +41,7 @@ members = [
     "crates/system/module-registry",
     "crates/system/valset",
     "crates/system/identity",
+    "crates/system/admission",
     "crates/app/chat",
     "crates/app/chat-view",
     "crates/app/forge-view",
@@ -71,14 +72,15 @@ gpui = { package = "gpui-pre", git = "https://github.com/ducktape-industries/gpu
 module-registry = { path = "crates/system/module-registry" }
 valset = { path = "crates/system/valset" }
 identity = { path = "crates/system/identity" }
+admission = { path = "crates/system/admission" }
 chat = { path = "crates/app/chat" }
 forge = { path = "crates/app/forge" }
 
 # ---- the host the founding suite runs the boot set on, the probe fixture it
 # seats and the key schemes it signs with (dev-dependencies only)
-host = { git = "https://github.com/ducktape-industries/ducktape", rev = "5d1d1f61d89960164cab919dfbb16a1d8cdb3b36" }
-fixture-probe = { git = "https://github.com/ducktape-industries/ducktape", rev = "5d1d1f61d89960164cab919dfbb16a1d8cdb3b36" }
-keyscheme = { git = "https://github.com/ducktape-industries/ducktape", rev = "5d1d1f61d89960164cab919dfbb16a1d8cdb3b36" }
+host = { git = "https://github.com/ducktape-industries/ducktape", rev = "acfaa043779e6234f570fda6ae59ef3465f866cd" }
+fixture-probe = { git = "https://github.com/ducktape-industries/ducktape", rev = "acfaa043779e6234f570fda6ae59ef3465f866cd" }
+keyscheme = { git = "https://github.com/ducktape-industries/ducktape", rev = "acfaa043779e6234f570fda6ae59ef3465f866cd" }
 commonware-cryptography = "2026.9.0"
 commonware-runtime = "2026.9.0"
 

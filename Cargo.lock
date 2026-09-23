@@ -45,6 +45,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
+name = "admission"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "borsh",
+ "guest",
+ "module-registry",
+ "store",
+ "valset",
+]
+
+[[package]]
 name = "aead"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -464,7 +476,7 @@ dependencies = [
 [[package]]
 name = "blobs"
 version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape?rev=5d1d1f61d89960164cab919dfbb16a1d8cdb3b36#5d1d1f61d89960164cab919dfbb16a1d8cdb3b36"
+source = "git+https://github.com/ducktape-industries/ducktape?rev=acfaa043779e6234f570fda6ae59ef3465f866cd#acfaa043779e6234f570fda6ae59ef3465f866cd"
 dependencies = [
  "abi",
  "sha1",
@@ -2066,7 +2078,7 @@ checksum = "1d674e81391d1e1ab681a28d99df07927c6d4aa5b027d7da16ba32d1d21ecd99"
 [[package]]
 name = "fixture-probe"
 version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape?rev=5d1d1f61d89960164cab919dfbb16a1d8cdb3b36#5d1d1f61d89960164cab919dfbb16a1d8cdb3b36"
+source = "git+https://github.com/ducktape-industries/ducktape?rev=acfaa043779e6234f570fda6ae59ef3465f866cd#acfaa043779e6234f570fda6ae59ef3465f866cd"
 dependencies = [
  "abi",
  "borsh",
@@ -2832,7 +2844,7 @@ dependencies = [
 [[package]]
 name = "host"
 version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape?rev=5d1d1f61d89960164cab919dfbb16a1d8cdb3b36#5d1d1f61d89960164cab919dfbb16a1d8cdb3b36"
+source = "git+https://github.com/ducktape-industries/ducktape?rev=acfaa043779e6234f570fda6ae59ef3465f866cd#acfaa043779e6234f570fda6ae59ef3465f866cd"
 dependencies = [
  "abi",
  "async-trait",
@@ -3301,7 +3313,7 @@ dependencies = [
 [[package]]
 name = "keyscheme"
 version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape?rev=5d1d1f61d89960164cab919dfbb16a1d8cdb3b36#5d1d1f61d89960164cab919dfbb16a1d8cdb3b36"
+source = "git+https://github.com/ducktape-industries/ducktape?rev=acfaa043779e6234f570fda6ae59ef3465f866cd#acfaa043779e6234f570fda6ae59ef3465f866cd"
 dependencies = [
  "base64 0.22.1",
  "borsh",
@@ -3659,6 +3671,7 @@ name = "module-registry"
 version = "0.1.0"
 dependencies = [
  "abi",
+ "admission",
  "borsh",
  "commonware-cryptography",
  "commonware-runtime",
@@ -4933,7 +4946,7 @@ dependencies = [
 [[package]]
 name = "runtime"
 version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape?rev=5d1d1f61d89960164cab919dfbb16a1d8cdb3b36#5d1d1f61d89960164cab919dfbb16a1d8cdb3b36"
+source = "git+https://github.com/ducktape-industries/ducktape?rev=acfaa043779e6234f570fda6ae59ef3465f866cd#acfaa043779e6234f570fda6ae59ef3465f866cd"
 dependencies = [
  "abi",
  "async-trait",
@@ -5472,7 +5485,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 [[package]]
 name = "state"
 version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape?rev=5d1d1f61d89960164cab919dfbb16a1d8cdb3b36#5d1d1f61d89960164cab919dfbb16a1d8cdb3b36"
+source = "git+https://github.com/ducktape-industries/ducktape?rev=acfaa043779e6234f570fda6ae59ef3465f866cd#acfaa043779e6234f570fda6ae59ef3465f866cd"
 dependencies = [
  "abi",
  "borsh",

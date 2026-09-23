@@ -17,8 +17,10 @@ mod tests;
 pub use rules::{execute, init, query};
 pub use store::{Page, PageReply};
 
-/// The program whose frames `valset` and this registry accept as governance.
+/// The program whose frames this registry accepts as governance.
 pub const AUTHORITY: &str = "governance";
+/// The program whose frames `valset` accepts: the one that enrolls a joiner.
+pub const ADMISSION: &str = abi::admission::PROGRAM;
 
 use abi::ProgramId;
 use borsh::{BorshDeserialize, BorshSerialize};

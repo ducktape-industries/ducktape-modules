@@ -10,6 +10,7 @@ fn founding_seats_the_validators_and_every_program_answers() {
             module_registry::PROGRAM,
             valset::PROGRAM,
             identity::PROGRAM,
+            admission::PROGRAM,
             AUTHORITY,
         ] {
             assert!(programs.contains_key(program), "{program} is not rostered");
@@ -21,10 +22,11 @@ fn founding_seats_the_validators_and_every_program_answers() {
                 .iter()
                 .all(|membership| membership.standing == valset::Standing::Validator)
         );
-        let seated = net.host.epoch_members(0).unwrap().unwrap();
-        assert_eq!(seated.len(), 2);
-        assert!(seated.contains(&member(1)));
-        assert!(seated.contains(&member(2)));
+        let seated = net.host.epoch_seating(0).unwrap().unwrap();
+        assert_eq!(seated.validators.len(), 2);
+        assert_eq!(seated.members.len(), 2);
+        assert!(seated.members.contains(&member(1)));
+        assert!(seated.members.contains(&member(2)));
         let identity::Reply::Accounts(accounts) = net
             .ask(
                 identity::PROGRAM,

@@ -1,7 +1,7 @@
 // The rules natively over `store::Memory`: what the founding suite checks on the host, without the host.
 
 use abi::{Cause, Env, Origin, reason};
-use module_registry::AUTHORITY;
+use module_registry::ADMISSION;
 use store::{Memory, Page};
 
 use crate::{Genesis, Member, Membership, Op, Query, Reply, Standing};
@@ -43,7 +43,7 @@ fn founded() -> Memory {
 }
 
 fn govern(store: &mut Memory, op: Op) -> Result<(), abi::Refusal> {
-    crate::execute(store, &env(Origin::Program(AUTHORITY.into())), op)
+    crate::execute(store, &env(Origin::Program(ADMISSION.into())), op)
 }
 
 fn ask(store: &Memory, query: Query) -> Reply {
@@ -72,7 +72,7 @@ fn founding_seats_the_validators_in_key_order() {
 }
 
 #[test]
-fn only_the_authority_writes_and_a_key_is_32_bytes() {
+fn only_admission_writes_and_a_key_is_32_bytes() {
     let mut store = founded();
     let stranger = crate::execute(
         &mut store,
@@ -170,4 +170,24 @@ fn the_host_contract_is_a_prefix_of_the_program_contract() {
         abi::encode(&abi::valset::Reply::Members(vec![member.clone()])),
         abi::encode(&super::Reply::Members(vec![member]))
     );
+}
+
+#[test]
+fn a_full_valset_refuses_a_new_member_and_still_moves_one() {
+    let mut store = founded();
+    for n in 0..crate::MAX_MEMBERS as u64 - 2 {
+        let resident = Membership {
+            key: n.to_be_bytes().repeat(4),
+            address: format!("node-{n}"),
+            standing: Standing::Resident,
+        };
+        govern(&mut store, Op::Set(resident)).unwrap();
+    }
+    let refused = govern(&mut store, Op::Set(membership(9, Standing::Resident))).unwrap_err();
+    assert_eq!(refused.reason, abi::reason::CAPACITY);
+    let moved = Membership {
+        address: "moved".into(),
+        ..membership(1, Standing::Validator)
+    };
+    govern(&mut store, Op::Set(moved)).unwrap();
 }

@@ -5,7 +5,7 @@ repository. Only what compiles to wasm lives here, in three folders:
 
 ```
 crates/sdk/     abi guest store ducklink view-wire view-guest view-guest-derive design
-crates/system/  module-registry valset identity
+crates/system/  module-registry valset identity admission
 crates/app/     chat chat-view forge forge-view members-view node-view explorer-view settings-view
 crates/lib/     gitcore
 ```
@@ -18,7 +18,7 @@ crates/lib/     gitcore
 | `crates/sdk/ducklink` | the `duck://` link: `duck://<chain>/<program>/<tail…>`, one spelling per name, no program names known here |
 | `crates/sdk/view-wire`, `view-guest`, `view-guest-derive`, `design` | the host<->view wire, the runtime a wasm view is written against, the palette |
 | `crates/system/module-registry` | the boot set's root: the registry program (its `Op`, `Query`, `Reply`), `AUTHORITY`, `Page`/`PageReply` and the origin/key/refusal `helpers` every system program links. Its `tests/system.rs` founds ducktape's host over the bytes `make wasm-programs` built and drives every system program |
-| `crates/system/valset`, `identity` | the other two boot programs, the same shape: types always built, the wasm32 program behind `program`, the asks another program makes of them (`identity::account_of`, `valset::standing`) behind `guest` |
+| `crates/system/valset`, `identity`, `admission` | the other boot programs, the same shape: types and rules always built, the wasm32 program behind `program`, the asks another program makes of them (`identity::account_of`, `valset::standing`, `valset::membership`, `valset::validators`, `valset::members`) always built. `admission` is the valset's one writer: it enrolls, lets a member leave, and tallies validators' votes (below) |
 | `crates/app/chat`, `chat-view` | the reference app module: `chat` is one crate whose types and rules over a `Read`/`Write` store are always built (native, tested), and whose wasm32 program over the host sits behind its `program` feature. `chat-view` links `chat` with the feature off: the types, no host import, no program export |
 | `crates/app/forge`, `forge-view` | the git server as a program, the same shape as `chat`: a push is one op whose input is the receive-pack body a client sent, a merge is an op that lands the commit the client built, fetch and the ref advertisement are queries; a git object's blob id is its oid. it links `gitcore` for the git; merging is the client's. The rules run natively over `MemorySandbox`, which is where `fixtures/` comes from; `forge-view` links `forge` with `program` off |
 | `crates/app/members-view`, `node-view`, `explorer-view`, `settings-view` | the system views, which link the system crates with `program` off |
@@ -34,9 +34,18 @@ What is not wasm lives elsewhere: the forge smoke (real git against
 `forge.wasm` on ducktape's runtime) and `view-pack` (a view into its program)
 are in the qa repo, which packs and founds what this repo builds.
 
-`valset` and `module-registry` take their writes from the program named
+`module-registry` takes its writes from the program named
 `module_registry::AUTHORITY` (`governance`); no program in this tree
-implements it. The eight system modules beyond the boot set are archived at
+implements it. `valset` takes its writes from `admission` and holds at most
+`abi::valset::MAX_MEMBERS` members. `admission` enrolls the signer of a frame
+as a resident at the address it names: with an invite a validator signed
+(single use, expiring, bound to the network, checked through the host's
+`verify`) while the door is closed, without one while it is open; a member
+that enrolls again only moves its address. Validators vote to promote, demote
+or remove a member and to open or close the door; a motion passes at the BFT
+quorum of the current validators. A member may leave; the last validator may
+not. The op shapes are `abi::admission`, since the node composes them. The
+eight system modules beyond the boot set are archived at
 `ducktape-industries/ducktape-system-modules-archive`.
 
 ## A program
