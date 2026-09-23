@@ -6,6 +6,8 @@
 #[cfg(feature = "program")]
 mod program;
 mod rules;
+#[cfg(test)]
+mod tests;
 
 pub use rules::execute;
 
