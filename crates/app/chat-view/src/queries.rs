@@ -179,3 +179,12 @@ pub(crate) async fn roster(host: ducktape_view_guest::Host) -> Result<NameDirect
         _ => Err(wrong_reply()),
     }
 }
+
+/// The account the seated key holds, straight from identity — chat-view and
+/// forge-view share this resolution (`identity::view::account_of_key`).
+pub(crate) async fn resolve_me(
+    host: ducktape_view_guest::Host,
+    key: String,
+) -> Result<Option<u64>, Refusal> {
+    identity::view::account_of_key(&host, &key).await
+}

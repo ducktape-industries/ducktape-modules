@@ -3,13 +3,13 @@ use ducktape_view_guest::doors::Program;
 
 pub use ducktape_view_guest::doors::{
     Invite as MintInvite, Mint, Minted as Invite, NodeStatus as Status, Props, Session,
-    Status as NodeStatus,
+    Status as NodeStatus, Submit,
 };
 
 pub struct Identity;
 impl Program for Identity {
     const NAME: &'static str = identity::PROGRAM;
-    type Op = ();
+    type Op = identity::Op;
     type Query = identity::Query;
     type Reply = identity::Reply;
 }

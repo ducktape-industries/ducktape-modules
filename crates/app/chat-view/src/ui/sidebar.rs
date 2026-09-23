@@ -335,9 +335,10 @@ fn with_seats(chat: &Chat, info: &ChannelInfo, row: impl IntoElement, theme: &Th
     let Some(names) = chat.names.ready() else {
         return content.into_any_element();
     };
+    let mine = chat.my_handle();
     for (index, seat) in info.channel.huddle.iter().enumerate() {
         let label = names.member_label(&seat.party);
-        let is_you = seat.party == chat.session.account;
+        let is_you = seat.party == mine;
         let speaking = false;
         let note = if is_you { "you" } else { "" };
         content = content.child(

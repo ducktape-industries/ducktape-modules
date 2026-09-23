@@ -20,8 +20,15 @@ pub struct Settings {
     invite: Loaded<Invite>,
     ttl: usize,
     copied: String,
+    create_account: CreateAccount,
     #[serde(skip)]
     watches: Vec<Task<()>>,
+}
+#[derive(Default, Serialize, Deserialize)]
+struct CreateAccount {
+    name: String,
+    busy: bool,
+    error: String,
 }
 const TTL: [u64; 3] = [1, 7, 30];
 impl View for Settings {
@@ -145,28 +152,40 @@ impl Settings {
     }
     fn account(&self, cx: &mut Context<Self>, theme: &Theme) -> AnyElement {
         match &self.account {
-            Loaded::Ready(Some(a)) => div()
-                .id("settings/account/data")
-                .flex()
-                .flex_col()
-                .gap_2()
-                .w_full()
-                .child(line(
-                    "who",
-                    "Who I am",
-                    &match a.number {
-                        Some(number) => format!("{} · account {number}", a.name),
-                        None => a.name.clone(),
-                    },
-                ))
-                .children(a.keys.iter().enumerate().map(|(i, k)| {
-                    line(
-                        &format!("key/{i}"),
-                        &k.label,
-                        &format!("{} · {}", k.key, k.standing),
-                    )
-                }))
-                .into_any_element(),
+            Loaded::Ready(Some(a)) => {
+                let mut body = div()
+                    .id("settings/account/data")
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .w_full()
+                    .child(line(
+                        "who",
+                        "Who I am",
+                        &match a.number {
+                            Some(number) => format!("{} · account {number}", a.name),
+                            None => a.name.clone(),
+                        },
+                    ))
+                    .children(a.keys.iter().enumerate().map(|(i, k)| {
+                        line(
+                            &format!("key/{i}"),
+                            &k.label,
+                            &if k.validator {
+                                format!("{} · Validator", k.key)
+                            } else {
+                                k.key.clone()
+                            },
+                        )
+                    }));
+                // A key resolves to `number: None` only once it has been
+                // matched against a non-empty seated key (see
+                // `account::read_account`), so a key is seated here.
+                if a.number.is_none() {
+                    body = body.child(self.create_account_form(cx, theme));
+                }
+                body.into_any_element()
+            }
             Loaded::Ready(None) => div()
                 .id("settings/account/empty")
                 .flex()
@@ -185,7 +204,7 @@ impl Settings {
                 .child(
                     secondary(
                         "settings/account/empty/detail",
-                        "No host key is selected.",
+                        "No host key is selected. Sign in with a key to create an account.",
                         theme,
                     )
                     .w_full(),
@@ -206,6 +225,100 @@ impl Settings {
             _ => secondary("settings/account/loading", "Reading your account…", theme)
                 .into_any_element(),
         }
+    }
+    fn create_account_form(&self, cx: &mut Context<Self>, theme: &Theme) -> AnyElement {
+        let busy = self.create_account.busy;
+        let typed = cx.listener(|v, event: &String, _, cx| {
+            v.create_account.name = event.clone();
+            cx.notify();
+        });
+        let mut name = Input::new("settings/account/create/name")
+            .h(px(28.))
+            .px_2()
+            .py_1()
+            .rounded_md()
+            .border_1()
+            .border_color(theme.border_strong)
+            .bg(theme.surface)
+            .value(self.create_account.name.clone())
+            .placeholder("Account name")
+            .label("Account name")
+            .disabled(busy)
+            .on_input(typed);
+        if !busy {
+            name = name.on_submit(cx.listener(|v, _: &(), _, cx| v.submit_create_account(cx)));
+        }
+        let mut body = div()
+            .id("settings/account/create")
+            .flex()
+            .flex_col()
+            .gap_2()
+            .w_full()
+            .max_w(px(420.))
+            .child(secondary(
+                "settings/account/create/help",
+                "Your key isn't linked to an account yet. An account gives you a name others see.",
+                theme,
+            ))
+            .child(name)
+            .child(
+                button(
+                    "settings/account/create/submit",
+                    if busy {
+                        "Creating…"
+                    } else {
+                        "Create account"
+                    },
+                    theme,
+                )
+                .aria_disabled(busy)
+                .when(busy, |b| b.opacity(0.5).tab_stop(false))
+                .when(!busy, |b| {
+                    b.on_click(cx.listener(|v, _: &ClickEvent, _, cx| v.submit_create_account(cx)))
+                }),
+            );
+        if !self.create_account.error.is_empty() {
+            body = body.child(refusal("account/create", &self.create_account.error, theme));
+        }
+        body.into_any_element()
+    }
+    fn submit_create_account(&mut self, cx: &mut Context<Self>) {
+        if self.create_account.busy {
+            return;
+        }
+        let name = self.create_account.name.trim().to_string();
+        if name.is_empty() {
+            self.create_account.error = "Enter an account name.".into();
+            cx.notify();
+            return;
+        }
+        self.create_account.error.clear();
+        self.create_account.busy = true;
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let host = cx.host();
+            let result = host
+                .ask::<Submit<Identity>>(identity::Op::Create {
+                    name,
+                    scheme: abi::Scheme::Ed25519,
+                })
+                .await;
+            let _ = this.update(cx, |view, cx| {
+                view.create_account.busy = false;
+                match result {
+                    Ok(_) => {
+                        view.create_account = CreateAccount::default();
+                        view.read_account(cx);
+                    }
+                    Err(refusal) => {
+                        view.create_account.error =
+                            format!("Couldn’t create this account: {}", refusal.sentence);
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
     fn network(&self, cx: &mut Context<Self>, theme: &Theme) -> impl IntoElement {
         let choices = div()

@@ -257,7 +257,7 @@ impl Chat {
                 draft.complete_send(&send);
                 match result {
                     Ok(pending) => {
-                        let me = chat.session.account.clone();
+                        let me = chat.my_handle();
                         if let (Some(mut row), Some(room)) = (pending, chat.room.as_mut())
                             && room.id == target.channel()
                         {

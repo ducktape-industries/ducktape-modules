@@ -1,12 +1,15 @@
 //! The `identity` program: accounts, the keys and programs that control them,
 //! and the consent by which a key joins an account. The types and rules are
 //! always built; a view links them with `program` off. The `program` feature
-//! adds the wasm32 program over the host (`program.rs`).
+//! adds the wasm32 program over the host (`program.rs`). The `view` feature
+//! adds the ask a view makes of identity directly (`view.rs`).
 #[cfg(feature = "program")]
 mod program;
 mod rules;
 #[cfg(test)]
 mod tests;
+#[cfg(feature = "view")]
+pub mod view;
 
 pub use rules::{execute, query};
 

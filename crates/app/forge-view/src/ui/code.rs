@@ -64,9 +64,20 @@ fn tree(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
                 ),
         );
     let Some(query) = tree_query(forge) else {
-        return column
-            .child(quiet("Resolving the ref…", theme))
-            .into_any_element();
+        // `refs()` lands (even empty) before `head_oid()` ever resolves for
+        // a repo with no commits: without this, a freshly created repo sat
+        // on "Resolving the ref…" forever instead of saying so.
+        let waiting = match forge.refs() {
+            Some(_) => empty_state(
+                id("forge-tree-no-commits"),
+                "No commits yet",
+                "Push code to this ref to browse it here: `git push duck://<network>/forge/<name> main`.",
+                theme,
+            )
+            .into_any_element(),
+            None => quiet("Resolving the ref…", theme).into_any_element(),
+        };
+        return column.child(waiting).into_any_element();
     };
     let reply = match staged(
         forge,

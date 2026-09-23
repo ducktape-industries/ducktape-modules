@@ -21,8 +21,3 @@ impl Program for ChatApi {
     type Query = chat::ChatViewQuery;
     type Reply = chat::ChatViewReply;
 }
-
-/// The reader's account number, when the seated handle carries one.
-pub fn account_number(session: &Session) -> Option<u64> {
-    session.account.strip_prefix("acct:")?.parse().ok()
-}

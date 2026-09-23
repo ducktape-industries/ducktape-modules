@@ -118,6 +118,19 @@ fn configure(cx: &mut TestAppContext) {
     });
     cx.host().never::<LiveChanges>();
     cx.host().handle::<Submit<ChatApi>>(|_| Ok(Vec::new()));
+    // The host hands every view the seated key as raw hex, never a handle:
+    // resolve it the way identity itself would. "0102" is account 7's own
+    // key, matching the roster above; any other key holds no account.
+    cx.host()
+        .handle::<ViewOf<identity::view::Identity>>(|query| {
+            Ok(match query {
+                identity::Query::OfKey { key } if key == [0x01, 0x02] => {
+                    identity::Reply::Number(Some(7))
+                }
+                identity::Query::OfKey { .. } => identity::Reply::Number(None),
+                query => panic!("unexpected identity query: {query:?}"),
+            })
+        });
 }
 
 /// Boots, seats a reader, lists rooms and opens `general` with two rows.
@@ -130,7 +143,7 @@ fn opened() -> (TestAppContext, Entity<Chat>) {
     cx.run_until_parked();
     assert!(cx.has_text("Not connected"));
     props.push(Session {
-        account: "acct:7".into(),
+        account: "0102".into(),
         connected: true,
         chain: "testnet#0a1b2c3d".into(),
         ..Session::default()
@@ -341,7 +354,7 @@ fn message_menu_preserves_disabled_actions_and_executes_enabled_routes() {
             mode: Mode::More,
             at: (611., 455.),
         });
-        chat.session.account.clear();
+        chat.me = Loaded::Ready(None);
         cx.notify();
     });
     cx.run_until_parked();
@@ -363,12 +376,27 @@ fn message_menu_preserves_disabled_actions_and_executes_enabled_routes() {
     assert!(cx.has_text("😀") && cx.has_text("✎") && cx.has_text("🗑"));
 
     view.update(&mut cx, |chat, _, cx| {
-        chat.session.account = "acct:7".into();
+        chat.me = Loaded::Ready(Some(7));
         cx.notify();
     });
     cx.run_until_parked();
     cx.simulate_click("chat-menu-delete");
     assert!(cx.has_text("Delete this message?"));
+    // Anchored near the row it opened from, this popup can overlap the
+    // message card beneath it; without occlude, a click on "Delete" here
+    // also fires the card's row-select handler, which resets `chat.menu`
+    // to `Mode::Toolbar` before `delete_armed` reads it, so the delete is
+    // silently dropped (no submit, no error).
+    let Some(wire::Node::Container(ducktape_view_guest::wire::ContainerNode {
+        interactivity, ..
+    })) = cx.find(&ui::menu::focus_key(Pane::Timeline, Mode::Delete))
+    else {
+        panic!("delete confirmation frame")
+    };
+    assert!(
+        interactivity.occlude,
+        "delete confirmation popup must occlude so its clicks don't also fire the row beneath"
+    );
     cx.simulate_click("chat-menu-confirm-delete");
     cx.run_until_parked();
     assert!(cx.host().asked::<Submit<ChatApi>>().iter().any(|op| {
@@ -505,7 +533,7 @@ fn channel_create_preserves_busy_account_and_voice_gates() {
         let create = chat.create.as_mut().unwrap();
         create.busy = false;
         create.voice = true;
-        chat.session.account = "user:0102".into();
+        chat.me = Loaded::Ready(None);
         cx.notify();
     });
     cx.run_until_parked();
@@ -519,7 +547,7 @@ fn channel_create_preserves_busy_account_and_voice_gates() {
     assert_eq!(cx.host().asked::<Submit<ChatApi>>().len(), submitted);
 
     view.update(&mut cx, |chat, _, cx| {
-        chat.session.account = "acct:7".into();
+        chat.me = Loaded::Ready(Some(7));
         chat.session.connected = false;
         cx.notify();
     });
@@ -555,6 +583,272 @@ fn unread_rooms_carry_a_dot_and_the_open_room_a_divider() {
     });
     cx.run_until_parked();
     assert!(cx.has_text("New messages"));
+}
+
+#[test]
+fn session_key_resolves_to_its_account() {
+    let (_cx, view) = opened();
+    view.read(|chat| {
+        assert_eq!(chat.my_account(), Some(7));
+        assert!(chat.holds_account());
+        assert_eq!(chat.my_handle(), "acct:7");
+    });
+}
+
+#[test]
+fn an_unregistered_key_stays_read_only() {
+    let mut cx = TestAppContext::new();
+    configure(&mut cx);
+    let props = cx.host().stream::<Props>();
+    let visible = cx.host().stream::<Visible>();
+    let view = cx.open::<Chat>();
+    cx.run_until_parked();
+    props.push(Session {
+        account: "ffff".into(),
+        connected: true,
+        chain: "testnet#0a1b2c3d".into(),
+        ..Session::default()
+    });
+    visible.push(true);
+    cx.run_until_parked();
+    view.read(|chat| {
+        assert_eq!(chat.my_account(), None);
+        assert!(!chat.holds_account());
+        assert_eq!(chat.write_refusal(), "no_account");
+    });
+    cx.simulate_click("chat-sidebar-new-channel");
+    cx.run_until_parked();
+    assert!(cx.has_text("Create an account to create a channel"));
+}
+
+/// The reader creates the account in Settings, then switches to Chat: the
+/// seated key never changes, only identity's own state does, so this has to
+/// arrive over identity's live stream — not the session's.
+#[test]
+fn an_account_gained_later_re_enables_create_channel() {
+    let registered = std::rc::Rc::new(std::cell::Cell::new(false));
+    let mut cx = TestAppContext::new();
+    configure(&mut cx);
+    let reply = registered.clone();
+    cx.host()
+        .handle::<ViewOf<identity::view::Identity>>(move |query| {
+            Ok(match query {
+                identity::Query::OfKey { key } if key == [0x01, 0x02] => {
+                    identity::Reply::Number(reply.get().then_some(7))
+                }
+                identity::Query::OfKey { .. } => identity::Reply::Number(None),
+                query => panic!("unexpected identity query: {query:?}"),
+            })
+        });
+    let props = cx.host().stream::<Props>();
+    let visible = cx.host().stream::<Visible>();
+    let live = cx.host().stream::<LiveChanges>();
+    let view = cx.open::<Chat>();
+    cx.run_until_parked();
+    props.push(Session {
+        account: "0102".into(),
+        connected: true,
+        chain: "testnet#0a1b2c3d".into(),
+        ..Session::default()
+    });
+    visible.push(true);
+    cx.run_until_parked();
+    cx.simulate_click("chat-sidebar-new-channel");
+    cx.run_until_parked();
+    assert!(cx.has_text("Create an account to create a channel"));
+
+    registered.set(true);
+    live.push(Some(1));
+    cx.run_until_parked();
+
+    assert!(!cx.has_text("Create an account to create a channel"));
+    view.read(|chat| assert_eq!(chat.my_account(), Some(7)));
+}
+
+/// A peer who registers their account AFTER this room's roster was first
+/// read still shows up under "account N" — the reader's own identity was
+/// re-resolved on identity's live stream, but the roster naming everyone
+/// ELSE never was, so a fresh signer's messages stayed numbered forever
+/// (regression: a two-account chat never named the other side's reply).
+#[test]
+fn a_peers_name_gained_later_replaces_its_numeric_fallback() {
+    let known = std::rc::Rc::new(std::cell::Cell::new(false));
+    let has_gary = known.clone();
+    let mut cx = TestAppContext::new();
+    cx.host()
+        .handle::<ducktape_view_guest::doors::Widget>(|command| {
+            assert!(matches!(command, wire::WidgetCommand::Focus { .. }));
+            Ok(())
+        });
+    cx.host().handle::<ViewOf<ChatApi>>(move |query| {
+        Ok(match query {
+            ChatViewQuery::Accounts { .. } => {
+                let mut accounts = vec![chat::AccountRow {
+                    number: 7,
+                    name: "eddy".into(),
+                    program: false,
+                    keys: vec!["0102".into()],
+                }];
+                if has_gary.get() {
+                    accounts.push(chat::AccountRow {
+                        number: 9,
+                        name: "gary".into(),
+                        program: false,
+                        keys: Vec::new(),
+                    });
+                }
+                ChatViewReply::Accounts(accounts)
+            }
+            ChatViewQuery::Channels { .. } => {
+                ChatViewReply::Channels(page(vec![channel("general", "General", 2)]))
+            }
+            ChatViewQuery::Roots { .. } => ChatViewReply::Roots(page(vec![
+                row(1, "acct:7", "hello"),
+                row(2, "acct:9", "hi from gary"),
+            ])),
+            ChatViewQuery::Members { .. } => ChatViewReply::Members(page(Vec::new())),
+            query => panic!("unexpected chat query: {query:?}"),
+        })
+    });
+    cx.host().handle::<Submit<ChatApi>>(|_| Ok(Vec::new()));
+    cx.host()
+        .handle::<ViewOf<identity::view::Identity>>(|query| {
+            Ok(match query {
+                identity::Query::OfKey { key } if key == [0x01, 0x02] => {
+                    identity::Reply::Number(Some(7))
+                }
+                identity::Query::OfKey { .. } => identity::Reply::Number(None),
+                query => panic!("unexpected identity query: {query:?}"),
+            })
+        });
+
+    let props = cx.host().stream::<Props>();
+    let visible = cx.host().stream::<Visible>();
+    let live = cx.host().stream::<LiveChanges>();
+    let view = cx.open::<Chat>();
+    cx.run_until_parked();
+    props.push(Session {
+        account: "0102".into(),
+        connected: true,
+        chain: "testnet#0a1b2c3d".into(),
+        ..Session::default()
+    });
+    visible.push(true);
+    cx.run_until_parked();
+    cx.simulate_click("chat-sidebar-channel-general");
+    cx.run_until_parked();
+
+    assert!(
+        cx.has_text("account 9"),
+        "an unregistered-at-load author falls back to a numeric label"
+    );
+    assert!(!cx.has_text("gary"));
+
+    known.set(true);
+    live.push(Some(1));
+    cx.run_until_parked();
+
+    assert!(
+        cx.has_text("gary"),
+        "the roster re-reads on identity's live stream, same as \"me\""
+    );
+    assert!(!cx.has_text("account 9"));
+    let _ = view;
+}
+
+/// The same roster the last test names also gates the `@` mention menu's
+/// candidates (`client::mention_choices` builds them from `self.names`):
+/// a peer who registers their account after this view's roster was first
+/// read is un-mentionable until identity's live stream re-reads it — even
+/// in a channel neither side has posted to yet (regression: typing
+/// `@qa-mention-b-...` right after account B onboarded never offered it).
+#[test]
+fn a_peers_mention_becomes_offerable_once_their_account_is_known() {
+    let known = std::rc::Rc::new(std::cell::Cell::new(false));
+    let has_gary = known.clone();
+    let mut cx = TestAppContext::new();
+    cx.host()
+        .handle::<ducktape_view_guest::doors::Widget>(|command| {
+            assert!(matches!(command, wire::WidgetCommand::Focus { .. }));
+            Ok(())
+        });
+    cx.host().handle::<ViewOf<ChatApi>>(move |query| {
+        Ok(match query {
+            ChatViewQuery::Accounts { .. } => {
+                let mut accounts = vec![chat::AccountRow {
+                    number: 7,
+                    name: "eddy".into(),
+                    program: false,
+                    keys: vec!["0102".into()],
+                }];
+                if has_gary.get() {
+                    accounts.push(chat::AccountRow {
+                        number: 9,
+                        name: "gary".into(),
+                        program: false,
+                        keys: Vec::new(),
+                    });
+                }
+                ChatViewReply::Accounts(accounts)
+            }
+            ChatViewQuery::Channels { .. } => {
+                ChatViewReply::Channels(page(vec![channel("general", "General", 0)]))
+            }
+            ChatViewQuery::Roots { .. } => ChatViewReply::Roots(page(Vec::new())),
+            ChatViewQuery::Members { .. } => ChatViewReply::Members(page(Vec::new())),
+            query => panic!("unexpected chat query: {query:?}"),
+        })
+    });
+    cx.host().handle::<Submit<ChatApi>>(|_| Ok(Vec::new()));
+    cx.host()
+        .handle::<ViewOf<identity::view::Identity>>(|query| {
+            Ok(match query {
+                identity::Query::OfKey { key } if key == [0x01, 0x02] => {
+                    identity::Reply::Number(Some(7))
+                }
+                identity::Query::OfKey { .. } => identity::Reply::Number(None),
+                query => panic!("unexpected identity query: {query:?}"),
+            })
+        });
+
+    let props = cx.host().stream::<Props>();
+    let visible = cx.host().stream::<Visible>();
+    let live = cx.host().stream::<LiveChanges>();
+    let view = cx.open::<Chat>();
+    cx.run_until_parked();
+    props.push(Session {
+        account: "0102".into(),
+        connected: true,
+        chain: "testnet#0a1b2c3d".into(),
+        ..Session::default()
+    });
+    visible.push(true);
+    cx.run_until_parked();
+    cx.simulate_click("chat-sidebar-channel-general");
+    cx.run_until_parked();
+
+    view.read(|chat| {
+        assert!(
+            !chat
+                .mention_choices()
+                .iter()
+                .any(|choice| choice.label == "gary"),
+            "not known to the roster yet, so not offerable"
+        );
+    });
+
+    known.set(true);
+    live.push(Some(1));
+    cx.run_until_parked();
+
+    view.read(|chat| {
+        assert!(
+            chat.mention_choices()
+                .iter()
+                .any(|choice| choice.label == "gary"),
+            "the roster re-read makes the peer mentionable, same as it names their messages"
+        );
+    });
 }
 
 mod message;

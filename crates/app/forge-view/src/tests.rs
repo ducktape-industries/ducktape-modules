@@ -55,6 +55,10 @@ fn answer(query: &Query, mode: &str) -> Reply {
         Query::Refs {
             page: Page { after: None, .. },
             ..
+        } if mode == "unborn" => reply("refs-empty"),
+        Query::Refs {
+            page: Page { after: None, .. },
+            ..
         } => reply("refs"),
         Query::Refs { .. } => reply("refs-empty"),
         Query::Activity { .. } => reply("activity"),
@@ -166,6 +170,18 @@ pub(crate) fn configure(cx: &mut TestAppContext, mode: &'static str) {
     cx.host().handle::<Id>(|kind| Ok(format!("{kind}-1")));
     cx.host().never::<Live>();
     cx.host().never::<Visible>();
+    // The host hands every view the seated key as raw hex, never a handle:
+    // resolve it the way identity itself would. `reviewer`'s hex is account
+    // 8's own key, matching the roster above; any other key holds none.
+    cx.host().handle::<Door<identity::view::Identity>>(|query| {
+        Ok(match query {
+            identity::Query::OfKey { key } if key == b"reviewer" => {
+                identity::Reply::Number(Some(8))
+            }
+            identity::Query::OfKey { .. } => identity::Reply::Number(None),
+            query => panic!("unexpected identity query: {query:?}"),
+        })
+    });
 }
 
 /// Boots the view, seats a reader and waits for the first reads to land.
@@ -176,7 +192,7 @@ pub(crate) fn booted(mode: &'static str) -> (TestAppContext, Entity<Forge>) {
     let view = cx.open::<Forge>();
     cx.run_until_parked();
     props.push(Session {
-        account: "acct:8".into(),
+        account: abi::hex(b"reviewer"),
         connected: true,
         chain: "testnet#0a1b2c3d".into(),
         ..Session::default()
@@ -191,6 +207,95 @@ pub(crate) fn opened(mode: &'static str) -> (TestAppContext, Entity<Forge>) {
     cx.simulate_click("forge-repo-project");
     cx.run_until_parked();
     (cx, view)
+}
+
+fn disabled(cx: &TestAppContext, id: &str) -> bool {
+    let Some(wire::Node::Container(ducktape_view_guest::wire::ContainerNode {
+        interactivity, ..
+    })) = cx.find(id)
+    else {
+        panic!("{id} button")
+    };
+    interactivity.aria.disabled == Some(true) && interactivity.on_click.is_none()
+}
+
+#[test]
+fn session_key_resolves_to_its_account() {
+    let (_cx, view) = booted("default");
+    view.read(|forge| {
+        assert_eq!(forge.my_account(), Some(8));
+        assert_eq!(forge.me_key(), Some(b"reviewer".to_vec()));
+    });
+}
+
+#[test]
+fn an_unregistered_key_stays_read_only() {
+    let mut cx = TestAppContext::new();
+    configure(&mut cx, "default");
+    let props = cx.host().stream::<Props>();
+    let view = cx.open::<Forge>();
+    cx.run_until_parked();
+    props.push(Session {
+        account: abi::hex(b"stranger"),
+        connected: true,
+        chain: "testnet#0a1b2c3d".into(),
+        ..Session::default()
+    });
+    cx.run_until_parked();
+    view.read(|forge| {
+        assert_eq!(forge.my_account(), None);
+        assert!(forge.me_key().is_none());
+    });
+    cx.simulate_click("forge-repo-project");
+    cx.run_until_parked();
+    cx.simulate_click("forge-tab-changes");
+    cx.run_until_parked();
+    assert!(disabled(&cx, "forge-filter-judgment"));
+}
+
+/// The reader creates the account in Settings, then switches to Forge: the
+/// seated key never changes, only identity's own state does, so this has to
+/// arrive over identity's live stream, folded into the same reconcile every
+/// forge/chat block already runs through.
+#[test]
+fn an_account_gained_later_re_enables_writes() {
+    let registered = std::rc::Rc::new(std::cell::Cell::new(false));
+    let mut cx = TestAppContext::new();
+    configure(&mut cx, "default");
+    let reply = registered.clone();
+    cx.host()
+        .handle::<Door<identity::view::Identity>>(move |query| {
+            Ok(match query {
+                identity::Query::OfKey { key } if key == b"reviewer" => {
+                    identity::Reply::Number(reply.get().then_some(8))
+                }
+                identity::Query::OfKey { .. } => identity::Reply::Number(None),
+                query => panic!("unexpected identity query: {query:?}"),
+            })
+        });
+    let props = cx.host().stream::<Props>();
+    let live = cx.host().stream::<Live>();
+    let view = cx.open::<Forge>();
+    cx.run_until_parked();
+    props.push(Session {
+        account: abi::hex(b"reviewer"),
+        connected: true,
+        chain: "testnet#0a1b2c3d".into(),
+        ..Session::default()
+    });
+    cx.run_until_parked();
+    cx.simulate_click("forge-repo-project");
+    cx.run_until_parked();
+    cx.simulate_click("forge-tab-changes");
+    cx.run_until_parked();
+    assert!(disabled(&cx, "forge-filter-judgment"));
+
+    registered.set(true);
+    live.push(Some(1));
+    cx.run_until_parked();
+
+    assert!(!disabled(&cx, "forge-filter-judgment"));
+    view.read(|forge| assert_eq!(forge.my_account(), Some(8)));
 }
 
 #[test]
@@ -240,6 +345,13 @@ fn an_empty_program_explains_how_a_repository_begins() {
             .iter()
             .any(|text| text.contains("git push duck://"))
     );
+}
+
+#[test]
+fn an_unborn_repo_says_so_instead_of_resolving_forever() {
+    let (cx, _) = opened("unborn");
+    assert!(cx.has_text("No commits yet"), "{:?}", cx.texts());
+    assert!(!cx.has_text("Resolving the ref…"));
 }
 
 #[test]
