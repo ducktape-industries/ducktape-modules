@@ -73,6 +73,18 @@ pub fn hex(bytes: &[u8]) -> String {
         })
 }
 
+/// [`hex`] read back: `None` for an odd length or a non-hex digit.
+pub fn unhex(text: &str) -> Option<Vec<u8>> {
+    let digit = |byte: u8| (byte as char).to_digit(16).map(|d| d as u8);
+    let text = text.as_bytes();
+    if !text.len().is_multiple_of(2) {
+        return None;
+    }
+    text.chunks(2)
+        .map(|pair| Some(digit(pair[0])? << 4 | digit(pair[1])?))
+        .collect()
+}
+
 /// Bytes as a person reads them: all of them in hex up to 32, else their
 /// count and the first eight.
 pub fn preview(bytes: &[u8]) -> String {
@@ -415,6 +427,17 @@ pub fn decode<T: BorshDeserialize>(bytes: &[u8]) -> Result<T, Refusal> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unhex_reads_hex_back() {
+        for bytes in [&[][..], &[0], &[0xab, 0x01, 0xff]] {
+            assert_eq!(unhex(&hex(bytes)).as_deref(), Some(bytes));
+        }
+        assert_eq!(unhex("ABff"), Some(vec![0xab, 0xff]));
+        for bad in ["a", "zz", "é1", "0x00"] {
+            assert_eq!(unhex(bad), None, "{bad}");
+        }
+    }
 
     #[test]
     fn prefix_end_is_the_first_key_past_every_extension() {

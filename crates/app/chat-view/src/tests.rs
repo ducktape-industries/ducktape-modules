@@ -937,3 +937,59 @@ fn a_direct_message_elsewhere_is_a_notice_and_a_badge_until_read() {
     cx.run_until_parked();
     assert_eq!(cx.host().asked::<Badge>().last(), Some(&0));
 }
+
+/// A room of 256 rows, each with markup, a reaction and a thread, renders
+/// inside the host's frame budget and under a byte ceiling: the native proxy
+/// for a render's fuel.
+#[test]
+fn a_room_of_256_rows_renders_inside_the_frame_budget() {
+    let mut cx = TestAppContext::new();
+    configure(&mut cx);
+    let rows: Vec<MsgRow> = (1..=256)
+        .map(|seq| {
+            let text = format!("row {seq}: **bold**, `code` and a [link](https://x.example/{seq})");
+            let mut row = row(seq, if seq % 2 == 0 { "acct:7" } else { "acct:8" }, &text);
+            row.blocks = chat::parse_message(&text);
+            row.reply_count = seq % 3;
+            row.reactions = vec![::chat::ReactionSummary {
+                emoji: "👍".into(),
+                count: seq,
+                reacted_by_me: seq % 2 == 0,
+            }];
+            row
+        })
+        .collect();
+    cx.host().handle::<ViewOf<ChatApi>>(move |query| {
+        Ok(match query {
+            ChatViewQuery::Accounts { .. } => ChatViewReply::Accounts(Vec::new()),
+            ChatViewQuery::Channels { .. } => {
+                ChatViewReply::Channels(page(vec![channel("general", "General", 256)]))
+            }
+            ChatViewQuery::Roots { .. } => ChatViewReply::Roots(page(rows.clone())),
+            ChatViewQuery::Members { .. } => ChatViewReply::Members(page(Vec::new())),
+            query => panic!("unexpected chat query: {query:?}"),
+        })
+    });
+    let props = cx.host().stream::<Props>();
+    let visible = cx.host().stream::<Visible>();
+    cx.open::<Chat>();
+    props.push(Session {
+        account: "0102".into(),
+        connected: true,
+        chain: "testnet#0a1b2c3d".into(),
+        ..Session::default()
+    });
+    visible.push(true);
+    cx.run_until_parked();
+    cx.simulate_click("chat-sidebar-channel-general");
+    cx.run_until_parked();
+    assert!(
+        cx.texts().iter().any(|text| text.contains("row 256")),
+        "{:?}",
+        cx.texts()
+    );
+    let bytes = cx.frame_bytes();
+    // about 1.5x what it drew when this was written: tighten when the room
+    // slims, raise only on purpose
+    assert!(bytes < 220_000, "a 256-row room drew {bytes} bytes");
+}

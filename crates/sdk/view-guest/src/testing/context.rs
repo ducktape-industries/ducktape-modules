@@ -128,6 +128,23 @@ impl TestAppContext {
     pub fn root(&self) -> &Node {
         self.frame.root.as_ref().expect("view has a tree")
     }
+    /// The last frame's whole tree as a host would take it on a fresh mount:
+    /// asserts the host's sanitizer passes it through untouched (inside
+    /// every node, text and picture budget) and answers its encoded bytes —
+    /// the proxy a native test has for the fuel a render spends.
+    pub fn frame_bytes(&self) -> usize {
+        let frame = Frame {
+            root: Some(self.root().clone()),
+            ..Frame::default()
+        };
+        let mut sanitized = frame.clone();
+        crate::wire::sanitize(&mut sanitized).expect("the frame sanitizes");
+        assert!(
+            sanitized.root == frame.root,
+            "the host would cut this frame: it is past a frame budget"
+        );
+        crate::wire::encode(&frame).len()
+    }
     pub fn assert_accessible(&self) {
         assert_accessible(self.frame.root.as_ref().expect("view has a tree"));
     }

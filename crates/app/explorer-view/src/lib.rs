@@ -121,14 +121,21 @@ pub struct TxRow {
     pub signer: Vec<u8>,
     pub seq: u64,
     pub target: String,
-    /// the payload as it landed, decoded only for the rows on screen
+    /// the payload as it landed, decoded only once a row is on screen; hex in
+    /// the snapshot, not a JSON array of numbers
     // ponytail: kept whole, so a snapshot carries a big push too; clip here if snapshots grow
+    #[serde(with = "hex_bytes")]
     pub payload: Vec<u8>,
+    #[serde(skip)]
+    op: std::cell::OnceCell<Op>,
 }
 
 impl TxRow {
-    pub fn op(&self) -> Op {
-        decode::decode(&self.target, &self.payload)
+    /// The payload as the op it names, decoded the first time a row is
+    /// drawn and kept: a render must not re-read a 1 MB push each frame.
+    pub fn op(&self) -> &Op {
+        self.op
+            .get_or_init(|| decode::decode(&self.target, &self.payload))
     }
 }
 
@@ -149,6 +156,7 @@ fn rows(block: Block) -> (BlockRow, Vec<TxRow>) {
         .rev()
         .map(|tx| TxRow {
             payload: tx.payload,
+            op: Default::default(),
             hash: tx.hash,
             height: block.height,
             time: block.time,
@@ -249,6 +257,18 @@ pub struct Entry {
     pub program: String,
     pub code: String,
     pub params: usize,
+}
+
+mod hex_bytes {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(bytes: &[u8], s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&abi::hex(bytes))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
+        abi::unhex(&String::deserialize(d)?).ok_or_else(|| serde::de::Error::custom("not hex"))
+    }
 }
 
 /// A borsh value in the view's serde snapshot, as its bytes: the registry's

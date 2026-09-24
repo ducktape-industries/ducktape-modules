@@ -417,7 +417,7 @@ fn tx_row(
 ) -> impl IntoElement {
     let id = SharedString::from(format!("explorer-tx-{}", abi::hex(&tx.hash)));
     let now = view.chain.now();
-    let title = tx.op().title;
+    let title = tx.op().title.clone();
     row(
         ElementId::Name(id),
         title.clone(),
