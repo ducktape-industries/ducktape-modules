@@ -21,7 +21,7 @@ impl Chat {
     ) {
         self.create = None;
         self.search_clear();
-        let link = crate::files::channel_link(&self.session.chain, &id, None);
+        let link = crate::chat::channel_link(&self.session.chain, &id, None);
         if !link.is_empty() {
             cx.host().open_link(&link);
         }
@@ -82,7 +82,7 @@ impl Chat {
                 let result = crate::roots(host, has_older_id, viewer2, None, WINDOW).await;
                 let _ = this.update(cx, |chat, cx| {
                     cx.notify();
-                    chat.rows_arrived(result, cx)
+                    chat.rows_arrived(result)
                 });
             });
             Loaded::Loading(handle)
@@ -98,11 +98,7 @@ impl Chat {
     }
 
     /// The newest window landed: the rows, and whether older ones remain.
-    fn rows_arrived(
-        &mut self,
-        result: Result<(Vec<MsgRow>, bool), Refusal>,
-        cx: &mut Context<Self>,
-    ) {
+    fn rows_arrived(&mut self, result: Result<(Vec<MsgRow>, bool), Refusal>) {
         let Some(room) = &mut self.room else { return };
         match result {
             Ok((rows, has_older)) => {
@@ -110,7 +106,6 @@ impl Chat {
                 room.reaches_head = true;
                 room.messages = Loaded::Ready(rows);
                 room.settle();
-                self.load_pictures(cx);
             }
             Err(refusal) => room.messages = Loaded::Failed(refusal),
         }
@@ -136,7 +131,6 @@ impl Chat {
                             room.has_older = has_older;
                             room.messages = Loaded::Ready(rows);
                             room.settle();
-                            chat.load_pictures(cx);
                         }
                     });
                 }
@@ -150,7 +144,7 @@ impl Chat {
             let root = thread.root;
             cx.refresh(
                 crate::thread(cx.host(), id, root, viewer, None),
-                move |chat, page, cx| {
+                move |chat, page, _| {
                     let Some(thread) = chat.room.as_mut().and_then(|room| room.thread.as_mut())
                     else {
                         return;
@@ -160,7 +154,6 @@ impl Chat {
                         thread.has_more = page.1.is_some();
                         thread.next = page.1;
                         room_of(chat).settle();
-                        chat.load_pictures(cx);
                     }
                 },
             );
@@ -200,7 +193,6 @@ impl Chat {
                             all.append(rows);
                             *rows = all;
                         }
-                        chat.load_pictures(cx);
                     }
                     Err(refusal) => {
                         chat.notice = format!("Couldn’t read this room: {}", refusal.sentence)
@@ -265,7 +257,6 @@ impl Chat {
                         thread.has_more = next.is_some();
                         thread.next = next;
                         room_of(chat).settle();
-                        chat.load_pictures(cx);
                     }
                     Err(refusal) => thread.replies = Loaded::Failed(refusal),
                 }

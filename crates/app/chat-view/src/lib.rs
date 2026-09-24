@@ -11,7 +11,6 @@ mod client;
 mod compose;
 mod composer;
 mod emoji;
-mod files;
 mod notices;
 mod queries;
 mod room;
@@ -35,9 +34,6 @@ use composer::Draft;
 use composer::Target;
 
 const PAGE: usize = 64;
-/// Attachments speak to the files module, which is not in this tree yet:
-/// every way a file gets in is closed until it returns. The code stays.
-pub(crate) const ATTACHMENTS: bool = false;
 const WINDOW: usize = 256;
 
 impl View for Chat {
@@ -170,8 +166,6 @@ impl View for Chat {
         if !self.search.query.is_empty() {
             self.search_now(cx);
         }
-        self.preview_read(cx);
-        self.watch_drops(cx);
     }
 }
 
@@ -197,7 +191,6 @@ impl Chat {
             self.refresh_me(cx);
         }
         if reader_changed || (prev.connected && !self.session.connected) {
-            self.uploads.clear();
             for draft in self.drafts.values_mut() {
                 draft.retire_device_requests();
             }
@@ -208,7 +201,6 @@ impl Chat {
             self.channels = cx.load(channels(cx.host()), |chat| &mut chat.channels);
             self.refresh(cx);
         }
-        self.watch_drops(cx);
     }
 
     fn visibility_changed(&mut self, visible: bool, cx: &mut Context<Self>) {

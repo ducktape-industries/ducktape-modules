@@ -96,7 +96,8 @@ pub struct ChatMessage {
     pub body: String,
     /// the editable markdown of the same body, mentions as stable tokens
     pub edit_body: String,
-    pub blocks: Vec<ChatBlock>,
+    /// the message as chat keeps it; the frame styles it as it draws
+    pub blocks: Vec<Block>,
     pub pending: bool,
     pub rev: u32,
     pub edited: bool,
@@ -110,20 +111,6 @@ pub struct ChatMessage {
     pub agent: bool,
     pub height: u64,
     pub reactions: Vec<ChatReaction>,
-}
-
-/// `kind` is `paragraph` | `code` | `quote` | `divider` | `attachment`.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ChatBlock {
-    pub kind: String,
-    /// the flat text; a code block's code; an attachment's file name
-    pub text: String,
-    pub lang: String,
-    /// spans carry a mark, so the frame draws them rich
-    pub rich: bool,
-    pub spans: Vec<ChatSpan>,
-    /// an attachment's destination: the file link
-    pub link: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -153,10 +140,6 @@ pub struct ChatMember {
     pub label: String,
 }
 
-/// Where a send puts a message's files; a paragraph that is one link into
-/// it reads as a file card, not a line of text.
-pub const ATTACHMENTS_DIR: &str = "/shared/attachments/";
-
 pub fn chat_message(row: MsgRow, names: &NameDirectory) -> ChatMessage {
     let edited = row.rev > 0;
     let meta = match (row.seq, edited) {
@@ -168,20 +151,13 @@ pub fn chat_message(row: MsgRow, names: &NameDirectory) -> ChatMessage {
         (
             "Message deleted".to_string(),
             String::new(),
-            vec![ChatBlock {
-                kind: "paragraph".into(),
-                text: "Message deleted".into(),
-                ..ChatBlock::default()
-            }],
+            vec![Block::paragraph("Message deleted")],
         )
     } else {
         (
             message_body(&row.blocks, names),
             draft_body(&row.blocks),
-            row.blocks
-                .iter()
-                .map(|block| block_view(block, names))
-                .collect(),
+            row.blocks,
         )
     };
     ChatMessage {
@@ -274,84 +250,45 @@ fn draft_spans(spans: &[Span]) -> String {
         .collect()
 }
 
-fn block_view(block: &Block, names: &NameDirectory) -> ChatBlock {
-    match block {
-        Block::Paragraph(spans) => rich_block("paragraph", spans, names),
-        Block::Quote(spans) => rich_block("quote", spans, names),
-        Block::Code { lang, text } => ChatBlock {
-            kind: "code".into(),
-            text: text.clone(),
-            lang: lang.clone().unwrap_or_default(),
-            ..ChatBlock::default()
-        },
-        Block::Divider => ChatBlock {
-            kind: "divider".into(),
-            ..ChatBlock::default()
-        },
+/// A paragraph's or quote's spans as the runs the frame styles; empty when
+/// no span carries a mark, so the block draws as one plain text.
+pub fn styled_spans(spans: &[Span], names: &NameDirectory) -> Vec<ChatSpan> {
+    if spans.iter().all(|span| span.marks.is_empty()) {
+        return Vec::new();
     }
-}
-
-/// A paragraph/quote block: plain runs keep one wrapping text; any inline
-/// mark switches to spans. A paragraph that is exactly one link into the
-/// attachments root is the file card the send's link line becomes.
-fn rich_block(kind: &str, spans: &[Span], names: &NameDirectory) -> ChatBlock {
-    let marked = spans.iter().any(|span| !span.marks.is_empty());
-    let views: Vec<ChatSpan> = if marked {
-        spans
-            .iter()
-            .filter_map(|span| {
-                let text = span_display(span, names);
-                if text.is_empty() {
-                    return None;
-                }
-                let link = span.marks.iter().find_map(|mark| match mark {
-                    Mark::Link(url) => Some(url.clone()),
-                    _ => None,
-                });
-                let mention = span.marks.iter().find_map(|mark| match mark {
-                    Mark::Mention(Party::Account(account)) => Some(account.to_string()),
-                    Mark::Mention(_) => Some(String::new()),
-                    _ => None,
-                });
-                let bold = span.marks.contains(&Mark::Bold);
-                let italic = span.marks.contains(&Mark::Italic);
-                let style = match (link, mention, bold, italic) {
-                    (Some(url), _, _, _) => SpanStyle::Link(url),
-                    (None, Some(account), _, _) => SpanStyle::Mention(account),
-                    (None, None, true, true) => SpanStyle::BoldItalic,
-                    (None, None, true, false) => SpanStyle::Bold,
-                    (None, None, false, true) => SpanStyle::Italic,
-                    (None, None, false, false) => SpanStyle::Plain,
-                };
-                Some(ChatSpan { text, style })
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
-    if let [only] = views.as_slice()
-        && kind == "paragraph"
-        && let SpanStyle::Link(url) = &only.style
-        && crate::files::address_path(url).is_ok_and(|path| path.starts_with(ATTACHMENTS_DIR))
-    {
-        return ChatBlock {
-            kind: "attachment".into(),
-            text: only.text.clone(),
-            link: url.clone(),
-            ..ChatBlock::default()
-        };
-    }
-    ChatBlock {
-        kind: kind.into(),
-        text: span_text(spans, names),
-        rich: marked,
-        spans: views,
-        ..ChatBlock::default()
-    }
+    spans
+        .iter()
+        .filter_map(|span| {
+            let text = span_display(span, names);
+            if text.is_empty() {
+                return None;
+            }
+            let link = span.marks.iter().find_map(|mark| match mark {
+                Mark::Link(url) => Some(url.clone()),
+                _ => None,
+            });
+            let mention = span.marks.iter().find_map(|mark| match mark {
+                Mark::Mention(Party::Account(account)) => Some(account.to_string()),
+                Mark::Mention(_) => Some(String::new()),
+                _ => None,
+            });
+            let bold = span.marks.contains(&Mark::Bold);
+            let italic = span.marks.contains(&Mark::Italic);
+            let style = match (link, mention, bold, italic) {
+                (Some(url), _, _, _) => SpanStyle::Link(url),
+                (None, Some(account), _, _) => SpanStyle::Mention(account),
+                (None, None, true, true) => SpanStyle::BoldItalic,
+                (None, None, true, false) => SpanStyle::Bold,
+                (None, None, false, true) => SpanStyle::Italic,
+                (None, None, false, false) => SpanStyle::Plain,
+            };
+            Some(ChatSpan { text, style })
+        })
+        .collect()
 }
 
 /// Spans to text; a mention plate shows the account's current name.
-fn span_text(spans: &[Span], names: &NameDirectory) -> String {
+pub fn span_text(spans: &[Span], names: &NameDirectory) -> String {
     spans.iter().map(|span| span_display(span, names)).collect()
 }
 

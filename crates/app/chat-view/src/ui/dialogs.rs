@@ -1,13 +1,11 @@
-//! Channel creation and attachment preview dialogs.
+//! The channel creation dialog.
 
 use ducktape_view_guest::prelude::*;
 use ducktape_view_guest::{
-    AnyElement, App, ClickEvent, Context, ParentElement, Styled, Theme, Window, div, px, surface,
-    wire,
+    AnyElement, App, ClickEvent, Context, ParentElement, Styled, Theme, Window, div, px,
 };
 
-use crate::ui::button;
-use crate::{Chat, Loaded};
+use crate::Chat;
 
 type Press = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
@@ -159,132 +157,5 @@ pub fn channel_create(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Opt
             theme,
             submit,
         ));
-    Some(card.into_any_element())
-}
-
-pub fn preview(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Option<AnyElement> {
-    let preview = chat.preview.as_ref()?;
-    let link = preview.link.clone();
-    let path = crate::files::attachment_file_path(&link);
-    let name = path.rsplit('/').next().unwrap_or_default().to_owned();
-    let open = cx.listener(move |chat, _: &ClickEvent, _window, cx| {
-        cx.notify();
-        chat.open_link(link.clone(), cx)
-    });
-    let close = cx.listener(|chat, _: &ClickEvent, _window, cx| {
-        chat.preview = None;
-        cx.notify();
-    });
-    let mut card = div()
-        .id("chat-preview-card")
-        .size_full()
-        .max_w(px(720.))
-        .flex()
-        .flex_col()
-        .gap_2()
-        .p_4()
-        .border_1()
-        .border_color(theme.border)
-        .bg(theme.background)
-        .shadow_lg()
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .child(div().flex_1().child(name))
-                .child(button("chat-preview-open", "Open in Files", theme, open))
-                .child(button("chat-preview-close", "Close preview", theme, close)),
-        );
-    if let Some(&(width, height)) = chat.pictures.get(&preview.link)
-        && width > 0
-        && height > 0
-    {
-        let (width, height) = crate::files::preview_box(width, height, chat.layout.viewport);
-        return Some(
-            card.child(
-                div()
-                    .id("chat-preview-picture-frame")
-                    .w(px(width))
-                    .h(px(height))
-                    .child(surface(
-                        "chat-preview-picture",
-                        "picture",
-                        vec![
-                            wire::SurfaceValue::Str(crate::files::PICTURE_SURFACE.into()),
-                            wire::SurfaceValue::Str(path),
-                        ],
-                    )),
-            )
-            .into_any_element(),
-        );
-    }
-    match &preview.read {
-        Loaded::Idle | Loaded::Loading(_) => {
-            card = card.child(
-                div()
-                    .p_4()
-                    .text_size(px(12.))
-                    .text_color(theme.muted)
-                    .child("Reading the file…"),
-            );
-        }
-        Loaded::Failed(refusal) => {
-            card = card.child(
-                div()
-                    .p_4()
-                    .text_size(px(12.))
-                    .text_color(theme.danger)
-                    .child(format!("Could not read this file: {}", refusal.sentence)),
-            );
-        }
-        Loaded::Ready(text) => {
-            if text.binary {
-                card = card.child(crate::ui::empty_state(
-                    "chat-preview-binary",
-                    "No preview",
-                    crate::files::BINARY_PLATE,
-                    theme,
-                ));
-            } else {
-                let (width, height) = crate::files::preview_room(chat.layout.viewport);
-                let document = if crate::files::markdown_path(&path) {
-                    let open = cx.listener(|chat, event: &wire::SurfaceValue, _window, cx| {
-                        cx.notify();
-                        if let wire::SurfaceValue::Str(link) = event {
-                            chat.open_link(link.clone(), cx);
-                        }
-                    });
-                    surface(
-                        "chat-preview-markdown",
-                        "markdown",
-                        vec![
-                            wire::SurfaceValue::Str(text.text.clone()),
-                            wire::SurfaceValue::Str(String::new()),
-                            wire::SurfaceValue::Bool(chat.session.dark),
-                        ],
-                    )
-                    .on_event(open)
-                } else {
-                    surface(
-                        "chat-preview-code",
-                        "code",
-                        vec![
-                            wire::SurfaceValue::Str(text.text.clone()),
-                            wire::SurfaceValue::Str(path),
-                            wire::SurfaceValue::Bool(chat.session.dark),
-                        ],
-                    )
-                };
-                card = card.child(div().w(px(width)).h(px(height)).child(document).when(
-                    text.clipped,
-                    |element| {
-                        element.child(
-                            "Only the beginning is shown here. Open in Files for the whole file.",
-                        )
-                    },
-                ));
-            }
-        }
-    }
     Some(card.into_any_element())
 }

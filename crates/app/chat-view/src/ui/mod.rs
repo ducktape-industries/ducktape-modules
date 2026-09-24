@@ -51,20 +51,6 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>) -> impl IntoElement {
             .on_dismiss(dismiss)
             .into_any_element();
     }
-    if let Some(preview) = dialogs::preview(chat, cx, &theme) {
-        let dismiss = cx.listener(|chat, _: &(), _window, cx| {
-            chat.preview = None;
-            cx.notify();
-        });
-        screen = modal_overlay("chat-preview-overlay", screen, preview)
-            .label("Attachment preview")
-            .flex()
-            .items_center()
-            .justify_center()
-            .backdrop(hsla(0., 0., 0., 0.55))
-            .on_dismiss(dismiss)
-            .into_any_element();
-    }
     if let Some(create) = dialogs::channel_create(chat, cx, &theme) {
         let dismiss = cx.listener(|chat, _: &(), _window, cx| {
             chat.create = None;

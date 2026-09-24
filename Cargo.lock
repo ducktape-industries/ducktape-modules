@@ -677,7 +677,6 @@ dependencies = [
  "identity",
  "serde",
  "serde_json",
- "unicode-normalization",
  "view-guest",
 ]
 

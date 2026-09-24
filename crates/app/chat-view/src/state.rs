@@ -1,8 +1,8 @@
 //! State stored by the root view and its panes.
-use super::{ChannelInfo, Draft, Loaded, MemberRow, MsgRow, NameDirectory, Session, files};
+use super::{ChannelInfo, Draft, Loaded, MemberRow, MsgRow, NameDirectory, Session};
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct Chat {
@@ -43,13 +43,6 @@ pub struct Chat {
     #[serde(skip)]
     pub(crate) confirmation: String,
     pub(crate) copy: Option<CopyRange>,
-    pub(crate) preview: Option<Preview>,
-    /// the pictures the host decoded for this view, by link: the drawn
-    /// size, or (0, 0) for one that stays a file card
-    #[serde(skip)]
-    pub(crate) pictures: BTreeMap<String, (i64, i64)>,
-    #[serde(skip)]
-    pub(crate) uploads: HashMap<String, ducktape_view_guest::Task<()>>,
     #[serde(skip)]
     pub(crate) watches: Watches,
     #[serde(skip)]
@@ -221,13 +214,6 @@ impl CopyRange {
     }
 }
 
-#[derive(Serialize, Deserialize, Default)]
-pub struct Preview {
-    pub(crate) link: String,
-    #[serde(skip)]
-    pub(crate) read: Loaded<files::Preview>,
-}
-
 #[derive(Default)]
 pub struct Watches {
     pub(crate) props: Option<ducktape_view_guest::Task<()>>,
@@ -235,5 +221,4 @@ pub struct Watches {
     pub(crate) identity: Option<ducktape_view_guest::Task<()>>,
     pub(crate) visible: Option<ducktape_view_guest::Task<()>>,
     pub(crate) route: Option<ducktape_view_guest::Task<()>>,
-    pub(crate) drops: Option<ducktape_view_guest::Task<()>>,
 }

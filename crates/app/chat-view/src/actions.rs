@@ -1,14 +1,12 @@
 //! What a press does: the message menus, reactions, edits and deletes, the
-//! channel's details, copying, links, the attachment preview, pictures, the
-//! search and the live-run poll.
+//! channel's details, copying, links, the search and the live-run poll.
 use ducktape_view_guest::Context;
-use ducktape_view_guest::view::Loaded;
 use ducktape_view_guest::wire;
 
 use crate::api::ClipboardWrite;
 use crate::chat::{ChatMsg, party_of};
 use crate::client::{ChatMessage, NameDirectory, chat_message};
-use crate::{Chat, Hits, Menu, Mode, Pane, Preview};
+use crate::{Chat, Hits, Menu, Mode, Pane};
 
 impl Chat {
     pub(crate) fn room_id(&self) -> String {
@@ -335,74 +333,14 @@ impl Chat {
     }
 
     pub(crate) fn message_link(&self, seq: u64) -> String {
-        crate::files::channel_link(&self.session.chain, &self.room_id(), Some(seq))
+        crate::chat::channel_link(&self.session.chain, &self.room_id(), Some(seq))
     }
 
     pub(crate) fn open_link(&mut self, link: String, cx: &mut Context<Self>) {
-        self.preview = None;
         self.create = None;
-        let url = crate::files::pressed_link(link, &self.session.chain);
+        let url = crate::chat::pressed_link(link, &self.session.chain);
         if !url.is_empty() {
             cx.host().open_link(&url);
-        }
-    }
-
-    // ---------- attachments ----------
-
-    pub(crate) fn open_preview(&mut self, link: String, cx: &mut Context<Self>) {
-        if !crate::ATTACHMENTS {
-            return self.open_link(link, cx);
-        }
-        self.preview = Some(Preview {
-            link,
-            read: Loaded::Idle,
-        });
-        self.preview_read(cx);
-    }
-
-    /// A preview that is not a decoded picture reads its file.
-    pub(crate) fn preview_read(&mut self, cx: &mut Context<Self>) {
-        let Some(preview) = &self.preview else { return };
-        let picture = matches!(self.pictures.get(&preview.link), Some(&(w, h)) if w > 0 && h > 0);
-        if picture || !preview.read.is_idle() {
-            return;
-        }
-        let path = crate::files::attachment_file_path(&preview.link);
-        let load = cx.load(crate::files::read_preview(cx.host(), path), |chat| {
-            &mut chat.preview.get_or_insert_default().read
-        });
-        if let Some(preview) = &mut self.preview {
-            preview.read = load;
-        }
-    }
-
-    /// Every picture attachment on screen the host has not been asked for
-    /// yet: one decode each, answered into `pictures`.
-    pub(crate) fn load_pictures(&mut self, cx: &mut Context<Self>) {
-        if !crate::ATTACHMENTS {
-            return;
-        }
-        let links: Vec<String> = [Pane::Timeline, Pane::Thread]
-            .into_iter()
-            .flat_map(|pane| self.messages(pane))
-            .flat_map(|m| m.blocks)
-            .filter(|b| b.kind == "attachment" && crate::files::is_picture(&b.text))
-            .map(|b| b.link)
-            .filter(|link| !self.pictures.contains_key(link))
-            .collect();
-        for link in links {
-            self.pictures.insert(link.clone(), (-1, -1));
-            let path = crate::files::attachment_file_path(&link);
-            cx.spawn(async move |this, cx| {
-                let host = cx.host();
-                let drawn = crate::files::picture_load(host, path).await;
-                let _ = this.update(cx, |chat, cx| {
-                    cx.notify();
-                    chat.pictures.insert(link, drawn);
-                    chat.preview_read(cx);
-                });
-            })
-            .detach();
         }
     }
 

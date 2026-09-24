@@ -11,18 +11,20 @@ pub(super) fn plain_line(id: ElementId, text: &str, mono: bool) -> InteractiveTe
 
 pub(super) fn rich_line(
     id: ElementId,
-    block: &ChatBlock,
+    spans: &[Span],
+    names: &NameDirectory,
     cx: &mut Context<Chat>,
     theme: &Theme,
 ) -> InteractiveText {
-    if block.spans.is_empty() {
-        return plain_line(id, &block.text, false);
+    let styled = crate::client::styled_spans(spans, names);
+    if styled.is_empty() {
+        return plain_line(id, &crate::client::span_text(spans, names), false);
     }
     let mut text = String::new();
     let mut highlights = Vec::new();
     let mut clickable = Vec::new();
     let mut targets = Vec::new();
-    for span in &block.spans {
+    for span in &styled {
         let start = text.len();
         text.push_str(&span.text);
         let range = start..text.len();

@@ -1,6 +1,6 @@
 //! Guest-owned composer projection and its GPUI presentation.
 
-use super::{AttachmentState, Draft, MentionChoice};
+use super::{Draft, MentionChoice};
 use crate::context::Callback;
 use crate::prelude::*;
 use crate::{
@@ -74,12 +74,7 @@ impl Draft {
                     choices,
                 );
                 match change.tag.as_str() {
-                    "send" | "attach" | "paste" | "copy" | "cut" | "restore" => {
-                        Outcome::Action(change.tag)
-                    }
-                    _ if change.tag.starts_with("remove:") || change.tag.starts_with("retry:") => {
-                        Outcome::Action(change.tag)
-                    }
+                    "send" | "paste" | "copy" | "cut" | "restore" => Outcome::Action(change.tag),
                     _ => Outcome::Updated,
                 }
             }
@@ -208,55 +203,6 @@ impl RenderOnce for MentionItem {
     }
 }
 
-#[derive(IntoElement)]
-struct AttachmentChip {
-    id: ElementId,
-    remove_id: ElementId,
-    name: SharedString,
-    note: SharedString,
-    note_color: gpui::Hsla,
-    remove: Option<Click>,
-}
-
-impl RenderOnce for AttachmentChip {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let theme = *cx.global::<Theme>();
-        div()
-            .id(self.id.clone())
-            .flex()
-            .items_center()
-            .gap_1()
-            .max_w(px(320.))
-            .p_1()
-            .pl_2()
-            .border_1()
-            .border_color(theme.border)
-            .bg(theme.surface)
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .flex_1()
-                    .min_w(px(0.))
-                    .child(div().whitespace_nowrap().text_sm().child(self.name))
-                    .child(
-                        div()
-                            .whitespace_nowrap()
-                            .text_xs()
-                            .text_color(self.note_color)
-                            .child(self.note),
-                    ),
-            )
-            .child(Mark {
-                id: self.remove_id,
-                sign: "×".into(),
-                label: "Remove attachment".into(),
-                face: |sign| sign,
-                on_click: self.remove,
-            })
-    }
-}
-
 fn press<V: View + 'static>(
     editable: bool,
     tag: String,
@@ -281,7 +227,6 @@ pub fn view<V: View + 'static>(
     key: &str,
     hint: &str,
     editable: bool,
-    attach: bool,
     choices: &[MentionChoice],
     cx: &mut Context<V>,
     handle: impl Fn(&mut V, Event<V>, &mut Window, &mut Context<V>) + 'static,
@@ -325,50 +270,6 @@ pub fn view<V: View + 'static>(
     }
     rows.push(editor.into_any_element());
 
-    if !draft.attachments.is_empty() {
-        let theme = *cx.global::<Theme>();
-        let chips = draft
-            .attachments
-            .iter()
-            .map(|held| {
-                let (note, note_color) = match &held.state {
-                    AttachmentState::Uploading => ("Uploading…".to_owned(), theme.muted),
-                    AttachmentState::Ready { uri } => (uri.clone(), theme.muted),
-                    AttachmentState::Failed { reason } => (reason.clone(), theme.danger),
-                    AttachmentState::Unavailable => {
-                        ("Select the file again".to_owned(), theme.warning)
-                    }
-                };
-                let id = format!("{key}/attachment/{}", held.token);
-                let mut chip = div().flex().items_center().gap_1().child(AttachmentChip {
-                    id: ElementId::Name(format!("{id}/chip").into()),
-                    remove_id: ElementId::Name(format!("{id}/remove").into()),
-                    name: held.name.clone().into(),
-                    note: note.into(),
-                    note_color,
-                    remove: press(editable, format!("remove:{}", held.token), &handle, cx),
-                });
-                if matches!(held.state, AttachmentState::Failed { .. }) {
-                    chip = chip.child(ActionButton {
-                        id: ElementId::Name(format!("{id}/retry").into()),
-                        label: "Retry".into(),
-                        primary: false,
-                        on_click: press(editable, format!("retry:{}", held.token), &handle, cx),
-                    });
-                }
-                chip.into_any_element()
-            })
-            .collect::<Vec<_>>();
-        rows.push(
-            div()
-                .mx(px(TEXT_INSET))
-                .flex()
-                .flex_wrap()
-                .gap_1()
-                .children(chips)
-                .into_any_element(),
-        );
-    }
     if !draft.note.is_empty() {
         rows.push(
             div()
@@ -405,15 +306,6 @@ pub fn view<V: View + 'static>(
         .flex()
         .items_center()
         .gap(px(2.));
-    if attach {
-        toolbar = toolbar.child(Mark {
-            id: ElementId::Name(format!("{key}/attach").into()),
-            sign: "+".into(),
-            label: "Attach a file".into(),
-            face: |sign| sign,
-            on_click: press(editable, "attach".into(), &handle, cx),
-        });
-    }
     let faces: [(&str, &str, &str, Face); 4] = [
         ("B", "Bold", "bold", |sign| {
             sign.font_weight(crate::FontWeight::BOLD)
