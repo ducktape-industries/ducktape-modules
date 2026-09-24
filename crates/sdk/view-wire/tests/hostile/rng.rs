@@ -4,11 +4,18 @@ use super::*;
 
 /// A tiny deterministic PRNG so the property tests need no new dependency.
 /// splitmix64: https://prng.di.unimi.it/splitmix64.c
-pub(super) struct Rng(u64);
+///
+/// The flag makes [`gen_id`] draw a host-local id now and then.
+pub(super) struct Rng(u64, bool);
 
 impl Rng {
     pub(super) fn new(seed: u64) -> Self {
-        Self(seed)
+        Self(seed, false)
+    }
+
+    /// A generator whose ids are sometimes ones the host must refuse.
+    pub(super) fn poisoning_ids(seed: u64) -> Self {
+        Self(seed, true)
     }
 
     pub(super) fn next_u64(&mut self) -> u64 {
@@ -76,6 +83,15 @@ pub(super) fn gen_opt_f32(rng: &mut Rng) -> Option<f32> {
 
 /// A key drawn from a small fixed pool: with only five options across a
 /// whole tree, collisions are the common case rather than the exception.
+/// A node's typed id; from a [`Rng::poisoning_ids`] generator, one in
+/// eight is a focus handle, which never crosses the wire.
+pub(super) fn gen_id(rng: &mut Rng) -> ElementIdWire {
+    if rng.1 && rng.next_range(8) == 0 {
+        return ElementIdWire::FocusHandle(rng.next_u64());
+    }
+    ElementIdWire::Name(gen_key(rng).into())
+}
+
 pub(super) fn gen_key(rng: &mut Rng) -> String {
     const POOL: [&str; 5] = ["App/a", "App/b", "dup", "x", "same-key"];
     (*rng.choose(&POOL)).to_string()
@@ -133,7 +149,7 @@ pub(super) fn gen_button_label(rng: &mut Rng) -> Node {
         selected: rng.next_bool().then(|| rng.next_bool()),
         role: gen_opt_role(rng),
         description: rng.next_bool().then(|| gen_string(rng)),
-        id: ElementIdWire::Name(gen_key(rng).into()),
+        id: gen_id(rng),
         content: ButtonContent::Label(gen_string(rng)),
         label: rng.next_bool().then(|| gen_string(rng)),
         on_press: rng.next_bool().then(|| rng.next_u64() as u32),
@@ -148,7 +164,7 @@ pub(super) fn gen_input(rng: &mut Rng) -> Node {
             description: Some(gen_string(rng)),
             disabled: rng.next_bool(),
         },
-        id: ElementIdWire::Name(gen_key(rng).into()),
+        id: gen_id(rng),
         placeholder: gen_string(rng),
         value: gen_string(rng),
         on_input: rng.next_u64() as u32,
@@ -193,7 +209,7 @@ pub(super) fn gen_editor(rng: &mut Rng) -> Node {
             presentation: None,
             binding: None,
         }),
-        id: ElementIdWire::Name(gen_key(rng).into()),
+        id: gen_id(rng),
         style: gpui::StyleRefinement::default(),
         placeholder: gen_string(rng),
         label: rng.next_bool().then(|| gen_string(rng)),
@@ -202,7 +218,7 @@ pub(super) fn gen_editor(rng: &mut Rng) -> Node {
 
 pub(super) fn gen_rule(rng: &mut Rng) -> Node {
     Node::Rule {
-        id: ElementIdWire::Name(gen_key(rng).into()),
+        id: gen_id(rng),
         axis: gen_axis(rng),
         style: gen_native_style(rng),
     }
@@ -369,7 +385,7 @@ pub(super) fn gen_svg(rng: &mut Rng) -> Node {
         });
         if rng.next_bool() {
             return Node::ImageViewer {
-                id: ElementIdWire::Name(gen_key(rng).into()),
+                id: gen_id(rng),
                 hash: rng.next_u64(),
                 data,
                 label: rng.next_bool().then(|| gen_string(rng)),
@@ -383,7 +399,7 @@ pub(super) fn gen_svg(rng: &mut Rng) -> Node {
             };
         }
         return Node::Image {
-            id: Some(ElementIdWire::Name(gen_key(rng).into())),
+            id: Some(gen_id(rng)),
             hash: rng.next_u64(),
             data,
             label: rng.next_bool().then(|| gen_string(rng)),
@@ -399,7 +415,7 @@ pub(super) fn gen_svg(rng: &mut Rng) -> Node {
         };
     }
     Node::Svg {
-        id: Some(ElementIdWire::Name(gen_key(rng).into())),
+        id: Some(gen_id(rng)),
         source: SvgSource::Data {
             hash: rng.next_u64(),
             bytes,
@@ -420,7 +436,7 @@ pub(super) fn gen_svg(rng: &mut Rng) -> Node {
 
 pub(super) fn gen_toggle(rng: &mut Rng) -> Node {
     Node::Toggle {
-        id: ElementIdWire::Name(gen_key(rng).into()),
+        id: gen_id(rng),
         kind: *rng.choose(&[ToggleKind::Checkbox, ToggleKind::Switch]),
         label: gen_string(rng),
         checked: rng.next_bool(),
@@ -431,7 +447,7 @@ pub(super) fn gen_toggle(rng: &mut Rng) -> Node {
 
 pub(super) fn gen_radio(rng: &mut Rng) -> Node {
     Node::Radio {
-        id: ElementIdWire::Name(gen_key(rng).into()),
+        id: gen_id(rng),
         label: gen_string(rng),
         selected: rng.next_bool(),
         on_select: rng.next_u64() as u32,
@@ -441,7 +457,7 @@ pub(super) fn gen_radio(rng: &mut Rng) -> Node {
 
 pub(super) fn gen_slider(rng: &mut Rng) -> Node {
     Node::Slider {
-        id: ElementIdWire::Name(gen_key(rng).into()),
+        id: gen_id(rng),
         label: rng.next_bool().then(|| gen_string(rng)),
         value: gen_f32(rng),
         min: gen_f32(rng),
@@ -463,7 +479,7 @@ pub(super) fn gen_pick_list(rng: &mut Rng) -> Node {
     };
     Node::PickList {
         settings: Default::default(),
-        id: ElementIdWire::Name(gen_key(rng).into()),
+        id: gen_id(rng),
         options: (0..count).map(|_| gen_string(rng)).collect(),
         selected: rng
             .next_bool()
@@ -477,7 +493,7 @@ pub(super) fn gen_pick_list(rng: &mut Rng) -> Node {
 
 pub(super) fn gen_progress(rng: &mut Rng) -> Node {
     Node::Progress {
-        id: ElementIdWire::Name(gen_key(rng).into()),
+        id: gen_id(rng),
         value: gen_f32(rng),
         min: gen_f32(rng),
         max: gen_f32(rng),
@@ -491,7 +507,7 @@ pub(super) fn gen_progress(rng: &mut Rng) -> Node {
 /// pulling into range.
 pub(super) fn gen_surface(rng: &mut Rng) -> Node {
     Node::Surface {
-        id: ElementIdWire::Name(gen_key(rng).into()),
+        id: gen_id(rng),
         name: gen_string(rng),
         args: vec![
             view_wire::SurfaceValue::Str(gen_string(rng)),
@@ -564,7 +580,7 @@ pub(super) fn gen_list(rng: &mut Rng, children: Vec<Node>) -> Node {
         }
         1 => {
             return Node::Overlay {
-                id: ElementIdWire::Name(gen_key(rng).into()),
+                id: gen_id(rng),
                 label: rng.next_bool().then(|| gen_string(rng)),
                 on_dismiss: Some(rng.next_u64() as u32),
                 children,

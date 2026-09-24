@@ -446,3 +446,25 @@ fn resize_handle_round_trip_retains_routes_and_checks_its_child() {
     );
     assert_eq!(cursor, Some(mouse::Cursor::ResizingHorizontally));
 }
+
+/// Every node kind that carries a typed id has it checked: a tree with a
+/// host-local id where the walk reaches is refused, and a tree that passes
+/// holds none (`check_frame` validates every surviving identity).
+#[test]
+fn a_host_local_id_on_any_node_kind_is_refused() {
+    const SEED: u64 = 0xF0C5_1D1D_5EED_0001;
+    const NUM_TREES: usize = 200;
+
+    let mut refused = 0;
+    for i in 1..NUM_TREES {
+        let seed = SEED ^ (i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        let ctx = format!("seed={seed:#x} tree={i}");
+        let mut frame = on_big_stack(move || gen_frame(&mut Rng::poisoning_ids(seed), i));
+        match sanitize(&mut frame) {
+            Ok(_) => check_frame(&frame, &ctx),
+            Err("focus-handle element IDs are host-local") => refused += 1,
+            Err(_) => {}
+        }
+    }
+    assert!(refused > 0, "no poisoned id reached the check");
+}
