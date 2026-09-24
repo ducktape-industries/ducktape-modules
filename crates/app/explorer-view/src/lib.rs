@@ -10,8 +10,8 @@
 //! finds. The window is the last [`WINDOW`] blocks, read a page at a time
 //! and then followed at the head as `rpc.status` moves.
 use ducktape_view_guest::doors::{
-    Block, BlockGet, BlockPage, BlockRef, Blocks, ClipboardWrite, NodeStatus, Props, Query,
-    Route as LinkRoute, Ticks,
+    Block, BlockPage, BlockRef, ClipboardWrite, ClockTicks, HostProps, HostRoute, NodeStatus,
+    Query, RpcBlock, RpcBlocks,
 };
 use ducktape_view_guest::export_view;
 use ducktape_view_guest::host::{Refusal, malformed};
@@ -332,7 +332,7 @@ impl View for Explorer {
     }
 
     fn restored(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        let mut ticks = cx.host().subscribe::<Ticks>(TICK);
+        let mut ticks = cx.host().subscribe::<ClockTicks>(TICK);
         self.watches.push(cx.spawn(async move |this, cx| {
             while ticks.next().await.is_some() {
                 if this.update(cx, |view, cx| view.read_head(cx)).is_err() {
@@ -340,7 +340,7 @@ impl View for Explorer {
                 }
             }
         }));
-        let mut props = cx.host().subscribe::<Props>(());
+        let mut props = cx.host().subscribe::<HostProps>(());
         self.watches.push(cx.spawn(async move |this, cx| {
             while let Some(Ok(session)) = props.next().await {
                 let landed = this.update(cx, |view, cx| {
@@ -352,7 +352,7 @@ impl View for Explorer {
                 }
             }
         }));
-        let mut routes = cx.host().subscribe::<LinkRoute>(());
+        let mut routes = cx.host().subscribe::<HostRoute>(());
         self.watches.push(cx.spawn(async move |this, cx| {
             while let Some(Ok(route)) = routes.next().await {
                 if this
@@ -384,7 +384,7 @@ impl Explorer {
     }
 
     fn read_head(&mut self, cx: &mut Context<Self>) {
-        let ask = cx.host().ask::<ducktape_view_guest::doors::Status>(());
+        let ask = cx.host().ask::<ducktape_view_guest::doors::RpcStatus>(());
         if self.status.ready().is_some() {
             cx.refresh(ask, |view, status, cx| {
                 view.status = Loaded::Ready(status);
@@ -444,7 +444,7 @@ impl Explorer {
             _ => return,
         };
         self.pulling = true;
-        let ask = cx.host().ask::<Blocks>(BlockPage {
+        let ask = cx.host().ask::<RpcBlocks>(BlockPage {
             before,
             limit: PAGE,
         });
@@ -505,7 +505,7 @@ impl Explorer {
             let opened =
                 matches!(self.opened.ready(), Some(Some((row, _))) if row.height == height);
             if !held && !opened {
-                let ask = cx.host().ask::<BlockGet>(BlockRef::Height(height));
+                let ask = cx.host().ask::<RpcBlock>(BlockRef::Height(height));
                 self.opened = cx.load(
                     async move { ask.await.map(|block| block.map(rows)) },
                     |view| &mut view.opened,
@@ -572,7 +572,7 @@ impl Explorer {
         if let Some(block) = self.chain.blocks.iter().find(|block| block.id == hash) {
             return self.go(Route::Block(block.height), cx);
         }
-        let ask = cx.host().ask::<BlockGet>(BlockRef::Id(hash));
+        let ask = cx.host().ask::<RpcBlock>(BlockRef::Id(hash));
         let blocks = self.chain.blocks.len();
         cx.spawn(async move |this, cx| {
             let found = ask.await;

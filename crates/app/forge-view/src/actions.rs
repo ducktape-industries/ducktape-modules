@@ -5,7 +5,7 @@
 //! straight away, keeps saying so while the block that carries it is on its
 //! way, and a refusal replaces it with the reason inline. Nothing is guessed
 //! into the lists — the next query reconciles them.
-use ducktape_view_guest::doors::Id;
+use ducktape_view_guest::doors::HostId;
 use ducktape_view_guest::view::Submit;
 use ducktape_view_guest::{Context, Window};
 
@@ -453,7 +453,7 @@ impl Forge {
         cx.spawn(async move |this, cx| {
             let host = cx.host();
             let result = async {
-                let message_id = host.ask::<Id>("message".into()).await?;
+                let message_id = host.ask::<HostId>("message".into()).await?;
                 host.ask::<Submit<ChatApi>>(chat::ChatMsg::PostMessage {
                     channel_id: channel,
                     message_id,

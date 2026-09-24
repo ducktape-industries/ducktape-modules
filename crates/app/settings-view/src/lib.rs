@@ -3,8 +3,8 @@ mod account;
 mod api;
 use account::{Account, read_account};
 use api::*;
-use ducktape_view_guest::doors::Live;
-use ducktape_view_guest::doors::{ClipboardWrite, Ticks};
+use ducktape_view_guest::doors::RpcLive;
+use ducktape_view_guest::doors::{ClipboardWrite, ClockTicks};
 use ducktape_view_guest::prelude::*;
 use ducktape_view_guest::view::Loaded;
 use ducktape_view_guest::{Context, Render, Task, View, Window, export_view};
@@ -15,9 +15,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Default, Serialize, Deserialize)]
 pub struct Settings {
     session: Session,
-    status: Loaded<Status>,
+    status: Loaded<NodeStatus>,
     account: Loaded<Option<Account>>,
-    invite: Loaded<Invite>,
+    invite: Loaded<Minted>,
     ttl: usize,
     copied: String,
     create_account: CreateAccount,
@@ -43,7 +43,7 @@ impl View for Settings {
     }
     fn restored(&mut self, _: &mut Window, cx: &mut Context<Self>) {
         self.watches.clear();
-        let mut props = cx.host().subscribe::<Props>(());
+        let mut props = cx.host().subscribe::<HostProps>(());
         self.watches.push(cx.spawn(async move |this, cx| {
             while let Some(reply) = props.next().await {
                 if this
@@ -63,7 +63,7 @@ impl View for Settings {
                 }
             }
         }));
-        let mut live = cx.host().subscribe::<Live>(valset::PROGRAM.into());
+        let mut live = cx.host().subscribe::<RpcLive>(valset::PROGRAM.into());
         self.watches.push(cx.spawn(async move |this, cx| {
             while live.next().await.is_some() {
                 if this
@@ -77,7 +77,7 @@ impl View for Settings {
                 }
             }
         }));
-        let mut ticks = cx.host().subscribe::<Ticks>(1000);
+        let mut ticks = cx.host().subscribe::<ClockTicks>(1000);
         self.watches.push(cx.spawn(async move |this, cx| {
             while ticks.next().await.is_some() {
                 if this.update(cx, |view, cx| view.read(cx)).is_err() {
@@ -91,11 +91,11 @@ impl View for Settings {
 impl Settings {
     fn read(&mut self, cx: &mut Context<Self>) {
         if self.status.ready().is_some() {
-            cx.refresh(cx.host().ask::<NodeStatus>(()), |view, status, _| {
+            cx.refresh(cx.host().ask::<RpcStatus>(()), |view, status, _| {
                 view.status = Loaded::Ready(status)
             });
         } else if !self.status.is_loading() {
-            self.status = cx.load(cx.host().ask::<NodeStatus>(()), |v| &mut v.status);
+            self.status = cx.load(cx.host().ask::<RpcStatus>(()), |v| &mut v.status);
         }
         cx.notify();
     }
@@ -340,7 +340,7 @@ impl Settings {
         let mint = cx.listener(|v: &mut Self, _: &ClickEvent, _, cx| {
             v.copied.clear();
             v.invite = cx.load(
-                cx.host().ask::<MintInvite>(Mint {
+                cx.host().ask::<RpcInvite>(Mint {
                     ttl_days: TTL[v.ttl],
                 }),
                 |v| &mut v.invite,

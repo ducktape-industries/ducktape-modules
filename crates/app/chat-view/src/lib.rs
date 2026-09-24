@@ -29,7 +29,7 @@ use ducktape_view_guest::view::{Loaded, View};
 use ducktape_view_guest::{IntoElement, Render, Window, export_view};
 use futures::StreamExt;
 
-use api::{ChatApi, Id, Live as LiveChanges, Props, Route, Session, Submit, Visible};
+use api::{ChatApi, HostId, HostProps, HostRoute, HostVisible, RpcLive, Session, Submit};
 use composer::Draft;
 use composer::Target;
 
@@ -52,7 +52,7 @@ impl View for Chat {
             draft.retire_device_requests();
         }
         self.menu = None;
-        let mut props = cx.host().subscribe::<Props>(());
+        let mut props = cx.host().subscribe::<HostProps>(());
         self.watches.props = Some(cx.spawn(async move |this, cx| {
             while let Some(item) = props.next().await {
                 if this
@@ -72,7 +72,7 @@ impl View for Chat {
                 }
             }
         }));
-        let mut changes = cx.host().subscribe::<LiveChanges>(::chat::PROGRAM.into());
+        let mut changes = cx.host().subscribe::<RpcLive>(::chat::PROGRAM.into());
         self.watches.changes = Some(cx.spawn(async move |this, cx| {
             while let Some(_item) = changes.next().await {
                 if this
@@ -88,7 +88,7 @@ impl View for Chat {
         }));
         // `duck://<chain>/chat/<channel>[/<seq>]`: a link opened into this
         // view (a notice's, say) names the room, and the message to land on
-        let mut routes = cx.host().subscribe::<Route>(());
+        let mut routes = cx.host().subscribe::<HostRoute>(());
         self.watches.route = Some(cx.spawn(async move |this, cx| {
             while let Some(Ok(route)) = routes.next().await {
                 let mut parts = route.splitn(2, '/');
@@ -110,7 +110,7 @@ impl View for Chat {
                 }
             }
         }));
-        let mut visible = cx.host().subscribe::<Visible>(());
+        let mut visible = cx.host().subscribe::<HostVisible>(());
         self.watches.visible = Some(cx.spawn(async move |this, cx| {
             while let Some(item) = visible.next().await {
                 if this
@@ -132,7 +132,7 @@ impl View for Chat {
         // and re-read the roster, or a name ANOTHER signer claims while this
         // room stays open never replaces the "account N" fallback their
         // messages render under (they show up, just unnamed).
-        let mut identity_live = cx.host().subscribe::<LiveChanges>(identity::PROGRAM.into());
+        let mut identity_live = cx.host().subscribe::<RpcLive>(identity::PROGRAM.into());
         self.watches.identity = Some(cx.spawn(async move |this, cx| {
             while identity_live.next().await.is_some() {
                 if this
@@ -376,7 +376,7 @@ impl Chat {
         cx.spawn(async move |this, cx| {
             let host = cx.host();
             let result = async {
-                let channel_id = host.ask::<Id>("channel".into()).await?;
+                let channel_id = host.ask::<HostId>("channel".into()).await?;
                 let op = if voice {
                     ChatMsg::CreateVoiceChannel {
                         channel_id: channel_id.clone(),

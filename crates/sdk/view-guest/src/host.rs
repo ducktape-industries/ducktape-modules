@@ -145,10 +145,10 @@ impl Host {
             .insert(id, format!("{request:?}"));
     }
     pub fn log(&self, message: impl AsRef<str>) {
-        self.notify::<doors::Log>(message.as_ref().to_owned());
+        self.notify::<doors::HostLog>(message.as_ref().to_owned());
     }
     pub fn open_link(&self, link: &str) {
-        self.notify::<doors::OpenLink>(link.to_owned());
+        self.notify::<doors::HostOpenLink>(link.to_owned());
     }
     pub(crate) fn diagnostic(&self, id: u64) -> Option<String> {
         self.0.borrow().diagnostics.get(&id).cloned()

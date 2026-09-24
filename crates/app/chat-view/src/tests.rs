@@ -70,15 +70,15 @@ fn row(seq: u64, author: &str, text: &str) -> MsgRow {
 
 /// The host doors chat only talks to, never hears back from here.
 fn quiet_doors(cx: &mut TestAppContext) {
-    cx.host().never::<api::Route>();
-    cx.host().never::<ducktape_view_guest::doors::Badge>();
+    cx.host().never::<api::HostRoute>();
+    cx.host().never::<ducktape_view_guest::doors::HostBadge>();
     cx.host().never::<ducktape_view_guest::doors::NotifyPost>();
 }
 
 fn configure(cx: &mut TestAppContext) {
     quiet_doors(cx);
     cx.host()
-        .handle::<ducktape_view_guest::doors::Widget>(|command| {
+        .handle::<ducktape_view_guest::doors::HostWidget>(|command| {
             assert!(matches!(command, wire::WidgetCommand::Focus { .. }));
             Ok(())
         });
@@ -124,7 +124,7 @@ fn configure(cx: &mut TestAppContext) {
             query => panic!("unexpected chat query: {query:?}"),
         })
     });
-    cx.host().never::<LiveChanges>();
+    cx.host().never::<RpcLive>();
     cx.host().handle::<Submit<ChatApi>>(|_| Ok(Vec::new()));
     // The host hands every view the seated key as raw hex, never a handle:
     // resolve it the way identity itself would. "0102" is account 7's own
@@ -145,8 +145,8 @@ fn configure(cx: &mut TestAppContext) {
 fn opened() -> (TestAppContext, Entity<Chat>) {
     let mut cx = TestAppContext::new();
     configure(&mut cx);
-    let props = cx.host().stream::<Props>();
-    let visible = cx.host().stream::<Visible>();
+    let props = cx.host().stream::<HostProps>();
+    let visible = cx.host().stream::<HostVisible>();
     let view = cx.open::<Chat>();
     cx.run_until_parked();
     assert!(cx.has_text("Not connected"));
@@ -208,7 +208,7 @@ fn the_room_shows_its_rows_intro_and_actions() {
     );
     assert!(
         cx.host()
-            .asked::<ducktape_view_guest::doors::Widget>()
+            .asked::<ducktape_view_guest::doors::HostWidget>()
             .iter()
             .any(|command| {
                 matches!(command, wire::WidgetCommand::Focus { target }
@@ -488,7 +488,7 @@ fn a_send_shows_pending_then_lands_and_a_refusal_is_a_banner() {
     assert!(cx.has_text("1 result for “hello”"), "{:?}", cx.texts());
     cx.simulate_click("chat-sidebar-clear-search");
     view.read(|chat| assert!(chat.search.query.is_empty()));
-    cx.host().handle::<Id>(|kind| {
+    cx.host().handle::<HostId>(|kind| {
         assert_eq!(kind, "channel");
         Ok("chan-1".into())
     });
@@ -504,8 +504,8 @@ fn a_send_shows_pending_then_lands_and_a_refusal_is_a_banner() {
     let bytes = cx.snapshot().unwrap();
     let mut restored = TestAppContext::new();
     configure(&mut restored);
-    restored.host().never::<Props>();
-    restored.host().never::<Visible>();
+    restored.host().never::<HostProps>();
+    restored.host().never::<HostVisible>();
     let view = restored.restore::<Chat>(&bytes).unwrap();
     restored.run_until_parked();
     view.read(|chat| assert_eq!(chat.room.as_ref().unwrap().id, "general"));
@@ -619,8 +619,8 @@ fn session_key_resolves_to_its_account() {
 fn an_unregistered_key_stays_read_only() {
     let mut cx = TestAppContext::new();
     configure(&mut cx);
-    let props = cx.host().stream::<Props>();
-    let visible = cx.host().stream::<Visible>();
+    let props = cx.host().stream::<HostProps>();
+    let visible = cx.host().stream::<HostVisible>();
     let view = cx.open::<Chat>();
     cx.run_until_parked();
     props.push(Session {
@@ -660,9 +660,9 @@ fn an_account_gained_later_re_enables_create_channel() {
                 query => panic!("unexpected identity query: {query:?}"),
             })
         });
-    let props = cx.host().stream::<Props>();
-    let visible = cx.host().stream::<Visible>();
-    let live = cx.host().stream::<LiveChanges>();
+    let props = cx.host().stream::<HostProps>();
+    let visible = cx.host().stream::<HostVisible>();
+    let live = cx.host().stream::<RpcLive>();
     let view = cx.open::<Chat>();
     cx.run_until_parked();
     props.push(Session {
@@ -697,7 +697,7 @@ fn a_peers_name_gained_later_replaces_its_numeric_fallback() {
     let mut cx = TestAppContext::new();
     quiet_doors(&mut cx);
     cx.host()
-        .handle::<ducktape_view_guest::doors::Widget>(|command| {
+        .handle::<ducktape_view_guest::doors::HostWidget>(|command| {
             assert!(matches!(command, wire::WidgetCommand::Focus { .. }));
             Ok(())
         });
@@ -743,9 +743,9 @@ fn a_peers_name_gained_later_replaces_its_numeric_fallback() {
             })
         });
 
-    let props = cx.host().stream::<Props>();
-    let visible = cx.host().stream::<Visible>();
-    let live = cx.host().stream::<LiveChanges>();
+    let props = cx.host().stream::<HostProps>();
+    let visible = cx.host().stream::<HostVisible>();
+    let live = cx.host().stream::<RpcLive>();
     let view = cx.open::<Chat>();
     cx.run_until_parked();
     props.push(Session {
@@ -790,7 +790,7 @@ fn a_peers_mention_becomes_offerable_once_their_account_is_known() {
     let mut cx = TestAppContext::new();
     quiet_doors(&mut cx);
     cx.host()
-        .handle::<ducktape_view_guest::doors::Widget>(|command| {
+        .handle::<ducktape_view_guest::doors::HostWidget>(|command| {
             assert!(matches!(command, wire::WidgetCommand::Focus { .. }));
             Ok(())
         });
@@ -833,9 +833,9 @@ fn a_peers_mention_becomes_offerable_once_their_account_is_known() {
             })
         });
 
-    let props = cx.host().stream::<Props>();
-    let visible = cx.host().stream::<Visible>();
-    let live = cx.host().stream::<LiveChanges>();
+    let props = cx.host().stream::<HostProps>();
+    let visible = cx.host().stream::<HostVisible>();
+    let live = cx.host().stream::<RpcLive>();
     let view = cx.open::<Chat>();
     cx.run_until_parked();
     props.push(Session {
@@ -899,7 +899,7 @@ fn export_chat_screens() {
 /// the room.
 #[test]
 fn a_direct_message_elsewhere_is_a_notice_and_a_badge_until_read() {
-    use ducktape_view_guest::doors::{Badge, NotifyPost};
+    use ducktape_view_guest::doors::{HostBadge, NotifyPost};
     let (mut cx, view) = opened();
     cx.host().handle::<ViewOf<ChatApi>>(|query| {
         Ok(match query {
@@ -929,13 +929,13 @@ fn a_direct_message_elsewhere_is_a_notice_and_a_badge_until_read() {
         ("reviewer", "ping")
     );
     assert_eq!(posts[0].link, "duck://testnet-0a1b2c3d/chat/dm-7-8/2");
-    assert_eq!(cx.host().asked::<Badge>().last(), Some(&1));
+    assert_eq!(cx.host().asked::<HostBadge>().last(), Some(&1));
     view.update(&mut cx, |chat, window, cx| {
         cx.notify();
         chat.choose("dm-7-8".into(), window, cx)
     });
     cx.run_until_parked();
-    assert_eq!(cx.host().asked::<Badge>().last(), Some(&0));
+    assert_eq!(cx.host().asked::<HostBadge>().last(), Some(&0));
 }
 
 /// A room of 256 rows, each with markup, a reaction and a thread, renders
@@ -970,8 +970,8 @@ fn a_room_of_256_rows_renders_inside_the_frame_budget() {
             query => panic!("unexpected chat query: {query:?}"),
         })
     });
-    let props = cx.host().stream::<Props>();
-    let visible = cx.host().stream::<Visible>();
+    let props = cx.host().stream::<HostProps>();
+    let visible = cx.host().stream::<HostVisible>();
     cx.open::<Chat>();
     props.push(Session {
         account: "0102".into(),

@@ -11,7 +11,7 @@
 
 use futures::StreamExt as _;
 use serde::{Deserialize, Serialize};
-use view_guest::doors::{AudioCapture, AudioItem, Device, Devices, VideoCapture, VideoItem};
+use view_guest::doors::{AudioCapture, AudioItem, Device, MediaDevices, VideoCapture, VideoItem};
 use view_guest::{
     div, ClickEvent, Context, InteractiveElement, IntoElement, ParentElement, Render,
     StatefulInteractiveElement, Styled, Task, View, Window,
@@ -39,7 +39,7 @@ struct Capture {
 impl View for MediaProbe {
     fn new(_: &mut Window, cx: &mut Context<Self>) -> Self {
         cx.spawn(async move |this, cx| {
-            let listed = cx.host().ask::<Devices>(()).await;
+            let listed = cx.host().ask::<MediaDevices>(()).await;
             let _ = this.update(cx, |view, cx| {
                 match listed {
                     Ok(devices) => {

@@ -4,7 +4,7 @@ use ducktape_view_guest::Context;
 use ducktape_view_guest::view::Submit;
 use ducktape_view_guest::wire;
 
-use crate::api::{ChatApi, ClipboardRead, ClipboardWrite, Id};
+use crate::api::{ChatApi, ClipboardRead, ClipboardWrite, HostId};
 use crate::chat::{ChatMsg, MsgRow};
 use crate::composer::Target;
 use crate::composer::{Event, Outcome, Send};
@@ -106,7 +106,7 @@ impl Chat {
         cx.spawn(async move |this, cx| {
             let host = cx.host();
             let result = async {
-                let id = host.ask::<Id>("message".into()).await?;
+                let id = host.ask::<HostId>("message".into()).await?;
                 let op = crate::composer::op(id, &send, &target)?;
                 let pending = pending_row(&op);
                 host.ask::<Submit<ChatApi>>(op).await.map(|_| pending)

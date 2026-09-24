@@ -1,8 +1,8 @@
 use super::*;
 use ducktape_view_guest::{doors::Query, testing::TestAppContext, wire};
 
-fn status() -> Status {
-    Status {
+fn status() -> NodeStatus {
+    NodeStatus {
         network: "Workshop".into(),
         time: 100,
         block_time_ms: 1000,
@@ -16,7 +16,7 @@ fn status() -> Status {
     }
 }
 fn respond(cx: &TestAppContext) {
-    cx.host().handle::<NodeStatus>(|()| Ok(status()));
+    cx.host().handle::<RpcStatus>(|()| Ok(status()));
     cx.host().handle::<Query<Identity>>(|q| {
         Ok(match q {
             identity::Query::OfKey { key } => {
@@ -57,9 +57,9 @@ fn respond(cx: &TestAppContext) {
 }
 fn fixture(state: &str, dark: bool) -> TestAppContext {
     let mut cx = TestAppContext::new();
-    cx.host().stream::<Ticks>();
-    cx.host().stream::<Live>();
-    let props = cx.host().stream::<Props>();
+    cx.host().stream::<ClockTicks>();
+    cx.host().stream::<RpcLive>();
+    let props = cx.host().stream::<HostProps>();
     respond(&cx);
     match state {
         "unregistered" => cx.host().handle::<Query<Identity>>(|q| {
@@ -67,12 +67,12 @@ fn fixture(state: &str, dark: bool) -> TestAppContext {
             Ok(identity::Reply::Number(None))
         }),
         "loading" => {
-            cx.host().never::<NodeStatus>();
+            cx.host().never::<RpcStatus>();
             cx.host().never::<Query<Identity>>();
         }
         "refused" => {
             cx.host()
-                .refuse::<NodeStatus>("unavailable", "The node is unavailable. Try again.");
+                .refuse::<RpcStatus>("unavailable", "The node is unavailable. Try again.");
             cx.host()
                 .refuse::<Query<Identity>>("unavailable", "Account query refused.");
         }
@@ -93,13 +93,13 @@ fn fixture(state: &str, dark: bool) -> TestAppContext {
     cx.run_until_parked();
     if state.starts_with("invite") {
         match state {
-            "invite-loading" => cx.host().never::<MintInvite>(),
+            "invite-loading" => cx.host().never::<RpcInvite>(),
             "invite-refused" => cx
                 .host()
-                .refuse::<MintInvite>("forbidden", "This node does not allow minting invites."),
-            _ => cx.host().handle::<MintInvite>(|request| {
+                .refuse::<RpcInvite>("forbidden", "This node does not allow minting invites."),
+            _ => cx.host().handle::<RpcInvite>(|request| {
                 assert_eq!(request.ttl_days, 7);
-                Ok(Invite {
+                Ok(Minted {
                     invite: "duck-invite:workshop-loopback-example".into(),
                     notes: vec![ducktape_view_guest::doors::Note {
                         reason: "expires".into(),
@@ -140,9 +140,9 @@ fn invite_ttl_copy_and_refusal() {
     cx.simulate_click("settings/invite/copy");
     cx.run_until_parked();
     assert!(cx.has_text("Copied"));
-    cx.host().handle::<MintInvite>(|r| {
+    cx.host().handle::<RpcInvite>(|r| {
         assert_eq!(r.ttl_days, 30);
-        Ok(Invite {
+        Ok(Minted {
             invite: "long-lived".into(),
             notes: vec![],
         })
@@ -157,12 +157,12 @@ fn invite_ttl_copy_and_refusal() {
 #[test]
 fn live_updates_retry_and_restore() {
     let mut cx = TestAppContext::new();
-    let live = cx.host().stream::<Ticks>();
-    cx.host().stream::<Live>();
-    cx.host().stream::<Props>();
+    let live = cx.host().stream::<ClockTicks>();
+    cx.host().stream::<RpcLive>();
+    cx.host().stream::<HostProps>();
     respond(&cx);
     cx.open::<Settings>();
-    cx.host().handle::<NodeStatus>(|()| {
+    cx.host().handle::<RpcStatus>(|()| {
         let mut s = status();
         s.height = 43;
         Ok(s)
@@ -326,10 +326,10 @@ fn create_account_disables_controls_while_busy() {
 #[test]
 fn long_host_key_is_truncated_and_non_validator_standing_is_quiet() {
     let mut cx = TestAppContext::new();
-    cx.host().stream::<Ticks>();
-    cx.host().stream::<Live>();
-    let props = cx.host().stream::<Props>();
-    cx.host().handle::<NodeStatus>(|()| Ok(status()));
+    cx.host().stream::<ClockTicks>();
+    cx.host().stream::<RpcLive>();
+    let props = cx.host().stream::<HostProps>();
+    cx.host().handle::<RpcStatus>(|()| Ok(status()));
     let long_key = vec![0x11; 32];
     let long_hex = abi::hex(&long_key);
     cx.host().handle::<Query<Identity>>(|q| {
