@@ -300,9 +300,12 @@ fn the_overview_shows_the_head_and_the_latest_blocks_and_transactions() {
     assert!(cx.has_text("Post in #design") && cx.has_text("Ada") && cx.has_text("#3"));
     assert!(cx.has_text("mystery · 4 bytes") && cx.has_text("0202…0202"));
     assert!(
-        cx.has_text("6c6c…6c6c"),
-        "block 8's hash, shortened: {texts:?}"
+        cx.has_text("6f6f…6f6f"),
+        "block 11's hash, shortened: {texts:?}"
     );
+    // blocks 0–10 carry nothing: one quiet line, not eleven rows
+    assert!(cx.has_text("0–10 · 11 empty blocks"), "{texts:?}");
+    assert!(!cx.has_text("6c6c…6c6c"), "block 8 is folded: {texts:?}");
     assert_eq!(
         cx.host().asked::<Blocks>(),
         vec![BlockPage {
@@ -430,7 +433,7 @@ fn a_tick_past_the_head_reads_only_the_new_blocks() {
     *tip.borrow_mut() = 14;
     ticks.push(());
     cx.run_until_parked();
-    assert!(cx.has_text("14"), "{:?}", cx.texts());
+    assert!(cx.has_text("13–14 · 2 empty blocks"), "{:?}", cx.texts());
     let explorer_asked = cx.host().asked::<Blocks>();
     assert_eq!(explorer_asked.len(), 2, "{explorer_asked:?}");
     assert!(explorer_asked.iter().all(|ask| ask.before.is_none()));
@@ -502,4 +505,56 @@ fn the_root_tracks_the_shared_theme() {
             .and_then(|background| background.as_solid()),
         Some(dark.background)
     );
+}
+
+#[test]
+fn runs_of_empty_blocks_fold_into_one_line_and_the_list_reaches_back() {
+    let block = |height: u64, txs: usize| BlockRow {
+        height,
+        txs,
+        ..BlockRow::default()
+    };
+    // newest first: 20 empty, 19 busy, 18 empty, 17 busy, 16..=3 empty, 2 busy
+    let mut blocks = vec![block(20, 0), block(19, 2), block(18, 0), block(17, 1)];
+    blocks.extend((3..=16).rev().map(|height| block(height, 0)));
+    blocks.push(block(2, 1));
+    let lines = ui::lines(&blocks, 6);
+    let shape: Vec<String> = lines
+        .iter()
+        .map(|line| match line {
+            ui::Line::Block(block) => block.height.to_string(),
+            ui::Line::Empty { newest, oldest } => format!("{oldest}-{newest}"),
+        })
+        .collect();
+    // a lone empty block stays a row; a run folds; the fold lets six lines
+    // reach back to block 2
+    assert_eq!(shape, ["20", "19", "18", "17", "3-16", "2"]);
+    assert_eq!(ui::lines(&blocks, 3).len(), 3);
+}
+
+#[test]
+fn the_search_field_holds_only_what_is_being_typed() {
+    let mut cx = TestAppContext::new();
+    cx.host().stream::<Ticks>();
+    node(&mut cx, Rc::new(RefCell::new(12)));
+    let explorer = cx.open::<Explorer>();
+    cx.run_until_parked();
+    let field = |_: &TestAppContext| explorer.read(|view| view.search.clone());
+    cx.simulate_input("explorer-search", "11");
+    cx.simulate_submit("explorer-search");
+    cx.run_until_parked();
+    assert!(cx.has_text("Post in #design"), "block 11 opened");
+    assert_eq!(field(&cx), "", "a search that lands clears the field");
+    cx.simulate_input("explorer-search", "half typed");
+    cx.simulate_click("explorer-next");
+    cx.run_until_parked();
+    assert_eq!(field(&cx), "", "prev/next clears it");
+    cx.simulate_input("explorer-search", "half typed");
+    cx.simulate_click("explorer-tab-accounts");
+    cx.run_until_parked();
+    assert_eq!(field(&cx), "", "a tab clears it");
+    cx.simulate_input("explorer-search", "nobody");
+    cx.simulate_submit("explorer-search");
+    cx.run_until_parked();
+    assert_eq!(field(&cx), "nobody", "a search that finds nothing keeps it");
 }

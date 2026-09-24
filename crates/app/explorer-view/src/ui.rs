@@ -306,10 +306,13 @@ fn block_row(block: &BlockRow, now: u64, cx: Cx, theme: &Theme) -> impl IntoElem
         cx,
         theme,
     )
+    .when(block.txs == 0, |row| row.text_color(theme.faint))
     .child(
         mono(grouped(block.height))
             .w(px(72.))
-            .font_weight(FontWeight::SEMIBOLD),
+            .when(block.txs > 0, |height| {
+                height.font_weight(FontWeight::SEMIBOLD)
+            }),
     )
     .child(mono(short(&block.id)).flex_1().text_color(theme.muted))
     .child(
@@ -324,6 +327,71 @@ fn block_row(block: &BlockRow, now: u64, cx: Cx, theme: &Theme) -> impl IntoElem
             .justify_end()
             .text_color(theme.faint),
     )
+}
+
+/// One line of a block list: a block, or a run of empty ones.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Line<'a> {
+    Block(&'a BlockRow),
+    /// consecutive blocks with no transaction, `oldest..=newest`
+    Empty {
+        newest: u64,
+        oldest: u64,
+    },
+}
+
+/// `blocks` (newest first) as at most `rows` lines, each run of two or more
+/// empty blocks folded into one, so the list reaches back past quiet
+/// stretches as far as the window holds.
+pub(crate) fn lines(blocks: &[BlockRow], rows: usize) -> Vec<Line<'_>> {
+    let mut lines = Vec::new();
+    let mut at = 0;
+    while at < blocks.len() && lines.len() < rows {
+        let run = blocks[at..]
+            .iter()
+            .take_while(|block| block.txs == 0)
+            .count();
+        if run >= 2 {
+            let (newest, oldest) = (blocks[at].height, blocks[at + run - 1].height);
+            lines.push(Line::Empty { newest, oldest });
+            at += run;
+        } else {
+            lines.push(Line::Block(&blocks[at]));
+            at += 1;
+        }
+    }
+    lines
+}
+
+fn block_lines(
+    blocks: &[BlockRow],
+    rows: usize,
+    now: u64,
+    cx: Cx,
+    theme: &Theme,
+) -> Vec<AnyElement> {
+    lines(blocks, rows)
+        .into_iter()
+        .map(|line| match line {
+            Line::Block(block) => block_row(block, now, cx, theme).into_any_element(),
+            Line::Empty { newest, oldest } => div()
+                .id(SharedString::from(format!("explorer-empty-{newest}")))
+                .flex()
+                .items_center()
+                .h(px(40.))
+                .px_5()
+                .border_b_1()
+                .border_color(theme.border)
+                .text_color(theme.faint)
+                .child(mono(format!(
+                    "{}–{} · {} empty blocks",
+                    grouped(oldest),
+                    grouped(newest),
+                    grouped(newest - oldest + 1)
+                )))
+                .into_any_element(),
+        })
+        .collect()
 }
 
 /// `height` adds the block column; `who` the signer column, which an
@@ -477,13 +545,7 @@ fn overview(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
     )
     .text_size(px(12.))
     .into_any_element();
-    let blocks: Vec<_> = view
-        .chain
-        .blocks
-        .iter()
-        .take(LATEST)
-        .map(|block| block_row(block, now, cx, theme).into_any_element())
-        .collect();
+    let blocks = block_lines(&view.chain.blocks, LATEST, now, cx, theme);
     let txs: Vec<_> = view
         .chain
         .txs
@@ -577,24 +639,14 @@ fn quiet_owned(id: &'static str, text: String, theme: &Theme) -> AnyElement {
 fn blocks(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
     let now = view.chain.now();
     let held = view.chain.blocks.len() as u64;
-    let rows: Vec<_> = view
-        .chain
-        .blocks
-        .iter()
-        .take(LIST_ROWS)
-        .map(|block| block_row(block, now, cx, theme).into_any_element())
-        .collect();
+    let rows = block_lines(&view.chain.blocks, LIST_ROWS, now, cx, theme);
     div()
         .id("explorer-blocks")
         .child(heading(
             "explorer-blocks-heading",
             "Blocks",
             Some(caption(
-                format!(
-                    "newest {} of {}",
-                    rows.len(),
-                    plural(held, "block", "blocks")
-                ),
+                format!("the last {}", plural(held, "block", "blocks")),
                 theme,
             )),
             theme,
