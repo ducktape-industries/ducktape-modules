@@ -163,9 +163,10 @@ pub(crate) struct Marks {
 pub(crate) fn inline(text: &str) -> (String, Vec<(Range<usize>, Marks)>) {
     let mut out = String::new();
     let mut runs = Vec::new();
+    let parts = text.split('`').count();
     for (index, part) in text.split('`').enumerate() {
         // an odd count of backticks leaves the last one literal
-        let closed = index % 2 == 1 && text.split('`').count() > index + 1;
+        let closed = index % 2 == 1 && parts > index + 1;
         if closed {
             let start = out.len();
             out.push_str(part);
@@ -250,6 +251,11 @@ fn rich(element_id: String, text: &str, theme: &Theme) -> AnyElement {
 
 /// A markdown document, block by block, under the element `name`.
 pub(crate) fn render(name: &str, text: &str, theme: &Theme) -> AnyElement {
+    render_blocks(name, &parse(text), theme)
+}
+
+/// Blocks [`parse`] already made, drawn as [`render`] draws them.
+pub(crate) fn render_blocks(name: &str, blocks: &[Block], theme: &Theme) -> AnyElement {
     let mut column = div()
         .id(id(name.to_owned()))
         .flex()
@@ -257,14 +263,18 @@ pub(crate) fn render(name: &str, text: &str, theme: &Theme) -> AnyElement {
         .gap_2()
         .text_size(design::text::BODY)
         .text_color(theme.foreground);
-    for (at, block) in parse(text).into_iter().enumerate() {
+    for (at, block) in blocks.iter().cloned().enumerate() {
         let key = format!("{name}-{at}");
         let element: AnyElement = match block {
             Block::Heading(level, text) => {
-                let size = [22., 18., 15., 13.5, 13., 13.][level - 1];
+                let size = match level {
+                    1 => design::text::TITLE,
+                    2 => design::text::SECTION,
+                    _ => design::text::BODY,
+                };
                 let mut heading = div()
                     .id(id(format!("{key}-h")))
-                    .text_size(px(size))
+                    .text_size(size)
                     .font_weight(FontWeight::SEMIBOLD)
                     .role(Role::Heading)
                     .aria_level(level)
