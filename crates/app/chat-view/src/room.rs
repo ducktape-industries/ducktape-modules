@@ -29,7 +29,7 @@ impl Chat {
         // read to the head this view knows now, not at the next list: a
         // reader who opens a room and quits has read it
         if let Some(list) = self.channels.ready().cloned() {
-            self.channels_arrived(list);
+            self.channels_arrived(list, cx);
             self.save_reads(cx);
         }
         self.settle_badge(cx);
@@ -337,13 +337,15 @@ impl Chat {
     }
 
     /// The channel list landed: the rooms, and what each one's head says
-    /// about what the reader has read.
-    pub(crate) fn channels_arrived(&mut self, channels: Vec<ChannelInfo>) {
+    /// about what the reader has read. The room on screen is read to its
+    /// head, and the host's notices for it with it.
+    pub(crate) fn channels_arrived(&mut self, channels: Vec<ChannelInfo>, cx: &mut Context<Self>) {
         let reading = self
             .room
             .as_ref()
             .filter(|room| self.reads.visible && !room.landed)
             .map(|room| room.id.clone());
+        let mut read = None;
         for info in &channels {
             let cursor = self
                 .reads
@@ -355,10 +357,16 @@ impl Chat {
                     self.reads.boundary = *cursor;
                 }
                 self.reads.entering = false;
-                *cursor = (*cursor).max(info.head_seq);
+                if info.head_seq > *cursor {
+                    *cursor = info.head_seq;
+                    read = Some(info.channel.id.clone());
+                }
             }
         }
         self.channels = Loaded::Ready(channels);
+        if let Some(room) = read {
+            self.read_notices(&room, cx);
+        }
     }
 
     pub(crate) fn unread(&self, info: &ChannelInfo) -> bool {
