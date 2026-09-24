@@ -238,10 +238,24 @@ impl Chat {
     /// Re-asks identity for the account the seated key holds now. Called on
     /// every key change and on identity's own live stream, so a key that
     /// gains an account while this view stays open (Settings, then back to
-    /// Chat) re-enables writes without a relaunch.
+    /// Chat) re-enables writes without a relaunch. The rooms are looked
+    /// at again once she is known: the relaunch recount of what is meant
+    /// for her waits on her account, and may have had the list first.
     fn refresh_me(&mut self, cx: &mut Context<Self>) {
-        let key = self.session.account.clone();
-        self.me = cx.load(resolve_me(cx.host(), key), |chat| &mut chat.me);
+        let me = resolve_me(cx.host(), self.session.account.clone());
+        self.me = Loaded::Loading(cx.spawn(async move |this, cx| {
+            let me = me.await;
+            let _ = this.update(cx, |chat, cx| {
+                chat.me = match me {
+                    Ok(me) => Loaded::Ready(me),
+                    Err(refusal) => Loaded::Failed(refusal),
+                };
+                if let Some(list) = chat.channels.ready().cloned() {
+                    chat.channels_landed(list, cx);
+                }
+                cx.notify();
+            });
+        }));
     }
 
     /// The reader's account number, once identity has answered.
