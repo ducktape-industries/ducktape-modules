@@ -2,11 +2,14 @@
 //! children inline beneath it; a text file is drawn highlighted with a
 //! numbered gutter, a markdown file rendered; a binary or oversize blob is
 //! the header the program returned and nothing else.
+use std::ops::Range;
+use std::rc::Rc;
+
 use ducktape_view_guest::KeyDownEvent;
 use ducktape_view_guest::prelude::*;
 
 use crate::Forge;
-use crate::tree::{Key, Slot};
+use crate::tree::{Key, Row, Slot};
 use crate::ui::components::{button, empty_state, heading, id, path_text, quiet};
 use crate::ui::{divider, highlight, markdown, staged};
 use forge::{Content, EntryKind, Query, Reply};
@@ -91,33 +94,37 @@ fn tree(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
             .into_any_element();
     }
     let open = forge.nav().blob.as_ref().map(|(path, _)| path.clone());
-    let mut list = div()
-        .id(id("forge-tree-list"))
-        .flex_1()
-        .min_h(px(0.))
-        .overflow_y_scroll()
-        .flex()
-        .flex_col()
-        .pb_2()
-        .role(Role::Tree)
-        .aria_label("Files")
-        .focusable()
-        .on_key_down(pressed);
-    for entry in rows {
+    let cursor = forge.nav().cursor.clone();
+    let expanded = forge.nav().expanded.clone();
+    let theme = *theme;
+    let press = Rc::new(cx.listener(|forge, row: &Row, _, cx| match &row.slot {
+        Slot::Entry { .. } if row.is_dir() => forge.toggle_dir(row.path.clone(), cx),
+        Slot::Entry { oid, .. } => forge.open_file(row.path.clone(), oid.clone(), cx),
+        Slot::Loading | Slot::Failed(_) => {}
+    }));
+    let count = rows.len();
+    let paint = move |index: usize| -> AnyElement {
+        let entry = &rows[index];
         let indent = px(8. + entry.depth as f32 * 14.);
-        let (kind, oid) = match entry.slot {
-            Slot::Entry { kind, oid } => (kind, oid),
+        let kind = match &entry.slot {
+            Slot::Entry { kind, .. } => *kind,
             Slot::Loading | Slot::Failed(_) => {
-                let text = match entry.slot {
-                    Slot::Failed(sentence) => sentence,
+                let text = match &entry.slot {
+                    Slot::Failed(sentence) => sentence.clone(),
                     _ => "Reading…".to_owned(),
                 };
-                list = list.child(div().pl(indent + px(18.)).py_1().child(quiet(text, theme)));
-                continue;
+                // a row's height, so a virtual tree measures one and knows all
+                return div()
+                    .min_h(px(26.))
+                    .flex()
+                    .items_center()
+                    .pl(indent + px(18.))
+                    .child(quiet(text, &theme))
+                    .into_any_element();
             }
         };
         let is_dir = kind == EntryKind::Directory;
-        let expanded = is_dir && forge.nav().expanded.contains(&entry.path);
+        let expanded = is_dir && expanded.contains(&entry.path);
         let glyph = match kind {
             EntryKind::Directory if expanded => "▾",
             EntryKind::Directory => "▸",
@@ -125,22 +132,15 @@ fn tree(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
             EntryKind::Symlink => "↪",
             EntryKind::Executable | EntryKind::File => "",
         };
-        let press = cx.listener({
-            let path = entry.path.clone();
-            move |forge, _: &ClickEvent, _, cx| {
-                if is_dir {
-                    forge.toggle_dir(path.clone(), cx)
-                } else {
-                    forge.open_file(path.clone(), oid.clone(), cx)
-                }
-            }
-        });
+        let press = press.clone();
+        let row = entry.clone();
         // A row is pressed, never focused: the list holds focus, so Enter
         // reaches the tree's key handler alone and not a focused row too.
         let selected = open.as_deref() == Some(&entry.path[..]);
-        let cursor = forge.nav().cursor.as_deref() == Some(&entry.path[..]);
+        let cursor = cursor.as_deref() == Some(&entry.path[..]);
         let mut line = div()
             .id(id(format!("forge-tree-{}", path_text(&entry.path))))
+            .w_full()
             .flex()
             .items_center()
             .gap_1()
@@ -151,7 +151,9 @@ fn tree(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
             .aria_level(entry.depth + 1)
             .aria_selected(selected)
             .hover(|style| style.bg(theme.hover))
-            .on_click(press)
+            .on_click(move |_: &ClickEvent, window: &mut Window, app: &mut App| {
+                press(&row, window, app)
+            })
             .child(
                 div()
                     .w(px(12.))
@@ -160,7 +162,7 @@ fn tree(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
                     .text_color(theme.muted)
                     .child(glyph),
             )
-            .child(div().flex_1().truncate().child(entry.name));
+            .child(div().flex_1().truncate().child(entry.name.clone()));
         if is_dir {
             line = line.aria_expanded(expanded);
         }
@@ -169,8 +171,46 @@ fn tree(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
         } else if cursor {
             line = line.bg(theme.hover);
         }
-        list = list.child(line);
-    }
+        line.into_any_element()
+    };
+    // A tree that fits is drawn whole; one that may overflow is a virtual
+    // list, whose scroll handle keeps the keyboard cursor in view. Half the
+    // window is a safe guess at the pane's height: over it costs nothing.
+    let list = if count as f32 * 26. <= forge.layout.height / 2. {
+        let mut list = div()
+            .id(id("forge-tree-list"))
+            .flex_1()
+            .min_h(px(0.))
+            .overflow_y_scroll()
+            .flex()
+            .flex_col();
+        for index in 0..count {
+            list = list.child(paint(index));
+        }
+        list.into_any_element()
+    } else {
+        uniform_list(
+            id("forge-tree-list"),
+            count,
+            move |range: Range<usize>, _, _| range.map(&paint).collect::<Vec<_>>(),
+        )
+        .track_scroll(&forge.tree_scroll)
+        .flex_1()
+        .min_h(px(0.))
+        .into_any_element()
+    };
+    let list = div()
+        .id(id("forge-tree-rows"))
+        .flex_1()
+        .min_h(px(0.))
+        .flex()
+        .flex_col()
+        .pb_2()
+        .role(Role::Tree)
+        .aria_label("Files")
+        .focusable()
+        .on_key_down(pressed)
+        .child(list);
     column.child(list).into_any_element()
 }
 

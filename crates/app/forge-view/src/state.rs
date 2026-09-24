@@ -54,6 +54,8 @@ pub struct Forge {
     #[serde(skip)]
     pub(crate) log_scroll: UniformListScrollHandle,
     #[serde(skip)]
+    pub(crate) tree_scroll: UniformListScrollHandle,
+    #[serde(skip)]
     pub(crate) next_pending: u64,
 }
 
