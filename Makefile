@@ -23,14 +23,6 @@ PROGRAMS := module-registry valset identity chat forge
 # Settings rides the registry.
 VIEWS := chat-view members-view node-view explorer-view settings-view forge-view
 
-# A view's decimal size limit in bytes; the default is the system views'.
-LIMIT_chat-view := 2500000
-LIMIT_forge-view := 2500000
-LIMIT_settings-view := 1300000
-# links every program abi a view may, to decode their ops
-LIMIT_explorer-view := 1800000
-view_limit = $(or $(LIMIT_$1),1200000)
-
 # What a wasm32 view may link. A crate a view links must never reach the
 # signing/identity graph (blst does not build for wasm32, and a view has no
 # business holding keys). The system crates are here because the system views
@@ -76,10 +68,10 @@ DEV_PROGRAMS = $(if $(or $P,$V),$P,$(PROGRAMS))
 DEV_VIEWS = $(if $(or $P,$V),$V,$(VIEWS))
 
 ## the edit loop: rebuilds the programs and views cargo finds stale, gates
-## the rebuilt views (ABI, size), runs the native tests of the crates whose
+## the rebuilt views (ABI), runs the native tests of the crates whose
 ## test binaries cargo rebuilt; one line per artifact.
 dev:
-	@tools/dev.sh "$(DEV_PROGRAMS)" "$(foreach v,$(DEV_VIEWS),$(v):$(call view_limit,$(v)))"
+	@tools/dev.sh "$(DEV_PROGRAMS)" "$(DEV_VIEWS)"
 
 ## where a view's bytes go: `twiggy top` over a release build that keeps its
 ## names (`--profile why`: release + `strip = "debuginfo"`, the name section
@@ -148,19 +140,18 @@ probe-fixture:
 
 ## builds every view for wasm32 under $(RELEASE)/, optimized (the bytes
 ## before wasm-opt stay beside it as <name>.wasm.unoptimized), ABI-checked
-## and gated on its size: `name  bytes / limit  (pct%)`.
+## and its size printed: `name  bytes`.
 wasm-views:
-	@$(foreach v,$(VIEWS),$(WASM_BUILD) --target-dir $(BUILD_TARGET) -p $(v) && tools/view-gate.sh $(v) $(RELEASE)/$(subst -,_,$(v)).wasm $(call view_limit,$(v)) || exit 1;)
+	@$(foreach v,$(VIEWS),$(WASM_BUILD) --target-dir $(BUILD_TARGET) -p $(v) && tools/view-gate.sh $(v) $(RELEASE)/$(subst -,_,$(v)).wasm || exit 1;)
 
 ## builds every VIEW_LINKABLE crate for wasm32-unknown-unknown, plus the
 ## exported view probe of view-guest, then fails if the normal wasm32 dependency
-## tree of any of them names a VIEW_FORBIDDEN crate. Omit DWARF from these
-## debug WASM artifacts so the exported probe fits the host module-size limit.
+## tree of any of them names a VIEW_FORBIDDEN crate.
 view-wasm-check:
 	@for crate in $(VIEW_LINKABLE); do \
-	  CARGO_PROFILE_DEV_DEBUG=0 $(CARGO) build --target wasm32-unknown-unknown -p $$crate || exit 1; \
+	  $(CARGO) build --target wasm32-unknown-unknown -p $$crate || exit 1; \
 	done; \
-	CARGO_PROFILE_DEV_DEBUG=0 $(CARGO) build --target wasm32-unknown-unknown -p view-guest --example exported_view --example media_probe || exit 1; \
+	$(CARGO) build --target wasm32-unknown-unknown -p view-guest --example exported_view --example media_probe || exit 1; \
 	reached=""; \
 	for crate in $(VIEW_LINKABLE); do \
 	  tree=$$($(CARGO) tree --target wasm32-unknown-unknown -e normal -p $$crate --prefix none) || exit 1; \

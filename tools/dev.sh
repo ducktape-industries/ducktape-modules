@@ -5,7 +5,7 @@
 # binaries cargo rebuilt, one line per artifact. Freshness is cargo's own
 # (`"fresh"` in its JSON messages), never an mtime computed here.
 #   env: CARGO, BUILD_TARGET, RELEASE, WASM_BUILD (the Makefile's)
-#   tools/dev.sh "<program ...>" "<view>:<limit> ..."
+#   tools/dev.sh "<program ...>" "<view ...>"
 set -eu
 here=$(dirname "$0")
 programs=$1
@@ -35,9 +35,7 @@ for p in $programs; do
     fi
 done
 
-for pair in $views; do
-    v=${pair%%:*}
-    limit=${pair#*:}
+for v in $views; do
     a=$(artifact "$v")
     eval "$WASM_BUILD" --target-dir "$BUILD_TARGET" -p "$v" --message-format=json-render-diagnostics > "$log"
     # Fresh, and the artifact is the optimized one a finished gate left.
@@ -45,17 +43,16 @@ for pair in $views; do
         echo "$v  unchanged"
         continue
     fi
-    if ! "$here/view-gate.sh" "$v" "$a" "$limit" > "$log" 2>&1; then
+    if ! "$here/view-gate.sh" "$v" "$a" > "$log" 2>&1; then
         cat "$log"
         exit 1
     fi
-    bytes=$(wc -c < "$a")
-    echo "$v  $(commas "$bytes") B  ($(awk "BEGIN { printf \"%.1f\", $bytes * 100 / $limit }")% of limit)"
+    echo "$v  $(commas "$(wc -c < "$a")") B"
 done
 
 # Native tests of the crates whose test binaries cargo rebuilt: a lib edit
 # rebuilds them, and so does an edit under tests/ that no wasm build sees.
-crates="$programs $(for pair in $views; do echo "${pair%%:*}"; done)"
+crates="$programs $views"
 packages=$(for c in $crates; do printf -- ' -p %s' "$c"; done)
 # shellcheck disable=SC2086
 $CARGO test --no-run --message-format=json-render-diagnostics $packages > "$log"

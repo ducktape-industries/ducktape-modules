@@ -97,12 +97,12 @@ The tree vocabulary, manifests, and five-function Wasm ABI are unchanged.
 
 1. Edit a program or a view.
 2. `make dev`: rebuilds what cargo finds stale (one line per artifact:
-   `name  1,181,498 B  (98.5% of limit)` or `unchanged`), gates the rebuilt
-   views (ABI, size) and runs the native tests of the crates cargo rebuilt.
+   `name  1,181,498 B` or `unchanged`), gates the rebuilt
+   views (ABI) and runs the native tests of the crates cargo rebuilt.
    `P=forge` / `V=forge-view` narrow it to one.
 3. `kit build NAME && kit up NAME` in qa packs and founds these artifacts,
    then the app opens on them.
-4. A view over its limit: `make wasm-why V=members-view` (`twiggy top`, `cargo install twiggy`).
+4. Where a view's bytes go: `make wasm-why V=members-view` (`twiggy top`, `cargo install twiggy`).
 5. A new module: `make new-program NAME=x`, then `make new-view NAME=x-view`;
    each prints what to do next. `make test` runs everything; the founding
    suite builds the boot set itself.
@@ -122,10 +122,8 @@ bytes do not depend on the checkout.
 
 View releases require `wasm-tools`, Python 3, and
 [Binaryen wasm-opt 132](https://github.com/WebAssembly/binaryen/releases/tag/version_132).
-`make wasm-views` builds, optimizes, and checks the exact guest ABI and decimal
-size limits (`LIMIT_<view>` in the Makefile: 1,200,000 bytes for the system
-views, 1,300,000 for Settings, 2,500,000 for Chat and Forge), printing
-`name  bytes / limit  (pct%)`. The bytes before wasm-opt stay beside each
+`make wasm-views` builds, optimizes, and checks the exact guest ABI, printing
+`name  bytes`. The bytes before wasm-opt stay beside each
 artifact as `<name>.wasm.unoptimized`. `WASM_OPT=/path/to/wasm-opt` can
 select the pinned optimizer. It preserves the view manifest and never
 supplies imports or removes capabilities. `make wasm-why V=<view>` builds the
