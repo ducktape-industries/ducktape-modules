@@ -182,6 +182,14 @@ fn a_linked_program_s_op_reads_as_its_described_fields() {
     assert_eq!(field(&op, "text").as_deref(), Some("hello there"));
     assert_eq!(field(&op, "thread").as_deref(), Some("—"));
 
+    // a dm room's id is not a channel name: it reads as the two accounts
+    let dm = decode::decode("chat", &post(&chat::dm_channel_id(2, 1), "ping"));
+    assert_eq!(dm.title, "Direct message");
+    assert_eq!(
+        field(&dm, "channel").as_deref(),
+        Some("DM · account 1 ↔ account 2")
+    );
+
     let push = forge::Op::Push {
         repo: "app".into(),
         request: vec![7; 100],

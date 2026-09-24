@@ -158,7 +158,8 @@ impl Chat {
             .into_iter()
             .map(|row| chat_message(row, names))
             .collect();
-        crate::client::mark_message_groups(&mut messages);
+        let boundary = (pane == Pane::Timeline).then_some(self.reads.boundary);
+        crate::client::mark_message_groups(&mut messages, boundary);
         messages
     }
 

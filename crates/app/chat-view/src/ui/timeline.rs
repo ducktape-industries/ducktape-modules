@@ -143,14 +143,10 @@ pub fn list(chat: &Chat, pane: Pane, cx: &mut Context<Chat>, theme: &Theme) -> i
         let pane_for_items = pane;
         let list_theme = *theme;
         let list_messages = messages.clone();
-        let unread_seq = (pane == Pane::Timeline && chat.reads.boundary > 0)
-            .then(|| {
-                list_messages
-                    .iter()
-                    .find(|message| !message.pending && message.seq > chat.reads.boundary)
-                    .map(|message| message.seq)
-            })
-            .flatten();
+        let unread_seq = crate::client::unread_seq(
+            &list_messages,
+            (pane == Pane::Timeline).then_some(chat.reads.boundary),
+        );
         let list = gpui_list(
             state,
             cx.processor(move |chat, index: usize, window, cx| {
