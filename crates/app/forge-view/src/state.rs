@@ -55,6 +55,8 @@ pub struct Forge {
     pub(crate) tree_scroll: UniformListScrollHandle,
     #[serde(skip)]
     pub(crate) next_pending: u64,
+    #[serde(skip)]
+    pub(crate) blob_cache: crate::ui::code::BlobCache,
 }
 
 /// Where the reader is. One flat record: every screen is a projection of it,

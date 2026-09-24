@@ -3,6 +3,7 @@
 //! numbered gutter, a markdown file rendered; a binary or oversize blob is
 //! the header the program returned and nothing else.
 use ducktape_view_guest::design;
+use std::cell::RefCell;
 use std::ops::Range;
 use std::rc::Rc;
 
@@ -264,7 +265,7 @@ fn body(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
         .child(header);
     let query = Query::Blob {
         repo: forge.repo_name(),
-        oid,
+        oid: oid.clone(),
         range: None,
     };
     let reply = match staged(forge, &query, "forge-blob", "Reading the file…", cx, theme) {
@@ -283,13 +284,13 @@ fn body(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
             .overflow_y_scroll()
             .px_5()
             .py_4()
-            .child(markdown::render(
+            .child(markdown::render_blocks(
                 "forge-blob-markdown",
-                &String::from_utf8_lossy(&blob.bytes),
+                &forge.blob_cache.doc(&oid, &blob.bytes),
                 theme,
             ))
             .into_any_element(),
-        Content::Text => lines(&name, &blob.bytes, theme),
+        Content::Text => lines(forge.blob_cache.lines(&oid, &name, &blob.bytes), theme),
         Content::Binary => empty_state(
             id("forge-blob-binary"),
             "Binary file",
@@ -363,7 +364,7 @@ pub(crate) fn readme(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
     };
     let query = Query::Blob {
         repo: forge.repo_name(),
-        oid,
+        oid: oid.clone(),
         range: None,
     };
     let reply = match staged(
@@ -381,9 +382,9 @@ pub(crate) fn readme(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
         return page.into_any_element();
     };
     let body = if matches!(blob.content, Content::Text) {
-        markdown::render(
+        markdown::render_blocks(
             "forge-readme-body",
-            &String::from_utf8_lossy(&blob.bytes),
+            &forge.blob_cache.doc(&oid, &blob.bytes),
             theme,
         )
     } else {
@@ -415,13 +416,59 @@ pub(crate) fn readme(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
     .into_any_element()
 }
 
+/// A text blob's rows and their highlight tokens.
+pub(crate) struct Lines {
+    rows: Vec<String>,
+    tokens: Vec<Vec<(Range<usize>, highlight::Token)>>,
+}
+
+/// The open blob decoded once: its lines and tokens (by blob id and name,
+/// since the name picks the language) and its markdown blocks (by blob id),
+/// so a frame redraws a file without decoding and tokenizing it again. One
+/// entry each: the pane shows one file at a time.
+#[derive(Default)]
+pub(crate) struct BlobCache {
+    lines: RefCell<Option<(String, String, Rc<Lines>)>>,
+    doc: RefCell<Option<(String, Rc<Vec<markdown::Block>>)>>,
+}
+
+impl BlobCache {
+    fn lines(&self, oid: &str, name: &str, bytes: &[u8]) -> Rc<Lines> {
+        let mut slot = self.lines.borrow_mut();
+        if let Some((o, n, lines)) = slot.as_ref()
+            && o == oid
+            && n == name
+        {
+            return lines.clone();
+        }
+        let text = String::from_utf8_lossy(bytes);
+        let rows: Vec<String> = text.split('\n').map(str::to_owned).collect();
+        let tokens = highlight::tokens(name, &rows.iter().map(String::as_str).collect::<Vec<_>>());
+        let lines = Rc::new(Lines { rows, tokens });
+        *slot = Some((oid.to_owned(), name.to_owned(), lines.clone()));
+        lines
+    }
+
+    fn doc(&self, oid: &str, bytes: &[u8]) -> Rc<Vec<markdown::Block>> {
+        let mut slot = self.doc.borrow_mut();
+        if let Some((o, blocks)) = slot.as_ref()
+            && o == oid
+        {
+            return blocks.clone();
+        }
+        let blocks = Rc::new(markdown::parse(&String::from_utf8_lossy(bytes)));
+        *slot = Some((oid.to_owned(), blocks.clone()));
+        blocks
+    }
+}
+
 /// Source lines, highlighted, numbered in a mono gutter.
-fn lines(name: &str, bytes: &[u8], theme: &Theme) -> AnyElement {
-    let text = String::from_utf8_lossy(bytes).into_owned();
-    let rows: Vec<String> = text.split('\n').map(str::to_owned).collect();
-    let tokens = highlight::tokens(name, &rows.iter().map(String::as_str).collect::<Vec<_>>());
-    let count = rows.len();
-    let gutter = count.to_string().len() as f32 * 7.5 + 16.;
+fn lines(lines: Rc<Lines>, theme: &Theme) -> AnyElement {
+    let count = lines.rows.len();
+    // JetBrains Mono advances 0.6em a digit (no text metrics reach a view),
+    // plus the gutter's padding and edge
+    let digit = design::type_scale::SECONDARY as f32 * 0.6;
+    let gutter = count.to_string().len() as f32 * digit + 16.;
     let theme = *theme;
     crate::ui::components::rows("forge-blob-lines", count, None, None, move |index| {
         div()
@@ -444,8 +491,8 @@ fn lines(name: &str, bytes: &[u8], theme: &Theme) -> AnyElement {
             )
             .child(highlight::line(
                 id(format!("forge-blob-text-{}", index + 1)),
-                &rows[index],
-                &tokens[index],
+                &lines.rows[index],
+                &lines.tokens[index],
                 &theme,
             ))
             .into_any_element()
@@ -461,4 +508,22 @@ pub(crate) fn join(dir: &[u8], name: &[u8]) -> Vec<u8> {
     path.push(b'/');
     path.extend_from_slice(name);
     path
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BlobCache;
+    use std::rc::Rc;
+
+    #[test]
+    fn a_blob_is_decoded_once_per_id_and_name() {
+        let cache = BlobCache::default();
+        let first = cache.lines("a1", "x.rs", b"fn a() {}\n");
+        assert!(Rc::ptr_eq(&first, &cache.lines("a1", "x.rs", b"")));
+        assert!(!Rc::ptr_eq(&first, &cache.lines("a1", "x.toml", b"")));
+        assert!(!Rc::ptr_eq(&first, &cache.lines("b2", "x.toml", b"")));
+        let doc = cache.doc("a1", b"# Hi");
+        assert!(Rc::ptr_eq(&doc, &cache.doc("a1", b"")));
+        assert!(!Rc::ptr_eq(&doc, &cache.doc("b2", b"# Hi")));
+    }
 }

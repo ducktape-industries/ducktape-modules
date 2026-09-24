@@ -1,7 +1,7 @@
 //! A small embedded highlighter: one hand-written scanner over a per-language
 //! table (comments, strings, keywords), line by line, carrying only whether a
-//! block comment is still open. No grammar, no dependency — a view ships
-//! under a size limit, and colour is a reading aid, not a parser.
+//! block comment is still open. No grammar, no dependency: colour is a reading
+//! aid, not a parser, and a table per language is all it needs.
 use ducktape_view_guest::design;
 use std::ops::Range;
 
