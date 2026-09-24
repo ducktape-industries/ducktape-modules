@@ -203,3 +203,73 @@ pub fn account(
         )),
     }
 }
+
+/// An op as a person reads it: a title and its fields.
+pub fn describe(op: &Op) -> (String, Vec<(&'static str, String)>) {
+    let account = |number: &AccountNumber| ("account", number.to_string());
+    match op {
+        Op::Create { name, scheme } => (
+            format!("Create · {name}"),
+            vec![("name", name.clone()), ("scheme", format!("{scheme:?}"))],
+        ),
+        Op::AddKey {
+            scheme,
+            label,
+            consent,
+        } => (
+            "Add key".into(),
+            vec![
+                ("scheme", format!("{scheme:?}")),
+                ("label", label.clone().unwrap_or_else(|| "—".into())),
+                ("key", abi::preview(&consent.key)),
+                account(&consent.account),
+                ("expires at", consent.expires_at.to_string()),
+            ],
+        ),
+        Op::RemoveKey { key } => ("Remove key".into(), vec![("key", abi::preview(key))]),
+        Op::SetName {
+            account: number,
+            name,
+        } => (
+            format!("Set name · {name}"),
+            vec![account(number), ("name", name.clone())],
+        ),
+        Op::SetProfile {
+            account: number,
+            avatar,
+            bio,
+        } => (
+            "Set profile".into(),
+            vec![
+                account(number),
+                (
+                    "avatar",
+                    avatar.map_or_else(|| "—".into(), |blob| abi::hex(blob.digest())),
+                ),
+                ("bio", bio.clone().unwrap_or_else(|| "—".into())),
+            ],
+        ),
+        Op::CreateProgram { name, controller } => (
+            format!("Create program · {name}"),
+            vec![
+                ("name", name.clone()),
+                ("controller", controller.to_string()),
+            ],
+        ),
+        Op::SetStanding {
+            account: number,
+            standing,
+        } => (
+            "Set standing".into(),
+            vec![account(number), ("standing", format!("{standing:?}"))],
+        ),
+        Op::TransferControl {
+            account: number,
+            to,
+        } => (
+            "Transfer control".into(),
+            vec![account(number), ("to", to.to_string())],
+        ),
+        Op::Revoke { account: number } => ("Revoke".into(), vec![account(number)]),
+    }
+}

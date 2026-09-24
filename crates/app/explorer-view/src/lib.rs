@@ -106,11 +106,18 @@ pub struct TxRow {
     pub signer: Vec<u8>,
     pub seq: u64,
     pub target: String,
-    /// the payload decoded once, as it landed
-    pub op: Op,
+    /// the payload as it landed, decoded only for the rows on screen
+    // ponytail: kept whole, so a snapshot carries a big push too; clip here if snapshots grow
+    pub payload: Vec<u8>,
 }
 
-/// A block read into rows, its transactions decoded.
+impl TxRow {
+    pub fn op(&self) -> Op {
+        decode::decode(&self.target, &self.payload)
+    }
+}
+
+/// A block read into rows.
 fn rows(block: Block) -> (BlockRow, Vec<TxRow>) {
     let row = BlockRow {
         height: block.height,
@@ -126,7 +133,7 @@ fn rows(block: Block) -> (BlockRow, Vec<TxRow>) {
         .into_iter()
         .rev()
         .map(|tx| TxRow {
-            op: decode::decode(&tx.target, &tx.payload),
+            payload: tx.payload,
             hash: tx.hash,
             height: block.height,
             time: block.time,

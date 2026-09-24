@@ -166,20 +166,18 @@ fn ready() -> (TestAppContext, Rc<RefCell<u64>>) {
 // ---------- decoding ----------
 
 #[test]
-fn a_linked_program_s_op_reads_as_a_field_table() {
-    let op = decode::decode("chat", &post("design", "hello there"));
-    assert_eq!(op.title, "Post in #design");
-    assert_eq!(op.kind, "chat::PostMessage");
-    let field = |name: &str| {
+fn a_linked_program_s_op_reads_as_its_described_fields() {
+    let field = |op: &decode::Op, name: &str| {
         op.fields
             .iter()
-            .find(|(key, _)| key == name)
-            .map(|(_, v)| v.as_str())
+            .find(|(key, _)| *key == name)
+            .map(|(_, v)| v.clone())
     };
-    assert_eq!(field("channel_id"), Some("design"));
-    assert_eq!(field("text"), Some("hello there"));
-    assert_eq!(field("thread"), Some("—"));
-    assert_eq!(field("blocks"), None, "blocks read as their text");
+    let op = decode::decode("chat", &post("design", "hello there"));
+    assert_eq!(op.title, "Post in #design");
+    assert_eq!(field(&op, "channel").as_deref(), Some("#design"));
+    assert_eq!(field(&op, "text").as_deref(), Some("hello there"));
+    assert_eq!(field(&op, "thread").as_deref(), Some("—"));
 
     let push = forge::Op::Push {
         repo: "app".into(),
@@ -187,28 +185,20 @@ fn a_linked_program_s_op_reads_as_a_field_table() {
     };
     let op = decode::decode("forge", &borsh::to_vec(&push).unwrap());
     assert_eq!(op.title, "Push · app");
-    assert!(
-        op.fields
-            .contains(&("request".into(), "100 bytes · 0707070707070707…".into())),
-        "{op:?}"
+    assert_eq!(
+        field(&op, "request").as_deref(),
+        Some("100 bytes · 0707070707070707…")
     );
 
-    // a payload too big to format whole reads as cut, not as a trap
+    // a big payload counts its real length, not what a formatter got through
     let huge = forge::Op::Push {
         repo: "app".into(),
         request: vec![0x50; 1 << 20],
     };
     let op = decode::decode("forge", &borsh::to_vec(&huge).unwrap());
-    assert_eq!(op.title, "Push · app");
-    let request = &op
-        .fields
-        .iter()
-        .find(|(key, _)| key == "request")
-        .unwrap()
-        .1;
-    assert!(
-        request.starts_with("over ") && request.ends_with("bytes · 5050505050505050…"),
-        "{request}"
+    assert_eq!(
+        field(&op, "request").as_deref(),
+        Some("1048576 bytes · 5050505050505050…")
     );
 
     let create = identity::Op::Create {
@@ -217,27 +207,23 @@ fn a_linked_program_s_op_reads_as_a_field_table() {
     };
     let op = decode::decode("identity", &borsh::to_vec(&create).unwrap());
     assert_eq!(op.title, "Create · Ada, \"the first\"");
-    assert!(op.fields.contains(&("scheme".into(), "Ed25519".into())));
+    assert_eq!(field(&op, "scheme").as_deref(), Some("Ed25519"));
 
-    // a tuple variant around a struct reads as the struct's fields
     let schedule = registry::Op::Schedule(registry::Scheduled {
         height: 7,
         change: registry::Change::Remove("forge".into()),
     });
     let op = decode::decode(registry::PROGRAM, &borsh::to_vec(&schedule).unwrap());
-    assert_eq!(op.kind, "module-registry::Schedule");
-    assert!(op.fields.contains(&("height".into(), "7".into())), "{op:?}");
-    assert!(
-        op.fields
-            .contains(&("change".into(), "Remove(\"forge\")".into()))
-    );
+    assert_eq!(op.title, "Schedule · forge");
+    assert_eq!(field(&op, "height").as_deref(), Some("7"));
+    assert_eq!(field(&op, "change").as_deref(), Some("Remove"));
 }
 
 #[test]
 fn an_unknown_program_or_a_bad_payload_reads_as_bytes() {
     let op = decode::decode("mystery", &[1, 2, 3, 4]);
     assert_eq!(op.title, "mystery · 4 bytes");
-    assert_eq!(op.fields, vec![("bytes".into(), "01020304".into())]);
+    assert_eq!(op.fields, vec![("bytes", "01020304".into())]);
     let op = decode::decode("chat", &[0xff; 3]);
     assert_eq!(op.title, "chat · 3 bytes");
 }
@@ -361,7 +347,7 @@ fn a_transaction_shows_its_block_signer_and_operation() {
     assert!(cx.has_text(&abi::hex(&[0xa1; 32])));
     assert!(cx.has_text("#3 laptop · ed25519 0101…0101"), "{texts:?}");
     assert!(cx.has_text("code abab…abab"), "{texts:?}");
-    assert!(cx.has_text("PostMessage") && cx.has_text("chat::PostMessage"));
+    assert!(cx.has_text("channel") && cx.has_text("#design"));
     assert!(cx.has_text("text") && cx.has_text("hello there"));
     assert!(
         !texts

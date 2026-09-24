@@ -406,9 +406,10 @@ fn tx_row(
 ) -> impl IntoElement {
     let id = SharedString::from(format!("explorer-tx-{}", abi::hex(&tx.hash)));
     let now = view.chain.now();
+    let title = tx.op().title;
     row(
         ElementId::Name(id),
-        tx.op.title.clone(),
+        title.clone(),
         Route::Tx(tx.hash),
         cx,
         theme,
@@ -426,7 +427,7 @@ fn tx_row(
                     .text_size(px(11.))
                     .text_color(theme.muted),
             )
-            .child(div().truncate().child(tx.op.title.clone())),
+            .child(div().truncate().child(title)),
     )
     .children(who.then(|| signer(view, &tx.signer, theme)))
     .children(height.then(|| mono(grouped(tx.height)).text_color(theme.muted)))
@@ -909,10 +910,7 @@ fn tx(view: &Explorer, hash: &[u8; 32], cx: Cx, theme: &Theme) -> AnyElement {
             let tail = &code[code.len().saturating_sub(4)..];
             mono(format!("code {}…{tail}", &code[..4.min(code.len())])).text_color(theme.faint)
         }));
-    let (variant, path) = match tx.op.kind.split_once("::") {
-        Some((_, variant)) => (variant.to_string(), tx.op.kind.clone()),
-        None => (tx.op.title.clone(), String::new()),
-    };
+    let op = tx.op();
     let operation = div()
         .id("explorer-operation")
         .mx_5()
@@ -924,26 +922,17 @@ fn tx(view: &Explorer, hash: &[u8; 32], cx: Cx, theme: &Theme) -> AnyElement {
         .bg(theme.surface)
         .border_1()
         .border_color(theme.border)
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .gap_2()
-                .mb_1()
-                .child(div().font_weight(FontWeight::SEMIBOLD).child(variant))
-                .child(mono(path).text_size(px(11.)).text_color(theme.faint)),
-        )
-        .children(tx.op.fields.iter().map(|(name, value)| {
+        .children(op.fields.into_iter().map(|(name, value)| {
             div()
                 .flex()
                 .gap_4()
                 .child(
-                    mono(name.clone())
+                    mono(name)
                         .w(px(90.))
                         .flex_shrink_0()
                         .text_color(theme.muted),
                 )
-                .child(div().flex_1().child(value.clone()))
+                .child(div().flex_1().child(value))
         }));
     let copy = copy_button(view, &["tx", &abi::hex(hash)], cx, theme);
     div()
@@ -954,11 +943,7 @@ fn tx(view: &Explorer, hash: &[u8; 32], cx: Cx, theme: &Theme) -> AnyElement {
                 .items_center()
                 .border_b_1()
                 .border_color(theme.border)
-                .child(
-                    div()
-                        .flex_1()
-                        .child(titled("Transaction", tx.op.title.clone(), theme)),
-                )
+                .child(div().flex_1().child(titled("Transaction", op.title, theme)))
                 .children(copy.map(|copy| div().px_5().child(copy))),
         )
         .child(field(

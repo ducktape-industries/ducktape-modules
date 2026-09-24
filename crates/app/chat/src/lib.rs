@@ -296,3 +296,130 @@ pub use queries::query;
 pub use wire::*;
 #[cfg(test)]
 mod tests;
+
+/// An op as a person reads it: a title and its fields.
+pub fn describe(op: &ChatMsg) -> (String, Vec<(&'static str, String)>) {
+    let party = |party: &Party| match party {
+        Party::Account(number) => format!("account {number}"),
+        Party::Key(key) => abi::preview(key),
+        Party::Module(module) => module.clone(),
+        Party::System => "system".into(),
+    };
+    let (title, channel, fields) = match op {
+        ChatMsg::CreateChannel {
+            channel_id,
+            name,
+            post_policy,
+        } => (
+            "Create channel",
+            channel_id,
+            vec![
+                ("name", name.clone()),
+                ("posting", format!("{post_policy:?}")),
+            ],
+        ),
+        ChatMsg::CreateVoiceChannel { channel_id, name } => (
+            "Create voice channel",
+            channel_id,
+            vec![("name", name.clone())],
+        ),
+        ChatMsg::CreateDmChannel { counterpart, name } => {
+            return (
+                format!("Open a DM with account {counterpart}"),
+                vec![
+                    ("with", format!("account {counterpart}")),
+                    ("name", name.clone()),
+                ],
+            );
+        }
+        ChatMsg::RenameChannel { channel_id, name } => {
+            ("Rename channel", channel_id, vec![("name", name.clone())])
+        }
+        ChatMsg::SetChannelArchived {
+            channel_id,
+            archived,
+        } => (
+            if *archived {
+                "Archive channel"
+            } else {
+                "Unarchive channel"
+            },
+            channel_id,
+            vec![],
+        ),
+        ChatMsg::PostMessage {
+            channel_id,
+            message_id,
+            blocks,
+            thread,
+        } => {
+            return (
+                format!("Post in #{channel_id}"),
+                vec![
+                    ("channel", format!("#{channel_id}")),
+                    ("text", plain_text(blocks)),
+                    ("message", message_id.clone()),
+                    (
+                        "thread",
+                        thread.map_or_else(|| "—".into(), |t| t.to_string()),
+                    ),
+                ],
+            );
+        }
+        ChatMsg::EditMessage {
+            channel_id,
+            seq,
+            blocks,
+            ..
+        } => (
+            "Edit message",
+            channel_id,
+            vec![("seq", seq.to_string()), ("text", plain_text(blocks))],
+        ),
+        ChatMsg::DeleteMessage { channel_id, seq } => {
+            ("Delete message", channel_id, vec![("seq", seq.to_string())])
+        }
+        ChatMsg::AddReaction {
+            channel_id,
+            seq,
+            emoji,
+        } => (
+            "React",
+            channel_id,
+            vec![("seq", seq.to_string()), ("emoji", emoji.clone())],
+        ),
+        ChatMsg::RemoveReaction {
+            channel_id,
+            seq,
+            emoji,
+        } => (
+            "Remove reaction",
+            channel_id,
+            vec![("seq", seq.to_string()), ("emoji", emoji.clone())],
+        ),
+        ChatMsg::SetMembership {
+            channel_id,
+            party: who,
+            member,
+        } => (
+            if *member {
+                "Add member"
+            } else {
+                "Remove member"
+            },
+            channel_id,
+            vec![("party", party(who))],
+        ),
+        ChatMsg::JoinHuddle {
+            channel_id, node, ..
+        } => (
+            "Join huddle",
+            channel_id,
+            vec![("node", abi::preview(node))],
+        ),
+        ChatMsg::LeaveHuddle { channel_id } => ("Leave huddle", channel_id, vec![]),
+    };
+    let mut all = vec![("channel", format!("#{channel}"))];
+    all.extend(fields);
+    (format!("{title} · #{channel}"), all)
+}

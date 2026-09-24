@@ -77,3 +77,32 @@ pub enum Reply {
     Program { height: u64, entry: Option<Entry> },
     Views(Vec<View>),
 }
+
+/// An op as a person reads it: a title and its fields.
+pub fn describe(op: &Op) -> (String, Vec<(&'static str, String)>) {
+    match op {
+        Op::Publish { body } => ("Publish".into(), vec![("body", abi::preview(body))]),
+        Op::Schedule(Scheduled { height, change }) => {
+            let (verb, code) = match change {
+                Change::Set(entry) => ("Set", Some(entry.code)),
+                Change::Remove(_) => ("Remove", None),
+                Change::SetView(view) => ("Set view", Some(view.view)),
+                Change::RemoveView(_) => ("Remove view", None),
+            };
+            let mut fields = vec![
+                ("change", verb.to_string()),
+                ("program", change.program().to_string()),
+                ("height", height.to_string()),
+            ];
+            fields.extend(code.map(|code| ("code", abi::hex(code.digest()))));
+            if let Change::Set(entry) = change {
+                fields.push(("params", abi::preview(&entry.params)));
+            }
+            (format!("Schedule · {}", change.program()), fields)
+        }
+        Op::Cancel { height, program } => (
+            format!("Cancel · {program}"),
+            vec![("program", program.clone()), ("height", height.to_string())],
+        ),
+    }
+}
