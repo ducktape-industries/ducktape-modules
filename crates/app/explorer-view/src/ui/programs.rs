@@ -33,7 +33,7 @@ pub(super) fn programs(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
                 .text_color(theme.muted)
                 .child(plural(entry.params as u64, "param byte", "param bytes")),
         )
-        .child(mono(short_code(&entry.code)).text_color(theme.muted))
+        .child(mono(design::short_hex(&entry.code)).text_color(theme.muted))
         .into_any_element()
     });
     let running: Vec<_> = running.collect();
@@ -55,56 +55,55 @@ pub(super) fn programs(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
                     .text_color(theme.muted)
                     .child("view only"),
             )
-            .child(mono(short_code(code)).text_color(theme.muted))
+            .child(mono(design::short_hex(code)).text_color(theme.muted))
             .into_any_element()
     });
     let listed: Vec<_> = listed.collect();
-    let scheduled: Vec<_> =
-        network
-            .changes
-            .iter()
-            .enumerate()
-            .map(|(index, scheduled)| {
-                let change = &scheduled.change;
-                let removal = change.code().is_none();
-                div()
-                    .id(ElementId::named_usize("explorer-change", index))
-                    .flex()
-                    .items_center()
-                    .gap_4()
-                    .h(px(40.))
-                    .px_5()
-                    .border_b_1()
-                    .border_color(theme.border)
-                    .child(
-                        div()
-                            .px_1()
-                            .text_size(design::text::CAPTION)
-                            .text_color(if removal {
-                                theme.danger
-                            } else {
-                                theme.accent_foreground
-                            })
-                            .bg(if removal {
-                                theme.danger_soft
-                            } else {
-                                theme.accent_soft
-                            })
-                            .child(change.verb()),
-                    )
-                    .child(mono(change.program().to_string()).flex_1())
-                    .child(
-                        div()
-                            .text_size(design::text::SECONDARY)
-                            .text_color(theme.muted)
-                            .child(format!("at {}", scheduled.height)),
-                    )
-                    .children(change.code().map(|code| {
-                        mono(short_code(&abi::hex(code.digest()))).text_color(theme.muted)
-                    }))
-                    .into_any_element()
-            })
-            .collect();
+    let scheduled: Vec<_> = network
+        .changes
+        .iter()
+        .enumerate()
+        .map(|(index, scheduled)| {
+            let change = &scheduled.change;
+            let removal = change.code().is_none();
+            div()
+                .id(ElementId::named_usize("explorer-change", index))
+                .flex()
+                .items_center()
+                .gap_4()
+                .h(px(40.))
+                .px_5()
+                .border_b_1()
+                .border_color(theme.border)
+                .child(
+                    div()
+                        .px_1()
+                        .text_size(design::text::CAPTION)
+                        .text_color(if removal {
+                            theme.danger
+                        } else {
+                            theme.accent_foreground
+                        })
+                        .bg(if removal {
+                            theme.danger_soft
+                        } else {
+                            theme.accent_soft
+                        })
+                        .child(change.verb()),
+                )
+                .child(mono(change.program().to_string()).flex_1())
+                .child(
+                    div()
+                        .text_size(design::text::SECONDARY)
+                        .text_color(theme.muted)
+                        .child(format!("at {}", scheduled.height)),
+                )
+                .children(change.code().map(|code| {
+                    mono(design::short_hex(&abi::hex(code.digest()))).text_color(theme.muted)
+                }))
+                .into_any_element()
+        })
+        .collect();
     let nothing_scheduled = scheduled.is_empty().then(|| {
         quiet(
             "explorer-no-changes",
@@ -142,12 +141,4 @@ pub(super) fn programs(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
         .children(scheduled)
         .children(nothing_scheduled)
         .into_any_element()
-}
-
-fn short_code(code: &str) -> String {
-    let mut head: String = code.chars().take(12).collect();
-    if code.chars().count() > 12 {
-        head.push('…');
-    }
-    head
 }

@@ -81,29 +81,15 @@ fn bar(view: &Explorer, cx: Cx, theme: &Theme) -> impl IntoElement {
         let active = view.route.tab() == route.tab();
         let go = cx
             .listener(move |view: &mut Explorer, _: &ClickEvent, _, cx| view.go(route.clone(), cx));
-        div()
-            .id(format!("explorer-tab-{}", label.to_lowercase()))
-            .h_full()
-            .flex()
-            .items_center()
-            .px_2()
-            .mx_1()
-            .text_color(if active {
-                theme.foreground
-            } else {
-                theme.muted
-            })
-            .when(active, |tab| {
-                tab.border_b_2()
-                    .border_color(theme.foreground)
-                    .font_weight(FontWeight::MEDIUM)
-            })
-            .hover(|tab| tab.text_color(theme.foreground))
-            .role(Role::Tab)
-            .aria_selected(active)
-            .focusable()
-            .on_click(go)
-            .child(label)
+        design::tab(
+            format!("explorer-tab-{}", label.to_lowercase()),
+            label,
+            active,
+            theme,
+            go,
+        )
+        .h_full()
+        .mx_1()
     });
     div()
         .id("explorer-bar")
@@ -226,21 +212,6 @@ fn row(id: ElementId, label: String, route: Route, cx: Cx, theme: &Theme) -> Sta
         .on_click(go)
 }
 
-fn avatar(name: &str, size: f32, theme: &Theme) -> impl IntoElement {
-    let initial = design::initial(name);
-    div()
-        .size(px(size))
-        .flex_shrink_0()
-        .rounded_full()
-        .flex()
-        .items_center()
-        .justify_center()
-        .bg(theme.surface_raised)
-        .text_color(theme.muted)
-        .text_size(px(size * 0.45))
-        .child(initial)
-}
-
 /// Who signed: the account holding the key, or the key itself.
 fn signer(view: &Explorer, key: &[u8], theme: &Theme) -> impl IntoElement {
     let (name, number) = match view.holder(key) {
@@ -253,7 +224,7 @@ fn signer(view: &Explorer, key: &[u8], theme: &Theme) -> impl IntoElement {
         .gap_2()
         .w(px(180.))
         .flex_shrink_0()
-        .child(avatar(&name, 20., theme))
+        .child(design::avatar(&name, px(20.), theme))
         .child(div().truncate().child(name))
         .children(number.map(|number| {
             mono(format!("#{number}"))

@@ -9,7 +9,7 @@ use std::rc::Rc;
 use ducktape_view_guest::prelude::*;
 
 use crate::Forge;
-use crate::ui::components::{chip, empty_state, id, path_text, quiet};
+use crate::ui::components::{badge, empty_state, id, path_text, quiet};
 use crate::ui::staged;
 use forge::{Content, FileDiff, FileStatus, LineKind, Query, Reply, Side};
 
@@ -279,7 +279,7 @@ fn published_comments(forge: &Forge) -> Vec<Anchored> {
     let mut all = Vec::new();
     for review in &reviews.items {
         let author = names.map_or_else(
-            || crate::state::short(&abi::hex(&review.author)),
+            || crate::ui::components::short_hex(&abi::hex(&review.author)),
             |names| names.key(&review.author),
         );
         let outdated = forge.outdated(&review.draft.commit_oid);
@@ -370,7 +370,7 @@ fn line_row(
                 .text_color(colour),
         );
     if let Some(draft) = &row.draft {
-        body = body.child(chip(
+        body = body.child(badge(
             id(format!("forge-diff-draft-{index}")),
             format!("pending: {draft}"),
             theme.accent_foreground,
@@ -400,7 +400,7 @@ fn line_row(
                 .child(crate::ui::bold(author.clone()))
                 .child(div().flex_1().child(text.clone()))
                 .when(*outdated, |element| {
-                    element.child(chip(
+                    element.child(badge(
                         id(format!("forge-diff-outdated-{index}-{at}")),
                         "outdated",
                         theme.warning,
@@ -512,7 +512,7 @@ pub(crate) fn composer(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) ->
             ))
             .child(
                 crate::ui::components::button(id("forge-comment-save"), "Stage", theme, save)
-                    .primary(true),
+                    .kind(design::Kind::Primary),
             ),
     )
     .into_any_element()

@@ -2,10 +2,10 @@
 //! empty state, heading, quiet line) come from `view_guest::design`.
 use std::ops::Range;
 
+use ducktape_view_guest::UniformListScrollHandle;
 use ducktape_view_guest::design;
-pub(crate) use ducktape_view_guest::design::{button, empty_state, heading};
+pub(crate) use ducktape_view_guest::design::{badge, button, empty_state, heading, short_hex};
 use ducktape_view_guest::prelude::*;
-use ducktape_view_guest::{Hsla, UniformListScrollHandle};
 
 pub(crate) fn id(text: impl Into<String>) -> ElementId {
     ElementId::Name(text.into().into())
@@ -96,41 +96,6 @@ where
     }
 }
 
-#[derive(IntoElement)]
-pub(crate) struct Chip {
-    id: ElementId,
-    label: String,
-    foreground: Hsla,
-    background: Hsla,
-}
-
-pub(crate) fn chip(
-    id: impl Into<ElementId>,
-    label: impl Into<String>,
-    foreground: Hsla,
-    background: Hsla,
-) -> Chip {
-    Chip {
-        id: id.into(),
-        label: label.into(),
-        foreground,
-        background,
-    }
-}
-
-impl RenderOnce for Chip {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
-        div()
-            .id(self.id)
-            .px_1()
-            .py_0p5()
-            .bg(self.background)
-            .text_color(self.foreground)
-            .text_size(design::text::CAPTION)
-            .child(self.label)
-    }
-}
-
 pub(crate) fn loading(id: impl Into<ElementId>, text: &str, theme: &Theme) -> AnyElement {
     div()
         .id(id.into())
@@ -200,8 +165,4 @@ pub(crate) fn ref_label(name: &[u8]) -> String {
         .or_else(|| text.strip_prefix("refs/tags/"))
         .unwrap_or(&text)
         .to_owned()
-}
-
-pub(crate) fn short_oid(oid: &str) -> String {
-    oid.chars().take(8).collect()
 }

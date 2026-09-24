@@ -5,7 +5,7 @@ use ducktape_view_guest::prelude::*;
 
 use crate::Forge;
 use crate::ui::changes::revision_name;
-use crate::ui::components::{empty_state, heading, id, path_text, quiet, ref_label, short_oid};
+use crate::ui::components::{empty_state, heading, id, path_text, quiet, ref_label, short_hex};
 use crate::ui::{fact, markdown};
 use forge::Mergeability;
 
@@ -23,12 +23,12 @@ pub(crate) fn overview(forge: &Forge, theme: &Theme) -> AnyElement {
         .child(fact("Into", ref_label(&change.into), theme))
         .child(fact(
             "Source head",
-            source.clone().map_or("gone".into(), |oid| short_oid(&oid)),
+            source.clone().map_or("gone".into(), |oid| short_hex(&oid)),
             theme,
         ))
         .child(fact(
             "Target head",
-            target.clone().map_or("gone".into(), |oid| short_oid(&oid)),
+            target.clone().map_or("gone".into(), |oid| short_hex(&oid)),
             theme,
         ))
         .child(fact("Reviews", change.review_count.to_string(), theme))
@@ -61,7 +61,7 @@ pub(crate) fn comments(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) ->
     }
     for review in &reviews.items {
         let author = names.map_or_else(
-            || crate::state::short(&abi::hex(&review.author)),
+            || crate::ui::components::short_hex(&abi::hex(&review.author)),
             |names| names.key(&review.author),
         );
         for comment in &review.draft.comments {
@@ -156,7 +156,7 @@ pub(crate) fn merge_status(forge: &Forge, theme: &Theme) -> AnyElement {
     for key in &change.reviewers {
         column = column.child(quiet(
             names.map_or_else(
-                || crate::state::short(&abi::hex(key)),
+                || crate::ui::components::short_hex(&abi::hex(key)),
                 |names| names.key(key),
             ),
             theme,

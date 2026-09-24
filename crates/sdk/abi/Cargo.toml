@@ -5,3 +5,4 @@ edition.workspace = true
 
 [dependencies]
 borsh = { workspace = true }
+design = { workspace = true }

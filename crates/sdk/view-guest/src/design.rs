@@ -6,7 +6,7 @@
 pub use ::design::*;
 
 use crate::prelude::*;
-use crate::{Div, FontWeight, Stateful};
+use crate::{Div, FontWeight, Hsla, Pixels, Stateful};
 
 /// [`type_scale`] as sizes an element takes.
 pub mod text {
@@ -121,7 +121,20 @@ pub fn mono(text: impl Into<SharedString>) -> Div {
         .child(text.into())
 }
 
+/// What a [`Button`] is among its neighbours.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Kind {
+    /// a surface fill
+    #[default]
+    Plain,
+    /// the one action a screen leads with: the primary fill
+    Primary,
+    /// a choice among many: no fill, muted text
+    Quiet,
+}
+
 /// A button. Disabled keeps it visible, drops the click and says so.
+/// Selected is the chosen one: fg text on the window and an fg edge.
 #[derive(IntoElement)]
 pub struct Button<F>
 where
@@ -131,13 +144,8 @@ where
     label: SharedString,
     theme: Theme,
     enabled: bool,
-    primary: bool,
+    kind: Kind,
     selected: bool,
-    /// a tab: quiet text, the chosen one underlined, no fill
-    tab: bool,
-    /// a choice among many: no fill, muted text, the chosen one an fg edge
-    /// like any selected button
-    quiet: bool,
     click: F,
 }
 
@@ -155,10 +163,8 @@ where
         label: label.into(),
         theme: *theme,
         enabled: true,
-        primary: false,
+        kind: Kind::Plain,
         selected: false,
-        tab: false,
-        quiet: false,
         click,
     }
 }
@@ -171,20 +177,12 @@ where
         self.enabled = enabled;
         self
     }
-    pub fn primary(mut self, primary: bool) -> Self {
-        self.primary = primary;
+    pub fn kind(mut self, kind: Kind) -> Self {
+        self.kind = kind;
         self
     }
     pub fn selected(mut self, selected: bool) -> Self {
         self.selected = selected;
-        self
-    }
-    pub fn tab(mut self, tab: bool) -> Self {
-        self.tab = tab;
-        self
-    }
-    pub fn quiet(mut self, quiet: bool) -> Self {
-        self.quiet = quiet;
         self
     }
 }
@@ -200,70 +198,114 @@ where
             .px_2()
             .py_1()
             .text_size(text::SECONDARY)
-            .role(if self.tab { Role::Tab } else { Role::Button })
+            .role(Role::Button)
             .child(self.label);
         // The chosen one is the ink one: fg text on the window, an fg edge
-        // (under a tab, around a button); the rest stay quiet.
-        element = if self.tab {
-            element
-                .text_color(if self.selected {
-                    theme.foreground
-                } else {
-                    theme.muted
-                })
-                .border_b_2()
-                .border_color(if self.selected {
-                    theme.foreground
-                } else {
-                    theme.background
-                })
-        } else if self.primary {
-            element
+        // around it; the rest stay quiet.
+        element = match (self.kind, self.selected) {
+            (Kind::Primary, _) => element
                 .bg(theme.primary)
-                .text_color(theme.primary_foreground)
-        } else if self.selected {
-            element
+                .text_color(theme.primary_foreground),
+            (_, true) => element
                 .bg(theme.background)
                 .text_color(theme.foreground)
                 .border_1()
-                .border_color(theme.foreground)
-        } else if self.quiet {
-            element
+                .border_color(theme.foreground),
+            (Kind::Quiet, false) => element
                 .text_color(theme.muted)
                 .border_1()
-                .border_color(theme.background)
-        } else {
-            element
+                .border_color(theme.background),
+            (Kind::Plain, false) => element
                 .bg(theme.surface)
                 .text_color(theme.foreground)
                 .border_1()
-                .border_color(theme.surface)
+                .border_color(theme.surface),
         };
         if self.selected {
-            element = element.font_weight(FontWeight::MEDIUM);
+            element = element.font_weight(FontWeight::MEDIUM).aria_selected(true);
         }
-        if self.enabled {
-            let plain = !self.primary && !self.selected;
-            let (tab, quiet) = (self.tab || (self.quiet && plain), plain);
-            element = element
-                .hover(move |style| match (tab, quiet) {
-                    (true, _) => style.text_color(theme.foreground),
-                    (false, true) => style.bg(theme.surface_raised),
-                    (false, false) => style,
-                })
-                .focusable()
-                .on_click(self.click);
-            if quiet && !tab {
-                element = element.active(move |style| style.bg(theme.accent_soft));
-            }
-        } else {
-            element = element.text_color(theme.muted).aria_disabled(true);
+        if !self.enabled {
+            return element.text_color(theme.muted).aria_disabled(true);
         }
-        if self.selected {
-            element = element.aria_selected(true);
-        }
-        element
+        element = match (self.kind, self.selected) {
+            (Kind::Quiet, false) => element.hover(move |style| style.text_color(theme.foreground)),
+            (Kind::Plain, false) => element
+                .hover(move |style| style.bg(theme.surface_raised))
+                .active(move |style| style.bg(theme.accent_soft)),
+            _ => element,
+        };
+        element.focusable().on_click(self.click)
     }
+}
+
+/// A tab: quiet text, the chosen one fg and underlined, no fill. A caller
+/// sizes it to its bar (`h_full`, `flex_1`) and may label a glyph.
+pub fn tab(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    selected: bool,
+    theme: &Theme,
+    click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> Stateful<Div> {
+    let theme = *theme;
+    div()
+        .id(id)
+        .flex()
+        .items_center()
+        .px_2()
+        .py_1()
+        .text_size(text::SECONDARY)
+        .text_color(if selected {
+            theme.foreground
+        } else {
+            theme.muted
+        })
+        .border_b_2()
+        .border_color(if selected {
+            theme.foreground
+        } else {
+            theme.background
+        })
+        .when(selected, |tab| tab.font_weight(FontWeight::MEDIUM))
+        .hover(move |style| style.text_color(theme.foreground))
+        .role(Role::Tab)
+        .aria_selected(selected)
+        .focusable()
+        .on_click(click)
+        .child(label.into())
+}
+
+/// A person's round initial at `size`, on the raised surface. A caller
+/// recolours it (an agent, a speaker) with `bg` / `text_color`.
+pub fn avatar(name: &str, size: Pixels, theme: &Theme) -> Div {
+    div()
+        .size(size)
+        .flex_shrink_0()
+        .rounded_full()
+        .flex()
+        .items_center()
+        .justify_center()
+        .bg(theme.surface_raised)
+        .text_color(theme.muted)
+        .text_size(size * 0.45)
+        .child(initial(name))
+}
+
+/// A small tag: a state, a role, a count, in its own colours.
+pub fn badge(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    foreground: Hsla,
+    background: Hsla,
+) -> Stateful<Div> {
+    div()
+        .id(id)
+        .px_1()
+        .py_0p5()
+        .bg(background)
+        .text_color(foreground)
+        .text_size(text::CAPTION)
+        .child(label.into())
 }
 
 /// `6230` → `6,230`.

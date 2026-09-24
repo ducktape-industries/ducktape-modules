@@ -7,7 +7,7 @@ use ducktape_view_guest::prelude::*;
 
 use crate::Forge;
 use crate::queries::PAGE;
-use crate::ui::components::{button, chip, empty_state, heading, id, quiet, short_oid};
+use crate::ui::components::{badge, button, empty_state, heading, id, quiet, short_hex};
 use crate::ui::{diff, fact, staged};
 use forge::{CommitInfo, Query, Reply};
 
@@ -88,13 +88,13 @@ pub(crate) fn log(
                     .font_family(design::fonts::FAMILY_MONO)
                     .text_size(design::text::SECONDARY)
                     .text_color(theme.muted)
-                    .child(short_oid(&oid)),
+                    .child(short_hex(&oid)),
             )
             .cell(div().flex_1().truncate().child(summary))
             .cell(quiet(author, &theme))
             .cell(quiet(format!("t{time}"), &theme));
         if parents > 1 {
-            row = row.cell(chip(
+            row = row.cell(badge(
                 id(format!("forge-commit-merge-{oid}")),
                 format!("{parents} parents"),
                 theme.accent_foreground,
@@ -137,7 +137,7 @@ fn detail(forge: &Forge, oid: &str, cx: &mut Context<Forge>, theme: &Theme) -> A
                 .border_color(theme.border)
                 .child(heading(
                     id("forge-commit-title"),
-                    commit.map_or_else(|| short_oid(oid), summary),
+                    commit.map_or_else(|| short_hex(oid), summary),
                     2,
                     theme,
                 ))
@@ -164,7 +164,7 @@ fn detail(forge: &Forge, oid: &str, cx: &mut Context<Forge>, theme: &Theme) -> A
                         commit
                             .parents
                             .iter()
-                            .map(|parent| short_oid(parent))
+                            .map(|parent| short_hex(parent))
                             .collect::<Vec<_>>()
                             .join(", ")
                     },

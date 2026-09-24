@@ -252,7 +252,7 @@ fn body(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
         .border_b_1()
         .border_color(theme.border)
         .child(heading(id("forge-blob-title"), path_text(&path), 2, theme))
-        .child(quiet(crate::ui::components::short_oid(&oid), theme))
+        .child(quiet(crate::ui::components::short_hex(&oid), theme))
         .child(div().flex_1())
         .child(button(id("forge-blob-close"), "Close", theme, close));
     let pane = div()

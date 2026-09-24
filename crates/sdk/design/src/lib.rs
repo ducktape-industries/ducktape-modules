@@ -388,9 +388,36 @@ pub fn kit_theme_json() -> String {
 pub const LIGHT_THEME: &str = "Ducktape Light";
 pub const DARK_THEME: &str = "Ducktape Dark";
 
+/// A key or hash as every view shows it: the first 8 and last 4 characters
+/// (`9f3a1b2c…c21e`). A text short enough that cutting would not shorten it
+/// stays whole. Cuts on character boundaries.
+pub fn short_hex(text: &str) -> String {
+    const HEAD: usize = 8;
+    const TAIL: usize = 4;
+    let count = text.chars().count();
+    if count <= HEAD + TAIL + 1 {
+        return text.to_owned();
+    }
+    let head: String = text.chars().take(HEAD).collect();
+    let tail: String = text.chars().skip(count - TAIL).collect();
+    format!("{head}…{tail}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn short_hex_keeps_head_and_tail() {
+        assert_eq!(short_hex(&"ab".repeat(32)), "abababab…abab");
+        assert_eq!(short_hex("0123456789abc"), "0123456789abc");
+        assert_eq!(short_hex("0123456789abcd"), "01234567…abcd");
+        assert_eq!(short_hex(""), "");
+        assert_eq!(
+            short_hex("오리테이프오리테이프오리테이프"),
+            "오리테이프오리테…리테이프"
+        );
+    }
     #[test]
     fn every_embedded_font_file_exists_and_is_truetype() {
         for asset in fonts::ASSETS {

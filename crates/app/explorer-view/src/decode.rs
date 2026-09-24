@@ -60,16 +60,12 @@ fn clip(text: &str) -> String {
     }
 }
 
-/// `9f3a…c21e`: the head and tail of a hash.
+/// A hash or key as [`short_hex`] shows it.
 pub fn short(raw: &[u8]) -> String {
-    let hex = abi::hex(raw);
-    if hex.len() <= 12 {
-        return hex;
-    }
-    format!("{}…{}", &hex[..4], &hex[hex.len() - 4..])
+    short_hex(&abi::hex(raw))
 }
 
-pub use ducktape_view_guest::design::{grouped, plural};
+pub use ducktape_view_guest::design::{grouped, plural, short_hex};
 
 /// How long before `now` a time in milliseconds was: `2s`, `3m`, `4h`, `5d`.
 pub fn ago(now: u64, then: u64) -> String {

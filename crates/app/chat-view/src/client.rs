@@ -68,8 +68,10 @@ impl NameDirectory {
         } else {
             format!("user:{key_hex}")
         };
-        self.of_handle(&handle)
-            .map_or_else(|| short_id(key_hex, 8), str::to_string)
+        self.of_handle(&handle).map_or_else(
+            || ducktape_view_guest::design::short_hex(key_hex),
+            str::to_string,
+        )
     }
 
     fn of_handle(&self, handle: &str) -> Option<&str> {
@@ -308,7 +310,7 @@ fn span_display(span: &Span, names: &NameDirectory) -> String {
 pub fn author_display(author: &str, names: &NameDirectory) -> String {
     names.of_handle(author).map_or_else(
         || match author.split_once(':') {
-            Some(("user", id)) => format!("user {}", short_id(id, 8)),
+            Some(("user", id)) => format!("user {}", ducktape_view_guest::design::short_hex(id)),
             Some(("acct", account)) => format!("account {account}"),
             Some(("module", id)) => id.to_string(),
             _ => "system".into(),
@@ -411,12 +413,4 @@ pub fn dm_peer_of(mine: u64, channel_id: &str) -> Option<u64> {
 
 pub fn height_label(height: u64) -> String {
     format!("block {}", ducktape_view_guest::design::grouped(height))
-}
-
-pub(crate) fn short_id(id: &str, keep: usize) -> String {
-    let mut head: String = id.chars().take(keep).collect();
-    if id.chars().count() > keep {
-        head.push('…');
-    }
-    head
 }

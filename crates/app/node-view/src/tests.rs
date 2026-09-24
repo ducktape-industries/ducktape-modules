@@ -121,20 +121,6 @@ fn the_set_shows_its_validators_memberships_and_counts() {
 }
 
 #[test]
-fn short_ids_cut_on_unicode_boundaries_and_mark_only_a_cut() {
-    for (id, keep, want) in [
-        ("0123456789", 8, "01234567…"),
-        ("01234567", 8, "01234567"),
-        ("abc", 8, "abc"),
-        ("오리테이프", 2, "오리…"),
-        ("abc", 0, "…"),
-        ("", 0, ""),
-    ] {
-        assert_eq!(short_id(id, keep), want, "short_id({id:?}, {keep})");
-    }
-}
-
-#[test]
 fn loading_waits_for_the_host() {
     let mut cx = TestAppContext::new();
     cx.host().stream::<RpcLive>();

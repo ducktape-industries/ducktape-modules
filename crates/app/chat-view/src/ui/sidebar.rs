@@ -347,12 +347,7 @@ fn with_seats(chat: &Chat, info: &ChannelInfo, row: impl IntoElement, theme: &Th
                 .pl_7()
                 .py_0p5()
                 .child(
-                    div()
-                        .size_5()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .rounded_full()
+                    design::avatar(&label, px(20.), theme)
                         .bg(if speaking {
                             theme.success_soft
                         } else {
@@ -363,8 +358,7 @@ fn with_seats(chat: &Chat, info: &ChannelInfo, row: impl IntoElement, theme: &Th
                             theme.success
                         } else {
                             theme.sidebar_muted
-                        })
-                        .child(design::initial(&label)),
+                        }),
                 )
                 .child(div().flex_1().text_size(design::text::CAPTION).child(label))
                 .when(!note.is_empty(), |el| {
@@ -463,17 +457,11 @@ pub fn avatar(
     fill: ducktape_view_guest::Hsla,
     theme: &Theme,
 ) -> impl IntoElement {
-    div()
+    design::avatar(name, px(24.), theme)
         .id(id)
-        .size_6()
-        .flex_shrink_0()
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded_full()
         .bg(if agent { theme.agent_soft } else { fill })
+        .text_color(theme.foreground)
         .text_size(design::text::CAPTION)
-        .child(design::initial(name))
 }
 
 pub fn dm_peer(chat: &Chat) -> Option<(String, bool)> {

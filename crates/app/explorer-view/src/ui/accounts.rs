@@ -20,7 +20,7 @@ pub(super) fn accounts(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
                 cx,
                 theme,
             )
-            .child(avatar(&account.name, 20., theme))
+            .child(design::avatar(&account.name, px(20.), theme))
             .child(div().flex_1().truncate().child(account.name.clone()))
             .child(mono(format!("#{}", account.number)).text_color(theme.faint))
             .child(div().w(px(90.)).text_color(theme.muted).child(plural(
@@ -160,7 +160,7 @@ pub(super) fn account(view: &Explorer, number: u64, cx: Cx, theme: &Theme) -> An
                 .gap_4()
                 .px_5()
                 .py_4()
-                .child(avatar(&account.name, 40., theme))
+                .child(design::avatar(&account.name, px(40.), theme))
                 .child(
                     div()
                         .flex()

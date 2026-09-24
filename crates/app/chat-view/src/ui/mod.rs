@@ -1,7 +1,6 @@
 //! Native GPUI composition for Chat. State and module operations stay in the
 //! root view; this module only builds the element tree and installs listeners.
 
-mod components;
 pub mod dialogs;
 pub mod menu;
 pub mod message;
@@ -10,9 +9,8 @@ pub mod side;
 pub mod sidebar;
 mod timeline;
 
-pub(crate) use components::badge;
 use ducktape_view_guest::design;
-pub(crate) use ducktape_view_guest::design::{button, empty_state, quiet};
+pub(crate) use ducktape_view_guest::design::{badge, button, empty_state, quiet};
 use ducktape_view_guest::{
     Context, InteractiveElement, IntoElement, ParentElement, Pixels, Styled, Theme, div, hsla,
     modal_overlay, px, resize_handle, sensor,

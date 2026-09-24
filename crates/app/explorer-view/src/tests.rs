@@ -190,7 +190,7 @@ fn a_linked_program_s_op_reads_as_its_described_fields() {
     assert_eq!(op.title, "Push · app");
     assert_eq!(
         field(&op, "request").as_deref(),
-        Some("100 bytes · 0707070707070707…")
+        Some("100 bytes · 07070707…0707")
     );
 
     // a big payload counts its real length, not what a formatter got through
@@ -201,7 +201,7 @@ fn a_linked_program_s_op_reads_as_its_described_fields() {
     let op = decode::decode("forge", &borsh::to_vec(&huge).unwrap());
     assert_eq!(
         field(&op, "request").as_deref(),
-        Some("1048576 bytes · 5050505050505050…")
+        Some("1048576 bytes · 50505050…5050")
     );
 
     let create = identity::Op::Create {
@@ -236,7 +236,7 @@ fn numbers_hashes_and_times_read_as_a_person_reads_them() {
     assert_eq!(decode::grouped(6230), "6,230");
     assert_eq!(decode::grouped(1_000_000), "1,000,000");
     assert_eq!(decode::grouped(12), "12");
-    assert_eq!(decode::short(&[0xab; 32]), "abab…abab");
+    assert_eq!(decode::short(&[0xab; 32]), "abababab…abab");
     assert_eq!(decode::ago(10_000, 8_000), "2s");
     assert_eq!(decode::ago(4_000_000, 0), "1h");
     assert_eq!(decode::date(0), "1 Jan 1970, 00:00:00");
@@ -294,14 +294,17 @@ fn the_overview_shows_the_head_and_the_latest_blocks_and_transactions() {
     assert!(!cx.has_text("Transactions ") && !texts.iter().any(|t| t.contains("tx count")));
     assert!(cx.has_text("Latest blocks") && cx.has_text("Latest transactions"));
     assert!(cx.has_text("Post in #design") && cx.has_text("Ada") && cx.has_text("#3"));
-    assert!(cx.has_text("mystery · 4 bytes") && cx.has_text("0202…0202"));
+    assert!(cx.has_text("mystery · 4 bytes") && cx.has_text("02020202…0202"));
     assert!(
-        cx.has_text("6f6f…6f6f"),
+        cx.has_text("6f6f6f6f…6f6f"),
         "block 11's hash, shortened: {texts:?}"
     );
     // blocks 0–10 carry nothing: one quiet line, not eleven rows
     assert!(cx.has_text("0–10 · 11 empty blocks"), "{texts:?}");
-    assert!(!cx.has_text("6c6c…6c6c"), "block 8 is folded: {texts:?}");
+    assert!(
+        !cx.has_text("6c6c6c6c…6c6c"),
+        "block 8 is folded: {texts:?}"
+    );
     assert_eq!(
         cx.host().asked::<RpcBlocks>(),
         vec![BlockPage {
@@ -348,8 +351,11 @@ fn a_transaction_shows_its_block_signer_and_operation() {
     let texts = cx.texts();
     assert!(cx.has_text("In block 11"), "{texts:?}");
     assert!(cx.has_text(&abi::hex(&[0xa1; 32])));
-    assert!(cx.has_text("#3 laptop · ed25519 0101…0101"), "{texts:?}");
-    assert!(cx.has_text("code abab…abab"), "{texts:?}");
+    assert!(
+        cx.has_text("#3 laptop · ed25519 01010101…0101"),
+        "{texts:?}"
+    );
+    assert!(cx.has_text("code abababab…abab"), "{texts:?}");
     assert!(cx.has_text("channel") && cx.has_text("#design"));
     assert!(cx.has_text("text") && cx.has_text("hello there"));
     assert!(
@@ -461,7 +467,7 @@ fn programs_lists_what_runs_and_what_is_scheduled() {
     cx.run_until_parked();
     assert!(cx.has_text("2 programs") && cx.has_text("identity"));
     assert!(cx.has_text("Remove") && cx.has_text("forge") && cx.has_text("at 120"));
-    assert!(cx.texts().iter().any(|text| text == "abababababab…"));
+    assert!(cx.texts().iter().any(|text| text == "abababab…abab"));
     assert!(
         cx.has_text("1 view") && cx.has_text("explorer") && cx.has_text("view only"),
         "a view-only entry is listed beside the programs"
@@ -749,7 +755,7 @@ fn a_full_window_renders_inside_the_frame_budget() {
     cx.run_until_parked();
     cx.simulate_click(&format!("explorer-tx-{}", abi::hex(&big)));
     cx.run_until_parked();
-    assert!(cx.has_text("1048576 bytes · 5050505050505050…"));
+    assert!(cx.has_text("1048576 bytes · 50505050…5050"));
     sizes.push(("a 1 MB push", cx.frame_bytes()));
     // ceilings about 1.5x what each page drew when this was written:
     // tighten when a page slims, raise only on purpose
