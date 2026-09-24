@@ -669,3 +669,96 @@ fn the_scheduled_changes_survive_a_snapshot() {
     restored.run_until_parked();
     assert!(restored.has_text("Remove") && restored.has_text("at 120"));
 }
+
+// ---------- frame budgets ----------
+
+/// A full window: 1,000 blocks, each with a post, and a 1 MB push at the tip.
+fn heavy(cx: &mut TestAppContext) {
+    let tip = WINDOW as u64;
+    let chain: Vec<Block> = (0..=tip)
+        .map(|height| {
+            let seed = (height % 250) as u8;
+            let mut tx = if height == tip {
+                let push = forge::Op::Push {
+                    repo: "app".into(),
+                    request: vec![0x50; 1 << 20],
+                };
+                tx(0xfe, ADA, forge::PROGRAM, borsh::to_vec(&push).unwrap())
+            } else {
+                let text = format!("message {height}");
+                tx(seed, ADA, chat::PROGRAM, post("design", &text))
+            };
+            tx.hash[..8].copy_from_slice(&height.to_le_bytes());
+            Block {
+                height,
+                id: [seed; 32],
+                parent: [seed.wrapping_sub(1); 32],
+                time: T0 + height * 1000,
+                epoch: height / 10,
+                proposer: Some(VALIDATOR.to_vec()),
+                txs: vec![tx],
+            }
+        })
+        .collect();
+    let host = cx.host();
+    host.stream::<Ticks>();
+    host.stream::<Props>();
+    host.stream::<LinkRoute>();
+    host.handle::<Status>(move |()| Ok(status(tip)));
+    let blocks = chain.clone();
+    host.handle::<Blocks>(move |ask| Ok(page(&blocks, &ask)));
+    host.handle::<BlockGet>(move |by| {
+        Ok(match by {
+            BlockRef::Height(height) => chain.get(height as usize).cloned(),
+            BlockRef::Id(id) => chain.iter().find(|block| block.id == id).cloned(),
+        })
+    });
+    host.handle::<Query<Identity>>(|_| {
+        Ok(identity::Reply::Accounts(module_registry::PageReply {
+            height: 1,
+            items: vec![ada()],
+            next: None,
+        }))
+    });
+    host.handle::<Query<Valset>>(|_| Ok(valset::Reply::Validators(vec![VALIDATOR.to_vec()])));
+    respond(cx);
+}
+
+/// Every page over a full window stays inside the host's frame budgets, and
+/// under a byte ceiling per page: the native proxy for a render's fuel.
+/// (Time is no proxy here: a debug build JSON-encodes the whole view around
+/// every update to catch a missed `notify`.)
+#[test]
+fn a_full_window_renders_inside_the_frame_budget() {
+    let mut cx = TestAppContext::new();
+    heavy(&mut cx);
+    cx.open::<Explorer>();
+    cx.run_until_parked();
+    let mut sizes = vec![("overview", cx.frame_bytes())];
+    for tab in ["blocks", "transactions", "accounts", "programs"] {
+        cx.simulate_click(&format!("explorer-tab-{tab}"));
+        cx.run_until_parked();
+        sizes.push((tab, cx.frame_bytes()));
+    }
+    let mut big = [0xfe; 32];
+    big[..8].copy_from_slice(&(WINDOW as u64).to_le_bytes());
+    cx.simulate_click("explorer-tab-transactions");
+    cx.run_until_parked();
+    cx.simulate_click(&format!("explorer-tx-{}", abi::hex(&big)));
+    cx.run_until_parked();
+    assert!(cx.has_text("1048576 bytes · 5050505050505050…"));
+    sizes.push(("a 1 MB push", cx.frame_bytes()));
+    // ceilings about 1.5x what each page drew when this was written:
+    // tighten when a page slims, raise only on purpose
+    let ceilings = [
+        ("overview", 76_000),
+        ("blocks", 95_000),
+        ("transactions", 196_000),
+        ("accounts", 9_000),
+        ("programs", 13_000),
+        ("a 1 MB push", 16_000),
+    ];
+    for ((page, bytes), (_, ceiling)) in sizes.into_iter().zip(ceilings) {
+        assert!(bytes < ceiling, "{page} drew {bytes} bytes, over {ceiling}");
+    }
+}

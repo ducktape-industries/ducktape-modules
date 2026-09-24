@@ -120,17 +120,17 @@ pub(super) fn tx(view: &Explorer, hash: &[u8; 32], cx: Cx, theme: &Theme) -> Any
         .bg(theme.surface)
         .border_1()
         .border_color(theme.border)
-        .children(op.fields.into_iter().map(|(name, value)| {
+        .children(op.fields.iter().map(|(name, value)| {
             div()
                 .flex()
                 .gap_4()
                 .child(
-                    mono(name)
+                    mono(*name)
                         .w(px(90.))
                         .flex_shrink_0()
                         .text_color(theme.muted),
                 )
-                .child(div().flex_1().child(value))
+                .child(div().flex_1().child(value.clone()))
         }));
     let copy = copy_button(view, &Route::Tx(*hash), cx, theme);
     div()
@@ -141,7 +141,11 @@ pub(super) fn tx(view: &Explorer, hash: &[u8; 32], cx: Cx, theme: &Theme) -> Any
                 .items_center()
                 .border_b_1()
                 .border_color(theme.border)
-                .child(div().flex_1().child(titled("Transaction", op.title, theme)))
+                .child(
+                    div()
+                        .flex_1()
+                        .child(titled("Transaction", op.title.clone(), theme)),
+                )
                 .children(copy.map(|copy| div().px_5().child(copy))),
         )
         .child(field(
