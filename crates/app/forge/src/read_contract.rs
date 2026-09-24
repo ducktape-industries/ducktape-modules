@@ -1,7 +1,7 @@
 //! Read projections: paths and source text are bytes, exactly as Git stores them.
 use borsh::{BorshDeserialize, BorshSerialize};
 
-#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Revision {
     Ref(Vec<u8>),
     Oid(String),
@@ -37,7 +37,7 @@ pub struct TreeInfo {
     pub oid: String,
     pub kind: EntryKind,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Ord, Eq, BorshSerialize, BorshDeserialize)]
 pub struct ByteRange {
     pub offset: u64,
     pub len: u64,

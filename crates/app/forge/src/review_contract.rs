@@ -7,7 +7,7 @@ pub const MAX_REVIEWERS: usize = 64;
 pub const MAX_TITLE_BYTES: usize = 256;
 pub const MAX_PATH_BYTES: usize = 4096;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Ord, Eq, BorshSerialize, BorshDeserialize)]
 pub enum ChangeState {
     Open,
     Closed,
@@ -76,7 +76,9 @@ pub struct ReviewCounts {
     pub request_changes: u64,
     pub comment: u64,
 }
-#[derive(Clone, Debug, Default, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+#[derive(
+    Clone, Debug, Default, PartialEq, PartialOrd, Ord, Eq, BorshSerialize, BorshDeserialize,
+)]
 pub struct ChangeFilter {
     pub state: Option<ChangeState>,
     pub author: Option<Vec<u8>>,

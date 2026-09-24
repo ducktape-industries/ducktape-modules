@@ -403,7 +403,10 @@ impl Forge {
             .unwrap_or_default();
         let key = unhex(&typed).or_else(|| {
             let names = self.names.ready()?;
-            let number = typed.strip_prefix("acct:").unwrap_or(&typed).parse().ok()?;
+            let number = match chat::party_of_handle(&typed) {
+                Some(chat::Party::Account(number)) => number,
+                _ => typed.parse().ok()?,
+            };
             names.key_of(number)
         });
         let Some(key) = key else {
