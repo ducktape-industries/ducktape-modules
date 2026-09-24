@@ -348,12 +348,15 @@ async fn network(host: Host) -> Result<Network, Refusal> {
                 verb: match scheduled.change {
                     registry::Change::Set(_) => "Set",
                     registry::Change::Remove(_) => "Remove",
+                    registry::Change::SetView(_) => "Set view",
+                    registry::Change::RemoveView(_) => "Remove view",
                 }
                 .into(),
                 program: scheduled.change.program().to_string(),
                 code: match &scheduled.change {
                     registry::Change::Set(entry) => Some(hex(entry.code.digest())),
-                    registry::Change::Remove(_) => None,
+                    registry::Change::SetView(view) => Some(hex(view.view.digest())),
+                    registry::Change::Remove(_) | registry::Change::RemoveView(_) => None,
                 },
             })
             .collect(),

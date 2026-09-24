@@ -76,9 +76,9 @@ forge = { path = "crates/app/forge" }
 
 # ---- the host the founding suite runs the boot set on, the probe fixture it
 # seats and the key schemes it signs with (dev-dependencies only)
-host = { git = "https://github.com/ducktape-industries/ducktape", rev = "5d1d1f61d89960164cab919dfbb16a1d8cdb3b36" }
-fixture-probe = { git = "https://github.com/ducktape-industries/ducktape", rev = "5d1d1f61d89960164cab919dfbb16a1d8cdb3b36" }
-keyscheme = { git = "https://github.com/ducktape-industries/ducktape", rev = "5d1d1f61d89960164cab919dfbb16a1d8cdb3b36" }
+host = { git = "https://github.com/ducktape-industries/ducktape", rev = "d1805fcbe47ce066af109bff2531506c903719f4" }
+fixture-probe = { git = "https://github.com/ducktape-industries/ducktape", rev = "d1805fcbe47ce066af109bff2531506c903719f4" }
+keyscheme = { git = "https://github.com/ducktape-industries/ducktape", rev = "d1805fcbe47ce066af109bff2531506c903719f4" }
 commonware-cryptography = "2026.9.0"
 commonware-runtime = "2026.9.0"
 
