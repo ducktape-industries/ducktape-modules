@@ -1,7 +1,9 @@
 //! The composer's events for one target, run through its draft: sends,
 //! edits, attachments picked, dropped or pasted, and their uploads.
-use ducktape_view_guest::view::{Cx, Submit, ask};
+use ducktape_view_guest::Context;
+use ducktape_view_guest::view::Submit;
 use ducktape_view_guest::wire;
+use futures::StreamExt;
 
 use crate::api::{ChatApi, ClipboardRead, ClipboardWrite, Drops, Id, Pick, Release, SelectedFile};
 use crate::chat::{ChatMsg, MsgRow};
@@ -23,50 +25,66 @@ impl Chat {
     }
 
     /// Files dropped on the window go to the composer that accepts them.
-    pub(crate) fn watch_drops(&mut self, cx: &mut Cx<Self>) {
+    pub(crate) fn watch_drops(&mut self, cx: &mut Context<Self>) {
         let wants = self.drop_target().is_some();
         if wants == self.watches.drops.is_some() {
             return;
         }
         self.watches.drops = wants.then(|| {
-            cx.watch::<Drops>(serde_json::json!({}), |chat, files, cx| {
-                if let Some(target) = chat.drop_target() {
-                    chat.picked(target, files.map_err(|r| r.sentence), cx);
+            let mut drops = cx.host().subscribe::<Drops>(());
+            cx.spawn(async move |this, cx| {
+                while let Some(files) = drops.next().await {
+                    if this
+                        .update(cx, |chat, cx| {
+                            if let Some(target) = chat.drop_target() {
+                                cx.notify();
+                                chat.picked(target, files.map_err(|r| r.sentence), cx);
+                            }
+                        })
+                        .is_err()
+                    {
+                        break;
+                    }
                 }
             })
         });
     }
 
-    pub(crate) fn composer(&mut self, target: Target, event: Event<Self>, cx: &mut Cx<Self>) {
+    pub(crate) fn composer(
+        &mut self,
+        target: Target,
+        event: Event<Self>,
+        window: &mut ducktape_view_guest::Window,
+        cx: &mut Context<Self>,
+    ) {
+        cx.notify();
         let choices = self.mention_choices();
         let key = draft_key(&target);
         let draft = self.drafts.entry(key.clone()).or_default();
-        match draft.handle(event, &choices) {
+        match draft.handle(event, &choices, cx) {
             Outcome::Updated => {}
-            Outcome::Run(effect) => effect.run(self, cx),
-            Outcome::Enqueue(tag) => cx.widget(wire::WidgetCommand::EditorAction {
-                target: format!("{key}/editor"),
+            Outcome::Run(run) => run(self, window, cx),
+            Outcome::Enqueue(tag) => window.dispatch(wire::WidgetCommand::EditorAction {
+                target: vec![wire::ElementIdWire::Name(format!("{key}/editor").into())],
                 tag,
             }),
             Outcome::Action(tag) => self.composer_action(target, &key, &tag, cx),
         }
     }
 
-    fn composer_action(&mut self, target: Target, key: &str, tag: &str, cx: &mut Cx<Self>) {
+    fn composer_action(&mut self, target: Target, key: &str, tag: &str, cx: &mut Context<Self>) {
         if let Some(token) = tag.strip_prefix("remove:") {
-            if let Some(handle) = self.uploads.remove(token) {
-                handle.abort();
-            }
+            self.uploads.remove(token);
             self.drafts
                 .entry(key.to_owned())
                 .or_default()
                 .attachments
                 .retain(|file| file.token != token);
             let token = token.to_owned();
-            cx.spawn(async move {
-                let _ = ask::<Release>(token).await;
-                |_: &mut Chat, _: &mut Cx<Chat>| {}
-            });
+            cx.spawn(async move |_, cx| {
+                let _ = cx.host().ask::<Release>(token).await;
+            })
+            .detach();
             return;
         }
         if let Some(token) = tag.strip_prefix("retry:") {
@@ -104,35 +122,47 @@ impl Chat {
                 }
             }
             "attach" if crate::ATTACHMENTS && matches!(target, Target::Post { .. }) => {
-                cx.spawn(async move {
-                    let result = ask::<Pick>(serde_json::json!({})).await;
-                    move |chat: &mut Chat, cx: &mut Cx<Chat>| {
+                cx.spawn(async move |this, cx| {
+                    let host = cx.host();
+                    let result = host.ask::<Pick>(()).await;
+                    let _ = this.update(cx, |chat, cx| {
+                        cx.notify();
                         chat.picked(target, result.map_err(|r| r.sentence), cx)
-                    }
-                });
+                    });
+                })
+                .detach();
             }
             "paste" => {
                 let key = key.to_owned();
-                cx.spawn(async move {
-                    let result = ask::<ClipboardRead>(serde_json::json!({})).await;
-                    move |chat: &mut Chat, cx: &mut Cx<Chat>| match result {
-                        Ok(clipboard) => {
-                            chat.drafts.entry(key.clone()).or_default().paste =
-                                Some(clipboard.text);
-                            cx.widget(wire::WidgetCommand::EditorAction {
-                                target: format!("{key}/editor"),
-                                tag: "paste-ready".into(),
-                            });
-                            if crate::ATTACHMENTS
-                                && matches!(target, Target::Post { .. })
-                                && !clipboard.files.is_empty()
-                            {
-                                chat.picked(target, Ok(clipboard.files), cx);
+                cx.spawn(async move |this, cx| {
+                    let host = cx.host();
+                    let result = host.ask::<ClipboardRead>(()).await;
+                    let _ = this.update_in(cx, |chat, window, cx| {
+                        cx.notify();
+                        match result {
+                            Ok(clipboard) => {
+                                chat.drafts.entry(key.clone()).or_default().paste =
+                                    Some(clipboard.text);
+                                window.dispatch(wire::WidgetCommand::EditorAction {
+                                    target: vec![wire::ElementIdWire::Name(
+                                        format!("{key}/editor").into(),
+                                    )],
+                                    tag: "paste-ready".into(),
+                                });
+                                if crate::ATTACHMENTS
+                                    && matches!(target, Target::Post { .. })
+                                    && !clipboard.files.is_empty()
+                                {
+                                    chat.picked(target, Ok(clipboard.files), cx);
+                                }
+                            }
+                            Err(refusal) => {
+                                chat.drafts.entry(key).or_default().note = refusal.sentence
                             }
                         }
-                        Err(refusal) => chat.drafts.entry(key).or_default().note = refusal.sentence,
-                    }
-                });
+                    });
+                })
+                .detach();
             }
             "copy" | "cut" => {
                 let Some(text) = self
@@ -145,14 +175,17 @@ impl Chat {
                     return;
                 };
                 let key = key.to_owned();
-                cx.spawn(async move {
-                    let result = ask::<ClipboardWrite>(text).await;
-                    move |chat: &mut Chat, _: &mut Cx<Chat>| {
+                cx.spawn(async move |this, cx| {
+                    let host = cx.host();
+                    let result = host.ask::<ClipboardWrite>(text).await;
+                    let _ = this.update(cx, |chat, cx| {
+                        cx.notify();
                         if let Err(refusal) = result {
                             chat.drafts.entry(key).or_default().note = refusal.sentence;
                         }
-                    }
-                });
+                    });
+                })
+                .detach();
             }
             _ => {}
         }
@@ -164,7 +197,7 @@ impl Chat {
         &mut self,
         target: Target,
         result: Result<Vec<SelectedFile>, String>,
-        cx: &mut Cx<Self>,
+        cx: &mut Context<Self>,
     ) {
         let key = draft_key(&target);
         let draft = self.drafts.entry(key.clone()).or_default();
@@ -185,9 +218,11 @@ impl Chat {
             });
             let (draft_key, token, chain) = (key.clone(), file.token.clone(), chain.clone());
             let upload_token = token.clone();
-            let handle = cx.spawn(async move {
-                let result = crate::files::upload(file, chain).await;
-                move |chat: &mut Chat, _: &mut Cx<Chat>| {
+            let handle = cx.spawn(async move |this, cx| {
+                let host = cx.host();
+                let result = crate::files::upload(host, file, chain).await;
+                let _ = this.update(cx, |chat, cx| {
+                    cx.notify();
                     chat.uploads.remove(&token);
                     let Some(draft) = chat.drafts.get_mut(&draft_key) else {
                         return;
@@ -200,27 +235,29 @@ impl Chat {
                             },
                         };
                     }
-                }
+                });
             });
-            self.uploads.insert(upload_token, handle.abort_on_drop());
+            self.uploads.insert(upload_token, handle);
         }
     }
 
-    fn send(&mut self, key: String, send: Send, target: Target, cx: &mut Cx<Self>) {
-        cx.spawn(async move {
+    fn send(&mut self, key: String, send: Send, target: Target, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let host = cx.host();
             let result = async {
-                let id = ask::<Id>("message").await?;
+                let id = host.ask::<Id>("message".into()).await?;
                 let op = crate::composer::op(id, &send, &target)?;
                 let pending = pending_row(&op);
-                ask::<Submit<ChatApi>>(op).await.map(|_| pending)
+                host.ask::<Submit<ChatApi>>(op).await.map(|_| pending)
             }
             .await;
-            move |chat: &mut Chat, cx: &mut Cx<Chat>| {
+            let _ = this.update(cx, |chat, cx| {
+                cx.notify();
                 let draft = chat.drafts.entry(key).or_default();
                 draft.complete_send(&send);
                 match result {
                     Ok(pending) => {
-                        let me = chat.session.me.clone();
+                        let me = chat.my_handle();
                         if let (Some(mut row), Some(room)) = (pending, chat.room.as_mut())
                             && room.id == target.channel()
                         {
@@ -242,8 +279,9 @@ impl Chat {
                         draft.failed(send);
                     }
                 }
-            }
-        });
+            });
+        })
+        .detach();
     }
 }
 

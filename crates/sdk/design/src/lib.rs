@@ -64,13 +64,13 @@ pub mod type_scale {
     pub const MONO: f64 = 12.;
 }
 
-/// Corner radii, in pixels. Tight: a control is barely rounded, a card a
-/// touch more, and only an avatar is a circle.
+/// Corner radii, in pixels. The shell's canvas is square: a control, a
+/// card and a modal have corners, and only an avatar or a dot is a circle.
 pub mod radius {
     /// a control: a button, an input, a list row
-    pub const CONTROL: f64 = 4.;
+    pub const CONTROL: f64 = 0.;
     /// a card, a panel, a modal
-    pub const CARD: f64 = 6.;
+    pub const CARD: f64 = 0.;
     /// a pill: an avatar
     pub const PILL: f64 = 999.;
 }
@@ -109,12 +109,12 @@ pub mod height {
 /// One sRGB color as the wire carries it: `[r, g, b, a]` in `0.0..=1.0`.
 pub type Color = [f32; 4];
 
-/// The named colors of one appearance. Cool neutral greys, an ink sidebar in
-/// both modes, one indigo accent for what is live or chosen, and the four
-/// status tones.
+/// The named colors of one appearance, the shell's calm set: warm-neutral
+/// greys, a sidebar one step off the window (not ink), ink itself as the
+/// accent for what is chosen, and the four status tones.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Palette {
-    /// the sidebar rail: ink in both modes
+    /// the sidebar rail: one step off the window, like any surface
     pub sidebar: Color,
     /// text on the sidebar
     pub sidebar_foreground: Color,
@@ -171,60 +171,60 @@ const fn hex(value: u32) -> Color {
 }
 
 pub const LIGHT: Palette = Palette {
-    sidebar: hex(0x17181C),
-    sidebar_foreground: hex(0xE8E8EC),
-    sidebar_muted: hex(0x8B8D97),
-    sidebar_raised: hex(0x26282F),
-    sidebar_border: hex(0x2A2C33),
+    sidebar: hex(0xF5F5F3),
+    sidebar_foreground: hex(0x111111),
+    sidebar_muted: hex(0x6B6B6B),
+    sidebar_raised: hex(0xEFEFED),
+    sidebar_border: hex(0xE6E6E6),
     background: hex(0xFFFFFF),
-    surface: hex(0xF7F7F8),
-    surface_raised: hex(0xEDEDF0),
-    border: hex(0xE4E4E8),
-    border_strong: hex(0xD0D0D6),
-    foreground: hex(0x1B1B1F),
-    muted: hex(0x6B6C76),
-    faint: hex(0xA2A3AC),
-    accent: hex(0x5B5FC7),
-    accent_soft: hex(0xECEDFB),
-    accent_foreground: hex(0x3B3FA8),
-    primary: hex(0x1B1B1F),
+    surface: hex(0xF5F5F3),
+    surface_raised: hex(0xEFEFED),
+    border: hex(0xE6E6E6),
+    border_strong: hex(0xCFCFCF),
+    foreground: hex(0x111111),
+    muted: hex(0x6B6B6B),
+    faint: hex(0xA3A3A3),
+    accent: hex(0x111111),
+    accent_soft: hex(0xEFEFED),
+    accent_foreground: hex(0x111111),
+    primary: hex(0x111111),
     primary_foreground: hex(0xFFFFFF),
-    link: hex(0x4C52C9),
-    success: hex(0x1F9D55),
-    success_soft: hex(0xE3F5EA),
+    link: hex(0x111111),
+    success: hex(0x2E7D32),
+    success_soft: hex(0xE6F2E7),
     warning: hex(0xB4700F),
     warning_soft: hex(0xFBF0DA),
-    danger: hex(0xD33A2E),
-    danger_soft: hex(0xFCE6E4),
+    danger: hex(0xB42318),
+    danger_soft: hex(0xFCE8E6),
     agent: hex(0x7A4BD8),
     agent_soft: hex(0xF0EAFC),
 };
 
 pub const DARK: Palette = Palette {
-    sidebar: hex(0x101114),
-    sidebar_foreground: hex(0xE7E7EA),
-    sidebar_muted: hex(0x7E8189),
-    sidebar_raised: hex(0x1E2026),
-    sidebar_border: hex(0x24262C),
-    background: hex(0x151619),
-    surface: hex(0x1B1C20),
-    surface_raised: hex(0x24262C),
-    border: hex(0x27292F),
-    border_strong: hex(0x363940),
-    foreground: hex(0xE7E7EA),
-    muted: hex(0x8E9098),
-    faint: hex(0x5E616A),
-    accent: hex(0x7C82E8),
-    accent_soft: hex(0x24263D),
-    accent_foreground: hex(0xB4B8F5),
-    primary: hex(0xE7E7EA),
-    primary_foreground: hex(0x151619),
-    link: hex(0x8F95F0),
-    success: hex(0x4CC27E),
+    sidebar: hex(0x1A1A1A),
+    sidebar_foreground: hex(0xEDEDED),
+    sidebar_muted: hex(0x8F8F8F),
+    sidebar_raised: hex(0x222222),
+    sidebar_border: hex(0x2A2A2A),
+    background: hex(0x111111),
+    surface: hex(0x1A1A1A),
+    surface_raised: hex(0x222222),
+    border: hex(0x2A2A2A),
+    border_strong: hex(0x3A3A3A),
+    foreground: hex(0xEDEDED),
+    muted: hex(0x8F8F8F),
+    faint: hex(0x5A5A5A),
+    accent: hex(0xEDEDED),
+    accent_soft: hex(0x222222),
+    accent_foreground: hex(0xEDEDED),
+    primary: hex(0xEDEDED),
+    primary_foreground: hex(0x111111),
+    link: hex(0xEDEDED),
+    success: hex(0x6FCF97),
     success_soft: hex(0x16301F),
     warning: hex(0xE1A93F),
     warning_soft: hex(0x3A2C10),
-    danger: hex(0xF0665A),
+    danger: hex(0xF97066),
     danger_soft: hex(0x3E1B14),
     agent: hex(0xA78BF5),
     agent_soft: hex(0x2A2340),
@@ -425,8 +425,8 @@ mod tests {
         assert_eq!(css(hex(0x5B5FC7)), "#5b5fc7");
         assert_eq!(css([1., 1., 1., 0.5]), "#ffffff80");
         assert_eq!(css(LIGHT.background), "#ffffff");
-        assert_eq!(css(DARK.background), "#151619");
-        assert_eq!(css(LIGHT.sidebar), "#17181c");
+        assert_eq!(css(DARK.background), "#111111");
+        assert_eq!(css(LIGHT.sidebar), "#f5f5f3");
     }
 
     #[test]

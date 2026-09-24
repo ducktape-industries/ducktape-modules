@@ -159,10 +159,10 @@ pub fn diff(old: &mut Node, new: &mut Node) -> Vec<Patch> {
     patches
 }
 
+/// Each node's own fields are compared once, on the way down: comparing a
+/// whole subtree first at every level compared a deep changed subtree once
+/// per level above it.
 fn diff_node(old: &mut Node, new: &mut Node, path: &mut Vec<u32>, out: &mut Vec<Patch>) {
-    if old == new {
-        return;
-    }
     let same_kind = std::mem::discriminant(old) == std::mem::discriminant(new);
     let same_arity = new.child_list_mut().is_some() || old.children().len() == new.children().len();
     if !(same_kind && same_arity) {
@@ -182,9 +182,14 @@ fn diff_node(old: &mut Node, new: &mut Node, path: &mut Vec<u32>, out: &mut Vec<
     }
     let mut old_children = old_children;
     let mut new_children = new_children;
-    match old.child_list_mut().is_some() {
-        true => diff_list(&mut old_children, &mut new_children, path, out),
-        false => {
+    let rows = match (&*old, &*new) {
+        (Node::List { range_start: a, .. }, Node::List { range_start: b, .. }) => Some((*a, *b)),
+        _ => None,
+    };
+    match (old.child_list_mut().is_some(), rows) {
+        (true, Some((a, b))) => diff_rows(&mut old_children, &mut new_children, a, b, path, out),
+        (true, None) => diff_list(&mut old_children, &mut new_children, path, out),
+        (false, _) => {
             for (index, (old_child, new_child)) in
                 old_children.iter_mut().zip(&mut new_children).enumerate()
             {
@@ -198,12 +203,56 @@ fn diff_node(old: &mut Node, new: &mut Node, path: &mut Vec<u32>, out: &mut Vec<
     new.attach(new_children).expect("its own children");
 }
 
+/// A list's rows are its item indices from `range_start` on: rows at the
+/// same index are the same row, whatever their keys. Scrolling a row into
+/// the window is one insert, not the whole window sent again.
+fn diff_rows(
+    old: &mut [Node],
+    new: &mut [Node],
+    old_start: usize,
+    new_start: usize,
+    path: &mut Vec<u32>,
+    out: &mut Vec<Patch>,
+) {
+    let old_end = old_start + old.len();
+    let new_end = new_start + new.len();
+    let (start, end) = (old_start.max(new_start), old_end.min(new_end));
+    if start >= end {
+        return diff_list(old, new, path, out);
+    }
+    let remove = |count: usize, index: usize, out: &mut Vec<Patch>| {
+        for _ in 0..count {
+            out.push(Patch::Remove {
+                path: path.clone(),
+                index: index as u32,
+            });
+        }
+    };
+    remove(old_end - end, end - old_start, out);
+    remove(start - old_start, 0, out);
+    for (index, row) in new.iter_mut().enumerate() {
+        let item = new_start + index;
+        match (start..end).contains(&item) {
+            true => {
+                path.push(index as u32);
+                diff_node(&mut old[item - old_start], row, path, out);
+                path.pop();
+            }
+            false => out.push(Patch::Insert {
+                path: path.clone(),
+                index: index as u32,
+                node: row.clone(),
+            }),
+        }
+    }
+}
+
 fn diff_list(old: &mut [Node], new: &mut [Node], path: &mut Vec<u32>, out: &mut Vec<Patch>) {
     let positional = old.len() == new.len()
         && old
             .iter()
             .zip(new.iter())
-            .all(|(a, b)| match (a.key(), b.key()) {
+            .all(|(a, b)| match (a.identity(), b.identity()) {
                 (Some(a), Some(b)) => a == b,
                 (None, None) => std::mem::discriminant(a) == std::mem::discriminant(b),
                 _ => false,
@@ -216,14 +265,14 @@ fn diff_list(old: &mut [Node], new: &mut [Node], path: &mut Vec<u32>, out: &mut 
         }
         return;
     }
-    // A key that appears once on each side is a child that survives; every
-    // other child — unkeyed, or a duplicate the host would rename — is
-    // removed and inserted afresh.
-    let unique = |nodes: &[Node]| -> std::collections::HashMap<String, usize> {
+    // An identity that appears once on each side is a child that survives;
+    // every other child — unkeyed, or a duplicate — is removed and inserted
+    // afresh. Typed GPUI IDs stay typed all the way through this map.
+    let unique = |nodes: &[Node]| -> std::collections::HashMap<ElementIdWire, usize> {
         let mut seen = std::collections::HashMap::new();
         for (index, node) in nodes.iter().enumerate() {
-            if let Some(key) = node.key() {
-                seen.entry(key.to_owned())
+            if let Some(identity) = node.identity() {
+                seen.entry(identity.clone())
                     .and_modify(|at| *at = usize::MAX)
                     .or_insert(index);
             }
@@ -236,9 +285,10 @@ fn diff_list(old: &mut [Node], new: &mut [Node], path: &mut Vec<u32>, out: &mut 
     // The list as the host has it after the patches so far: old indices.
     let mut live: Vec<usize> = Vec::with_capacity(new.len());
     for (index, node) in old.iter().enumerate() {
-        let survives = node
-            .key()
-            .is_some_and(|key| old_keys.contains_key(key) && new_keys.contains_key(key));
+        let survives = node.identity().is_some_and(|identity| {
+            let owned = identity.to_owned();
+            old_keys.contains_key(&owned) && new_keys.contains_key(&owned)
+        });
         match survives {
             true => live.push(index),
             false => out.push(Patch::Remove {
@@ -248,10 +298,13 @@ fn diff_list(old: &mut [Node], new: &mut [Node], path: &mut Vec<u32>, out: &mut 
         }
     }
     for (index, new_child) in new.iter_mut().enumerate() {
-        let wanted = new_child
-            .key()
-            .filter(|key| new_keys.contains_key(*key))
-            .and_then(|key| old_keys.get(key).copied());
+        let wanted = new_child.identity().and_then(|identity| {
+            let owned = identity.to_owned();
+            new_keys
+                .contains_key(&owned)
+                .then(|| old_keys.get(&owned).copied())
+                .flatten()
+        });
         let Some(wanted) = wanted else {
             out.push(Patch::Insert {
                 path: path.clone(),

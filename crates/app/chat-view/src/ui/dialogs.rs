@@ -1,213 +1,290 @@
-//! What opens over the screen: the channel-creation card and the attachment
-//! preview.
-use ducktape_view_guest::view::{Cx, Loaded};
-use ducktape_view_guest::wire::{Length, Node, SurfaceValue, kit, kit::Tone};
+//! Channel creation and attachment preview dialogs.
 
-use crate::Chat;
-use ducktape_view_guest::wire::kit::*;
+use ducktape_view_guest::prelude::*;
+use ducktape_view_guest::{
+    AnyElement, App, ClickEvent, Context, ParentElement, Styled, Theme, Window, div, px, surface,
+    wire,
+};
 
-pub fn channel_create(chat: &Chat, cx: &mut Cx<Chat>) -> Option<Node> {
+use crate::ui::button;
+use crate::{Chat, Loaded};
+
+type Press = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
+
+fn dialog_button(
+    id: &'static str,
+    label: &'static str,
+    theme: &Theme,
+    press: Option<Press>,
+) -> AnyElement {
+    let enabled = press.is_some();
+    let button = div()
+        .id(id)
+        .px_2()
+        .py_1()
+        .bg(theme.surface)
+        .text_color(if enabled {
+            theme.foreground
+        } else {
+            theme.muted
+        })
+        .role(ducktape_view_guest::Role::Button)
+        .aria_disabled(!enabled)
+        .child(label);
+    match press {
+        Some(press) => button
+            .focusable()
+            .hover(|style| style.bg(theme.surface_raised))
+            .active(|style| style.bg(theme.accent_soft))
+            .on_click(press)
+            .into_any_element(),
+        None => button.into_any_element(),
+    }
+}
+
+pub fn channel_create(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Option<AnyElement> {
     let create = chat.create.as_ref()?;
-    let key = "chat/create";
     let busy = create.busy;
-    let typed = cx.on_value(|chat, text: String, _| {
-        if let Some(c) = &mut chat.create {
-            c.name = text;
+    let can_submit = !busy && chat.session.connected && chat.holds_account();
+    let typed = cx.listener(|chat, event: &String, _window, cx| {
+        if let Some(create) = &mut chat.create {
+            create.name = event.clone();
         }
+        cx.notify();
     });
-    let submit = cx.on(|chat, cx| chat.create_channel(cx));
-    let voice = cx.on(|chat, _| {
-        if let Some(c) = &mut chat.create {
-            c.voice = !c.voice;
+    let submit = cx.listener(|chat, _: &ClickEvent, _window, cx| {
+        cx.notify();
+        chat.create_channel(cx)
+    });
+    let voice = cx.listener(|chat, _: &ClickEvent, _window, cx| {
+        if let Some(create) = &mut chat.create {
+            create.voice = !create.voice;
         }
+        cx.notify();
     });
-    let members = cx.on(|chat, _| {
-        if let Some(c) = &mut chat.create
-            && !c.voice
+    let members = cx.listener(|chat, _: &ClickEvent, _window, cx| {
+        if let Some(create) = &mut chat.create
+            && !create.voice
         {
-            c.members_only = !c.members_only;
+            create.members_only = !create.members_only;
         }
+        cx.notify();
     });
-    let cancel = cx.on(|chat, _| chat.create = None);
-    let mut children = vec![
-        kit::heading(format!("{key}/title"), "Create a channel"),
-        text_field(
-            format!("{key}/name"),
-            "Channel name",
-            &create.name,
-            typed,
-            Some(submit),
-            busy,
-        ),
-        action(
-            format!("{key}/voice"),
+    let cancel = cx.listener(|chat, _: &ClickEvent, _window, cx| {
+        chat.create = None;
+        cx.notify();
+    });
+    let mut name = Input::new("chat-create-name")
+        .h(px(28.))
+        .px_2()
+        .py_1()
+        .border_1()
+        .border_color(theme.border_strong)
+        .bg(theme.surface)
+        .value(create.name.clone())
+        .placeholder("Channel name")
+        .label("Channel name")
+        .disabled(busy)
+        .on_input(typed);
+    if can_submit {
+        name = name.on_submit(cx.listener(|chat, _: &(), _window, cx| {
+            cx.notify();
+            chat.create_channel(cx)
+        }));
+    }
+    let voice = (!busy).then(|| Box::new(voice) as Press);
+    let members = (!busy && !create.voice).then(|| Box::new(members) as Press);
+    let cancel = (!busy).then(|| Box::new(cancel) as Press);
+    let submit = can_submit.then(|| Box::new(submit) as Press);
+    let mut card = div()
+        .id("chat-create-card")
+        .max_w(px(480.))
+        .flex()
+        .flex_col()
+        .gap_2()
+        .p_5()
+        .border_1()
+        .border_color(theme.border)
+        .bg(theme.background)
+        .shadow_lg()
+        .child(div().text_size(px(16.)).child("Create a channel"))
+        .child(
+            div()
+                .text_size(px(12.))
+                .text_color(theme.muted)
+                .child("Channel name"),
+        )
+        .child(name)
+        .child(dialog_button(
+            "chat-create-voice",
             if create.voice {
                 "Voice room: On"
             } else {
                 "Voice room: Off"
             },
-            (!busy).then_some(voice),
-        ),
-        action(
-            format!("{key}/members"),
+            theme,
+            voice,
+        ))
+        .child(dialog_button(
+            "chat-create-members",
             if create.members_only {
                 "Members only: On"
             } else {
                 "Members only: Off"
             },
-            (!busy && !create.voice).then_some(members),
-        ),
-    ];
-    if !create.error.is_empty() {
-        children.push(kit::tone_text(
-            format!("{key}/error"),
-            &create.error,
-            Tone::Danger,
+            theme,
+            members,
         ));
+    if !create.error.is_empty() {
+        card = card.child(
+            div()
+                .text_size(px(12.))
+                .text_color(theme.danger)
+                .child(create.error.clone()),
+        );
     }
-    children.push(kit::row(
-        format!("{key}/actions"),
-        [
-            subtle(format!("{key}/cancel"), "Cancel", (!busy).then_some(cancel)),
-            gated(
-                primary(
-                    format!("{key}/submit"),
-                    "Create channel",
-                    (!busy && chat.session.connected && !chat.session.busy).then_some(submit),
-                ),
-                chat.session.holds_account(),
-                "Create an account to create a channel",
-            ),
-        ],
-    ));
-    let card = kit::card(
-        format!("{key}/card"),
-        kit::spaced(kit::column(key, children), kit::spacing::SM as f32),
-    );
-    Some(width(padded_all(card, 20.), Length::Fixed(480.)))
+    if !chat.holds_account() {
+        card = card.child(
+            div()
+                .text_size(px(12.))
+                .text_color(theme.muted)
+                .child("Create an account to create a channel"),
+        );
+    }
+    card = card
+        .child(dialog_button("chat-create-cancel", "Cancel", theme, cancel))
+        .child(dialog_button(
+            "chat-create-submit",
+            "Create channel",
+            theme,
+            submit,
+        ));
+    Some(card.into_any_element())
 }
 
-/// The file pressed, shown where the reader is: a picture at the size the
-/// screen allows, a text file's head in a code plate, or the plate that says
-/// there is nothing to show.
-pub fn preview(chat: &Chat, cx: &mut Cx<Chat>) -> Option<Node> {
+pub fn preview(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Option<AnyElement> {
     let preview = chat.preview.as_ref()?;
-    let key = "chat/preview";
     let link = preview.link.clone();
     let path = crate::files::attachment_file_path(&link);
     let name = path.rsplit('/').next().unwrap_or_default().to_owned();
-    let open = cx.on(move |chat, _| chat.open_link(link.clone()));
-    let close = cx.on(|chat, _| chat.preview = None);
-    let header = kit::spaced(
-        kit::centered_row(
-            format!("{key}/header"),
-            [
-                fill_width(kit::nowrap(kit::strong(format!("{key}/name"), &name))),
-                subtle(format!("{key}/open-in-files"), "Open in Files", Some(open)),
-                glyph(format!("{key}/close"), "✕", "Close preview", Some(close)),
-            ],
-        ),
-        kit::spacing::SM as f32,
-    );
-    let body = preview_body(chat, key, &path, cx);
-    Some(padded_all(
-        kit::spaced(kit::column(key, [header, body]), kit::spacing::MD as f32),
-        14.,
-    ))
-}
-
-fn preview_body(chat: &Chat, key: &str, path: &str, cx: &mut Cx<Chat>) -> Node {
-    let preview = chat.preview.as_ref().expect("a preview");
-    let screen = chat.layout.viewport;
-    if let Some(&(w, h)) = chat.pictures.get(&preview.link)
-        && w > 0
-        && h > 0
+    let open = cx.listener(move |chat, _: &ClickEvent, _window, cx| {
+        cx.notify();
+        chat.open_link(link.clone(), cx)
+    });
+    let close = cx.listener(|chat, _: &ClickEvent, _window, cx| {
+        chat.preview = None;
+        cx.notify();
+    });
+    let mut card = div()
+        .id("chat-preview-card")
+        .size_full()
+        .max_w(px(720.))
+        .flex()
+        .flex_col()
+        .gap_2()
+        .p_4()
+        .border_1()
+        .border_color(theme.border)
+        .bg(theme.background)
+        .shadow_lg()
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .child(div().flex_1().child(name))
+                .child(button("chat-preview-open", "Open in Files", theme, open))
+                .child(button("chat-preview-close", "Close preview", theme, close)),
+        );
+    if let Some(&(width, height)) = chat.pictures.get(&preview.link)
+        && width > 0
+        && height > 0
     {
-        let (bw, bh) = crate::files::preview_box(w, h, screen);
-        let surface = Node::Surface {
-            key: format!("{key}/picture"),
-            name: "picture".into(),
-            args: vec![
-                SurfaceValue::Str(crate::files::PICTURE_SURFACE.into()),
-                SurfaceValue::Str(path.to_owned()),
-            ],
-            on_event: None,
-        };
-        return height(
-            width(
-                kit::container(format!("{key}/frame"), surface),
-                Length::Fixed(bw),
-            ),
-            Length::Fixed(bh),
+        let (width, height) = crate::files::preview_box(width, height, chat.layout.viewport);
+        return Some(
+            card.child(
+                div()
+                    .id("chat-preview-picture-frame")
+                    .w(px(width))
+                    .h(px(height))
+                    .child(surface(
+                        "chat-preview-picture",
+                        "picture",
+                        vec![
+                            wire::SurfaceValue::Str(crate::files::PICTURE_SURFACE.into()),
+                            wire::SurfaceValue::Str(path),
+                        ],
+                    )),
+            )
+            .into_any_element(),
         );
     }
-    let (plate_width, plate_height) = crate::files::preview_room(screen);
-    let read = match &preview.read {
-        Loaded::Failed(refusal) => {
-            return kit::notice(
-                format!("{key}/failed"),
-                kit::wrapping(kit::text(
-                    format!("{key}/reason"),
-                    format!("Could not read this file: {}", refusal.sentence),
-                )),
-                Tone::Danger,
+    match &preview.read {
+        Loaded::Idle | Loaded::Loading(_) => {
+            card = card.child(
+                div()
+                    .p_4()
+                    .text_size(px(12.))
+                    .text_color(theme.muted)
+                    .child("Reading the file…"),
             );
         }
-        Loaded::Ready(read) => read,
-        _ => return kit::secondary(format!("{key}/reading"), "Reading the file…"),
-    };
-    if read.binary {
-        return kit::empty_state(
-            format!("{key}/binary"),
-            "No preview",
-            crate::files::BINARY_PLATE,
-        );
-    }
-    // binary-or-text is the wire's call; markdown-vs-code is the path's
-    let dark = chat.session.dark;
-    let document = if crate::files::markdown_path(path) {
-        let on_link = cx.on_value(|chat, value: SurfaceValue, _| {
-            if let SurfaceValue::Str(link) = value {
-                chat.open_link(link);
+        Loaded::Failed(refusal) => {
+            card = card.child(
+                div()
+                    .p_4()
+                    .text_size(px(12.))
+                    .text_color(theme.danger)
+                    .child(format!("Could not read this file: {}", refusal.sentence)),
+            );
+        }
+        Loaded::Ready(text) => {
+            if text.binary {
+                card = card.child(crate::ui::empty_state(
+                    "chat-preview-binary",
+                    "No preview",
+                    crate::files::BINARY_PLATE,
+                    theme,
+                ));
+            } else {
+                let (width, height) = crate::files::preview_room(chat.layout.viewport);
+                let document = if crate::files::markdown_path(&path) {
+                    let open = cx.listener(|chat, event: &wire::SurfaceValue, _window, cx| {
+                        cx.notify();
+                        if let wire::SurfaceValue::Str(link) = event {
+                            chat.open_link(link.clone(), cx);
+                        }
+                    });
+                    surface(
+                        "chat-preview-markdown",
+                        "markdown",
+                        vec![
+                            wire::SurfaceValue::Str(text.text.clone()),
+                            wire::SurfaceValue::Str(String::new()),
+                            wire::SurfaceValue::Bool(chat.session.dark),
+                        ],
+                    )
+                    .on_event(open)
+                } else {
+                    surface(
+                        "chat-preview-code",
+                        "code",
+                        vec![
+                            wire::SurfaceValue::Str(text.text.clone()),
+                            wire::SurfaceValue::Str(path),
+                            wire::SurfaceValue::Bool(chat.session.dark),
+                        ],
+                    )
+                };
+                card = card.child(div().w(px(width)).h(px(height)).child(document).when(
+                    text.clipped,
+                    |element| {
+                        element.child(
+                            "Only the beginning is shown here. Open in Files for the whole file.",
+                        )
+                    },
+                ));
             }
-        });
-        Node::Surface {
-            key: format!("{key}/markdown"),
-            name: "markdown".into(),
-            args: vec![
-                SurfaceValue::Str(read.text.clone()),
-                SurfaceValue::Str(String::new()),
-                SurfaceValue::Bool(dark),
-            ],
-            on_event: Some(on_link),
         }
-    } else {
-        Node::Surface {
-            key: format!("{key}/code"),
-            name: "code".into(),
-            args: vec![
-                SurfaceValue::Str(read.text.clone()),
-                SurfaceValue::Str(path.to_owned()),
-                SurfaceValue::Bool(dark),
-            ],
-            on_event: None,
-        }
-    };
-    let mut children = vec![fill(kit::container(format!("{key}/plate"), document))];
-    if read.clipped {
-        children.push(kit::caption(
-            format!("{key}/clipped"),
-            "Only the beginning is shown here. Open in Files for the whole file.",
-        ));
     }
-    height(
-        width(
-            kit::spaced(
-                kit::column(format!("{key}/document"), children),
-                kit::spacing::XS as f32,
-            ),
-            Length::Fixed(plate_width),
-        ),
-        Length::Fixed(plate_height),
-    )
+    Some(card.into_any_element())
 }

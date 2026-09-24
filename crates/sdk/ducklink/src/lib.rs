@@ -50,6 +50,16 @@ impl ChainId {
         format!("{}-{}", self.label, self.salt_hex())
     }
 
+    /// the chain a network names: the network's name as the label, salted
+    /// with the first four bytes (eight hex digits) of its genesis block's
+    /// digest, which the node's status carries. `None` for a name that is
+    /// no label, or a digest shorter than a salt.
+    pub fn of(network: &str, genesis: &[u8]) -> Option<ChainId> {
+        let salt = genesis.get(..4)?;
+        let hex: String = salt.iter().map(|byte| format!("{byte:02x}")).collect();
+        format!("{network}#{hex}").parse().ok()
+    }
+
     /// the salt's lowercase hex digits, two per byte.
     pub fn salt_hex(&self) -> String {
         self.salt.iter().map(|byte| format!("{byte:02x}")).collect()
@@ -369,6 +379,15 @@ fn empty(text: &str) -> Refused {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_network_and_its_genesis_name_one_chain() {
+        let chain = ChainId::of("testkit", &[0xb5, 0xb6, 0xea, 0x90, 0xff]).unwrap();
+        assert_eq!(chain.to_string(), "testkit#b5b6ea90");
+        assert_eq!(chain.authority(), "testkit-b5b6ea90");
+        assert_eq!(ChainId::of("Test Kit", &[0; 32]), None);
+        assert_eq!(ChainId::of("testkit", &[0; 3]), None);
+    }
 
     fn chain() -> ChainId {
         "dognet-b5b6ea90".parse().expect("a chain id parses")

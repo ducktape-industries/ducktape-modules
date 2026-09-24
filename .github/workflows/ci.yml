@@ -24,9 +24,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
       - run: rustup show
+      # `make wasm-views` optimizes with Binaryen 132 exactly and reads the ABI with wasm-tools
+      - run: |
+          curl -sSL https://github.com/WebAssembly/binaryen/releases/download/version_132/binaryen-version_132-x86_64-linux.tar.gz | tar xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/binaryen-version_132/bin" >> "$GITHUB_PATH"
+          cargo install wasm-tools --locked
       - run: cargo fmt --all -- --check
+      # the founding suite runs `make wasm-programs` itself
       - run: cargo test --locked --workspace --no-fail-fast
       - run: cargo clippy --locked --workspace --tests --no-deps -- -D warnings
       - run: make program-wasm-check CARGO="cargo --locked"
       - run: make view-wasm-check CARGO="cargo --locked"
-      - run: make wasm-programs CARGO="cargo --locked"
+      - run: make wasm-views CARGO="cargo --locked"
+      - run: make wasm-reproducible CARGO="cargo --locked"

@@ -5,7 +5,7 @@
 **/*.rs.bk
 .DS_Store
 .claude/worktrees/
-.codex/worktrees/
+.codex/
 # Brainstorm specs and implementation plans are per-PR working files, never a
 # record: they stay local and die with their worktree.
 docs/superpowers/

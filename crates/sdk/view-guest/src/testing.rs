@@ -5,7 +5,7 @@ use crate::wire::{ButtonContent, Event, Frame, Node};
 
 /// Every text the tree shows, depth first: text nodes, button labels, and
 /// the value or placeholder of an input or editor.
-pub fn texts(frame: &Frame) -> Vec<String> {
+pub(crate) fn texts(frame: &Frame) -> Vec<String> {
     let mut out = Vec::new();
     if let Some(root) = &frame.root {
         collect_texts(root, &mut out);
@@ -15,30 +15,27 @@ pub fn texts(frame: &Frame) -> Vec<String> {
 
 fn collect_texts(node: &Node, out: &mut Vec<String>) {
     match node {
-        Node::Container { content, .. }
-        | Node::Sensor { child: content, .. }
-        | Node::Pin { content, .. }
+        Node::Container(crate::wire::ContainerNode { children, .. }) => {
+            children.iter().for_each(|child| collect_texts(child, out))
+        }
+        Node::Sensor { child: content, .. }
         | Node::Float { content, .. }
+        | Node::Deferred { content, .. }
         | Node::Responsive { content, .. }
         | Node::Lazy { content, .. }
         | Node::ResizeHandle { content, .. }
         | Node::MouseArea { content, .. }
         | Node::Scroll { content, .. } => collect_texts(content, out),
-        Node::Linear { children, .. }
-        | Node::Grid { children, .. }
-        | Node::Stack { children, .. }
-        | Node::Hover { children, .. }
-        | Node::Tooltip { children, .. }
+        Node::Tooltip { children, .. }
         | Node::Overlay { children, .. }
-        | Node::KeyedColumn { children, .. }
-        | Node::Flex { children, .. }
+        | Node::UniformList { children, .. }
+        | Node::Anchored { children, .. }
+        | Node::List { children, .. }
         | Node::When { children, .. } => {
             children.iter().for_each(|child| collect_texts(child, out))
         }
-        Node::RichText { spans, .. } => {
-            out.push(spans.iter().map(|span| span.content.as_str()).collect())
-        }
-        Node::Text { content, .. } => out.push(content.clone()),
+        Node::RichText { text, .. } => out.push(text.clone()),
+        Node::Text(crate::wire::TextNode { content, .. }) => out.push(content.clone()),
         Node::Input {
             value: text,
             placeholder,
@@ -99,7 +96,7 @@ fn collect_texts(node: &Node, out: &mut Vec<String>) {
 /// Panics listing each node assistive technology cannot name or place, by
 /// its key path and fault. `ops/build-views.sh` runs every test whose name
 /// holds `accessibility` before it builds a component.
-pub fn assert_accessible(tree: &Node) {
+pub(crate) fn assert_accessible(tree: &Node) {
     let faults = crate::wire::accessibility_faults(tree);
     assert!(
         faults.is_empty(),
@@ -113,12 +110,31 @@ pub fn assert_accessible(tree: &Node) {
     );
 }
 
-pub fn has_text(frame: &Frame, content: &str) -> bool {
+pub(crate) fn has_text(frame: &Frame, content: &str) -> bool {
     texts(frame).iter().any(|text| text == content)
 }
 
+pub(crate) fn rich_click(frame: &Frame, key: &str, index: usize) -> Event {
+    let Some(Node::RichText {
+        on_click: Some(handler),
+        clickable_ranges,
+        ..
+    }) = find(frame, key)
+    else {
+        panic!("{key} is not interactive rich text");
+    };
+    assert!(
+        index < clickable_ranges.len(),
+        "rich text click index out of bounds"
+    );
+    Event::Select {
+        handler: *handler,
+        index: u32::try_from(index).expect("rich text click index fits the wire"),
+    }
+}
+
 /// The node under `key` (`App/content/count`), if the tree has one.
-pub fn find<'a>(frame: &'a Frame, key: &str) -> Option<&'a Node> {
+pub(crate) fn find<'a>(frame: &'a Frame, key: &str) -> Option<&'a Node> {
     let root = frame.root.as_ref()?;
     find_by(root, &|node| node.key() == Some(key))
 }
@@ -129,23 +145,22 @@ fn find_by<'a>(node: &'a Node, matches: &dyn Fn(&Node) -> bool) -> Option<&'a No
         return Some(node);
     }
     match node {
-        Node::Container { content, .. }
-        | Node::Sensor { child: content, .. }
-        | Node::Pin { content, .. }
+        Node::Container(crate::wire::ContainerNode { children, .. }) => {
+            children.iter().find_map(|child| find_by(child, matches))
+        }
+        Node::Sensor { child: content, .. }
         | Node::Float { content, .. }
+        | Node::Deferred { content, .. }
         | Node::Responsive { content, .. }
         | Node::Lazy { content, .. }
         | Node::ResizeHandle { content, .. }
         | Node::MouseArea { content, .. }
         | Node::Scroll { content, .. } => find_by(content, matches),
-        Node::Linear { children, .. }
-        | Node::Grid { children, .. }
-        | Node::Stack { children, .. }
-        | Node::Hover { children, .. }
-        | Node::Tooltip { children, .. }
+        Node::Tooltip { children, .. }
         | Node::Overlay { children, .. }
-        | Node::KeyedColumn { children, .. }
-        | Node::Flex { children, .. }
+        | Node::UniformList { children, .. }
+        | Node::Anchored { children, .. }
+        | Node::List { children, .. }
         | Node::When { children, .. } => children.iter().find_map(|child| find_by(child, matches)),
 
         Node::Button {
@@ -154,7 +169,7 @@ fn find_by<'a>(node: &'a Node, matches: &dyn Fn(&Node) -> bool) -> Option<&'a No
         } => find_by(child, matches),
         Node::Button { .. }
         | Node::RichText { .. }
-        | Node::Text { .. }
+        | Node::Text(crate::wire::TextNode { .. })
         | Node::Qr { .. }
         | Node::Svg { .. }
         | Node::Image { .. }
@@ -178,13 +193,19 @@ fn find_by<'a>(node: &'a Node, matches: &dyn Fn(&Node) -> bool) -> Option<&'a No
 fn button<'a>(frame: &'a Frame, name: &str) -> Option<&'a Node> {
     let root = frame.root.as_ref()?;
     find_by(root, &|node| match node {
+        Node::Container(crate::wire::ContainerNode { interactivity, .. })
+            if interactivity.on_click.is_some() =>
+        {
+            let mut labels = Vec::new();
+            collect_texts(node, &mut labels);
+            node.key() == Some(name)
+                || interactivity.aria.label.as_deref() == Some(name)
+                || labels.iter().any(|label| label == name)
+        }
         Node::Button {
-            key,
-            content,
-            label,
-            ..
+            id, content, label, ..
         } => {
-            key == name
+            id.name() == Some(name)
                 || label.as_deref() == Some(name)
                 || matches!(content, ButtonContent::Label(label) if label == name)
         }
@@ -197,27 +218,34 @@ fn input<'a>(frame: &'a Frame, name: &str) -> Option<&'a Node> {
     let root = frame.root.as_ref()?;
     find_by(root, &|node| match node {
         Node::Input {
-            key, placeholder, ..
-        } => key == name || placeholder == name,
+            id, placeholder, ..
+        } => id.name() == Some(name) || placeholder == name,
         _ => false,
     })
 }
 
 /// The events the host sends when the user presses the button with key or
 /// label `name`.
-pub fn press(frame: &Frame, name: &str) -> Vec<Event> {
-    let Some(Node::Button { on_press, .. }) = button(frame, name) else {
-        panic!("no button {name:?} in {:?}", texts(frame));
-    };
-    let Some(message) = on_press else {
-        panic!("button {name:?} is disabled");
-    };
-    vec![Event::Message(*message)]
+pub(crate) fn press(frame: &Frame, name: &str) -> Vec<Event> {
+    match button(frame, name) {
+        Some(Node::Container(crate::wire::ContainerNode { interactivity, .. })) => {
+            vec![Event::Click {
+                handler: interactivity.on_click.expect("click route"),
+                event: (&gpui::ClickEvent::default()).into(),
+            }]
+        }
+        Some(Node::Button {
+            on_press: Some(message),
+            ..
+        }) => vec![Event::Message(*message)],
+        Some(Node::Button { on_press: None, .. }) => panic!("button {name:?} is disabled"),
+        _ => panic!("no button {name:?} in {:?}", texts(frame)),
+    }
 }
 
 /// The events the host sends when the input with key or placeholder `name`
 /// now reads `text`.
-pub fn type_into(frame: &Frame, name: &str, text: &str) -> Vec<Event> {
+pub(crate) fn type_into(frame: &Frame, name: &str, text: &str) -> Vec<Event> {
     let Some(Node::Input { on_input, .. }) = input(frame, name) else {
         panic!("no input {name:?} in {:?}", texts(frame));
     };
@@ -227,67 +255,9 @@ pub fn type_into(frame: &Frame, name: &str, text: &str) -> Vec<Event> {
     }]
 }
 
-/// The events the host sends when the editor with key or placeholder `name`
-/// now reads `text`.
-pub fn edit(frame: &Frame, name: &str, before_text: &str, text: &str) -> Vec<Event> {
-    let editor = frame.root.as_ref().and_then(|root| {
-        find_by(root, &|node| match node {
-            Node::Editor {
-                key, placeholder, ..
-            } => key == name || placeholder == name,
-            _ => false,
-        })
-    });
-    let Some(Node::Editor {
-        document,
-        options,
-        editable,
-        ..
-    }) = editor
-    else {
-        panic!("no editor {name:?}");
-    };
-    assert!(editable, "editor {name:?} is disabled");
-    assert!(
-        document.validate_text(before_text).is_ok(),
-        "test must supply the actual document mirror"
-    );
-    let binding = options.binding.as_ref().expect("editor commit route");
-    let mut after = document.clone();
-    after.revision = after
-        .revision
-        .checked_add(1)
-        .expect("editor observation revisions exhausted");
-    after.text_revision += u64::from(before_text != text);
-    after.byte_len = u32::try_from(text.len()).expect("editor document limit");
-    after.cursor.clamp(text);
-    vec![Event::EditorTransaction {
-        handler: binding.on_event,
-        event: crate::wire::EditorTransactionEvent::Commit {
-            origin: None,
-            id: crate::wire::EditorTransactionId {
-                instance: 0,
-                document: document.document.clone(),
-                reset: document.reset,
-                sequence: after.revision,
-                attempt: 0,
-                text_revision: document.text_revision,
-                revision: document.revision,
-            },
-            before: document.clone(),
-            after,
-            patches: crate::wire::editor_document::editor_changed_span(before_text, text)
-                .expect("valid editor patch"),
-            kind: crate::wire::EditorEditKind::GuestPatch,
-            history: crate::wire::EditorHistoryEffect::NewGroup,
-            input_time_ms: 0,
-        },
-    }]
-}
-
 /// The events the host sends when the user submits the input with key or
 /// placeholder `name`.
-pub fn submit(frame: &Frame, name: &str) -> Vec<Event> {
+pub(crate) fn submit(frame: &Frame, name: &str) -> Vec<Event> {
     let Some(Node::Input { on_submit, .. }) = input(frame, name) else {
         panic!("no input {name:?} in {:?}", texts(frame));
     };
@@ -297,75 +267,11 @@ pub fn submit(frame: &Frame, name: &str) -> Vec<Event> {
     vec![Event::Message(*message)]
 }
 
-/// The node whose key is `name`, or whose label is for a labelled control.
-fn control<'a>(frame: &'a Frame, name: &str) -> Option<&'a Node> {
-    let root = frame.root.as_ref()?;
-    find_by(root, &|node| match node {
-        Node::Toggle { key, label, .. } | Node::Radio { key, label, .. } => {
-            key == name || label == name
-        }
-        Node::Slider { key, .. } | Node::PickList { key, .. } | Node::ComboBox { key, .. } => {
-            key == name
-        }
-        _ => false,
-    })
-}
-
-/// The events the host sends when the user flips the checkbox or toggler
-/// with key or label `name` to `on`.
-pub fn toggle(frame: &Frame, name: &str, on: bool) -> Vec<Event> {
-    let Some(Node::Toggle { on_toggle, .. }) = control(frame, name) else {
-        panic!("no checkbox or toggler {name:?} in {:?}", texts(frame));
-    };
-    let Some(handler) = on_toggle else {
-        panic!("control {name:?} is disabled");
-    };
-    vec![Event::Toggle {
-        handler: *handler,
-        on,
-    }]
-}
-
-/// The events the host sends when the user drags the slider with key
-/// `name` to `value`.
-pub fn slide(frame: &Frame, name: &str, value: f32) -> Vec<Event> {
-    let Some(Node::Slider { on_change, .. }) = control(frame, name) else {
-        panic!("no slider {name:?} in {:?}", keys(frame));
-    };
-    vec![Event::Slide {
-        handler: *on_change,
-        value,
-    }]
-}
-
-/// The events the host sends when the user picks the option reading
-/// `option` from the pick list with key `name`.
-pub fn pick(frame: &Frame, name: &str, option: &str) -> Vec<Event> {
-    let Some(
-        Node::PickList {
-            options, on_select, ..
-        }
-        | Node::ComboBox {
-            options, on_select, ..
-        },
-    ) = control(frame, name)
-    else {
-        panic!("no pick list {name:?} in {:?}", keys(frame));
-    };
-    let Some(index) = options.iter().position(|candidate| candidate == option) else {
-        panic!("no option {option:?} in {options:?}");
-    };
-    vec![Event::Select {
-        handler: *on_select,
-        index: index as u32,
-    }]
-}
-
 /// The events the host sends when the sensor with key `name` measures its
 /// child at `width` by `height`: a first measurement is a show, so the
 /// show route hears it, and a sensor with only a resize route hears it
 /// there.
-pub fn measure(frame: &Frame, name: &str, width: f32, height: f32) -> Vec<Event> {
+pub(crate) fn measure(frame: &Frame, name: &str, width: f32, height: f32) -> Vec<Event> {
     let Some(Node::Sensor {
         on_show, on_resize, ..
     }) = find(frame, name)
@@ -382,78 +288,48 @@ pub fn measure(frame: &Frame, name: &str, width: f32, height: f32) -> Vec<Event>
     }]
 }
 
-/// The events the host sends when the sensor with key `name` leaves view.
-pub fn hide(frame: &Frame, name: &str) -> Vec<Event> {
-    let Some(Node::Sensor { on_hide, .. }) = find(frame, name) else {
-        panic!("no sensor {name:?} in {:?}", keys(frame));
+/// The event the host sends while the named resize handle is grabbed.
+pub(crate) fn drag(frame: &Frame, name: &str, dx: f64, dy: f64) -> Vec<Event> {
+    let Some(Node::ResizeHandle { on_drag, .. }) = find(frame, name) else {
+        panic!("no resize handle {name:?} in {:?}", keys(frame));
     };
-    let Some(message) = on_hide else {
-        panic!("sensor {name:?} has no hide route");
+    let Some(handler) = on_drag else {
+        panic!("resize handle {name:?} has no drag route");
     };
-    vec![Event::Message(*message)]
-}
-
-/// The mouse area with key `name`.
-fn mouse_area<'a>(frame: &'a Frame, name: &str) -> &'a Node {
-    let found = frame.root.as_ref().and_then(|root| {
-        find_by(
-            root,
-            &|node| matches!(node, Node::MouseArea { key, .. } if key == name),
-        )
-    });
-    match found {
-        Some(node) => node,
-        None => panic!("no mouse area {name:?} in {:?}", keys(frame)),
-    }
-}
-
-/// The events the host sends when the pointer enters the mouse area with
-/// key `name`.
-pub fn hover(frame: &Frame, name: &str) -> Vec<Event> {
-    let Node::MouseArea { on_enter, .. } = mouse_area(frame, name) else {
-        unreachable!()
-    };
-    let Some(message) = on_enter else {
-        panic!("mouse area {name:?} has no enter route");
-    };
-    vec![Event::Message(*message)]
-}
-
-/// The events the host sends when the pointer moves to (`x`, `y`) inside
-/// the mouse area with key `name` — the area's own coordinates.
-pub fn move_to(frame: &Frame, name: &str, x: f32, y: f32) -> Vec<Event> {
-    let Node::MouseArea { on_move, .. } = mouse_area(frame, name) else {
-        unreachable!()
-    };
-    let Some(handler) = on_move else {
-        panic!("mouse area {name:?} has no move route");
-    };
-    vec![Event::Pointer {
-        handler: *handler,
-        x,
-        y,
-    }]
-}
-
-/// The events the host sends when the wheel turns by (`dx`, `dy`) lines
-/// over the mouse area with key `name`.
-pub fn scroll(frame: &Frame, name: &str, dx: f32, dy: f32) -> Vec<Event> {
-    let Node::MouseArea { on_scroll, .. } = mouse_area(frame, name) else {
-        unreachable!()
-    };
-    let Some(handler) = on_scroll else {
-        panic!("mouse area {name:?} has no scroll route");
-    };
-    vec![Event::Scroll {
+    vec![Event::Drag {
         handler: *handler,
         dx,
         dy,
-        pixels: false,
+    }]
+}
+
+/// The event the host sends when the modal backdrop dismisses an overlay.
+pub(crate) fn dismiss(frame: &Frame, name: &str) -> Vec<Event> {
+    let Some(Node::Overlay { on_dismiss, .. }) = find(frame, name) else {
+        panic!("no overlay {name:?} in {:?}", keys(frame));
+    };
+    let Some(message) = on_dismiss else {
+        panic!("overlay {name:?} has no dismiss route");
+    };
+    vec![Event::Message(*message)]
+}
+
+/// The event a named host-painted surface returns to its guest listener.
+pub(crate) fn surface(frame: &Frame, name: &str, value: crate::wire::SurfaceValue) -> Vec<Event> {
+    let Some(Node::Surface { on_event, .. }) = find(frame, name) else {
+        panic!("no surface {name:?} in {:?}", keys(frame));
+    };
+    let Some(handler) = on_event else {
+        panic!("surface {name:?} has no event route");
+    };
+    vec![Event::Surface {
+        handler: *handler,
+        value,
     }]
 }
 
 /// Every node key in the tree, depth first.
-pub fn keys(frame: &Frame) -> Vec<String> {
+pub(crate) fn keys(frame: &Frame) -> Vec<String> {
     let mut out = Vec::new();
     if let Some(root) = &frame.root {
         collect_keys(root, &mut out);
@@ -466,23 +342,22 @@ fn collect_keys(node: &Node, out: &mut Vec<String>) {
         out.push(key.to_string());
     }
     match node {
-        Node::Container { content, .. }
-        | Node::Sensor { child: content, .. }
-        | Node::Pin { content, .. }
+        Node::Container(crate::wire::ContainerNode { children, .. }) => {
+            children.iter().for_each(|child| collect_keys(child, out))
+        }
+        Node::Sensor { child: content, .. }
         | Node::Float { content, .. }
+        | Node::Deferred { content, .. }
         | Node::Responsive { content, .. }
         | Node::Lazy { content, .. }
         | Node::ResizeHandle { content, .. }
         | Node::MouseArea { content, .. }
         | Node::Scroll { content, .. } => collect_keys(content, out),
-        Node::Linear { children, .. }
-        | Node::Grid { children, .. }
-        | Node::Stack { children, .. }
-        | Node::Hover { children, .. }
-        | Node::Tooltip { children, .. }
+        Node::Tooltip { children, .. }
         | Node::Overlay { children, .. }
-        | Node::KeyedColumn { children, .. }
-        | Node::Flex { children, .. }
+        | Node::UniformList { children, .. }
+        | Node::Anchored { children, .. }
+        | Node::List { children, .. }
         | Node::When { children, .. } => children.iter().for_each(|child| collect_keys(child, out)),
 
         Node::Button {
@@ -491,7 +366,7 @@ fn collect_keys(node: &Node, out: &mut Vec<String>) {
         } => collect_keys(child, out),
         Node::Button { .. }
         | Node::RichText { .. }
-        | Node::Text { .. }
+        | Node::Text(crate::wire::TextNode { .. })
         | Node::Qr { .. }
         | Node::Svg { .. }
         | Node::Image { .. }
@@ -511,29 +386,7 @@ fn collect_keys(node: &Node, out: &mut Vec<String>) {
     }
 }
 
-pub fn answer(id: u64, payload: &[u8]) -> Event {
-    Event::Response {
-        id,
-        result: Ok(payload.to_vec()),
-        done: true,
-    }
-}
-
-pub fn item(id: u64, payload: &[u8]) -> Event {
-    Event::Response {
-        id,
-        result: Ok(payload.to_vec()),
-        done: false,
-    }
-}
-
-/// Refuse a request the way a MODULE refuses one: the reason a view keys on is
-/// `module`, and `message` is the sentence the module wrote. A test that needs
-/// another token builds the [`crate::wire::Refusal`] itself.
-pub fn refuse(id: u64, message: &str) -> Event {
-    Event::Response {
-        id,
-        result: Err(crate::wire::Refusal::new("module", message)),
-        done: true,
-    }
-}
+mod context;
+mod fake_host;
+pub use context::TestAppContext;
+pub use fake_host::{FakeHost, Feed};

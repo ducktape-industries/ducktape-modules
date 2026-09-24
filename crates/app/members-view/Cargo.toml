@@ -1,0 +1,23 @@
+[package]
+name = "members-view"
+edition.workspace = true
+version.workspace = true
+publish = false
+
+# A Rust-authored view, exported as a dynamically loaded wasm module by
+# `export_view!`; `unsafe_code` is not forbidden only because the module
+# exports need `#[unsafe(export_name)]`.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+futures.workspace = true
+ducktape-view-guest.workspace = true
+identity.workspace = true
+valset.workspace = true
+module-registry.workspace = true
+serde.workspace = true
+
+# Typed fake-host tests use the program contracts.
+[dev-dependencies]
+abi.workspace = true

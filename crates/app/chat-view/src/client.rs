@@ -3,9 +3,7 @@
 //! the derived DM channel id. Everything is display logic over `chat`.
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::chat::{
-    AccountRow, Block, Mark, MsgRow, Party, Span, dm_peers, hex, party_handle, unhex,
-};
+use crate::chat::{AccountRow, Block, Mark, MsgRow, Party, Span, dm_peers, hex, unhex};
 
 /// The account bound to a user key: its number (the identity) and its name.
 #[derive(Clone, Debug, PartialEq)]
@@ -70,27 +68,8 @@ impl NameDirectory {
         } else {
             format!("user:{key_hex}")
         };
-        self.of_handle(&handle).map_or_else(
-            || ducktape_view_guest::kit::short_id(key_hex, 8),
-            str::to_string,
-        )
-    }
-
-    pub fn party_of(&self, key: &[u8]) -> Party {
-        match self.account_of(&hex(key)) {
-            Some(account) => Party::Account(account),
-            None => Party::Key(key.to_vec()),
-        }
-    }
-
-    pub fn handle_of(&self, key: &[u8]) -> String {
-        party_handle(&self.party_of(key))
-    }
-
-    /// An account row belongs to the account's current keys; a key row only
-    /// to that exact key.
-    pub fn owns_handle(&self, handle: &str, key: &[u8]) -> bool {
-        handle == self.handle_of(key) || handle == party_handle(&Party::Key(key.to_vec()))
+        self.of_handle(&handle)
+            .map_or_else(|| short_id(key_hex, 8), str::to_string)
     }
 
     fn of_handle(&self, handle: &str) -> Option<&str> {
@@ -392,7 +371,7 @@ fn span_display(span: &Span, names: &NameDirectory) -> String {
 pub fn author_display(author: &str, names: &NameDirectory) -> String {
     names.of_handle(author).map_or_else(
         || match author.split_once(':') {
-            Some(("user", id)) => format!("user {}", ducktape_view_guest::kit::short_id(id, 8)),
+            Some(("user", id)) => format!("user {}", short_id(id, 8)),
             Some(("acct", account)) => format!("account {account}"),
             Some(("module", id)) => id.to_string(),
             _ => "system".into(),
@@ -500,7 +479,27 @@ pub fn dm_peer_of(mine: u64, channel_id: &str) -> Option<u64> {
 }
 
 pub fn height_label(height: u64) -> String {
-    format!("block {}", ducktape_view_guest::kit::grouped(height))
+    format!("block {}", grouped(height))
+}
+
+pub(crate) fn short_id(id: &str, keep: usize) -> String {
+    let mut head: String = id.chars().take(keep).collect();
+    if id.chars().count() > keep {
+        head.push('…');
+    }
+    head
+}
+
+fn grouped(number: u64) -> String {
+    let digits = number.to_string();
+    let mut grouped = String::with_capacity(digits.len() + digits.len() / 3);
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            grouped.push(',');
+        }
+        grouped.push(digit);
+    }
+    grouped
 }
 
 pub fn reaction_palette() -> [&'static str; 32] {

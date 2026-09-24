@@ -1,594 +1,549 @@
-//! One message: the avatar rail, the byline, the body's blocks (rich text,
-//! code, quotes, attachments), its reactions and the way into its thread.
-use ducktape_view_guest::view::Cx;
-use ducktape_view_guest::wire::{self, ButtonPreset, Length, Node, kit, kit::Tone};
+//! Message cards and their native GPUI actions.
 
-use crate::client::{ChatBlock, ChatMessage, SpanStyle, height_label};
+use ducktape_view_guest::prelude::*;
+use ducktape_view_guest::{
+    AnyElement, ClickEvent, Context, ElementId, FontStyle, FontWeight, HighlightStyle,
+    InteractiveText, ParentElement, Styled, StyledText, Theme, UnderlineStyle, Window, div, px,
+    surface, wire,
+};
+
+use crate::client::{ChatBlock, ChatMessage, SpanStyle};
+use crate::ui::badge;
 use crate::{Chat, Mode, Pane};
-use ducktape_view_guest::wire::kit::*;
+mod rich;
+use rich::{plain_line, rich_line};
 
-/// The avatar plate beside an author's first message, and the gap to the
-/// text. A continuation row keeps the same rail so bodies line up.
-pub const AVATAR: f32 = 28.;
-pub const RAIL_GAP: f32 = kit::spacing::MD as f32;
-/// Where a message's text starts, from the row's left edge.
-const PILL_HEIGHT: f32 = 24.;
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Plate {
-    Plain,
-    Selected,
-    Ranged,
-}
-
-/// The card: the rail, then the byline and body. A chosen or ranged row
-/// wears a wash.
 pub fn card(
     chat: &Chat,
-    message: &ChatMessage,
+    message: ChatMessage,
     pane: Pane,
-    plate: Plate,
-    cx: &mut Cx<Chat>,
-) -> Node {
-    let key = format!("message/{pane:?}/{}", message.id);
-    let p = kit::palette();
-    let rail = if message.show_author {
-        avatar(format!("{key}/avatar"), &message.initial, message.agent)
-    } else {
-        kit::space(Some(Length::Fixed(AVATAR)), Some(Length::Fixed(4.)))
-    };
-    let contents = contents(chat, &key, message, pane, plate, cx);
-    let row = aligned_x(
-        kit::padded(
-            kit::spaced(kit::row(format!("{key}/row"), [rail, contents]), RAIL_GAP),
-            wire::Edges {
-                top: if message.show_author {
-                    kit::spacing::MD as f32
-                } else {
-                    3.
-                },
-                right: 16.,
-                bottom: 3.,
-                left: 16.,
-            },
-        ),
-        wire::AlignX::Left,
-    );
-    let card = rounded(kit::container(key, row), kit::radius::CONTROL as f32);
-    match plate {
-        Plate::Plain => card,
-        Plate::Selected => background(card, p.accent_soft),
-        Plate::Ranged => background(card, p.surface_raised),
-    }
-}
-
-fn contents(
-    chat: &Chat,
-    key: &str,
-    message: &ChatMessage,
-    pane: Pane,
-    plate: Plate,
-    cx: &mut Cx<Chat>,
-) -> Node {
-    let key = format!("{key}/contents");
-    let p = kit::palette();
-    let mut children = Vec::new();
-    if message.show_author {
-        let mut header = vec![kit::nowrap(kit::strong(
-            format!("{key}/author"),
-            &message.author,
-        ))];
-        if message.agent {
-            header.push(kit::badge(format!("{key}/agent"), "Agent", Tone::Agent));
-        }
-        if message.height > 0 {
-            header.push(kit::nowrap(kit::colored(
-                kit::text_size(
-                    kit::mono(format!("{key}/height"), height_label(message.height)),
-                    kit::type_scale::CAPTION as f32,
-                ),
-                p.faint,
-            )));
-        }
-        children.push(kit::spaced(
-            kit::centered_row(format!("{key}/header"), header),
-            kit::spacing::XS as f32,
-        ));
-    }
-    // a press chooses the message (shift grows the copy range)
+    _window: &mut Window,
+    cx: &mut Context<Chat>,
+    theme: &Theme,
+) -> impl IntoElement {
+    let id = message.id.clone();
     let seq = message.seq;
-    let press = cx.on(move |chat, _| chat.press_message(pane, seq));
-    let on_link = cx.on_value(|chat, link: String, _| chat.open_link(link));
-    children.push(with_press(
-        with_row_role(
-            mouse_area(
-                format!("{key}/select"),
-                body(
-                    chat,
-                    format!("{key}/body"),
-                    &message.blocks,
-                    Some(on_link),
-                    cx,
-                ),
-            ),
-            format!(
-                "Select message, shows its actions: {}: {}",
-                message.author, message.body
-            ),
-            plate != Plate::Plain,
-        ),
-        press,
-    ));
-    if message.edited {
-        children.push(kit::caption(format!("{key}/edited"), "edited"));
-    }
-    let writable = chat.may_write();
-    let mut reactions = Vec::new();
-    for reaction in &message.reactions {
-        let (emoji, mine) = (reaction.emoji.clone(), reaction.reacted_by_me);
-        let press =
-            writable.then(|| cx.on(move |chat, cx| chat.react(seq, emoji.clone(), !mine, cx)));
-        reactions.push(pill(
-            format!("{key}/reaction/{}", reaction.emoji),
-            &reaction.emoji,
-            Some(reaction.count),
-            if mine {
-                "Remove reaction"
+    let press = cx.listener(move |chat, event: &ClickEvent, _window, cx| {
+        cx.notify();
+        let position = event.position();
+        chat.layout.press = (position.x.into(), position.y.into());
+        chat.press_message(pane, seq);
+    });
+    let chosen = !message.deleted
+        && seq > 0
+        && chat
+            .menu
+            .as_ref()
+            .is_some_and(|menu| menu.pane == pane && menu.seq == seq);
+    let ranged = !message.deleted && chat.copy.is_some_and(|range| range.holds(pane, seq));
+    let group: ducktape_view_guest::SharedString = format!("chat-message-{id}").into();
+    let avatar = if message.show_author {
+        div()
+            .id(format!("chat-message-{id}-avatar"))
+            .size_7()
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(6.))
+            .bg(if message.agent {
+                theme.agent_soft
             } else {
-                "Add reaction"
-            },
-            mine,
-            press,
-        ));
-    }
-    if !reactions.is_empty() {
+                theme.surface_raised
+            })
+            .text_color(if message.agent {
+                theme.agent
+            } else {
+                theme.muted
+            })
+            .font_weight(ducktape_view_guest::FontWeight::SEMIBOLD)
+            .text_size(px(11.5))
+            .child(message.initial.clone())
+            .into_any_element()
+    } else {
+        div().w_7().h(px(4.)).flex_shrink_0().into_any_element()
+    };
+    let card = div()
+        .id(format!("chat-message-{id}"))
+        .relative()
+        .flex()
+        .gap(px(10.))
+        .px_4()
+        .pt(px(if message.show_author { 12. } else { 3. }))
+        .pb(px(3.))
+        .bg(if chosen {
+            theme.accent_soft
+        } else if ranged {
+            theme.surface_raised
+        } else {
+            theme.background
+        })
+        .hover(|style| style.bg(theme.surface_raised))
+        .role(ducktape_view_guest::Role::Button)
+        .aria_label(format!(
+            "Select message, shows its actions: {}: {}",
+            message.author, message.body
+        ))
+        .focusable()
+        .on_click(press)
+        .child(avatar)
+        .child(content(chat, message.clone(), pane, cx, theme));
+    // Controls are siblings of the selection target: their native click must
+    // not also replace the opened menu with the message-selection toolbar.
+    let mut outer = div().relative().w_full().group(group.clone()).child(card);
+    if !message.pending && !message.deleted {
         let rev = message.rev;
-        let open = writable
-            .then(|| cx.on(move |chat, cx| chat.open_menu(pane, seq, rev, Mode::Reactions, cx)));
-        reactions.push(pill(
-            format!("{key}/reaction/add"),
-            "+",
-            None,
-            "Add reaction",
-            false,
-            open,
-        ));
-        children.push(kit::spaced(
-            kit::wrapped_row(format!("{key}/reactions"), reactions),
-            kit::spacing::XXS as f32,
-        ));
-    }
-    // in the timeline the count is the way into the thread; in the thread
-    // itself it is the rule between the root and its replies
-    match (message.reply_count > 0, pane) {
-        (false, _) => {}
-        (true, Pane::Timeline) => {
-            let open = cx.on(move |chat, cx| chat.open_thread(seq, cx));
-            children.push(reply_link(
-                format!("{key}/thread"),
-                message.reply_count,
+        let writable = chat.may_write();
+        let mut actions = div()
+            .id(format!("chat-message-{id}-actions"))
+            .absolute()
+            .right_2()
+            .top_1()
+            .flex()
+            .gap_1()
+            .bg(theme.background)
+            // GPUI dispatches a click to every interactive element whose
+            // hitbox contains it, not just the topmost one: without this,
+            // a click on a button here also lands on `card`'s row-select
+            // handler beneath it, which clobbers whatever this row just
+            // set (e.g. `open_menu`'s mode) back to `Mode::Toolbar`.
+            .occlude()
+            .invisible()
+            .group_hover(group, |style| style.visible());
+        if chosen {
+            actions = actions.visible();
+        }
+        if pane == Pane::Timeline && message.reply_count == 0 {
+            let open = cx.listener(move |chat, _: &ClickEvent, _, cx| {
+                cx.notify();
+                chat.open_thread(seq, cx);
+            });
+            actions = actions.child(action_button(
+                format!("chat-message-{id}-thread"),
+                "💬",
+                "Open thread",
+                theme,
+                true,
                 open,
             ));
         }
-        (true, Pane::Thread) => children.push(kit::spaced(
-            kit::centered_row(
-                format!("{key}/thread"),
-                [
-                    kit::nowrap(kit::caption(
-                        format!("{key}/thread/count"),
-                        plural(message.reply_count, "reply", "replies"),
-                    )),
-                    kit::container(
-                        format!("{key}/thread/line"),
-                        kit::divider(format!("{key}/thread/rule")),
-                    ),
-                ],
-            ),
-            kit::spacing::SM as f32,
-        )),
+        let thumbs = cx.listener(move |chat, _: &ClickEvent, _, cx| {
+            cx.notify();
+            chat.react(seq, "👍".into(), true, cx);
+        });
+        actions = actions.child(action_button(
+            format!("chat-message-{id}-thumbs-up"),
+            "👍",
+            "React with 👍",
+            theme,
+            writable,
+            thumbs,
+        ));
+        let react = cx.listener(move |chat, event: &ClickEvent, window, cx| {
+            cx.notify();
+            let position = event.position();
+            chat.layout.press = (position.x.into(), position.y.into());
+            chat.open_menu(pane, seq, rev, Mode::Reactions, window, cx);
+        });
+        actions = actions.child(action_button(
+            format!("chat-message-{id}-react"),
+            "😀",
+            "Manage reactions",
+            theme,
+            writable,
+            react,
+        ));
+        let more = cx.listener(move |chat, event: &ClickEvent, window, cx| {
+            cx.notify();
+            let position = event.position();
+            chat.layout.press = (position.x.into(), position.y.into());
+            chat.open_menu(pane, seq, rev, Mode::More, window, cx);
+        });
+        actions = actions.child(action_button(
+            format!("chat-message-{id}-more"),
+            "⋯",
+            "More message actions",
+            theme,
+            true,
+            more,
+        ));
+        outer = outer.child(actions);
+    }
+    outer
+}
+
+fn content(
+    chat: &Chat,
+    message: ChatMessage,
+    pane: Pane,
+    cx: &mut Context<Chat>,
+    theme: &Theme,
+) -> impl IntoElement {
+    let mut body = div()
+        .id(format!("chat-message-{}-contents", message.id))
+        .flex_1()
+        .min_w(px(0.))
+        .flex()
+        .flex_col()
+        .gap_1();
+    if message.show_author {
+        let mut header = div()
+            .id(format!("chat-message-{}-header", message.id))
+            .flex()
+            .items_center()
+            .gap_1()
+            .child(
+                div()
+                    .text_size(px(13.))
+                    .font_weight(ducktape_view_guest::FontWeight::MEDIUM)
+                    .child(message.author.clone()),
+            );
+        if message.agent {
+            header = header.child(badge(
+                format!("chat-message-{}-agent", message.id),
+                "Agent",
+                theme.agent,
+                theme.agent_soft,
+            ));
+        }
+        if message.height > 0 {
+            header = header.child(
+                div()
+                    .text_size(px(11.))
+                    .text_color(theme.muted)
+                    .font_family("JetBrains Mono")
+                    .child(crate::client::height_label(message.height)),
+            );
+        }
+        body = body.child(header);
+    }
+    for (index, block) in message.blocks.iter().enumerate() {
+        body = body.child(block_view(chat, &message, index, block, cx, theme));
+    }
+    if message.blocks.is_empty() {
+        body = body.child(
+            div()
+                .id(format!("chat-message-{}-text", message.id))
+                .child(message.body.clone()),
+        );
+    }
+    if message.edited {
+        body = body.child(
+            div()
+                .text_size(px(11.))
+                .text_color(theme.muted)
+                .child("edited"),
+        );
     }
     if message.pending {
-        children.push(kit::caption(format!("{key}/pending"), &message.meta));
+        body = body.child(
+            div()
+                .id(format!("chat-message-{}-pending", message.id))
+                .text_size(px(11.))
+                .text_color(theme.muted)
+                .child("sending…"),
+        );
     }
-    kit::spaced(kit::column(key, children), 3.)
-}
-
-pub fn body(
-    chat: &Chat,
-    key: String,
-    blocks: &[ChatBlock],
-    on_link: Option<u32>,
-    cx: &mut Cx<Chat>,
-) -> Node {
-    let p = kit::palette();
-    let mut children = Vec::new();
-    for (index, block) in blocks.iter().enumerate() {
-        let scope = format!("{key}/block/{index}");
-        let content = match block.kind.as_str() {
-            "divider" => kit::divider(scope),
-            "attachment" => match chat.pictures.get(&block.link) {
-                Some(&(w, h)) if w > 0 && h > 0 => picture(scope, block, (w, h), cx),
-                _ => attachment_card(scope, block, cx),
-            },
-            "code" => {
-                let mut lines = Vec::new();
-                if !block.lang.is_empty() {
-                    lines.push(kit::caption(format!("{scope}/language"), &block.lang));
-                }
-                lines.push(plain_line(format!("{scope}/code"), &block.text, true));
-                padded_all(
-                    bordered(
-                        background(
-                            kit::container(
-                                scope.clone(),
-                                kit::spaced(
-                                    kit::column(format!("{scope}/code-lines"), lines),
-                                    kit::spacing::XXS as f32,
-                                ),
-                            ),
-                            p.surface,
-                        ),
-                        Some(p.border),
-                        Some(1.),
-                        kit::radius::CONTROL as f32,
-                    ),
-                    kit::spacing::MD as f32,
-                )
-            }
-            "quote" | "paragraph" => {
-                let text = if block.rich {
-                    rich_line(format!("{scope}/text"), block, on_link)
-                } else {
-                    plain_line(format!("{scope}/text"), &block.text, false)
-                };
-                if block.kind == "quote" {
-                    kit::spaced(
-                        kit::row(
-                            scope.clone(),
-                            [
-                                kit::vertical_divider(format!("{scope}/bar")),
-                                kit::colored(text, p.muted),
-                            ],
-                        ),
-                        kit::spacing::MD as f32,
-                    )
-                } else {
-                    text
-                }
-            }
-            _ => continue,
-        };
-        children.push(content);
-    }
-    kit::spaced(kit::column(key, children), kit::spacing::XS as f32)
-}
-
-/// A picture that came with the message, in the flow at thumbnail size with
-/// its name under it; pressing it opens the file.
-fn picture(key: String, block: &ChatBlock, size: (i64, i64), cx: &mut Cx<Chat>) -> Node {
-    let p = kit::palette();
-    let (w, h) = crate::files::picture_box(size.0, size.1);
-    let surface = Node::Surface {
-        key: format!("{key}/picture"),
-        name: "picture".into(),
-        args: vec![
-            wire::SurfaceValue::Str(crate::files::PICTURE_SURFACE.into()),
-            wire::SurfaceValue::Str(crate::files::attachment_file_path(&block.link)),
-        ],
-        on_event: None,
-    };
-    let frame = bordered(
-        height(
-            width(
-                kit::container(format!("{key}/frame"), surface),
-                Length::Fixed(w),
-            ),
-            Length::Fixed(h),
-        ),
-        Some(p.border),
-        Some(1.),
-        kit::radius::CARD as f32,
-    );
-    let link = block.link.clone();
-    let open = cx.on(move |chat, cx| chat.open_preview(link.clone(), cx));
-    let mut open = kit::button_child(
-        format!("{key}/open"),
-        frame,
-        Some(open),
-        ButtonPreset::Subtle,
-    );
-    if let Node::Button { label, padding, .. } = &mut open {
-        *label = Some(format!("Open {}", block.text));
-        *padding = Some(wire::Edges::all(0.));
-    }
-    let stack = kit::spaced(
-        kit::column(
-            format!("{key}/stack"),
-            [
-                kit::row(format!("{key}/hug"), [open]),
-                kit::nowrap(kit::caption(format!("{key}/name"), &block.text)),
-            ],
-        ),
-        3.,
-    );
-    kit::row(key, [stack])
-}
-
-/// A file that came with the message: its name over what it is, in a plate
-/// that opens it.
-fn attachment_card(key: String, block: &ChatBlock, cx: &mut Cx<Chat>) -> Node {
-    let p = kit::palette();
-    let content = kit::spaced(
-        kit::centered_row(
-            format!("{key}/row"),
-            [
-                kit::text(format!("{key}/glyph"), "📄"),
-                kit::spaced(
-                    kit::column(
-                        format!("{key}/name"),
-                        [
-                            kit::nowrap(kit::strong(format!("{key}/title"), &block.text)),
-                            kit::nowrap(kit::caption(
-                                format!("{key}/kind"),
-                                crate::files::attachment_kind(&block.text),
-                            )),
-                        ],
-                    ),
-                    1.,
-                ),
-            ],
-        ),
-        kit::spacing::MD as f32,
-    );
-    let link = block.link.clone();
-    let open = cx.on(move |chat, cx| chat.open_preview(link.clone(), cx));
-    let mut card = kit::button_child(
-        format!("{key}/card"),
-        content,
-        Some(open),
-        ButtonPreset::Secondary,
-    );
-    if let Node::Button {
-        label,
-        padding,
-        width,
-        style,
-        ..
-    } = &mut card
-    {
-        *label = Some(format!("Open {}", block.text));
-        *padding = Some(wire::Edges {
-            top: kit::spacing::SM as f32,
-            right: 14.,
-            bottom: kit::spacing::SM as f32,
-            left: kit::spacing::LG as f32,
-        });
-        *width = Some(Length::Shrink);
-        style.active.background = Some(kit::rgba(p.surface));
-        style.active.border = Some(wire::Border {
-            color: Some(kit::rgba(p.border)),
-            width: Some(1.),
-            radius: Some([kit::radius::CARD as f32; 4]),
-        });
-    }
-    kit::row(key, [card])
-}
-
-fn rich_text(key: String, spans: Vec<wire::RichSpan>, on_link: Option<u32>) -> Node {
-    Node::RichText {
-        key,
-        spans,
-        on_link,
-        options: wire::TextOptions {
-            wrapping: Some(wire::Wrapping::WordOrGlyph),
-            ..Default::default()
-        },
-        size: None,
-        color: None,
-        font: Default::default(),
-        width: Some(Length::Fill),
-        align_x: None,
-    }
-}
-
-/// An unmarked paragraph or a code block as ONE rich span: only `RichText`
-/// carries the host's text-selection handle.
-pub fn plain_line(key: String, text: &str, mono: bool) -> Node {
-    rich_text(
-        key,
-        vec![wire::RichSpan {
-            content: text.to_owned(),
-            size: mono.then_some(kit::type_scale::MONO as f32),
-            font: mono.then_some(wire::NamedFont {
-                family: wire::FontFamily::Monospace,
-                weight: wire::Weight::Normal,
-                stretch: wire::FontStretch::Normal,
-                style: wire::FontStyle::Normal,
-            }),
-            ..Default::default()
-        }],
-        None,
-    )
-}
-
-pub fn rich_line(key: String, block: &ChatBlock, on_link: Option<u32>) -> Node {
-    let p = kit::palette();
-    let spans = block
-        .spans
-        .iter()
-        .map(|span| {
-            let (link, weight, italic) = match &span.style {
-                SpanStyle::Plain => (None, wire::Weight::Normal, false),
-                SpanStyle::Bold => (None, wire::Weight::Bold, false),
-                SpanStyle::Italic => (None, wire::Weight::Normal, true),
-                SpanStyle::BoldItalic => (None, wire::Weight::Bold, true),
-                SpanStyle::Link(url) => (Some(url.clone()), wire::Weight::Medium, false),
-                SpanStyle::Mention(account) => (Some(account.clone()), wire::Weight::Medium, false),
-            };
-            let is_link = matches!(span.style, SpanStyle::Link(_));
-            let decorated = weight != wire::Weight::Normal || italic;
-            wire::RichSpan {
-                content: span.text.clone(),
-                link: link.filter(|l| !l.is_empty()),
-                underline: is_link,
-                color: (is_link || matches!(span.style, SpanStyle::Mention(_)))
-                    .then_some(kit::rgba(p.link)),
-                font: decorated.then_some(wire::NamedFont {
-                    family: wire::FontFamily::SansSerif,
-                    weight,
-                    stretch: wire::FontStretch::Normal,
-                    style: if italic {
-                        wire::FontStyle::Italic
-                    } else {
-                        wire::FontStyle::Normal
-                    },
-                }),
-                ..Default::default()
-            }
-        })
-        .collect();
-    rich_text(key, spans, on_link)
-}
-
-/// A reaction as a pill: the emoji and its count inside a hairline, the
-/// reader's own in the accent wash. Without a count it is the "add one" chip.
-fn pill(
-    key: String,
-    emoji: &str,
-    count: Option<u64>,
-    label: &str,
-    mine: bool,
-    on_press: Option<u32>,
-) -> Node {
-    let p = kit::palette();
-    let mut parts = vec![kit::nowrap(kit::tall_glyph(
-        format!("{key}/emoji"),
-        emoji,
-        kit::type_scale::BODY as f32,
-        PILL_HEIGHT,
-    ))];
-    if let Some(count) = count {
-        parts.push(kit::nowrap(kit::weighted(
-            kit::colored(
-                kit::text_size(
-                    kit::text(format!("{key}/count"), count.to_string()),
-                    kit::type_scale::SECONDARY as f32,
-                ),
-                if mine { p.accent_foreground } else { p.muted },
-            ),
-            wire::Weight::Medium,
-        )));
-    }
-    let content = kit::spaced(
-        kit::centered_row(format!("{key}/label"), parts),
-        kit::spacing::XXS as f32,
-    );
-    let mut button = kit::button_child(key.clone(), content, on_press, ButtonPreset::Subtle);
-    if let Node::Button {
-        checked,
-        label: accessible,
-        description,
-        padding,
-        height,
-        ..
-    } = &mut button
-    {
-        *checked = Some(mine);
-        *accessible = Some(label.into());
-        *description = Some(emoji.into());
-        *height = Some(Length::Fixed(PILL_HEIGHT));
-        *padding = Some(wire::Edges {
-            top: 0.,
-            right: kit::spacing::SM as f32,
-            bottom: 0.,
-            left: kit::spacing::XS as f32,
-        });
-    }
-    width(
-        background(
-            bordered(
-                kit::container(format!("{key}/pill"), button),
-                Some(if mine { p.accent } else { p.border }),
-                Some(1.),
-                kit::radius::PILL as f32,
-            ),
-            if mine { p.accent_soft } else { p.surface },
-        ),
-        Length::Shrink,
-    )
-}
-
-/// The way into a message's thread: an outlined chip with the reply count
-/// in the accent and the invitation beside it.
-fn reply_link(key: String, replies: u64, open: u32) -> Node {
-    let p = kit::palette();
-    let content = kit::spaced(
-        kit::centered_row(
-            format!("{key}/row"),
-            [
-                kit::nowrap(kit::weighted(
-                    kit::colored(
-                        kit::text(format!("{key}/count"), plural(replies, "reply", "replies")),
-                        p.link,
-                    ),
-                    wire::Weight::Medium,
-                )),
-                kit::nowrap(kit::caption(format!("{key}/hint"), "View thread ›")),
-            ],
-        ),
-        kit::spacing::SM as f32,
-    );
-    let mut button = kit::button_child(key.clone(), content, Some(open), ButtonPreset::Secondary);
-    if let Node::Button {
-        label,
-        padding,
-        height,
-        ..
-    } = &mut button
-    {
-        *label = Some("Open thread".into());
-        *height = Some(Length::Fixed(kit::height::ROW as f32));
-        *padding = Some(wire::Edges {
-            top: 0.,
-            right: kit::spacing::MD as f32,
-            bottom: 0.,
-            left: kit::spacing::MD as f32,
-        });
-    }
-    kit::padded(
-        kit::row(format!("{key}/hug"), [button]),
-        wire::Edges {
-            top: 2.,
-            right: 0.,
-            bottom: 0.,
-            left: 0.,
-        },
-    )
-}
-
-/// The avatar beside a message: the kit's plate grown to the rail's 28px, a
-/// rounded square rather than a pill.
-pub fn avatar(key: String, initials: &str, agent: bool) -> Node {
-    let tone = if agent { Tone::Agent } else { Tone::Neutral };
-    let mut avatar = kit::avatar(key, initials, tone);
-    if let Node::Container {
-        width,
-        height,
-        border,
-        content,
-        ..
-    } = &mut avatar
-    {
-        *width = Some(Length::Fixed(AVATAR));
-        *height = Some(Length::Fixed(AVATAR));
-        *border = Some(wire::Border {
-            color: None,
-            width: None,
-            radius: Some([kit::radius::CARD as f32; 4]),
-        });
-        if let Node::Text { size, .. } = content.as_mut() {
-            *size = Some(11.5);
+    if !message.reactions.is_empty() {
+        let reaction_seq = message.seq;
+        let mut reactions = div()
+            .id(format!("chat-message-{}-reactions", message.id))
+            .flex()
+            .flex_wrap()
+            .gap_1();
+        for reaction in &message.reactions {
+            let emoji = reaction.emoji.clone();
+            let description = emoji.clone();
+            let add = !reaction.reacted_by_me;
+            let mine = reaction.reacted_by_me;
+            let click = cx.listener(move |chat, _: &ClickEvent, _window, cx| {
+                cx.notify();
+                chat.react(reaction_seq, emoji.clone(), add, cx)
+            });
+            let id = format!("chat-message-{}-reaction-{}", message.id, reaction.emoji);
+            let label = format!("{} {}", reaction.emoji, reaction.count);
+            reactions = reactions.child(reaction_button(
+                id,
+                label,
+                description,
+                mine,
+                theme,
+                chat.may_write(),
+                click,
+            ));
         }
+        let rev = message.rev;
+        let open = cx.listener(move |chat, event: &ClickEvent, window, cx| {
+            let position = event.position();
+            chat.layout.press = (position.x.into(), position.y.into());
+            chat.open_menu(pane, reaction_seq, rev, Mode::Reactions, window, cx);
+            cx.notify();
+        });
+        reactions = reactions.child(action_button(
+            format!("chat-message-{}-reaction-add", message.id),
+            "+",
+            "Add reaction",
+            theme,
+            chat.may_write(),
+            open,
+        ));
+        body = body.child(reactions);
     }
-    avatar
+    if message.reply_count > 0 && pane == Pane::Timeline {
+        let root = message.seq;
+        let open = cx.listener(move |chat, _: &ClickEvent, _window, cx| {
+            cx.notify();
+            chat.open_thread(root, cx)
+        });
+        body = body.child(
+            div()
+                .id(format!("chat-message-{}-replies", message.id))
+                .flex()
+                .items_center()
+                .gap_1()
+                .pt_1()
+                .text_size(px(12.))
+                .text_color(theme.accent_foreground)
+                .role(ducktape_view_guest::Role::Button)
+                .focusable()
+                .on_click(open)
+                .child(format!(
+                    "{} · View thread ›",
+                    plural(message.reply_count, "reply", "replies")
+                )),
+        );
+    } else if message.reply_count > 0 {
+        body = body.child(
+            div()
+                .id(format!("chat-message-{}-reply-separator", message.id))
+                .flex()
+                .items_center()
+                .gap_2()
+                .pt_1()
+                .child(
+                    div()
+                        .text_size(px(11.))
+                        .text_color(theme.muted)
+                        .child(plural(message.reply_count, "reply", "replies")),
+                )
+                .child(div().h(px(1.)).flex_1().bg(theme.border)),
+        );
+    }
+    body
+}
+
+fn block_view(
+    chat: &Chat,
+    message: &ChatMessage,
+    index: usize,
+    block: &ChatBlock,
+    cx: &mut Context<Chat>,
+    theme: &Theme,
+) -> AnyElement {
+    let id = ElementId::from(format!("chat-message-{}-block-{index}", message.id));
+    match block.kind.as_str() {
+        "divider" => div()
+            .id(id)
+            .h(px(1.))
+            .w_full()
+            .bg(theme.border)
+            .into_any_element(),
+        "code" => {
+            let mut code = div()
+                .id(id)
+                .flex()
+                .flex_col()
+                .gap_1()
+                .p_2()
+                .bg(theme.surface);
+            if !block.lang.is_empty() {
+                code = code.child(
+                    div()
+                        .text_size(px(11.))
+                        .text_color(theme.muted)
+                        .child(block.lang.clone()),
+                );
+            }
+            code.child(plain_line(
+                format!("chat-message-{}-block-{index}-code", message.id).into(),
+                &block.text,
+                true,
+            ))
+            .into_any_element()
+        }
+        "quote" => div()
+            .border_l_2()
+            .border_color(theme.border_strong)
+            .pl_2()
+            .text_color(theme.muted)
+            .child(rich_line(id.clone(), block, cx, theme))
+            .into_any_element(),
+        "attachment" => {
+            let link = block.link.clone();
+            let open = cx.listener(move |chat, _: &ClickEvent, _window, cx| {
+                cx.notify();
+                chat.open_preview(link.clone(), cx);
+            });
+            let card = div()
+                .id(id)
+                .hover(|s| s.bg(theme.surface_raised))
+                .role(ducktape_view_guest::Role::Button)
+                .aria_label(format!("Open {}", block.text))
+                .focusable()
+                .on_click(open);
+            if let Some(&(width, height)) = chat.pictures.get(&block.link)
+                && width > 0
+                && height > 0
+            {
+                let (width, height) = crate::files::picture_box(width, height);
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(3.))
+                    .child(
+                        div().flex().child(
+                            card.child(
+                                div()
+                                    .w(px(width))
+                                    .h(px(height))
+                                    .overflow_hidden()
+                                    .border_1()
+                                    .border_color(theme.border)
+                                    .child(surface(
+                                        format!(
+                                            "chat-message-{}-block-{index}-picture",
+                                            message.id
+                                        ),
+                                        "picture",
+                                        vec![
+                                            wire::SurfaceValue::Str(
+                                                crate::files::PICTURE_SURFACE.into(),
+                                            ),
+                                            wire::SurfaceValue::Str(
+                                                crate::files::attachment_file_path(&block.link),
+                                            ),
+                                        ],
+                                    )),
+                            ),
+                        ),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(11.))
+                            .text_color(theme.muted)
+                            .child(block.text.clone()),
+                    )
+                    .into_any_element()
+            } else {
+                div()
+                    .flex()
+                    .child(
+                        card.flex()
+                            .items_center()
+                            .gap(px(12.))
+                            .py(px(8.))
+                            .pl(px(16.))
+                            .pr(px(14.))
+                            .bg(theme.surface)
+                            .border_1()
+                            .border_color(theme.border)
+                            .child("📄")
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(1.))
+                                    .child(
+                                        div()
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .child(block.text.clone()),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(px(11.))
+                                            .text_color(theme.muted)
+                                            .child(crate::files::attachment_kind(&block.text)),
+                                    ),
+                            ),
+                    )
+                    .into_any_element()
+            }
+        }
+        _ => rich_line(id, block, cx, theme).into_any_element(),
+    }
+}
+
+fn action_button(
+    id: impl Into<ElementId>,
+    label: impl Into<String>,
+    accessible: &str,
+    theme: &Theme,
+    enabled: bool,
+    click: impl Fn(&ClickEvent, &mut Window, &mut ducktape_view_guest::App) + 'static,
+) -> impl IntoElement {
+    let control = div()
+        .id(id)
+        .px_1()
+        .py_0p5()
+        .bg(theme.surface)
+        .hover(|s| s.bg(theme.surface_raised))
+        .role(ducktape_view_guest::Role::Button)
+        .aria_label(accessible)
+        .aria_disabled(!enabled)
+        .text_size(px(11.))
+        .child(label.into());
+    if enabled {
+        control.focusable().on_click(click)
+    } else {
+        control
+    }
+}
+
+fn reaction_button(
+    id: impl Into<ElementId>,
+    label: impl Into<String>,
+    emoji: impl Into<String>,
+    mine: bool,
+    theme: &Theme,
+    enabled: bool,
+    click: impl Fn(&ClickEvent, &mut Window, &mut ducktape_view_guest::App) + 'static,
+) -> impl IntoElement {
+    let control = div()
+        .id(id)
+        .px_1()
+        .py_0p5()
+        .bg(if mine {
+            theme.accent_soft
+        } else {
+            theme.surface
+        })
+        .text_color(if mine {
+            theme.accent_foreground
+        } else if enabled {
+            theme.foreground
+        } else {
+            theme.muted
+        })
+        .role(ducktape_view_guest::Role::Button)
+        .aria_label(if mine {
+            "Remove reaction"
+        } else {
+            "Add reaction"
+        })
+        .aria_description(emoji.into())
+        .aria_toggled(mine.into())
+        .aria_disabled(!enabled)
+        .text_size(px(11.))
+        .child(label.into());
+    if enabled {
+        control
+            .focusable()
+            .hover(|style| style.bg(theme.surface_raised))
+            .on_click(click)
+    } else {
+        control
+    }
+}
+
+fn plural(count: u64, one: &str, many: &str) -> String {
+    format!("{count} {}", if count == 1 { one } else { many })
 }

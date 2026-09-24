@@ -3,19 +3,21 @@
 #
 #   crates/sdk/     the contracts: `abi` (the borsh bytes ABI a program and the
 #                   host share), `guest` (what a program compiles against),
-#                   `ducklink` (the `duck://` grammar), and the view contract
-#                   (`view-wire`, `view-guest`, `design`)
-#   crates/modules/ the boot set: the `modules` crate (the contracts of the
-#                   programs every network founds with and the helpers a
-#                   program builds on), `system/` (the wasm32 workspace of
-#                   module-registry, valset and identity, their bytes committed
-#                   under `system/wasm/`) and the suite that drives them on the
-#                   host
-#   crates/app/     the app modules: chat (its types and rules, which the view
-#                   links), chat-program (the wasm32 program over them) and
-#                   chat-view; forge (the git server as a program), gitcore
-#                   (the git it links) and forge-harness (its rig: the wasm on
-#                   ducktape's runtime, real git as the client)
+#                   `store` (what a program's rules are written over: the
+#                   `Reads`/`Writes` store, typed tables, paging, refusals;
+#                   `Memory` runs them natively), `ducklink` (the `duck://`
+#                   grammar), and the view contract (`view-wire`,
+#                   `view-guest`, `design`)
+#   crates/system/  the boot set: module-registry, valset and identity, one
+#                   crate each in the same shape as the app programs; the
+#                   suite under module-registry/tests founds ducktape's host
+#                   over the bytes `make wasm-programs` built
+#   crates/app/     the app modules: chat and forge (each one crate: types and
+#                   rules always, the wasm32 program behind the `program`
+#                   feature), chat-view and forge-view (which link their
+#                   program crate with the feature off) and the system views
+#   crates/lib/     libraries a program links: gitcore (git objects, packs,
+#                   walks, diffs, the wire's server side)
 #
 # A view links its module by path and reads its types; a view is a cdylib for
 # wasm32-unknown-unknown on `view-guest`. The host that runs the programs
@@ -30,18 +32,25 @@ resolver = "2"
 members = [
     "crates/sdk/abi",
     "crates/sdk/guest",
+    "crates/sdk/store",
     "crates/sdk/ducklink",
     "crates/sdk/design",
     "crates/sdk/view-wire",
     "crates/sdk/view-guest",
-    "crates/modules",
+    "crates/sdk/view-guest-derive",
+    "crates/system/module-registry",
+    "crates/system/valset",
+    "crates/system/identity",
     "crates/app/chat",
     "crates/app/chat-view",
-    "crates/app/gitcore",
+    "crates/app/forge-view",
+    "crates/app/members-view",
+    "crates/app/node-view",
+    "crates/app/explorer-view",
+    "crates/app/settings-view",
     "crates/app/forge",
-    "crates/app/forge-harness",
+    "crates/lib/gitcore",
 ]
-exclude = ["crates/modules/system", "crates/app/chat-program"]
 
 [workspace.package]
 edition = "2024"
@@ -51,21 +60,25 @@ version = "0.1.0"
 # ---- the contracts, in tree
 abi = { path = "crates/sdk/abi" }
 guest = { path = "crates/sdk/guest" }
+store = { path = "crates/sdk/store" }
+gitcore = { path = "crates/lib/gitcore" }
 ducklink = { path = "crates/sdk/ducklink" }
 design = { path = "crates/sdk/design" }
 view-wire = { path = "crates/sdk/view-wire" }
 view-guest = { path = "crates/sdk/view-guest" }
 ducktape-view-guest = { path = "crates/sdk/view-guest", package = "view-guest" }
-modules = { path = "crates/modules" }
-gitcore = { path = "crates/app/gitcore" }
+gpui = { package = "gpui-pre", git = "https://github.com/ducktape-industries/gpui-pre", rev = "389089537a3782a5b3cb48a3d6ee72ce2f7e4c26", default-features = false }
+module-registry = { path = "crates/system/module-registry" }
+valset = { path = "crates/system/valset" }
+identity = { path = "crates/system/identity" }
+chat = { path = "crates/app/chat" }
 forge = { path = "crates/app/forge" }
 
-# ---- the host the boot set's suite runs on, the probe fixture it seats, the
-# key schemes it signs with, and the runtime forge's rig drives its wasm on
-host = { git = "https://github.com/ducktape-industries/ducktape", rev = "5d1d1f61d89960164cab919dfbb16a1d8cdb3b36" }
-fixture-probe = { git = "https://github.com/ducktape-industries/ducktape", rev = "5d1d1f61d89960164cab919dfbb16a1d8cdb3b36" }
-keyscheme = { git = "https://github.com/ducktape-industries/ducktape", rev = "5d1d1f61d89960164cab919dfbb16a1d8cdb3b36" }
-runtime = { git = "https://github.com/ducktape-industries/ducktape", rev = "5d1d1f61d89960164cab919dfbb16a1d8cdb3b36" }
+# ---- the host the founding suite runs the boot set on, the probe fixture it
+# seats and the key schemes it signs with (dev-dependencies only)
+host = { git = "https://github.com/ducktape-industries/ducktape", rev = "d1805fcbe47ce066af109bff2531506c903719f4" }
+fixture-probe = { git = "https://github.com/ducktape-industries/ducktape", rev = "d1805fcbe47ce066af109bff2531506c903719f4" }
+keyscheme = { git = "https://github.com/ducktape-industries/ducktape", rev = "d1805fcbe47ce066af109bff2531506c903719f4" }
 commonware-cryptography = "2026.9.0"
 commonware-runtime = "2026.9.0"
 
@@ -75,14 +88,8 @@ serde_json = "1"
 # borsh — the one codec the program abi is written in.
 borsh = { version = "1", default-features = false, features = ["derive", "std"] }
 sha2 = "0.10"
-sha1 = "0.10"
-flate2 = "1"
-axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync"] }
 tempfile = "3"
-ureq = { version = "3", default-features = false }
 base64 = "0.22"
-async-trait = "0.1"
 futures = "0.3"
 # duckfs path normalization: NFC so visually-identical names collide instead
 # of coexisting (a consensus-determinism requirement, not cosmetics).
@@ -91,6 +98,7 @@ unicode-normalization = "0.1"
 [patch."https://github.com/ducktape-industries/ducktape"]
 abi = { path = "crates/sdk/abi" }
 guest = { path = "crates/sdk/guest" }
+store = { path = "crates/sdk/store" }
 
 # proc-macro and build-script crates (serde_derive, async-trait, borsh-derive)
 # are compiled once and then run for every unit below them — unoptimized they
@@ -104,8 +112,20 @@ opt-level = 2
 # a view and a program ship as cdylibs for wasm32-unknown-unknown; the release
 # profile is what their bytes come out of.
 [profile.release]
-opt-level = 3
+# Wire serde visitors dominate guests; optimize their shared code for size.
+opt-level = "z"
 lto = "fat"
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# `make wasm-why`: the release bytes with their names, so twiggy can say
+# whose they are. Its own output dir; nothing ships from it.
+[profile.why]
+inherits = "release"
+strip = "debuginfo"
+
+[patch.crates-io]
+rmp-serde = { git = "https://github.com/ducktape-industries/gpui-pre", rev = "389089537a3782a5b3cb48a3d6ee72ce2f7e4c26" }
+gpui-pre-scheduler = { git = "https://github.com/ducktape-industries/gpui-pre", rev = "389089537a3782a5b3cb48a3d6ee72ce2f7e4c26" }
+gpui-pre-zlog = { git = "https://github.com/ducktape-industries/gpui-pre", rev = "389089537a3782a5b3cb48a3d6ee72ce2f7e4c26" }

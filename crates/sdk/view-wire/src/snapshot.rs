@@ -1,5 +1,4 @@
 //! Complete owned guest state. Unlike a rendered tree, it must never be truncated.
-use bincode::Options;
 use serde::{Deserialize, Serialize};
 use std::cell::Cell;
 
@@ -26,12 +25,7 @@ impl Snapshot {
         if bytes.len() > MAX_SNAPSHOT_BYTES {
             return Err("snapshot exceeds the byte budget".into());
         }
-        let snapshot: Self = bincode::DefaultOptions::new()
-            .with_fixint_encoding()
-            .with_limit(MAX_SNAPSHOT_BYTES as u64)
-            .reject_trailing_bytes()
-            .deserialize(bytes)
-            .map_err(|error| error.to_string())?;
+        let snapshot: Self = crate::decode(bytes)?;
         snapshot.validate()?;
         Ok(snapshot)
     }
@@ -154,7 +148,7 @@ impl<'de> Deserialize<'de> for SnapshotValue {
 
 // Editor snapshots and application-owned history are byte blobs. Treating
 // every byte as a separate Serde value exhausts guest fuel well below the
-// snapshot byte budget. Bincode uses the same length + bytes representation.
+// snapshot byte budget, so MessagePack's binary representation is retained.
 pub(crate) fn serialize_bytes<S: serde::Serializer>(
     bytes: &[u8],
     serializer: S,
@@ -265,8 +259,10 @@ mod tests {
         assert!(deep.encode().is_err());
         assert!(Snapshot::decode(&crate::encode(&deep)).is_err());
         let mut bomb = snapshot(SnapshotValue::List(vec![])).encode().unwrap();
-        // Fixed-width schema length + schema bytes + enum tag, then list length.
-        bomb[8 + 64 + 4..8 + 64 + 4 + 8].copy_from_slice(&u64::MAX.to_le_bytes());
+        assert_eq!(bomb.last(), Some(&0x90));
+        bomb.pop();
+        bomb.push(0xdd);
+        bomb.extend_from_slice(&u32::MAX.to_be_bytes());
         assert!(Snapshot::decode(&bomb).is_err());
         let small = snapshot(SnapshotValue::Unit);
         assert_eq!(
@@ -283,9 +279,9 @@ mod byte_blob_tests {
     #[test]
     fn byte_blob_codec_keeps_its_exact_length_and_bytes_representation() {
         let value = SnapshotValue::Bytes(vec![0x41, 0x42]);
-        let mut encoded = 5u32.to_le_bytes().to_vec();
-        encoded.extend_from_slice(&2u64.to_le_bytes());
-        encoded.extend_from_slice(b"AB");
+        let encoded = vec![
+            0x81, 0xa5, b'B', b'y', b't', b'e', b's', 0xc4, 2, b'A', b'B',
+        ];
         assert_eq!(crate::encode(&value), encoded);
         assert_eq!(crate::decode::<SnapshotValue>(&encoded).unwrap(), value);
         assert_eq!(crate::encoded_size(&value), encoded.len() as u64);
