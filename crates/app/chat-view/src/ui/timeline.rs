@@ -152,7 +152,10 @@ pub fn list(chat: &Chat, pane: Pane, cx: &mut Context<Chat>, theme: &Theme) -> i
                 let unread = unread_seq == Some(message.seq);
                 let card = message::card(chat, message, pane_for_items, window, cx, &list_theme);
                 if unread {
+                    // full width, as a bare card is: a row shrunk to its
+                    // words took the hover and the action strip with it
                     div()
+                        .w_full()
                         .flex()
                         .flex_col()
                         .child(unread_marker(&list_theme))

@@ -993,3 +993,44 @@ fn a_room_of_256_rows_renders_inside_the_frame_budget() {
     // slims, raise only on purpose
     assert!(bytes < 220_000, "a 256-row room drew {bytes} bytes");
 }
+
+/// A reload carries the read cursors but not the count: the first list after
+/// it counts again what is meant for the reader in rooms still unread, and
+/// posts nothing a second time.
+#[test]
+fn the_badge_is_counted_again_from_the_read_cursors() {
+    use ducktape_view_guest::doors::{HostBadge, NotifyPost};
+    let (mut cx, view) = opened();
+    cx.host().handle::<ViewOf<ChatApi>>(|query| {
+        Ok(match query {
+            ChatViewQuery::MessagesAround { channel_id, .. } => {
+                let mut ping = row(2, "acct:8", "ping");
+                ping.channel_id = channel_id;
+                ChatViewReply::Messages(vec![row(1, "acct:7", "old"), ping])
+            }
+            ChatViewQuery::Roots { .. } => ChatViewReply::Roots(page(Vec::new())),
+            ChatViewQuery::Members { .. } => ChatViewReply::Members(page(Vec::new())),
+            query => panic!("unexpected chat query: {query:?}"),
+        })
+    });
+    let rooms = || vec![channel("general", "General", 3), channel("dm-7-8", "dm", 2)];
+    let posted = cx.host().asked::<NotifyPost>().len();
+    view.update(&mut cx, |chat, _, cx| {
+        cx.notify();
+        // as a reload leaves it: the rooms and the cursors, no count
+        chat.channels = Loaded::Ready(rooms());
+        chat.reads.cursors.insert("general".into(), 3);
+        chat.reads.cursors.insert("dm-7-8".into(), 1);
+        chat.attention.clear();
+        chat.badge = None;
+        chat.recounted = false;
+        chat.channels_landed(rooms(), cx);
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        cx.host().asked::<NotifyPost>().len(),
+        posted,
+        "no second notice"
+    );
+    assert_eq!(cx.host().asked::<HostBadge>().last(), Some(&1));
+}

@@ -59,6 +59,10 @@ pub struct Chat {
     /// the tab badge last sent
     #[serde(skip)]
     pub(crate) badge: Option<i64>,
+    /// `attention` was counted again from the read cursors since this view
+    /// (re)started
+    #[serde(skip)]
+    pub(crate) recounted: bool,
 }
 
 #[derive(Serialize, Deserialize, Default)]

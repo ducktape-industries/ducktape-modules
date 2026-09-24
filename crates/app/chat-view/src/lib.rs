@@ -91,12 +91,9 @@ impl View for Chat {
         let mut routes = cx.host().subscribe::<HostRoute>(());
         self.watches.route = Some(cx.spawn(async move |this, cx| {
             while let Some(Ok(route)) = routes.next().await {
-                let mut parts = route.splitn(2, '/');
-                let channel = parts.next().unwrap_or_default().to_owned();
-                let seq = parts.next().and_then(|seq| seq.parse().ok()).unwrap_or(0);
-                if channel.is_empty() {
+                let Some((channel, seq)) = chat::route_target(&route) else {
                     continue;
-                }
+                };
                 if this
                     .update_in(cx, |chat, window, cx| {
                         cx.notify();
