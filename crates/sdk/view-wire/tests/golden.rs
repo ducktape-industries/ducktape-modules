@@ -1,11 +1,14 @@
 //! The wire's bytes, committed. One `Frame` holding every `Node` variant,
 //! one of every `Event`, and one request and reply through every door in
 //! `doors::ALL`, encoded into `tests/golden/{frame,doors}.bin` with a JSON
-//! twin beside each for readable diffs. Any byte that moves — a field, a
-//! variant, a `gpui::StyleRefinement` change from a fork bump — fails here,
-//! and the fix is to bump `WIRE_EPOCH` in the same commit and regenerate
-//! with `WIRE_GOLDEN_WRITE=1`.
-use std::collections::BTreeSet;
+//! twin beside each for readable diffs. Any byte of the frame that moves — a
+//! field, a variant, a `gpui::StyleRefinement` change from a fork bump —
+//! fails here. The doors are a map keyed by kind: an existing kind whose
+//! bytes moved, or a kind that went away, fails; a kind new since the
+//! fixture passes, since no view built before it can call it. A failure is
+//! fixed by bumping `WIRE_EPOCH` in the same commit and regenerating with
+//! `WIRE_GOLDEN_WRITE=1`, which also records new kinds.
+use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 use std::path::PathBuf;
 
@@ -375,63 +378,55 @@ fn every_door() -> Vec<(Exchange, serde_json::Value)> {
     ]
 }
 
+/// The request and reply bytes of each door, by kind.
+type Doors = BTreeMap<String, (Vec<u8>, Vec<u8>)>;
+
 #[test]
 fn every_door_carries_the_committed_bytes() {
     let (exchanges, json): (Vec<_>, Vec<_>) = every_door().into_iter().unzip();
-    let kinds: Vec<&str> = exchanges.iter().map(|(kind, ..)| kind.as_str()).collect();
-    assert_eq!(kinds, doors::ALL, "one exchange per door in ALL, in order");
-    let bytes = doors::encode(&exchanges);
-    check(
-        "doors",
-        &bytes,
-        &serde_json::to_string_pretty(&json).unwrap(),
-    );
-    assert_eq!(
-        doors::decode::<Vec<(String, Vec<u8>, Vec<u8>)>>(&bytes).unwrap(),
-        exchanges
-    );
-}
-
-/// The kinds the app host routes, read from its source (`("<cap>", "<op>")`
-/// match arms under `src/runtime`), must be exactly `ALL`. Runs when
-/// `DUCKTAPE_APP` names the app checkout; the app decodes `doors::*`
-/// generically once its follow-up lands, and this reads its arms until then.
-#[test]
-fn the_app_host_serves_every_door_and_nothing_else() {
-    let Some(app) = std::env::var_os("DUCKTAPE_APP") else {
-        eprintln!("DUCKTAPE_APP unset: skipping the app-host coverage check");
+    let built: Doors = exchanges
+        .into_iter()
+        .map(|(kind, request, reply)| (kind, (request, reply)))
+        .collect();
+    let kinds: BTreeSet<&str> = built.keys().map(String::as_str).collect();
+    let all: BTreeSet<&str> = doors::ALL.iter().copied().collect();
+    assert_eq!(kinds, all, "one exchange per door in ALL");
+    let bin = golden("doors.bin");
+    if std::env::var_os("WIRE_GOLDEN_WRITE").is_some() {
+        std::fs::write(&bin, doors::encode(&built)).unwrap();
+        std::fs::write(
+            golden("doors.json"),
+            serde_json::to_string_pretty(&json).unwrap(),
+        )
+        .unwrap();
         return;
-    };
-    let mut served = BTreeSet::new();
-    let mut stack = vec![PathBuf::from(app).join("src/runtime")];
-    while let Some(dir) = stack.pop() {
-        for entry in
-            std::fs::read_dir(&dir).unwrap_or_else(|error| panic!("{}: {error}", dir.display()))
-        {
-            let path = entry.unwrap().path();
-            if path.is_dir() {
-                stack.push(path);
-            } else if path.extension().is_some_and(|ext| ext == "rs") {
-                for line in std::fs::read_to_string(&path).unwrap().lines() {
-                    served.extend(served_kind(line));
-                }
-            }
-        }
     }
-    let all: BTreeSet<String> = doors::ALL.iter().map(|kind| (*kind).to_owned()).collect();
-    let unserved: Vec<_> = all.difference(&served).collect();
-    let unknown: Vec<_> = served.difference(&all).collect();
-    assert!(
-        unserved.is_empty() && unknown.is_empty(),
-        "doors the app does not serve: {unserved:?}; kinds the app serves that are not doors: {unknown:?}"
-    );
+    let committed: Doors = doors::decode(
+        &std::fs::read(&bin)
+            .unwrap_or_else(|error| panic!("{}: {error}; {MESSAGE}", bin.display())),
+    )
+    .unwrap();
+    assert_eq!(moved(&committed, &built), Vec::<String>::new(), "{MESSAGE}");
 }
 
-/// `("host", "badge")` on a line → `host.badge`.
-fn served_kind(line: &str) -> Option<String> {
-    let (_, rest) = line.split_once("(\"")?;
-    let (capability, rest) = rest.split_once("\", \"")?;
-    let (operation, _) = rest.split_once("\")")?;
-    let word = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_lowercase() || b == b'_');
-    (word(capability) && word(operation)).then(|| format!("{capability}.{operation}"))
+/// The committed kinds whose bytes `built` changed or dropped. A kind only
+/// `built` has is new, and passes.
+fn moved(committed: &Doors, built: &Doors) -> Vec<String> {
+    committed
+        .iter()
+        .filter(|(kind, bytes)| built.get(*kind) != Some(bytes))
+        .map(|(kind, _)| kind.clone())
+        .collect()
+}
+
+#[test]
+fn a_new_door_passes_and_a_moved_or_dropped_one_fails() {
+    let door = |kind: &str, byte: u8| (kind.to_string(), (vec![byte], vec![]));
+    let committed: Doors = [door("a.one", 1), door("a.two", 2)].into();
+    let grown: Doors = [door("a.one", 1), door("a.two", 2), door("a.new", 3)].into();
+    assert!(moved(&committed, &grown).is_empty());
+    let changed: Doors = [door("a.one", 9), door("a.two", 2)].into();
+    assert_eq!(moved(&committed, &changed), ["a.one"]);
+    let dropped: Doors = [door("a.one", 1)].into();
+    assert_eq!(moved(&committed, &dropped), ["a.two"]);
 }

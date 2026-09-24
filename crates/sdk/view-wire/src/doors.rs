@@ -15,6 +15,8 @@
 //! by review: [`Door`] is sealed, so a view cannot declare a kind or pick a
 //! codec, and [`Program`]'s bounds are borsh, so a program that speaks
 //! anything else does not have a door.
+//!
+//! ABSENT is `None`, never a refusal: a door whose thing may not exist replies `Option`, and a refusal means the ask itself failed.
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
@@ -69,6 +71,27 @@ macro_rules! door {
                 decode(bytes)
             }
         }
+    };
+}
+
+/// Every [`door!`] below, and [`ALL`] from the same list, so a door is
+/// never declared without being listed. `also` names the kinds written by
+/// hand: the two node doors generic over a [`Program`], and [`Widget`].
+macro_rules! doors {
+    (
+        also: [$($also:expr),* $(,)?];
+        $($(#[$doc:meta])* $name:ident, $kind:literal, $request:ty, $reply:ty;)*
+    ) => {
+        $(door!($(#[$doc])* $name, $kind, $request, $reply);)*
+
+        /// Every kind, so a host can assert it answers each one.
+        pub const ALL: &[&str] = &[$($also,)* $($kind),*];
+
+        /// Which doors a view was built against, in its manifest, so a host
+        /// with fewer refuses it at load rather than at the call. Within a
+        /// wire epoch the doors only grow (a moved or dropped one is an epoch
+        /// bump: `tests/golden.rs`), so their count names the set.
+        pub const DOORS_REVISION: u32 = ALL.len() as u32;
     };
 }
 
@@ -167,11 +190,6 @@ pub struct NodeStatus {
     pub identity: Vec<u8>,
     pub contract: u32,
 }
-door!(
-    /// `rpc.status`: the connected node's status.
-    Status, "rpc.status", (), NodeStatus
-);
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub struct Mint {
     pub ttl_days: u64,
@@ -186,18 +204,6 @@ pub struct Minted {
     pub invite: String,
     pub notes: Vec<Note>,
 }
-door!(
-    /// `rpc.invite`: mint one invite, once (never retried).
-    Invite, "rpc.invite", Mint, Minted
-);
-
-door!(
-    /// `rpc.live <program>`: one item per block that wrote to the program,
-    /// carrying its height; `None` when the node link was reopened and the
-    /// view should re-read.
-    Live, "rpc.live", String, Option<u64>
-);
-
 /// A page of finalized blocks, newest first: those below `before` (from the
 /// tip when `None`), at most `limit` (the node caps a page at 100).
 #[derive(
@@ -240,21 +246,6 @@ pub struct Block {
     pub proposer: Option<Vec<u8>>,
     pub txs: Vec<Tx>,
 }
-door!(
-    /// `rpc.blocks`: a page of finalized blocks, newest first.
-    Blocks, "rpc.blocks", BlockPage, Vec<Block>
-);
-door!(
-    /// `rpc.block`: one finalized block; `None` where the node has none by
-    /// that name.
-    BlockGet, "rpc.block", BlockRef, Option<Block>
-);
-
-door!(
-    /// `blob.get`: a blob by `sha256:<hex>` or `sha1:<hex>` id, unframed.
-    BlobGet, "blob.get", String, Vec<u8>
-);
-
 // ---------- the host ----------
 
 /// The session facts every view is handed: the theme, the connection, the
@@ -270,47 +261,6 @@ pub struct Session {
     pub account: String,
     pub endpoint: String,
 }
-door!(
-    /// `host.props`: a subscription to [`Session`], an item per change.
-    Props, "host.props", (), Session
-);
-door!(
-    /// `host.visible`: whether the view is on screen, an item per change.
-    Visible, "host.visible", (), bool
-);
-door!(
-    /// `host.badge`: the count on the view's tab.
-    Badge, "host.badge", i64, ()
-);
-door!(
-    /// `host.open_link`: the one way out, a `duck://` link.
-    OpenLink, "host.open_link", String, ()
-);
-door!(
-    /// `host.route`: a subscription, one item per `duck://` link opened into
-    /// this view: the path after the view's own segment (`tx/<hash>` of
-    /// `duck://<chain>/explorer/tx/<hash>`), segments of `[A-Za-z0-9._-]`.
-    /// A link that mounted the view is its first item.
-    Route, "host.route", (), String
-);
-door!(
-    /// `host.chord`: claim a command chord (`cmd[-shift][-alt]-<key>`); an
-    /// item per press while the subscription stands.
-    Chord, "host.chord", String, ()
-);
-door!(
-    /// `host.id`: a fresh id under the named prefix.
-    Id, "host.id", String, String
-);
-door!(
-    /// `clock.ticks`: an item per period, in milliseconds.
-    Ticks, "clock.ticks", i64, ()
-);
-door!(
-    /// `host.log`: one line to the host's log.
-    Log, "host.log", String, ()
-);
-
 /// `host.widget`: a command on the mounted tree. The one door on the TREE
 /// side of the codec rule — a [`WidgetCommand`] names typed element ids the
 /// tree is drawn with — so it is the one door in named MessagePack.
@@ -361,31 +311,6 @@ pub struct Clipboard {
     pub text: String,
     pub files: Vec<SelectedFile>,
 }
-door!(
-    /// `fs.pick`: the file chooser, answered with what the person chose.
-    Pick, "fs.pick", (), Vec<SelectedFile>
-);
-door!(
-    /// `fs.drops`: an item per drop onto the view.
-    Drops, "fs.drops", (), Vec<SelectedFile>
-);
-door!(
-    /// `fs.read`: one chunk of a granted file.
-    FsRead, "fs.read", ReadRequest, Vec<u8>
-);
-door!(
-    /// `fs.release`: give a grant back.
-    Release, "fs.release", String, ()
-);
-door!(
-    /// `clipboard.read`: the clipboard's text and any files on it.
-    ClipboardRead, "clipboard.read", (), Clipboard
-);
-door!(
-    /// `clipboard.write`: text onto the clipboard.
-    ClipboardWrite, "clipboard.write", String, ()
-);
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub struct Device {
     pub id: String,
@@ -451,32 +376,6 @@ pub enum VideoItem {
     Opened(Framing),
     Frame(Vec<u8>),
 }
-door!(
-    /// `media.devices`: the capture and playout devices this machine has.
-    Devices, "media.devices", (), Vec<Device>
-);
-door!(
-    /// `audio.capture`: the microphone, first the mode then the samples.
-    AudioCapture, "audio.capture", Listen, AudioItem
-);
-door!(
-    /// `video.capture`: the camera, first the framing then the frames.
-    VideoCapture, "video.capture", Watch, VideoItem
-);
-door!(
-    /// `audio.play`: open this view's one output in a mode.
-    AudioPlay, "audio.play", AudioMode, AudioMode
-);
-door!(
-    /// `audio.write`: interleaved i16 little-endian samples onto the output;
-    /// refused past the playout ceiling rather than queued.
-    AudioWrite, "audio.write", Vec<u8>, ()
-);
-door!(
-    /// `audio.stop`: close the output.
-    AudioStop, "audio.stop", (), ()
-);
-
 /// One desktop notice, worded by the view; a later notice under the same
 /// non-empty `tag` replaces the standing one.
 #[derive(
@@ -487,11 +386,6 @@ pub struct Notice {
     pub body: String,
     pub tag: String,
 }
-door!(
-    /// `notify.show`: post a notice; `true` when a banner was raised.
-    NotifyShow, "notify.show", Notice, bool
-);
-
 /// One notice for the host to decide on: `notify.post`. The view asks; the
 /// host logs it in its notification centre and decides whether a banner
 /// reaches the screen (the person's per-view choice, focus, a burst limit).
@@ -519,46 +413,75 @@ pub enum Posted {
     /// The person blocked this view's notices: dropped, not logged.
     Blocked,
 }
-door!(
+doors! {
+    also: ["rpc.query", "op.submit", Widget::KIND];
+    /// `rpc.status`: the connected node's status.
+    Status, "rpc.status", (), NodeStatus;
+    /// `rpc.invite`: mint one invite, once (never retried).
+    Invite, "rpc.invite", Mint, Minted;
+    /// `rpc.live <program>`: one item per block that wrote to the program,
+    /// carrying its height; `None` when the node link was reopened and the
+    /// view should re-read.
+    Live, "rpc.live", String, Option<u64>;
+    /// `rpc.blocks`: a page of finalized blocks, newest first.
+    Blocks, "rpc.blocks", BlockPage, Vec<Block>;
+    /// `rpc.block`: one finalized block; `None` where the node has none by
+    /// that name.
+    BlockGet, "rpc.block", BlockRef, Option<Block>;
+    /// `blob.get`: a blob by `sha256:<hex>` or `sha1:<hex>` id, unframed.
+    BlobGet, "blob.get", String, Vec<u8>;
+    /// `host.props`: a subscription to [`Session`], an item per change.
+    Props, "host.props", (), Session;
+    /// `host.visible`: whether the view is on screen, an item per change.
+    Visible, "host.visible", (), bool;
+    /// `host.badge`: the count on the view's tab.
+    Badge, "host.badge", i64, ();
+    /// `host.open_link`: the one way out, a `duck://` link.
+    OpenLink, "host.open_link", String, ();
+    /// `host.route`: a subscription, one item per `duck://` link opened into
+    /// this view: the path after the view's own segment (`tx/<hash>` of
+    /// `duck://<chain>/explorer/tx/<hash>`), segments of `[A-Za-z0-9._-]`.
+    /// A link that mounted the view is its first item.
+    Route, "host.route", (), String;
+    /// `host.chord`: claim a command chord (`cmd[-shift][-alt]-<key>`); an
+    /// item per press while the subscription stands.
+    Chord, "host.chord", String, ();
+    /// `host.id`: a fresh id under the named prefix.
+    Id, "host.id", String, String;
+    /// `clock.ticks`: an item per period, in milliseconds.
+    Ticks, "clock.ticks", i64, ();
+    /// `host.log`: one line to the host's log.
+    Log, "host.log", String, ();
+    /// `fs.pick`: the file chooser, answered with what the person chose.
+    Pick, "fs.pick", (), Vec<SelectedFile>;
+    /// `fs.drops`: an item per drop onto the view.
+    Drops, "fs.drops", (), Vec<SelectedFile>;
+    /// `fs.read`: one chunk of a granted file.
+    FsRead, "fs.read", ReadRequest, Vec<u8>;
+    /// `fs.release`: give a grant back.
+    Release, "fs.release", String, ();
+    /// `clipboard.read`: the clipboard's text and any files on it.
+    ClipboardRead, "clipboard.read", (), Clipboard;
+    /// `clipboard.write`: text onto the clipboard.
+    ClipboardWrite, "clipboard.write", String, ();
+    /// `media.devices`: the capture and playout devices this machine has.
+    Devices, "media.devices", (), Vec<Device>;
+    /// `audio.capture`: the microphone, first the mode then the samples.
+    AudioCapture, "audio.capture", Listen, AudioItem;
+    /// `video.capture`: the camera, first the framing then the frames.
+    VideoCapture, "video.capture", Watch, VideoItem;
+    /// `audio.play`: open this view's one output in a mode.
+    AudioPlay, "audio.play", AudioMode, AudioMode;
+    /// `audio.write`: interleaved i16 little-endian samples onto the output;
+    /// refused past the playout ceiling rather than queued.
+    AudioWrite, "audio.write", Vec<u8>, ();
+    /// `audio.stop`: close the output.
+    AudioStop, "audio.stop", (), ();
+    /// `notify.show`: post a notice; `true` when a banner was raised.
+    NotifyShow, "notify.show", Notice, bool;
     /// `notify.post`: hand the host a notice; it says what it did.
-    NotifyPost, "notify.post", Post, Posted
-);
-
-/// Every kind, so a host can assert it answers each one.
-pub const ALL: &[&str] = &[
-    "rpc.query",
-    "op.submit",
-    Status::KIND,
-    Invite::KIND,
-    Live::KIND,
-    Blocks::KIND,
-    BlockGet::KIND,
-    BlobGet::KIND,
-    Props::KIND,
-    Visible::KIND,
-    Badge::KIND,
-    OpenLink::KIND,
-    Route::KIND,
-    Chord::KIND,
-    Id::KIND,
-    Ticks::KIND,
-    Log::KIND,
-    Widget::KIND,
-    Pick::KIND,
-    Drops::KIND,
-    FsRead::KIND,
-    Release::KIND,
-    ClipboardRead::KIND,
-    ClipboardWrite::KIND,
-    Devices::KIND,
-    AudioCapture::KIND,
-    VideoCapture::KIND,
-    AudioPlay::KIND,
-    AudioWrite::KIND,
-    AudioStop::KIND,
-    NotifyShow::KIND,
-    NotifyPost::KIND,
-];
+    NotifyPost, "notify.post", Post, Posted;
+}
 
 /// The `<capability>` half of every kind in [`ALL`]: the names a view's
 /// manifest may declare. `export_view!` refuses any other at compile time.

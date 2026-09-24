@@ -489,3 +489,14 @@ fn notifying_during_render_requests_another_frame() {
     assert!(driver.tick(vec![]).busy);
     assert!(!driver.tick(vec![]).busy);
 }
+
+#[test]
+fn the_manifest_bytes_parse_back_with_the_epoch_and_the_doors() {
+    const TEXT: &str = "ducktape.view.manifest.v2\nApp\nWords\nclock,\n";
+    let bytes: [u8; manifest_len(TEXT, "640,480")] = manifest_bytes(TEXT, "640,480");
+    let manifest = wire::manifest::Manifest::parse(std::str::from_utf8(&bytes).unwrap()).unwrap();
+    assert_eq!(manifest.wire_epoch, wire::WIRE_EPOCH);
+    assert_eq!(manifest.doors, wire::doors::DOORS_REVISION);
+    assert_eq!(manifest.capabilities, ["clock"]);
+    assert!(!manifest.needs_newer_doors());
+}
