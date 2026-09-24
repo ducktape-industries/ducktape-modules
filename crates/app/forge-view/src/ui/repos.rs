@@ -72,12 +72,7 @@ fn repo_row(
             .invisible()
             .group_hover(group.clone(), |style| style.visible()),
     };
-    let initial = owner
-        .chars()
-        .next()
-        .unwrap_or('?')
-        .to_uppercase()
-        .to_string();
+    let initial = design::initial(&owner);
     div()
         .id(id(format!("forge-repo-{name}")))
         .group(group)

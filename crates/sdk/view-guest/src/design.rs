@@ -279,6 +279,14 @@ pub fn grouped(number: u64) -> String {
     out
 }
 
+/// An avatar's letter: the first grapheme of `name`, uppercased where
+/// that applies (`alice` → `A`, `김민지` → `김`), else `•`.
+pub fn initial(name: &str) -> String {
+    unicode_segmentation::UnicodeSegmentation::graphemes(name.trim_start(), true)
+        .next()
+        .map_or_else(|| "•".into(), str::to_uppercase)
+}
+
 /// `1 block`, `1,200 blocks`.
 pub fn plural(count: u64, one: &str, many: &str) -> String {
     format!("{} {}", grouped(count), if count == 1 { one } else { many })
@@ -294,5 +302,14 @@ mod tests {
         assert_eq!(super::grouped(1_048_576), "1,048,576");
         assert_eq!(super::plural(1, "block", "blocks"), "1 block");
         assert_eq!(super::plural(1200, "block", "blocks"), "1,200 blocks");
+    }
+
+    #[test]
+    fn an_initial_is_the_first_grapheme() {
+        assert_eq!(super::initial("alice park"), "A");
+        assert_eq!(super::initial("김민지"), "김");
+        assert_eq!(super::initial(" 한글"), "한");
+        assert_eq!(super::initial("e\u{301}va"), "E\u{301}");
+        assert_eq!(super::initial(""), "•");
     }
 }

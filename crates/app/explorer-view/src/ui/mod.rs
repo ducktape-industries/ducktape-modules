@@ -227,12 +227,7 @@ fn row(id: ElementId, label: String, route: Route, cx: Cx, theme: &Theme) -> Sta
 }
 
 fn avatar(name: &str, size: f32, theme: &Theme) -> impl IntoElement {
-    let initial: String = name
-        .chars()
-        .next()
-        .into_iter()
-        .flat_map(char::to_uppercase)
-        .collect();
+    let initial = design::initial(name);
     div()
         .size(px(size))
         .flex_shrink_0()
