@@ -105,7 +105,10 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
                         || crate::client::short_id(&room.id, 8),
                         |info| info.channel.name.clone(),
                     );
-                    format!("Message #{name}")
+                    match crate::chat::dm_peers(&room.id) {
+                        Some(_) => format!("Message {name}"),
+                        None => format!("Message #{name}"),
+                    }
                 }
             };
             let editable = chat.session.connected;
@@ -134,14 +137,33 @@ fn header(chat: &Chat, room: &Room, cx: &mut Context<Chat>, theme: &Theme) -> im
         chat.toggle_details();
         cx.notify();
     });
-    let mut title = div().flex().items_center().gap_2().child(
+    // a direct room is a person: their initials and name, no `#`, and no
+    // "Members only" (a direct room always is)
+    let direct = crate::chat::dm_peers(&room.id).is_some();
+    let peer = super::sidebar::dm_peer(chat);
+    let mut title = div().flex().items_center().gap_2();
+    if direct {
+        let (name, agent) = peer.clone().unwrap_or((name.clone(), false));
+        title = title.child(super::sidebar::avatar(
+            "chat-room-avatar",
+            &name,
+            agent,
+            theme.surface_raised,
+            theme,
+        ));
+    }
+    title = title.child(
         div()
             .id("chat-room-title")
             .text_size(px(13.5))
             .font_weight(ducktape_view_guest::FontWeight::SEMIBOLD)
             .role(Role::Heading)
             .aria_level(2)
-            .child(format!("#{}", name)),
+            .child(match (direct, peer) {
+                (true, Some((peer, _))) => peer,
+                (true, None) => name,
+                (false, _) => format!("#{name}"),
+            }),
     );
     if info.is_some_and(|info| info.channel.archived) {
         title = title.child(badge(
@@ -151,7 +173,7 @@ fn header(chat: &Chat, room: &Room, cx: &mut Context<Chat>, theme: &Theme) -> im
             theme.warning_soft,
         ));
     }
-    if info.is_some_and(crate::chat::members_only) {
+    if !direct && info.is_some_and(crate::chat::members_only) {
         title = title.child(badge(
             "chat-room-members-only",
             "Members only",
@@ -170,7 +192,7 @@ fn header(chat: &Chat, room: &Room, cx: &mut Context<Chat>, theme: &Theme) -> im
         .child(div().flex_1().child(title))
         .child(button(
             "chat-room-details",
-            "Channel details",
+            if direct { "Details" } else { "Channel details" },
             theme,
             details,
         ))

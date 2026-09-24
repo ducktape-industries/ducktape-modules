@@ -26,21 +26,34 @@ impl Chat {
                 .collect()
         });
         self.channels_arrived(channels);
-        if let (Some(before), Some(me)) = (before, self.my_account()) {
+        if let Some(me) = self.my_account() {
+            // the count is not kept, the read cursors are: the first list
+            // a view that started over (a reload carries its state, not the
+            // count) sees counts again what is meant for her in each room
+            // still unread, and announces only what moved since `before`
+            let recount = !std::mem::replace(&mut self.recounted, true);
             let viewing = self.viewing();
-            let moved: Vec<(String, u64, u64)> = self
+            let news: Vec<(String, u64, u64, u64)> = self
                 .channels
                 .ready()
                 .into_iter()
                 .flatten()
                 .filter(|info| Some(info.channel.id.as_str()) != viewing.as_deref())
                 .filter_map(|info| {
-                    let was = before.get(&info.channel.id).copied().unwrap_or(0);
-                    (info.head_seq > was).then(|| (info.channel.id.clone(), was, info.head_seq))
+                    let (id, head) = (&info.channel.id, info.head_seq);
+                    let seen = before
+                        .as_ref()
+                        .map_or(head, |before| before.get(id).copied().unwrap_or(0));
+                    let cursor = match recount {
+                        true => self.reads.cursors.get(id).copied().unwrap_or(head),
+                        false => head,
+                    };
+                    let from = seen.min(cursor);
+                    (head > from).then(|| (id.clone(), from, seen, head))
                 })
                 .collect();
-            for (channel, was, head) in moved {
-                self.read_news(channel, was, head, me, cx);
+            for (channel, from, seen, head) in news {
+                self.read_news(channel, from, seen, head, me, cx);
             }
         }
         self.settle_badge(cx);
@@ -54,9 +67,17 @@ impl Chat {
             .map(|room| room.id.clone())
     }
 
-    /// Reads the messages past `was` in `channel` and posts the ones meant
-    /// for the reader.
-    fn read_news(&mut self, channel: String, was: u64, head: u64, me: u64, cx: &mut Context<Self>) {
+    /// Reads the messages past `was` in `channel` and counts the ones meant
+    /// for the reader, posting those past `seen`.
+    fn read_news(
+        &mut self,
+        channel: String,
+        was: u64,
+        seen: u64,
+        head: u64,
+        me: u64,
+        cx: &mut Context<Self>,
+    ) {
         let fresh = (head - was).min(MAX_NEW);
         let viewer = self.viewer();
         cx.spawn(async move |this, cx| {
@@ -83,16 +104,19 @@ impl Chat {
                     .info(&channel)
                     .map(|info| info.channel.name.clone())
                     .unwrap_or_default();
-                let posts: Vec<Post> = rows
+                let posts: Vec<(u64, Post)> = rows
                     .iter()
                     .filter(|row| row.seq > was && row.seq <= head)
-                    .filter_map(|row| notice(row, me, &name, &chat.session.chain, names))
+                    .filter_map(|row| {
+                        notice(row, me, &name, &chat.session.chain, names)
+                            .map(|post| (row.seq, post))
+                    })
                     .collect();
                 if posts.is_empty() || chat.viewing().as_deref() == Some(channel.as_str()) {
                     return;
                 }
                 *chat.attention.entry(channel).or_default() += posts.len() as i64;
-                for post in posts {
+                for (_, post) in posts.into_iter().filter(|(seq, _)| *seq > seen) {
                     cx.host().notify::<NotifyPost>(post);
                 }
                 chat.settle_badge(cx);

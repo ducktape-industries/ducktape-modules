@@ -24,6 +24,9 @@ where
     selected: bool,
     /// a tab: quiet text, the chosen one underlined, no fill
     tab: bool,
+    /// a choice among many (a ref, the About panel): no fill, muted text,
+    /// the chosen one an fg edge like any selected button
+    quiet: bool,
     click: F,
 }
 
@@ -44,6 +47,7 @@ where
         primary: false,
         selected: false,
         tab: false,
+        quiet: false,
         click,
     }
 }
@@ -66,6 +70,10 @@ where
     }
     pub fn tab(mut self, tab: bool) -> Self {
         self.tab = tab;
+        self
+    }
+    pub fn quiet(mut self, quiet: bool) -> Self {
+        self.quiet = quiet;
         self
     }
 }
@@ -108,6 +116,11 @@ where
                 .text_color(theme.foreground)
                 .border_1()
                 .border_color(theme.foreground)
+        } else if self.quiet {
+            element
+                .text_color(theme.muted)
+                .border_1()
+                .border_color(theme.background)
         } else {
             element
                 .bg(theme.surface)
@@ -119,7 +132,8 @@ where
             element = element.font_weight(FontWeight::MEDIUM);
         }
         if self.enabled {
-            let (tab, quiet) = (self.tab, !self.primary && !self.selected);
+            let plain = !self.primary && !self.selected;
+            let (tab, quiet) = (self.tab || (self.quiet && plain), plain);
             element = element
                 .hover(move |style| match (tab, quiet) {
                     (true, _) => style.text_color(theme.foreground),

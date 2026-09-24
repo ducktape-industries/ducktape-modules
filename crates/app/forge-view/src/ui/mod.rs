@@ -159,7 +159,8 @@ fn repo(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
     let about = cx.listener(|forge, _: &ClickEvent, _, cx| forge.toggle_dock(Dock::About, cx));
     tabs = tabs.child(div().flex_1()).child(
         button(id("forge-dock-about"), "About", theme, about)
-            .selected(forge.nav().dock == Some(Dock::About)),
+            .selected(forge.nav().dock == Some(Dock::About))
+            .quiet(true),
     );
     let body: AnyElement = match forge.nav().tab {
         RepoTab::Readme => code::readme(forge, cx, theme),
@@ -217,7 +218,8 @@ fn ref_picker(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyEleme
                 theme,
                 pick,
             )
-            .selected(name == head),
+            .selected(name == head)
+            .quiet(true),
         );
     }
     picker.into_any_element()

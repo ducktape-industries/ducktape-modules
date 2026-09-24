@@ -415,21 +415,13 @@ fn dm_button(
         .role(ducktape_view_guest::Role::Button)
         .focusable()
         .on_click(click)
-        .child(
-            div()
-                .size_6()
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded_full()
-                .bg(if agent {
-                    theme.agent_soft
-                } else {
-                    theme.sidebar_raised
-                })
-                .text_size(px(11.))
-                .child(initials(&name)),
-        )
+        .child(avatar(
+            format!("chat-sidebar-dm-{peer}-avatar"),
+            &name,
+            agent,
+            theme.sidebar_raised,
+            theme,
+        ))
         .child(
             div()
                 .flex_1()
@@ -459,6 +451,28 @@ fn dm_button(
         );
     }
     row
+}
+
+/// A person's round initials: a direct room's face, in the sidebar and
+/// over the room.
+pub fn avatar(
+    id: impl Into<ElementId>,
+    name: &str,
+    agent: bool,
+    fill: ducktape_view_guest::Hsla,
+    theme: &Theme,
+) -> impl IntoElement {
+    div()
+        .id(id)
+        .size_6()
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded_full()
+        .bg(if agent { theme.agent_soft } else { fill })
+        .text_size(px(11.))
+        .child(initials(name))
 }
 
 fn initials(name: &str) -> String {
