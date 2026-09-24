@@ -947,14 +947,14 @@ fn a_direct_message_elsewhere_is_a_notice_and_a_badge_until_read() {
     assert_eq!(cx.host().asked::<NotifyRead>(), [posts[0].tag.clone()]);
 }
 
-/// A room of 256 rows, each with markup, a reaction and a thread, renders
-/// inside the host's frame budget and under a byte ceiling: the native proxy
-/// for a render's fuel.
+/// A full room (one window of rows), each with markup, a reaction and a
+/// thread, renders inside the host's frame budget and under a regression
+/// guard on its bytes: the native proxy for a render's fuel.
 #[test]
-fn a_room_of_256_rows_renders_inside_the_frame_budget() {
+fn a_full_room_renders_inside_the_frame_budget() {
     let mut cx = TestAppContext::new();
     configure(&mut cx);
-    let rows: Vec<MsgRow> = (1..=256)
+    let rows: Vec<MsgRow> = (1..=WINDOW as u64)
         .map(|seq| {
             let text = format!("row {seq}: **bold**, `code` and a [link](https://x.example/{seq})");
             let mut row = row(seq, if seq % 2 == 0 { "acct:7" } else { "acct:8" }, &text);
@@ -972,7 +972,7 @@ fn a_room_of_256_rows_renders_inside_the_frame_budget() {
         Ok(match query {
             ChatViewQuery::Accounts { .. } => ChatViewReply::Accounts(Vec::new()),
             ChatViewQuery::Channels { .. } => {
-                ChatViewReply::Channels(page(vec![channel("general", "General", 256)]))
+                ChatViewReply::Channels(page(vec![channel("general", "General", WINDOW as u64)]))
             }
             ChatViewQuery::Roots { .. } => ChatViewReply::Roots(page(rows.clone())),
             ChatViewQuery::Members { .. } => ChatViewReply::Members(page(Vec::new())),
@@ -993,14 +993,21 @@ fn a_room_of_256_rows_renders_inside_the_frame_budget() {
     cx.simulate_click("chat-sidebar-channel-general");
     cx.run_until_parked();
     assert!(
-        cx.texts().iter().any(|text| text.contains("row 256")),
+        cx.texts()
+            .iter()
+            .any(|text| text.contains(&format!("row {WINDOW}"))),
         "{:?}",
         cx.texts()
     );
     let bytes = cx.frame_bytes();
-    // about 1.5x what it drew when this was written: tighten when the room
-    // slims, raise only on purpose
-    assert!(bytes < 220_000, "a 256-row room drew {bytes} bytes");
+    // A regression guard, not a host limit: about 1.5x what a full room drew
+    // when measured. The host's own limits are the sanitize check inside
+    // `frame_bytes`. Tighten when the room slims, raise only on purpose.
+    const REGRESSION_GUARD: usize = 220_000;
+    assert!(
+        bytes < REGRESSION_GUARD,
+        "a {WINDOW}-row room drew {bytes} bytes, over its guard {REGRESSION_GUARD}"
+    );
 }
 
 /// A reload carries the read cursors but not the count: the first list after
