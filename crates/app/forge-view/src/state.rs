@@ -37,10 +37,8 @@ pub struct Forge {
     pub(crate) copied: Option<String>,
     pub(crate) layout: Layout,
     #[serde(skip)]
-    pub(crate) data: BTreeMap<String, Loaded<Reply>>,
-    /// what each cached read asked, so a live bump can ask it again
-    #[serde(skip)]
-    pub(crate) requests: BTreeMap<String, Query>,
+    /// every read on screen, keyed by the query that asked it
+    pub(crate) data: BTreeMap<Query, Loaded<Reply>>,
     #[serde(skip)]
     pub(crate) names: Loaded<Names>,
     #[serde(skip)]
@@ -410,28 +408,16 @@ impl Names {
     }
     /// What a chat handle (`acct:7`, `user:<hex>`, `system`) is called.
     pub fn handle(&self, handle: &str) -> String {
-        if let Some(number) = handle
-            .strip_prefix("acct:")
-            .and_then(|n| n.parse::<u64>().ok())
-        {
-            return self
+        match chat::party_of_handle(handle) {
+            Some(chat::Party::Account(number)) => self
                 .rows
                 .iter()
                 .find(|row| row.number == number)
                 .map(|row| row.name.clone())
-                .unwrap_or_else(|| handle.to_owned());
-        }
-        if let Some(hex) = handle.strip_prefix("user:") {
-            return self
-                .rows
-                .iter()
-                .find(|row| row.keys.iter().any(|held| held.eq_ignore_ascii_case(hex)))
-                .map(|row| row.name.clone())
-                .unwrap_or_else(|| short(hex));
-        }
-        match handle {
-            "system" => "Forge".into(),
-            other => other.to_owned(),
+                .unwrap_or_else(|| handle.to_owned()),
+            Some(chat::Party::Key(key)) => self.key(&key),
+            Some(chat::Party::System) => "Forge".into(),
+            Some(chat::Party::Module(_)) | None => handle.to_owned(),
         }
     }
     /// The signing key of an account number: `host.props` names no key, and

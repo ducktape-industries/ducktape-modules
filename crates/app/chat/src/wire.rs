@@ -278,6 +278,25 @@ pub fn party_handle(party: &Party) -> String {
     }
 }
 
+/// The party a handle names: [`party_handle`] read back.
+pub fn party_of_handle(handle: &str) -> Option<Party> {
+    if handle == "system" {
+        return Some(Party::System);
+    }
+    if let Some(number) = handle.strip_prefix("acct:") {
+        return number.parse().ok().map(Party::Account);
+    }
+    if let Some(module) = handle.strip_prefix("module:") {
+        return Some(Party::Module(module.into()));
+    }
+    let hex = handle.strip_prefix("user:").filter(|hex| !hex.is_empty())?;
+    (0..hex.len())
+        .step_by(2)
+        .map(|at| u8::from_str_radix(hex.get(at..at + 2)?, 16).ok())
+        .collect::<Option<Vec<u8>>>()
+        .map(Party::Key)
+}
+
 /// The room two accounts share: `dm-<lower>-<higher>`.
 pub fn dm_channel_id(a: AccountNumber, b: AccountNumber) -> String {
     format!("dm-{}-{}", a.min(b), a.max(b))

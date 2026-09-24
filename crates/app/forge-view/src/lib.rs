@@ -151,7 +151,6 @@ impl Forge {
             self.names = cx.load(queries::roster(cx.host()), |forge| &mut forge.names);
             self.refresh_me(cx);
             self.data.clear();
-            self.requests.clear();
         }
         self.sync(cx);
     }
@@ -183,14 +182,13 @@ impl Forge {
 
     /// One read, once. Landing it advances whatever depends on it.
     pub(crate) fn read(&mut self, query: Query, cx: &mut Context<Self>) {
-        let key = queries::key(&query);
-        if self.data.contains_key(&key) {
+        if self.data.contains_key(&query) {
             return;
         }
-        self.requests.insert(key.clone(), query.clone());
-        let landing = key.clone();
+        let landing = query.clone();
+        let asked = query.clone();
         let task = cx.spawn(async move |this, cx| {
-            let result = queries::fetch(cx.host(), query).await;
+            let result = queries::fetch(cx.host(), asked).await;
             let _ = this.update(cx, |forge, cx| {
                 forge.data.insert(
                     landing,
@@ -203,15 +201,16 @@ impl Forge {
                 forge.sync(cx);
             });
         });
-        self.data.insert(key, Loaded::Loading(task));
+        self.data.insert(query, Loaded::Loading(task));
     }
 
     /// Ask again for everything on screen, keeping the rows already there
     /// until the fresh ones land.
     pub(crate) fn refresh(&mut self, cx: &mut Context<Self>) {
-        for (key, query) in self.requests.clone() {
+        for query in self.data.keys().cloned().collect::<Vec<_>>() {
+            let landing = query.clone();
             cx.refresh(queries::fetch(cx.host(), query), move |forge, reply, _| {
-                forge.data.insert(key.clone(), Loaded::Ready(reply));
+                forge.data.insert(landing.clone(), Loaded::Ready(reply));
             });
         }
         for channel in self.messages.keys().cloned().collect::<Vec<_>>() {
@@ -238,7 +237,7 @@ impl Forge {
 
     /// Retry one read the reader asked to retry.
     pub(crate) fn retry(&mut self, query: Query, cx: &mut Context<Self>) {
-        self.data.remove(&queries::key(&query));
+        self.data.remove(&query);
         self.read(query, cx);
         cx.notify();
     }
@@ -246,9 +245,8 @@ impl Forge {
     /// Issue what this screen needs and drop what it does not.
     pub(crate) fn sync(&mut self, cx: &mut Context<Self>) {
         let needed = self.needed();
-        let keys: BTreeSet<String> = needed.iter().map(queries::key).collect();
-        self.data.retain(|key, _| keys.contains(key));
-        self.requests.retain(|key, _| keys.contains(key));
+        let keys: BTreeSet<&Query> = needed.iter().collect();
+        self.data.retain(|query, _| keys.contains(query));
         for query in needed {
             self.read(query, cx);
         }
@@ -418,7 +416,7 @@ impl Forge {
     // ---------------------------------------------------------- accessors
 
     pub(crate) fn stage(&self, query: &Query) -> Stage<'_> {
-        match self.data.get(&queries::key(query)) {
+        match self.data.get(query) {
             Some(Loaded::Ready(reply)) => Stage::Ready(reply),
             Some(Loaded::Failed(refusal)) => Stage::Failed(refusal),
             _ => Stage::Loading,

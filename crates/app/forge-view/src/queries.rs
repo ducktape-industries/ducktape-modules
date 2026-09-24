@@ -17,11 +17,6 @@ pub(crate) const PAGE: Page = Page::first(64);
 /// it read and says more follows, rather than walking a repository forever.
 const MAX_PAGES: usize = 16;
 
-/// The cache key of a read: the query is its own identity.
-pub(crate) fn key(query: &Query) -> String {
-    format!("{query:?}")
-}
-
 fn wrong_reply() -> Refusal {
     malformed("the module answered another question".into())
 }

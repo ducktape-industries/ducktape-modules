@@ -18,7 +18,17 @@ pub struct Cursor {
 }
 
 #[derive(
-    Clone, Debug, Default, PartialEq, Eq, BorshSerialize, BorshDeserialize, Serialize, Deserialize,
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    PartialOrd,
+    Ord,
+    Eq,
+    BorshSerialize,
+    BorshDeserialize,
+    Serialize,
+    Deserialize,
 )]
 pub struct Page {
     pub after: Option<Vec<u8>>,

@@ -110,13 +110,13 @@ pub enum Op {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Ord, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Service {
     ReceivePack,
     UploadPack,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Query {
     Repos {
         page: Page,

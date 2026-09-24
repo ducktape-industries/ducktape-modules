@@ -176,3 +176,18 @@ fn a_channel_takes_posts_threads_reactions_and_answers_the_view() {
     };
     assert_eq!(hits.hits.iter().map(|r| r.seq).collect::<Vec<_>>(), vec![2]);
 }
+
+#[test]
+fn a_handle_reads_back_as_its_party() {
+    for party in [
+        Party::Account(7),
+        Party::Key(vec![0xab, 0x01]),
+        Party::Module("forge".into()),
+        Party::System,
+    ] {
+        assert_eq!(party_of_handle(&party_handle(&party)), Some(party));
+    }
+    for nothing in ["acct:x", "user:", "user:abc", "user:zz", "someone"] {
+        assert_eq!(party_of_handle(nothing), None, "{nothing}");
+    }
+}
