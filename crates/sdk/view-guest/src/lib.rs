@@ -90,11 +90,29 @@ use context::Callback;
 mod driver;
 pub use driver::Driver;
 
-/// Appends the preferred window size and current wire epoch at compile time.
+const fn digits(number: u32) -> usize {
+    match number.checked_ilog10() {
+        Some(log) => log as usize + 1,
+        None => 1,
+    }
+}
+
+/// The length of [`manifest_bytes`] over `text` and `preferred_size`.
+pub const fn manifest_len(text: &str, preferred_size: &str) -> usize {
+    text.len()
+        + preferred_size.len()
+        + 1
+        + digits(wire::WIRE_EPOCH)
+        + 1
+        + digits(wire::doors::DOORS_REVISION)
+}
+
+/// Appends the preferred window size, the current wire epoch and the doors
+/// revision at compile time.
 pub const fn manifest_bytes<const N: usize>(text: &str, preferred_size: &str) -> [u8; N] {
     let bytes = text.as_bytes();
     let size = preferred_size.as_bytes();
-    assert!(N == bytes.len() + size.len() + 1 + wire::WIRE_EPOCH.ilog10() as usize + 1);
+    assert!(N == manifest_len(text, preferred_size));
     let mut out = [0u8; N];
     let mut i = 0;
     while i < bytes.len() + size.len() {
@@ -105,13 +123,23 @@ pub const fn manifest_bytes<const N: usize>(text: &str, preferred_size: &str) ->
         };
         i += 1;
     }
-    out[i] = b'\n';
-    let mut epoch = wire::WIRE_EPOCH;
     let mut end = N;
-    while end > i + 1 {
+    let mut number = wire::doors::DOORS_REVISION;
+    let mut last = digits(number);
+    let mut line = 0;
+    while line < 2 {
+        let mut left = last;
+        while left > 0 {
+            end -= 1;
+            out[end] = b'0' + (number % 10) as u8;
+            number /= 10;
+            left -= 1;
+        }
         end -= 1;
-        out[end] = b'0' + (epoch % 10) as u8;
-        epoch /= 10;
+        out[end] = b'\n';
+        number = wire::WIRE_EPOCH;
+        last = digits(number);
+        line += 1;
     }
     out
 }
@@ -126,11 +154,11 @@ macro_rules! export_driver {
             $crate::wire::doors::is_capability($capability),
             concat!("`", $capability, "` is not a door capability: see view_wire::doors::CAPABILITIES")
         );)*
-        const MANIFEST: &str = concat!("ducktape.view.manifest.v1\n", $name, "\n", $description, "\n" $(, $capability, ",")*, "\n");
+        const MANIFEST: &str = concat!("ducktape.view.manifest.v2\n", $name, "\n", $description, "\n" $(, $capability, ",")*, "\n");
 
         #[cfg_attr(target_arch = "wasm32", unsafe(link_section = "ducktape.view.manifest"))]
         #[used]
-        static MANIFEST_SECTION: [u8; MANIFEST.len() + <$app as $crate::View>::PREFERRED_WINDOW_SIZE.len() + 2 + $crate::wire::WIRE_EPOCH.ilog10() as usize] =
+        static MANIFEST_SECTION: [u8; $crate::manifest_len(MANIFEST, <$app as $crate::View>::PREFERRED_WINDOW_SIZE)] =
             $crate::manifest_bytes(MANIFEST, <$app as $crate::View>::PREFERRED_WINDOW_SIZE);
 
         #[cfg(target_arch = "wasm32")]

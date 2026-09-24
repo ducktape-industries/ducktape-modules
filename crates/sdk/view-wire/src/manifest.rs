@@ -23,6 +23,9 @@ impl PreferredSize {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Manifest {
     pub wire_epoch: u32,
+    /// the [`crate::doors::DOORS_REVISION`] the view was built against; 0
+    /// from a v1 manifest, which predates it
+    pub doors: u32,
     pub name: String,
     pub description: String,
     pub capabilities: Vec<String>,
@@ -84,15 +87,18 @@ pub fn read_manifest(bytes: &[u8]) -> Option<Manifest> {
 }
 
 impl Manifest {
-    /// Parses the strict six-line `ducktape.view.manifest.v1` text and its bounds.
+    /// Parses the strict six-line `ducktape.view.manifest.v1` text, or the
+    /// seven-line `v2` that adds the doors revision, and its bounds.
     pub fn parse(text: &str) -> Option<Self> {
         if text.len() > 1024 || text.chars().any(|c| c.is_control() && c != '\n') {
             return None;
         }
         let mut lines = text.split('\n');
-        if lines.next()? != "ducktape.view.manifest.v1" {
-            return None;
-        }
+        let v2 = match lines.next()? {
+            "ducktape.view.manifest.v1" => false,
+            "ducktape.view.manifest.v2" => true,
+            _ => return None,
+        };
         let name = lines.next()?.to_owned();
         let description = lines.next()?.to_owned();
         let caps = lines.next()?;
@@ -115,16 +121,14 @@ impl Manifest {
                 )?)
             }
         };
-        let epoch = lines.next()?;
-        let wire_epoch = epoch.parse::<u32>().ok()?;
-        if wire_epoch == 0 || wire_epoch.to_string() != epoch {
-            return None;
-        }
+        let wire_epoch = canonical(lines.next()?)?;
+        let doors = if v2 { canonical(lines.next()?)? } else { 0 };
         if lines.next().is_some() {
             return None;
         }
         let manifest = Self {
             wire_epoch,
+            doors,
             name,
             description,
             capabilities,
@@ -145,6 +149,11 @@ impl Manifest {
         }
     }
 
+    /// Whether the view was built against doors this host does not have.
+    pub fn needs_newer_doors(&self) -> bool {
+        self.doors > crate::doors::DOORS_REVISION
+    }
+
     fn within_bounds(&self) -> bool {
         !self.name.is_empty()
             && self.name.len() <= MAX_NAME_BYTES
@@ -155,6 +164,12 @@ impl Manifest {
                 .iter()
                 .all(|capability| capability.len() <= MAX_CAPABILITY_BYTES)
     }
+}
+
+/// A positive number written the one way: no sign, no leading zero.
+fn canonical(text: &str) -> Option<u32> {
+    let number = text.parse::<u32>().ok()?;
+    (number != 0 && number.to_string() == text).then_some(number)
 }
 
 #[cfg(test)]
@@ -310,5 +325,27 @@ mod tests {
         value.hash(&mut hashes[0]);
         parsed.preferred_size.unwrap().hash(&mut hashes[1]);
         assert_eq!(hashes[0].finish(), hashes[1].finish());
+    }
+
+    #[test]
+    fn a_v2_manifest_names_its_doors_and_a_v1_one_none() {
+        let v2 = Manifest::parse("ducktape.view.manifest.v2\nApp\n\n\nnone\n2\n7").unwrap();
+        assert_eq!((v2.wire_epoch, v2.doors), (2, 7));
+        assert!(!v2.needs_newer_doors());
+        let v1 = Manifest::parse("ducktape.view.manifest.v1\nApp\n\n\nnone\n2").unwrap();
+        assert_eq!(v1.doors, 0);
+        for invalid in [
+            "ducktape.view.manifest.v2\nApp\n\n\nnone\n2",
+            "ducktape.view.manifest.v2\nApp\n\n\nnone\n2\n0",
+            "ducktape.view.manifest.v2\nApp\n\n\nnone\n2\n07",
+            "ducktape.view.manifest.v1\nApp\n\n\nnone\n2\n7",
+        ] {
+            assert!(Manifest::parse(invalid).is_none(), "accepted {invalid:?}");
+        }
+        let ahead = format!(
+            "ducktape.view.manifest.v2\nApp\n\n\nnone\n2\n{}",
+            crate::doors::DOORS_REVISION + 1
+        );
+        assert!(Manifest::parse(&ahead).unwrap().needs_newer_doors());
     }
 }
