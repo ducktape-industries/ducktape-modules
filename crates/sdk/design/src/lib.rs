@@ -75,18 +75,6 @@ pub mod radius {
     pub const PILL: f64 = 999.;
 }
 
-/// The pane a view is seated in. The shell draws no title strip over a
-/// view: its controls (split, pop out, close) float over the view's
-/// top-right corner. A view keeps that corner free — a header row that
-/// runs to the right edge pads its right end by [`pane::CONTROLS`].
-pub mod pane {
-    /// Width the pane's controls cover from the view's right edge: three
-    /// 28px buttons, their 2px gaps and the 8px inset, and a margin.
-    pub const CONTROLS: f64 = 112.;
-    /// Height they cover from the view's top edge (8px inset, 28px, 8px).
-    pub const CONTROLS_HEIGHT: f64 = 44.;
-}
-
 /// Gaps and insets, in pixels. One ladder: every gap the kit's builders open
 /// and every edge they pad is a step on it, so a view names the step instead
 /// of the number.

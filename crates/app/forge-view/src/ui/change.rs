@@ -140,7 +140,6 @@ fn header(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
         .pb_2()
         .border_b_1()
         .border_color(theme.border)
-        .pr(px(PANE_CONTROLS))
         .child(top);
     if !refusal.is_empty() {
         column = column.child(

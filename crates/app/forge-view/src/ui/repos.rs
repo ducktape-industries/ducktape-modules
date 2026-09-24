@@ -4,9 +4,7 @@ use ducktape_view_guest::prelude::*;
 
 use crate::Forge;
 use crate::queries::PAGE;
-use crate::ui::components::{
-    button, chip, empty_state, heading, heading_in, id, quiet, ref_label, row,
-};
+use crate::ui::components::{button, chip, empty_state, heading, id, quiet, ref_label, row};
 use crate::ui::{pending, scroller, staged};
 use forge::{Query, Reply, RepoInfo};
 
@@ -23,6 +21,14 @@ fn listed<'a>(forge: &'a Forge, reply: &'a Reply) -> Vec<&'a RepoInfo> {
         .iter()
         .filter(|info| needle.is_empty() || info.name.to_lowercase().contains(&needle))
         .collect()
+}
+
+/// "1 ref", "3 refs".
+pub(crate) fn refs(count: u64) -> String {
+    match count == 1 {
+        true => "1 ref".to_owned(),
+        false => format!("{count} refs"),
+    }
 }
 
 /// The screen: every repository of this network, newest activity first.
@@ -91,9 +97,9 @@ pub(crate) fn overview(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) ->
                     theme.surface_raised,
                 ))
                 .cell(div().w(px(140.)).truncate().child(quiet(owner, theme)))
-                .cell(quiet(format!("{} refs", info.repo.refs_count), theme))
+                .cell(quiet(refs(info.repo.refs_count), theme))
                 .cell(div().flex_1())
-                .cell(quiet(format!("height {}", info.repo.last_activity), theme)),
+                .cell(quiet(format!("block {}", info.repo.last_activity), theme)),
         );
     }
     column.child(list).into_any_element()
@@ -113,38 +119,33 @@ pub(crate) fn rail(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> Any
         .bg(theme.sidebar)
         .text_color(theme.sidebar_foreground)
         .child(
+            // The window's title bar already says Forge: the rail's head is
+            // the way back to every repository.
             div()
                 .id(id("forge-rail-header"))
                 .flex()
                 .items_center()
-                .gap_2()
-                .px_3()
-                .py_2()
-                .bg(theme.sidebar_raised)
+                .px_2()
+                .py_1()
                 .border_b_1()
                 .border_color(theme.sidebar_border)
-                .text_color(theme.sidebar_foreground)
-                .child(heading_in(
-                    id("forge-rail-title"),
-                    "Forge",
-                    1,
-                    theme.sidebar_foreground,
-                ))
-                .child(div().flex_1())
                 .child(
-                    // The rail is ink: its controls wear the sidebar tones,
-                    // never the surface ones the content column uses.
                     div()
                         .id(id("forge-rail-home"))
+                        .flex_1()
                         .px_1()
-                        .py_0p5()
+                        .py_1()
                         .text_size(px(12.))
                         .text_color(theme.sidebar_muted)
-                        .hover(|style| style.bg(theme.sidebar))
+                        .hover(|style| {
+                            style
+                                .bg(theme.sidebar_raised)
+                                .text_color(theme.sidebar_foreground)
+                        })
                         .role(Role::Button)
                         .focusable()
                         .on_click(home)
-                        .child("All"),
+                        .child("← All repositories"),
                 ),
         )
         .child(
@@ -212,7 +213,6 @@ fn header(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme, search_id: &str
         .py_3()
         .border_b_1()
         .border_color(theme.border)
-        .pr(px(PANE_CONTROLS))
         .child(heading(id("forge-repos-title"), "Repositories", 1, theme))
         .child(
             Input::new(id(search_id.to_owned()))

@@ -333,7 +333,7 @@ fn the_repositories_list_shows_every_column_of_the_plan() {
     assert!(cx.has_text("main"), "the default head is a chip");
     assert!(cx.has_text("Ada"), "the owner key resolves to a name");
     assert!(cx.has_text("6 refs"));
-    assert!(cx.has_text("height 2"));
+    assert!(cx.has_text("block 2"));
 }
 
 #[test]
@@ -690,3 +690,9 @@ mod change_tests;
 
 #[path = "screen_tests.rs"]
 mod screen_tests;
+
+#[test]
+fn one_ref_is_not_refs() {
+    assert_eq!(crate::ui::repos::refs(1), "1 ref");
+    assert_eq!(crate::ui::repos::refs(0), "0 refs");
+}

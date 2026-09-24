@@ -41,11 +41,6 @@ pub use surface::{surface, Surface};
 pub use view_element::{AnyView, ViewElement};
 
 /// Traits and primitives used to compose guest GPUI elements.
-/// How far from the right edge a view keeps its top corner free: the
-/// pane's own controls float there (`design::pane`). A header row at the
-/// view's top that runs to its right edge pads its right end by this.
-pub const PANE_CONTROLS: f32 = design::pane::CONTROLS as f32;
-
 pub mod prelude {
     pub use crate::{
         anchored, canvas, deferred, div, hsla, img, list, modal_overlay, px, rems, resize_handle,
@@ -57,7 +52,7 @@ pub mod prelude {
         MouseDownEvent, MouseExitEvent, MouseMoveEvent, MousePressureEvent, MouseUpEvent,
         ParentElement, PinchEvent, Pixels, Render, RenderOnce, Role, ScrollStrategy,
         ScrollWheelEvent, SharedString, StatefulInteractiveElement, Styled, StyledImage,
-        StyledText, Theme, UniformListScrollHandle, Window, WindowControlArea, PANE_CONTROLS,
+        StyledText, Theme, UniformListScrollHandle, Window, WindowControlArea,
     };
 }
 mod editor;

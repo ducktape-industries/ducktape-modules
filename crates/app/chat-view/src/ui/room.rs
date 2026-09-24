@@ -131,7 +131,6 @@ fn header(chat: &Chat, room: &Room, cx: &mut Context<Chat>, theme: &Theme) -> im
         .p_3()
         .border_b_1()
         .border_color(theme.border)
-        .pr(px(PANE_CONTROLS))
         .child(div().flex_1().child(title))
         .child(button(
             "chat-room-details",
