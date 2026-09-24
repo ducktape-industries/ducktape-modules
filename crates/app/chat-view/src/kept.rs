@@ -10,6 +10,9 @@ use ducktape_view_guest::store;
 use crate::Chat;
 
 const EMOJI: &str = "emoji";
+/// How many times the kept cursors are asked for before chat gives up on
+/// them.
+const READ_ATTEMPTS: u32 = 3;
 
 impl Chat {
     /// The key the reader's cursors are kept under; none with no key seated.
@@ -25,10 +28,9 @@ impl Chat {
         let Some(key) = self.reads_key() else {
             return;
         };
-        let reads = store::get::<BTreeMap<String, u64>>(&cx.host(), &key);
         let emoji = store::get::<Vec<String>>(&cx.host(), EMOJI);
         cx.spawn(async move |this, cx| {
-            let (reads, emoji) = (reads.await, emoji.await);
+            let emoji = emoji.await;
             let _ = this.update(cx, |chat, cx| {
                 cx.notify();
                 for kept in emoji.ok().flatten().unwrap_or_default().into_iter() {
@@ -37,9 +39,39 @@ impl Chat {
                     }
                 }
                 chat.recent_emoji.truncate(crate::emoji::RECENT);
+            });
+        })
+        .detach();
+        self.load_reads(key, 1, cx);
+    }
+
+    /// The kept cursors, asked again on a refusal. After [`READ_ATTEMPTS`]
+    /// the reader starts from what this session sees, so her reads still
+    /// save; what the device held for rooms not seen yet is lost.
+    fn load_reads(&mut self, key: String, attempt: u32, cx: &mut Context<Self>) {
+        let reads = store::get::<BTreeMap<String, u64>>(&cx.host(), &key);
+        cx.spawn(async move |this, cx| {
+            let reads = reads.await;
+            let _ = this.update(cx, |chat, cx| {
+                cx.notify();
                 match reads {
                     Ok(reads) => chat.reads_landed(key, reads.unwrap_or_default(), cx),
-                    Err(refusal) => cx.host().log(format!("read cursors not loaded: {refusal}")),
+                    // the reader changed meanwhile: her own load is under way
+                    Err(_) if chat.reads_key().as_ref() != Some(&key) => {}
+                    Err(refusal) if attempt < READ_ATTEMPTS => {
+                        cx.host()
+                            .log(format!("read cursors not loaded, asking again: {refusal}"));
+                        chat.load_reads(key, attempt + 1, cx);
+                    }
+                    Err(refusal) => {
+                        cx.host().log(format!(
+                            "read cursors not loaded, starting from this session: {refusal}"
+                        ));
+                        chat.reads_landed(key, BTreeMap::new(), cx);
+                        // nothing of this session is on the device yet
+                        chat.reads.written.clear();
+                        chat.save_reads(cx);
+                    }
                 }
             });
         })

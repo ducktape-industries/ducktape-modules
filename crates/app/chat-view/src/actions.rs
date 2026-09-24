@@ -333,15 +333,16 @@ impl Chat {
             .count()
     }
 
-    pub(crate) fn message_link(&self, seq: u64) -> String {
+    /// None before the session names a chain: Copy link is not offered.
+    pub(crate) fn message_link(&self, seq: u64) -> Option<String> {
         crate::chat::channel_link(&self.session.chain, &self.room_id(), Some(seq))
     }
 
     pub(crate) fn open_link(&mut self, link: String, cx: &mut Context<Self>) {
         self.create = None;
-        let url = crate::chat::pressed_link(link, &self.session.chain);
-        if !url.is_empty() {
-            cx.host().open_link(&url);
+        match crate::chat::pressed_link(link, &self.session.chain) {
+            Some(url) => cx.host().open_link(&url),
+            None => cx.host().log("no link to open: the session names no chain"),
         }
     }
 

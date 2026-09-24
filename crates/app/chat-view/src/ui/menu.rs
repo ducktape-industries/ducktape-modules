@@ -16,8 +16,9 @@ const CELL: f32 = 32.;
 const PICKER_GAP: f32 = 2.;
 const PICKER_INSET: f32 = 8.;
 const COLUMNS: u16 = 8;
-/// Rows of the picker's grid: a tab's `emoji::PER_TAB` in rows of eight.
-const GRID_ROWS: f32 = 5.;
+/// Rows of the picker's grid: a tab's `emoji::PER_TAB` in rows of
+/// `COLUMNS`.
+const GRID_ROWS: f32 = emoji::PER_TAB.div_ceil(COLUMNS as usize) as f32;
 const SEARCH: f32 = 28.;
 const CAPTION: f32 = 14.;
 const TABS: f32 = 28.;
@@ -42,6 +43,8 @@ pub fn focus_key(pane: Pane, mode: Mode) -> String {
 pub fn floating(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Option<AnyElement> {
     let menu = chat.menu.as_ref()?;
     let (at, size) = popup_geometry(menu, more_items(chat, menu).len())?;
+    // a fixed size where the popup must not jump under the pointer; the
+    // delete confirmation sizes to its words and buttons
     let content = message_menu(chat, menu, cx, theme);
     // the picker's focus key names its search field, which takes the keys
     let id = match menu.mode {
@@ -50,9 +53,9 @@ pub fn floating(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Option<An
     };
     let frame = div()
         .id(id)
-        .w(px(size.0))
-        .h(px(size.1))
-        .overflow_hidden()
+        .when_some(size, |frame, (w, h)| {
+            frame.w(px(w)).h(px(h)).overflow_hidden()
+        })
         .focusable()
         .border_1()
         .border_color(theme.border)
@@ -78,11 +81,14 @@ pub fn floating(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Option<An
     )
 }
 
-fn popup_geometry(menu: &Menu, items: usize) -> Option<((f32, f32), (f32, f32))> {
+/// A width and height, or a point, in pixels.
+type Pair = (f32, f32);
+
+fn popup_geometry(menu: &Menu, items: usize) -> Option<(Pair, Option<Pair>)> {
     let size = match menu.mode {
-        Mode::More => menu_size(items),
-        Mode::Reactions => picker_size(),
-        Mode::Delete => (280., 96.),
+        Mode::More => Some(menu_size(items)),
+        Mode::Reactions => Some(picker_size()),
+        Mode::Delete => None,
         Mode::Toolbar | Mode::Editing => return None,
     };
     Some((menu.at, size))
@@ -176,7 +182,7 @@ fn more_items(chat: &Chat, menu: &Menu) -> Vec<Action> {
     [
         (Action::Reply, pane == Pane::Timeline && !open),
         (Action::React, writable),
-        (Action::CopyLink, !chat.message_link(seq).is_empty()),
+        (Action::CopyLink, chat.message_link(seq).is_some()),
         (Action::Edit, writable && chat.wrote(pane, seq)),
         (Action::Delete, writable && chat.may_delete(pane, seq)),
     ]
@@ -226,7 +232,10 @@ fn actions(chat: &Chat, menu: &Menu, cx: &mut Context<Chat>, theme: &Theme) -> A
                 let press = cx.listener(move |chat, _: &ClickEvent, _, cx| {
                     cx.notify();
                     chat.close_menu();
-                    chat.copy_text(link.clone(), "message link", cx);
+                    match &link {
+                        Some(link) => chat.copy_text(link.clone(), "message link", cx),
+                        None => cx.host().log("no message link: the session names no chain"),
+                    }
                 });
                 Item::new(
                     "chat-menu-copy-link",
@@ -310,6 +319,7 @@ fn reactions(chat: &Chat, menu: &Menu, cx: &mut Context<Chat>, theme: &Theme) ->
     }
     let mut picker = div()
         .id("chat-reaction-picker")
+        .size_full()
         .flex()
         .flex_col()
         .gap(px(STACK_GAP))
@@ -382,8 +392,9 @@ fn reactions(chat: &Chat, menu: &Menu, cx: &mut Context<Chat>, theme: &Theme) ->
             },
             theme,
         ));
+        // every match, scrolled in the room the tabs and grid leave
         let mut cells = grid("chat-reaction-results");
-        for emoji in found.into_iter().take(emoji::PER_TAB) {
+        for emoji in found {
             let press = pick(cx, emoji);
             cells = cells.child(Reaction::new(
                 format!("chat-reaction-{emoji}"),
@@ -392,7 +403,14 @@ fn reactions(chat: &Chat, menu: &Menu, cx: &mut Context<Chat>, theme: &Theme) ->
                 theme,
             ));
         }
-        picker = picker.child(cells);
+        picker = picker.child(
+            div()
+                .id("chat-reaction-results-scroll")
+                .flex_1()
+                .min_h(px(0.))
+                .overflow_y_scroll()
+                .child(cells),
+        );
     }
     picker.into_any_element()
 }
@@ -641,6 +659,14 @@ mod tests {
             mode: Mode::More,
             at: (617., 449.),
         };
-        assert_eq!(popup_geometry(&menu, 3), Some(((617., 449.), (220., 100.))));
+        assert_eq!(
+            popup_geometry(&menu, 3),
+            Some(((617., 449.), Some((220., 100.))))
+        );
+        let delete = Menu {
+            mode: Mode::Delete,
+            ..menu
+        };
+        assert_eq!(popup_geometry(&delete, 0), Some(((617., 449.), None)));
     }
 }

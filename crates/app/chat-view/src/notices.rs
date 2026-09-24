@@ -180,7 +180,8 @@ fn notice(row: &MsgRow, me: u64, name: &str, chain: &str, names: &NameDirectory)
         },
         body: client::message_body(&row.blocks, names),
         tag: tag(me, &row.channel_id, name, names),
-        link: crate::chat::channel_link(chain, &row.channel_id, Some(row.seq)),
+        // a notice without a link is one the centre cannot open, not a bad one
+        link: crate::chat::channel_link(chain, &row.channel_id, Some(row.seq)).unwrap_or_default(),
     })
 }
 
