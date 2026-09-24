@@ -367,9 +367,12 @@ pub fn describe(op: &ChatMsg) -> (String, Vec<(&'static str, String)>) {
             thread,
         } => {
             return (
-                format!("Post in #{channel_id}"),
+                match dm_peers(channel_id) {
+                    Some(_) => "Direct message".into(),
+                    None => format!("Post in #{channel_id}"),
+                },
                 vec![
-                    ("channel", format!("#{channel_id}")),
+                    ("channel", room(channel_id)),
                     ("text", plain_text(blocks)),
                     ("message", message_id.clone()),
                     (
@@ -432,7 +435,17 @@ pub fn describe(op: &ChatMsg) -> (String, Vec<(&'static str, String)>) {
         ),
         ChatMsg::LeaveHuddle { channel_id } => ("Leave huddle", channel_id, vec![]),
     };
-    let mut all = vec![("channel", format!("#{channel}"))];
+    let mut all = vec![("channel", room(channel))];
     all.extend(fields);
-    (format!("{title} · #{channel}"), all)
+    (format!("{title} · {}", room(channel)), all)
+}
+
+/// A channel as `describe` names it: `#design`, or `DM · account 1 ↔ account 2`
+/// for a dm room, whose id is no name a person picked.
+#[cfg(feature = "view")]
+fn room(channel_id: &str) -> String {
+    match dm_peers(channel_id) {
+        Some((a, b)) => format!("DM · account {a} ↔ account {b}"),
+        None => format!("#{channel_id}"),
+    }
 }

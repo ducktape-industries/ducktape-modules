@@ -1322,3 +1322,32 @@ fn the_edit_field_saves() {
     assert!(cx.find("chat-message-editing").is_some());
     assert!(cx.has_text("Save"));
 }
+
+#[test]
+fn a_run_breaks_at_the_unread_divider_and_after_a_long_quiet() {
+    let names = client::NameDirectory::empty();
+    let at = |seq: u64, time: u64| {
+        client::chat_message(
+            MsgRow {
+                time,
+                ..row(seq, "acct:7", "hi")
+            },
+            &names,
+        )
+    };
+    let minute = 60 * 1000;
+    let mut messages = vec![
+        at(1, 0),
+        at(2, minute),
+        at(3, 2 * minute),
+        at(4, 3 * minute + client::GROUP_GAP_MS),
+    ];
+    client::mark_message_groups(&mut messages, Some(2));
+    let heads: Vec<bool> = messages.iter().map(|m| m.show_author).collect();
+    // 2 runs on; 3 is the first unread; 4 comes after a quiet past the gap
+    assert_eq!(heads, [true, false, true, true]);
+
+    client::mark_message_groups(&mut messages, None);
+    let heads: Vec<bool> = messages.iter().map(|m| m.show_author).collect();
+    assert_eq!(heads, [true, false, false, true]);
+}

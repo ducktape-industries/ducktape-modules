@@ -106,12 +106,15 @@ pub struct ChatMessage {
     pub deleted: bool,
     pub reply_count: u64,
     pub thread: Option<u64>,
-    /// Opens a run: the first message, or one whose author differs from the
-    /// one above (see [`mark_message_groups`]).
+    /// Opens a run: the first message, one whose author differs from the
+    /// one above, the first unread, or one after a long quiet (see
+    /// [`mark_message_groups`]).
     pub show_author: bool,
     pub initial: String,
     pub agent: bool,
     pub height: u64,
+    /// block time in milliseconds; 0 for a pending row
+    pub time: u64,
     pub reactions: Vec<ChatReaction>,
 }
 
@@ -180,18 +183,40 @@ pub fn chat_message(row: MsgRow, names: &NameDirectory) -> ChatMessage {
         initial: avatar_initial(&row.author, names),
         agent: is_agent(&row.author, names),
         height: row.height,
+        time: row.time,
         reactions: row.reactions,
     }
 }
 
+/// A quiet longer than this opens a new run, as Slack's does.
+pub const GROUP_GAP_MS: u64 = 5 * 60 * 1000;
+
+/// The first message past the read `boundary` — the row the "New messages"
+/// divider sits above. None when there is no boundary.
+pub fn unread_seq(messages: &[ChatMessage], boundary: Option<u64>) -> Option<u64> {
+    let boundary = boundary.filter(|b| *b > 0)?;
+    messages
+        .iter()
+        .find(|message| !message.pending && message.seq > boundary)
+        .map(|message| message.seq)
+}
+
 /// Slack-style grouping: a message shows its author header only when it
-/// opens a run. Deleted messages always break a run.
-pub fn mark_message_groups(messages: &mut [ChatMessage]) {
+/// opens a run. Deleted messages, the unread divider, and a quiet longer
+/// than [`GROUP_GAP_MS`] always break a run.
+pub fn mark_message_groups(messages: &mut [ChatMessage], boundary: Option<u64>) {
+    let unread = unread_seq(messages, boundary);
     for index in 0..messages.len() {
-        messages[index].show_author = index == 0
-            || messages[index].deleted
-            || messages[index - 1].deleted
-            || messages[index - 1].author != messages[index].author;
+        let this = &messages[index];
+        let opens = index.checked_sub(1).is_none_or(|i| {
+            let above = &messages[i];
+            this.deleted
+                || above.deleted
+                || above.author != this.author
+                || unread == Some(this.seq)
+                || this.time.saturating_sub(above.time) > GROUP_GAP_MS
+        });
+        messages[index].show_author = opens;
     }
 }
 
