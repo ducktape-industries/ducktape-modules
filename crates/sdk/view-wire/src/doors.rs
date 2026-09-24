@@ -469,6 +469,10 @@ doors! {
     AudioStop, "audio.stop", (), ();
     /// `notify.post`: hand the host a notice; it says what it did.
     NotifyPost, "notify.post", Post, Posted;
+    /// `notify.read`: the reader has seen what this view posted under a
+    /// tag; the host marks this view's rows under it read and takes down
+    /// its standing banner. Another view's rows are never touched.
+    NotifyRead, "notify.read", String, ();
     /// `store.get`: the value this view keeps under a key on this device,
     /// for the network in hand; `None` where it keeps none. A view sees
     /// only its own keys, and only on the network it runs on.
