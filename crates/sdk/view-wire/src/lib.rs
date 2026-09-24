@@ -43,7 +43,9 @@
 ///    `false`, the default hover mode, an empty `Aria`), and a container leaves
 ///    out a default `Interactivity`: an empty one was ~900 bytes of field
 ///    names, so a room of chat rows ran past a view's per-tick fuel.
-pub const WIRE_EPOCH: u32 = 2;
+/// 3: `notify.show` is gone; `notify.post` is the one way to hand the host a
+///    notice.
+pub const WIRE_EPOCH: u32 = 3;
 
 /// For `skip_serializing_if`: a value that says nothing is left out.
 pub(crate) fn is_default<T: Default + PartialEq>(value: &T) -> bool {

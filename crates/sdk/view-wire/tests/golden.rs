@@ -358,14 +358,6 @@ fn every_door() -> Vec<(Exchange, serde_json::Value)> {
         ),
         exchange::<AudioWrite>(vec![0, 1, 2, 3], ()),
         exchange::<AudioStop>((), ()),
-        exchange::<NotifyShow>(
-            Notice {
-                title: "Chat".into(),
-                body: "alice: hi".into(),
-                tag: "room".into(),
-            },
-            true,
-        ),
         exchange::<NotifyPost>(
             Post {
                 title: "alice mentioned you".into(),
