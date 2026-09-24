@@ -198,6 +198,58 @@ door!(
     Live, "rpc.live", String, Option<u64>
 );
 
+/// A page of finalized blocks, newest first: those below `before` (from the
+/// tip when `None`), at most `limit` (the node caps a page at 100).
+#[derive(
+    Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
+)]
+pub struct BlockPage {
+    pub before: Option<u64>,
+    pub limit: u32,
+}
+/// One finalized block, by height or by its id (the block digest).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+pub enum BlockRef {
+    Height(u64),
+    Id([u8; 32]),
+}
+/// One applied frame of a block. `hash` is sha256 over the frame's exact
+/// bytes; `payload` is the op the target program was handed.
+#[derive(
+    Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
+)]
+pub struct Tx {
+    pub hash: [u8; 32],
+    pub signer: Vec<u8>,
+    pub seq: u64,
+    pub target: String,
+    pub payload: Vec<u8>,
+}
+/// A finalized block as the node's archive keeps it. `proposer` is the
+/// validator key that led its round, where the node holds its certificate.
+/// No state root or writes: the node keeps neither per height.
+#[derive(
+    Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
+)]
+pub struct Block {
+    pub height: u64,
+    pub id: [u8; 32],
+    pub parent: [u8; 32],
+    pub time: u64,
+    pub epoch: u64,
+    pub proposer: Option<Vec<u8>>,
+    pub txs: Vec<Tx>,
+}
+door!(
+    /// `rpc.blocks`: a page of finalized blocks, newest first.
+    Blocks, "rpc.blocks", BlockPage, Vec<Block>
+);
+door!(
+    /// `rpc.block`: one finalized block; `None` where the node has none by
+    /// that name.
+    BlockGet, "rpc.block", BlockRef, Option<Block>
+);
+
 door!(
     /// `blob.get`: a blob by `sha256:<hex>` or `sha1:<hex>` id, unframed.
     BlobGet, "blob.get", String, Vec<u8>
@@ -440,6 +492,8 @@ pub const ALL: &[&str] = &[
     Status::KIND,
     Invite::KIND,
     Live::KIND,
+    Blocks::KIND,
+    BlockGet::KIND,
     BlobGet::KIND,
     Props::KIND,
     Visible::KIND,
