@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 
 use ducktape_view_guest::Context;
-use ducktape_view_guest::doors::{Badge, NotifyPost, Post};
+use ducktape_view_guest::doors::{HostBadge, NotifyPost, Post};
 
 use crate::chat::{Block, ChannelInfo, Mark, MsgRow, Party};
 use crate::client::{self, NameDirectory};
@@ -120,7 +120,7 @@ impl Chat {
         let count: i64 = self.attention.values().sum();
         if self.badge != Some(count) {
             self.badge = Some(count);
-            cx.host().notify::<Badge>(count);
+            cx.host().notify::<HostBadge>(count);
         }
     }
 }

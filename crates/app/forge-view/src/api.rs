@@ -2,7 +2,7 @@
 //! forge (its own) and chat (the discussion threads).
 use ducktape_view_guest::doors::{Query, Submit};
 
-pub use ducktape_view_guest::doors::{Props, Session};
+pub use ducktape_view_guest::doors::{HostProps, Session};
 
 /// The forge and chat programs, by their own markers (named apart from
 /// this view's `Forge` and the chat module's `Chat`).

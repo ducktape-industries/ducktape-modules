@@ -224,7 +224,7 @@ fn every_door() -> Vec<(Exchange, serde_json::Value)> {
     vec![
         exchange::<Query<Golden>>((7, "q".into()), vec![1, 2, 3]),
         exchange::<Submit<Golden>>("op".into(), b"receipt".to_vec()),
-        exchange::<Status>(
+        exchange::<RpcStatus>(
             (),
             NodeStatus {
                 network: "local#1".into(),
@@ -239,7 +239,7 @@ fn every_door() -> Vec<(Exchange, serde_json::Value)> {
                 contract: 1,
             },
         ),
-        exchange::<Invite>(
+        exchange::<RpcInvite>(
             Mint { ttl_days: 7 },
             Minted {
                 invite: "duck://invite/x".into(),
@@ -249,8 +249,8 @@ fn every_door() -> Vec<(Exchange, serde_json::Value)> {
                 }],
             },
         ),
-        exchange::<Live>("chat".into(), Some(9)),
-        exchange::<Blocks>(
+        exchange::<RpcLive>("chat".into(), Some(9)),
+        exchange::<RpcBlocks>(
             BlockPage {
                 before: Some(10),
                 limit: 2,
@@ -271,9 +271,9 @@ fn every_door() -> Vec<(Exchange, serde_json::Value)> {
                 }],
             }],
         ),
-        exchange::<BlockGet>(BlockRef::Id([4; 32]), None),
+        exchange::<RpcBlock>(BlockRef::Id([4; 32]), None),
         exchange::<BlobGet>("sha256:00".into(), b"blob".to_vec()),
-        exchange::<Props>(
+        exchange::<HostProps>(
             (),
             Session {
                 connected: true,
@@ -283,22 +283,22 @@ fn every_door() -> Vec<(Exchange, serde_json::Value)> {
                 endpoint: "http://127.0.0.1:1".into(),
             },
         ),
-        exchange::<Visible>((), true),
-        exchange::<Badge>(3, ()),
-        exchange::<OpenLink>("duck://chat/room".into(), ()),
-        exchange::<Route>((), "tx/00ff".into()),
-        exchange::<Chord>("cmd-k".into(), ()),
-        exchange::<Id>("msg".into(), "msg-1".into()),
-        exchange::<Ticks>(1000, ()),
-        exchange::<Log>("hello".into(), ()),
-        exchange::<Widget>(
+        exchange::<HostVisible>((), true),
+        exchange::<HostBadge>(3, ()),
+        exchange::<HostOpenLink>("duck://chat/room".into(), ()),
+        exchange::<HostRoute>((), "tx/00ff".into()),
+        exchange::<HostChord>("cmd-k".into(), ()),
+        exchange::<HostId>("msg".into(), "msg-1".into()),
+        exchange::<ClockTicks>(1000, ()),
+        exchange::<HostLog>("hello".into(), ()),
+        exchange::<HostWidget>(
             WidgetCommand::Focus {
                 target: vec![id("input")],
             },
             (),
         ),
-        exchange::<Pick>((), vec![file.clone()]),
-        exchange::<Drops>((), vec![file.clone()]),
+        exchange::<FsPick>((), vec![file.clone()]),
+        exchange::<FsDrops>((), vec![file.clone()]),
         exchange::<FsRead>(
             ReadRequest {
                 token: "t1".into(),
@@ -307,7 +307,7 @@ fn every_door() -> Vec<(Exchange, serde_json::Value)> {
             },
             b"hello".to_vec(),
         ),
-        exchange::<Release>("t1".into(), ()),
+        exchange::<FsRelease>("t1".into(), ()),
         exchange::<ClipboardRead>(
             (),
             Clipboard {
@@ -316,7 +316,7 @@ fn every_door() -> Vec<(Exchange, serde_json::Value)> {
             },
         ),
         exchange::<ClipboardWrite>("copied".into(), ()),
-        exchange::<Devices>(
+        exchange::<MediaDevices>(
             (),
             vec![Device {
                 id: "mic0".into(),

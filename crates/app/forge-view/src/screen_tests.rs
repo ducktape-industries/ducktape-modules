@@ -2,10 +2,10 @@
 //! dark, for the app's renderer (`ducktape-app --render-tree <json>`).
 use super::{accounts, booted, change_screen, opened, refusal};
 use crate::Forge;
-use crate::api::{Ask, ChatApi, Props};
+use crate::api::{Ask, ChatApi, HostProps};
 use crate::state::ChangeTab;
 use ducktape_view_guest::Theme;
-use ducktape_view_guest::doors::{Live, Query, Visible};
+use ducktape_view_guest::doors::{HostVisible, Query, RpcLive};
 use ducktape_view_guest::testing::TestAppContext;
 
 /// `FORGE_SCREEN_EXPORT=1` writes each screen's tree for the app's
@@ -74,9 +74,9 @@ fn screen(state: &str) -> TestAppContext {
                 .handle::<Ask>(|_| Err(refusal("refused-not-found")));
             cx.host()
                 .handle::<Query<ChatApi>>(|_| Ok(chat::ChatViewReply::Accounts(accounts())));
-            cx.host().never::<Live>();
-            cx.host().never::<Visible>();
-            cx.host().never::<Props>();
+            cx.host().never::<RpcLive>();
+            cx.host().never::<HostVisible>();
+            cx.host().never::<HostProps>();
             cx.open::<Forge>();
             cx.run_until_parked();
             cx

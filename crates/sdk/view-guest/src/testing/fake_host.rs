@@ -139,16 +139,16 @@ impl FakeHost {
         for request in &frame.requests {
             state.requests.push(request.clone());
             match request.kind.as_str() {
-                doors::Log::KIND => {
+                doors::HostLog::KIND => {
                     state
                         .logs
-                        .push(doors::Log::decode_request(&request.payload).expect("log line"));
+                        .push(doors::HostLog::decode_request(&request.payload).expect("log line"));
                     continue;
                 }
-                doors::OpenLink::KIND => {
+                doors::HostOpenLink::KIND => {
                     state
                         .links
-                        .push(doors::OpenLink::decode_request(&request.payload).expect("link"));
+                        .push(doors::HostOpenLink::decode_request(&request.payload).expect("link"));
                     continue;
                 }
                 _ => {}
@@ -236,7 +236,7 @@ impl<C: Door> Feed<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::doors::{Live, Program, Query};
+    use crate::doors::{Program, Query, RpcLive};
 
     struct First;
     struct Second;
@@ -290,9 +290,9 @@ mod tests {
     #[test]
     fn streams_stop_delivering_to_cancelled_subscriptions() {
         let host = FakeHost::default();
-        let feed = host.stream::<Live>();
+        let feed = host.stream::<RpcLive>();
         let channel = crate::host::Host::default();
-        let stream = channel.subscribe::<Live>("first".into());
+        let stream = channel.subscribe::<RpcLive>("first".into());
         host.accept(
             &Frame {
                 requests: channel.drain_outbox(),
@@ -353,9 +353,9 @@ mod tests {
     fn closing_a_feed_finishes_without_fabricating_an_item_or_refusal() {
         use futures::StreamExt;
         let host = FakeHost::default();
-        let feed = host.stream::<Live>();
+        let feed = host.stream::<RpcLive>();
         let channel = crate::host::Host::default();
-        let mut stream = channel.subscribe::<Live>("first".into());
+        let mut stream = channel.subscribe::<RpcLive>("first".into());
         host.accept(
             &Frame {
                 requests: channel.drain_outbox(),

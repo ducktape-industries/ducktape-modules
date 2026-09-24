@@ -18,13 +18,13 @@ mod ui;
 
 use std::collections::BTreeSet;
 
-use ducktape_view_guest::doors::{Live, Route, Visible};
+use ducktape_view_guest::doors::{HostRoute, HostVisible, RpcLive};
 use ducktape_view_guest::host::Refusal;
 use ducktape_view_guest::view::Loaded;
 use ducktape_view_guest::{Context, IntoElement, Render, View, Window, export_view};
 use futures::StreamExt;
 
-use api::Props;
+use api::HostProps;
 use forge::{
     Bounds, Change, ChangeFilter, ChangeState, Comparison, PageReply, Query, RefInfo, Reply,
     RepoInfo, Review, Revision,
@@ -49,7 +49,7 @@ impl View for Forge {
 
     fn restored(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         self.watches.clear();
-        let mut props = cx.host().subscribe::<Props>(());
+        let mut props = cx.host().subscribe::<HostProps>(());
         self.watches.push(cx.spawn(async move |this, cx| {
             while let Some(item) = props.next().await {
                 if this
@@ -71,7 +71,7 @@ impl View for Forge {
         }));
         // `duck://<chain>/forge/<name>`: a link opened into this view names
         // the repository to open
-        let mut routes = cx.host().subscribe::<Route>(());
+        let mut routes = cx.host().subscribe::<HostRoute>(());
         self.watches.push(cx.spawn(async move |this, cx| {
             while let Some(route) = routes.next().await {
                 let Ok(route) = route else { break };
@@ -87,7 +87,7 @@ impl View for Forge {
         // while this view is open (Settings, then back to Forge) writes no
         // session change of its own, only an identity block.
         for module in [forge::PROGRAM, chat::PROGRAM, identity::PROGRAM] {
-            let mut live = cx.host().subscribe::<Live>(module.into());
+            let mut live = cx.host().subscribe::<RpcLive>(module.into());
             self.watches.push(cx.spawn(async move |this, cx| {
                 while live.next().await.is_some() {
                     if this.update(cx, |forge, cx| forge.reconcile(cx)).is_err() {
@@ -96,7 +96,7 @@ impl View for Forge {
                 }
             }));
         }
-        let mut visible = cx.host().subscribe::<Visible>(());
+        let mut visible = cx.host().subscribe::<HostVisible>(());
         self.watches.push(cx.spawn(async move |this, cx| {
             while let Some(item) = visible.next().await {
                 if this

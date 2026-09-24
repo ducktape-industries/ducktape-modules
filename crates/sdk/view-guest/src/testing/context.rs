@@ -177,7 +177,7 @@ impl TestAppContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{doors::Live, Context, InteractiveElement, ParentElement, Render, Task, Window};
+    use crate::{doors::RpcLive, Context, InteractiveElement, ParentElement, Render, Task, Window};
     use futures::StreamExt;
     use serde::{Deserialize, Serialize};
 
@@ -194,7 +194,7 @@ mod tests {
             view
         }
         fn restored(&mut self, _: &mut Window, cx: &mut Context<Self>) {
-            let mut stream = cx.host().subscribe::<Live>("live".into());
+            let mut stream = cx.host().subscribe::<RpcLive>("live".into());
             self.task = Some(cx.spawn(async move |this, cx| {
                 while let Some(item) = stream.next().await {
                     item.unwrap();
@@ -216,7 +216,7 @@ mod tests {
     #[test]
     fn restoring_resubscribes_without_replaying_old_events_or_duplicate_ids() {
         let mut cx = TestAppContext::new();
-        let feed = cx.host().stream::<Live>();
+        let feed = cx.host().stream::<RpcLive>();
         cx.open::<LiveView>();
         feed.push(None);
         cx.run_until_parked();
@@ -228,6 +228,6 @@ mod tests {
         feed.push(None);
         cx.run_until_parked();
         restored.read(|view| assert_eq!(view.items, 2));
-        assert_eq!(cx.host().asked::<Live>().len(), 2);
+        assert_eq!(cx.host().asked::<RpcLive>().len(), 2);
     }
 }

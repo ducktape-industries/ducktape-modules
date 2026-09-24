@@ -76,7 +76,7 @@ macro_rules! door {
 
 /// Every [`door!`] below, and [`ALL`] from the same list, so a door is
 /// never declared without being listed. `also` names the kinds written by
-/// hand: the two node doors generic over a [`Program`], and [`Widget`].
+/// hand: the two node doors generic over a [`Program`], and [`HostWidget`].
 macro_rules! doors {
     (
         also: [$($also:expr),* $(,)?];
@@ -264,9 +264,9 @@ pub struct Session {
 /// `host.widget`: a command on the mounted tree. The one door on the TREE
 /// side of the codec rule — a [`WidgetCommand`] names typed element ids the
 /// tree is drawn with — so it is the one door in named MessagePack.
-pub struct Widget;
-impl sealed::Sealed for Widget {}
-impl Door for Widget {
+pub struct HostWidget;
+impl sealed::Sealed for HostWidget {}
+impl Door for HostWidget {
     const KIND: &'static str = "host.widget";
     type Request = WidgetCommand;
     type Reply = ();
@@ -287,7 +287,7 @@ impl Door for Widget {
 // ---------- the device ----------
 
 /// A file the person granted, readable through [`FsRead`] by token until
-/// [`Release`]d.
+/// released ([`FsRelease`]).
 #[derive(
     Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
 )]
@@ -414,58 +414,58 @@ pub enum Posted {
     Blocked,
 }
 doors! {
-    also: ["rpc.query", "op.submit", Widget::KIND];
+    also: ["rpc.query", "op.submit", HostWidget::KIND];
     /// `rpc.status`: the connected node's status.
-    Status, "rpc.status", (), NodeStatus;
+    RpcStatus, "rpc.status", (), NodeStatus;
     /// `rpc.invite`: mint one invite, once (never retried).
-    Invite, "rpc.invite", Mint, Minted;
+    RpcInvite, "rpc.invite", Mint, Minted;
     /// `rpc.live <program>`: one item per block that wrote to the program,
     /// carrying its height; `None` when the node link was reopened and the
     /// view should re-read.
-    Live, "rpc.live", String, Option<u64>;
+    RpcLive, "rpc.live", String, Option<u64>;
     /// `rpc.blocks`: a page of finalized blocks, newest first.
-    Blocks, "rpc.blocks", BlockPage, Vec<Block>;
+    RpcBlocks, "rpc.blocks", BlockPage, Vec<Block>;
     /// `rpc.block`: one finalized block; `None` where the node has none by
     /// that name.
-    BlockGet, "rpc.block", BlockRef, Option<Block>;
+    RpcBlock, "rpc.block", BlockRef, Option<Block>;
     /// `blob.get`: a blob by `sha256:<hex>` or `sha1:<hex>` id, unframed.
     BlobGet, "blob.get", String, Vec<u8>;
     /// `host.props`: a subscription to [`Session`], an item per change.
-    Props, "host.props", (), Session;
+    HostProps, "host.props", (), Session;
     /// `host.visible`: whether the view is on screen, an item per change.
-    Visible, "host.visible", (), bool;
+    HostVisible, "host.visible", (), bool;
     /// `host.badge`: the count on the view's tab.
-    Badge, "host.badge", i64, ();
+    HostBadge, "host.badge", i64, ();
     /// `host.open_link`: the one way out, a `duck://` link.
-    OpenLink, "host.open_link", String, ();
+    HostOpenLink, "host.open_link", String, ();
     /// `host.route`: a subscription, one item per `duck://` link opened into
     /// this view: the path after the view's own segment (`tx/<hash>` of
     /// `duck://<chain>/explorer/tx/<hash>`), segments of `[A-Za-z0-9._-]`.
     /// A link that mounted the view is its first item.
-    Route, "host.route", (), String;
+    HostRoute, "host.route", (), String;
     /// `host.chord`: claim a command chord (`cmd[-shift][-alt]-<key>`); an
     /// item per press while the subscription stands.
-    Chord, "host.chord", String, ();
+    HostChord, "host.chord", String, ();
     /// `host.id`: a fresh id under the named prefix.
-    Id, "host.id", String, String;
+    HostId, "host.id", String, String;
     /// `clock.ticks`: an item per period, in milliseconds.
-    Ticks, "clock.ticks", i64, ();
+    ClockTicks, "clock.ticks", i64, ();
     /// `host.log`: one line to the host's log.
-    Log, "host.log", String, ();
+    HostLog, "host.log", String, ();
     /// `fs.pick`: the file chooser, answered with what the person chose.
-    Pick, "fs.pick", (), Vec<SelectedFile>;
+    FsPick, "fs.pick", (), Vec<SelectedFile>;
     /// `fs.drops`: an item per drop onto the view.
-    Drops, "fs.drops", (), Vec<SelectedFile>;
+    FsDrops, "fs.drops", (), Vec<SelectedFile>;
     /// `fs.read`: one chunk of a granted file.
     FsRead, "fs.read", ReadRequest, Vec<u8>;
     /// `fs.release`: give a grant back.
-    Release, "fs.release", String, ();
+    FsRelease, "fs.release", String, ();
     /// `clipboard.read`: the clipboard's text and any files on it.
     ClipboardRead, "clipboard.read", (), Clipboard;
     /// `clipboard.write`: text onto the clipboard.
     ClipboardWrite, "clipboard.write", String, ();
     /// `media.devices`: the capture and playout devices this machine has.
-    Devices, "media.devices", (), Vec<Device>;
+    MediaDevices, "media.devices", (), Vec<Device>;
     /// `audio.capture`: the microphone, first the mode then the samples.
     AudioCapture, "audio.capture", Listen, AudioItem;
     /// `video.capture`: the camera, first the framing then the frames.

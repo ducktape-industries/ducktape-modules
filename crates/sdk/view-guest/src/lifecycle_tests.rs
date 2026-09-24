@@ -2,7 +2,7 @@ use crate::{wire, Context, Driver, InteractiveElement, ParentElement, Render, Ta
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 
-use crate::doors::Live;
+use crate::doors::RpcLive;
 
 #[derive(Default, Serialize, Deserialize)]
 struct Streams {
@@ -13,7 +13,7 @@ struct Streams {
 }
 impl View for Streams {
     fn new(_: &mut Window, cx: &mut Context<Self>) -> Self {
-        let mut stream = cx.host().subscribe::<Live>("numbers".into());
+        let mut stream = cx.host().subscribe::<RpcLive>("numbers".into());
         let task = cx.spawn(async move |this, cx| {
             while let Some(value) = stream.next().await {
                 let pending = this

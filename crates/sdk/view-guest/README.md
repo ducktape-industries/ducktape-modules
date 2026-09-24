@@ -33,8 +33,8 @@ sealed, so a view cannot invent a kind. Three verbs on `Host` (`src/host.rs`):
 
 ```rust
 let reply = cx.host().ask::<Query<Identity>>(identity::Query::List { page }).await?;
-let mut live = cx.host().subscribe::<Live>(valset::PROGRAM.into());
-cx.host().notify::<doors::Badge>(3);
+let mut live = cx.host().subscribe::<RpcLive>(valset::PROGRAM.into());
+cx.host().notify::<doors::HostBadge>(3);
 ```
 
 A node program is addressed by a `doors::Program` impl beside the view
@@ -43,7 +43,7 @@ and `Submit<P>` are its two doors. Every refusal is `abi::Refusal`
 (`reason` token, `sentence`), one type end to end. `Loaded<T>` + `cx.load`
 (`src/view.rs`) hold an ask's four states and snapshot `Loading` as `Idle`.
 
-`Session` (`doors.rs`, `subscribe::<Props>`) is what every view is handed:
+`Session` (`doors.rs`, `subscribe::<HostProps>`) is what every view is handed:
 `connected`, `dark`, `chain`, `account`, `endpoint`; an item per change.
 
 ## Lifecycle, snapshot
