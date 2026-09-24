@@ -363,6 +363,15 @@ fn every_door() -> Vec<(Exchange, serde_json::Value)> {
             },
             true,
         ),
+        exchange::<NotifyPost>(
+            Post {
+                title: "alice mentioned you".into(),
+                body: "@bob hi".into(),
+                tag: "room".into(),
+                link: "duck://chat/room".into(),
+            },
+            Posted::Banner,
+        ),
     ]
 }
 
