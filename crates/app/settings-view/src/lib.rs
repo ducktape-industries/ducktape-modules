@@ -123,14 +123,11 @@ impl Settings {
                     ),
                     line("block", "Block time", &format!("{} ms", s.block_time_ms)),
                     line("tip", "Tip", &abi::hex(&s.tip)),
-                    line("identity", "Node identity", &{
-                        let id = abi::hex(&s.identity);
-                        if id.len() > 20 {
-                            format!("{}…", &id[..20])
-                        } else {
-                            id
-                        }
-                    }),
+                    line(
+                        "identity",
+                        "Node identity",
+                        &design::short_hex(&abi::hex(&s.identity)),
+                    ),
                     line("contract", "Contract version", &s.contract.to_string()),
                 ])
                 .into_any_element(),

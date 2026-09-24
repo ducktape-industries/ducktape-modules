@@ -350,7 +350,7 @@ fn tx_row(
         cx,
         theme,
     )
-    .child(mono(short(&tx.hash)).w(px(84.)).text_color(theme.muted))
+    .child(mono(short(&tx.hash)).w(px(100.)).text_color(theme.muted))
     .child(
         div()
             .flex_1()

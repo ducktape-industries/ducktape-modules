@@ -84,7 +84,8 @@ pub(crate) fn log(
             })
             .cell(
                 div()
-                    .w(px(72.))
+                    .w(px(100.))
+                    .whitespace_nowrap()
                     .font_family(design::fonts::FAMILY_MONO)
                     .text_size(design::text::SECONDARY)
                     .text_color(theme.muted)

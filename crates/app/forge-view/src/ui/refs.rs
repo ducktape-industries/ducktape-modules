@@ -88,7 +88,8 @@ pub(crate) fn render(
             ))
             .cell(
                 div()
-                    .w(px(80.))
+                    .w(px(100.))
+                    .whitespace_nowrap()
                     .font_family(design::fonts::FAMILY_MONO)
                     .text_size(design::text::SECONDARY)
                     .text_color(theme.muted)
