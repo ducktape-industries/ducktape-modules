@@ -734,7 +734,8 @@ fn heavy(cx: &mut TestAppContext) {
 }
 
 /// Every page over a full window stays inside the host's frame budgets, and
-/// under a byte ceiling per page: the native proxy for a render's fuel.
+/// under a per-page regression guard on its bytes: the native proxy for a
+/// render's fuel.
 /// (Time is no proxy here: a debug build JSON-encodes the whole view around
 /// every update to catch a missed `notify`.)
 #[test]
@@ -757,9 +758,10 @@ fn a_full_window_renders_inside_the_frame_budget() {
     cx.run_until_parked();
     assert!(cx.has_text("1048576 bytes · 50505050…5050"));
     sizes.push(("a 1 MB push", cx.frame_bytes()));
-    // ceilings about 1.5x what each page drew when this was written:
-    // tighten when a page slims, raise only on purpose
-    let ceilings = [
+    // A regression guard, not a host limit: about 1.5x what each page drew
+    // when measured. The host's own limits are the sanitize check inside
+    // `frame_bytes`. Tighten when a page slims, raise only on purpose.
+    const REGRESSION_GUARD: [(&str, usize); 6] = [
         ("overview", 76_000),
         ("blocks", 95_000),
         ("transactions", 196_000),
@@ -767,7 +769,10 @@ fn a_full_window_renders_inside_the_frame_budget() {
         ("programs", 13_000),
         ("a 1 MB push", 16_000),
     ];
-    for ((page, bytes), (_, ceiling)) in sizes.into_iter().zip(ceilings) {
-        assert!(bytes < ceiling, "{page} drew {bytes} bytes, over {ceiling}");
+    for ((page, bytes), (_, guard)) in sizes.into_iter().zip(REGRESSION_GUARD) {
+        assert!(
+            bytes < guard,
+            "{page} drew {bytes} bytes, over its guard {guard}"
+        );
     }
 }
