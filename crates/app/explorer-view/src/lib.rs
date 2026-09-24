@@ -10,7 +10,8 @@
 //! finds. The window is the last [`WINDOW`] blocks, read a page at a time
 //! and then followed at the head as `rpc.status` moves.
 use ducktape_view_guest::doors::{
-    Block, BlockGet, BlockPage, BlockRef, Blocks, NodeStatus, Program, Query, Ticks,
+    Block, BlockGet, BlockPage, BlockRef, Blocks, ClipboardWrite, NodeStatus, Program, Props,
+    Query, Route as LinkRoute, Ticks,
 };
 use ducktape_view_guest::export_view;
 use ducktape_view_guest::host::{Refusal, malformed};
@@ -249,6 +250,9 @@ pub struct Explorer {
     search: String,
     /// what the last search found nothing for, in words
     note: Option<String>,
+    /// the session's chain id (`<label>#<salt>`), which links are minted in
+    #[serde(default)]
+    session_chain: String,
     status: Loaded<NodeStatus>,
     chain: Chain,
     accounts: Loaded<Vec<Account>>,
@@ -276,6 +280,29 @@ impl View for Explorer {
         self.watches.push(cx.spawn(async move |this, cx| {
             while ticks.next().await.is_some() {
                 if this.update(cx, |view, cx| view.read_head(cx)).is_err() {
+                    break;
+                }
+            }
+        }));
+        let mut props = cx.host().subscribe::<Props>(());
+        self.watches.push(cx.spawn(async move |this, cx| {
+            while let Some(Ok(session)) = props.next().await {
+                let landed = this.update(cx, |view, cx| {
+                    view.session_chain = session.chain;
+                    cx.notify();
+                });
+                if landed.is_err() {
+                    break;
+                }
+            }
+        }));
+        let mut routes = cx.host().subscribe::<LinkRoute>(());
+        self.watches.push(cx.spawn(async move |this, cx| {
+            while let Some(Ok(route)) = routes.next().await {
+                if this
+                    .update(cx, |view, cx| view.open_route(&route, cx))
+                    .is_err()
+                {
                     break;
                 }
             }
@@ -450,37 +477,7 @@ impl Explorer {
             return self.go(Route::Block(height), cx);
         }
         if let Some(hash) = hash_of(&query) {
-            if self.chain.txs.iter().any(|tx| tx.hash == hash) || self.opened_tx(&hash).is_some() {
-                return self.go(Route::Tx(hash), cx);
-            }
-            if let Some(block) = self.chain.blocks.iter().find(|block| block.id == hash) {
-                return self.go(Route::Block(block.height), cx);
-            }
-            let ask = cx.host().ask::<BlockGet>(BlockRef::Id(hash));
-            let blocks = self.chain.blocks.len();
-            cx.spawn(async move |this, cx| {
-                let found = ask.await;
-                let _ = this.update(cx, |view, cx| {
-                    match found {
-                        Ok(Some(block)) => {
-                            let (row, txs) = rows(block);
-                            let height = row.height;
-                            view.opened = Loaded::Ready(Some((row, txs)));
-                            view.go(Route::Block(height), cx);
-                        }
-                        Ok(None) => {
-                            view.note = Some(format!(
-                                "No block has this hash, and no transaction in the last {} does.",
-                                decode::plural(blocks as u64, "block", "blocks")
-                            ))
-                        }
-                        Err(refusal) => view.note = Some(refusal.sentence),
-                    }
-                    cx.notify();
-                });
-            })
-            .detach();
-            return;
+            return self.find_hash(hash, cx);
         }
         let accounts = self.accounts.ready().map(Vec::as_slice).unwrap_or_default();
         let number = query
@@ -508,6 +505,98 @@ impl Explorer {
         }
         self.note = Some(format!("Nothing here is called “{query}”."));
         cx.notify();
+    }
+
+    /// A hash, as search and a link read it: a transaction or a block in the
+    /// window, else a block the node finds by id.
+    fn find_hash(&mut self, hash: [u8; 32], cx: &mut Context<Self>) {
+        if self.chain.txs.iter().any(|tx| tx.hash == hash) || self.opened_tx(&hash).is_some() {
+            return self.go(Route::Tx(hash), cx);
+        }
+        if let Some(block) = self.chain.blocks.iter().find(|block| block.id == hash) {
+            return self.go(Route::Block(block.height), cx);
+        }
+        let ask = cx.host().ask::<BlockGet>(BlockRef::Id(hash));
+        let blocks = self.chain.blocks.len();
+        cx.spawn(async move |this, cx| {
+            let found = ask.await;
+            let _ = this.update(cx, |view, cx| {
+                match found {
+                    Ok(Some(block)) => {
+                        let (row, txs) = rows(block);
+                        let height = row.height;
+                        view.opened = Loaded::Ready(Some((row, txs)));
+                        view.go(Route::Block(height), cx);
+                    }
+                    Ok(None) => {
+                        view.note = Some(format!(
+                            "No block has this hash, and no transaction in the last {} does.",
+                            decode::plural(blocks as u64, "block", "blocks")
+                        ))
+                    }
+                    Err(refusal) => view.note = Some(refusal.sentence),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// A `host.route` item, the path of a `duck://…/explorer/<route>` link:
+    /// `block/<height|hash>`, `tx/<hash>`, `account/<n>`, `program/<name>`.
+    pub fn open_route(&mut self, route: &str, cx: &mut Context<Self>) {
+        let parts: Vec<&str> = route.split('/').collect();
+        match parts.as_slice() {
+            ["block", at] => match (at.parse::<u64>(), hash_of(at)) {
+                (Ok(height), _) => return self.go(Route::Block(height), cx),
+                (_, Some(hash)) => return self.find_hash(hash, cx),
+                _ => {}
+            },
+            // a transaction outside the window reads as "not in the last N
+            // blocks" until the window reaches it
+            ["tx", hash] => {
+                if let Some(hash) = hash_of(hash) {
+                    return self.go(Route::Tx(hash), cx);
+                }
+            }
+            ["account", number] => {
+                if let Ok(number) = number.parse::<u64>() {
+                    return self.go(Route::Account(number), cx);
+                }
+            }
+            ["program", name] if !name.is_empty() => {
+                return self.go(Route::Transactions(Some((*name).to_string())), cx);
+            }
+            _ => {}
+        }
+        self.note = Some(format!(
+            "This link names nothing the Explorer shows: {route}"
+        ));
+        cx.notify();
+    }
+
+    /// `duck://<chain>/explorer/<tail…>`, while the session names a chain.
+    pub fn link(&self, tail: &[&str]) -> Option<String> {
+        let chain = self.session_chain.parse::<ducklink::ChainId>().ok()?;
+        let tail = tail.iter().map(|segment| (*segment).to_string()).collect();
+        ducklink::Link::new(chain, "explorer", tail)
+            .ok()
+            .map(|link| link.to_string())
+    }
+
+    pub fn copy_link(&mut self, link: String, cx: &mut Context<Self>) {
+        let ask = cx.host().ask::<ClipboardWrite>(link);
+        cx.spawn(async move |this, cx| {
+            let copied = ask.await;
+            let _ = this.update(cx, |view, cx| {
+                view.note = Some(match copied {
+                    Ok(()) => "Copied the link.".into(),
+                    Err(refusal) => refusal.sentence,
+                });
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn opened_tx(&self, hash: &[u8; 32]) -> Option<&TxRow> {
@@ -672,7 +761,7 @@ export_view!(
     Explorer,
     "Explorer",
     "The chain as this node keeps it: blocks, transactions, accounts and programs.",
-    ["rpc", "host", "clock"]
+    ["rpc", "host", "clock", "clipboard"]
 );
 
 #[cfg(test)]

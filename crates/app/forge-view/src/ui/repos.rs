@@ -33,7 +33,7 @@ fn repo_row(
     theme: &Theme,
 ) -> AnyElement {
     let name = info.name.clone();
-    let url = format!("duck://{}/forge/{name}", crate::ui::chain(forge));
+    let url = crate::ui::repo_link(forge, &name);
     let group = format!("forge-repo-{name}-row");
     let open = cx.listener({
         let name = name.clone();

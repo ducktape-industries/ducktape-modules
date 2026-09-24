@@ -30,6 +30,15 @@ impl Forge {
         self.moved(cx);
     }
 
+    /// A `host.route` item: `<name>` opens that repository; anything else
+    /// opens the list.
+    pub(crate) fn open_route(&mut self, route: &str, cx: &mut Context<Self>) {
+        match route.split('/').collect::<Vec<_>>().as_slice() {
+            [name] if !name.is_empty() => self.open_repo((*name).to_owned(), cx),
+            _ => self.open_repos(cx),
+        }
+    }
+
     pub(crate) fn open_repo(&mut self, name: String, cx: &mut Context<Self>) {
         self.nav = Default::default();
         self.nav.repo = Some(name);

@@ -16,6 +16,8 @@ futures.workspace = true
 abi.workspace = true
 borsh.workspace = true
 ducktape-view-guest.workspace = true
+# mints the `duck://<chain>/explorer/…` link a page copies
+ducklink.workspace = true
 # The op types of every program a view may link, so a transaction's payload
 # reads as its operation rather than bytes.
 chat.workspace = true

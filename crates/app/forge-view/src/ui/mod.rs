@@ -130,10 +130,9 @@ fn repo(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
                 theme,
             ));
     }
-    title = title.child(div().flex_1()).child(quiet(
-        format!("duck://{}/forge/{name}", chain(forge)),
-        theme,
-    ));
+    title = title
+        .child(div().flex_1())
+        .child(quiet(repo_link(forge, &name), theme));
     header = header.child(title).child(ref_picker(forge, cx, theme));
     let mut tabs = div().id(id("forge-tabs")).flex().gap_1();
     for tab in RepoTab::ALL {
@@ -171,12 +170,18 @@ fn repo(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
         .into_any_element()
 }
 
-pub(crate) fn chain(forge: &Forge) -> String {
-    if forge.session.chain.is_empty() {
-        "network".into()
-    } else {
-        forge.session.chain.clone()
-    }
+/// `duck://<chain>/forge/<name>`: the repository's clone address and link,
+/// minted by ducklink from the session's chain id (`<label>#<salt>`); a
+/// placeholder `duck://<network>/forge/<name>` while no chain is known.
+pub(crate) fn repo_link(forge: &Forge, name: &str) -> String {
+    forge
+        .session
+        .chain
+        .parse::<ducklink::ChainId>()
+        .ok()
+        .and_then(|chain| ducklink::Link::new(chain, "forge", vec![name.to_owned()]).ok())
+        .map(|link| link.to_string())
+        .unwrap_or_else(|| format!("duck://<network>/forge/{name}"))
 }
 
 /// Branches and tags, default first; the picked one steers every screen.

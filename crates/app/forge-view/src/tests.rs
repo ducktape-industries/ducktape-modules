@@ -189,6 +189,7 @@ pub(crate) fn booted(mode: &'static str) -> (TestAppContext, Entity<Forge>) {
     let mut cx = TestAppContext::new();
     configure(&mut cx, mode);
     let props = cx.host().stream::<Props>();
+    cx.host().stream::<ducktape_view_guest::doors::Route>();
     let view = cx.open::<Forge>();
     cx.run_until_parked();
     props.push(Session {
@@ -233,6 +234,7 @@ fn an_unregistered_key_stays_read_only() {
     let mut cx = TestAppContext::new();
     configure(&mut cx, "default");
     let props = cx.host().stream::<Props>();
+    cx.host().stream::<ducktape_view_guest::doors::Route>();
     let view = cx.open::<Forge>();
     cx.run_until_parked();
     props.push(Session {
@@ -274,6 +276,7 @@ fn an_account_gained_later_re_enables_writes() {
             })
         });
     let props = cx.host().stream::<Props>();
+    cx.host().stream::<ducktape_view_guest::doors::Route>();
     let live = cx.host().stream::<Live>();
     let view = cx.open::<Forge>();
     cx.run_until_parked();
@@ -335,7 +338,7 @@ fn the_repositories_list_shows_every_column_of_the_plan() {
     assert!(cx.has_text("6 refs"));
     assert!(cx.has_text("block 2"));
     assert!(
-        cx.has_text("duck://testnet#0a1b2c3d/forge/project"),
+        cx.has_text("duck://testnet-0a1b2c3d/forge/project"),
         "the row shows where it clones from"
     );
 }
@@ -368,6 +371,7 @@ fn a_refused_read_keeps_its_reason_and_offers_one_retry() {
     cx.host().never::<Live>();
     cx.host().never::<Visible>();
     cx.host().never::<Props>();
+    cx.host().never::<ducktape_view_guest::doors::Route>();
     cx.open::<Forge>();
     cx.run_until_parked();
     let sentence = "object ffffffffffffffffffffffffffffffffffffffff is not held by this node";
@@ -411,7 +415,7 @@ fn a_repository_opens_on_code_with_its_header_ref_picker_and_tabs() {
     assert!(
         cx.texts()
             .iter()
-            .any(|text| text.starts_with("duck://testnet#0a1b2c3d/forge/project")),
+            .any(|text| text.starts_with("duck://testnet-0a1b2c3d/forge/project")),
         "{:?}",
         cx.texts()
     );
@@ -635,6 +639,7 @@ fn a_snapshot_restores_the_same_screen_without_replaying_events() {
     let mut restored = TestAppContext::new();
     configure(&mut restored, "default");
     restored.host().never::<Props>();
+    restored.host().never::<ducktape_view_guest::doors::Route>();
     let view = restored.restore::<Forge>(&snapshot).unwrap();
     restored.run_until_parked();
     view.read(|forge| {
@@ -713,7 +718,30 @@ fn copy_puts_the_address_on_the_clipboard_without_opening_the_repository() {
         });
     cx.simulate_click("forge-repo-project-copy");
     cx.run_until_parked();
-    assert_eq!(*copied.borrow(), "duck://testnet#0a1b2c3d/forge/project");
+    assert_eq!(*copied.borrow(), "duck://testnet-0a1b2c3d/forge/project");
     assert!(cx.has_text("Copied"));
     view.read(|forge| assert!(forge.nav.repo.is_none(), "copy is not open"));
+}
+
+#[test]
+fn a_forge_link_opens_its_repository() {
+    let mut cx = TestAppContext::new();
+    configure(&mut cx, "default");
+    let props = cx.host().stream::<Props>();
+    let routes = cx.host().stream::<ducktape_view_guest::doors::Route>();
+    let view = cx.open::<Forge>();
+    cx.run_until_parked();
+    props.push(Session {
+        connected: true,
+        chain: "testnet#0a1b2c3d".into(),
+        ..Session::default()
+    });
+    cx.run_until_parked();
+    routes.push("project".into());
+    cx.run_until_parked();
+    view.read(|forge| assert_eq!(forge.nav().repo.as_deref(), Some("project")));
+    // a route forge does not read falls back to the list
+    routes.push("project/extra".into());
+    cx.run_until_parked();
+    view.read(|forge| assert!(forge.nav().repo.is_none()));
 }
