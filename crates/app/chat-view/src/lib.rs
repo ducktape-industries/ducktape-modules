@@ -10,6 +10,7 @@ mod chat;
 mod client;
 mod compose;
 mod composer;
+mod emoji;
 mod files;
 mod queries;
 mod room;

@@ -125,6 +125,14 @@ fn rich_message_keeps_styles_and_dispatches_each_link_by_value() {
     assert!(cx.has_text("rust"));
     assert!(cx.has_text("fn main() {}"));
     assert!(cx.has_text("quoted"));
+    let seq = view.read(|chat| {
+        chat.rows(Pane::Timeline)
+            .iter()
+            .find(|row| row.message_id == "rich")
+            .map(|row| row.seq)
+            .expect("the rich row")
+    });
+    super::message::hover(&mut cx, &view, seq);
     assert!(matches!(
         cx.find("chat-message-rich-more"),
         Some(wire::Node::Container (ducktape_view_guest::wire::ContainerNode { interactivity, .. }))

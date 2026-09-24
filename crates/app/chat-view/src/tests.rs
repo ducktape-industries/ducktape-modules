@@ -191,6 +191,7 @@ fn the_room_shows_its_rows_intro_and_actions() {
     for seq in [1, 2] {
         assert!(cx.find(&format!("chat-message-m{seq}-block-0")).is_some());
     }
+    message::hover(&mut cx, &view, 1);
     cx.simulate_click("chat-message-m1-react");
     assert!(
         cx.find(&ui::menu::focus_key(Pane::Timeline, Mode::Reactions))
@@ -316,6 +317,7 @@ fn timeline_retains_virtual_tail_anchoring_and_scroll_feedback() {
 #[test]
 fn menus_and_dialogs_are_modal_overlays_with_dismiss_routes() {
     let (mut cx, view) = opened();
+    message::hover(&mut cx, &view, 1);
     cx.simulate_click("chat-message-m1-more");
     assert!(matches!(
         cx.find("chat-menu-overlay"),
@@ -344,37 +346,47 @@ fn menus_and_dialogs_are_modal_overlays_with_dismiss_routes() {
 }
 
 #[test]
-fn message_menu_preserves_disabled_actions_and_executes_enabled_routes() {
+fn message_menu_offers_only_what_the_reader_may_do_and_executes_it() {
     let (mut cx, view) = opened();
+    let menu_on = |seq| Menu {
+        pane: Pane::Timeline,
+        seq,
+        rev: 0,
+        mode: Mode::More,
+        at: (611., 455.),
+    };
     view.update(&mut cx, |chat, _, cx| {
-        chat.menu = Some(Menu {
-            pane: Pane::Timeline,
-            seq: 1,
-            rev: 0,
-            mode: Mode::More,
-            at: (611., 455.),
-        });
+        chat.menu = Some(menu_on(1));
         chat.me = Loaded::Ready(None);
         cx.notify();
     });
     cx.run_until_parked();
+    // a key with no account reads: nothing it would be refused is offered
     for id in [
         "chat-menu-add-reaction",
         "chat-menu-edit",
         "chat-menu-delete",
     ] {
-        let Some(wire::Node::Container(ducktape_view_guest::wire::ContainerNode {
-            interactivity,
-            ..
-        })) = cx.find(id)
-        else {
-            panic!("{id} remains a visible native menu row");
-        };
-        assert_eq!(interactivity.aria.disabled, Some(true));
-        assert!(interactivity.on_click.is_none());
+        assert!(cx.find(id).is_none(), "{id} offered to a reader");
     }
-    assert!(cx.has_text("😀") && cx.has_text("✎") && cx.has_text("🗑"));
+    assert!(cx.find("chat-menu-copy-link").is_some());
 
+    // someone else's message in a channel the reader owns: delete, no edit
+    view.update(&mut cx, |chat, _, cx| {
+        chat.menu = Some(menu_on(2));
+        chat.me = Loaded::Ready(Some(7));
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(cx.find("chat-menu-edit").is_none(), "only the author edits");
+    assert!(cx.find("chat-menu-delete").is_some(), "the owner deletes");
+
+    view.update(&mut cx, |chat, _, cx| {
+        chat.menu = Some(menu_on(1));
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(cx.has_text("😀") && cx.has_text("✎") && cx.has_text("🗑"));
     view.update(&mut cx, |chat, _, cx| {
         chat.me = Loaded::Ready(Some(7));
         cx.notify();

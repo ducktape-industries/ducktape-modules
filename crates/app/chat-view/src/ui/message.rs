@@ -24,9 +24,14 @@ pub fn card(
     let id = message.id.clone();
     let seq = message.seq;
     let press = cx.listener(move |chat, event: &ClickEvent, _window, cx| {
-        cx.notify();
         let position = event.position();
-        chat.layout.press = (position.x.into(), position.y.into());
+        let at = (position.x.into(), position.y.into());
+        // a reaction, the replies link or the toolbar took this click first
+        if chat.was_claimed(at) {
+            return;
+        }
+        cx.notify();
+        chat.layout.press = at;
         chat.press_message(pane, seq);
     });
     let chosen = !message.deleted
@@ -89,31 +94,54 @@ pub fn card(
         .child(content(chat, message.clone(), pane, cx, theme));
     // Controls are siblings of the selection target: their native click must
     // not also replace the opened menu with the message-selection toolbar.
-    let mut outer = div().relative().w_full().group(group.clone()).child(card);
-    if !message.pending && !message.deleted {
+    // The row says when the pointer is over it, and only that row (and a
+    // chosen one) carries the action strip: drawn invisible under every
+    // row, the strips were most of each frame the view sends — over half
+    // its bytes in a busy room — and every frame is paid for in fuel.
+    let key = (pane, seq);
+    let row_hover = cx.listener(move |chat, over: &bool, _window, cx| {
+        if *over && chat.hovered != Some(key) {
+            chat.hovered = Some(key);
+            cx.notify();
+        } else if !*over && chat.hovered == Some(key) {
+            chat.hovered = None;
+            cx.notify();
+        }
+    });
+    let mut outer = div()
+        .id(format!("chat-message-{id}-row"))
+        .relative()
+        .w_full()
+        .group(group.clone())
+        .on_hover(row_hover)
+        .child(card);
+    if !message.pending && !message.deleted && (chosen || chat.hovered == Some(key)) {
         let rev = message.rev;
         let writable = chat.may_write();
         let mut actions = div()
             .id(format!("chat-message-{id}-actions"))
             .absolute()
             .right_2()
-            .top_1()
+            // 22px tall at 2px: inside even a compact row (3 + 20 + 3), so
+            // the bar never hangs into the next row, which paints over it
+            // and is outside this row's hover
+            .top(px(2.))
             .flex()
-            .gap_1()
             .bg(theme.background)
-            // GPUI dispatches a click to every interactive element whose
-            // hitbox contains it, not just the topmost one: without this,
-            // a click on a button here also lands on `card`'s row-select
-            // handler beneath it, which clobbers whatever this row just
-            // set (e.g. `open_menu`'s mode) back to `Mode::Toolbar`.
-            .occlude()
+            .border_1()
+            .border_color(theme.border)
+            // No occlude: an occluding bar took the row's hover away the
+            // moment the pointer reached it, hid itself, and was never
+            // clickable. GPUI hands a click here to the card beneath too;
+            // each button claims it (`Chat::claim`) so the card stands down.
             .invisible()
             .group_hover(group, |style| style.visible());
         if chosen {
             actions = actions.visible();
         }
         if pane == Pane::Timeline && message.reply_count == 0 {
-            let open = cx.listener(move |chat, _: &ClickEvent, _, cx| {
+            let open = cx.listener(move |chat, event: &ClickEvent, _, cx| {
+                chat.claim(event);
                 cx.notify();
                 chat.open_thread(seq, cx);
             });
@@ -126,7 +154,8 @@ pub fn card(
                 open,
             ));
         }
-        let thumbs = cx.listener(move |chat, _: &ClickEvent, _, cx| {
+        let thumbs = cx.listener(move |chat, event: &ClickEvent, _, cx| {
+            chat.claim(event);
             cx.notify();
             chat.react(seq, "👍".into(), true, cx);
         });
@@ -139,6 +168,7 @@ pub fn card(
             thumbs,
         ));
         let react = cx.listener(move |chat, event: &ClickEvent, window, cx| {
+            chat.claim(event);
             cx.notify();
             let position = event.position();
             chat.layout.press = (position.x.into(), position.y.into());
@@ -153,6 +183,7 @@ pub fn card(
             react,
         ));
         let more = cx.listener(move |chat, event: &ClickEvent, window, cx| {
+            chat.claim(event);
             cx.notify();
             let position = event.position();
             chat.layout.press = (position.x.into(), position.y.into());
@@ -255,7 +286,8 @@ fn content(
             let description = emoji.clone();
             let add = !reaction.reacted_by_me;
             let mine = reaction.reacted_by_me;
-            let click = cx.listener(move |chat, _: &ClickEvent, _window, cx| {
+            let click = cx.listener(move |chat, event: &ClickEvent, _window, cx| {
+                chat.claim(event);
                 cx.notify();
                 chat.react(reaction_seq, emoji.clone(), add, cx)
             });
@@ -273,15 +305,19 @@ fn content(
         }
         let rev = message.rev;
         let open = cx.listener(move |chat, event: &ClickEvent, window, cx| {
+            // the card under this button would otherwise take the same
+            // click and put the row's toolbar over the picker just opened
+            chat.claim(event);
             let position = event.position();
             chat.layout.press = (position.x.into(), position.y.into());
             chat.open_menu(pane, reaction_seq, rev, Mode::Reactions, window, cx);
             cx.notify();
         });
-        reactions = reactions.child(action_button(
+        reactions = reactions.child(reaction_button(
             format!("chat-message-{}-reaction-add", message.id),
             "+",
-            "Add reaction",
+            "",
+            false,
             theme,
             chat.may_write(),
             open,
@@ -290,27 +326,17 @@ fn content(
     }
     if message.reply_count > 0 && pane == Pane::Timeline {
         let root = message.seq;
-        let open = cx.listener(move |chat, _: &ClickEvent, _window, cx| {
+        let open = cx.listener(move |chat, event: &ClickEvent, _window, cx| {
+            chat.claim(event);
             cx.notify();
             chat.open_thread(root, cx)
         });
-        body = body.child(
-            div()
-                .id(format!("chat-message-{}-replies", message.id))
-                .flex()
-                .items_center()
-                .gap_1()
-                .pt_1()
-                .text_size(px(12.))
-                .text_color(theme.accent_foreground)
-                .role(ducktape_view_guest::Role::Button)
-                .focusable()
-                .on_click(open)
-                .child(format!(
-                    "{} · View thread ›",
-                    plural(message.reply_count, "reply", "replies")
-                )),
-        );
+        body = body.child(div().flex().pt_1().child(replies_button(
+            format!("chat-message-{}-replies", message.id),
+            message.reply_count,
+            theme,
+            open,
+        )));
     } else if message.reply_count > 0 {
         body = body.child(
             div()
@@ -379,7 +405,8 @@ fn block_view(
             .into_any_element(),
         "attachment" => {
             let link = block.link.clone();
-            let open = cx.listener(move |chat, _: &ClickEvent, _window, cx| {
+            let open = cx.listener(move |chat, event: &ClickEvent, _window, cx| {
+                chat.claim(event);
                 cx.notify();
                 chat.open_preview(link.clone(), cx);
             });
@@ -482,17 +509,29 @@ fn action_button(
 ) -> impl IntoElement {
     let control = div()
         .id(id)
-        .px_1()
-        .py_0p5()
-        .bg(theme.surface)
-        .hover(|s| s.bg(theme.surface_raised))
+        .w(px(26.))
+        .h(px(20.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .bg(theme.background)
+        .text_color(if enabled {
+            theme.foreground
+        } else {
+            theme.faint
+        })
         .role(ducktape_view_guest::Role::Button)
         .aria_label(accessible)
         .aria_disabled(!enabled)
-        .text_size(px(11.))
+        .text_size(px(12.))
         .child(label.into());
     if enabled {
-        control.focusable().on_click(click)
+        control
+            .focusable()
+            .cursor_pointer()
+            .hover(|s| s.bg(theme.surface_raised))
+            .focus_visible(|s| s.bg(theme.surface_raised))
+            .on_click(click)
     } else {
         control
     }
@@ -507,41 +546,111 @@ fn reaction_button(
     enabled: bool,
     click: impl Fn(&ClickEvent, &mut Window, &mut ducktape_view_guest::App) + 'static,
 ) -> impl IntoElement {
-    let control = div()
+    let emoji = emoji.into();
+    // "+" has no emoji: it is the picker's door, not a toggle
+    let add = emoji.is_empty();
+    let mut control = div()
         .id(id)
-        .px_1()
-        .py_0p5()
+        .h(px(22.))
+        .px(px(6.))
+        .flex()
+        .items_center()
+        .gap_1()
+        .border_1()
+        // the reader's own wear the strong line: accent_soft is the
+        // hover grey in the calm palette, so a fill alone can't say "mine"
+        .border_color(if mine { theme.accent } else { theme.border })
         .bg(if mine {
             theme.accent_soft
         } else {
-            theme.surface
+            theme.background
         })
-        .text_color(if mine {
-            theme.accent_foreground
-        } else if enabled {
+        .text_color(if enabled {
             theme.foreground
         } else {
             theme.muted
         })
         .role(ducktape_view_guest::Role::Button)
-        .aria_label(if mine {
+        .aria_label(if add {
+            "Add reaction"
+        } else if mine {
             "Remove reaction"
         } else {
             "Add reaction"
         })
-        .aria_description(emoji.into())
-        .aria_toggled(mine.into())
         .aria_disabled(!enabled)
-        .text_size(px(11.))
-        .child(label.into());
+        .text_size(px(12.));
+    if !add {
+        control = control.aria_description(emoji).aria_toggled(mine.into());
+    }
+    let label: String = label.into();
+    control = match label.split_once(' ') {
+        // "🎉 3": the count in the data face, as every count here is
+        Some((glyph, count)) => control.child(glyph.to_owned()).child(
+            div()
+                .font_family("JetBrains Mono")
+                .text_size(px(11.))
+                .child(count.to_owned()),
+        ),
+        None => control.child(label),
+    };
     if enabled {
         control
             .focusable()
-            .hover(|style| style.bg(theme.surface_raised))
+            .cursor_pointer()
+            .hover(|style| {
+                style
+                    .bg(theme.surface_raised)
+                    .border_color(theme.border_strong)
+            })
+            .focus_visible(|style| style.border_color(theme.accent))
             .on_click(click)
     } else {
         control
     }
+}
+
+/// Under a message with replies: how many, and the way into them, drawn as
+/// the button it is.
+fn replies_button(
+    id: impl Into<ElementId>,
+    count: u64,
+    theme: &Theme,
+    click: impl Fn(&ClickEvent, &mut Window, &mut ducktape_view_guest::App) + 'static,
+) -> impl IntoElement {
+    let noun = if count == 1 { "reply" } else { "replies" };
+    div()
+        .id(id)
+        .h(px(24.))
+        .px_2()
+        .flex()
+        .items_center()
+        .gap(px(6.))
+        .border_1()
+        .border_color(theme.border)
+        .bg(theme.background)
+        .text_size(px(12.))
+        .text_color(theme.foreground)
+        .cursor_pointer()
+        .hover(|style| {
+            style
+                .bg(theme.surface_raised)
+                .border_color(theme.border_strong)
+        })
+        .active(|style| style.bg(theme.accent_soft))
+        .focus_visible(|style| style.border_color(theme.accent))
+        .role(ducktape_view_guest::Role::Button)
+        .aria_label(format!("Open thread, {count} {noun}"))
+        .focusable()
+        .on_click(click)
+        .child(
+            div()
+                .font_family("JetBrains Mono")
+                .text_size(px(11.))
+                .child(count.to_string()),
+        )
+        .child(noun)
+        .child(div().text_color(theme.muted).child("Open thread →"))
 }
 
 fn plural(count: u64, one: &str, many: &str) -> String {

@@ -23,6 +23,25 @@ pub struct Chat {
     pub(crate) layout: Layout,
     pub(crate) reads: Reads,
     pub(crate) menu: Option<Menu>,
+    /// The reaction picker's search and tab while it is open.
+    #[serde(skip)]
+    pub(crate) picker: Picker,
+    /// The reader's reactions, newest first: the picker's frequent row.
+    #[serde(default)]
+    pub(crate) recent_emoji: Vec<String>,
+    /// Where a control on a message card took the pointer's click: GPUI
+    /// hands the same click to the card beneath, which stands down instead
+    /// of selecting the row over what the control just did.
+    #[serde(skip)]
+    pub(crate) claimed: Option<(f32, f32)>,
+    /// The message row under the pointer: the one that carries the action
+    /// strip, beside a chosen one.
+    #[serde(skip)]
+    pub(crate) hovered: Option<(Pane, u64)>,
+    /// The line over the room saying a copy landed: not a refusal, so not
+    /// the `notice` banner.
+    #[serde(skip)]
+    pub(crate) confirmation: String,
     pub(crate) copy: Option<CopyRange>,
     pub(crate) preview: Option<Preview>,
     /// the pictures the host decoded for this view, by link: the drawn
@@ -174,6 +193,13 @@ pub struct Menu {
     pub(crate) rev: u32,
     pub(crate) mode: Mode,
     pub(crate) at: (f32, f32),
+}
+
+/// The reaction picker: what the search holds and which tab is open.
+#[derive(Default, Debug)]
+pub struct Picker {
+    pub(crate) query: String,
+    pub(crate) tab: usize,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug)]

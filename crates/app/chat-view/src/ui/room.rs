@@ -46,6 +46,42 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
                     )),
             );
         }
+        if !chat.confirmation.is_empty() {
+            let dismiss = cx.listener(|chat, _: &ClickEvent, _window, cx| {
+                chat.confirmation.clear();
+                cx.notify();
+            });
+            pane = pane.child(
+                div()
+                    .id("chat-room-confirmation")
+                    .mx_3()
+                    .my_2()
+                    .px_2()
+                    .h(px(30.))
+                    .border_1()
+                    .border_color(theme.border)
+                    .bg(theme.surface)
+                    .text_size(px(12.))
+                    .text_color(theme.muted)
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(div().flex_1().child(chat.confirmation.clone()))
+                    .child(
+                        div()
+                            .id("chat-room-confirmation-dismiss")
+                            .px_1()
+                            .text_color(theme.muted)
+                            .cursor_pointer()
+                            .hover(|style| style.text_color(theme.foreground))
+                            .role(ducktape_view_guest::Role::Button)
+                            .aria_label("Dismiss")
+                            .focusable()
+                            .on_click(dismiss)
+                            .child("✕"),
+                    ),
+            );
+        }
         if !chat.search.query.is_empty() {
             pane = pane.child(search_results(chat, cx, theme));
         } else {
