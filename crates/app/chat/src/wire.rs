@@ -290,11 +290,7 @@ pub fn party_of_handle(handle: &str) -> Option<Party> {
         return Some(Party::Module(module.into()));
     }
     let hex = handle.strip_prefix("user:").filter(|hex| !hex.is_empty())?;
-    (0..hex.len())
-        .step_by(2)
-        .map(|at| u8::from_str_radix(hex.get(at..at + 2)?, 16).ok())
-        .collect::<Option<Vec<u8>>>()
-        .map(Party::Key)
+    abi::unhex(hex).map(Party::Key)
 }
 
 /// The room two accounts share: `dm-<lower>-<higher>`.
@@ -308,6 +304,4 @@ pub fn dm_peers(channel_id: &str) -> Option<(AccountNumber, AccountNumber)> {
     Some((a.parse().ok()?, b.parse().ok()?))
 }
 
-pub fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
+pub use abi::hex;

@@ -1,5 +1,6 @@
 //! The Overview tab: the head, the latest blocks and transactions.
 use super::*;
+use ducktape_view_guest::design;
 
 pub(super) fn overview(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
     let status = view.status.ready();
@@ -14,9 +15,18 @@ pub(super) fn overview(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
             .py_4()
             .border_r_1()
             .border_color(theme.border)
-            .child(mono(label).text_size(px(11.)).text_color(theme.muted))
+            .child(
+                mono(label)
+                    .text_size(design::text::CAPTION)
+                    .text_color(theme.muted),
+            )
             .child(div().text_size(px(22.)).child(value))
-            .child(div().text_size(px(12.)).text_color(theme.muted).child(note))
+            .child(
+                div()
+                    .text_size(design::text::SECONDARY)
+                    .text_color(theme.muted)
+                    .child(note),
+            )
     };
     let dash = || "—".to_string();
     let (height, cadence) = match status {
@@ -53,7 +63,7 @@ pub(super) fn overview(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
         cx,
         theme,
     )
-    .text_size(px(12.))
+    .text_size(design::text::SECONDARY)
     .into_any_element();
     let all_txs = link(
         "explorer-all-txs".into(),
@@ -62,7 +72,7 @@ pub(super) fn overview(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
         cx,
         theme,
     )
-    .text_size(px(12.))
+    .text_size(design::text::SECONDARY)
     .into_any_element();
     let blocks = block_lines(&view.chain.blocks, LATEST, now, cx, theme);
     let txs: Vec<_> = view

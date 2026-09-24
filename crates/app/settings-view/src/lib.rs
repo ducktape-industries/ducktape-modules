@@ -3,6 +3,7 @@ mod account;
 mod api;
 use account::{Account, read_account};
 use api::*;
+use ducktape_view_guest::design;
 use ducktape_view_guest::doors::RpcLive;
 use ducktape_view_guest::doors::{ClipboardWrite, ClockTicks};
 use ducktape_view_guest::prelude::*;
@@ -197,7 +198,7 @@ impl Settings {
                 .child(
                     div()
                         .id("settings/account/empty/title")
-                        .text_size(px(13.5))
+                        .text_size(design::text::SECTION)
                         .font_weight(FontWeight::MEDIUM)
                         .child("No account"),
                 )
@@ -374,8 +375,8 @@ impl Settings {
                         div()
                             .id("settings/invite/blob")
                             .w_full()
-                            .font_family("JetBrains Mono")
-                            .text_size(px(12.))
+                            .font_family(design::fonts::FAMILY_MONO)
+                            .text_size(design::text::SECONDARY)
                             .child(invite.invite.clone()),
                     )
                     .children(invite.notes.iter().enumerate().map(|(i, n)| {
@@ -436,11 +437,11 @@ impl Render for Settings {
             .size_full()
             .bg(theme.background)
             .text_color(theme.foreground)
-            .text_size(px(13.))
+            .text_size(design::text::BODY)
             .child(
                 div()
                     .id("settings/title")
-                    .text_size(px(16.))
+                    .text_size(design::text::TITLE)
                     .font_weight(FontWeight::SEMIBOLD)
                     .role(Role::Heading)
                     .aria_level(1)
@@ -555,7 +556,7 @@ fn refusal(key: &str, sentence: &str, theme: &Theme) -> impl IntoElement {
 fn secondary(id: impl Into<String>, text: impl Into<String>, theme: &Theme) -> Stateful<Div> {
     div()
         .id(id.into())
-        .text_size(px(12.))
+        .text_size(design::text::SECONDARY)
         .text_color(theme.muted)
         .child(text.into())
 }

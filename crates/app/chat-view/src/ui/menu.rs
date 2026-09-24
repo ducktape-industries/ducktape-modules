@@ -2,6 +2,7 @@
 use crate::composer::Target;
 use crate::emoji;
 use crate::{Chat, Menu, Mode, Pane};
+use ducktape_view_guest::design;
 use ducktape_view_guest::prelude::*;
 use ducktape_view_guest::{
     Anchor, AnchoredPositionMode, AnyElement, App, ClickEvent, Context, Edges, ElementId,
@@ -414,7 +415,7 @@ fn caption(text: &str, theme: &Theme) -> impl IntoElement {
     div()
         .h(px(CAPTION))
         .text_size(px(10.5))
-        .font_family("JetBrains Mono")
+        .font_family(design::fonts::FAMILY_MONO)
         .text_color(theme.muted)
         .child(text.to_uppercase())
 }
@@ -435,10 +436,14 @@ fn delete(_chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement {
         .flex_col()
         .gap_1()
         .p_3()
-        .child(div().text_size(px(13.)).child("Delete this message?"))
         .child(
             div()
-                .text_size(px(12.))
+                .text_size(design::text::BODY)
+                .child("Delete this message?"),
+        )
+        .child(
+            div()
+                .text_size(design::text::SECONDARY)
                 .text_color(theme.muted)
                 .child("It leaves the room for everyone."),
         )
@@ -559,7 +564,7 @@ impl RenderOnce for Item {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .text_size(px(13.))
+                    .text_size(design::text::BODY)
                     .whitespace_nowrap()
                     .child(glyph),
             );

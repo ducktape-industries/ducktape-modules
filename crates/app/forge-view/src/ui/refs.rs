@@ -1,5 +1,6 @@
 //! Refs: branches and tags, how far each one is from the default head, and
 //! the Change a comparison can become.
+use ducktape_view_guest::design;
 use ducktape_view_guest::prelude::*;
 
 use crate::Forge;
@@ -88,8 +89,8 @@ pub(crate) fn render(
             .cell(
                 div()
                     .w(px(80.))
-                    .font_family("monospace")
-                    .text_size(px(12.))
+                    .font_family(design::fonts::FAMILY_MONO)
+                    .text_size(design::text::SECONDARY)
                     .text_color(theme.muted)
                     .child(short_oid(&info.target)),
             )

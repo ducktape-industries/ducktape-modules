@@ -1,5 +1,6 @@
 //! The open room, search results, notices, and composer.
 
+use ducktape_view_guest::design;
 use ducktape_view_guest::prelude::*;
 use ducktape_view_guest::{ClickEvent, Context, ElementId, ParentElement, Styled, Theme, div, px};
 
@@ -61,7 +62,7 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
                     .border_1()
                     .border_color(theme.border)
                     .bg(theme.surface)
-                    .text_size(px(12.))
+                    .text_size(design::text::SECONDARY)
                     .text_color(theme.muted)
                     .flex()
                     .items_center()
@@ -155,7 +156,7 @@ fn header(chat: &Chat, room: &Room, cx: &mut Context<Chat>, theme: &Theme) -> im
     title = title.child(
         div()
             .id("chat-room-title")
-            .text_size(px(13.5))
+            .text_size(design::text::SECTION)
             .font_weight(ducktape_view_guest::FontWeight::SEMIBOLD)
             .role(Role::Heading)
             .aria_level(2)
@@ -232,10 +233,10 @@ fn no_room(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement {
                 .flex_col()
                 .gap_2()
                 .p_6()
-                .child(div().text_size(px(13.)).child("No channels"))
+                .child(div().text_size(design::text::BODY).child("No channels"))
                 .child(
                     div()
-                        .text_size(px(12.))
+                        .text_size(design::text::SECONDARY)
                         .text_color(theme.muted)
                         .child("Create the first channel in this network."),
                 )
@@ -269,7 +270,7 @@ fn huddle(info: &ChannelInfo, theme: &Theme) -> impl IntoElement {
         ))
         .child(
             div()
-                .text_size(px(12.))
+                .text_size(design::text::SECONDARY)
                 .text_color(theme.muted)
                 .child(format!("{} people", info.channel.huddle.len())),
         )
@@ -300,14 +301,17 @@ fn search_results(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl In
             ));
         }
         Loaded::Ready(hits) => {
-            content = content.child(div().text_size(px(12.)).text_color(theme.muted).child(
-                format!(
-                    "{} result{} for “{}”",
-                    hits.rows.len(),
-                    if hits.rows.len() == 1 { "" } else { "s" },
-                    chat.search.query
-                ),
-            ));
+            content = content.child(
+                div()
+                    .text_size(design::text::SECONDARY)
+                    .text_color(theme.muted)
+                    .child(format!(
+                        "{} result{} for “{}”",
+                        hits.rows.len(),
+                        if hits.rows.len() == 1 { "" } else { "s" },
+                        chat.search.query
+                    )),
+            );
             for row in &hits.rows {
                 let id = row.channel_id.clone();
                 let seq = row.seq;
@@ -327,10 +331,14 @@ fn search_results(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl In
                         .role(ducktape_view_guest::Role::Button)
                         .focusable()
                         .on_click(open)
-                        .child(div().text_size(px(12.)).child(row.text.clone()))
                         .child(
                             div()
-                                .text_size(px(11.))
+                                .text_size(design::text::SECONDARY)
+                                .child(row.text.clone()),
+                        )
+                        .child(
+                            div()
+                                .text_size(design::text::CAPTION)
                                 .text_color(theme.muted)
                                 .child(format!("message {}", row.seq)),
                         ),

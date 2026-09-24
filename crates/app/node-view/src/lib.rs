@@ -5,6 +5,7 @@
 //! The contract is borsh and this view's state is a serde snapshot, so a
 //! reply is folded to rows as it lands.
 use abi::hex;
+use ducktape_view_guest::design;
 use ducktape_view_guest::doors::Query;
 use ducktape_view_guest::doors::RpcLive;
 use ducktape_view_guest::export_view;
@@ -15,7 +16,7 @@ use ducktape_view_guest::{
     ParentElement, Render, StatefulInteractiveElement, Styled, Task, Theme, View, Window, div, px,
 };
 mod components;
-use components::{EmptyState, Section};
+use components::Section;
 use futures::StreamExt;
 
 use serde::{Deserialize, Serialize};
@@ -80,7 +81,7 @@ impl Render for Nodes {
             .size_full()
             .bg(theme.background)
             .text_color(theme.foreground)
-            .text_size(px(13.))
+            .text_size(design::text::BODY)
             .child(
                 div()
                     .id("nodes-head")
@@ -91,7 +92,7 @@ impl Render for Nodes {
                         div()
                             .id("nodes-title")
                             .flex_1()
-                            .text_size(px(16.))
+                            .text_size(design::text::TITLE)
                             .font_weight(ducktape_view_guest::FontWeight::SEMIBOLD)
                             .role(ducktape_view_guest::Role::Heading)
                             .aria_level(1)
@@ -99,7 +100,7 @@ impl Render for Nodes {
                     )
                     .child(
                         div()
-                            .text_size(px(11.))
+                            .text_size(design::text::CAPTION)
                             .text_color(theme.muted)
                             .child(self.count()),
                     ),
@@ -123,8 +124,8 @@ impl Nodes {
         match self.set.ready() {
             Some(set) => format!(
                 "{} · {}",
-                plural(set.validators.len(), "validator", "validators"),
-                plural(set.members.len(), "member", "members"),
+                design::plural(set.validators.len() as u64, "validator", "validators"),
+                design::plural(set.members.len() as u64, "member", "members"),
             ),
             None => String::new(),
         }
@@ -135,41 +136,20 @@ impl Nodes {
         match &self.set {
             Loaded::Idle | Loaded::Loading(_) => div()
                 .id("nodes-loading")
-                .text_size(px(12.))
+                .text_size(design::text::SECONDARY)
                 .text_color(theme.muted)
                 .child("Reading the validator set…")
                 .into_any_element(),
             Loaded::Failed(refusal) => {
                 let retry = cx.listener(|view, _: &ClickEvent, _, cx| view.read(cx));
-                div()
-                    .id("nodes-refused")
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .p_3()
-                    .border_1()
-                    .border_color(theme.danger)
-                    .bg(theme.danger_soft)
-                    .child(refusal.sentence.clone())
-                    .child(
-                        div()
-                            .id("nodes-retry")
-                            .px_2()
-                            .py_1()
-                            .bg(theme.surface)
-                            .hover(|s| s.bg(theme.surface_raised))
-                            .role(ducktape_view_guest::Role::Button)
-                            .focusable()
-                            .on_click(retry)
-                            .child("Retry"),
-                    )
-                    .into_any_element()
+                design::refused("nodes", refusal.sentence.clone(), theme, retry).into_any_element()
             }
             Loaded::Ready(set) if set.members.is_empty() && set.validators.is_empty() => {
-                EmptyState::new(
+                design::empty_state(
                     "nodes-empty",
                     "No members",
                     "The validator set of this network is empty.",
+                    theme,
                 )
                 .into_any_element()
             }
@@ -193,7 +173,7 @@ fn validators(validators: &[String], theme: &Theme) -> AnyElement {
     if validators.is_empty() {
         return div()
             .id("nodes-no-validators")
-            .text_size(px(12.))
+            .text_size(design::text::SECONDARY)
             .text_color(theme.muted)
             .child("No key validates on this network.")
             .into_any_element();
@@ -212,15 +192,15 @@ fn validators(validators: &[String], theme: &Theme) -> AnyElement {
                 .child(
                     div()
                         .w(px(28.))
-                        .text_size(px(12.))
+                        .text_size(design::text::SECONDARY)
                         .text_color(theme.muted)
                         .child((index + 1).to_string()),
                 )
                 .child(
                     div()
                         .flex_1()
-                        .font_family("JetBrains Mono")
-                        .text_size(px(12.))
+                        .font_family(design::fonts::FAMILY_MONO)
+                        .text_size(design::text::SECONDARY)
                         .child(short_id(validator, 16)),
                 )
         }))
@@ -247,15 +227,15 @@ fn members(members: &[Member], theme: &Theme) -> impl IntoElement {
                 .child(
                     div()
                         .flex_1()
-                        .font_family("JetBrains Mono")
-                        .text_size(px(12.))
+                        .font_family(design::fonts::FAMILY_MONO)
+                        .text_size(design::text::SECONDARY)
                         .child(short_id(&member.key, 16)),
                 )
                 .child(
                     div()
                         .max_w(px(220.))
                         .truncate()
-                        .text_size(px(12.))
+                        .text_size(design::text::SECONDARY)
                         .child(short_id(&member.address, 28)),
                 )
                 .child(
@@ -264,7 +244,7 @@ fn members(members: &[Member], theme: &Theme) -> impl IntoElement {
                         .py_0p5()
                         .bg(background)
                         .text_color(foreground)
-                        .text_size(px(11.))
+                        .text_size(design::text::CAPTION)
                         .child(member.standing.clone()),
                 )
         }))
@@ -276,10 +256,6 @@ fn short_id(id: &str, keep: usize) -> String {
         head.push('…');
     }
     head
-}
-
-fn plural(count: usize, one: &str, many: &str) -> String {
-    format!("{count} {}", if count == 1 { one } else { many })
 }
 
 /// The set, read twice: the consensus keys the program answers, then every

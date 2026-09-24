@@ -1,5 +1,6 @@
 //! Commits: a virtualized log of the picked ref, and one commit's own diff
 //! against its first parent.
+use ducktape_view_guest::design;
 use std::rc::Rc;
 
 use ducktape_view_guest::prelude::*;
@@ -84,8 +85,8 @@ pub(crate) fn log(
             .cell(
                 div()
                     .w(px(72.))
-                    .font_family("monospace")
-                    .text_size(px(12.))
+                    .font_family(design::fonts::FAMILY_MONO)
+                    .text_size(design::text::SECONDARY)
                     .text_color(theme.muted)
                     .child(short_oid(&oid)),
             )

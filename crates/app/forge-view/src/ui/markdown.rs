@@ -3,6 +3,7 @@
 //! (bold, italic, links) are chat's own tokenizer, so a README reads with
 //! the composer's syntax; inline `code` is split out first, since chat's
 //! wire has no mark for it.
+use ducktape_view_guest::design;
 use std::ops::Range;
 
 use ducktape_view_guest::prelude::*;
@@ -218,7 +219,7 @@ fn rich(element_id: String, text: &str, theme: &Theme) -> AnyElement {
             }
             if marks.code {
                 style.background_color = Some(theme.surface_raised);
-                mono.push((range.clone(), highlight::MONO.into()));
+                mono.push((range.clone(), design::fonts::FAMILY_MONO.into()));
             }
             if let Some(target) = marks.link {
                 style.color = Some(theme.link);
@@ -254,7 +255,7 @@ pub(crate) fn render(name: &str, text: &str, theme: &Theme) -> AnyElement {
         .flex()
         .flex_col()
         .gap_2()
-        .text_size(px(13.))
+        .text_size(design::text::BODY)
         .text_color(theme.foreground);
     for (at, block) in parse(text).into_iter().enumerate() {
         let key = format!("{name}-{at}");
@@ -284,8 +285,8 @@ pub(crate) fn render(name: &str, text: &str, theme: &Theme) -> AnyElement {
                     div()
                         .min_w(px(18.))
                         .text_color(theme.muted)
-                        .font_family(highlight::MONO)
-                        .text_size(px(12.))
+                        .font_family(design::fonts::FAMILY_MONO)
+                        .text_size(design::text::SECONDARY)
                         .child(marker),
                 )
                 .child(div().flex_1().min_w(px(0.)).child(rich(key, &text, theme)))

@@ -1,5 +1,6 @@
 //! Message cards and their native GPUI actions.
 
+use ducktape_view_guest::design;
 use ducktape_view_guest::prelude::*;
 use ducktape_view_guest::{
     AnyElement, ClickEvent, Context, ElementId, FontStyle, FontWeight, HighlightStyle,
@@ -224,7 +225,7 @@ fn content(
             .gap_1()
             .child(
                 div()
-                    .text_size(px(13.))
+                    .text_size(design::text::BODY)
                     .font_weight(ducktape_view_guest::FontWeight::MEDIUM)
                     .child(message.author.clone()),
             );
@@ -239,9 +240,9 @@ fn content(
         if message.height > 0 {
             header = header.child(
                 div()
-                    .text_size(px(11.))
+                    .text_size(design::text::CAPTION)
                     .text_color(theme.muted)
-                    .font_family("JetBrains Mono")
+                    .font_family(design::fonts::FAMILY_MONO)
                     .child(crate::client::height_label(message.height)),
             );
         }
@@ -262,7 +263,7 @@ fn content(
     if message.edited {
         body = body.child(
             div()
-                .text_size(px(11.))
+                .text_size(design::text::CAPTION)
                 .text_color(theme.muted)
                 .child("edited"),
         );
@@ -271,7 +272,7 @@ fn content(
         body = body.child(
             div()
                 .id(format!("chat-message-{}-pending", message.id))
-                .text_size(px(11.))
+                .text_size(design::text::CAPTION)
                 .text_color(theme.muted)
                 .child("sending…"),
         );
@@ -349,9 +350,9 @@ fn content(
                 .pt_1()
                 .child(
                     div()
-                        .text_size(px(11.))
+                        .text_size(design::text::CAPTION)
                         .text_color(theme.muted)
-                        .child(plural(message.reply_count, "reply", "replies")),
+                        .child(design::plural(message.reply_count, "reply", "replies")),
                 )
                 .child(div().h(px(1.)).flex_1().bg(theme.border)),
         );
@@ -386,7 +387,7 @@ fn block_view(
             if let Some(lang) = lang.as_ref().filter(|lang| !lang.is_empty()) {
                 code = code.child(
                     div()
-                        .text_size(px(11.))
+                        .text_size(design::text::CAPTION)
                         .text_color(theme.muted)
                         .child(lang.clone()),
                 );
@@ -433,7 +434,7 @@ fn action_button(
         .role(ducktape_view_guest::Role::Button)
         .aria_label(accessible)
         .aria_disabled(!enabled)
-        .text_size(px(12.))
+        .text_size(design::text::SECONDARY)
         .child(label.into());
     if enabled {
         control
@@ -489,7 +490,7 @@ fn reaction_button(
             "Add reaction"
         })
         .aria_disabled(!enabled)
-        .text_size(px(12.));
+        .text_size(design::text::SECONDARY);
     if !add {
         control = control.aria_description(emoji).aria_toggled(mine.into());
     }
@@ -498,8 +499,8 @@ fn reaction_button(
         // "🎉 3": the count in the data face, as every count here is
         Some((glyph, count)) => control.child(glyph.to_owned()).child(
             div()
-                .font_family("JetBrains Mono")
-                .text_size(px(11.))
+                .font_family(design::fonts::FAMILY_MONO)
+                .text_size(design::text::CAPTION)
                 .child(count.to_owned()),
         ),
         None => control.child(label),
@@ -539,7 +540,7 @@ fn replies_button(
         .border_1()
         .border_color(theme.border)
         .bg(theme.background)
-        .text_size(px(12.))
+        .text_size(design::text::SECONDARY)
         .text_color(theme.foreground)
         .cursor_pointer()
         .hover(|style| {
@@ -555,14 +556,10 @@ fn replies_button(
         .on_click(click)
         .child(
             div()
-                .font_family("JetBrains Mono")
-                .text_size(px(11.))
+                .font_family(design::fonts::FAMILY_MONO)
+                .text_size(design::text::CAPTION)
                 .child(count.to_string()),
         )
         .child(noun)
         .child(div().text_color(theme.muted).child("Open thread →"))
-}
-
-fn plural(count: u64, one: &str, many: &str) -> String {
-    format!("{count} {}", if count == 1 { one } else { many })
 }

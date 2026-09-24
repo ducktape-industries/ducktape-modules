@@ -21,7 +21,6 @@ use futures::StreamExt;
 use module_registry as registry;
 use serde::{Deserialize, Serialize};
 
-mod components;
 mod decode;
 pub(crate) mod ui;
 

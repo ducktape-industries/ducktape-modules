@@ -436,14 +436,9 @@ pub(crate) fn short(hex: &str) -> String {
     }
 }
 
+/// [`abi::unhex`], where the empty string is not a key either.
 pub(crate) fn unhex(text: &str) -> Option<Vec<u8>> {
-    if text.is_empty() || !text.len().is_multiple_of(2) {
-        return None;
-    }
-    (0..text.len())
-        .step_by(2)
-        .map(|at| u8::from_str_radix(&text[at..at + 2], 16).ok())
-        .collect()
+    abi::unhex(text).filter(|bytes| !bytes.is_empty())
 }
 
 /// The key a change's screens and drafts hang on.

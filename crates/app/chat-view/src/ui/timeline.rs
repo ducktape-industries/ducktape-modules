@@ -1,6 +1,7 @@
 //! Native GPUI message lists. The room and thread use native variable-height lists;
 //! callbacks still call the root view's existing message operations.
 
+use ducktape_view_guest::design;
 use ducktape_view_guest::prelude::*;
 use ducktape_view_guest::{
     ClickEvent, Context, FollowMode, ListAlignment, ListSizingBehavior, ListState, ParentElement,
@@ -266,7 +267,7 @@ fn unread_marker(theme: &Theme) -> impl IntoElement {
         .gap_2()
         .px_3()
         .py_1()
-        .text_size(px(12.))
+        .text_size(design::text::SECONDARY)
         .text_color(theme.accent_foreground)
         .child(div().h(px(1.)).flex_1().bg(theme.accent))
         .child("New messages")
@@ -286,7 +287,7 @@ fn intro(name: &str, dm: Option<&str>, theme: &Theme) -> impl IntoElement {
         .px_6()
         .pt_6()
         .pb_3()
-        .text_size(px(12.))
+        .text_size(design::text::SECONDARY)
         .text_color(theme.muted)
         .child(detail)
 }

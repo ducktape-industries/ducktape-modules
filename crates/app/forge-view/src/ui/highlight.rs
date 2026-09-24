@@ -2,13 +2,11 @@
 //! table (comments, strings, keywords), line by line, carrying only whether a
 //! block comment is still open. No grammar, no dependency — a view ships
 //! under a size limit, and colour is a reading aid, not a parser.
+use ducktape_view_guest::design;
 use std::ops::Range;
 
 use ducktape_view_guest::prelude::*;
 use ducktape_view_guest::{FontStyle, FontWeight, HighlightStyle};
-
-/// The code face the app ships (design's `FAMILY_MONO`).
-pub(crate) const MONO: &str = "JetBrains Mono";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Token {
@@ -305,8 +303,8 @@ pub(crate) fn line(
         .id(element_id)
         .flex_1()
         .min_w(px(0.))
-        .font_family(MONO)
-        .text_size(px(12.))
+        .font_family(design::fonts::FAMILY_MONO)
+        .text_size(design::text::SECONDARY)
         .text_color(theme.foreground)
         .whitespace_nowrap()
         .child(styled)

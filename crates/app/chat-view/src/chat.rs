@@ -23,18 +23,9 @@ pub fn party_of(text: &str) -> Option<Party> {
     unhex(key).map(Party::Key)
 }
 
-/// An even-length all-hex string back to its bytes; anything else is not hex.
+/// [`abi::unhex`], where the empty string is not a key either.
 pub fn unhex(text: &str) -> Option<Vec<u8>> {
-    if text.is_empty()
-        || !text.len().is_multiple_of(2)
-        || !text.bytes().all(|b| b.is_ascii_hexdigit())
-    {
-        return None;
-    }
-    (0..text.len())
-        .step_by(2)
-        .map(|at| u8::from_str_radix(&text[at..at + 2], 16).ok())
-        .collect()
+    abi::unhex(text).filter(|bytes| !bytes.is_empty())
 }
 
 // ---------- duck links ----------

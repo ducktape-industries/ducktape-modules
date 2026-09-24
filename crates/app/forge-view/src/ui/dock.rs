@@ -1,5 +1,6 @@
 //! The three panels a Change docks, one at a time: its body, every line
 //! comment in one place, and what stands between it and its target ref.
+use ducktape_view_guest::design;
 use ducktape_view_guest::prelude::*;
 
 use crate::Forge;
@@ -53,7 +54,7 @@ pub(crate) fn comments(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) ->
                     .id(id(format!("forge-comment-draft-{}", staged.anchor())))
                     .p_2()
                     .bg(theme.accent_soft)
-                    .text_size(px(12.))
+                    .text_size(design::text::SECONDARY)
                     .child(format!("pending · {} — {}", staged.anchor(), staged.body)),
             );
         }
@@ -79,7 +80,7 @@ pub(crate) fn comments(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) ->
                     )))
                     .p_2()
                     .bg(theme.surface_raised)
-                    .text_size(px(12.))
+                    .text_size(design::text::SECONDARY)
                     .role(Role::Button)
                     .focusable()
                     .on_click(jump)

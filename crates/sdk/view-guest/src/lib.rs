@@ -67,6 +67,7 @@ pub use editor_binding::{
 pub use editor_documents::EditorDocumentUpdate;
 pub use editor_element::{EditorElement, EditorElementEvent};
 pub mod composer;
+pub mod design;
 pub mod host;
 pub mod testing;
 pub mod widget;

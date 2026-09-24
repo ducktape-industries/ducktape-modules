@@ -1,5 +1,6 @@
 //! The Programs tab: what the registry runs, lists and will change.
 use super::*;
+use ducktape_view_guest::design;
 
 pub(super) fn programs(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
     let network = match &view.network {
@@ -8,10 +9,11 @@ pub(super) fn programs(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
         _ => return quiet("explorer-programs-loading", "Reading the registry…", theme),
     };
     if network.programs.is_empty() && network.views.is_empty() && network.changes.is_empty() {
-        return EmptyState::new(
+        return empty_state(
             "explorer-empty",
             "No programs",
             "The registry of this network runs nothing yet.",
+            theme,
         )
         .into_any_element();
     }
@@ -27,7 +29,7 @@ pub(super) fn programs(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
         .child(mono(entry.program.clone()).flex_1())
         .child(
             div()
-                .text_size(px(12.))
+                .text_size(design::text::SECONDARY)
                 .text_color(theme.muted)
                 .child(plural(entry.params as u64, "param byte", "param bytes")),
         )
@@ -49,7 +51,7 @@ pub(super) fn programs(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
             .child(mono(name.clone()).flex_1())
             .child(
                 div()
-                    .text_size(px(12.))
+                    .text_size(design::text::SECONDARY)
                     .text_color(theme.muted)
                     .child("view only"),
             )
@@ -77,7 +79,7 @@ pub(super) fn programs(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
                     .child(
                         div()
                             .px_1()
-                            .text_size(px(11.))
+                            .text_size(design::text::CAPTION)
                             .text_color(if removal {
                                 theme.danger
                             } else {
@@ -93,7 +95,7 @@ pub(super) fn programs(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
                     .child(mono(change.program().to_string()).flex_1())
                     .child(
                         div()
-                            .text_size(px(12.))
+                            .text_size(design::text::SECONDARY)
                             .text_color(theme.muted)
                             .child(format!("at {}", scheduled.height)),
                     )

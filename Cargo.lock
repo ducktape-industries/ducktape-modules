@@ -671,6 +671,7 @@ dependencies = [
 name = "chat-view"
 version = "0.1.0"
 dependencies = [
+ "abi",
  "chat",
  "ducklink",
  "futures",
