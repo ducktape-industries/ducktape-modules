@@ -226,7 +226,7 @@ fn a_linked_program_s_op_reads_as_its_described_fields() {
 fn an_unknown_program_or_a_bad_payload_reads_as_bytes() {
     let op = decode::decode("mystery", &[1, 2, 3, 4]);
     assert_eq!(op.title, "mystery · 4 bytes");
-    assert_eq!(op.fields, vec![("bytes", "01020304".into())]);
+    assert_eq!(op.fields, vec![("bytes".into(), "01020304".into())]);
     let op = decode::decode("chat", &[0xff; 3]);
     assert_eq!(op.title, "chat · 3 bytes");
 }
@@ -775,4 +775,28 @@ fn a_full_window_renders_inside_the_frame_budget() {
             "{page} drew {bytes} bytes, over its guard {guard}"
         );
     }
+}
+
+/// The snapshot keeps each transaction's decoded op, not its payload: a
+/// 1 MB push in the window does not ride along, and a restored row still
+/// reads as its op.
+#[test]
+fn a_snapshot_keeps_ops_not_payloads() {
+    let mut cx = TestAppContext::new();
+    heavy(&mut cx);
+    cx.open::<Explorer>();
+    cx.run_until_parked();
+    let bytes = cx.snapshot().unwrap();
+    assert!(bytes.len() < 1 << 20, "a snapshot of {} bytes", bytes.len());
+    let mut restored = TestAppContext::new();
+    heavy(&mut restored);
+    restored.restore::<Explorer>(&bytes).unwrap();
+    restored.run_until_parked();
+    let mut big = [0xfe; 32];
+    big[..8].copy_from_slice(&(WINDOW as u64).to_le_bytes());
+    restored.simulate_click("explorer-tab-transactions");
+    restored.run_until_parked();
+    restored.simulate_click(&format!("explorer-tx-{}", abi::hex(&big)));
+    restored.run_until_parked();
+    assert!(restored.has_text("Push · app"), "{:?}", restored.texts());
 }
