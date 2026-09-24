@@ -54,6 +54,9 @@ pub fn list(chat: &Chat, pane: Pane, cx: &mut Context<Chat>, theme: &Theme) -> i
         if let Some(error) = failed {
             return content.child(quiet(error, theme).p_4());
         }
+        if pane == Pane::Thread {
+            return content.child(no_replies(theme));
+        }
         if let Some(room) = &chat.room {
             let name = chat
                 .info(&room.id)
@@ -113,10 +116,19 @@ pub fn list(chat: &Chat, pane: Pane, cx: &mut Context<Chat>, theme: &Theme) -> i
                 super::sidebar::dm_peer(chat).map(|peer| peer.0),
             )
         });
+        // a thread that is only its root says so under it
+        let bare = pane == Pane::Thread
+            && messages.len() == 1
+            && chat
+                .room
+                .as_ref()
+                .and_then(|room| room.thread.as_ref())
+                .is_some_and(|thread| thread.replies.ready().is_some_and(Vec::is_empty));
         let keys = lead
             .then_some("intro".to_owned())
             .into_iter()
             .chain(messages.iter().map(|message| message.id.clone()))
+            .chain(bare.then_some("no-replies".to_owned()))
             .collect::<Vec<_>>();
         let state = list_state(chat, pane, &keys);
         state.set_follow_mode(if pane == Pane::Timeline {
@@ -148,7 +160,10 @@ pub fn list(chat: &Chat, pane: Pane, cx: &mut Context<Chat>, theme: &Theme) -> i
                 }
                 let message_index = index - usize::from(lead);
                 let Some(message) = list_messages.get(message_index).cloned() else {
-                    return div().into_any_element();
+                    return match bare {
+                        true => no_replies(&list_theme).into_any_element(),
+                        false => div().into_any_element(),
+                    };
                 };
                 let unread = unread_seq == Some(message.seq);
                 let card = message::card(chat, message, pane_for_items, window, cx, &list_theme);
@@ -290,4 +305,15 @@ fn intro(name: &str, dm: Option<&str>, theme: &Theme) -> impl IntoElement {
         .text_size(design::text::SECONDARY)
         .text_color(theme.muted)
         .child(detail)
+}
+
+/// A thread with nothing under its root yet.
+fn no_replies(theme: &Theme) -> impl IntoElement {
+    div()
+        .id("chat-thread-no-replies")
+        .px_4()
+        .py_3()
+        .text_size(px(12.))
+        .text_color(theme.muted)
+        .child("No replies yet")
 }

@@ -410,10 +410,15 @@ pub fn composer(
     let empty = crate::composer::Draft::default();
     let draft = chat.drafts.get(&key).unwrap_or(&empty);
     let choices = chat.mention_choices();
+    let commit = match target {
+        Target::Post { .. } => "Send",
+        Target::Edit { .. } => "Save",
+    };
     crate::composer::view::<Chat>(
         draft,
         &key,
         hint,
+        commit,
         editable,
         &choices,
         cx,
