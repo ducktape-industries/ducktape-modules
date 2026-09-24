@@ -171,7 +171,7 @@ fn repo(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
         .into_any_element()
 }
 
-fn chain(forge: &Forge) -> String {
+pub(crate) fn chain(forge: &Forge) -> String {
     if forge.session.chain.is_empty() {
         "network".into()
     } else {

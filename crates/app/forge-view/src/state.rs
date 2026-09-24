@@ -32,6 +32,9 @@ pub struct Forge {
     /// the conversation composer of the open change
     pub(crate) reply: String,
     pub(crate) notice: String,
+    /// the repository whose address was copied last, so its row says so
+    #[serde(skip)]
+    pub(crate) copied: Option<String>,
     pub(crate) layout: Layout,
     #[serde(skip)]
     pub(crate) data: BTreeMap<String, Loaded<Reply>>,
