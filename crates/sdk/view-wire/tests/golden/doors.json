@@ -603,5 +603,15 @@
       "tag": "room"
     },
     "reply": true
+  },
+  {
+    "kind": "notify.post",
+    "request": {
+      "title": "alice mentioned you",
+      "body": "@bob hi",
+      "tag": "room",
+      "link": "duck://chat/room"
+    },
+    "reply": "Banner"
   }
 ]

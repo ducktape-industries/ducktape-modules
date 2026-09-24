@@ -492,6 +492,38 @@ door!(
     NotifyShow, "notify.show", Notice, bool
 );
 
+/// One notice for the host to decide on: `notify.post`. The view asks; the
+/// host logs it in its notification centre and decides whether a banner
+/// reaches the screen (the person's per-view choice, focus, a burst limit).
+/// `link` is a `duck://` link the centre opens when the notice is picked,
+/// or empty.
+#[derive(
+    Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
+)]
+pub struct Post {
+    pub title: String,
+    pub body: String,
+    pub tag: String,
+    pub link: String,
+}
+/// What the host did with a [`Post`].
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
+)]
+pub enum Posted {
+    /// Logged, and a banner was raised.
+    Banner,
+    /// Logged in the centre only: no banner (not yet allowed, silenced,
+    /// in front, over the burst limit, or banners are off).
+    Logged,
+    /// The person blocked this view's notices: dropped, not logged.
+    Blocked,
+}
+door!(
+    /// `notify.post`: hand the host a notice; it says what it did.
+    NotifyPost, "notify.post", Post, Posted
+);
+
 /// Every kind, so a host can assert it answers each one.
 pub const ALL: &[&str] = &[
     "rpc.query",
@@ -525,6 +557,7 @@ pub const ALL: &[&str] = &[
     AudioWrite::KIND,
     AudioStop::KIND,
     NotifyShow::KIND,
+    NotifyPost::KIND,
 ];
 
 /// The `<capability>` half of every kind in [`ALL`]: the names a view's
