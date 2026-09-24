@@ -6,7 +6,7 @@
 //! reply is folded to rows as it lands.
 use abi::hex;
 use ducktape_view_guest::doors::Live;
-use ducktape_view_guest::doors::{Program, Query};
+use ducktape_view_guest::doors::Query;
 use ducktape_view_guest::export_view;
 use ducktape_view_guest::host::{Refusal, malformed};
 use ducktape_view_guest::view::Loaded;
@@ -20,14 +20,7 @@ use futures::StreamExt;
 
 use serde::{Deserialize, Serialize};
 
-/// The validator set's query surface, as this view reads it.
-struct Valset;
-impl Program for Valset {
-    const NAME: &'static str = valset::PROGRAM;
-    type Op = ();
-    type Query = valset::Query;
-    type Reply = valset::Reply;
-}
+use valset::view::Valset;
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct Nodes {

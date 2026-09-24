@@ -5,8 +5,6 @@ use abi::Refusal;
 use chat::{Block, ChatMsg, ChatViewQuery, ChatViewReply, PostPolicy};
 use store::{Reads, Writes};
 
-pub const CHAT: &str = "chat";
-
 pub fn create<S: Writes>(s: &mut S, repo: &str, change: &Change) {
     emit(
         s,
@@ -18,7 +16,7 @@ pub fn create<S: Writes>(s: &mut S, repo: &str, change: &Change) {
     );
 }
 fn emit<S: Writes>(s: &mut S, message: ChatMsg) {
-    s.emit(CHAT, abi::encode(&message));
+    s.emit(chat::PROGRAM, abi::encode(&message));
 }
 pub fn message_id<S: Writes>(s: &mut S) -> Result<String, Refusal> {
     let key = b"system-message-seq";
@@ -48,7 +46,7 @@ pub fn message<S: Reads>(s: &S, id: &str) -> Result<Option<chat::MsgRow>, Refusa
     let request = abi::encode(&ChatViewQuery::MessageById {
         message_id: id.into(),
     });
-    let bytes = s.query(CHAT, request)?;
+    let bytes = s.query(chat::PROGRAM, request)?;
     match abi::decode::<ChatViewReply>(&bytes).map_err(|e| storage(e.sentence))? {
         ChatViewReply::Message(row) => Ok(row),
         _ => Err(Refusal::new(
@@ -67,7 +65,7 @@ pub fn attention<S: Reads>(
         channel_id: channel.into(),
         author: chat::Party::Key(key.to_vec()),
     });
-    let bytes = s.query(CHAT, request)?;
+    let bytes = s.query(chat::PROGRAM, request)?;
     match abi::decode::<ChatViewReply>(&bytes).map_err(|e| storage(e.sentence))? {
         ChatViewReply::Attention(row) => Ok(row),
         _ => Err(Refusal::new(

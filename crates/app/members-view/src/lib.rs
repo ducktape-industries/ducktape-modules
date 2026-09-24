@@ -6,7 +6,7 @@
 //! reply is folded to [`Row`]s as it lands: nothing the programs speak is
 //! kept across a snapshot, only what the screen shows.
 use ducktape_view_guest::doors::Live;
-use ducktape_view_guest::doors::{Program, Query};
+use ducktape_view_guest::doors::Query;
 use ducktape_view_guest::export_view;
 use ducktape_view_guest::host::{Refusal, malformed};
 use ducktape_view_guest::view::Loaded;
@@ -19,23 +19,9 @@ use futures::StreamExt;
 use module_registry::Page;
 use serde::{Deserialize, Serialize};
 
-/// The identity program's query surface, as this view reads it.
-struct Identity;
-impl Program for Identity {
-    const NAME: &'static str = identity::PROGRAM;
-    type Op = ();
-    type Query = identity::Query;
-    type Reply = identity::Reply;
-}
+use identity::view::Identity;
 
-/// The validator set, read for the standing beside a member.
-struct Valset;
-impl Program for Valset {
-    const NAME: &'static str = valset::PROGRAM;
-    type Op = ();
-    type Query = valset::Query;
-    type Reply = valset::Reply;
-}
+use valset::view::Valset;
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct Members {

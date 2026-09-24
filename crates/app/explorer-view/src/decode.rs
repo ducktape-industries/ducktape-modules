@@ -28,8 +28,8 @@ fn described<T: borsh::BorshDeserialize>(
 
 pub fn decode(program: &str, payload: &[u8]) -> Op {
     let described = match program {
-        "chat" => described(payload, chat::describe),
-        "forge" => described(payload, forge::describe),
+        chat::PROGRAM => described(payload, chat::describe),
+        forge::PROGRAM => described(payload, forge::describe),
         identity::PROGRAM => described(payload, identity::describe),
         valset::PROGRAM => described(payload, valset::describe),
         module_registry::PROGRAM => described(payload, module_registry::describe),

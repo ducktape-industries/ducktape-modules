@@ -17,6 +17,11 @@
 //! `attention/<ch>/<author>/<!last_reply>` stores a Borsh root sequence; one
 //! entry per answered thread lets callers find the latest reply without scanning messages.
 pub mod message;
+#[cfg(feature = "view")]
+pub mod view;
+
+/// The name this program runs under.
+pub const PROGRAM: &str = "chat";
 
 use std::collections::BTreeSet;
 

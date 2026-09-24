@@ -7,7 +7,7 @@ use abi::{Env, Origin, Refusal, Scheme, reason};
 use guest::{Execute, Program, Query};
 use store::{Page, Reads, decoded, invalid};
 
-const PROGRAM: &str = "chat";
+use crate::PROGRAM;
 
 fn bad(e: impl ToString) -> Refusal {
     invalid(e.to_string())

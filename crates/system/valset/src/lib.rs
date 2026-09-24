@@ -6,6 +6,8 @@ mod program;
 mod rules;
 #[cfg(test)]
 mod tests;
+#[cfg(feature = "view")]
+pub mod view;
 
 pub use rules::{execute, init, query};
 

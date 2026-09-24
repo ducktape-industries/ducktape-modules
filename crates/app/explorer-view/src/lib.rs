@@ -10,8 +10,8 @@
 //! finds. The window is the last [`WINDOW`] blocks, read a page at a time
 //! and then followed at the head as `rpc.status` moves.
 use ducktape_view_guest::doors::{
-    Block, BlockGet, BlockPage, BlockRef, Blocks, ClipboardWrite, NodeStatus, Program, Props,
-    Query, Route as LinkRoute, Ticks,
+    Block, BlockGet, BlockPage, BlockRef, Blocks, ClipboardWrite, NodeStatus, Props, Query,
+    Route as LinkRoute, Ticks,
 };
 use ducktape_view_guest::export_view;
 use ducktape_view_guest::host::{Refusal, malformed};
@@ -36,29 +36,11 @@ const PAGE: u32 = 20;
 /// How often the head is re-read, in milliseconds.
 const TICK: i64 = 2_000;
 
-struct Registry;
-impl Program for Registry {
-    const NAME: &'static str = registry::PROGRAM;
-    type Op = ();
-    type Query = registry::Query;
-    type Reply = registry::Reply;
-}
+use module_registry::view::Registry;
 
-struct Identity;
-impl Program for Identity {
-    const NAME: &'static str = identity::PROGRAM;
-    type Op = ();
-    type Query = identity::Query;
-    type Reply = identity::Reply;
-}
+use identity::view::Identity;
 
-struct Valset;
-impl Program for Valset {
-    const NAME: &'static str = valset::PROGRAM;
-    type Op = ();
-    type Query = valset::Query;
-    type Reply = valset::Reply;
-}
+use valset::view::Valset;
 
 /// Where the explorer is: a list under a tab, or one thing opened from it.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
