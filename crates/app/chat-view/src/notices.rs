@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 
 use ducktape_view_guest::Context;
-use ducktape_view_guest::doors::{HostBadge, NotifyPost, Post};
+use ducktape_view_guest::doors::{HostBadge, NotifyPost, NotifyRead, Post};
 
 use crate::chat::{Block, ChannelInfo, Mark, MsgRow, Party};
 use crate::client::{self, NameDirectory};
@@ -25,7 +25,7 @@ impl Chat {
                 .map(|info| (info.channel.id.clone(), info.head_seq))
                 .collect()
         });
-        self.channels_arrived(channels);
+        self.channels_arrived(channels, cx);
         if let Some(me) = self.my_account() {
             // the count is not kept, the read cursors are: the first list
             // a view that started over (a reload carries its state, not the
@@ -126,6 +126,18 @@ impl Chat {
         .detach();
     }
 
+    /// `room` is read: the host's rows for it, under the tag its notices
+    /// carry, are read too.
+    pub(crate) fn read_notices(&self, room: &str, cx: &mut Context<Self>) {
+        let (Some(me), Some(info)) = (self.my_account(), self.info(room)) else {
+            return;
+        };
+        let empty = NameDirectory::default();
+        let names = self.names.ready().unwrap_or(&empty);
+        cx.host()
+            .notify::<NotifyRead>(tag(me, room, &info.channel.name, names));
+    }
+
     /// The tab badge: messages meant for the reader in rooms still unread.
     /// A room read, or on screen, drops out.
     pub(crate) fn settle_badge(&mut self, cx: &mut Context<Self>) {
@@ -163,16 +175,25 @@ fn notice(row: &MsgRow, me: u64, name: &str, chain: &str, names: &NameDirectory)
     let sender = client::author_display(&row.author, names);
     Some(Post {
         title: match direct {
-            true => sender.clone(),
+            true => sender,
             false => format!("{sender} mentioned you"),
         },
         body: client::message_body(&row.blocks, names),
-        tag: match direct {
-            true => format!("@{sender}"),
-            false => format!("#{name}"),
-        },
+        tag: tag(me, &row.channel_id, name, names),
         link: crate::chat::channel_link(chain, &row.channel_id, Some(row.seq)),
     })
+}
+
+/// The tag a room's notices go under: `@peer` for a direct room, the
+/// channel's `#name` otherwise.
+fn tag(me: u64, room: &str, name: &str, names: &NameDirectory) -> String {
+    match client::dm_peer_of(me, room) {
+        Some(peer) => format!(
+            "@{}",
+            client::author_display(&format!("acct:{peer}"), names)
+        ),
+        None => format!("#{name}"),
+    }
 }
 
 fn mentions(blocks: &[Block], me: u64) -> bool {

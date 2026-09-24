@@ -73,6 +73,7 @@ fn quiet_doors(cx: &mut TestAppContext) {
     cx.host().never::<api::HostRoute>();
     cx.host().never::<ducktape_view_guest::doors::HostBadge>();
     cx.host().never::<ducktape_view_guest::doors::NotifyPost>();
+    cx.host().never::<ducktape_view_guest::doors::NotifyRead>();
     cx.host()
         .handle::<ducktape_view_guest::doors::StoreGet>(|_| Ok(None));
     cx.host().never::<ducktape_view_guest::doors::StoreSet>();
@@ -583,10 +584,13 @@ fn unread_rooms_carry_a_dot_and_the_open_room_a_divider() {
     let (mut cx, view) = opened();
     view.update(&mut cx, |chat, window, cx| {
         chat.open("other".into(), window, cx);
-        chat.channels_arrived(vec![
-            channel("general", "General", 9),
-            channel("other", "Other", 0),
-        ]);
+        chat.channels_arrived(
+            vec![
+                channel("general", "General", 9),
+                channel("other", "Other", 0),
+            ],
+            cx,
+        );
         cx.notify();
     });
     cx.run_until_parked();
@@ -600,7 +604,7 @@ fn unread_rooms_carry_a_dot_and_the_open_room_a_divider() {
             reaches_head: true,
             ..Room::default()
         });
-        chat.channels_arrived(vec![channel("general", "General", 9)]);
+        chat.channels_arrived(vec![channel("general", "General", 9)], cx);
         assert_eq!(chat.reads.boundary, 3);
         cx.notify();
     });
@@ -899,10 +903,10 @@ fn export_chat_screens() {
 
 /// A direct message landing in a room the reader is not in is handed to the
 /// host as a notice linking to it, and counted on the tab until she opens
-/// the room.
+/// the room; opening it reads the host's rows under the notice's tag.
 #[test]
 fn a_direct_message_elsewhere_is_a_notice_and_a_badge_until_read() {
-    use ducktape_view_guest::doors::{HostBadge, NotifyPost};
+    use ducktape_view_guest::doors::{HostBadge, NotifyPost, NotifyRead};
     let (mut cx, view) = opened();
     cx.host().handle::<ViewOf<ChatApi>>(|query| {
         Ok(match query {
@@ -933,12 +937,14 @@ fn a_direct_message_elsewhere_is_a_notice_and_a_badge_until_read() {
     );
     assert_eq!(posts[0].link, "duck://testnet-0a1b2c3d/chat/dm-7-8/2");
     assert_eq!(cx.host().asked::<HostBadge>().last(), Some(&1));
+    assert!(cx.host().asked::<NotifyRead>().is_empty());
     view.update(&mut cx, |chat, window, cx| {
         cx.notify();
         chat.choose("dm-7-8".into(), window, cx)
     });
     cx.run_until_parked();
     assert_eq!(cx.host().asked::<HostBadge>().last(), Some(&0));
+    assert_eq!(cx.host().asked::<NotifyRead>(), [posts[0].tag.clone()]);
 }
 
 /// A room of 256 rows, each with markup, a reaction and a thread, renders
