@@ -222,7 +222,7 @@ fn the_gutter_of_a_drawn_line_is_the_comment_button() {
     cx.simulate_click("forge-start-review");
     cx.run_until_parked();
     assert!(
-        cx.has_text("Review pinned at 26607f52 · 0 pending"),
+        cx.has_text("Review pinned at 26607f52…a84d · 0 pending"),
         "{:?}",
         cx.texts()
     );

@@ -20,7 +20,7 @@ use ducktape_view_guest::{Div, FontWeight, Stateful};
 
 use crate::Forge;
 use crate::state::{Dock, RepoTab};
-use components::{button, chip, heading, id, quiet};
+use components::{badge, button, heading, id, quiet};
 use forge::Reply;
 
 pub(crate) fn render(forge: &mut Forge, cx: &mut Context<Forge>) -> impl IntoElement {
@@ -120,11 +120,11 @@ fn repo(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
     if let Some((info, _, _)) = forge.repo() {
         let names = forge.names.ready();
         let owner = names.map_or_else(
-            || crate::state::short(&abi::hex(&info.repo.owner)),
+            || crate::ui::components::short_hex(&abi::hex(&info.repo.owner)),
             |names| names.key(&info.repo.owner),
         );
         title = title
-            .child(chip(
+            .child(badge(
                 id("forge-repo-owner"),
                 format!("owner {owner}"),
                 theme.muted,
@@ -146,22 +146,19 @@ fn repo(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
     let mut tabs = div().id(id("forge-tabs")).flex().gap_1();
     for tab in RepoTab::ALL {
         let open = cx.listener(move |forge, _: &ClickEvent, _, cx| forge.open_tab(tab, cx));
-        tabs = tabs.child(
-            button(
-                id(format!("forge-tab-{}", tab.slug())),
-                tab.label(),
-                theme,
-                open,
-            )
-            .selected(forge.nav().tab == tab)
-            .tab(true),
-        );
+        tabs = tabs.child(design::tab(
+            id(format!("forge-tab-{}", tab.slug())),
+            tab.label(),
+            forge.nav().tab == tab,
+            theme,
+            open,
+        ));
     }
     let about = cx.listener(|forge, _: &ClickEvent, _, cx| forge.toggle_dock(Dock::About, cx));
     tabs = tabs.child(div().flex_1()).child(
         button(id("forge-dock-about"), "About", theme, about)
             .selected(forge.nav().dock == Some(Dock::About))
-            .quiet(true),
+            .kind(design::Kind::Quiet),
     );
     let body: AnyElement = match forge.nav().tab {
         RepoTab::Readme => code::readme(forge, cx, theme),
@@ -220,7 +217,7 @@ fn ref_picker(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyEleme
                 pick,
             )
             .selected(name == head)
-            .quiet(true),
+            .kind(design::Kind::Quiet),
         );
     }
     picker.into_any_element()
@@ -323,7 +320,7 @@ fn about(forge: &Forge, theme: &Theme) -> AnyElement {
         .child(fact(
             "Owner",
             names.map_or_else(
-                || crate::state::short(&abi::hex(&info.repo.owner)),
+                || crate::ui::components::short_hex(&abi::hex(&info.repo.owner)),
                 |names| names.key(&info.repo.owner),
             ),
             theme,
@@ -341,7 +338,7 @@ fn about(forge: &Forge, theme: &Theme) -> AnyElement {
     for key in &writers.items {
         column = column.child(quiet(
             names.map_or_else(
-                || crate::state::short(&abi::hex(key)),
+                || crate::ui::components::short_hex(&abi::hex(key)),
                 |names| names.key(key),
             ),
             theme,

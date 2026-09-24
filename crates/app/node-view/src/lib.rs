@@ -201,7 +201,7 @@ fn validators(validators: &[String], theme: &Theme) -> AnyElement {
                         .flex_1()
                         .font_family(design::fonts::FAMILY_MONO)
                         .text_size(design::text::SECONDARY)
-                        .child(short_id(validator, 16)),
+                        .child(design::short_hex(validator)),
                 )
         }))
         .into_any_element()
@@ -229,14 +229,14 @@ fn members(members: &[Member], theme: &Theme) -> impl IntoElement {
                         .flex_1()
                         .font_family(design::fonts::FAMILY_MONO)
                         .text_size(design::text::SECONDARY)
-                        .child(short_id(&member.key, 16)),
+                        .child(design::short_hex(&member.key)),
                 )
                 .child(
                     div()
                         .max_w(px(220.))
                         .truncate()
                         .text_size(design::text::SECONDARY)
-                        .child(short_id(&member.address, 28)),
+                        .child(member.address.clone()),
                 )
                 .child(
                     div()
@@ -248,14 +248,6 @@ fn members(members: &[Member], theme: &Theme) -> impl IntoElement {
                         .child(member.standing.clone()),
                 )
         }))
-}
-
-fn short_id(id: &str, keep: usize) -> String {
-    let mut head: String = id.chars().take(keep).collect();
-    if id.chars().count() > keep {
-        head.push('…');
-    }
-    head
 }
 
 /// The set, read twice: the consensus keys the program answers, then every

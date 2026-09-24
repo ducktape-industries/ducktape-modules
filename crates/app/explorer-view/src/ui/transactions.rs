@@ -75,7 +75,7 @@ pub(super) fn tx(view: &Explorer, hash: &[u8; 32], cx: Cx, theme: &Theme) -> Any
                 .flex()
                 .items_center()
                 .gap_2()
-                .child(avatar(&account.name, 20., theme))
+                .child(design::avatar(&account.name, px(20.), theme))
                 .child(link(
                     "explorer-from".into(),
                     account.name.clone(),
@@ -107,8 +107,7 @@ pub(super) fn tx(view: &Explorer, hash: &[u8; 32], cx: Cx, theme: &Theme) -> Any
         .gap_2()
         .child(mono(tx.target.clone()))
         .children(code.map(|code| {
-            let tail = &code[code.len().saturating_sub(4)..];
-            mono(format!("code {}…{tail}", &code[..4.min(code.len())])).text_color(theme.faint)
+            mono(format!("code {}", design::short_hex(&code))).text_color(theme.faint)
         }));
     let op = tx.op();
     let operation = div()

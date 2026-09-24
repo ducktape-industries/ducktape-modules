@@ -72,7 +72,6 @@ fn repo_row(
             .invisible()
             .group_hover(group.clone(), |style| style.visible()),
     };
-    let initial = design::initial(&owner);
     div()
         .id(id(format!("forge-repo-{name}")))
         .group(group)
@@ -134,17 +133,8 @@ fn repo_row(
                         .items_center()
                         .gap_1p5()
                         .child(
-                            div()
-                                .size(px(18.))
-                                .flex_shrink_0()
-                                .rounded_full()
-                                .bg(theme.surface_raised)
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .text_size(px(10.))
-                                .font_weight(ducktape_view_guest::FontWeight::SEMIBOLD)
-                                .child(initial),
+                            design::avatar(&owner, px(18.), theme)
+                                .font_weight(ducktape_view_guest::FontWeight::SEMIBOLD),
                         )
                         .child(div().min_w(px(0.)).truncate().child(owner)),
                 )
@@ -226,7 +216,7 @@ pub(crate) fn overview(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) ->
     let mut list = scroller("forge-repos-list").p_0().gap_0();
     for info in rows {
         let owner = names.map_or_else(
-            || crate::state::short(&abi::hex(&info.repo.owner)),
+            || crate::ui::components::short_hex(&abi::hex(&info.repo.owner)),
             |names| names.key(&info.repo.owner),
         );
         list = list.child(repo_row(forge, info, owner, cx, theme));
@@ -366,7 +356,7 @@ fn header(
         .child(div().flex_1())
         .child(
             button(id("forge-new-repo"), "+ New", theme, new)
-                .primary(true)
+                .kind(design::Kind::Primary)
                 .enabled(forge.session.connected),
         )
         .into_any_element()
@@ -437,7 +427,10 @@ fn dialog(form: &crate::state::NewRepo, cx: &mut Context<Forge>, theme: &Theme) 
             )
             .child(div().flex_1())
             .child(button(id("forge-new-repo-cancel"), "Cancel", theme, cancel))
-            .child(button(id("forge-new-repo-submit"), "Create", theme, create).primary(true)),
+            .child(
+                button(id("forge-new-repo-submit"), "Create", theme, create)
+                    .kind(design::Kind::Primary),
+            ),
     )
     .into_any_element()
 }

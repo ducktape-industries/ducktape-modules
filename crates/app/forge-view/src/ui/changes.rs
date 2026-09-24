@@ -5,7 +5,7 @@ use ducktape_view_guest::prelude::*;
 
 use crate::Forge;
 use crate::state::{ChangeForm, Filter};
-use crate::ui::components::{button, chip, empty_state, heading, id, quiet, ref_label, row};
+use crate::ui::components::{badge, button, empty_state, heading, id, quiet, ref_label, row};
 use crate::ui::{pending, scroller, staged};
 use forge::{ChangeState, ChangeSummary, Judgment, Reply, ReviewCounts};
 
@@ -71,7 +71,7 @@ pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
         let n = summary.n;
         let open = cx.listener(move |forge, _: &ClickEvent, _, cx| forge.open_change(Some(n), cx));
         let author = names.map_or_else(
-            || crate::state::short(&abi::hex(&summary.author)),
+            || crate::ui::components::short_hex(&abi::hex(&summary.author)),
             |names| names.key(&summary.author),
         );
         let mut line = row(id(format!("forge-change-{n}")), theme)
@@ -102,7 +102,7 @@ pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
             .cell(verdicts(&summary.verdicts, n, theme));
         if let Some(judgment) = judgment {
             if judgment.requested {
-                line = line.cell(chip(
+                line = line.cell(badge(
                     id(format!("forge-change-requested-{n}")),
                     "review requested",
                     theme.accent_foreground,
@@ -110,7 +110,7 @@ pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
                 ));
             }
             if judgment.replies.is_some() {
-                line = line.cell(chip(
+                line = line.cell(badge(
                     id(format!("forge-change-unread-{n}")),
                     "new reply",
                     theme.warning,
@@ -136,7 +136,7 @@ pub(crate) fn state_chip(state: ChangeState, n: u64, theme: &Theme) -> AnyElemen
         ChangeState::Merged => ("merged", theme.accent_foreground, theme.accent_soft),
         ChangeState::Closed => ("closed", theme.muted, theme.surface_raised),
     };
-    chip(
+    badge(
         id(format!("forge-change-state-{n}")),
         label,
         foreground,
@@ -149,7 +149,7 @@ fn verdicts(counts: &ReviewCounts, n: u64, theme: &Theme) -> AnyElement {
     if counts.approve + counts.request_changes + counts.comment == 0 {
         return div().into_any_element();
     }
-    chip(
+    badge(
         id(format!("forge-change-verdicts-{n}")),
         format!(
             "✓{} ✗{} 💬{}",
@@ -306,7 +306,7 @@ pub(crate) fn form(
                     theme,
                     submit,
                 )
-                .primary(true)
+                .kind(design::Kind::Primary)
                 .enabled(forge.session.connected),
             ),
     )

@@ -2,44 +2,9 @@
 
 use ducktape_view_guest::design;
 use ducktape_view_guest::prelude::*;
-use ducktape_view_guest::{
-    AnyElement, App, ClickEvent, Context, ParentElement, Styled, Theme, Window, div, px,
-};
+use ducktape_view_guest::{AnyElement, ClickEvent, Context, ParentElement, Styled, Theme, div, px};
 
 use crate::Chat;
-
-type Press = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
-
-fn dialog_button(
-    id: &'static str,
-    label: &'static str,
-    theme: &Theme,
-    press: Option<Press>,
-) -> AnyElement {
-    let enabled = press.is_some();
-    let button = div()
-        .id(id)
-        .px_2()
-        .py_1()
-        .bg(theme.surface)
-        .text_color(if enabled {
-            theme.foreground
-        } else {
-            theme.muted
-        })
-        .role(ducktape_view_guest::Role::Button)
-        .aria_disabled(!enabled)
-        .child(label);
-    match press {
-        Some(press) => button
-            .focusable()
-            .hover(|style| style.bg(theme.surface_raised))
-            .active(|style| style.bg(theme.accent_soft))
-            .on_click(press)
-            .into_any_element(),
-        None => button.into_any_element(),
-    }
-}
 
 pub fn channel_create(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Option<AnyElement> {
     let create = chat.create.as_ref()?;
@@ -91,10 +56,6 @@ pub fn channel_create(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Opt
             chat.create_channel(cx)
         }));
     }
-    let voice = (!busy).then(|| Box::new(voice) as Press);
-    let members = (!busy && !create.voice).then(|| Box::new(members) as Press);
-    let cancel = (!busy).then(|| Box::new(cancel) as Press);
-    let submit = can_submit.then(|| Box::new(submit) as Press);
     let mut card = div()
         .id("chat-create-card")
         .max_w(px(480.))
@@ -118,26 +79,32 @@ pub fn channel_create(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Opt
                 .child("Channel name"),
         )
         .child(name)
-        .child(dialog_button(
-            "chat-create-voice",
-            if create.voice {
-                "Voice room: On"
-            } else {
-                "Voice room: Off"
-            },
-            theme,
-            voice,
-        ))
-        .child(dialog_button(
-            "chat-create-members",
-            if create.members_only {
-                "Members only: On"
-            } else {
-                "Members only: Off"
-            },
-            theme,
-            members,
-        ));
+        .child(
+            design::button(
+                "chat-create-voice",
+                if create.voice {
+                    "Voice room: On"
+                } else {
+                    "Voice room: Off"
+                },
+                theme,
+                voice,
+            )
+            .enabled(!busy),
+        )
+        .child(
+            design::button(
+                "chat-create-members",
+                if create.members_only {
+                    "Members only: On"
+                } else {
+                    "Members only: Off"
+                },
+                theme,
+                members,
+            )
+            .enabled(!busy && !create.voice),
+        );
     if !create.error.is_empty() {
         card = card.child(
             div()
@@ -155,12 +122,10 @@ pub fn channel_create(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Opt
         );
     }
     card = card
-        .child(dialog_button("chat-create-cancel", "Cancel", theme, cancel))
-        .child(dialog_button(
-            "chat-create-submit",
-            "Create channel",
-            theme,
-            submit,
-        ));
+        .child(design::button("chat-create-cancel", "Cancel", theme, cancel).enabled(!busy))
+        .child(
+            design::button("chat-create-submit", "Create channel", theme, submit)
+                .enabled(can_submit),
+        );
     Some(card.into_any_element())
 }

@@ -95,7 +95,7 @@ pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
                 .child(div().flex_1())
                 .child(
                     button(id("forge-settings-save"), "Save", theme, save)
-                        .primary(true)
+                        .kind(ducktape_view_guest::design::Kind::Primary)
                         .enabled(forge.session.connected),
                 ),
         )
@@ -150,7 +150,7 @@ pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
     let names = forge.names.ready();
     for key in &writers.items {
         let label = names.map_or_else(
-            || crate::state::short(&abi::hex(key)),
+            || crate::ui::components::short_hex(&abi::hex(key)),
             |names| names.key(key),
         );
         let revoke = cx.listener({

@@ -103,7 +103,7 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
                 Some((peer, _)) => format!("Message {peer}"),
                 None => {
                     let name = chat.info(&room.id).map_or_else(
-                        || crate::client::short_id(&room.id, 8),
+                        || ducktape_view_guest::design::short_hex(&room.id),
                         |info| info.channel.name.clone(),
                     );
                     match crate::chat::dm_peers(&room.id) {
@@ -131,7 +131,7 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
 fn header(chat: &Chat, room: &Room, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement {
     let info = chat.info(&room.id);
     let name = info.map_or_else(
-        || crate::client::short_id(&room.id, 8),
+        || ducktape_view_guest::design::short_hex(&room.id),
         |info| info.channel.name.clone(),
     );
     let details = cx.listener(|chat, _: &ClickEvent, _window, cx| {

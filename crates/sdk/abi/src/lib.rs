@@ -85,13 +85,17 @@ pub fn unhex(text: &str) -> Option<Vec<u8>> {
         .collect()
 }
 
-/// Bytes as a person reads them: all of them in hex up to 32, else their
-/// count and the first eight.
+/// Bytes as a person reads them: a key or hash up to 32 bytes as
+/// [`design::short_hex`], else their count and the same short form.
 pub fn preview(bytes: &[u8]) -> String {
     match bytes.len() {
         0 => "0 bytes".into(),
-        1..=32 => hex(bytes),
-        len => format!("{len} bytes · {}…", hex(&bytes[..8])),
+        1..=32 => design::short_hex(&hex(bytes)),
+        // the head and tail short_hex keeps, without hexing the whole payload
+        len => format!(
+            "{len} bytes · {}",
+            design::short_hex(&(hex(&bytes[..8]) + &hex(&bytes[len - 2..])))
+        ),
     }
 }
 

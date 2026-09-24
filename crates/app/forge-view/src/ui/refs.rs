@@ -4,7 +4,7 @@ use ducktape_view_guest::design;
 use ducktape_view_guest::prelude::*;
 
 use crate::Forge;
-use crate::ui::components::{button, chip, empty_state, id, quiet, ref_label, row, short_oid};
+use crate::ui::components::{badge, button, empty_state, id, quiet, ref_label, row, short_hex};
 use crate::ui::{pending, scroller, staged};
 use forge::{Mergeability, Query, Reply, Revision};
 
@@ -80,7 +80,7 @@ pub(crate) fn render(
                     .truncate()
                     .child(crate::ui::bold(label.clone())),
             )
-            .cell(chip(
+            .cell(badge(
                 id(format!("forge-ref-kind-{label}")),
                 if tag { "tag" } else { "branch" },
                 theme.muted,
@@ -92,7 +92,7 @@ pub(crate) fn render(
                     .font_family(design::fonts::FAMILY_MONO)
                     .text_size(design::text::SECONDARY)
                     .text_color(theme.muted)
-                    .child(short_oid(&info.target)),
+                    .child(short_hex(&info.target)),
             )
             .cell(standing(forge, &name, head, theme))
             .cell(div().flex_1());

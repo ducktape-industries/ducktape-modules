@@ -340,28 +340,19 @@ fn reactions(chat: &Chat, menu: &Menu, cx: &mut Context<Chat>, theme: &Theme) ->
                 cx.notify();
             });
             tabs = tabs.child(
-                div()
-                    .id(format!("chat-reaction-tab-{}", category.name))
-                    .flex_1()
-                    .h_full()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .text_size(px(14.))
-                    .border_b_2()
-                    .border_color(if chosen {
-                        theme.accent
-                    } else {
-                        theme.background
-                    })
-                    .role(Role::Tab)
-                    .aria_label(category.name)
-                    .aria_selected(chosen)
-                    .focusable()
-                    .cursor_pointer()
-                    .hover(|style| style.bg(theme.surface_raised))
-                    .on_click(open)
-                    .child(category.glyph),
+                design::tab(
+                    format!("chat-reaction-tab-{}", category.name),
+                    category.glyph,
+                    chosen,
+                    theme,
+                    open,
+                )
+                .flex_1()
+                .h_full()
+                .justify_center()
+                .text_size(px(14.))
+                .aria_label(category.name)
+                .cursor_pointer(),
             );
         }
         let category = &emoji::CATEGORIES[tab];

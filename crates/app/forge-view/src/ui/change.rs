@@ -7,7 +7,7 @@ use crate::Forge;
 use crate::state::{ChangeTab, Dock, verdict_label};
 use crate::ui::changes::{revision_name, state_chip};
 use crate::ui::components::{
-    button, chip, empty_state, heading, id, path_text, quiet, ref_label, row, short_oid,
+    badge, button, empty_state, heading, id, path_text, quiet, ref_label, row, short_hex,
 };
 use crate::ui::{commits, diff, pending, scroller, staged};
 use forge::{ChangeState, Query, Reply, Verdict};
@@ -66,7 +66,7 @@ fn header(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
     let merge = cx.listener(|forge, _: &ClickEvent, _, cx| forge.merge(cx));
     let names = forge.names.ready();
     let author = names.map_or_else(
-        || crate::state::short(&abi::hex(&change.author)),
+        || crate::ui::components::short_hex(&abi::hex(&change.author)),
         |names| names.key(&change.author),
     );
     let refusal = forge.merge_refusal();
@@ -95,29 +95,26 @@ fn header(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
         ))
         .child(div().flex_1());
     if let Some(head) = source {
-        top = top.child(quiet(format!("head {}", short_oid(head)), theme));
+        top = top.child(quiet(format!("head {}", short_hex(head)), theme));
     }
     top = top
         .child(button(id("forge-edit-change"), "Edit", theme, edit).enabled(open && mine))
         .child(button(id("forge-close-change"), "Close", theme, close).enabled(open))
         .child(
             button(id("forge-merge"), "Merge", theme, merge)
-                .primary(true)
+                .kind(design::Kind::Primary)
                 .enabled(refusal.is_empty() && forge.session.connected),
         );
     let mut bar = div().id(id("forge-change-tabs")).flex().gap_1();
     for tab in ChangeTab::ALL {
         let pick = cx.listener(move |forge, _: &ClickEvent, _, cx| forge.open_change_tab(tab, cx));
-        bar = bar.child(
-            button(
-                id(format!("forge-change-tab-{}", tab.slug())),
-                tab.label(),
-                theme,
-                pick,
-            )
-            .selected(forge.nav().change_tab == tab)
-            .tab(true),
-        );
+        bar = bar.child(design::tab(
+            id(format!("forge-change-tab-{}", tab.slug())),
+            tab.label(),
+            forge.nav().change_tab == tab,
+            theme,
+            pick,
+        ));
     }
     bar = bar.child(div().flex_1());
     for dock in Dock::CHANGE {
@@ -178,7 +175,7 @@ fn conversation(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyEle
     let names = forge.names.ready();
     for review in &reviews.items {
         let author = names.map_or_else(
-            || crate::state::short(&abi::hex(&review.author)),
+            || crate::ui::components::short_hex(&abi::hex(&review.author)),
             |names| names.key(&review.author),
         );
         let outdated = forge.outdated(&review.draft.commit_oid);
@@ -196,7 +193,7 @@ fn conversation(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyEle
                     .items_center()
                     .gap_2()
                     .child(crate::ui::bold(author))
-                    .child(chip(
+                    .child(badge(
                         id(format!("forge-review-verdict-{}", review.id)),
                         verdict_label(review.draft.verdict),
                         match review.draft.verdict {
@@ -211,11 +208,11 @@ fn conversation(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyEle
                         },
                     ))
                     .child(quiet(
-                        format!("at {}", short_oid(&review.draft.commit_oid)),
+                        format!("at {}", short_hex(&review.draft.commit_oid)),
                         theme,
                     ))
                     .when(outdated, |element| {
-                        element.child(chip(
+                        element.child(badge(
                             id(format!("forge-review-outdated-{}", review.id)),
                             "outdated",
                             theme.warning,
@@ -336,7 +333,7 @@ fn composer(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement
         )
         .child(
             button(id("forge-reply-send"), "Send", theme, send)
-                .primary(true)
+                .kind(design::Kind::Primary)
                 .enabled(forge.session.connected && !forge.reply.trim().is_empty()),
         )
         .into_any_element()
@@ -442,7 +439,7 @@ fn file_tree(forge: &Forge, query: &Query, cx: &mut Context<Forge>, theme: &Them
                 theme,
             ));
         if drafts + landed > 0 {
-            line = line.cell(chip(
+            line = line.cell(badge(
                 id(format!("forge-file-comments-{label}")),
                 format!("💬{}", drafts + landed),
                 theme.accent_foreground,
@@ -486,7 +483,7 @@ fn review_bar(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyEleme
             .child(div().flex_1())
             .child(
                 button(id("forge-start-review"), "Start review", theme, start)
-                    .primary(true)
+                    .kind(design::Kind::Primary)
                     .enabled(forge.session.connected && forge.me_key().is_some()),
             )
             .into_any_element();
@@ -507,7 +504,7 @@ fn review_bar(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyEleme
                 .child(quiet(
                     format!(
                         "Review pinned at {} · {} pending",
-                        short_oid(&review.commit),
+                        short_hex(&review.commit),
                         review.comments.len()
                     ),
                     theme,
@@ -516,7 +513,7 @@ fn review_bar(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyEleme
                 .child(button(id("forge-cancel-review"), "Discard", theme, cancel))
                 .child(
                     button(id("forge-finish-review"), "Finish review", theme, finishing)
-                        .primary(true)
+                        .kind(design::Kind::Primary)
                         .enabled(!review.finishing),
                 ),
         );

@@ -334,7 +334,7 @@ fn the_repositories_list_shows_every_column_of_the_plan() {
     let (cx, _) = booted("default");
     assert!(cx.has_text("Repositories"));
     assert!(cx.has_text("project"), "{:?}", cx.texts());
-    assert!(cx.has_text("main"), "the default head is a chip");
+    assert!(cx.has_text("main"), "the default head is a badge");
     assert!(cx.has_text("Ada"), "the owner key resolves to a name");
     assert!(cx.has_text("6 refs"));
     assert!(cx.has_text("block 2"));
@@ -636,7 +636,7 @@ fn commits_follows_the_cursor_and_opens_one_commit_with_its_diff() {
         "{:?}",
         cx.texts()
     );
-    assert!(cx.has_text("ebfb8b62"), "the parent is named");
+    assert!(cx.has_text("ebfb8b62…4e16"), "the parent is named");
     assert!(
         cx.find("forge-commit-diff-file-src/lib.rs").is_some(),
         "a commit's diff names its files above the rows"

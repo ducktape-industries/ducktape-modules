@@ -406,7 +406,7 @@ impl Names {
             .iter()
             .find(|row| row.keys.iter().any(|held| held.eq_ignore_ascii_case(&hex)))
             .map(|row| row.name.clone())
-            .unwrap_or_else(|| short(&hex))
+            .unwrap_or_else(|| ducktape_view_guest::design::short_hex(&hex))
     }
     /// What a chat handle (`acct:7`, `user:<hex>`, `system`) is called.
     pub fn handle(&self, handle: &str) -> String {
@@ -427,14 +427,6 @@ impl Names {
     pub fn key_of(&self, number: u64) -> Option<Vec<u8>> {
         let row = self.rows.iter().find(|row| row.number == number)?;
         unhex(row.keys.first()?)
-    }
-}
-
-pub(crate) fn short(hex: &str) -> String {
-    if hex.len() > 12 {
-        format!("{}…", &hex[..12])
-    } else {
-        hex.to_owned()
     }
 }
 
