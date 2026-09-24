@@ -376,16 +376,6 @@ pub enum VideoItem {
     Opened(Framing),
     Frame(Vec<u8>),
 }
-/// One desktop notice, worded by the view; a later notice under the same
-/// non-empty `tag` replaces the standing one.
-#[derive(
-    Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
-)]
-pub struct Notice {
-    pub title: String,
-    pub body: String,
-    pub tag: String,
-}
 /// One notice for the host to decide on: `notify.post`. The view asks; the
 /// host logs it in its notification centre and decides whether a banner
 /// reaches the screen (the person's per-view choice, focus, a burst limit).
@@ -477,8 +467,6 @@ doors! {
     AudioWrite, "audio.write", Vec<u8>, ();
     /// `audio.stop`: close the output.
     AudioStop, "audio.stop", (), ();
-    /// `notify.show`: post a notice; `true` when a banner was raised.
-    NotifyShow, "notify.show", Notice, bool;
     /// `notify.post`: hand the host a notice; it says what it did.
     NotifyPost, "notify.post", Post, Posted;
 }

@@ -596,15 +596,6 @@
     "reply": null
   },
   {
-    "kind": "notify.show",
-    "request": {
-      "title": "Chat",
-      "body": "alice: hi",
-      "tag": "room"
-    },
-    "reply": true
-  },
-  {
     "kind": "notify.post",
     "request": {
       "title": "alice mentioned you",
