@@ -73,6 +73,9 @@ fn quiet_doors(cx: &mut TestAppContext) {
     cx.host().never::<api::HostRoute>();
     cx.host().never::<ducktape_view_guest::doors::HostBadge>();
     cx.host().never::<ducktape_view_guest::doors::NotifyPost>();
+    cx.host()
+        .handle::<ducktape_view_guest::doors::StoreGet>(|_| Ok(None));
+    cx.host().never::<ducktape_view_guest::doors::StoreSet>();
 }
 
 fn configure(cx: &mut TestAppContext) {
@@ -1033,6 +1036,78 @@ fn the_badge_is_counted_again_from_the_read_cursors() {
         "no second notice"
     );
     assert_eq!(cx.host().asked::<HostBadge>().last(), Some(&1));
+}
+
+/// A relaunch starts with no cursors in memory: the ones kept on the device
+/// come back, so a mention and a direct message still unread count on the
+/// badge and dot their rooms, and reading a room keeps its new cursor.
+#[test]
+fn kept_cursors_bring_the_badge_back_after_a_relaunch() {
+    use ducktape_view_guest::doors::{self, HostBadge, StoreGet, StoreSet};
+    use std::collections::BTreeMap;
+    let mut cx = TestAppContext::new();
+    configure(&mut cx);
+    cx.host().handle::<StoreGet>(|key| {
+        Ok((key == "reads/0102").then(|| {
+            doors::encode(&BTreeMap::from([
+                ("general".to_owned(), 1u64),
+                ("dm-7-8".to_owned(), 0),
+            ]))
+        }))
+    });
+    cx.host().handle::<ViewOf<ChatApi>>(|query| {
+        Ok(match query {
+            ChatViewQuery::Accounts { .. } => ChatViewReply::Accounts(Vec::new()),
+            ChatViewQuery::Channels { .. } => ChatViewReply::Channels(page(vec![
+                channel("general", "General", 3),
+                channel("dm-7-8", "dm", 1),
+            ])),
+            ChatViewQuery::MessagesAround { channel_id, .. } => {
+                let mut ping = row(2, "acct:8", "@eddy");
+                ping.blocks = vec![chat::Block::Paragraph(vec![chat::Span {
+                    text: "@eddy".into(),
+                    marks: vec![chat::Mark::Mention(chat::Party::Account(7))],
+                }])];
+                if channel_id == "dm-7-8" {
+                    ping = row(1, "acct:8", "hi");
+                }
+                ping.channel_id = channel_id;
+                ChatViewReply::Messages(vec![ping])
+            }
+            ChatViewQuery::Roots { .. } => ChatViewReply::Roots(page(Vec::new())),
+            ChatViewQuery::Members { .. } => ChatViewReply::Members(page(Vec::new())),
+            query => panic!("unexpected chat query: {query:?}"),
+        })
+    });
+    let props = cx.host().stream::<HostProps>();
+    let visible = cx.host().stream::<HostVisible>();
+    let _view = cx.open::<Chat>();
+    props.push(Session {
+        account: "0102".into(),
+        connected: true,
+        chain: "testnet#0a1b2c3d".into(),
+        ..Session::default()
+    });
+    visible.push(true);
+    cx.run_until_parked();
+    assert_eq!(cx.host().asked::<HostBadge>().last(), Some(&2));
+    assert!(cx.find("chat-sidebar-channel-general-unread").is_some());
+    assert!(cx.find("chat-sidebar-dm-8-unread").is_some());
+
+    cx.simulate_click("chat-sidebar-channel-general");
+    cx.run_until_parked();
+    assert_eq!(cx.host().asked::<HostBadge>().last(), Some(&1));
+    let (key, kept) = cx
+        .host()
+        .asked::<StoreSet>()
+        .pop()
+        .expect("the read is kept");
+    assert_eq!(key, "reads/0102");
+    let kept: BTreeMap<String, u64> = doors::decode(&kept.unwrap()).unwrap();
+    assert_eq!(
+        kept,
+        BTreeMap::from([("general".into(), 3), ("dm-7-8".into(), 0)])
+    );
 }
 
 /// The timeline's list keeps its path when a message menu opens over the
