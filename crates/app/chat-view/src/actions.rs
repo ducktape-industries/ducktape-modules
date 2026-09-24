@@ -21,6 +21,26 @@ impl Chat {
     // ---------- menus ----------
 
     /// A press on a message's body: chosen, its actions stay open.
+    /// A control on a message card took `event`: the card's own select
+    /// handler, handed the same click after it, stands down.
+    /// A key press reaches only the focused control, so only a pointer's
+    /// click is claimed.
+    pub(crate) fn claim(&mut self, event: &ducktape_view_guest::ClickEvent) {
+        use ducktape_view_guest::ClickEvent;
+        self.claimed = match event {
+            ClickEvent::Keyboard(_) => None,
+            ClickEvent::Mouse(_) | ClickEvent::Touch(_) => {
+                let at = event.position();
+                Some((at.x.into(), at.y.into()))
+            }
+        };
+    }
+
+    /// Whether a control on the card already took the click at `at`.
+    pub(crate) fn was_claimed(&mut self, at: (f32, f32)) -> bool {
+        self.claimed.take() == Some(at)
+    }
+
     pub(crate) fn press_message(&mut self, pane: Pane, seq: u64) {
         if seq == 0 {
             return;
@@ -64,6 +84,9 @@ impl Chat {
                 .entry(crate::draft_key(&target))
                 .or_default()
                 .seed(&body, &choices);
+        }
+        if mode == Mode::Reactions {
+            self.picker = Default::default();
         }
         self.menu = Some(Menu {
             pane,
@@ -141,6 +164,26 @@ impl Chat {
         messages
     }
 
+    /// Whether the reader wrote the message at `seq`: only its author
+    /// edits it, and the chat module refuses anyone else.
+    pub(crate) fn wrote(&self, pane: Pane, seq: u64) -> bool {
+        let me = self.my_handle();
+        !me.is_empty()
+            && self
+                .rows(pane)
+                .iter()
+                .any(|row| row.seq == seq && row.author == me)
+    }
+
+    /// Whether the reader may delete the message at `seq`: its author, or
+    /// the channel's owner.
+    pub(crate) fn may_delete(&self, pane: Pane, seq: u64) -> bool {
+        self.wrote(pane, seq)
+            || self.room_info().is_some_and(|info| {
+                !info.channel.owner.is_empty() && info.channel.owner == self.my_handle()
+            })
+    }
+
     // ---------- writes ----------
 
     pub(crate) fn react(&mut self, seq: u64, emoji: String, add: bool, cx: &mut Context<Self>) {
@@ -158,6 +201,9 @@ impl Chat {
             .is_some_and(|m| m.mode == Mode::Reactions)
         {
             self.menu = None;
+        }
+        if add {
+            crate::emoji::remember(&mut self.recent_emoji, &emoji);
         }
         let op = if add {
             ChatMsg::AddReaction {
@@ -257,7 +303,7 @@ impl Chat {
     pub(crate) fn copy_text(&mut self, text: String, label: &str, cx: &mut Context<Self>) {
         if !text.is_empty() {
             cx.host().notify::<ClipboardWrite>(text);
-            self.notice = format!("Copied {label}");
+            self.confirmation = format!("Copied {label}");
         }
     }
 
@@ -274,8 +320,8 @@ impl Chat {
             return;
         }
         let label = match lines.len() {
-            1 => "1 message selected".to_owned(),
-            n => format!("{n} messages selected"),
+            1 => "1 message".to_owned(),
+            n => format!("{n} messages"),
         };
         self.copy_text(lines.join("\n"), &label, cx);
     }

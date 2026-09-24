@@ -2,8 +2,13 @@ use super::*;
 use ducktape_view_guest::{StyleRefinement, Styled};
 
 #[test]
-fn action_strip_uses_native_group_visibility_and_is_not_inside_selection_target() {
-    let (cx, _) = opened();
+fn action_strip_keeps_the_rows_hover_and_is_not_inside_selection_target() {
+    let (mut cx, view) = opened();
+    assert!(
+        cx.find("chat-message-m1-actions").is_none(),
+        "no strip on a row the pointer is not over"
+    );
+    hover(&mut cx, &view, 1);
     let Some(wire::Node::Container(ducktape_view_guest::wire::ContainerNode {
         style,
         interactivity,
@@ -20,14 +25,12 @@ fn action_strip_uses_native_group_visibility_and_is_not_inside_selection_target(
         interactivity.group_hover.as_ref().unwrap().style.visibility,
         StyleRefinement::default().visible().visibility
     );
-    // GPUI dispatches a click to every interactive element whose hitbox
-    // contains it, not just the topmost one — being a sibling of `card`
-    // (checked below) is not enough to keep a click here off `card`'s
-    // row-select handler too, which would clobber the mode `open_menu`
-    // just set back to `Mode::Toolbar`. Only `occlude` stops that.
+    // An occluding strip took the row's group hover away as the pointer
+    // reached it: it hid itself and could not be clicked. It stays under
+    // the group; its buttons claim their click from the card instead.
     assert!(
-        interactivity.occlude,
-        "action strip must occlude so its clicks don't also fire card's row-select"
+        !interactivity.occlude,
+        "the strip must not take the row's hover from under the pointer"
     );
     let card = cx.find("chat-message-m1").unwrap();
     fn has_actions(node: &wire::Node) -> bool {
@@ -38,6 +41,15 @@ fn action_strip_uses_native_group_visibility_and_is_not_inside_selection_target(
         "native action clicks must not bubble through selection"
     );
     assert!(cx.find("chat-message-m1-thumbs-up").is_some());
+}
+
+/// The pointer over message `seq`'s row, as the host reports it.
+pub(super) fn hover(cx: &mut TestAppContext, view: &Entity<Chat>, seq: u64) {
+    view.update(cx, |chat, _, cx| {
+        chat.hovered = Some((Pane::Timeline, seq));
+        cx.notify();
+    });
+    cx.run_until_parked();
 }
 
 #[test]
@@ -116,4 +128,108 @@ fn thread_root_uses_reply_count_as_a_separator() {
     cx.run_until_parked();
     assert!(cx.find("chat-message-m1-reply-separator").is_some());
     assert!(cx.has_text("2 replies"));
+}
+
+#[test]
+fn a_control_on_a_card_keeps_its_click_from_the_card_beneath() {
+    use ducktape_view_guest::{ClickEvent, Point, px};
+    let pointer = |x: f32| {
+        let button = wire::click::ButtonEvent {
+            button: wire::click::MouseButton::Left,
+            position: Point {
+                x: px(x),
+                y: px(9.),
+            },
+            modifiers: Default::default(),
+            click_count: 1,
+        };
+        ClickEvent::from(wire::click::Click::Mouse {
+            down: button.clone(),
+            up: button,
+            first_mouse: false,
+        })
+    };
+    let mut chat = Chat::default();
+    // GPUI hands one click to the control and then to the card under it
+    chat.claim(&pointer(40.));
+    assert!(chat.was_claimed((40., 9.)), "the card stands down");
+    assert!(
+        !chat.was_claimed((40., 9.)),
+        "once: the next click is the card's"
+    );
+    chat.claim(&pointer(40.));
+    assert!(
+        !chat.was_claimed((41., 9.)),
+        "a click elsewhere is the card's"
+    );
+    // a key press reaches only the focused control, never the card
+    chat.claim(&ClickEvent::default());
+    assert!(!chat.was_claimed((0., 0.)));
+}
+
+#[test]
+fn replies_read_as_a_button() {
+    let (mut cx, view) = opened();
+    view.update(&mut cx, |chat, _, cx| {
+        if let Some(Loaded::Ready(rows)) = chat.room.as_mut().map(|room| &mut room.messages) {
+            rows[0].reply_count = 3;
+        }
+        cx.notify();
+    });
+    cx.run_until_parked();
+    let Some(wire::Node::Container(ducktape_view_guest::wire::ContainerNode {
+        style,
+        interactivity,
+        ..
+    })) = cx.find("chat-message-m1-replies")
+    else {
+        panic!("replies button")
+    };
+    assert_eq!(interactivity.role, Some(ducktape_view_guest::Role::Button));
+    assert!(interactivity.focusable && interactivity.hover.is_some());
+    assert!(
+        interactivity.focus_visible.is_some(),
+        "a visible focus ring"
+    );
+    assert_eq!(
+        style.mouse_cursor,
+        Some(ducktape_view_guest::CursorStyle::PointingHand)
+    );
+    assert!(cx.has_text("Open thread →"));
+    cx.simulate_click("chat-message-m1-replies");
+    view.read(|chat| {
+        assert_eq!(
+            chat.room.as_ref().unwrap().thread.as_ref().map(|t| t.root),
+            Some(1)
+        );
+    });
+}
+
+#[test]
+fn the_picker_searches_and_enter_picks_the_first_match() {
+    let (mut cx, view) = opened();
+    hover(&mut cx, &view, 1);
+    cx.simulate_click("chat-message-m1-react");
+    assert!(cx.find("chat-reaction-🔥").is_some(), "the frequent row");
+    assert!(
+        cx.find("chat-reaction-Smileys-😀").is_some(),
+        "the first tab"
+    );
+    cx.simulate_click("chat-reaction-tab-Food");
+    assert!(cx.find("chat-reaction-Food-🍕").is_some());
+    let focus = ui::menu::focus_key(Pane::Timeline, Mode::Reactions);
+    cx.simulate_input(&focus, "duck");
+    assert!(cx.has_text("1 MATCH"));
+    cx.simulate_submit(&focus);
+    cx.run_until_parked();
+    assert!(
+        cx.host()
+            .asked::<Submit<ChatApi>>()
+            .iter()
+            .any(|op| matches!(op, ChatMsg::AddReaction { emoji, .. } if emoji == "🦆"))
+    );
+    view.read(|chat| {
+        assert!(chat.menu.is_none());
+        assert_eq!(chat.recent_emoji.first().map(String::as_str), Some("🦆"));
+    });
 }
