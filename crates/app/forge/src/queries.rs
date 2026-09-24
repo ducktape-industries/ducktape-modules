@@ -9,7 +9,7 @@ use gitcore::wire::smart_http_service_header;
 use gitcore::wire::upload::{
     Command, capability_advertisement, fetch, ls_refs_response, parse_command,
 };
-use store::{Listing, Reads, decoded, stale};
+use store::{Listing, Reads, decoded, invalid, stale};
 const AGENT: &[u8] = b"ducktape-forge";
 
 /// A UI query's response bytes (one `Reply`), or a git protocol query's raw
@@ -28,12 +28,16 @@ fn answer<S: Reads>(s: &S, height: u64, q: &Query) -> Result<Reply, Refusal> {
         .page()
         .map(|p| listing(p.bounded(bounds.page_size as u64), q, height))
         .transpose()?;
-    let p = || paging.as_ref().expect("this query has pagination");
+    let p = || {
+        paging
+            .as_ref()
+            .ok_or_else(|| invalid("this query has no page"))
+    };
     Ok(match q {
         Query::Repos { .. } => {
-            let page = p()
+            let page = p()?
                 .reply(
-                    s.scan(p().scan_ahead(b"a/"))
+                    s.scan(p()?.scan_ahead(b"a/"))
                         .into_iter()
                         .map(|e| (e.key, e.value)),
                 )
@@ -50,8 +54,8 @@ fn answer<S: Reads>(s: &S, height: u64, q: &Query) -> Result<Reply, Refusal> {
         Query::Repo { repo, .. } => {
             let record = load_repo(s, repo)?;
             let prefix = writers_prefix(repo);
-            let writers = p().reply(
-                s.scan(p().scan_ahead(&prefix))
+            let writers = p()?.reply(
+                s.scan(p()?.scan_ahead(&prefix))
                     .into_iter()
                     .map(|e| (e.key.clone(), e.key[prefix.len()..].to_vec())),
             );
@@ -68,9 +72,9 @@ fn answer<S: Reads>(s: &S, height: u64, q: &Query) -> Result<Reply, Refusal> {
         Query::Refs { repo, .. } => {
             let record = load_repo(s, repo)?;
             let prefix = refs_prefix(repo);
-            let page = p()
+            let page = p()?
                 .reply(
-                    s.scan(p().scan_ahead(&prefix))
+                    s.scan(p()?.scan_ahead(&prefix))
                         .into_iter()
                         .map(|e| (e.key.clone(), e)),
                 )
@@ -89,7 +93,7 @@ fn answer<S: Reads>(s: &S, height: u64, q: &Query) -> Result<Reply, Refusal> {
             last_height: load_repo(s, repo)?.last_activity,
         },
         Query::Changes { .. } | Query::Change { .. } | Query::Judgment { .. } => {
-            crate::change_queries::answer(s, height, q, p())?
+            crate::change_queries::answer(s, height, q, p()?)?
         }
         _ => crate::reads::answer(s, height, q, &bounds, paging.as_ref())?,
     })

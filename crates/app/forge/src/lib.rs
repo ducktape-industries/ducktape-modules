@@ -22,6 +22,7 @@ pub use ops::{PROGRAM, execute, init};
 pub use queries::query;
 
 /// An op as a person reads it: a title and its fields.
+#[cfg(feature = "view")]
 pub fn describe(op: &Op) -> (String, Vec<(&'static str, String)>) {
     let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
     let revision = |revision: &Revision| match revision {
@@ -29,7 +30,18 @@ pub fn describe(op: &Op) -> (String, Vec<(&'static str, String)>) {
         Revision::Oid(oid) => oid.clone(),
     };
     let (verb, repo, fields) = match op {
-        Op::Create { repo, hash } => ("Create", repo, vec![("hash", format!("{hash:?}"))]),
+        Op::Create { repo, hash } => (
+            "Create",
+            repo,
+            vec![(
+                "hash",
+                match hash {
+                    abi::HashKind::Sha256 => "SHA-256",
+                    abi::HashKind::Sha1 => "SHA-1",
+                }
+                .into(),
+            )],
+        ),
         Op::Configure { repo, settings } => (
             "Configure",
             repo,
@@ -93,7 +105,15 @@ pub fn describe(op: &Op) -> (String, Vec<(&'static str, String)>) {
             repo,
             vec![
                 ("change", format!("#{n}")),
-                ("verdict", format!("{:?}", review.verdict)),
+                (
+                    "verdict",
+                    match review.verdict {
+                        Verdict::Approve => "approve",
+                        Verdict::RequestChanges => "request changes",
+                        Verdict::Comment => "comment",
+                    }
+                    .into(),
+                ),
                 ("commit", review.commit_oid.clone()),
                 ("comments", review.comments.len().to_string()),
             ],

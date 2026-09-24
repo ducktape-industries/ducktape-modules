@@ -20,8 +20,8 @@ ducktape-view-guest.workspace = true
 ducklink.workspace = true
 # The op types of every program a view may link, so a transaction's payload
 # reads as its operation rather than bytes.
-chat.workspace = true
-forge.workspace = true
+chat = { workspace = true, features = ["view"] }
+forge = { workspace = true, features = ["view"] }
 identity = { workspace = true, features = ["view"] }
 module-registry = { workspace = true, features = ["view"] }
 valset = { workspace = true, features = ["view"] }

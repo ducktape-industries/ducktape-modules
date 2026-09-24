@@ -100,6 +100,7 @@ pub enum Reply {
 }
 
 /// An op as a person reads it: a title and its fields.
+#[cfg(feature = "view")]
 pub fn describe(op: &Op) -> (String, Vec<(&'static str, String)>) {
     match op {
         Op::Publish { body } => ("Publish".into(), vec![("body", abi::preview(body))]),
