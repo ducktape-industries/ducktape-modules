@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 
 mod components;
 mod decode;
-mod ui;
+pub(crate) mod ui;
 
 pub use decode::Op;
 
@@ -431,6 +431,9 @@ impl Explorer {
         }
         self.route = route;
         self.note = None;
+        // the field holds only what is being typed: a search that lands, a
+        // tab, prev/next and a row all leave it empty
+        self.search.clear();
         cx.notify();
     }
 
