@@ -27,6 +27,8 @@ VIEWS := chat-view members-view node-view explorer-view settings-view forge-view
 LIMIT_chat-view := 2500000
 LIMIT_forge-view := 2500000
 LIMIT_settings-view := 1300000
+# links every program abi a view may, to decode their ops
+LIMIT_explorer-view := 1800000
 view_limit = $(or $(LIMIT_$1),1200000)
 
 # What a wasm32 view may link. A crate a view links must never reach the

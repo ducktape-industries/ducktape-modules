@@ -1,15 +1,472 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use super::*;
 use abi::BlobId;
+use ducktape_view_guest::doors::{Status, Tx};
 use ducktape_view_guest::testing::TestAppContext;
 
+const ADA: [u8; 32] = [1; 32];
+const STRANGER: [u8; 32] = [2; 32];
+const VALIDATOR: [u8; 32] = [9; 32];
+/// Block times, milliseconds: block `h` lands at `T0 + h` seconds.
+const T0: u64 = 1_790_000_000_000;
+
+fn post(channel: &str, text: &str) -> Vec<u8> {
+    borsh::to_vec(&chat::ChatMsg::PostMessage {
+        channel_id: channel.into(),
+        message_id: "m1".into(),
+        blocks: chat::parse_message(text),
+        thread: None,
+    })
+    .unwrap()
+}
+
+fn tx(seed: u8, signer: [u8; 32], target: &str, payload: Vec<u8>) -> Tx {
+    Tx {
+        hash: [seed; 32],
+        signer: signer.to_vec(),
+        seq: seed as u64,
+        target: target.into(),
+        payload,
+    }
+}
+
+/// Blocks 0..=`tip`: 11 carries Ada's post, 12 a stranger's op to a
+/// program this view does not link.
+fn chain(tip: u64) -> Vec<Block> {
+    (0..=tip)
+        .map(|height| Block {
+            height,
+            id: [(height as u8).wrapping_add(100); 32],
+            parent: [(height as u8).wrapping_add(99); 32],
+            time: T0 + height * 1000,
+            epoch: height / 10,
+            proposer: Some(VALIDATOR.to_vec()),
+            txs: match height {
+                11 => vec![tx(0xa1, ADA, "chat", post("design", "hello there"))],
+                12 => vec![tx(0xb2, STRANGER, "mystery", vec![1, 2, 3, 4])],
+                _ => Vec::new(),
+            },
+        })
+        .collect()
+}
+
+fn page(chain: &[Block], ask: &BlockPage) -> Vec<Block> {
+    let top = chain.len() as u64 - 1;
+    let Some(start) = ask.before.map_or(Some(top), |before| before.checked_sub(1)) else {
+        return Vec::new();
+    };
+    (0..=start.min(top))
+        .rev()
+        .take(ask.limit as usize)
+        .map(|height| chain[height as usize].clone())
+        .collect()
+}
+
+fn status(height: u64) -> NodeStatus {
+    NodeStatus {
+        network: "test#1".into(),
+        block_time_ms: 1000,
+        epoch_length: 10,
+        height,
+        epoch: (height + 1) / 10,
+        ..NodeStatus::default()
+    }
+}
+
+fn ada() -> identity::Account {
+    identity::Account {
+        number: 3,
+        name: "Ada".into(),
+        control: identity::Control::Keys(vec![identity::Key {
+            scheme: abi::Scheme::Ed25519,
+            key: ADA.to_vec(),
+            label: Some("laptop".into()),
+            added_at: 0,
+        }]),
+        avatar: None,
+        bio: None,
+        updated_at: 0,
+    }
+}
+
+/// A node at `tip`, whose tip the test may move.
+fn node(cx: &mut TestAppContext, tip: Rc<RefCell<u64>>) {
+    let host = cx.host();
+    let head = tip.clone();
+    host.handle::<Status>(move |()| Ok(status(*head.borrow())));
+    let head = tip.clone();
+    host.handle::<Blocks>(move |ask| Ok(page(&chain(*head.borrow()), &ask)));
+    host.handle::<BlockGet>(move |by| {
+        let chain = chain(*tip.borrow());
+        Ok(match by {
+            BlockRef::Height(height) => chain.get(height as usize).cloned(),
+            BlockRef::Id(id) => chain.into_iter().find(|block| block.id == id),
+        })
+    });
+    host.handle::<Query<Identity>>(|query| match query {
+        identity::Query::List { .. } => Ok(identity::Reply::Accounts(module_registry::PageReply {
+            height: 1,
+            items: vec![ada()],
+            next: None,
+        })),
+        other => panic!("unexpected identity query: {other:?}"),
+    });
+    host.handle::<Query<Valset>>(|_| Ok(valset::Reply::Validators(vec![VALIDATOR.to_vec()])));
+    respond(cx);
+}
+
+fn entry(program: &str, code: u8) -> registry::Entry {
+    registry::Entry {
+        program: program.into(),
+        code: BlobId::Sha256([code; 32]),
+        params: vec![1, 2, 3],
+    }
+}
+
+fn respond(cx: &mut TestAppContext) {
+    cx.host().handle::<Query<Registry>>(|query| {
+        Ok(match query {
+            registry::Query::At(0) => {
+                registry::Reply::Programs(vec![entry("chat", 0xab), entry("identity", 0xcd)])
+            }
+            registry::Query::Scheduled { .. } => {
+                registry::Reply::Scheduled(module_registry::PageReply {
+                    height: 1,
+                    items: vec![registry::Scheduled {
+                        height: 120,
+                        change: registry::Change::Remove("forge".into()),
+                    }],
+                    next: None,
+                })
+            }
+            other => panic!("unexpected query: {other:?}"),
+        })
+    });
+}
+
+fn ready() -> (TestAppContext, Rc<RefCell<u64>>) {
+    let mut cx = TestAppContext::new();
+    cx.host().stream::<Ticks>();
+    let tip = Rc::new(RefCell::new(12));
+    node(&mut cx, tip.clone());
+    cx.open::<Explorer>();
+    cx.run_until_parked();
+    (cx, tip)
+}
+
+// ---------- decoding ----------
+
 #[test]
-fn preferred_window_keeps_the_original_baseline() {
-    assert_eq!(<Explorer as View>::PREFERRED_WINDOW_SIZE, "760,640");
+fn a_linked_program_s_op_reads_as_a_field_table() {
+    let op = decode::decode("chat", &post("design", "hello there"));
+    assert_eq!(op.title, "Post in #design");
+    assert_eq!(op.kind, "chat::PostMessage");
+    let field = |name: &str| {
+        op.fields
+            .iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, v)| v.as_str())
+    };
+    assert_eq!(field("channel_id"), Some("design"));
+    assert_eq!(field("text"), Some("hello there"));
+    assert_eq!(field("thread"), Some("—"));
+    assert_eq!(field("blocks"), None, "blocks read as their text");
+
+    let push = forge::Op::Push {
+        repo: "app".into(),
+        request: vec![7; 100],
+    };
+    let op = decode::decode("forge", &borsh::to_vec(&push).unwrap());
+    assert_eq!(op.title, "Push · app");
+    assert!(
+        op.fields
+            .contains(&("request".into(), "100 bytes · 0707070707070707…".into())),
+        "{op:?}"
+    );
+
+    let create = identity::Op::Create {
+        name: "Ada, \"the first\"".into(),
+        scheme: abi::Scheme::Ed25519,
+    };
+    let op = decode::decode("identity", &borsh::to_vec(&create).unwrap());
+    assert_eq!(op.title, "Create · Ada, \"the first\"");
+    assert!(op.fields.contains(&("scheme".into(), "Ed25519".into())));
+
+    // a tuple variant around a struct reads as the struct's fields
+    let schedule = registry::Op::Schedule(registry::Scheduled {
+        height: 7,
+        change: registry::Change::Remove("forge".into()),
+    });
+    let op = decode::decode(registry::PROGRAM, &borsh::to_vec(&schedule).unwrap());
+    assert_eq!(op.kind, "module-registry::Schedule");
+    assert!(op.fields.contains(&("height".into(), "7".into())), "{op:?}");
+    assert!(
+        op.fields
+            .contains(&("change".into(), "Remove(\"forge\")".into()))
+    );
+}
+
+#[test]
+fn an_unknown_program_or_a_bad_payload_reads_as_bytes() {
+    let op = decode::decode("mystery", &[1, 2, 3, 4]);
+    assert_eq!(op.title, "mystery · 4 bytes");
+    assert_eq!(op.fields, vec![("bytes".into(), "01020304".into())]);
+    let op = decode::decode("chat", &[0xff; 3]);
+    assert_eq!(op.title, "chat · 3 bytes");
+}
+
+#[test]
+fn numbers_hashes_and_times_read_as_a_person_reads_them() {
+    assert_eq!(decode::grouped(6230), "6,230");
+    assert_eq!(decode::grouped(1_000_000), "1,000,000");
+    assert_eq!(decode::grouped(12), "12");
+    assert_eq!(decode::short(&[0xab; 32]), "abab…abab");
+    assert_eq!(decode::ago(10_000, 8_000), "2s");
+    assert_eq!(decode::ago(4_000_000, 0), "1h");
+    assert_eq!(decode::date(0), "1 Jan 1970, 00:00:00");
+    assert_eq!(decode::date(1_790_236_327_000), "24 Sep 2026, 07:52:07");
+    assert_eq!(decode::date(951_782_400_000), "29 Feb 2000, 00:00:00");
+}
+
+// ---------- the window ----------
+
+#[test]
+fn the_window_follows_the_head_and_stops_where_the_archive_does() {
+    let mut window = Chain::default();
+    let blocks = chain(150);
+    let ask = |before| BlockPage {
+        before,
+        limit: PAGE,
+    };
+    window.land(None, page(&blocks, &ask(None)));
+    assert_eq!((window.top(), window.blocks.len()), (Some(150), 100));
+    assert!(!window.complete, "a full page may have more below it");
+    window.land(Some(51), page(&blocks, &ask(Some(51))));
+    assert_eq!(window.blocks.len(), 151);
+    assert!(window.complete);
+    let more = chain(152);
+    window.land(None, page(&more, &ask(None)));
+    assert_eq!((window.top(), window.blocks.len()), (Some(152), 153));
+    assert!(
+        window
+            .blocks
+            .windows(2)
+            .all(|pair| pair[0].height == pair[1].height + 1)
+    );
+    assert_eq!(window.txs.len(), 2, "no transaction is folded in twice");
+    assert_eq!(window.block(11).map(|block| block.txs), Some(1));
+    // a head that no longer joins the window starts it again
+    let far = chain(400);
+    window.land(None, page(&far, &ask(None)));
+    assert_eq!((window.top(), window.blocks.len()), (Some(400), 100));
+    assert!(!window.complete && window.txs.is_empty());
+}
+
+// ---------- pages ----------
+
+#[test]
+fn the_overview_shows_the_head_and_the_latest_blocks_and_transactions() {
+    let (cx, _) = ready();
+    let texts = cx.texts();
+    assert!(
+        cx.has_text("Height") && cx.has_text("Block every 1.0 s"),
+        "{texts:?}"
+    );
+    assert!(cx.has_text("Next in 7 blocks"), "{texts:?}");
+    assert!(cx.has_text("Validators") && cx.has_text("Accounts"));
+    assert!(!cx.has_text("Transactions ") && !texts.iter().any(|t| t.contains("tx count")));
+    assert!(cx.has_text("Latest blocks") && cx.has_text("Latest transactions"));
+    assert!(cx.has_text("Post in #design") && cx.has_text("Ada") && cx.has_text("#3"));
+    assert!(cx.has_text("mystery · 4 bytes") && cx.has_text("0202…0202"));
+    assert!(
+        cx.has_text("6c6c…6c6c"),
+        "block 8's hash, shortened: {texts:?}"
+    );
+    assert_eq!(
+        cx.host().asked::<Blocks>(),
+        vec![BlockPage {
+            before: None,
+            limit: PAGE
+        }],
+        "13 blocks is the whole archive: one page"
+    );
+    cx.assert_accessible();
+}
+
+#[test]
+fn a_block_opens_with_its_fields_its_proposer_and_its_transactions() {
+    let (mut cx, _) = ready();
+    cx.simulate_click("explorer-block-11");
+    cx.run_until_parked();
+    let texts = cx.texts();
+    assert!(
+        cx.has_text("11") && cx.has_text(&abi::hex(&[111; 32])),
+        "{texts:?}"
+    );
+    assert!(cx.has_text("validator 1"), "{texts:?}");
+    assert!(cx.has_text("Post in #design"));
+    assert!(
+        !texts.iter().any(|t| t.contains("Applied")),
+        "no receipts: {texts:?}"
+    );
+    assert!(!texts.iter().any(|t| t.contains("State root")), "{texts:?}");
+    cx.assert_accessible();
+    cx.simulate_click("explorer-next");
+    cx.run_until_parked();
+    assert!(cx.has_text("mystery · 4 bytes"));
+    assert!(
+        cx.host().asked::<BlockGet>().is_empty(),
+        "both were in the window"
+    );
+}
+
+#[test]
+fn a_transaction_shows_its_block_signer_and_operation() {
+    let (mut cx, _) = ready();
+    cx.simulate_click(&format!("explorer-tx-{}", abi::hex(&[0xa1; 32])));
+    cx.run_until_parked();
+    let texts = cx.texts();
+    assert!(cx.has_text("In block 11"), "{texts:?}");
+    assert!(cx.has_text(&abi::hex(&[0xa1; 32])));
+    assert!(cx.has_text("#3 laptop · ed25519 0101…0101"), "{texts:?}");
+    assert!(cx.has_text("code abab…abab"), "{texts:?}");
+    assert!(cx.has_text("PostMessage") && cx.has_text("chat::PostMessage"));
+    assert!(cx.has_text("text") && cx.has_text("hello there"));
+    assert!(
+        !texts
+            .iter()
+            .any(|t| t.contains("Applied") || t.contains("Rejected"))
+    );
+    cx.assert_accessible();
+    cx.simulate_click("explorer-from");
+    cx.run_until_parked();
+    assert!(
+        cx.has_text("1 transaction in the last 13 blocks"),
+        "{:?}",
+        cx.texts()
+    );
+}
+
+#[test]
+fn an_account_shows_its_devices_and_what_it_used_in_the_window() {
+    let (mut cx, _) = ready();
+    cx.simulate_input("explorer-search", "ada");
+    cx.simulate_submit("explorer-search");
+    cx.run_until_parked();
+    let texts = cx.texts();
+    assert!(cx.has_text("account 3   1 device"), "{texts:?}");
+    assert!(
+        cx.has_text("laptop") && cx.has_text("last used 1s ago"),
+        "{texts:?}"
+    );
+    assert!(cx.has_text("Programs used") && cx.has_text("1 tx"));
+    assert!(!cx.has_text("mystery · 4 bytes"), "not Ada's");
+    cx.assert_accessible();
+}
+
+#[test]
+fn search_finds_heights_hashes_accounts_and_programs() {
+    let (mut cx, _) = ready();
+    let search = |cx: &mut TestAppContext, text: &str| {
+        cx.simulate_input("explorer-search", text);
+        cx.simulate_submit("explorer-search");
+        cx.run_until_parked();
+    };
+    search(&mut cx, &abi::hex(&[0xb2; 32]));
+    assert!(cx.has_text("In block 12"), "{:?}", cx.texts());
+    search(&mut cx, "#3");
+    assert!(cx.has_text("account 3   1 device"));
+    search(&mut cx, "chat");
+    assert!(cx.has_text("Transactions · chat") && cx.has_text("Post in #design"));
+    assert!(!cx.has_text("mystery · 4 bytes"));
+    // a block hash in the window opens it; one outside is asked of the node
+    search(&mut cx, &abi::hex(&[105; 32]));
+    assert!(cx.has_text(&abi::hex(&[105; 32])), "{:?}", cx.texts());
+    search(&mut cx, &abi::hex(&[0xee; 32]));
+    assert!(
+        cx.has_text("No block has this hash, and no transaction in the last 13 blocks does."),
+        "{:?}",
+        cx.texts()
+    );
+    search(&mut cx, "1,000");
+    assert!(cx.has_text("No block 1,000"), "{:?}", cx.texts());
+    assert_eq!(
+        cx.host().asked::<BlockGet>(),
+        vec![BlockRef::Id([0xee; 32]), BlockRef::Height(1000)]
+    );
+    search(&mut cx, "nobody");
+    assert!(cx.has_text("Nothing here is called “nobody”."));
+}
+
+#[test]
+fn a_tick_past_the_head_reads_only_the_new_blocks() {
+    let mut cx = TestAppContext::new();
+    let ticks = cx.host().stream::<Ticks>();
+    let tip = Rc::new(RefCell::new(12));
+    node(&mut cx, tip.clone());
+    cx.open::<Explorer>();
+    cx.run_until_parked();
+    *tip.borrow_mut() = 14;
+    ticks.push(());
+    cx.run_until_parked();
+    assert!(cx.has_text("14"), "{:?}", cx.texts());
+    let explorer_asked = cx.host().asked::<Blocks>();
+    assert_eq!(explorer_asked.len(), 2, "{explorer_asked:?}");
+    assert!(explorer_asked.iter().all(|ask| ask.before.is_none()));
+}
+
+#[test]
+fn a_refused_window_says_why_and_retry_reads_again() {
+    let mut cx = TestAppContext::new();
+    cx.host().stream::<Ticks>();
+    let tip = Rc::new(RefCell::new(12));
+    node(&mut cx, tip);
+    cx.host()
+        .refuse::<Blocks>("not_found", "this node serves no blocks");
+    cx.open::<Explorer>();
+    cx.run_until_parked();
+    assert!(cx.has_text("this node serves no blocks"));
+    let chain_ = chain(12);
+    cx.host()
+        .handle::<Blocks>(move |ask| Ok(page(&chain_, &ask)));
+    cx.simulate_click("explorer-retry");
+    cx.run_until_parked();
+    assert!(cx.has_text("Latest blocks"));
+}
+
+#[test]
+fn programs_lists_what_runs_and_what_is_scheduled() {
+    let (mut cx, _) = ready();
+    cx.simulate_click("explorer-tab-programs");
+    cx.run_until_parked();
+    assert!(cx.has_text("2 programs") && cx.has_text("identity"));
+    assert!(cx.has_text("Remove") && cx.has_text("forge") && cx.has_text("at 120"));
+    assert!(cx.texts().iter().any(|text| text == "abababababab…"));
+    cx.assert_accessible();
+}
+
+#[test]
+fn a_snapshot_restores_without_reading_the_window_again() {
+    let (cx, _) = ready();
+    let bytes = cx.snapshot().unwrap();
+    let mut restored = TestAppContext::new();
+    restored.host().stream::<Ticks>();
+    restored.host().never::<Status>();
+    restored.host().never::<Blocks>();
+    restored.host().never::<Query<Identity>>();
+    restored.host().never::<Query<Valset>>();
+    restored.host().never::<Query<Registry>>();
+    restored.restore::<Explorer>(&bytes).unwrap();
+    restored.run_until_parked();
+    assert!(restored.has_text("Post in #design"));
+    assert!(restored.host().asked::<Blocks>().is_empty());
 }
 
 #[test]
 fn the_root_tracks_the_shared_theme() {
-    let mut cx = ready();
+    let (mut cx, _) = ready();
     let dark = ducktape_view_guest::Theme::dark();
     cx.set_global(dark);
     let Some(ducktape_view_guest::wire::Node::Container(
@@ -26,177 +483,4 @@ fn the_root_tracks_the_shared_theme() {
             .and_then(|background| background.as_solid()),
         Some(dark.background)
     );
-    assert_eq!(style.text.color, Some(dark.foreground));
-}
-
-fn entry(program: &str, code: u8) -> registry::Entry {
-    registry::Entry {
-        program: program.into(),
-        code: BlobId::Sha256([code; 32]),
-        params: vec![1, 2, 3],
-    }
-}
-
-fn programs() -> registry::Reply {
-    registry::Reply::Programs(vec![entry("identity", 0xab), entry("valset", 0xcd)])
-}
-
-fn page<T>(items: Vec<T>) -> module_registry::PageReply<T> {
-    module_registry::PageReply {
-        height: 1,
-        items,
-        next: None,
-    }
-}
-
-fn scheduled() -> registry::Reply {
-    registry::Reply::Scheduled(page(vec![
-        registry::Scheduled {
-            height: 120,
-            change: registry::Change::Set(entry("chat", 0xef)),
-        },
-        registry::Scheduled {
-            height: 200,
-            change: registry::Change::Remove("forge".into()),
-        },
-    ]))
-}
-
-fn respond(cx: &mut TestAppContext) {
-    cx.host().handle::<Query<Registry>>(|query| {
-        Ok(match query {
-            registry::Query::At(0) => programs(),
-            registry::Query::Scheduled { .. } => scheduled(),
-            other => panic!("unexpected query: {other:?}"),
-        })
-    });
-}
-
-fn ready() -> TestAppContext {
-    let mut cx = TestAppContext::new();
-    cx.host().stream::<Live>();
-    respond(&mut cx);
-    cx.open::<Explorer>();
-    cx.run_until_parked();
-    assert_eq!(
-        cx.host().asked::<Query<Registry>>(),
-        vec![
-            registry::Query::At(0),
-            registry::Query::Scheduled {
-                page: module_registry::Page {
-                    after: None,
-                    limit: None
-                }
-            }
-        ]
-    );
-    assert_eq!(
-        cx.host().asked::<Live>(),
-        vec![registry::PROGRAM.to_string()]
-    );
-    cx
-}
-
-#[test]
-fn the_registry_lists_what_runs_and_what_is_scheduled() {
-    let cx = ready();
-    let texts = cx.texts();
-    assert!(cx.has_text("2 programs"), "{texts:?}");
-    assert!(cx.has_text("identity") && cx.has_text("valset"));
-    assert!(cx.has_text("Running") && cx.has_text("Scheduled"));
-    // a scheduled change says what it does, to what, and when
-    assert!(cx.has_text("Set") && cx.has_text("chat") && cx.has_text("at 120"));
-    assert!(cx.has_text("Remove") && cx.has_text("forge") && cx.has_text("at 200"));
-    // the code blob reaches the screen shortened, never as 64 hex chars
-    assert!(
-        texts.iter().any(|text| text == "abababababab…"),
-        "{texts:?}"
-    );
-    assert!(cx.has_text("3 param bytes"));
-}
-
-#[test]
-fn loading_waits_for_the_host() {
-    let mut cx = TestAppContext::new();
-    cx.host().stream::<Live>();
-    cx.host().never::<Query<Registry>>();
-    cx.open::<Explorer>();
-    cx.run_until_parked();
-    assert!(cx.has_text("Reading the registry…"));
-}
-
-#[test]
-fn an_empty_set_says_so() {
-    let mut cx = TestAppContext::new();
-    cx.host().stream::<Live>();
-    cx.host().handle::<Query<Registry>>(|query| {
-        Ok(match query {
-            registry::Query::At(0) => registry::Reply::Programs(vec![]),
-            registry::Query::Scheduled { .. } => registry::Reply::Scheduled(page(vec![])),
-            other => panic!("unexpected query: {other:?}"),
-        })
-    });
-    cx.open::<Explorer>();
-    cx.run_until_parked();
-    assert!(cx.has_text("No programs"));
-}
-
-#[test]
-fn a_refusal_shows_its_sentence_and_retry_asks_again() {
-    let mut cx = TestAppContext::new();
-    cx.host().stream::<Live>();
-    cx.host()
-        .refuse::<Query<Registry>>("unavailable", "the registry is not running here");
-    cx.open::<Explorer>();
-    cx.run_until_parked();
-    assert!(cx.has_text("the registry is not running here"));
-    respond(&mut cx);
-    cx.simulate_click("explorer-retry");
-    cx.run_until_parked();
-    assert!(cx.has_text("identity"));
-    assert_eq!(cx.host().asked::<Query<Registry>>().len(), 3);
-}
-
-#[test]
-fn a_live_bump_re_reads_and_a_snapshot_restores_the_screen() {
-    let mut cx = TestAppContext::new();
-    let feed = cx.host().stream::<Live>();
-    respond(&mut cx);
-    cx.open::<Explorer>();
-    cx.run_until_parked();
-    cx.host()
-        .refuse::<Query<Registry>>("unavailable", "refresh temporarily unavailable");
-    feed.push(None);
-    cx.run_until_parked();
-    assert!(cx.has_text("identity"));
-    assert_eq!(cx.host().asked::<Query<Registry>>().len(), 3);
-    cx.host().handle::<Query<Registry>>(|query| {
-        Ok(match query {
-            registry::Query::At(0) => registry::Reply::Programs(vec![entry("forge", 0x11)]),
-            registry::Query::Scheduled { .. } => registry::Reply::Scheduled(page(vec![])),
-            other => panic!("unexpected query: {other:?}"),
-        })
-    });
-    feed.push(None);
-    cx.run_until_parked();
-    assert!(cx.has_text("forge") && !cx.has_text("identity"));
-    assert!(cx.has_text("Nothing is scheduled against the registry."));
-
-    let bytes = cx.snapshot().unwrap();
-    let mut restored = TestAppContext::new();
-    restored.host().stream::<Live>();
-    restored.host().never::<Query<Registry>>();
-    restored.restore::<Explorer>(&bytes).unwrap();
-    restored.run_until_parked();
-    assert!(restored.has_text("forge"));
-    assert_eq!(restored.host().asked::<Query<Registry>>().len(), 1);
-    assert_eq!(
-        restored.host().asked::<Live>(),
-        vec![registry::PROGRAM.to_string()]
-    );
-}
-
-#[test]
-fn the_ready_set_is_accessible() {
-    ready().assert_accessible();
 }

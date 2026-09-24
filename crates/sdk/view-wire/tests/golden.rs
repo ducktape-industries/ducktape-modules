@@ -247,6 +247,28 @@ fn every_door() -> Vec<(Exchange, serde_json::Value)> {
             },
         ),
         exchange::<Live>("chat".into(), Some(9)),
+        exchange::<Blocks>(
+            BlockPage {
+                before: Some(10),
+                limit: 2,
+            },
+            vec![Block {
+                height: 9,
+                id: [4; 32],
+                parent: [5; 32],
+                time: 1,
+                epoch: 0,
+                proposer: Some(vec![6; 32]),
+                txs: vec![Tx {
+                    hash: [7; 32],
+                    signer: vec![8; 32],
+                    seq: 1,
+                    target: "chat".into(),
+                    payload: vec![9],
+                }],
+            }],
+        ),
+        exchange::<BlockGet>(BlockRef::Id([4; 32]), None),
         exchange::<BlobGet>("sha256:00".into(), b"blob".to_vec()),
         exchange::<Props>(
             (),
