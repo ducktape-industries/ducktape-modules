@@ -620,5 +620,10 @@
       null
     ],
     "reply": null
+  },
+  {
+    "kind": "notify.read",
+    "request": "#design",
+    "reply": null
   }
 ]
