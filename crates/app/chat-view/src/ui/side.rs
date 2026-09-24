@@ -1,5 +1,6 @@
 //! Thread and channel-details panes.
 
+use ducktape_view_guest::design;
 use ducktape_view_guest::prelude::*;
 use ducktape_view_guest::{
     AnyElement, ClickEvent, Context, ElementId, ParentElement, Styled, Theme, div, px,
@@ -35,7 +36,7 @@ pub fn thread(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
                     div()
                         .id("chat-thread-title")
                         .flex_1()
-                        .text_size(px(13.5))
+                        .text_size(design::text::SECTION)
                         .font_weight(ducktape_view_guest::FontWeight::SEMIBOLD)
                         .role(Role::Heading)
                         .aria_level(2)
@@ -51,7 +52,7 @@ pub fn thread(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
             pane = pane.child(
                 div()
                     .p_2()
-                    .text_size(px(12.))
+                    .text_size(design::text::SECONDARY)
                     .text_color(theme.muted)
                     .child("Loading replies…"),
             );
@@ -139,7 +140,7 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
                     div()
                         .id("chat-details-title")
                         .flex_1()
-                        .text_size(px(13.5))
+                        .text_size(design::text::SECTION)
                         .font_weight(ducktape_view_guest::FontWeight::SEMIBOLD)
                         .role(Role::Heading)
                         .aria_level(2)
@@ -150,7 +151,7 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
         .child(div().h(px(1.)).w_full().bg(theme.border))
         .child(
             div()
-                .text_size(px(12.))
+                .text_size(design::text::SECONDARY)
                 .text_color(theme.muted)
                 .child("Name"),
         )
@@ -185,7 +186,7 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
         .child(div().h(px(1.)).w_full().bg(theme.border))
         .child(
             div()
-                .text_size(px(12.))
+                .text_size(design::text::SECONDARY)
                 .text_color(theme.muted)
                 .child("Members"),
         )
@@ -209,7 +210,7 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
         ))
         .child(
             div()
-                .text_size(px(11.))
+                .text_size(design::text::CAPTION)
                 .text_color(theme.faint)
                 .child("Select a member below to remove it from this channel."),
         );
@@ -218,7 +219,7 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
         content = content.child(
             div()
                 .id("chat-details-no-members")
-                .text_size(px(11.))
+                .text_size(design::text::CAPTION)
                 .text_color(theme.faint)
                 .child("No members added. An open channel needs none."),
         );
@@ -245,7 +246,7 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
             .child(
                 div()
                     .flex_1()
-                    .text_size(px(12.))
+                    .text_size(design::text::SECONDARY)
                     .child(member.label.clone()),
             )
             .child(remove_button);

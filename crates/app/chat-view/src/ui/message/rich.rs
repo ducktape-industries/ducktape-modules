@@ -1,10 +1,13 @@
 use super::*;
+use ducktape_view_guest::design;
 
 pub(super) fn plain_line(id: ElementId, text: &str, mono: bool) -> InteractiveText {
     let styled = StyledText::new(text.to_owned());
     let mut text = InteractiveText::new(id, styled).w_full();
     if mono {
-        text = text.font_family("JetBrains Mono").text_size(px(12.));
+        text = text
+            .font_family(design::fonts::FAMILY_MONO)
+            .text_size(design::text::SECONDARY);
     }
     text
 }

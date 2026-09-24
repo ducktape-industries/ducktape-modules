@@ -69,22 +69,7 @@ pub fn short(raw: &[u8]) -> String {
     format!("{}…{}", &hex[..4], &hex[hex.len() - 4..])
 }
 
-/// `6230` → `6,230`.
-pub fn grouped(number: u64) -> String {
-    let digits = number.to_string();
-    let mut out = String::new();
-    for (index, c) in digits.chars().enumerate() {
-        if index > 0 && (digits.len() - index).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(c);
-    }
-    out
-}
-
-pub fn plural(count: u64, one: &str, many: &str) -> String {
-    format!("{} {}", grouped(count), if count == 1 { one } else { many })
-}
+pub use ducktape_view_guest::design::{grouped, plural};
 
 /// How long before `now` a time in milliseconds was: `2s`, `3m`, `4h`, `5d`.
 pub fn ago(now: u64, then: u64) -> String {

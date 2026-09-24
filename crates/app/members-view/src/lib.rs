@@ -5,6 +5,7 @@
 //! The contracts are borsh and this view's state is a serde snapshot, so a
 //! reply is folded to [`Row`]s as it lands: nothing the programs speak is
 //! kept across a snapshot, only what the screen shows.
+use ducktape_view_guest::design;
 use ducktape_view_guest::doors::Query;
 use ducktape_view_guest::doors::RpcLive;
 use ducktape_view_guest::export_view;
@@ -84,7 +85,7 @@ impl Render for Members {
             .size_full()
             .bg(theme.background)
             .text_color(theme.foreground)
-            .text_size(px(13.))
+            .text_size(design::text::BODY)
             .child(
                 div()
                     .id("members-head")
@@ -95,7 +96,7 @@ impl Render for Members {
                         div()
                             .id("members-title")
                             .flex_1()
-                            .text_size(px(16.))
+                            .text_size(design::text::TITLE)
                             .font_weight(ducktape_view_guest::FontWeight::SEMIBOLD)
                             .role(ducktape_view_guest::Role::Heading)
                             .aria_level(1)
@@ -103,7 +104,7 @@ impl Render for Members {
                     )
                     .child(
                         div()
-                            .text_size(px(11.))
+                            .text_size(design::text::CAPTION)
                             .text_color(theme.muted)
                             .child(self.count()),
                     ),
@@ -144,7 +145,7 @@ impl Members {
 
     fn count(&self) -> String {
         match self.rows.ready() {
-            Some(rows) => plural(rows.len(), "account", "accounts"),
+            Some(rows) => design::plural(rows.len() as u64, "account", "accounts"),
             None => String::new(),
         }
     }
@@ -154,37 +155,16 @@ impl Members {
         match &self.rows {
             Loaded::Idle | Loaded::Loading(_) => div()
                 .id("members-loading")
-                .text_size(px(12.))
+                .text_size(design::text::SECONDARY)
                 .text_color(theme.muted)
                 .child("Reading the roster…")
                 .into_any_element(),
             Loaded::Failed(refusal) => {
                 let retry = cx.listener(|view, _: &ClickEvent, _, cx| view.read(cx));
-                div()
-                    .id("members-refused")
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .p_3()
-                    .border_1()
-                    .border_color(theme.danger)
-                    .bg(theme.danger_soft)
-                    .child(refusal.sentence.clone())
-                    .child(
-                        div()
-                            .id("members-retry")
-                            .px_2()
-                            .py_1()
-                            .bg(theme.surface)
-                            .hover(|s| s.bg(theme.surface_raised))
-                            .role(ducktape_view_guest::Role::Button)
-                            .focusable()
-                            .on_click(retry)
-                            .child("Retry"),
-                    )
+                design::refused("members", refusal.sentence.clone(), theme, retry)
                     .into_any_element()
             }
-            Loaded::Ready(rows) if rows.is_empty() => empty_state(
+            Loaded::Ready(rows) if rows.is_empty() => design::empty_state(
                 "members-empty",
                 "No accounts",
                 "The identity program of this network holds no accounts yet.",
@@ -194,7 +174,7 @@ impl Members {
             Loaded::Ready(rows) => {
                 let shown: Vec<&Row> = rows.iter().filter(|row| self.matches(row)).collect();
                 if shown.is_empty() {
-                    return empty_state(
+                    return design::empty_state(
                         "members-no-match",
                         "Nothing matches",
                         format!("No account reads like “{}”.", self.filter.trim()),
@@ -252,7 +232,7 @@ impl RenderOnce for MemberRow {
             .child(
                 div()
                     .w(px(56.))
-                    .text_size(px(12.))
+                    .text_size(design::text::SECONDARY)
                     .text_color(theme.muted)
                     .child(format!("#{}", row.number)),
             )
@@ -260,9 +240,9 @@ impl RenderOnce for MemberRow {
             .child(Badge::new(row.control, theme.muted, theme.surface_raised))
             .child(
                 div()
-                    .text_size(px(12.))
+                    .text_size(design::text::SECONDARY)
                     .text_color(theme.muted)
-                    .child(plural(row.keys, "key", "keys")),
+                    .child(design::plural(row.keys as u64, "key", "keys")),
             );
         if let Some(standing) = row.standing {
             element = element.child(Badge::new(standing, theme.success, theme.success_soft));
@@ -299,54 +279,9 @@ impl RenderOnce for Badge {
             .py_0p5()
             .bg(self.background)
             .text_color(self.foreground)
-            .text_size(px(11.))
+            .text_size(design::text::CAPTION)
             .child(self.label)
     }
-}
-
-#[derive(IntoElement)]
-struct EmptyState {
-    id: ElementId,
-    title: String,
-    detail: String,
-    muted: ducktape_view_guest::Hsla,
-}
-
-fn empty_state(
-    id: &'static str,
-    title: &str,
-    detail: impl Into<String>,
-    theme: &Theme,
-) -> EmptyState {
-    EmptyState {
-        id: id.into(),
-        title: title.to_owned(),
-        detail: detail.into(),
-        muted: theme.muted,
-    }
-}
-
-impl RenderOnce for EmptyState {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
-        div()
-            .id(self.id)
-            .flex()
-            .flex_col()
-            .gap_1()
-            .p_6()
-            .max_w(px(420.))
-            .child(div().text_size(px(13.)).child(self.title))
-            .child(
-                div()
-                    .text_size(px(12.))
-                    .text_color(self.muted)
-                    .child(self.detail),
-            )
-    }
-}
-
-fn plural(count: usize, one: &str, many: &str) -> String {
-    format!("{count} {}", if count == 1 { one } else { many })
 }
 
 /// The roster, with each account's valset standing joined on the keys it

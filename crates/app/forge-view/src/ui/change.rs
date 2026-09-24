@@ -1,5 +1,6 @@
 //! One Change: its header and the three tabs a reviewer lives in.
 //! Conversation is chat's hidden channel; Files is the reviewer's home.
+use ducktape_view_guest::design;
 use ducktape_view_guest::prelude::*;
 
 use crate::Forge;
@@ -146,7 +147,7 @@ fn header(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
         column = column.child(
             div()
                 .id(id("forge-merge-refusal"))
-                .text_size(px(12.))
+                .text_size(design::text::SECONDARY)
                 .text_color(theme.muted)
                 .child(refusal),
         );
@@ -259,7 +260,7 @@ fn messages(forge: &Forge, theme: &Theme) -> AnyElement {
             .id(id("forge-conversation-refused"))
             .p_2()
             .bg(theme.danger_soft)
-            .text_size(px(12.))
+            .text_size(design::text::SECONDARY)
             .child(refusal.sentence.clone())
             .into_any_element(),
         Some(ducktape_view_guest::view::Loaded::Ready(rows)) if rows.is_empty() => empty_state(
@@ -296,7 +297,11 @@ fn messages(forge: &Forge, theme: &Theme) -> AnyElement {
                                 .child(crate::ui::bold(author))
                                 .child(quiet(format!("#{}", message.seq), theme)),
                         )
-                        .child(div().text_size(px(13.)).child(message.text.clone())),
+                        .child(
+                            div()
+                                .text_size(design::text::BODY)
+                                .child(message.text.clone()),
+                        ),
                 );
             }
             column.into_any_element()
@@ -448,7 +453,7 @@ fn file_tree(forge: &Forge, query: &Query, cx: &mut Context<Forge>, theme: &Them
             div()
                 .id(id(format!("forge-viewed-{label}")))
                 .px_2()
-                .text_size(px(11.))
+                .text_size(design::text::CAPTION)
                 .text_color(if viewed { theme.success } else { theme.muted })
                 .role(Role::Button)
                 .aria_label("Mark this file viewed")
@@ -519,7 +524,7 @@ fn review_bar(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyEleme
         bar = bar.child(
             div()
                 .id(id("forge-review-error"))
-                .text_size(px(12.))
+                .text_size(design::text::SECONDARY)
                 .text_color(theme.danger)
                 .child(review.error.clone()),
         );

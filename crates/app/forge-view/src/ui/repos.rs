@@ -1,5 +1,6 @@
 //! The repositories: the full list when nothing is open, the rail that
 //! switches between them when something is.
+use ducktape_view_guest::design;
 use ducktape_view_guest::prelude::*;
 
 use crate::Forge;
@@ -60,7 +61,7 @@ fn repo_row(
         .border_1()
         .border_color(theme.border)
         .bg(theme.background)
-        .text_size(px(11.))
+        .text_size(design::text::CAPTION)
         .text_color(theme.muted)
         .hover(|style| style.text_color(theme.foreground))
         .on_click(copy)
@@ -101,7 +102,7 @@ fn repo_row(
                 .gap(px(3.))
                 .child(
                     div()
-                        .text_size(px(13.5))
+                        .text_size(design::text::SECTION)
                         .font_weight(ducktape_view_guest::FontWeight::SEMIBOLD)
                         .truncate()
                         .child(name.clone()),
@@ -115,7 +116,7 @@ fn repo_row(
                             div()
                                 .min_w(px(0.))
                                 .truncate()
-                                .font_family("JetBrains Mono")
+                                .font_family(design::fonts::FAMILY_MONO)
                                 .text_size(px(11.5))
                                 .text_color(theme.faint)
                                 .child(url),
@@ -129,7 +130,7 @@ fn repo_row(
                 .items_center()
                 .gap_5()
                 .flex_shrink_0()
-                .text_size(px(12.))
+                .text_size(design::text::SECONDARY)
                 .text_color(theme.muted)
                 .child(
                     div()
@@ -156,7 +157,7 @@ fn repo_row(
                     div()
                         .w(px(72.))
                         .truncate()
-                        .font_family("JetBrains Mono")
+                        .font_family(design::fonts::FAMILY_MONO)
                         .text_size(px(11.5))
                         .child(ref_label(&info.repo.settings.head)),
                 )
@@ -267,7 +268,7 @@ pub(crate) fn rail(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> Any
                         .flex_1()
                         .px_1()
                         .py_1()
-                        .text_size(px(12.))
+                        .text_size(design::text::SECONDARY)
                         .text_color(theme.sidebar_muted)
                         .hover(|style| {
                             style
@@ -426,7 +427,7 @@ fn dialog(form: &crate::state::NewRepo, cx: &mut Context<Forge>, theme: &Theme) 
         card = card.child(
             div()
                 .id(id("forge-new-repo-error"))
-                .text_size(px(12.))
+                .text_size(design::text::SECONDARY)
                 .text_color(theme.danger)
                 .child(form.error.clone()),
         );

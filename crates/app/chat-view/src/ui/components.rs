@@ -1,108 +1,8 @@
-//! Small repeated presentation components local to Chat.
+//! Small repeated presentation components local to Chat; the shared ones
+//! (button, empty state, quiet line) come from `view_guest::design`.
 
-use ducktape_view_guest::Div;
+use ducktape_view_guest::design;
 use ducktape_view_guest::prelude::*;
-
-#[derive(IntoElement)]
-pub(crate) struct Button<F>
-where
-    F: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-{
-    id: ElementId,
-    label: String,
-    theme: Theme,
-    click: F,
-}
-
-pub(crate) fn button<F>(
-    id: impl Into<ElementId>,
-    label: impl Into<String>,
-    theme: &Theme,
-    click: F,
-) -> Button<F>
-where
-    F: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-{
-    Button {
-        id: id.into(),
-        label: label.into(),
-        theme: *theme,
-        click,
-    }
-}
-
-impl<F> RenderOnce for Button<F>
-where
-    F: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-{
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
-        div()
-            .id(self.id)
-            .px_2()
-            .py_1()
-            .bg(self.theme.surface)
-            .hover(|style| style.bg(self.theme.surface_raised))
-            .active(|style| style.bg(self.theme.accent_soft))
-            .role(Role::Button)
-            .focusable()
-            .on_click(self.click)
-            .child(self.label)
-    }
-}
-
-#[derive(IntoElement)]
-pub(crate) struct EmptyState {
-    id: ElementId,
-    title: String,
-    detail: String,
-    muted: Hsla,
-}
-
-pub(crate) fn empty_state(
-    id: impl Into<ElementId>,
-    title: impl Into<String>,
-    detail: impl Into<String>,
-    theme: &Theme,
-) -> EmptyState {
-    EmptyState {
-        id: id.into(),
-        title: title.into(),
-        detail: detail.into(),
-        muted: theme.muted,
-    }
-}
-
-impl RenderOnce for EmptyState {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
-        div()
-            .id(self.id)
-            .flex()
-            .flex_col()
-            .gap_1()
-            .p_6()
-            .max_w(px(420.))
-            .child(
-                div()
-                    .text_size(px(13.5))
-                    .font_weight(ducktape_view_guest::FontWeight::MEDIUM)
-                    .child(self.title),
-            )
-            .child(
-                div()
-                    .text_size(px(12.))
-                    .text_color(self.muted)
-                    .child(self.detail),
-            )
-    }
-}
-
-/// One muted line of status text.
-pub(crate) fn quiet(text: impl Into<String>, theme: &Theme) -> Div {
-    div()
-        .text_size(px(12.))
-        .text_color(theme.muted)
-        .child(text.into())
-}
 
 #[derive(IntoElement)]
 pub(crate) struct Badge {
@@ -134,7 +34,7 @@ impl RenderOnce for Badge {
             .py_0p5()
             .bg(self.background)
             .text_color(self.foreground)
-            .text_size(px(11.))
+            .text_size(design::text::CAPTION)
             .child(self.label)
     }
 }

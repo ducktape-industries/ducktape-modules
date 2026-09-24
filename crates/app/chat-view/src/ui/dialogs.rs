@@ -1,5 +1,6 @@
 //! The channel creation dialog.
 
+use ducktape_view_guest::design;
 use ducktape_view_guest::prelude::*;
 use ducktape_view_guest::{
     AnyElement, App, ClickEvent, Context, ParentElement, Styled, Theme, Window, div, px,
@@ -105,10 +106,14 @@ pub fn channel_create(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Opt
         .border_color(theme.border)
         .bg(theme.background)
         .shadow_lg()
-        .child(div().text_size(px(16.)).child("Create a channel"))
         .child(
             div()
-                .text_size(px(12.))
+                .text_size(design::text::TITLE)
+                .child("Create a channel"),
+        )
+        .child(
+            div()
+                .text_size(design::text::SECONDARY)
                 .text_color(theme.muted)
                 .child("Channel name"),
         )
@@ -136,7 +141,7 @@ pub fn channel_create(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Opt
     if !create.error.is_empty() {
         card = card.child(
             div()
-                .text_size(px(12.))
+                .text_size(design::text::SECONDARY)
                 .text_color(theme.danger)
                 .child(create.error.clone()),
         );
@@ -144,7 +149,7 @@ pub fn channel_create(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Opt
     if !chat.holds_account() {
         card = card.child(
             div()
-                .text_size(px(12.))
+                .text_size(design::text::SECONDARY)
                 .text_color(theme.muted)
                 .child("Create an account to create a channel"),
         );

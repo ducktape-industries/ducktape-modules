@@ -1,155 +1,14 @@
-//! The repeated shapes of this view, in chat's visual language: the same
-//! Theme tokens, the same row height, the same button, chip and empty state.
-//! They live here because the crate boundary forbids reaching into chat-view.
+//! The repeated shapes of this view; the ones every view shares (button,
+//! empty state, heading, quiet line) come from `view_guest::design`.
 use std::ops::Range;
 
+use ducktape_view_guest::design;
+pub(crate) use ducktape_view_guest::design::{button, empty_state, heading};
 use ducktape_view_guest::prelude::*;
-use ducktape_view_guest::{FontWeight, Hsla, UniformListScrollHandle};
+use ducktape_view_guest::{Hsla, UniformListScrollHandle};
 
 pub(crate) fn id(text: impl Into<String>) -> ElementId {
     ElementId::Name(text.into().into())
-}
-
-/// A button. Disabled keeps the row visible, drops the route and says so.
-#[derive(IntoElement)]
-pub(crate) struct Button<F>
-where
-    F: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-{
-    id: ElementId,
-    label: String,
-    theme: Theme,
-    enabled: bool,
-    primary: bool,
-    selected: bool,
-    /// a tab: quiet text, the chosen one underlined, no fill
-    tab: bool,
-    /// a choice among many (a ref, the About panel): no fill, muted text,
-    /// the chosen one an fg edge like any selected button
-    quiet: bool,
-    click: F,
-}
-
-pub(crate) fn button<F>(
-    id: impl Into<ElementId>,
-    label: impl Into<String>,
-    theme: &Theme,
-    click: F,
-) -> Button<F>
-where
-    F: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-{
-    Button {
-        id: id.into(),
-        label: label.into(),
-        theme: *theme,
-        enabled: true,
-        primary: false,
-        selected: false,
-        tab: false,
-        quiet: false,
-        click,
-    }
-}
-
-impl<F> Button<F>
-where
-    F: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-{
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = enabled;
-        self
-    }
-    pub fn primary(mut self, primary: bool) -> Self {
-        self.primary = primary;
-        self
-    }
-    pub fn selected(mut self, selected: bool) -> Self {
-        self.selected = selected;
-        self
-    }
-    pub fn tab(mut self, tab: bool) -> Self {
-        self.tab = tab;
-        self
-    }
-    pub fn quiet(mut self, quiet: bool) -> Self {
-        self.quiet = quiet;
-        self
-    }
-}
-
-impl<F> RenderOnce for Button<F>
-where
-    F: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-{
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
-        let theme = self.theme;
-        let mut element = div()
-            .id(self.id)
-            .px_2()
-            .py_1()
-            .text_size(px(12.))
-            .role(if self.tab { Role::Tab } else { Role::Button })
-            .child(self.label);
-        // The chosen one is the ink one: fg text on the window, an fg edge
-        // (under a tab, around a button); the rest stay quiet.
-        element = if self.tab {
-            element
-                .text_color(if self.selected {
-                    theme.foreground
-                } else {
-                    theme.muted
-                })
-                .border_b_2()
-                .border_color(if self.selected {
-                    theme.foreground
-                } else {
-                    theme.background
-                })
-        } else if self.primary {
-            element
-                .bg(theme.primary)
-                .text_color(theme.primary_foreground)
-        } else if self.selected {
-            element
-                .bg(theme.background)
-                .text_color(theme.foreground)
-                .border_1()
-                .border_color(theme.foreground)
-        } else if self.quiet {
-            element
-                .text_color(theme.muted)
-                .border_1()
-                .border_color(theme.background)
-        } else {
-            element
-                .bg(theme.surface)
-                .text_color(theme.foreground)
-                .border_1()
-                .border_color(theme.surface)
-        };
-        if self.selected {
-            element = element.font_weight(FontWeight::MEDIUM);
-        }
-        if self.enabled {
-            let plain = !self.primary && !self.selected;
-            let (tab, quiet) = (self.tab || (self.quiet && plain), plain);
-            element = element
-                .hover(move |style| match (tab, quiet) {
-                    (true, _) => style.text_color(theme.foreground),
-                    (false, true) => style.bg(theme.surface_raised),
-                    (false, false) => style,
-                })
-                .focusable()
-                .on_click(self.click);
-        } else {
-            element = element.text_color(theme.muted).aria_disabled(true);
-        }
-        if self.selected {
-            element = element.aria_selected(true);
-        }
-        element
-    }
 }
 
 /// A list row: the one interactive line every list of this view uses.
@@ -238,52 +97,6 @@ where
 }
 
 #[derive(IntoElement)]
-pub(crate) struct EmptyState {
-    id: ElementId,
-    title: String,
-    detail: String,
-    muted: Hsla,
-}
-
-pub(crate) fn empty_state(
-    id: impl Into<ElementId>,
-    title: impl Into<String>,
-    detail: impl Into<String>,
-    theme: &Theme,
-) -> EmptyState {
-    EmptyState {
-        id: id.into(),
-        title: title.into(),
-        detail: detail.into(),
-        muted: theme.muted,
-    }
-}
-
-impl RenderOnce for EmptyState {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
-        div()
-            .id(self.id)
-            .flex()
-            .flex_col()
-            .gap_1()
-            .p_6()
-            .max_w(px(420.))
-            .child(
-                div()
-                    .text_size(px(13.5))
-                    .font_weight(FontWeight::MEDIUM)
-                    .child(self.title),
-            )
-            .child(
-                div()
-                    .text_size(px(12.))
-                    .text_color(self.muted)
-                    .child(self.detail),
-            )
-    }
-}
-
-#[derive(IntoElement)]
 pub(crate) struct Chip {
     id: ElementId,
     label: String,
@@ -313,7 +126,7 @@ impl RenderOnce for Chip {
             .py_0p5()
             .bg(self.background)
             .text_color(self.foreground)
-            .text_size(px(11.))
+            .text_size(design::text::CAPTION)
             .child(self.label)
     }
 }
@@ -322,104 +135,9 @@ pub(crate) fn loading(id: impl Into<ElementId>, text: &str, theme: &Theme) -> An
     div()
         .id(id.into())
         .p_3()
-        .text_size(px(12.))
+        .text_size(design::text::SECONDARY)
         .text_color(theme.muted)
         .child(text.to_owned())
-        .into_any_element()
-}
-
-/// A refused read, with the reason and the one thing to do about it.
-#[derive(IntoElement)]
-pub(crate) struct Refused<F>
-where
-    F: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-{
-    id: ElementId,
-    sentence: String,
-    theme: Theme,
-    retry: F,
-}
-
-pub(crate) fn refused<F>(
-    id: impl Into<ElementId>,
-    sentence: impl Into<String>,
-    theme: &Theme,
-    retry: F,
-) -> Refused<F>
-where
-    F: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-{
-    Refused {
-        id: id.into(),
-        sentence: sentence.into(),
-        theme: *theme,
-        retry,
-    }
-}
-
-impl<F> RenderOnce for Refused<F>
-where
-    F: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-{
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
-        let theme = self.theme;
-        let retry_id = match &self.id {
-            ElementId::Name(name) => id(format!("{name}-retry")),
-            _ => id("forge-retry"),
-        };
-        div()
-            .id(self.id)
-            .flex()
-            .flex_col()
-            .gap_2()
-            .p_3()
-            .m_2()
-            .border_1()
-            .border_color(theme.danger)
-            .bg(theme.danger_soft)
-            .text_size(px(12.))
-            .child(self.sentence)
-            .child(
-                div()
-                    .id(retry_id)
-                    .px_2()
-                    .py_1()
-                    .w(px(64.))
-                    .bg(theme.surface)
-                    .hover(|style| style.bg(theme.surface_raised))
-                    .role(Role::Button)
-                    .focusable()
-                    .on_click(self.retry)
-                    .child("Retry"),
-            )
-    }
-}
-
-/// A section heading, the same weight everywhere.
-pub(crate) fn heading(
-    element_id: impl Into<ElementId>,
-    text: impl Into<String>,
-    level: usize,
-    theme: &Theme,
-) -> AnyElement {
-    heading_in(element_id, text, level, theme.foreground)
-}
-
-/// The same heading in a chosen tone — the ink rail reads its own.
-pub(crate) fn heading_in(
-    element_id: impl Into<ElementId>,
-    text: impl Into<String>,
-    level: usize,
-    color: Hsla,
-) -> AnyElement {
-    div()
-        .id(element_id.into())
-        .text_size(px(if level == 1 { 16. } else { 13. }))
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(color)
-        .role(Role::Heading)
-        .aria_level(level)
-        .child(text.into())
         .into_any_element()
 }
 
@@ -465,25 +183,9 @@ pub(crate) fn rows(
     list.flex_1().min_h(px(0.)).into_any_element()
 }
 
-pub(crate) fn quiet(text: impl Into<String>, theme: &Theme) -> AnyElement {
-    div()
-        .text_size(px(12.))
-        .text_color(theme.muted)
-        .child(text.into())
-        .into_any_element()
-}
-
-/// One monospaced source line, as the code and diff screens draw it.
-pub(crate) fn mono(text: impl Into<String>, color: Hsla) -> AnyElement {
-    div()
-        .flex_1()
-        .min_w(px(0.))
-        .font_family("monospace")
-        .text_size(px(12.))
-        .text_color(color)
-        .whitespace_nowrap()
-        .child(text.into())
-        .into_any_element()
+/// [`design::quiet`], as the screens that return it hand it on.
+pub(crate) fn quiet(text: impl Into<SharedString>, theme: &Theme) -> AnyElement {
+    design::quiet(text, theme).into_any_element()
 }
 
 /// A path's bytes as something a screen can say out loud.

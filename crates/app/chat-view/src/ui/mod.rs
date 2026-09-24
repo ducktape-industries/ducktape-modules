@@ -10,7 +10,9 @@ pub mod side;
 pub mod sidebar;
 mod timeline;
 
-pub(crate) use components::{badge, button, empty_state, quiet};
+pub(crate) use components::badge;
+use ducktape_view_guest::design;
+pub(crate) use ducktape_view_guest::design::{button, empty_state, quiet};
 use ducktape_view_guest::{
     Context, InteractiveElement, IntoElement, ParentElement, Pixels, Styled, Theme, div, hsla,
     modal_overlay, px, resize_handle, sensor,
@@ -27,7 +29,7 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>) -> impl IntoElement {
         .size_full()
         .bg(theme.background)
         .text_color(theme.foreground)
-        .text_size(px(13.))
+        .text_size(design::text::BODY)
         .child(if chat.session.connected {
             connected(chat, cx, &theme).into_any_element()
         } else {

@@ -416,7 +416,7 @@ pub fn dm_peer_of(mine: u64, channel_id: &str) -> Option<u64> {
 }
 
 pub fn height_label(height: u64) -> String {
-    format!("block {}", grouped(height))
+    format!("block {}", ducktape_view_guest::design::grouped(height))
 }
 
 pub(crate) fn short_id(id: &str, keep: usize) -> String {
@@ -425,16 +425,4 @@ pub(crate) fn short_id(id: &str, keep: usize) -> String {
         head.push('…');
     }
     head
-}
-
-fn grouped(number: u64) -> String {
-    let digits = number.to_string();
-    let mut grouped = String::with_capacity(digits.len() + digits.len() / 3);
-    for (index, digit) in digits.chars().enumerate() {
-        if index > 0 && (digits.len() - index).is_multiple_of(3) {
-            grouped.push(',');
-        }
-        grouped.push(digit);
-    }
-    grouped
 }

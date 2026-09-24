@@ -3,12 +3,13 @@
 //! line here, because it arrives as one.
 //!
 //! Every row is virtual, and a line's gutter number is its comment button.
+use ducktape_view_guest::design;
 use std::rc::Rc;
 
 use ducktape_view_guest::prelude::*;
 
 use crate::Forge;
-use crate::ui::components::{chip, empty_state, id, mono, path_text, quiet};
+use crate::ui::components::{chip, empty_state, id, path_text, quiet};
 use crate::ui::staged;
 use forge::{Content, FileDiff, FileStatus, LineKind, Query, Reply, Side};
 
@@ -144,7 +145,7 @@ fn file_strip(
                 .id(id(format!("{element_id}-file-{label}")))
                 .flex()
                 .gap_2()
-                .text_size(px(12.))
+                .text_size(design::text::SECONDARY)
                 .role(Role::Button)
                 .focusable()
                 .on_click(pick)
@@ -310,14 +311,14 @@ fn paint_row(
             .px_2()
             .py_1()
             .bg(theme.surface_raised)
-            .text_size(px(12.))
+            .text_size(design::text::SECONDARY)
             .child(crate::ui::bold(row.text.clone()))
             .into_any_element(),
         Kind::Hunk => div()
             .id(id(format!("forge-diff-hunk-{index}")))
             .w_full()
             .px_2()
-            .font_family("monospace")
+            .font_family(design::fonts::FAMILY_MONO)
             .text_size(px(11.5))
             .text_color(theme.accent)
             .bg(theme.surface)
@@ -357,12 +358,17 @@ fn line_row(
         .child(
             div()
                 .w(px(12.))
-                .font_family("monospace")
-                .text_size(px(12.))
+                .font_family(design::fonts::FAMILY_MONO)
+                .text_size(design::text::SECONDARY)
                 .text_color(theme.muted)
                 .child(marker),
         )
-        .child(mono(row.text.clone(), colour));
+        .child(
+            ducktape_view_guest::design::mono(row.text.clone())
+                .flex_1()
+                .min_w(px(0.))
+                .text_color(colour),
+        );
     if let Some(draft) = &row.draft {
         body = body.child(chip(
             id(format!("forge-diff-draft-{index}")),
@@ -390,7 +396,7 @@ fn line_row(
                 .px_6()
                 .py_1()
                 .bg(theme.surface)
-                .text_size(px(12.))
+                .text_size(design::text::SECONDARY)
                 .child(crate::ui::bold(author.clone()))
                 .child(div().flex_1().child(text.clone()))
                 .when(*outdated, |element| {
@@ -419,7 +425,7 @@ fn gutter(
     let cell = || {
         div()
             .w(px(44.))
-            .font_family("monospace")
+            .font_family(design::fonts::FAMILY_MONO)
             .text_size(px(11.5))
             .text_color(theme.muted)
     };
@@ -488,7 +494,7 @@ pub(crate) fn composer(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) ->
         card = card.child(
             div()
                 .id(id("forge-comment-error"))
-                .text_size(px(12.))
+                .text_size(design::text::SECONDARY)
                 .text_color(theme.danger)
                 .child(review.error.clone()),
         );

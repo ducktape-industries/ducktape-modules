@@ -1,5 +1,6 @@
 //! The Blocks tab and one block.
 use super::*;
+use ducktape_view_guest::design;
 
 pub(super) fn blocks(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
     let now = view.chain.now();
@@ -23,10 +24,11 @@ pub(super) fn blocks(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
 pub(super) fn block(view: &Explorer, height: u64, cx: Cx, theme: &Theme) -> AnyElement {
     let Some((block, txs)) = view.block(height) else {
         return match &view.opened {
-            Loaded::Ready(None) => EmptyState::new(
+            Loaded::Ready(None) => empty_state(
                 "explorer-no-block",
                 format!("No block {}", grouped(height)),
                 "This node keeps no finalized block at this height.",
+                theme,
             )
             .into_any_element(),
             Loaded::Failed(refusal) => failed(&refusal.sentence, cx, theme),
@@ -44,7 +46,7 @@ pub(super) fn block(view: &Explorer, height: u64, cx: Cx, theme: &Theme) -> AnyE
             .items_center()
             .border_1()
             .border_color(theme.border)
-            .text_size(px(12.))
+            .text_size(design::text::SECONDARY)
             .text_color(if enabled {
                 theme.foreground
             } else {
@@ -96,8 +98,8 @@ pub(super) fn block(view: &Explorer, height: u64, cx: Cx, theme: &Theme) -> AnyE
                     cx,
                     theme,
                 )
-                .font_family(MONO)
-                .text_size(px(12.)),
+                .font_family(design::fonts::FAMILY_MONO)
+                .text_size(design::text::SECONDARY),
             )
             .child(mono(short(&block.parent)).text_color(theme.muted)),
         None => div().child(mono(short(&block.parent)).text_color(theme.muted)),

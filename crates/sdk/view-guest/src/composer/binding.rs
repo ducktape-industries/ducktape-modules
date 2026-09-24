@@ -312,7 +312,8 @@ pub fn view<V: View + 'static>(
         }),
         ("I", "Italic", "italic", |sign| sign.italic()),
         ("</>", "Code", "code", |sign| {
-            sign.font_family("JetBrains Mono").text_size(px(11.))
+            sign.font_family(design::fonts::FAMILY_MONO)
+                .text_size(crate::design::text::CAPTION)
         }),
         ("“", "Quote", "quote", |sign| sign.text_size(px(16.))),
     ];

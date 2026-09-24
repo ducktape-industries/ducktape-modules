@@ -1,5 +1,6 @@
 //! Changes: the filter rail with "Needs my judgment" on top, the list, and
 //! the form that opens or edits one.
+use ducktape_view_guest::design;
 use ducktape_view_guest::prelude::*;
 
 use crate::Forge;
@@ -287,7 +288,7 @@ pub(crate) fn form(
         card = card.child(
             div()
                 .id(id("forge-change-error"))
-                .text_size(px(12.))
+                .text_size(design::text::SECONDARY)
                 .text_color(theme.danger)
                 .child(form.error.clone()),
         );

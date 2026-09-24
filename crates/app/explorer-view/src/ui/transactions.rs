@@ -1,5 +1,6 @@
 //! The Transactions tab and one transaction.
 use super::*;
+use ducktape_view_guest::design;
 
 pub(super) fn transactions(
     view: &Explorer,
@@ -51,13 +52,14 @@ pub(super) fn transactions(
 
 pub(super) fn tx(view: &Explorer, hash: &[u8; 32], cx: Cx, theme: &Theme) -> AnyElement {
     let Some(tx) = view.tx(hash) else {
-        return EmptyState::new(
+        return empty_state(
             "explorer-no-tx",
             "Transaction not found",
             format!(
                 "It is not in the last {} this explorer reads.",
                 plural(view.chain.blocks.len() as u64, "block", "blocks")
             ),
+            theme,
         )
         .into_any_element();
     };
@@ -178,7 +180,7 @@ pub(super) fn tx(view: &Explorer, hash: &[u8; 32], cx: Cx, theme: &Theme) -> Any
                 .id("explorer-operation-heading")
                 .px_5()
                 .py_2()
-                .text_size(px(13.5))
+                .text_size(design::text::SECTION)
                 .font_weight(FontWeight::SEMIBOLD)
                 .role(Role::Heading)
                 .aria_level(2)

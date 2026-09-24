@@ -1,5 +1,6 @@
 //! The Accounts tab and one account.
 use super::*;
+use ducktape_view_guest::design;
 
 pub(super) fn accounts(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
     let list = match &view.accounts {
@@ -71,10 +72,11 @@ pub(super) fn account(view: &Explorer, number: u64, cx: Cx, theme: &Theme) -> An
         .and_then(|list| list.iter().find(|account| account.number == number))
     else {
         return match &view.accounts {
-            Loaded::Ready(_) => EmptyState::new(
+            Loaded::Ready(_) => empty_state(
                 "explorer-no-account",
                 format!("No account #{number}"),
                 "Identity holds no account by this number.",
+                theme,
             )
             .into_any_element(),
             Loaded::Failed(refusal) => failed(&refusal.sentence, cx, theme),
@@ -122,7 +124,7 @@ pub(super) fn account(view: &Explorer, number: u64, cx: Cx, theme: &Theme) -> An
             .child(
                 mono(format!("{} {}", device.scheme, short(&device.key)))
                     .flex_1()
-                    .text_size(px(11.))
+                    .text_size(design::text::CAPTION)
                     .text_color(theme.faint),
             )
             .child(
@@ -130,7 +132,7 @@ pub(super) fn account(view: &Explorer, number: u64, cx: Cx, theme: &Theme) -> An
                     Some(tx) => format!("last used {} ago", ago(now, tx.time)),
                     None => "not used lately".into(),
                 })
-                .text_size(px(11.))
+                .text_size(design::text::CAPTION)
                 .text_color(theme.muted),
             )
     });
@@ -178,7 +180,7 @@ pub(super) fn account(view: &Explorer, number: u64, cx: Cx, theme: &Theme) -> An
                                 account.number,
                                 plural(account.devices.len() as u64, "device", "devices")
                             ))
-                            .text_size(px(11.))
+                            .text_size(design::text::CAPTION)
                             .text_color(theme.muted),
                         ),
                 )

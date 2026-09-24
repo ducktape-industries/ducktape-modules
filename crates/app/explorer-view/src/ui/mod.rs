@@ -1,14 +1,14 @@
 //! The explorer's pages. Square corners, rows split by one-pixel rules,
 //! hashes and numbers in the data face.
+use ducktape_view_guest::design;
 use ducktape_view_guest::prelude::*;
 use ducktape_view_guest::view::Loaded;
 use ducktape_view_guest::{Div, FontWeight, Stateful};
 
-use crate::components::EmptyState;
 use crate::decode::{ago, date, grouped, plural, short};
 use crate::{Account, BlockRow, Explorer, Route, TxRow};
+use design::{empty_state, mono};
 
-const MONO: &str = "JetBrains Mono";
 /// The most rows one list draws; the rest is reached by search.
 const LIST_ROWS: usize = 50;
 /// The rows each Overview panel draws.
@@ -36,7 +36,7 @@ pub fn render(view: &Explorer, cx: Cx) -> AnyElement {
         .size_full()
         .bg(theme.background)
         .text_color(theme.foreground)
-        .text_size(px(13.))
+        .text_size(design::text::BODY)
         .child(bar(view, cx, &theme));
     if let Some(note) = &view.note {
         root = root.child(
@@ -47,7 +47,7 @@ pub fn render(view: &Explorer, cx: Cx) -> AnyElement {
                 .border_b_1()
                 .border_color(theme.border)
                 .bg(theme.surface)
-                .text_size(px(12.))
+                .text_size(design::text::SECONDARY)
                 .text_color(theme.muted)
                 .child(note.clone()),
         );
@@ -125,7 +125,7 @@ fn bar(view: &Explorer, cx: Cx, theme: &Theme) -> impl IntoElement {
                     .border_1()
                     .border_color(theme.border)
                     .bg(theme.background)
-                    .text_size(px(12.))
+                    .text_size(design::text::SECONDARY)
                     .value(view.search.clone())
                     .placeholder("Search by height, hash, account or program")
                     .label("Search the chain")
@@ -156,50 +156,18 @@ fn page(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
 
 // ---------- pieces ----------
 
-fn mono(text: impl Into<SharedString>) -> Div {
-    div()
-        .font_family(MONO)
-        .text_size(px(12.))
-        .whitespace_nowrap()
-        .child(text.into())
-}
-
 fn quiet(id: &'static str, text: &'static str, theme: &Theme) -> AnyElement {
-    div()
+    design::quiet(text, theme)
         .id(id)
         .px_5()
         .py_4()
-        .text_size(px(12.))
-        .text_color(theme.muted)
-        .child(text)
         .into_any_element()
 }
 
 fn failed(sentence: &str, cx: Cx, theme: &Theme) -> AnyElement {
     let retry = cx.listener(|view: &mut Explorer, _: &ClickEvent, _, cx| view.read_all(cx));
-    div()
-        .id("explorer-refused")
+    design::refused("explorer", sentence.to_owned(), theme, retry)
         .m_5()
-        .flex()
-        .flex_col()
-        .gap_2()
-        .p_3()
-        .border_1()
-        .border_color(theme.danger)
-        .bg(theme.danger_soft)
-        .child(sentence.to_string())
-        .child(
-            div()
-                .id("explorer-retry")
-                .px_2()
-                .py_1()
-                .bg(theme.surface)
-                .hover(|s| s.bg(theme.surface_raised))
-                .role(Role::Button)
-                .focusable()
-                .on_click(retry)
-                .child("Retry"),
-        )
         .into_any_element()
 }
 
@@ -213,22 +181,13 @@ fn heading(id: &str, title: &str, right: Option<AnyElement>, theme: &Theme) -> i
         .px_5()
         .border_b_1()
         .border_color(theme.border)
-        .child(
-            div()
-                .id(SharedString::from(format!("{id}-title")))
-                .flex_1()
-                .text_size(px(13.5))
-                .font_weight(FontWeight::SEMIBOLD)
-                .role(Role::Heading)
-                .aria_level(2)
-                .child(title.to_string()),
-        )
+        .child(design::heading(format!("{id}-title"), title.to_owned(), 2, theme).flex_1())
         .children(right)
 }
 
 fn caption(text: impl Into<SharedString>, theme: &Theme) -> AnyElement {
     mono(text)
-        .text_size(px(11.))
+        .text_size(design::text::CAPTION)
         .text_color(theme.muted)
         .into_any_element()
 }
@@ -303,7 +262,7 @@ fn signer(view: &Explorer, key: &[u8], theme: &Theme) -> impl IntoElement {
         .child(div().truncate().child(name))
         .children(number.map(|number| {
             mono(format!("#{number}"))
-                .text_size(px(11.))
+                .text_size(design::text::CAPTION)
                 .text_color(theme.faint)
         }))
 }
@@ -435,7 +394,7 @@ fn tx_row(
             .overflow_hidden()
             .child(
                 mono(tx.target.clone())
-                    .text_size(px(11.))
+                    .text_size(design::text::CAPTION)
                     .text_color(theme.muted),
             )
             .child(div().truncate().child(title)),
@@ -479,7 +438,7 @@ fn titled(kind: &str, title: String, theme: &Theme) -> impl IntoElement {
         .py_4()
         .child(
             mono(kind.to_string())
-                .text_size(px(11.))
+                .text_size(design::text::CAPTION)
                 .text_color(theme.muted),
         )
         .child(
@@ -497,7 +456,7 @@ fn quiet_owned(id: &'static str, text: String, theme: &Theme) -> AnyElement {
         .id(id)
         .px_5()
         .py_4()
-        .text_size(px(12.))
+        .text_size(design::text::SECONDARY)
         .text_color(theme.muted)
         .child(text)
         .into_any_element()
@@ -519,7 +478,7 @@ fn copy_button(view: &Explorer, route: &Route, cx: Cx, theme: &Theme) -> Option<
             .items_center()
             .border_1()
             .border_color(theme.border)
-            .text_size(px(12.))
+            .text_size(design::text::SECONDARY)
             .text_color(theme.muted)
             .hover(|s| s.bg(theme.hover).text_color(theme.foreground))
             .role(Role::Button)

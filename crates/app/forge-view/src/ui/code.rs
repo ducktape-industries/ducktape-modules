@@ -2,6 +2,7 @@
 //! children inline beneath it; a text file is drawn highlighted with a
 //! numbered gutter, a markdown file rendered; a binary or oversize blob is
 //! the header the program returned and nothing else.
+use ducktape_view_guest::design;
 use std::ops::Range;
 use std::rc::Rc;
 
@@ -404,8 +405,8 @@ pub(crate) fn readme(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
                     .pb_2()
                     .border_b_1()
                     .border_color(theme.border)
-                    .font_family(highlight::MONO)
-                    .text_size(px(12.))
+                    .font_family(design::fonts::FAMILY_MONO)
+                    .text_size(design::text::SECONDARY)
                     .text_color(theme.muted)
                     .child(path_text(&name)),
             )
@@ -436,8 +437,8 @@ fn lines(name: &str, bytes: &[u8], theme: &Theme) -> AnyElement {
                     .justify_end()
                     .border_r_1()
                     .border_color(theme.border)
-                    .font_family(highlight::MONO)
-                    .text_size(px(12.))
+                    .font_family(design::fonts::FAMILY_MONO)
+                    .text_size(design::text::SECONDARY)
                     .text_color(theme.faint)
                     .child((index + 1).to_string()),
             )

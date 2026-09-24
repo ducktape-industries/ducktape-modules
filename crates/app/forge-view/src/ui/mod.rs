@@ -14,6 +14,7 @@ pub(crate) mod refs;
 pub(crate) mod repos;
 pub(crate) mod settings;
 
+use ducktape_view_guest::design;
 use ducktape_view_guest::prelude::*;
 use ducktape_view_guest::{Div, FontWeight, Stateful};
 
@@ -58,7 +59,7 @@ pub(crate) fn render(forge: &mut Forge, cx: &mut Context<Forge>) -> impl IntoEle
         .size_full()
         .bg(theme.background)
         .text_color(theme.foreground)
-        .text_size(px(13.))
+        .text_size(design::text::BODY)
         .child(columns);
     ducktape_view_guest::sensor(id("forge-viewport"), root)
         .size_full()
@@ -85,7 +86,7 @@ fn main(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
                 .p_2()
                 .bg(theme.danger_soft)
                 .text_color(theme.foreground)
-                .text_size(px(12.))
+                .text_size(design::text::SECONDARY)
                 .child(forge.notice.clone()),
         );
     }
@@ -353,7 +354,7 @@ pub(crate) fn fact(label: &str, value: impl Into<String>, theme: &Theme) -> AnyE
     div()
         .flex()
         .gap_2()
-        .text_size(px(12.))
+        .text_size(design::text::SECONDARY)
         .child(
             div()
                 .w(px(120.))
@@ -391,7 +392,7 @@ pub(crate) fn pending(forge: &Forge, scope: &str, theme: &Theme) -> AnyElement {
                 } else {
                     theme.surface_raised
                 })
-                .text_size(px(12.))
+                .text_size(design::text::SECONDARY)
                 .child(op.label.clone())
                 .child(quiet(
                     if failed {
@@ -428,12 +429,13 @@ pub(crate) fn staged<'a>(
             let query = query.clone();
             let retry =
                 cx.listener(move |forge, _: &ClickEvent, _, cx| forge.retry(query.clone(), cx));
-            Err(components::refused(
-                id(element_id.to_owned()),
+            Err(ducktape_view_guest::design::refused(
+                element_id,
                 refusal.sentence.clone(),
                 theme,
                 retry,
             )
+            .m_2()
             .into_any_element())
         }
     }

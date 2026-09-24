@@ -1,6 +1,7 @@
 //! The channel and direct-message pane, authored as native GPUI elements.
 
 use ducktape_view_guest::AnyElement;
+use ducktape_view_guest::design;
 use ducktape_view_guest::prelude::*;
 use ducktape_view_guest::{ClickEvent, Context, ElementId, ParentElement, Styled, Theme, div, px};
 
@@ -187,7 +188,7 @@ fn section_header(
         .gap_1()
         .px_1()
         .py_1()
-        .text_size(px(11.))
+        .text_size(design::text::CAPTION)
         .text_color(theme.sidebar_muted)
         .child(div().flex_1().child(label.to_owned()))
         .child(control)
@@ -198,7 +199,7 @@ fn quiet(id: impl Into<ElementId>, text: impl Into<String>, theme: &Theme) -> im
         .id(id)
         .px_1()
         .py_1()
-        .text_size(px(11.))
+        .text_size(design::text::CAPTION)
         .text_color(theme.sidebar_muted)
         .child(text.into())
 }
@@ -249,7 +250,7 @@ fn channel_button(
     if !info.channel.huddle.is_empty() {
         row = row.child(
             div()
-                .text_size(px(11.))
+                .text_size(design::text::CAPTION)
                 .text_color(theme.success)
                 .child(format!("🔊 {}", info.channel.huddle.len())),
         );
@@ -257,7 +258,7 @@ fn channel_button(
     if crate::chat::members_only(info) {
         row = row.child(
             div()
-                .text_size(px(11.))
+                .text_size(design::text::CAPTION)
                 .text_color(theme.sidebar_muted)
                 .child("Members only"),
         );
@@ -265,7 +266,7 @@ fn channel_button(
     if info.channel.archived {
         row = row.child(
             div()
-                .text_size(px(11.))
+                .text_size(design::text::CAPTION)
                 .text_color(theme.sidebar_muted)
                 .child("Archived"),
         );
@@ -357,7 +358,7 @@ fn with_seats(chat: &Chat, info: &ChannelInfo, row: impl IntoElement, theme: &Th
                         } else {
                             theme.sidebar_raised
                         })
-                        .text_size(px(11.))
+                        .text_size(design::text::CAPTION)
                         .text_color(if speaking {
                             theme.success
                         } else {
@@ -365,11 +366,11 @@ fn with_seats(chat: &Chat, info: &ChannelInfo, row: impl IntoElement, theme: &Th
                         })
                         .child(initials(&label)),
                 )
-                .child(div().flex_1().text_size(px(11.)).child(label))
+                .child(div().flex_1().text_size(design::text::CAPTION).child(label))
                 .when(!note.is_empty(), |el| {
                     el.child(
                         div()
-                            .text_size(px(11.))
+                            .text_size(design::text::CAPTION)
                             .text_color(theme.sidebar_muted)
                             .child(note),
                     )
@@ -471,7 +472,7 @@ pub fn avatar(
         .justify_center()
         .rounded_full()
         .bg(if agent { theme.agent_soft } else { fill })
-        .text_size(px(11.))
+        .text_size(design::text::CAPTION)
         .child(initials(name))
 }
 

@@ -449,18 +449,9 @@ fn fenced(chars: &[char], at: usize, marker: &str) -> Option<(String, usize)> {
     None
 }
 
-/// An even-length all-hex string back to its bytes; anything else is not hex.
+/// [`abi::unhex`], where the empty string is not a key either.
 fn hex_bytes(hex: &str) -> Option<Vec<u8>> {
-    let looks_hex = !hex.is_empty()
-        && hex.len().is_multiple_of(2)
-        && hex.bytes().all(|b| b.is_ascii_hexdigit());
-    if !looks_hex {
-        return None;
-    }
-    (0..hex.len())
-        .step_by(2)
-        .map(|at| u8::from_str_radix(&hex[at..at + 2], 16).ok())
-        .collect()
+    abi::unhex(hex).filter(|bytes| !bytes.is_empty())
 }
 
 const LINK_SCHEMES: [&str; 3] = ["http://", "https://", "duck://"];
