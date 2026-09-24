@@ -205,12 +205,22 @@ pub fn account(
 }
 
 /// An op as a person reads it: a title and its fields.
+#[cfg(feature = "view")]
 pub fn describe(op: &Op) -> (String, Vec<(&'static str, String)>) {
     let account = |number: &AccountNumber| ("account", number.to_string());
+    let scheme_name = |scheme: &abi::Scheme| {
+        match scheme {
+            abi::Scheme::Ed25519 => "Ed25519",
+            abi::Scheme::Secp256k1 => "secp256k1",
+            abi::Scheme::Secp256r1 => "secp256r1",
+            abi::Scheme::Bls12381 => "BLS12-381",
+        }
+        .to_string()
+    };
     match op {
         Op::Create { name, scheme } => (
             format!("Create · {name}"),
-            vec![("name", name.clone()), ("scheme", format!("{scheme:?}"))],
+            vec![("name", name.clone()), ("scheme", scheme_name(scheme))],
         ),
         Op::AddKey {
             scheme,
@@ -219,7 +229,7 @@ pub fn describe(op: &Op) -> (String, Vec<(&'static str, String)>) {
         } => (
             "Add key".into(),
             vec![
-                ("scheme", format!("{scheme:?}")),
+                ("scheme", scheme_name(scheme)),
                 ("label", label.clone().unwrap_or_else(|| "—".into())),
                 ("key", abi::preview(&consent.key)),
                 account(&consent.account),
@@ -261,7 +271,17 @@ pub fn describe(op: &Op) -> (String, Vec<(&'static str, String)>) {
             standing,
         } => (
             "Set standing".into(),
-            vec![account(number), ("standing", format!("{standing:?}"))],
+            vec![
+                account(number),
+                (
+                    "standing",
+                    match standing {
+                        Standing::Active => "active",
+                        Standing::Suspended => "suspended",
+                    }
+                    .into(),
+                ),
+            ],
         ),
         Op::TransferControl {
             account: number,

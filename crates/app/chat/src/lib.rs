@@ -303,6 +303,7 @@ pub use wire::*;
 mod tests;
 
 /// An op as a person reads it: a title and its fields.
+#[cfg(feature = "view")]
 pub fn describe(op: &ChatMsg) -> (String, Vec<(&'static str, String)>) {
     let party = |party: &Party| match party {
         Party::Account(number) => format!("account {number}"),
@@ -320,7 +321,14 @@ pub fn describe(op: &ChatMsg) -> (String, Vec<(&'static str, String)>) {
             channel_id,
             vec![
                 ("name", name.clone()),
-                ("posting", format!("{post_policy:?}")),
+                (
+                    "posting",
+                    match post_policy {
+                        PostPolicy::Open => "open",
+                        PostPolicy::MembersOnly => "members only",
+                    }
+                    .into(),
+                ),
             ],
         ),
         ChatMsg::CreateVoiceChannel { channel_id, name } => (

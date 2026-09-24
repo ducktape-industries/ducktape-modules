@@ -153,7 +153,7 @@ pub fn answer<S: Reads>(
         hash,
         bounds,
     };
-    let page = || page.expect("this query has pagination");
+    let page = || page.ok_or_else(|| invalid("this query has no page"));
     Ok(match q {
         Query::Log { from, .. } => {
             let tip = r.commit_id(resolve(s, name, from, hash)?)?;
@@ -164,7 +164,7 @@ pub fn answer<S: Reads>(
                 &[],
                 cap(bounds.log_walk),
             ))?;
-            let page = page().slice(&ids)?.try_map(|id| {
+            let page = page()?.slice(&ids)?.try_map(|id| {
                 let c = r.commit(&id)?;
                 Ok(CommitInfo {
                     oid: id.to_hex(),
@@ -199,7 +199,7 @@ pub fn answer<S: Reads>(
             Reply::Tree {
                 height,
                 tree: tree.to_hex(),
-                page: page().slice(&entries)?.map(|e| TreeInfo {
+                page: page()?.slice(&entries)?.map(|e| TreeInfo {
                     name: e.name,
                     oid: e.id.to_hex(),
                     kind: entry_kind(e.mode),
@@ -212,13 +212,13 @@ pub fn answer<S: Reads>(
         },
         Query::Diff {
             base, head, path, ..
-        } => crate::diffs::query(&r, height, base, head, path.as_deref(), page())?,
+        } => crate::diffs::query(&r, height, base, head, path.as_deref(), page()?)?,
         Query::Compare { from, into, .. } => {
             let from = r.commit_id(resolve(s, name, from, hash)?)?;
             let into = r.commit_id(resolve(s, name, into, hash)?)?;
             compare(&mut r, height, from, into)?
         }
-        _ => unreachable!(),
+        _ => return Err(invalid("not an object query")),
     })
 }
 fn compare<S: Reads>(
@@ -272,4 +272,58 @@ fn compare<S: Reads>(
             mergeability,
         },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use abi::{HashKind, reason};
+
+    fn bounds() -> Bounds {
+        Bounds {
+            max_objects: 1,
+            max_delta_depth: 1,
+            max_object_size: 1,
+            push_walk: 1,
+            fetch_walk: 1,
+            merge_cost: 1,
+            page_size: 1,
+            log_walk: 1,
+            tree_walk: 1,
+            diff_bytes: 1,
+            blob_bytes: 1,
+            record_bytes: 1,
+        }
+    }
+
+    /// A wrong variant, or a paged query handed no page, refuses: no panic
+    /// on the query path.
+    #[test]
+    fn a_misrouted_query_refuses() {
+        let mut s = store::Memory::default();
+        let repo = Repo {
+            hash: HashKind::Sha1,
+            owner: vec![],
+            settings: Settings::default(),
+            refs_count: 0,
+            last_activity: 0,
+        };
+        s.state
+            .insert(crate::repo::repo_key("r"), abi::encode(&repo));
+        let page = store::Page::default();
+        let diff = Query::Diff {
+            repo: "r".into(),
+            base: None,
+            head: "0".repeat(40),
+            path: None,
+            page,
+        };
+        let refused = answer(&s, 1, &diff, &bounds(), None).unwrap_err();
+        assert_eq!(refused.reason, reason::INVALID_INPUT);
+        let repos = Query::Repos {
+            page: store::Page::default(),
+        };
+        let refused = answer(&s, 1, &repos, &bounds(), None).unwrap_err();
+        assert_eq!(refused.reason, reason::INVALID_INPUT);
+    }
 }
