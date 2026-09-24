@@ -29,8 +29,9 @@ pub use decode::Op;
 /// The recent window the explorer reads: activity, search by transaction
 /// hash and the transaction list reach this far back and no further.
 pub const WINDOW: usize = 1_000;
-/// Blocks per `rpc.blocks` page (the node caps a page at 100).
-const PAGE: u32 = 100;
+/// Blocks per `rpc.blocks` page (the node caps a page at 100). Small, so
+/// one reply's decoding stays well inside a tick's fuel.
+const PAGE: u32 = 20;
 /// How often the head is re-read, in milliseconds.
 const TICK: i64 = 2_000;
 

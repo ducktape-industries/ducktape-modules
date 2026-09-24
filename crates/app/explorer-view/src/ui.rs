@@ -66,58 +66,61 @@ fn bar(view: &Explorer, cx: Cx, theme: &Theme) -> impl IntoElement {
         cx.notify();
     });
     let submit = cx.listener(|view: &mut Explorer, _: &(), _, cx| view.search(cx));
+    let tabs = tabs.into_iter().map(|(label, route)| {
+        let active = view.route.tab() == route.tab();
+        let go = cx
+            .listener(move |view: &mut Explorer, _: &ClickEvent, _, cx| view.go(route.clone(), cx));
+        div()
+            .id(format!("explorer-tab-{}", label.to_lowercase()))
+            .h_full()
+            .flex()
+            .items_center()
+            .px_2()
+            .mx_1()
+            .text_color(if active {
+                theme.foreground
+            } else {
+                theme.muted
+            })
+            .when(active, |tab| {
+                tab.border_b_2()
+                    .border_color(theme.foreground)
+                    .font_weight(FontWeight::MEDIUM)
+            })
+            .hover(|tab| tab.text_color(theme.foreground))
+            .role(Role::Tab)
+            .aria_selected(active)
+            .focusable()
+            .on_click(go)
+            .child(label)
+    });
     div()
         .id("explorer-bar")
+        .w_full()
         .flex()
         .items_center()
+        .justify_between()
         .h(px(44.))
         .px_3()
         .border_b_1()
         .border_color(theme.border)
-        .children(tabs.into_iter().map(|(label, route)| {
-            let active = view.route.tab() == route.tab();
-            let go = cx.listener(move |view: &mut Explorer, _: &ClickEvent, _, cx| {
-                view.go(route.clone(), cx)
-            });
-            div()
-                .id(format!("explorer-tab-{}", label.to_lowercase()))
-                .h_full()
-                .flex()
-                .items_center()
-                .px_2()
-                .mx_1()
-                .text_color(if active {
-                    theme.foreground
-                } else {
-                    theme.muted
-                })
-                .when(active, |tab| {
-                    tab.border_b_2()
-                        .border_color(theme.foreground)
-                        .font_weight(FontWeight::MEDIUM)
-                })
-                .hover(|tab| tab.text_color(theme.foreground))
-                .role(Role::Tab)
-                .aria_selected(active)
-                .focusable()
-                .on_click(go)
-                .child(label)
-        }))
-        .child(div().flex_1())
+        .child(div().h_full().flex().items_center().children(tabs))
         .child(
-            Input::new("explorer-search")
-                .w(px(360.))
-                .h(px(28.))
-                .px_2()
-                .border_1()
-                .border_color(theme.border)
-                .bg(theme.background)
-                .text_size(px(12.))
-                .value(view.search.clone())
-                .placeholder("Search by height, hash, account or program")
-                .label("Search the chain")
-                .on_input(typed)
-                .on_submit(submit),
+            div().w(px(360.)).flex_shrink_0().child(
+                Input::new("explorer-search")
+                    .w_full()
+                    .h(px(28.))
+                    .px_2()
+                    .border_1()
+                    .border_color(theme.border)
+                    .bg(theme.background)
+                    .text_size(px(12.))
+                    .value(view.search.clone())
+                    .placeholder("Search by height, hash, account or program")
+                    .label("Search the chain")
+                    .on_input(typed)
+                    .on_submit(submit),
+            ),
         )
 }
 
@@ -323,7 +326,16 @@ fn block_row(block: &BlockRow, now: u64, cx: Cx, theme: &Theme) -> impl IntoElem
     )
 }
 
-fn tx_row(view: &Explorer, tx: &TxRow, height: bool, cx: Cx, theme: &Theme) -> impl IntoElement {
+/// `height` adds the block column; `who` the signer column, which an
+/// account's own activity leaves out.
+fn tx_row(
+    view: &Explorer,
+    tx: &TxRow,
+    height: bool,
+    who: bool,
+    cx: Cx,
+    theme: &Theme,
+) -> impl IntoElement {
     let id = SharedString::from(format!("explorer-tx-{}", abi::hex(&tx.hash)));
     let now = view.chain.now();
     row(
@@ -348,7 +360,7 @@ fn tx_row(view: &Explorer, tx: &TxRow, height: bool, cx: Cx, theme: &Theme) -> i
             )
             .child(div().truncate().child(tx.op.title.clone())),
     )
-    .child(signer(view, &tx.signer, theme))
+    .children(who.then(|| signer(view, &tx.signer, theme)))
     .children(height.then(|| mono(grouped(tx.height)).text_color(theme.muted)))
     .child(
         mono(ago(now, tx.time))
@@ -477,7 +489,7 @@ fn overview(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
         .txs
         .iter()
         .take(LATEST)
-        .map(|tx| tx_row(view, tx, false, cx, theme).into_any_element())
+        .map(|tx| tx_row(view, tx, false, true, cx, theme).into_any_element())
         .collect();
     let no_txs = txs.is_empty().then(|| {
         quiet_owned(
@@ -602,7 +614,7 @@ fn transactions(view: &Explorer, program: Option<String>, cx: Cx, theme: &Theme)
     let rows: Vec<_> = matching
         .iter()
         .take(LIST_ROWS)
-        .map(|tx| tx_row(view, tx, true, cx, theme).into_any_element())
+        .map(|tx| tx_row(view, tx, true, true, cx, theme).into_any_element())
         .collect();
     let title = match &program {
         Some(program) => format!("Transactions · {program}"),
@@ -719,7 +731,7 @@ fn block(view: &Explorer, height: u64, cx: Cx, theme: &Theme) -> AnyElement {
     let count = txs.len() as u64;
     let rows: Vec<_> = txs
         .into_iter()
-        .map(|tx| tx_row(view, tx, false, cx, theme).into_any_element())
+        .map(|tx| tx_row(view, tx, false, true, cx, theme).into_any_element())
         .collect();
     let empty = rows.is_empty().then(|| {
         quiet(
@@ -1020,7 +1032,7 @@ fn account(view: &Explorer, number: u64, cx: Cx, theme: &Theme) -> AnyElement {
     let rows: Vec<_> = sent
         .iter()
         .take(LIST_ROWS)
-        .map(|tx| tx_row(view, tx, true, cx, theme).into_any_element())
+        .map(|tx| tx_row(view, tx, true, false, cx, theme).into_any_element())
         .collect();
     let empty = rows.is_empty().then(|| {
         quiet_owned(

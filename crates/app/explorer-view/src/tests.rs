@@ -186,6 +186,24 @@ fn a_linked_program_s_op_reads_as_a_field_table() {
         "{op:?}"
     );
 
+    // a payload too big to format whole reads as cut, not as a trap
+    let huge = forge::Op::Push {
+        repo: "app".into(),
+        request: vec![0x50; 1 << 20],
+    };
+    let op = decode::decode("forge", &borsh::to_vec(&huge).unwrap());
+    assert_eq!(op.title, "Push · app");
+    let request = &op
+        .fields
+        .iter()
+        .find(|(key, _)| key == "request")
+        .unwrap()
+        .1;
+    assert!(
+        request.starts_with("over ") && request.ends_with("bytes · 5050505050505050…"),
+        "{request}"
+    );
+
     let create = identity::Op::Create {
         name: "Ada, \"the first\"".into(),
         scheme: abi::Scheme::Ed25519,
@@ -235,20 +253,21 @@ fn numbers_hashes_and_times_read_as_a_person_reads_them() {
 #[test]
 fn the_window_follows_the_head_and_stops_where_the_archive_does() {
     let mut window = Chain::default();
-    let blocks = chain(150);
+    let blocks = chain(30);
+    assert_eq!(PAGE, 20, "the sizes below assume a page of 20");
     let ask = |before| BlockPage {
         before,
         limit: PAGE,
     };
     window.land(None, page(&blocks, &ask(None)));
-    assert_eq!((window.top(), window.blocks.len()), (Some(150), 100));
+    assert_eq!((window.top(), window.blocks.len()), (Some(30), 20));
     assert!(!window.complete, "a full page may have more below it");
-    window.land(Some(51), page(&blocks, &ask(Some(51))));
-    assert_eq!(window.blocks.len(), 151);
+    window.land(Some(11), page(&blocks, &ask(Some(11))));
+    assert_eq!(window.blocks.len(), 31);
     assert!(window.complete);
-    let more = chain(152);
+    let more = chain(32);
     window.land(None, page(&more, &ask(None)));
-    assert_eq!((window.top(), window.blocks.len()), (Some(152), 153));
+    assert_eq!((window.top(), window.blocks.len()), (Some(32), 33));
     assert!(
         window
             .blocks
@@ -260,7 +279,7 @@ fn the_window_follows_the_head_and_stops_where_the_archive_does() {
     // a head that no longer joins the window starts it again
     let far = chain(400);
     window.land(None, page(&far, &ask(None)));
-    assert_eq!((window.top(), window.blocks.len()), (Some(400), 100));
+    assert_eq!((window.top(), window.blocks.len()), (Some(400), 20));
     assert!(!window.complete && window.txs.is_empty());
 }
 
