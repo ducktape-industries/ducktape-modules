@@ -65,12 +65,7 @@ fn schedule(store: &mut impl Writes, env: &Env, scheduled: Scheduled) -> Result<
             env.height
         )));
     }
-    let blob = match &scheduled.change {
-        Change::Set(entry) => Some(entry.code),
-        Change::SetView(view) => Some(view.view),
-        Change::Remove(_) | Change::RemoveView(_) => None,
-    };
-    if let Some(blob) = blob
+    if let Some(blob) = scheduled.change.code()
         && store.blob_stat(blob).is_none()
     {
         return Err(not_found(format!("code {blob:?} is not published")));

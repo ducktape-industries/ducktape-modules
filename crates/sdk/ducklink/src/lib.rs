@@ -199,6 +199,16 @@ impl std::fmt::Display for Link {
     }
 }
 
+/// `duck://<chain>/<program>/<tail…>` from a session's chain id text
+/// (`<label>#<salt>`); `None` while the session names no chain, or when a
+/// part breaks [`Link::new`]'s rules.
+pub fn mint(chain: &str, program: &str, tail: &[&str]) -> Option<String> {
+    let tail = tail.iter().map(|segment| (*segment).to_owned()).collect();
+    Link::new(chain.parse().ok()?, program, tail)
+        .ok()
+        .map(|link| link.to_string())
+}
+
 /// a tail segment that spells a number: decimal, no sign, no leading zero (`0`
 /// itself aside), within `u64`. One spelling, so `7`, `07` and `+7` are not
 /// three links to one thing; a program that numbers its tail reads it here and
@@ -494,5 +504,14 @@ mod tests {
         for bad in ["", "007", "+7", "-1", "seq", "18446744073709551616"] {
             assert_eq!(number(bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn mint_needs_a_chain_and_a_clean_tail() {
+        let chain = ChainId::of("net", b"genesis").unwrap().to_string();
+        let link = mint(&chain, "chat", &["design", "7"]).unwrap();
+        assert_eq!(Link::parse(&link).unwrap().tail, ["design", "7"]);
+        assert_eq!(mint("", "chat", &["design"]), None, "no chain yet");
+        assert_eq!(mint(&chain, "chat", &[""]), None, "an empty segment");
     }
 }
