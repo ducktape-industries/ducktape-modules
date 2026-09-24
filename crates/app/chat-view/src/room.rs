@@ -26,6 +26,7 @@ impl Chat {
             cx.host().open_link(&link);
         }
         self.open(id, window, cx);
+        self.settle_badge(cx);
     }
 
     pub(crate) fn open(

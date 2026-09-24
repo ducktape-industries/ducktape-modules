@@ -3,8 +3,8 @@
 use crate::chat::{ChatMsg, ChatViewQuery, ChatViewReply};
 use ducktape_view_guest::doors::Program;
 pub use ducktape_view_guest::doors::{
-    ClipboardRead, ClipboardWrite, Drops, Id, Live, Pick, Props, Release, SelectedFile, Session,
-    Submit, Visible,
+    ClipboardRead, ClipboardWrite, Drops, Id, Live, Pick, Props, Release, Route, SelectedFile,
+    Session, Submit, Visible,
 };
 
 pub struct ChatApi;

@@ -60,6 +60,12 @@ pub struct Chat {
     pub(crate) timeline_rows: RefCell<Vec<String>>,
     #[serde(skip)]
     pub(crate) thread_rows: RefCell<Vec<String>>,
+    /// messages meant for the reader in rooms she has not read, by room
+    #[serde(skip)]
+    pub(crate) attention: BTreeMap<String, i64>,
+    /// the tab badge last sent
+    #[serde(skip)]
+    pub(crate) badge: Option<i64>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -228,5 +234,6 @@ pub struct Watches {
     pub(crate) changes: Option<ducktape_view_guest::Task<()>>,
     pub(crate) identity: Option<ducktape_view_guest::Task<()>>,
     pub(crate) visible: Option<ducktape_view_guest::Task<()>>,
+    pub(crate) route: Option<ducktape_view_guest::Task<()>>,
     pub(crate) drops: Option<ducktape_view_guest::Task<()>>,
 }
