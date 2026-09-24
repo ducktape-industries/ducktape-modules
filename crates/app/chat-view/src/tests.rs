@@ -460,6 +460,37 @@ fn reaction_picker_keeps_labels_and_its_stable_action_id() {
     );
 }
 
+/// A search shows every match, past one tab's worth, in a scrolled grid.
+#[test]
+fn an_emoji_search_shows_every_match() {
+    let (mut cx, view) = opened();
+    let found = crate::emoji::search("c");
+    assert!(
+        found.len() > crate::emoji::PER_TAB,
+        "a query that overflows a tab"
+    );
+    view.update(&mut cx, |chat, _, cx| {
+        chat.menu = Some(Menu {
+            pane: Pane::Timeline,
+            seq: 1,
+            rev: 0,
+            mode: Mode::Reactions,
+            at: (333., 222.),
+        });
+        chat.picker.query = "c".into();
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(cx.has_text(&format!("{} MATCHES", found.len())));
+    assert!(cx.find("chat-reaction-results-scroll").is_some());
+    for emoji in found {
+        assert!(
+            cx.find(&format!("chat-reaction-{emoji}")).is_some(),
+            "{emoji}"
+        );
+    }
+}
+
 #[test]
 fn a_send_shows_pending_then_lands_and_a_refusal_is_a_banner() {
     let (mut cx, view) = opened();
@@ -1065,6 +1096,7 @@ fn kept_cursors_bring_the_badge_back_after_a_relaunch() {
             doors::encode(&BTreeMap::from([
                 ("general".to_owned(), 1u64),
                 ("dm-7-8".to_owned(), 0),
+                ("gone".to_owned(), 4),
             ]))
         }))
     });
@@ -1119,8 +1151,63 @@ fn kept_cursors_bring_the_badge_back_after_a_relaunch() {
     let kept: BTreeMap<String, u64> = doors::decode(&kept.unwrap()).unwrap();
     assert_eq!(
         kept,
-        BTreeMap::from([("general".into(), 3), ("dm-7-8".into(), 0)])
+        BTreeMap::from([("general".into(), 3), ("dm-7-8".into(), 0)]),
+        "a room no longer listed is not kept"
     );
+}
+
+/// A device store that refuses the kept cursors is asked again, then chat
+/// starts from what it sees: reading a room still keeps its cursor.
+#[test]
+fn a_refused_store_read_still_keeps_cursors() {
+    use ducktape_view_guest::doors::{self, StoreGet, StoreSet};
+    use ducktape_view_guest::host::malformed;
+    use std::collections::BTreeMap;
+    let mut cx = TestAppContext::new();
+    configure(&mut cx);
+    cx.host().handle::<StoreGet>(|key| match key.as_str() {
+        "reads/0102" => Err(malformed("the store is unavailable".into())),
+        _ => Ok(None),
+    });
+    cx.host().handle::<ViewOf<ChatApi>>(|query| {
+        Ok(match query {
+            ChatViewQuery::Accounts { .. } => ChatViewReply::Accounts(Vec::new()),
+            ChatViewQuery::Channels { .. } => {
+                ChatViewReply::Channels(page(vec![channel("general", "General", 3)]))
+            }
+            ChatViewQuery::Roots { .. } => ChatViewReply::Roots(page(Vec::new())),
+            ChatViewQuery::Members { .. } => ChatViewReply::Members(page(Vec::new())),
+            query => panic!("unexpected chat query: {query:?}"),
+        })
+    });
+    let props = cx.host().stream::<HostProps>();
+    let visible = cx.host().stream::<HostVisible>();
+    let _view = cx.open::<Chat>();
+    props.push(Session {
+        account: "0102".into(),
+        connected: true,
+        chain: "testnet#0a1b2c3d".into(),
+        ..Session::default()
+    });
+    visible.push(true);
+    cx.run_until_parked();
+    let asked = cx.host().asked::<StoreGet>();
+    assert_eq!(
+        asked.iter().filter(|key| *key == "reads/0102").count(),
+        3,
+        "asked again before giving up: {asked:?}"
+    );
+    cx.simulate_click("chat-sidebar-channel-general");
+    cx.run_until_parked();
+    let (key, kept) = cx
+        .host()
+        .asked::<StoreSet>()
+        .into_iter()
+        .rfind(|(key, _)| key == "reads/0102")
+        .expect("the read is kept");
+    assert_eq!(key, "reads/0102");
+    let kept: BTreeMap<String, u64> = doors::decode(&kept.unwrap()).unwrap();
+    assert_eq!(kept, BTreeMap::from([("general".into(), 3)]));
 }
 
 /// The timeline's list keeps its path when a message menu opens over the

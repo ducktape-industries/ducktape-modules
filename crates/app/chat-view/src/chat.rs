@@ -31,13 +31,13 @@ pub fn unhex(text: &str) -> Option<Vec<u8>> {
 // ---------- duck links ----------
 
 /// `duck://<chain>/chat/<channel>[/<seq>]`: chat's own tail, the channel
-/// written as [`route_segment`] spells it; "" without a chain.
-pub fn channel_link(chain: &str, channel: &str, seq: Option<u64>) -> String {
+/// written as [`route_segment`] spells it; none without a chain.
+pub fn channel_link(chain: &str, channel: &str, seq: Option<u64>) -> Option<String> {
     let channel = route_segment(channel);
     let seq = seq.map(|seq| seq.to_string());
     let mut tail = vec![channel.as_str()];
     tail.extend(seq.as_deref());
-    ducklink::mint(chain, ::chat::PROGRAM, &tail).unwrap_or_default()
+    ducklink::mint(chain, ::chat::PROGRAM, &tail)
 }
 
 /// A channel id as one route segment. The app hands a view only routes of
@@ -92,12 +92,11 @@ pub fn route_target(route: &str) -> Option<(String, u64)> {
 
 /// A pressed mention (an account number) becomes `duck://<chain>/identity/<n>`,
 /// the link the app opens; any other link is already one and passes through.
-pub fn pressed_link(link: String, chain: &str) -> String {
+/// None when no link can be minted (no chain yet).
+pub fn pressed_link(link: String, chain: &str) -> Option<String> {
     match link.parse::<u64>() {
-        Ok(account) => {
-            ducklink::mint(chain, identity::PROGRAM, &[&account.to_string()]).unwrap_or_default()
-        }
-        Err(_) => link,
+        Ok(account) => ducklink::mint(chain, identity::PROGRAM, &[&account.to_string()]),
+        Err(_) => Some(link),
     }
 }
 
@@ -108,14 +107,15 @@ mod tests {
     #[test]
     fn links_keep_their_shapes() {
         assert_eq!(
-            channel_link("testnet#0a1b2c3d", "general", Some(42)),
-            "duck://testnet-0a1b2c3d/chat/general/42"
+            channel_link("testnet#0a1b2c3d", "general", Some(42)).as_deref(),
+            Some("duck://testnet-0a1b2c3d/chat/general/42")
         );
-        assert_eq!(channel_link("", "general", None), "");
+        assert_eq!(channel_link("", "general", None), None);
         assert_eq!(
-            pressed_link("7".into(), "testnet#0a1b2c3d"),
-            "duck://testnet-0a1b2c3d/identity/7"
+            pressed_link("7".into(), "testnet#0a1b2c3d").as_deref(),
+            Some("duck://testnet-0a1b2c3d/identity/7")
         );
+        assert_eq!(pressed_link("7".into(), ""), None);
     }
 
     /// A room whose id the app's route charset refuses (a forge room's `:`)
@@ -146,7 +146,7 @@ mod tests {
             "보고서 #1",
             long.as_str(),
         ] {
-            let link = channel_link("testnet#0a1b2c3d", channel, Some(42));
+            let link = channel_link("testnet#0a1b2c3d", channel, Some(42)).unwrap();
             // what the app does with a chain link: the tail, joined
             let route = ducklink::Link::parse(&link).unwrap().tail.join("/");
             assert!(route_ok(&route), "{channel} → {route}");

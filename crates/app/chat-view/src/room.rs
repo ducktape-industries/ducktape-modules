@@ -21,9 +21,9 @@ impl Chat {
     ) {
         self.create = None;
         self.search_clear();
-        let link = crate::chat::channel_link(&self.session.chain, &id, None);
-        if !link.is_empty() {
-            cx.host().open_link(&link);
+        match crate::chat::channel_link(&self.session.chain, &id, None) {
+            Some(link) => cx.host().open_link(&link),
+            None => cx.host().log("no room link: the session names no chain"),
         }
         self.open(id, window, cx);
         // read to the head this view knows now, not at the next list: a
@@ -363,6 +363,15 @@ impl Chat {
                 }
             }
         }
+        // a room gone from the list takes its cursor with it: the kept map
+        // is written whole, and must not grow with every room ever seen
+        let listed: std::collections::HashSet<&str> = channels
+            .iter()
+            .map(|info| info.channel.id.as_str())
+            .collect();
+        self.reads
+            .cursors
+            .retain(|room, _| listed.contains(room.as_str()));
         self.channels = Loaded::Ready(channels);
         if let Some(room) = read {
             self.read_notices(&room, cx);
