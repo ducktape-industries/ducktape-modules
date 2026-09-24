@@ -241,6 +241,9 @@ pub struct Change {
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Network {
     pub programs: Vec<Entry>,
+    /// the view-only entries: a name and its view's code, no program behind it
+    #[serde(default)]
+    pub views: Vec<(String, String)>,
     pub changes: Vec<Change>,
 }
 
@@ -696,7 +699,7 @@ async fn validators(host: Host) -> Result<Vec<Vec<u8>>, Refusal> {
     }
 }
 
-/// What the registry runs and what it will run.
+/// What the registry runs and lists, and what it will.
 ///
 /// `At(0)` is the folded set: the registry applies the changes due at or
 /// before the height asked, and it answers no height of its own, so there is
@@ -707,6 +710,13 @@ async fn network(host: Host) -> Result<Network, Refusal> {
     };
     let programs = match host.ask::<Query<Registry>>(registry::Query::At(0)).await? {
         registry::Reply::Programs(programs) => programs,
+        other => return Err(unexpected(&other)),
+    };
+    let views = match host
+        .ask::<Query<Registry>>(registry::Query::Views(0))
+        .await?
+    {
+        registry::Reply::Views(views) => views,
         other => return Err(unexpected(&other)),
     };
     let mut scheduled = Vec::new();
@@ -734,6 +744,10 @@ async fn network(host: Host) -> Result<Network, Refusal> {
                 code: abi::hex(entry.code.digest()),
                 params: entry.params.len(),
             })
+            .collect(),
+        views: views
+            .into_iter()
+            .map(|view| (view.name, abi::hex(view.view.digest())))
             .collect(),
         changes: scheduled
             .iter()

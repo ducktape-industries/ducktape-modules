@@ -1242,7 +1242,7 @@ fn programs(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
         Loaded::Failed(refusal) => return failed(&refusal.sentence, cx, theme),
         _ => return quiet("explorer-programs-loading", "Reading the registry…", theme),
     };
-    if network.programs.is_empty() && network.changes.is_empty() {
+    if network.programs.is_empty() && network.views.is_empty() && network.changes.is_empty() {
         return EmptyState::new(
             "explorer-empty",
             "No programs",
@@ -1270,6 +1270,28 @@ fn programs(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
         .into_any_element()
     });
     let running: Vec<_> = running.collect();
+    // A view-only entry sends nothing, so it has no transactions to open.
+    let listed = network.views.iter().map(|(name, code)| {
+        div()
+            .id(SharedString::from(format!("explorer-view-{name}")))
+            .flex()
+            .items_center()
+            .gap_4()
+            .h(px(40.))
+            .px_5()
+            .border_b_1()
+            .border_color(theme.border)
+            .child(mono(name.clone()).flex_1())
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .text_color(theme.muted)
+                    .child("view only"),
+            )
+            .child(mono(short_code(code)).text_color(theme.muted))
+            .into_any_element()
+    });
+    let listed: Vec<_> = listed.collect();
     let scheduled: Vec<_> = network
         .changes
         .iter()
@@ -1335,6 +1357,15 @@ fn programs(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
             theme,
         ))
         .children(running)
+        .when(!listed.is_empty(), |list| {
+            list.child(heading(
+                "explorer-views-header",
+                "Views",
+                Some(caption(plural(listed.len() as u64, "view", "views"), theme)),
+                theme,
+            ))
+            .children(listed)
+        })
         .child(heading(
             "explorer-scheduled-header",
             "Scheduled",

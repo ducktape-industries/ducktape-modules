@@ -254,6 +254,84 @@ fn a_view_is_listed_apart_from_the_programs_and_scheduled_like_one() {
     assert_eq!(programs(&store, 6), ["boot"]);
 }
 
+fn cancel(store: &mut Memory, height: u64, program: &str) -> Result<(), abi::Refusal> {
+    crate::execute(
+        store,
+        &authority(1),
+        Op::Cancel {
+            height,
+            program: program.into(),
+        },
+    )
+}
+
+#[test]
+fn a_name_is_one_kind_whatever_order_the_changes_are_scheduled_in() {
+    let (mut store, code) = founded();
+    let view = |name: &str| {
+        Change::SetView(View {
+            name: name.into(),
+            view: code,
+        })
+    };
+    schedule(&mut store, 10, view("x")).unwrap();
+    assert_eq!(
+        schedule(&mut store, 5, Change::Set(entry("x", code)))
+            .unwrap_err()
+            .reason,
+        reason::ALREADY_EXISTS,
+        "a program landing before a pending view of its name"
+    );
+    schedule(&mut store, 5, Change::Set(entry("y", code))).unwrap();
+    assert_eq!(
+        schedule(&mut store, 3, view("y")).unwrap_err().reason,
+        reason::ALREADY_EXISTS,
+        "a view landing before a pending program of its name"
+    );
+    assert_eq!(
+        schedule(&mut store, 20, Change::Set(entry("lens", code)))
+            .unwrap_err()
+            .reason,
+        reason::ALREADY_EXISTS,
+        "a listed view"
+    );
+    schedule(&mut store, 6, Change::Remove("boot".into())).unwrap();
+    schedule(&mut store, 8, view("boot")).unwrap();
+    assert_eq!(
+        cancel(&mut store, 6, "boot").unwrap_err().reason,
+        reason::ALREADY_EXISTS,
+        "cancelling the removal would leave boot both kinds from 8"
+    );
+    assert_eq!(views(&store, 10).len(), 3);
+    assert_eq!(programs(&store, 10), ["y"]);
+}
+
+#[test]
+fn a_removal_names_one_of_its_own_kind() {
+    let (mut store, code) = founded();
+    for (change, what) in [
+        (Change::Remove("ghost".into()), "no such program"),
+        (Change::RemoveView("ghost".into()), "no such view"),
+        (Change::Remove("lens".into()), "a view is not a program"),
+        (Change::RemoveView("boot".into()), "a program is not a view"),
+    ] {
+        assert_eq!(
+            schedule(&mut store, 5, change).unwrap_err().reason,
+            reason::NOT_FOUND,
+            "{what}"
+        );
+    }
+    schedule(&mut store, 5, Change::Set(entry("new", code))).unwrap();
+    schedule(&mut store, 6, Change::Remove("new".into())).unwrap();
+    assert_eq!(
+        schedule(&mut store, 4, Change::Remove("new".into()))
+            .unwrap_err()
+            .reason,
+        reason::NOT_FOUND,
+        "not yet seated at 4"
+    );
+}
+
 #[test]
 fn the_host_contract_is_a_prefix_of_the_program_contract() {
     assert_eq!(

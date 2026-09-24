@@ -182,13 +182,27 @@ fn schedule_pages_and_missing_programs_report_the_answering_height() {
     deterministic::Runner::default().start(|context| async move {
         let dir = tempfile::tempdir().unwrap();
         let mut net = Net::found(context, dir.path()).await;
+        let output = net
+            .apply(
+                &public(7),
+                module_registry::PROGRAM,
+                &module_registry::Op::Publish {
+                    body: program("identity"),
+                },
+            )
+            .await;
+        let code: BlobId = abi::decode(&output).unwrap();
         for program in ["z", "a", "m"] {
             let receipt = net
                 .as_authority(
                     module_registry::PROGRAM,
                     &module_registry::Op::Schedule(module_registry::Scheduled {
                         height: 100,
-                        change: module_registry::Change::Remove(program.into()),
+                        change: module_registry::Change::Set(module_registry::Entry {
+                            program: program.into(),
+                            code,
+                            params: Vec::new(),
+                        }),
                     }),
                 )
                 .await;
