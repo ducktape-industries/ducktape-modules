@@ -2492,7 +2492,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre"
 version = "0.3.5"
-source = "git+https://github.com/ducktape-industries/gpui-pre?rev=1eadd2072ecc9c55e7dd4f125c1559c1e69abdf8#1eadd2072ecc9c55e7dd4f125c1559c1e69abdf8"
+source = "git+https://github.com/ducktape-industries/gpui-pre?rev=8b2f818e5841843f21b39dc189a1662fbdb1f340#8b2f818e5841843f21b39dc189a1662fbdb1f340"
 dependencies = [
  "accesskit",
  "anyhow",
@@ -2632,7 +2632,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-scheduler"
 version = "0.3.5"
-source = "git+https://github.com/ducktape-industries/gpui-pre?rev=1eadd2072ecc9c55e7dd4f125c1559c1e69abdf8#1eadd2072ecc9c55e7dd4f125c1559c1e69abdf8"
+source = "git+https://github.com/ducktape-industries/gpui-pre?rev=8b2f818e5841843f21b39dc189a1662fbdb1f340#8b2f818e5841843f21b39dc189a1662fbdb1f340"
 dependencies = [
  "async-task",
  "backtrace",
@@ -2692,7 +2692,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-zlog"
 version = "0.3.5"
-source = "git+https://github.com/ducktape-industries/gpui-pre?rev=1eadd2072ecc9c55e7dd4f125c1559c1e69abdf8#1eadd2072ecc9c55e7dd4f125c1559c1e69abdf8"
+source = "git+https://github.com/ducktape-industries/gpui-pre?rev=8b2f818e5841843f21b39dc189a1662fbdb1f340#8b2f818e5841843f21b39dc189a1662fbdb1f340"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4916,7 +4916,7 @@ dependencies = [
 [[package]]
 name = "rmp-serde"
 version = "1.3.1"
-source = "git+https://github.com/ducktape-industries/gpui-pre?rev=1eadd2072ecc9c55e7dd4f125c1559c1e69abdf8#1eadd2072ecc9c55e7dd4f125c1559c1e69abdf8"
+source = "git+https://github.com/ducktape-industries/gpui-pre?rev=8b2f818e5841843f21b39dc189a1662fbdb1f340#8b2f818e5841843f21b39dc189a1662fbdb1f340"
 dependencies = [
  "rmp",
  "serde",
