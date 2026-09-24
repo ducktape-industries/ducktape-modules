@@ -69,6 +69,7 @@ pub use editor_element::{EditorElement, EditorElementEvent};
 pub mod composer;
 pub mod design;
 pub mod host;
+pub mod store;
 pub mod testing;
 pub mod widget;
 pub mod window;

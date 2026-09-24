@@ -367,6 +367,8 @@ fn every_door() -> Vec<(Exchange, serde_json::Value)> {
             },
             Posted::Banner,
         ),
+        exchange::<StoreGet>("reads/alice".into(), Some(vec![1, 2])),
+        exchange::<StoreSet>(("reads/alice".into(), None), ()),
     ]
 }
 
