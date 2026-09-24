@@ -617,3 +617,55 @@ fn a_page_copies_its_link_once_the_session_names_a_chain() {
     assert!(cx.has_text("Copied the link."));
     cx.assert_accessible();
 }
+
+#[test]
+fn every_route_reads_back_from_its_path() {
+    for route in [
+        Route::Overview,
+        Route::Blocks,
+        Route::Block(0),
+        Route::Block(6230),
+        Route::Transactions(None),
+        Route::Transactions(Some("chat".into())),
+        Route::Tx([0xa1; 32]),
+        Route::Accounts,
+        Route::Account(3),
+        Route::Programs,
+    ] {
+        assert_eq!(
+            Route::from_path(&route.path()),
+            Some(route.clone()),
+            "{route:?}"
+        );
+    }
+    for nothing in [
+        "block/07",
+        "block/x",
+        "tx/zz",
+        "program/",
+        "account/-1",
+        "blocks/1",
+    ] {
+        assert_eq!(Route::from_path(nothing), None, "{nothing}");
+    }
+}
+
+#[test]
+fn the_scheduled_changes_survive_a_snapshot() {
+    let (mut cx, _) = ready();
+    cx.simulate_click("explorer-tab-programs");
+    cx.run_until_parked();
+    let bytes = cx.snapshot().unwrap();
+    let mut restored = TestAppContext::new();
+    restored.host().stream::<Ticks>();
+    restored.host().never::<Status>();
+    restored.host().never::<Props>();
+    restored.host().never::<LinkRoute>();
+    restored.host().never::<Blocks>();
+    restored.host().never::<Query<Identity>>();
+    restored.host().never::<Query<Valset>>();
+    restored.host().never::<Query<Registry>>();
+    restored.restore::<Explorer>(&bytes).unwrap();
+    restored.run_until_parked();
+    assert!(restored.has_text("Remove") && restored.has_text("at 120"));
+}

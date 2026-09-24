@@ -39,6 +39,25 @@ pub enum Change {
 }
 
 impl Change {
+    /// What the change does, in words: `Set`, `Remove`, `Set view`, `Remove view`.
+    pub fn verb(&self) -> &'static str {
+        match self {
+            Change::Set(_) => "Set",
+            Change::Remove(_) => "Remove",
+            Change::SetView(_) => "Set view",
+            Change::RemoveView(_) => "Remove view",
+        }
+    }
+
+    /// The code a set lands; a removal has none.
+    pub fn code(&self) -> Option<abi::BlobId> {
+        match self {
+            Change::Set(entry) => Some(entry.code),
+            Change::SetView(view) => Some(view.view),
+            Change::Remove(_) | Change::RemoveView(_) => None,
+        }
+    }
+
     pub fn program(&self) -> &str {
         match self {
             Change::Set(entry) => &entry.program,
@@ -85,18 +104,12 @@ pub fn describe(op: &Op) -> (String, Vec<(&'static str, String)>) {
     match op {
         Op::Publish { body } => ("Publish".into(), vec![("body", abi::preview(body))]),
         Op::Schedule(Scheduled { height, change }) => {
-            let (verb, code) = match change {
-                Change::Set(entry) => ("Set", Some(entry.code)),
-                Change::Remove(_) => ("Remove", None),
-                Change::SetView(view) => ("Set view", Some(view.view)),
-                Change::RemoveView(_) => ("Remove view", None),
-            };
             let mut fields = vec![
-                ("change", verb.to_string()),
+                ("change", change.verb().to_string()),
                 ("program", change.program().to_string()),
                 ("height", height.to_string()),
             ];
-            fields.extend(code.map(|code| ("code", abi::hex(code.digest()))));
+            fields.extend(change.code().map(|code| ("code", abi::hex(code.digest()))));
             if let Change::Set(entry) = change {
                 fields.push(("params", abi::preview(&entry.params)));
             }

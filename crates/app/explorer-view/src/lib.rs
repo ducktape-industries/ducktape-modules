@@ -58,6 +58,39 @@ pub enum Route {
 }
 
 impl Route {
+    /// This page's tail after `duck://<chain>/explorer/`, which
+    /// [`Route::from_path`] reads back.
+    pub fn path(&self) -> String {
+        match self {
+            Route::Overview => String::new(),
+            Route::Blocks => "blocks".into(),
+            Route::Block(height) => format!("block/{height}"),
+            Route::Transactions(None) => "txs".into(),
+            Route::Transactions(Some(program)) => format!("program/{program}"),
+            Route::Tx(hash) => format!("tx/{}", abi::hex(hash)),
+            Route::Accounts => "accounts".into(),
+            Route::Account(number) => format!("account/{number}"),
+            Route::Programs => "programs".into(),
+        }
+    }
+
+    /// The page a link's tail names, if it names one.
+    pub fn from_path(path: &str) -> Option<Route> {
+        let parts: Vec<&str> = path.split('/').collect();
+        Some(match parts.as_slice() {
+            [""] => Route::Overview,
+            ["blocks"] => Route::Blocks,
+            ["block", height] => Route::Block(ducklink::number(height)?),
+            ["txs"] => Route::Transactions(None),
+            ["program", name] if !name.is_empty() => Route::Transactions(Some((*name).into())),
+            ["tx", hash] => Route::Tx(hash_of(hash)?),
+            ["accounts"] => Route::Accounts,
+            ["account", number] => Route::Account(ducklink::number(number)?),
+            ["programs"] => Route::Programs,
+            _ => return None,
+        })
+    }
+
     fn tab(&self) -> usize {
         match self {
             Route::Overview => 0,
@@ -218,13 +251,22 @@ pub struct Entry {
     pub params: usize,
 }
 
-/// One change the registry will fold in at a later block.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Change {
-    pub height: u64,
-    pub verb: String,
-    pub program: String,
-    pub code: Option<String>,
+/// A borsh value in the view's serde snapshot, as its bytes: the registry's
+/// own types, kept as they came.
+mod borsh_bytes {
+    use borsh::{BorshDeserialize, BorshSerialize};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<T: BorshSerialize, S: Serializer>(value: &T, s: S) -> Result<S::Ok, S::Error> {
+        Serialize::serialize(&abi::encode(value), s)
+    }
+
+    pub fn deserialize<'de, T: BorshDeserialize, D: Deserializer<'de>>(
+        d: D,
+    ) -> Result<T, D::Error> {
+        abi::decode(&<Vec<u8> as Deserialize>::deserialize(d)?)
+            .map_err(|refusal| serde::de::Error::custom(refusal.sentence))
+    }
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -233,7 +275,9 @@ pub struct Network {
     /// the view-only entries: a name and its view's code, no program behind it
     #[serde(default)]
     pub views: Vec<(String, String)>,
-    pub changes: Vec<Change>,
+    /// what the registry will fold in at later blocks
+    #[serde(with = "borsh_bytes")]
+    pub changes: Vec<registry::Scheduled>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -535,31 +579,15 @@ impl Explorer {
     }
 
     /// A `host.route` item, the path of a `duck://…/explorer/<route>` link:
-    /// `block/<height|hash>`, `tx/<hash>`, `account/<n>`, `program/<name>`.
+    /// a [`Route::path`], or `block/<hash>`, found like a searched hash.
     pub fn open_route(&mut self, route: &str, cx: &mut Context<Self>) {
-        let parts: Vec<&str> = route.split('/').collect();
-        match parts.as_slice() {
-            ["block", at] => match (at.parse::<u64>(), hash_of(at)) {
-                (Ok(height), _) => return self.go(Route::Block(height), cx),
-                (_, Some(hash)) => return self.find_hash(hash, cx),
-                _ => {}
-            },
+        if let Some(opened) = Route::from_path(route) {
             // a transaction outside the window reads as "not in the last N
             // blocks" until the window reaches it
-            ["tx", hash] => {
-                if let Some(hash) = hash_of(hash) {
-                    return self.go(Route::Tx(hash), cx);
-                }
-            }
-            ["account", number] => {
-                if let Ok(number) = number.parse::<u64>() {
-                    return self.go(Route::Account(number), cx);
-                }
-            }
-            ["program", name] if !name.is_empty() => {
-                return self.go(Route::Transactions(Some((*name).to_string())), cx);
-            }
-            _ => {}
+            return self.go(opened, cx);
+        }
+        if let Some(hash) = route.strip_prefix("block/").and_then(hash_of) {
+            return self.find_hash(hash, cx);
         }
         self.note = Some(format!(
             "This link names nothing the Explorer shows: {route}"
@@ -567,13 +595,14 @@ impl Explorer {
         cx.notify();
     }
 
-    /// `duck://<chain>/explorer/<tail…>`, while the session names a chain.
-    pub fn link(&self, tail: &[&str]) -> Option<String> {
-        let chain = self.session_chain.parse::<ducklink::ChainId>().ok()?;
-        let tail = tail.iter().map(|segment| (*segment).to_string()).collect();
-        ducklink::Link::new(chain, "explorer", tail)
-            .ok()
-            .map(|link| link.to_string())
+    /// `duck://<chain>/explorer/<route>`, while the session names a chain.
+    pub fn link(&self, route: &Route) -> Option<String> {
+        let path = route.path();
+        let tail: Vec<&str> = path
+            .split('/')
+            .filter(|segment| !segment.is_empty())
+            .collect();
+        ducklink::mint(&self.session_chain, "explorer", &tail)
     }
 
     pub fn copy_link(&mut self, link: String, cx: &mut Context<Self>) {
@@ -738,25 +767,7 @@ async fn network(host: Host) -> Result<Network, Refusal> {
             .into_iter()
             .map(|view| (view.name, abi::hex(view.view.digest())))
             .collect(),
-        changes: scheduled
-            .iter()
-            .map(|scheduled| Change {
-                height: scheduled.height,
-                verb: match scheduled.change {
-                    registry::Change::Set(_) => "Set",
-                    registry::Change::Remove(_) => "Remove",
-                    registry::Change::SetView(_) => "Set view",
-                    registry::Change::RemoveView(_) => "Remove view",
-                }
-                .into(),
-                program: scheduled.change.program().to_string(),
-                code: match &scheduled.change {
-                    registry::Change::Set(entry) => Some(abi::hex(entry.code.digest())),
-                    registry::Change::SetView(view) => Some(abi::hex(view.view.digest())),
-                    registry::Change::Remove(_) | registry::Change::RemoveView(_) => None,
-                },
-            })
-            .collect(),
+        changes: scheduled,
     })
 }
 
