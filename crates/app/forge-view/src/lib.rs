@@ -86,7 +86,7 @@ impl View for Forge {
         // identity's own block matters too: a key that gains an account
         // while this view is open (Settings, then back to Forge) writes no
         // session change of its own, only an identity block.
-        for module in ["forge", "chat", identity::PROGRAM] {
+        for module in [forge::PROGRAM, chat::PROGRAM, identity::PROGRAM] {
             let mut live = cx.host().subscribe::<Live>(module.into());
             self.watches.push(cx.spawn(async move |this, cx| {
                 while live.next().await.is_some() {

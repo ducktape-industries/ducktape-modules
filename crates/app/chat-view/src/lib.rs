@@ -76,7 +76,7 @@ impl View for Chat {
                 }
             }
         }));
-        let mut changes = cx.host().subscribe::<LiveChanges>("chat".into());
+        let mut changes = cx.host().subscribe::<LiveChanges>(::chat::PROGRAM.into());
         self.watches.changes = Some(cx.spawn(async move |this, cx| {
             while let Some(_item) = changes.next().await {
                 if this

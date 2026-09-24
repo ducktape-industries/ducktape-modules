@@ -189,29 +189,22 @@ fn canonical_path(path: &str) -> Result<Vec<String>, String> {
 
 // ---------- duck links ----------
 
-/// `duck://<chain>/<program>/<tail…>`, or "" without a chain.
-fn minted(chain: &str, program: &str, tail: Vec<String>) -> String {
-    chain
-        .parse()
-        .ok()
-        .and_then(|chain| Link::new(chain, program, tail).ok())
-        .map(|link| link.to_string())
-        .unwrap_or_default()
-}
-
 /// `duck://<chain>/chat/<channel>[/<seq>]`: chat's own tail, as the module
-/// reads it.
+/// reads it; "" without a chain.
 pub fn channel_link(chain: &str, channel: &str, seq: Option<u64>) -> String {
-    let mut tail = vec![channel.to_owned()];
-    tail.extend(seq.map(|seq| seq.to_string()));
-    minted(chain, "chat", tail)
+    let seq = seq.map(|seq| seq.to_string());
+    let mut tail = vec![channel];
+    tail.extend(seq.as_deref());
+    ducklink::mint(chain, ::chat::PROGRAM, &tail).unwrap_or_default()
 }
 
 /// A pressed mention (an account number) becomes `duck://<chain>/identity/<n>`,
 /// the link the app opens; any other link is already one and passes through.
 pub fn pressed_link(link: String, chain: &str) -> String {
     match link.parse::<u64>() {
-        Ok(account) => minted(chain, "identity", vec![account.to_string()]),
+        Ok(account) => {
+            ducklink::mint(chain, identity::PROGRAM, &[&account.to_string()]).unwrap_or_default()
+        }
         Err(_) => link,
     }
 }

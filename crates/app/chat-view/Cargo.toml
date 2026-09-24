@@ -16,6 +16,6 @@ futures.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 ducklink.workspace = true
-chat = { path = "../chat" }
+chat = { path = "../chat", features = ["view"] }
 identity = { workspace = true, features = ["view"] }
 unicode-normalization.workspace = true
