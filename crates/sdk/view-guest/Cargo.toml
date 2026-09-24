@@ -9,6 +9,7 @@ license = "MIT"
 description = "Renderer-independent WASM view execution and host protocol"
 
 [dependencies]
+borsh.workspace = true
 futures.workspace = true
 view-wire.workspace = true
 design.workspace = true

@@ -469,6 +469,12 @@ doors! {
     AudioStop, "audio.stop", (), ();
     /// `notify.post`: hand the host a notice; it says what it did.
     NotifyPost, "notify.post", Post, Posted;
+    /// `store.get`: the value this view keeps under a key on this device,
+    /// for the network in hand; `None` where it keeps none. A view sees
+    /// only its own keys, and only on the network it runs on.
+    StoreGet, "store.get", String, Option<Vec<u8>>;
+    /// `store.set`: keep a value under a key, or drop it with `None`.
+    StoreSet, "store.set", (String, Option<Vec<u8>>), ();
 }
 
 /// The `<capability>` half of every kind in [`ALL`]: the names a view's
@@ -485,6 +491,7 @@ pub const CAPABILITIES: &[&str] = &[
     "audio",
     "video",
     "notify",
+    "store",
 ];
 
 /// Whether `name` is in [`CAPABILITIES`]; `const` so a manifest literal is

@@ -604,5 +604,21 @@
       "link": "duck://chat/room"
     },
     "reply": "Banner"
+  },
+  {
+    "kind": "store.get",
+    "request": "reads/alice",
+    "reply": [
+      1,
+      2
+    ]
+  },
+  {
+    "kind": "store.set",
+    "request": [
+      "reads/alice",
+      null
+    ],
+    "reply": null
   }
 ]
