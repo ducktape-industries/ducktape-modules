@@ -242,8 +242,8 @@ impl Chat {
         };
         let handle = cx.spawn(async move |this, cx| {
             let host = cx.host();
-            let result = crate::thread(host, id, root, viewer, None).await;
-            let _ = this.update(cx, |chat, cx| {
+            let result = crate::thread(host, id.clone(), root, viewer, None).await;
+            let _ = this.update_in(cx, |chat, window, cx| {
                 cx.notify();
                 let Some(thread) = chat.room.as_mut().and_then(|r| r.thread.as_mut()) else {
                     return;
@@ -257,6 +257,14 @@ impl Chat {
                         thread.has_more = next.is_some();
                         thread.next = next;
                         room_of(chat).settle();
+                        // the reply field takes the keys once it can be typed in
+                        let key = crate::draft_key(&crate::composer::Target::Post {
+                            channel: id,
+                            thread: Some(root),
+                        });
+                        window.focus(ducktape_view_guest::ElementId::Name(
+                            format!("{key}/editor").into(),
+                        ));
                     }
                     Err(refusal) => thread.replies = Loaded::Failed(refusal),
                 }

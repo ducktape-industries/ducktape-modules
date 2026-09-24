@@ -22,7 +22,9 @@ pub fn thread(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
         .h_full()
         .flex()
         .flex_col()
-        .bg(theme.surface)
+        // one ground under the header, the replies and the field: the
+        // rows are drawn on `background`, so the pane is too
+        .bg(theme.background)
         .child(
             div()
                 .id("chat-thread-header")

@@ -20,6 +20,8 @@ use ducktape_view_guest::{
 
 use crate::Chat;
 
+const MENU_OVERLAY: &str = "chat-menu-overlay";
+
 pub fn render(chat: &Chat, cx: &mut Context<Chat>) -> impl IntoElement {
     let theme = *cx.global::<Theme>();
     let mut screen = div()
@@ -43,16 +45,35 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>) -> impl IntoElement {
         })
         .into_any_element();
 
-    if let Some(menu) = menu::floating(chat, cx, &theme) {
-        let dismiss = cx.listener(|chat, _: &(), _window, cx| {
-            chat.close_menu();
-            cx.notify();
-        });
-        screen = modal_overlay("chat-menu-overlay", screen, menu)
-            .label("Message menu")
-            .on_dismiss(dismiss)
-            .into_any_element();
-    }
+    // The room sits under the id "chat-menu-overlay" whether or not a menu
+    // is open: the host keeps a list's scroll (and a field's state) by the
+    // ids above it, so a menu opening over the room must not move it to a
+    // new path, or the timeline starts over at its latest message.
+    screen = match menu::floating(chat, cx, &theme) {
+        Some(menu) => {
+            let dismiss = cx.listener(|chat, _: &(), _window, cx| {
+                chat.close_menu();
+                cx.notify();
+            });
+            let mut overlay = modal_overlay(MENU_OVERLAY, screen, menu)
+                .label("Message menu")
+                .on_dismiss(dismiss);
+            // a confirm asks before anything else happens: it dims the room
+            if chat
+                .menu
+                .as_ref()
+                .is_some_and(|menu| menu.mode == crate::Mode::Delete)
+            {
+                overlay = overlay.backdrop(hsla(0., 0., 0., 0.35));
+            }
+            overlay.into_any_element()
+        }
+        None => div()
+            .id(MENU_OVERLAY)
+            .size_full()
+            .child(screen)
+            .into_any_element(),
+    };
     if let Some(create) = dialogs::channel_create(chat, cx, &theme) {
         let dismiss = cx.listener(|chat, _: &(), _window, cx| {
             chat.create = None;

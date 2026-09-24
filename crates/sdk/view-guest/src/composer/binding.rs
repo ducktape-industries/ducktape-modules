@@ -226,6 +226,9 @@ pub fn view<V: View + 'static>(
     draft: &Draft,
     key: &str,
     hint: &str,
+    // what the commit button says: "Send" for a new message, "Save" for an
+    // edit; the composer does not guess from the draft
+    commit: &str,
     editable: bool,
     choices: &[MentionChoice],
     cx: &mut Context<V>,
@@ -329,7 +332,7 @@ pub fn view<V: View + 'static>(
     let sendable = editable && draft.can_send(draft.editor.state_view().text);
     toolbar = toolbar.child(div().flex_1()).child(ActionButton {
         id: ElementId::Name(format!("{key}/send").into()),
-        label: "Send".into(),
+        label: commit.to_owned().into(),
         primary: true,
         on_click: press(sendable, "send".into(), &handle, cx),
     });

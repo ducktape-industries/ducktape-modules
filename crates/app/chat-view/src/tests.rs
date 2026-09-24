@@ -1034,3 +1034,59 @@ fn the_badge_is_counted_again_from_the_read_cursors() {
     );
     assert_eq!(cx.host().asked::<HostBadge>().last(), Some(&1));
 }
+
+/// The timeline's list keeps its path when a message menu opens over the
+/// room: the host keys the list's scroll by it, and a new path started the
+/// room over at its latest message.
+#[test]
+fn a_menu_opening_leaves_the_timeline_where_it_was() {
+    fn list_path(node: &wire::Node) -> Option<Vec<wire::ElementIdWire>> {
+        if let wire::Node::List { path, .. } = node {
+            return Some(path.clone());
+        }
+        node.children().iter().find_map(list_path)
+    }
+    let (mut cx, view) = opened();
+    let closed = list_path(cx.root()).expect("the timeline is a list");
+    view.update(&mut cx, |chat, window, cx| {
+        cx.notify();
+        chat.open_menu(Pane::Timeline, 2, 0, Mode::More, window, cx);
+    });
+    cx.run_until_parked();
+    assert!(cx.find("chat-menu-copy-link").is_some(), "the menu is open");
+    assert_eq!(list_path(cx.root()), Some(closed));
+}
+
+/// A thread with nothing under its root says so, and its reply field takes
+/// the keys once the replies are read.
+#[test]
+fn an_empty_thread_says_so_and_its_field_takes_focus() {
+    let (mut cx, view) = opened();
+    view.update(&mut cx, |chat, _, cx| {
+        cx.notify();
+        chat.open_thread(1, cx);
+    });
+    cx.run_until_parked();
+    assert!(cx.has_text("No replies yet"));
+    let field = wire::ElementIdWire::Name("draft-general-1/editor".into());
+    assert!(
+        cx.host()
+            .asked::<ducktape_view_guest::doors::HostWidget>()
+            .iter()
+            .any(|command| matches!(command, wire::WidgetCommand::Focus { target } if *target == vec![field.clone()]))
+    );
+}
+
+/// The field that edits a message commits with "Save"; a new one sends.
+#[test]
+fn the_edit_field_saves() {
+    let (mut cx, view) = opened();
+    assert!(cx.has_text("Send") && !cx.has_text("Save"));
+    view.update(&mut cx, |chat, window, cx| {
+        cx.notify();
+        chat.open_menu(Pane::Timeline, 1, 0, Mode::Editing, window, cx);
+    });
+    cx.run_until_parked();
+    assert!(cx.find("chat-message-editing").is_some());
+    assert!(cx.has_text("Save"));
+}
