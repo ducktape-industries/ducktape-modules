@@ -202,6 +202,7 @@ impl Chat {
         }
         if add {
             crate::emoji::remember(&mut self.recent_emoji, &emoji);
+            self.save_emoji(cx);
         }
         let op = if add {
             ChatMsg::AddReaction {

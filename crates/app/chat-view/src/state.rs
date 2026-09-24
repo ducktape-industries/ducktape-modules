@@ -171,6 +171,13 @@ pub struct Reads {
     #[serde(skip)]
     pub(crate) entering: bool,
     pub(crate) boundary: u64,
+    /// The store key the cursors were loaded from; nothing is written back
+    /// until they have been.
+    #[serde(default)]
+    pub(crate) kept: Option<String>,
+    /// The cursors last written to the store.
+    #[serde(skip)]
+    pub(crate) written: BTreeMap<String, u64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]

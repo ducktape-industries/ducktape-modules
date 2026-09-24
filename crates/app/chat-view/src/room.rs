@@ -26,6 +26,12 @@ impl Chat {
             cx.host().open_link(&link);
         }
         self.open(id, window, cx);
+        // read to the head this view knows now, not at the next list: a
+        // reader who opens a room and quits has read it
+        if let Some(list) = self.channels.ready().cloned() {
+            self.channels_arrived(list);
+            self.save_reads(cx);
+        }
         self.settle_badge(cx);
     }
 

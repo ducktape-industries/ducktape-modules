@@ -11,6 +11,7 @@ mod client;
 mod compose;
 mod composer;
 mod emoji;
+mod kept;
 mod notices;
 mod queries;
 mod room;
@@ -192,7 +193,11 @@ impl Chat {
                 draft.retire_device_requests();
             }
             self.reads.cursors.clear();
+            self.reads.kept = None;
             self.create = None;
+        }
+        if self.session.connected && (reader_changed || !prev.connected) {
+            self.load_kept(cx);
         }
         if !prev.connected && self.session.connected {
             self.channels = cx.load(channels(cx.host()), |chat| &mut chat.channels);
@@ -438,7 +443,7 @@ export_view!(
     Chat,
     "Chat",
     "Channels, direct messages, threads, search and the live call of this workspace.",
-    ["rpc", "op", "host", "fs", "clipboard", "notify"]
+    ["rpc", "op", "host", "fs", "clipboard", "notify", "store"]
 );
 
 #[cfg(test)]

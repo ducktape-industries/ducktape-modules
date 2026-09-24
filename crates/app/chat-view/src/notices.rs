@@ -57,10 +57,11 @@ impl Chat {
             }
         }
         self.settle_badge(cx);
+        self.save_reads(cx);
     }
 
     /// The room on screen, if the reader can see it.
-    fn viewing(&self) -> Option<String> {
+    pub(crate) fn viewing(&self) -> Option<String> {
         self.room
             .as_ref()
             .filter(|_| self.reads.visible)
