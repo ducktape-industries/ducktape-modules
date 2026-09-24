@@ -22,25 +22,8 @@ pub struct Mention {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum AttachmentState {
-    Uploading,
-    Ready { uri: String },
-    Failed { reason: String },
-    Unavailable,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Attachment {
-    pub token: String,
-    pub name: String,
-    pub bytes: u64,
-    pub state: AttachmentState,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Send {
     pub body: String,
-    pub attachments: Vec<Attachment>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -55,7 +38,6 @@ pub struct Draft {
     #[serde(with = "document_snapshot")]
     pub editor: Editor,
     pub mentions: Vec<Mention>,
-    pub attachments: Vec<Attachment>,
     pub failed_send: Option<Send>,
     pub submitted: Option<Send>,
     pub in_flight: Vec<Send>,
@@ -154,15 +136,7 @@ impl Draft {
     }
 
     pub(crate) fn can_send(&self, text: &str) -> bool {
-        let uploading = self
-            .attachments
-            .iter()
-            .any(|file| file.state == AttachmentState::Uploading);
-        let ready = self
-            .attachments
-            .iter()
-            .any(|file| matches!(file.state, AttachmentState::Ready { .. }));
-        !uploading && (!text.trim().is_empty() || ready)
+        !text.trim().is_empty()
     }
 
     pub fn failed(&mut self, send: Send) {
@@ -172,7 +146,6 @@ impl Draft {
                     previous.body.push('\n');
                 }
                 previous.body.push_str(&send.body);
-                previous.attachments.extend(send.attachments);
             }
             None => self.failed_send = Some(send),
         }
@@ -192,14 +165,6 @@ impl Draft {
         }
         self.paste = None;
         self.clipboard = None;
-        for file in &mut self.attachments {
-            if matches!(
-                file.state,
-                AttachmentState::Uploading | AttachmentState::Failed { .. }
-            ) {
-                file.state = AttachmentState::Unavailable;
-            }
-        }
     }
 }
 
@@ -262,7 +227,6 @@ mod tests {
         let mut draft = Draft::from_body("new typing", &[]);
         draft.in_flight.push(Send {
             body: "in flight".into(),
-            attachments: Vec::new(),
         });
         let mut restored: Draft =
             serde_json::from_slice(&serde_json::to_vec(&draft).unwrap()).unwrap();
@@ -273,40 +237,10 @@ mod tests {
     }
 
     #[test]
-    fn replacement_revokes_pending_device_work_but_keeps_uploaded_links() {
-        let mut draft = Draft::from_body("still typing", &[]);
-        draft.attachments = vec![
-            Attachment {
-                token: "a".into(),
-                name: "pending".into(),
-                bytes: 1,
-                state: AttachmentState::Uploading,
-            },
-            Attachment {
-                token: "b".into(),
-                name: "ready".into(),
-                bytes: 1,
-                state: AttachmentState::Ready {
-                    uri: "duck://files/x".into(),
-                },
-            },
-        ];
-        let mut restored: Draft =
-            serde_json::from_slice(&serde_json::to_vec(&draft).unwrap()).unwrap();
-        restored.retire_device_requests();
-        assert_eq!(restored.editor.text(), "still typing");
-        assert_eq!(restored.attachments[0].state, AttachmentState::Unavailable);
-        assert_eq!(restored.attachments[1].state, draft.attachments[1].state);
-    }
-
-    #[test]
     fn two_failed_sends_preserve_both_bodies_and_restore_cannot_erase_new_typing() {
         let mut draft = Draft::from_body("new typing", &[]);
         for body in ["first", "second"] {
-            draft.failed(Send {
-                body: body.into(),
-                attachments: Vec::new(),
-            });
+            draft.failed(Send { body: body.into() });
         }
         assert_eq!(draft.failed_send.as_ref().unwrap().body, "first\nsecond");
         assert_eq!(
@@ -396,18 +330,8 @@ mod tests {
     }
 
     #[test]
-    fn queued_upload_blocks_send_and_failure_preserves_newer_typing() {
+    fn a_failed_send_preserves_newer_typing() {
         let mut draft = Draft::from_body("first", &[]);
-        draft.attachments.push(Attachment {
-            token: "f1".into(),
-            name: "a.txt".into(),
-            bytes: 10,
-            state: AttachmentState::Uploading,
-        });
-        assert!(!draft.can_send(draft.editor.state_view().text));
-        draft.attachments[0].state = AttachmentState::Ready {
-            uri: "duck://files/a.txt".into(),
-        };
         let before = draft.editor.text();
         draft.committed(&before, "", draft.editor.cursor(), "send", &[]);
         let sent = draft.submitted.take().unwrap();

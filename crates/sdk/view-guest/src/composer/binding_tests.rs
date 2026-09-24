@@ -1,5 +1,5 @@
 use super::super::editing;
-use super::super::{Attachment, Send};
+use super::super::Send;
 use super::binding_editor::editor;
 use super::key_tag;
 use super::*;
@@ -36,7 +36,6 @@ impl Render for ComposerView {
             "c",
             "Message #general",
             true,
-            true,
             &choices,
             cx,
             |view, event, _, cx| {
@@ -61,10 +60,10 @@ fn walk(node: &wire::Node, seen: &mut impl FnMut(&wire::Node)) {
 }
 
 fn drawn(draft: &Draft) -> wire::Node {
-    drawn_with(draft, "c", true, &[])
+    drawn_with(draft, "c", &[])
 }
 
-fn drawn_with(draft: &Draft, key: &str, attach: bool, choices: &[MentionChoice]) -> wire::Node {
+fn drawn_with(draft: &Draft, key: &str, choices: &[MentionChoice]) -> wire::Node {
     let mut app = App::for_driver();
     let entity = Entity::reserve(&app);
     let mut window = app.window();
@@ -77,7 +76,6 @@ fn drawn_with(draft: &Draft, key: &str, attach: bool, choices: &[MentionChoice])
         key,
         "Message #general",
         true,
-        attach,
         choices,
         &mut cx,
         |_: &mut ComposerView, _, _, _| {},
@@ -212,8 +210,8 @@ fn every_mark_is_the_same_square_and_the_field_writes_at_body_size() {
     });
     assert_eq!(
         marks.len(),
-        5,
-        "attach, bold, italic, code and quote are control-high squares"
+        4,
+        "bold, italic, code and quote are control-high squares"
     );
     assert_eq!(
         body_size,
@@ -231,7 +229,7 @@ fn restored_editor_presentation_keeps_mention_highlights_and_document_routes() {
         token: "<@1>".into(),
         label: "Ada".into(),
     }];
-    let root = drawn_with(&Draft::from_body("Hi <@1>", &choices), "c", true, &choices);
+    let root = drawn_with(&Draft::from_body("Hi <@1>", &choices), "c", &choices);
     let wire::Node::Editor {
         document,
         on_document: _,
@@ -252,7 +250,7 @@ fn restored_editor_presentation_keeps_mention_highlights_and_document_routes() {
 }
 
 #[test]
-fn toolbar_attachment_mention_and_restore_actions_have_reachable_aria_routes() {
+fn toolbar_mention_and_restore_actions_have_reachable_aria_routes() {
     let choices = vec![MentionChoice {
         token: "<@1>".into(),
         label: "Ada".into(),
@@ -262,27 +260,15 @@ fn toolbar_attachment_mention_and_restore_actions_have_reachable_aria_routes() {
         position: wire::EditorPosition { line: 0, column: 2 },
         selection: None,
     });
-    draft.attachments.push(Attachment {
-        token: "file-1".into(),
-        name: "report.txt".into(),
-        bytes: 4,
-        state: AttachmentState::Failed {
-            reason: "upload failed".into(),
-        },
-    });
     draft.failed_send = Some(Send {
         body: "older".into(),
-        attachments: Vec::new(),
     });
-    let root = drawn_with(&draft, "c", true, &choices);
+    let root = drawn_with(&draft, "c", &choices);
     for (key, label) in [
-        ("c/attach", "Attach a file"),
         ("c/bold", "Bold"),
         ("c/italic", "Italic"),
         ("c/code", "Code"),
         ("c/quote", "Quote"),
-        ("c/attachment/file-1/remove", "Remove attachment"),
-        ("c/attachment/file-1/retry", "Retry"),
         ("c/restore", "Restore"),
     ] {
         let Some(wire::Node::Container(crate::wire::ContainerNode { interactivity, .. })) =
@@ -370,7 +356,7 @@ fn key_state(claim: &wire::EditorKeyClaim) -> wire::keyboard::KeyState {
 }
 
 fn claimed(draft: &Draft) -> Vec<wire::EditorKeyClaim> {
-    let root = drawn_with(draft, "c", true, &roster());
+    let root = drawn_with(draft, "c", &roster());
     let wire::Node::Editor { options, .. } = editor_node(&root) else {
         unreachable!()
     };

@@ -135,7 +135,7 @@ impl Draft {
             };
         }
         if tag == "restore" {
-            let empty = state.text.is_empty() && self.attachments.is_empty();
+            let empty = state.text.is_empty();
             if !empty {
                 return wire::EditorDecision::Noop;
             }
@@ -173,14 +173,6 @@ impl Draft {
             let text = format!("@{} ", choice.label);
             let caret = range.start + text.len();
             return apply(state, range, text, caret);
-        }
-        let attachment_action = tag.starts_with("remove:") || tag.starts_with("retry:");
-        if attachment_action {
-            return wire::EditorDecision::Apply {
-                patches: Vec::new(),
-                cursor: state.cursor,
-                history: wire::EditorHistoryEffect::Native,
-            };
         }
         match tag {
             "paste-ready" => {
@@ -220,7 +212,7 @@ impl Draft {
                 let caret = range.start;
                 apply(state, range, String::new(), caret)
             }
-            "attach" | "paste" | "copy" | "menu-next" | "menu-previous" | "menu-dismiss" => {
+            "paste" | "copy" | "menu-next" | "menu-previous" | "menu-dismiss" => {
                 wire::EditorDecision::Apply {
                     patches: Vec::new(),
                     cursor: state.cursor,
@@ -253,7 +245,6 @@ impl Draft {
             }
             self.submitted = Some(super::Send {
                 body: self.body_of(before).trim().to_owned(),
-                attachments: std::mem::take(&mut self.attachments),
             });
             self.mentions.clear();
             self.undo.clear();
@@ -319,7 +310,6 @@ impl Draft {
             };
             let restored = Draft::from_body(&send.body, choices);
             self.mentions = restored.mentions;
-            self.attachments = send.attachments;
             return;
         }
         let range = self.expanded(selection(before, cursor), tag);

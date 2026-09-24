@@ -146,7 +146,7 @@ fn notice(row: &MsgRow, me: u64, name: &str, chain: &str, names: &NameDirectory)
             true => format!("@{sender}"),
             false => format!("#{name}"),
         },
-        link: crate::files::channel_link(chain, &row.channel_id, Some(row.seq)),
+        link: crate::chat::channel_link(chain, &row.channel_id, Some(row.seq)),
     })
 }
 

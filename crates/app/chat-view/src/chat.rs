@@ -36,3 +36,43 @@ pub fn unhex(text: &str) -> Option<Vec<u8>> {
         .map(|at| u8::from_str_radix(&text[at..at + 2], 16).ok())
         .collect()
 }
+
+// ---------- duck links ----------
+
+/// `duck://<chain>/chat/<channel>[/<seq>]`: chat's own tail, as the module
+/// reads it; "" without a chain.
+pub fn channel_link(chain: &str, channel: &str, seq: Option<u64>) -> String {
+    let seq = seq.map(|seq| seq.to_string());
+    let mut tail = vec![channel];
+    tail.extend(seq.as_deref());
+    ducklink::mint(chain, ::chat::PROGRAM, &tail).unwrap_or_default()
+}
+
+/// A pressed mention (an account number) becomes `duck://<chain>/identity/<n>`,
+/// the link the app opens; any other link is already one and passes through.
+pub fn pressed_link(link: String, chain: &str) -> String {
+    match link.parse::<u64>() {
+        Ok(account) => {
+            ducklink::mint(chain, identity::PROGRAM, &[&account.to_string()]).unwrap_or_default()
+        }
+        Err(_) => link,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn links_keep_their_shapes() {
+        assert_eq!(
+            channel_link("testnet#0a1b2c3d", "general", Some(42)),
+            "duck://testnet-0a1b2c3d/chat/general/42"
+        );
+        assert_eq!(channel_link("", "general", None), "");
+        assert_eq!(
+            pressed_link("7".into(), "testnet#0a1b2c3d"),
+            "duck://testnet-0a1b2c3d/identity/7"
+        );
+    }
+}

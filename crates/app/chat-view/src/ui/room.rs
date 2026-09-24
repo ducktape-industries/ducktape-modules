@@ -385,7 +385,6 @@ pub fn composer(
         &key,
         hint,
         editable,
-        crate::ATTACHMENTS,
         &choices,
         cx,
         move |chat, event, window, cx| chat.composer(target.clone(), event, window, cx),

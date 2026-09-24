@@ -4,10 +4,10 @@ use ducktape_view_guest::prelude::*;
 use ducktape_view_guest::{
     AnyElement, ClickEvent, Context, ElementId, FontStyle, FontWeight, HighlightStyle,
     InteractiveText, ParentElement, Styled, StyledText, Theme, UnderlineStyle, Window, div, px,
-    surface, wire,
 };
 
-use crate::client::{ChatBlock, ChatMessage, SpanStyle};
+use crate::chat::{Block, Span};
+use crate::client::{ChatMessage, NameDirectory, SpanStyle};
 use crate::ui::badge;
 use crate::{Chat, Mode, Pane};
 mod rich;
@@ -247,8 +247,10 @@ fn content(
         }
         body = body.child(header);
     }
+    let empty = NameDirectory::empty();
+    let names = chat.names.ready().unwrap_or(&empty);
     for (index, block) in message.blocks.iter().enumerate() {
-        body = body.child(block_view(chat, &message, index, block, cx, theme));
+        body = body.child(block_view(&message, index, block, names, cx, theme));
     }
     if message.blocks.is_empty() {
         body = body.child(
@@ -358,22 +360,22 @@ fn content(
 }
 
 fn block_view(
-    chat: &Chat,
     message: &ChatMessage,
     index: usize,
-    block: &ChatBlock,
+    block: &Block,
+    names: &NameDirectory,
     cx: &mut Context<Chat>,
     theme: &Theme,
 ) -> AnyElement {
     let id = ElementId::from(format!("chat-message-{}-block-{index}", message.id));
-    match block.kind.as_str() {
-        "divider" => div()
+    match block {
+        Block::Divider => div()
             .id(id)
             .h(px(1.))
             .w_full()
             .bg(theme.border)
             .into_any_element(),
-        "code" => {
+        Block::Code { lang, text } => {
             let mut code = div()
                 .id(id)
                 .flex()
@@ -381,121 +383,29 @@ fn block_view(
                 .gap_1()
                 .p_2()
                 .bg(theme.surface);
-            if !block.lang.is_empty() {
+            if let Some(lang) = lang.as_ref().filter(|lang| !lang.is_empty()) {
                 code = code.child(
                     div()
                         .text_size(px(11.))
                         .text_color(theme.muted)
-                        .child(block.lang.clone()),
+                        .child(lang.clone()),
                 );
             }
             code.child(plain_line(
                 format!("chat-message-{}-block-{index}-code", message.id).into(),
-                &block.text,
+                text,
                 true,
             ))
             .into_any_element()
         }
-        "quote" => div()
+        Block::Quote(spans) => div()
             .border_l_2()
             .border_color(theme.border_strong)
             .pl_2()
             .text_color(theme.muted)
-            .child(rich_line(id.clone(), block, cx, theme))
+            .child(rich_line(id.clone(), spans, names, cx, theme))
             .into_any_element(),
-        "attachment" => {
-            let link = block.link.clone();
-            let open = cx.listener(move |chat, event: &ClickEvent, _window, cx| {
-                chat.claim(event);
-                cx.notify();
-                chat.open_preview(link.clone(), cx);
-            });
-            let card = div()
-                .id(id)
-                .hover(|s| s.bg(theme.surface_raised))
-                .role(ducktape_view_guest::Role::Button)
-                .aria_label(format!("Open {}", block.text))
-                .focusable()
-                .on_click(open);
-            if let Some(&(width, height)) = chat.pictures.get(&block.link)
-                && width > 0
-                && height > 0
-            {
-                let (width, height) = crate::files::picture_box(width, height);
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(3.))
-                    .child(
-                        div().flex().child(
-                            card.child(
-                                div()
-                                    .w(px(width))
-                                    .h(px(height))
-                                    .overflow_hidden()
-                                    .border_1()
-                                    .border_color(theme.border)
-                                    .child(surface(
-                                        format!(
-                                            "chat-message-{}-block-{index}-picture",
-                                            message.id
-                                        ),
-                                        "picture",
-                                        vec![
-                                            wire::SurfaceValue::Str(
-                                                crate::files::PICTURE_SURFACE.into(),
-                                            ),
-                                            wire::SurfaceValue::Str(
-                                                crate::files::attachment_file_path(&block.link),
-                                            ),
-                                        ],
-                                    )),
-                            ),
-                        ),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(11.))
-                            .text_color(theme.muted)
-                            .child(block.text.clone()),
-                    )
-                    .into_any_element()
-            } else {
-                div()
-                    .flex()
-                    .child(
-                        card.flex()
-                            .items_center()
-                            .gap(px(12.))
-                            .py(px(8.))
-                            .pl(px(16.))
-                            .pr(px(14.))
-                            .bg(theme.surface)
-                            .border_1()
-                            .border_color(theme.border)
-                            .child("📄")
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap(px(1.))
-                                    .child(
-                                        div()
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .child(block.text.clone()),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_size(px(11.))
-                                            .text_color(theme.muted)
-                                            .child(crate::files::attachment_kind(&block.text)),
-                                    ),
-                            ),
-                    )
-                    .into_any_element()
-            }
-        }
-        _ => rich_line(id, block, cx, theme).into_any_element(),
+        Block::Paragraph(spans) => rich_line(id, spans, names, cx, theme).into_any_element(),
     }
 }
 
