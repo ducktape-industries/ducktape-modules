@@ -73,7 +73,12 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
                 }
             };
             let editable = chat.session.connected;
-            pane = pane.child(composer(chat, target, &hint, editable, cx));
+            // inset from the pane's edges, so the field reads as a field
+            pane = pane.child(
+                div()
+                    .p_3()
+                    .child(composer(chat, target, &hint, editable, cx)),
+            );
         } else {
             pane = pane.child(gate(chat, refusal, cx, theme));
         }
@@ -93,20 +98,15 @@ fn header(chat: &Chat, room: &Room, cx: &mut Context<Chat>, theme: &Theme) -> im
         chat.toggle_details();
         cx.notify();
     });
-    let mut title = div()
-        .id("chat-room-title")
-        .flex()
-        .items_center()
-        .gap_2()
-        .child(
-            div()
-                .id("chat-room-title")
-                .text_size(px(13.5))
-                .font_weight(ducktape_view_guest::FontWeight::SEMIBOLD)
-                .role(Role::Heading)
-                .aria_level(2)
-                .child(format!("#{}", name)),
-        );
+    let mut title = div().flex().items_center().gap_2().child(
+        div()
+            .id("chat-room-title")
+            .text_size(px(13.5))
+            .font_weight(ducktape_view_guest::FontWeight::SEMIBOLD)
+            .role(Role::Heading)
+            .aria_level(2)
+            .child(format!("#{}", name)),
+    );
     if info.is_some_and(|info| info.channel.archived) {
         title = title.child(badge(
             "chat-room-archived",

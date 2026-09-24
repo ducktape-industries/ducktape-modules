@@ -90,19 +90,23 @@ impl Draft {
 
 const TEXT_INSET: f32 = design::spacing::MD as f32;
 const CONTROL_INSET: f32 = design::spacing::XXS as f32;
-const MARK: f32 = 24.;
+
+/// Dresses a mark's sign as what it does: bold, italic, code.
+type Face = fn(crate::Div) -> crate::Div;
 
 #[derive(IntoElement)]
 struct Mark {
     id: ElementId,
     sign: SharedString,
     label: SharedString,
+    face: Face,
     on_click: Option<Click>,
 }
 
 impl RenderOnce for Mark {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = *cx.global::<Theme>();
+        let sign = (self.face)(div()).child(self.sign);
         let mut mark = div()
             .id(self.id)
             .role(Role::Button)
@@ -111,15 +115,14 @@ impl RenderOnce for Mark {
             .flex()
             .items_center()
             .justify_center()
-            .w(px(MARK))
-            .h(px(MARK))
-            .border_1()
-            .border_color(theme.border)
+            .size(px(design::height::CONTROL as f32))
             .text_size(px(design::type_scale::BODY as f32))
             .text_color(theme.muted)
-            .child(self.sign);
+            .child(sign);
         if let Some(on_click) = self.on_click {
-            mark = mark.on_click(on_click);
+            mark = mark
+                .hover(move |style| style.bg(theme.surface_raised).text_color(theme.foreground))
+                .on_click(on_click);
         }
         mark
     }
@@ -136,10 +139,11 @@ struct ActionButton {
 impl RenderOnce for ActionButton {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = *cx.global::<Theme>();
-        let (background, foreground, border) = if self.primary {
-            (theme.primary, theme.primary_foreground, theme.primary)
-        } else {
-            (theme.surface, theme.foreground, theme.border)
+        // A primary button that can't act yet reads as resting, not as ink.
+        let (background, foreground, border) = match (self.primary, self.on_click.is_some()) {
+            (true, true) => (theme.primary, theme.primary_foreground, theme.primary),
+            (true, false) => (theme.surface_raised, theme.muted, theme.surface_raised),
+            (false, _) => (theme.surface, theme.foreground, theme.border),
         };
         let mut button = div()
             .id(self.id)
@@ -247,6 +251,7 @@ impl RenderOnce for AttachmentChip {
                 id: self.remove_id,
                 sign: "×".into(),
                 label: "Remove attachment".into(),
+                face: |sign| sign,
                 on_click: self.remove,
             })
     }
@@ -395,25 +400,36 @@ pub fn view<V: View + 'static>(
         );
     }
 
-    let mut toolbar = div().mx(px(CONTROL_INSET)).flex().items_center().gap_1();
+    let mut toolbar = div()
+        .mx(px(CONTROL_INSET))
+        .flex()
+        .items_center()
+        .gap(px(2.));
     if attach {
         toolbar = toolbar.child(Mark {
             id: ElementId::Name(format!("{key}/attach").into()),
             sign: "+".into(),
             label: "Attach a file".into(),
+            face: |sign| sign,
             on_click: press(editable, "attach".into(), &handle, cx),
         });
     }
-    for (sign, label, tag) in [
-        ("B", "Bold", "bold"),
-        ("I", "Italic", "italic"),
-        ("<>", "Code", "code"),
-        ("”", "Quote", "quote"),
-    ] {
+    let faces: [(&str, &str, &str, Face); 4] = [
+        ("B", "Bold", "bold", |sign| {
+            sign.font_weight(crate::FontWeight::BOLD)
+        }),
+        ("I", "Italic", "italic", |sign| sign.italic()),
+        ("</>", "Code", "code", |sign| {
+            sign.font_family("JetBrains Mono").text_size(px(11.))
+        }),
+        ("“", "Quote", "quote", |sign| sign.text_size(px(16.))),
+    ];
+    for (sign, label, tag, face) in faces {
         toolbar = toolbar.child(Mark {
             id: ElementId::Name(format!("{key}/{tag}").into()),
             sign: sign.into(),
             label: label.into(),
+            face,
             on_click: press(editable, tag.into(), &handle, cx),
         });
     }
@@ -430,9 +446,9 @@ pub fn view<V: View + 'static>(
         .id(ElementId::Name(key.into()))
         .flex()
         .flex_col()
-        .gap_2()
+        .gap_1()
         .border_1()
-        .border_color(cx.global::<Theme>().border_strong)
+        .border_color(cx.global::<Theme>().border)
         .bg(cx.global::<Theme>().background)
         .pb(px(CONTROL_INSET))
         .children(rows)

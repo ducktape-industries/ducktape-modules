@@ -269,39 +269,21 @@ fn unread_marker(theme: &Theme) -> impl IntoElement {
         .child("New messages")
 }
 
+/// The top of a room's history. The room's name is already its header's,
+/// so this says only where the history starts.
 fn intro(name: &str, dm: Option<&str>, theme: &Theme) -> impl IntoElement {
-    let (title, detail) = match dm {
-        Some(peer) => (
-            peer.to_owned(),
-            format!("This is the very beginning of your conversation with {peer}."),
-        ),
-        None => (
-            format!("#{name}"),
-            format!(
-                "This is the very beginning of #{name}. Say hello, or pin what the room is for."
-            ),
+    let detail = match dm {
+        Some(peer) => format!("This is the very beginning of your conversation with {peer}."),
+        None => format!(
+            "This is the very beginning of #{name}. Say hello, or pin what the room is for."
         ),
     };
     div()
         .id("chat-timeline-intro")
-        .p_6()
-        .flex()
-        .flex_col()
-        .gap_1()
-        .child(
-            div()
-                .id("chat-timeline-intro-title")
-                .text_size(px(16.))
-                .font_weight(ducktape_view_guest::FontWeight::SEMIBOLD)
-                .role(Role::Heading)
-                .aria_level(1)
-                .child(title),
-        )
-        .child(
-            div()
-                .text_size(px(12.))
-                .text_color(theme.muted)
-                .child(detail),
-        )
-        .child(div().h(px(1.)).w_full().bg(theme.border))
+        .px_6()
+        .pt_6()
+        .pb_3()
+        .text_size(px(12.))
+        .text_color(theme.muted)
+        .child(detail)
 }

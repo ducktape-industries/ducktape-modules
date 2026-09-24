@@ -148,23 +148,25 @@ pub(crate) fn rail(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> Any
                 ),
         )
         .child(
-            Input::new(id("forge-rail-search"))
-                .h(px(28.))
-                .mx_2()
-                .my_1()
-                .px_2()
-                .py_1()
-                .border_1()
-                .border_color(theme.sidebar_border)
-                .bg(theme.sidebar_raised)
-                .text_color(theme.sidebar_foreground)
-                .value(forge.search.clone())
-                .placeholder("Search repositories…")
-                .label("Search repositories")
-                .on_input(cx.listener(|forge, text: &String, _, cx| {
-                    forge.search = text.clone();
-                    cx.notify();
-                })),
+            // The row pads, not the field: a full-width field with its own
+            // margins ran past the rail's edge.
+            div().px_2().py_1().child(
+                Input::new(id("forge-rail-search"))
+                    .h(px(28.))
+                    .px_2()
+                    .py_1()
+                    .border_1()
+                    .border_color(theme.sidebar_border)
+                    .bg(theme.sidebar_raised)
+                    .text_color(theme.sidebar_foreground)
+                    .value(forge.search.clone())
+                    .placeholder("Search repositories…")
+                    .label("Search repositories")
+                    .on_input(cx.listener(|forge, text: &String, _, cx| {
+                        forge.search = text.clone();
+                        cx.notify();
+                    })),
+            ),
         );
     let reply = match staged(
         forge,
