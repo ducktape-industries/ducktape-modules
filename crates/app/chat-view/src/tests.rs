@@ -1156,6 +1156,63 @@ fn kept_cursors_bring_the_badge_back_after_a_relaunch() {
     );
 }
 
+/// On a relaunch the kept cursors and the room list can land before
+/// identity names the reader: the recount waits for her account, then runs
+/// without another chat write to prompt it.
+#[test]
+fn the_relaunch_recount_waits_for_the_readers_account() {
+    use ducktape_view_guest::doors::{self, HostBadge, StoreGet};
+    use std::collections::BTreeMap;
+    let known = std::rc::Rc::new(std::cell::Cell::new(false));
+    let mut cx = TestAppContext::new();
+    configure(&mut cx);
+    cx.host().handle::<StoreGet>(|key| {
+        Ok((key == "reads/0102")
+            .then(|| doors::encode(&BTreeMap::from([("dm-7-8".to_owned(), 0u64)]))))
+    });
+    let reply = known.clone();
+    cx.host()
+        .handle::<ViewOf<identity::view::Identity>>(move |query| {
+            Ok(match query {
+                identity::Query::OfKey { .. } => identity::Reply::Number(reply.get().then_some(7)),
+                query => panic!("unexpected identity query: {query:?}"),
+            })
+        });
+    cx.host().handle::<ViewOf<ChatApi>>(|query| {
+        Ok(match query {
+            ChatViewQuery::Accounts { .. } => ChatViewReply::Accounts(Vec::new()),
+            ChatViewQuery::Channels { .. } => {
+                ChatViewReply::Channels(page(vec![channel("dm-7-8", "dm", 1)]))
+            }
+            ChatViewQuery::MessagesAround { channel_id, .. } => {
+                let mut hi = row(1, "acct:8", "hi");
+                hi.channel_id = channel_id;
+                ChatViewReply::Messages(vec![hi])
+            }
+            query => panic!("unexpected chat query: {query:?}"),
+        })
+    });
+    let props = cx.host().stream::<HostProps>();
+    let visible = cx.host().stream::<HostVisible>();
+    let live = cx.host().stream::<RpcLive>();
+    let _view = cx.open::<Chat>();
+    props.push(Session {
+        account: "0102".into(),
+        connected: true,
+        chain: "testnet#0a1b2c3d".into(),
+        ..Session::default()
+    });
+    visible.push(true);
+    cx.run_until_parked();
+    assert_ne!(cx.host().asked::<HostBadge>().last(), Some(&1));
+
+    // identity names her on its live stream
+    known.set(true);
+    live.push(Some(1));
+    cx.run_until_parked();
+    assert_eq!(cx.host().asked::<HostBadge>().last(), Some(&1));
+}
+
 /// A device store that refuses the kept cursors is asked again, then chat
 /// starts from what it sees: reading a room still keeps its cursor.
 #[test]
