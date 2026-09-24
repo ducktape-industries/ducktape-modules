@@ -364,7 +364,7 @@ fn with_seats(chat: &Chat, info: &ChannelInfo, row: impl IntoElement, theme: &Th
                         } else {
                             theme.sidebar_muted
                         })
-                        .child(initials(&label)),
+                        .child(design::initial(&label)),
                 )
                 .child(div().flex_1().text_size(design::text::CAPTION).child(label))
                 .when(!note.is_empty(), |el| {
@@ -473,19 +473,7 @@ pub fn avatar(
         .rounded_full()
         .bg(if agent { theme.agent_soft } else { fill })
         .text_size(design::text::CAPTION)
-        .child(initials(name))
-}
-
-fn initials(name: &str) -> String {
-    let mut chars = name
-        .split_whitespace()
-        .filter_map(|word| word.chars().next());
-    let first = chars.next();
-    let second = chars.next();
-    match (first, second) {
-        (Some(first), Some(second)) => format!("{first}{second}").to_uppercase(),
-        _ => name.chars().take(2).collect::<String>().to_uppercase(),
-    }
+        .child(design::initial(name))
 }
 
 pub fn dm_peer(chat: &Chat) -> Option<(String, bool)> {

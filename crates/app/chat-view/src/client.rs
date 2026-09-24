@@ -324,13 +324,7 @@ pub fn avatar_initial(author: &str, names: &NameDirectory) -> String {
         Some(("module", id)) => id.to_owned(),
         _ => "system".into(),
     };
-    source
-        .chars()
-        .find(char::is_ascii_alphanumeric)
-        .map_or_else(
-            || "•".into(),
-            |glyph| glyph.to_ascii_uppercase().to_string(),
-        )
+    ducktape_view_guest::design::initial(&source)
 }
 
 /// A person's key or account is human; a program account (an agent's) and
