@@ -68,3 +68,18 @@ pub fn standing(ctx: &impl store::Reads, key: &[u8]) -> Result<Option<Standing>,
         )),
     }
 }
+
+/// An op as a person reads it: a title and its fields.
+pub fn describe(op: &Op) -> (String, Vec<(&'static str, String)>) {
+    match op {
+        Op::Set(membership) => (
+            format!("Set · {}", membership.address),
+            vec![
+                ("key", abi::preview(&membership.key)),
+                ("address", membership.address.clone()),
+                ("standing", format!("{:?}", membership.standing)),
+            ],
+        ),
+        Op::Remove { key } => ("Remove".into(), vec![("key", abi::preview(key))]),
+    }
+}

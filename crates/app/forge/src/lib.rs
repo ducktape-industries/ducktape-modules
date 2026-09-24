@@ -18,3 +18,86 @@ mod store;
 pub use contract::*;
 pub use ops::{execute, init};
 pub use queries::query;
+
+/// An op as a person reads it: a title and its fields.
+pub fn describe(op: &Op) -> (String, Vec<(&'static str, String)>) {
+    let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
+    let revision = |revision: &Revision| match revision {
+        Revision::Ref(name) => text(name),
+        Revision::Oid(oid) => oid.clone(),
+    };
+    let (verb, repo, fields) = match op {
+        Op::Create { repo, hash } => ("Create", repo, vec![("hash", format!("{hash:?}"))]),
+        Op::Configure { repo, settings } => (
+            "Configure",
+            repo,
+            vec![
+                ("head", text(&settings.head)),
+                ("allow force", settings.allow_force.to_string()),
+                ("allow delete", settings.allow_delete.to_string()),
+            ],
+        ),
+        Op::Grant { repo, key } => ("Grant", repo, vec![("key", abi::preview(key))]),
+        Op::Revoke { repo, key } => ("Revoke", repo, vec![("key", abi::preview(key))]),
+        Op::Push { repo, request } => ("Push", repo, vec![("request", abi::preview(request))]),
+        Op::Merge {
+            repo,
+            into,
+            from,
+            result,
+            change,
+            ..
+        } => (
+            "Merge",
+            repo,
+            vec![
+                ("from", revision(from)),
+                ("into", text(into)),
+                ("result", result.clone()),
+                (
+                    "change",
+                    change.map_or_else(|| "—".into(), |n| format!("#{n}")),
+                ),
+            ],
+        ),
+        Op::ChangeOpen {
+            repo,
+            from,
+            into,
+            title,
+            reviewers,
+            ..
+        } => (
+            "Open change",
+            repo,
+            vec![
+                ("title", title.clone()),
+                ("from", revision(from)),
+                ("into", text(into)),
+                ("reviewers", reviewers.len().to_string()),
+            ],
+        ),
+        Op::ChangeEdit { repo, n, title, .. } => (
+            "Edit change",
+            repo,
+            vec![
+                ("change", format!("#{n}")),
+                ("title", title.clone().unwrap_or_else(|| "—".into())),
+            ],
+        ),
+        Op::ChangeClose { repo, n } => ("Close change", repo, vec![("change", format!("#{n}"))]),
+        Op::ReviewSubmit { repo, n, review } => (
+            "Review",
+            repo,
+            vec![
+                ("change", format!("#{n}")),
+                ("verdict", format!("{:?}", review.verdict)),
+                ("commit", review.commit_oid.clone()),
+                ("comments", review.comments.len().to_string()),
+            ],
+        ),
+    };
+    let mut all = vec![("repo", repo.clone())];
+    all.extend(fields);
+    (format!("{verb} · {repo}"), all)
+}

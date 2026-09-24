@@ -73,6 +73,16 @@ pub fn hex(bytes: &[u8]) -> String {
         })
 }
 
+/// Bytes as a person reads them: all of them in hex up to 32, else their
+/// count and the first eight.
+pub fn preview(bytes: &[u8]) -> String {
+    match bytes.len() {
+        0 => "0 bytes".into(),
+        1..=32 => hex(bytes),
+        len => format!("{len} bytes · {}…", hex(&bytes[..8])),
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash, BorshSerialize, BorshDeserialize)]
 pub enum Origin {
     External(Vec<u8>),
