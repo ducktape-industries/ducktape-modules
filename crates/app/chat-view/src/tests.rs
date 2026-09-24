@@ -68,7 +68,15 @@ fn row(seq: u64, author: &str, text: &str) -> MsgRow {
     }
 }
 
+/// The host doors chat only talks to, never hears back from here.
+fn quiet_doors(cx: &mut TestAppContext) {
+    cx.host().never::<api::Route>();
+    cx.host().never::<ducktape_view_guest::doors::Badge>();
+    cx.host().never::<ducktape_view_guest::doors::NotifyPost>();
+}
+
 fn configure(cx: &mut TestAppContext) {
+    quiet_doors(cx);
     cx.host()
         .handle::<ducktape_view_guest::doors::Widget>(|command| {
             assert!(matches!(command, wire::WidgetCommand::Focus { .. }));
@@ -687,6 +695,7 @@ fn a_peers_name_gained_later_replaces_its_numeric_fallback() {
     let known = std::rc::Rc::new(std::cell::Cell::new(false));
     let has_gary = known.clone();
     let mut cx = TestAppContext::new();
+    quiet_doors(&mut cx);
     cx.host()
         .handle::<ducktape_view_guest::doors::Widget>(|command| {
             assert!(matches!(command, wire::WidgetCommand::Focus { .. }));
@@ -779,6 +788,7 @@ fn a_peers_mention_becomes_offerable_once_their_account_is_known() {
     let known = std::rc::Rc::new(std::cell::Cell::new(false));
     let has_gary = known.clone();
     let mut cx = TestAppContext::new();
+    quiet_doors(&mut cx);
     cx.host()
         .handle::<ducktape_view_guest::doors::Widget>(|command| {
             assert!(matches!(command, wire::WidgetCommand::Focus { .. }));
@@ -882,4 +892,48 @@ fn export_chat_screens() {
         serde_json::to_vec(cx.root()).unwrap(),
     )
     .unwrap();
+}
+
+/// A direct message landing in a room the reader is not in is handed to the
+/// host as a notice linking to it, and counted on the tab until she opens
+/// the room.
+#[test]
+fn a_direct_message_elsewhere_is_a_notice_and_a_badge_until_read() {
+    use ducktape_view_guest::doors::{Badge, NotifyPost};
+    let (mut cx, view) = opened();
+    cx.host().handle::<ViewOf<ChatApi>>(|query| {
+        Ok(match query {
+            ChatViewQuery::MessagesAround { channel_id, .. } => {
+                assert_eq!(channel_id, "dm-7-8");
+                let mut ping = row(2, "acct:8", "ping");
+                ping.channel_id = channel_id;
+                ChatViewReply::Messages(vec![row(1, "acct:7", "old"), ping])
+            }
+            ChatViewQuery::Roots { .. } => ChatViewReply::Roots(page(Vec::new())),
+            ChatViewQuery::Members { .. } => ChatViewReply::Members(page(Vec::new())),
+            query => panic!("unexpected chat query: {query:?}"),
+        })
+    });
+    view.update(&mut cx, |chat, _, cx| {
+        cx.notify();
+        chat.channels_landed(
+            vec![channel("general", "General", 3), channel("dm-7-8", "dm", 2)],
+            cx,
+        );
+    });
+    cx.run_until_parked();
+    let posts = cx.host().asked::<NotifyPost>();
+    assert_eq!(posts.len(), 1);
+    assert_eq!(
+        (posts[0].title.as_str(), posts[0].body.as_str()),
+        ("reviewer", "ping")
+    );
+    assert_eq!(posts[0].link, "duck://testnet-0a1b2c3d/chat/dm-7-8/2");
+    assert_eq!(cx.host().asked::<Badge>().last(), Some(&1));
+    view.update(&mut cx, |chat, window, cx| {
+        cx.notify();
+        chat.choose("dm-7-8".into(), window, cx)
+    });
+    cx.run_until_parked();
+    assert_eq!(cx.host().asked::<Badge>().last(), Some(&0));
 }

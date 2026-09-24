@@ -12,6 +12,7 @@ mod compose;
 mod composer;
 mod emoji;
 mod files;
+mod notices;
 mod queries;
 mod room;
 mod state;
@@ -29,7 +30,7 @@ use ducktape_view_guest::view::{Loaded, View};
 use ducktape_view_guest::{IntoElement, Render, Window, export_view};
 use futures::StreamExt;
 
-use api::{ChatApi, Id, Live as LiveChanges, Props, Session, Submit, Visible};
+use api::{ChatApi, Id, Live as LiveChanges, Props, Route, Session, Submit, Visible};
 use composer::Draft;
 use composer::Target;
 
@@ -82,6 +83,30 @@ impl View for Chat {
                     .update(cx, |chat, cx| {
                         cx.notify();
                         chat.refresh(cx);
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        }));
+        // `duck://<chain>/chat/<channel>[/<seq>]`: a link opened into this
+        // view (a notice's, say) names the room, and the message to land on
+        let mut routes = cx.host().subscribe::<Route>(());
+        self.watches.route = Some(cx.spawn(async move |this, cx| {
+            while let Some(Ok(route)) = routes.next().await {
+                let mut parts = route.splitn(2, '/');
+                let channel = parts.next().unwrap_or_default().to_owned();
+                let seq = parts.next().and_then(|seq| seq.parse().ok()).unwrap_or(0);
+                if channel.is_empty() {
+                    continue;
+                }
+                if this
+                    .update_in(cx, |chat, window, cx| {
+                        cx.notify();
+                        chat.search_clear();
+                        chat.open_at(channel, seq, window, cx);
+                        chat.settle_badge(cx);
                     })
                     .is_err()
                 {
@@ -196,8 +221,8 @@ impl Chat {
         self.reads.visible = visible;
         self.reads.entering = visible;
         if visible && self.session.connected {
-            cx.refresh(channels(cx.host()), |chat, list, _| {
-                chat.channels_arrived(list)
+            cx.refresh(channels(cx.host()), |chat, list, cx| {
+                chat.channels_landed(list, cx)
             });
         }
     }
@@ -205,8 +230,8 @@ impl Chat {
     /// Every state change of the chat module: re-read what is on screen,
     /// keeping the rows already there until the fresh ones land.
     fn refresh(&mut self, cx: &mut Context<Self>) {
-        cx.refresh(channels(cx.host()), |chat, list, _| {
-            chat.channels_arrived(list)
+        cx.refresh(channels(cx.host()), |chat, list, cx| {
+            chat.channels_landed(list, cx)
         });
         self.refresh_room(cx);
     }
@@ -385,8 +410,8 @@ impl Chat {
                 match result {
                     Ok(id) => {
                         chat.create = None;
-                        cx.refresh(channels(cx.host()), |chat, list, _| {
-                            chat.channels_arrived(list)
+                        cx.refresh(channels(cx.host()), |chat, list, cx| {
+                            chat.channels_landed(list, cx)
                         });
                         if !voice {
                             chat.choose(id, window, cx);
@@ -424,7 +449,7 @@ export_view!(
     Chat,
     "Chat",
     "Channels, direct messages, threads, search and the live call of this workspace.",
-    ["rpc", "op", "host", "fs", "clipboard"]
+    ["rpc", "op", "host", "fs", "clipboard", "notify"]
 );
 
 #[cfg(test)]
