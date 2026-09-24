@@ -12,7 +12,7 @@ fn gen_tree(rng: &mut Rng, depth: usize, width: usize) -> Node {
         }
         node = match rng.next_range(8) {
             7 => Node::ResizeHandle {
-                id: ElementIdWire::Name(gen_key(rng).into()),
+                id: gen_id(rng),
                 on_press: rng.next_bool().then(|| rng.next_u64() as u32),
                 on_release: rng.next_bool().then(|| rng.next_u64() as u32),
                 on_drag: rng.next_bool().then(|| rng.next_u64() as u32),
@@ -21,7 +21,7 @@ fn gen_tree(rng: &mut Rng, depth: usize, width: usize) -> Node {
                 style: gpui::StyleRefinement::default(),
             },
             6 => Node::Tooltip {
-                id: ElementIdWire::Name(gen_key(rng).into()),
+                id: gen_id(rng),
                 position: TooltipPosition::Bottom,
                 delay_ms: rng.next_u64(),
                 snap: rng.next_bool(),
@@ -29,7 +29,7 @@ fn gen_tree(rng: &mut Rng, depth: usize, width: usize) -> Node {
                 children: vec![node, gen_leaf(rng)],
             },
             4 => Node::Sensor {
-                id: ElementIdWire::Name(gen_key(rng).into()),
+                id: gen_id(rng),
                 reset: None,
                 on_show: rng.next_bool().then(|| rng.next_u64() as u32),
                 on_resize: rng.next_bool().then(|| rng.next_u64() as u32),
@@ -40,7 +40,7 @@ fn gen_tree(rng: &mut Rng, depth: usize, width: usize) -> Node {
                 style: gpui::StyleRefinement::default(),
             },
             5 => Node::MouseArea {
-                id: ElementIdWire::Name(gen_key(rng).into()),
+                id: gen_id(rng),
                 role: gen_opt_role(rng),
                 label: rng.next_bool().then(|| gen_string(rng)),
                 expanded: rng.next_bool().then(|| rng.next_bool()),
@@ -65,7 +65,7 @@ fn gen_tree(rng: &mut Rng, depth: usize, width: usize) -> Node {
             2 => Node::Scroll {
                 on_scroll: Some(7),
                 virtual_rows: rng.next_bool(),
-                id: ElementIdWire::Name(gen_key(rng).into()),
+                id: gen_id(rng),
                 direction: *rng.choose(&[
                     ScrollDirection::Vertical,
                     ScrollDirection::Horizontal,
@@ -88,7 +88,7 @@ fn gen_tree(rng: &mut Rng, depth: usize, width: usize) -> Node {
                 selected: rng.next_bool().then(|| rng.next_bool()),
                 role: gen_opt_role(rng),
                 description: rng.next_bool().then(|| gen_string(rng)),
-                id: ElementIdWire::Name(gen_key(rng).into()),
+                id: gen_id(rng),
                 content: ButtonContent::Child(Box::new(node)),
                 label: rng.next_bool().then(|| gen_string(rng)),
                 on_press: rng.next_bool().then(|| rng.next_u64() as u32),
