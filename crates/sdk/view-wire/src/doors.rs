@@ -287,6 +287,13 @@ door!(
     OpenLink, "host.open_link", String, ()
 );
 door!(
+    /// `host.route`: a subscription, one item per `duck://` link opened into
+    /// this view: the path after the view's own segment (`tx/<hash>` of
+    /// `duck://<chain>/explorer/tx/<hash>`), segments of `[A-Za-z0-9._-]`.
+    /// A link that mounted the view is its first item.
+    Route, "host.route", (), String
+);
+door!(
     /// `host.chord`: claim a command chord (`cmd[-shift][-alt]-<key>`); an
     /// item per press while the subscription stands.
     Chord, "host.chord", String, ()
@@ -499,6 +506,7 @@ pub const ALL: &[&str] = &[
     Visible::KIND,
     Badge::KIND,
     OpenLink::KIND,
+    Route::KIND,
     Chord::KIND,
     Id::KIND,
     Ticks::KIND,

@@ -792,6 +792,7 @@ fn block(view: &Explorer, height: u64, cx: Cx, theme: &Theme) -> AnyElement {
             theme,
         )
     });
+    let copy = copy_button(view, &["block", &height.to_string()], cx, theme);
     div()
         .id("explorer-block")
         .child(
@@ -810,6 +811,7 @@ fn block(view: &Explorer, height: u64, cx: Cx, theme: &Theme) -> AnyElement {
                         .flex()
                         .gap_2()
                         .px_5()
+                        .children(copy)
                         .child(step(
                             "explorer-previous",
                             format!("← {}", previous.map_or(String::new(), grouped)),
@@ -943,13 +945,22 @@ fn tx(view: &Explorer, hash: &[u8; 32], cx: Cx, theme: &Theme) -> AnyElement {
                 )
                 .child(div().flex_1().child(value.clone()))
         }));
+    let copy = copy_button(view, &["tx", &abi::hex(hash)], cx, theme);
     div()
         .id("explorer-tx")
-        .child(div().border_b_1().border_color(theme.border).child(titled(
-            "Transaction",
-            tx.op.title.clone(),
-            theme,
-        )))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .border_b_1()
+                .border_color(theme.border)
+                .child(
+                    div()
+                        .flex_1()
+                        .child(titled("Transaction", tx.op.title.clone(), theme)),
+                )
+                .children(copy.map(|copy| div().px_5().child(copy))),
+        )
         .child(field(
             "Block",
             link(
@@ -1134,6 +1145,7 @@ fn account(view: &Explorer, number: u64, cx: Cx, theme: &Theme) -> AnyElement {
             .child(mono(program).flex_1())
             .child(mono(format!("{count} tx")).text_color(theme.muted))
     });
+    let copy = copy_button(view, &["account", &number.to_string()], cx, theme);
     div()
         .id("explorer-account")
         .flex()
@@ -1169,7 +1181,9 @@ fn account(view: &Explorer, number: u64, cx: Cx, theme: &Theme) -> AnyElement {
                             .text_size(px(11.))
                             .text_color(theme.muted),
                         ),
-                ),
+                )
+                .child(div().flex_1())
+                .children(copy),
         )
         .child(
             div()
@@ -1338,4 +1352,31 @@ fn short_code(code: &str) -> String {
         head.push('…');
     }
     head
+}
+
+/// "Copy link": this page's `duck://<chain>/explorer/…` link, onto the
+/// clipboard. Absent while the session names no chain.
+fn copy_button(view: &Explorer, tail: &[&str], cx: Cx, theme: &Theme) -> Option<AnyElement> {
+    let link = view.link(tail)?;
+    let copy = cx.listener(move |view: &mut Explorer, _: &ClickEvent, _, cx| {
+        view.copy_link(link.clone(), cx)
+    });
+    Some(
+        div()
+            .id("explorer-copy-link")
+            .px_3()
+            .h(px(28.))
+            .flex()
+            .items_center()
+            .border_1()
+            .border_color(theme.border)
+            .text_size(px(12.))
+            .text_color(theme.muted)
+            .hover(|s| s.bg(theme.hover).text_color(theme.foreground))
+            .role(Role::Button)
+            .focusable()
+            .on_click(copy)
+            .child("Copy link")
+            .into_any_element(),
+    )
 }

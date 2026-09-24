@@ -283,6 +283,7 @@ fn every_door() -> Vec<(Exchange, serde_json::Value)> {
         exchange::<Visible>((), true),
         exchange::<Badge>(3, ()),
         exchange::<OpenLink>("duck://chat/room".into(), ()),
+        exchange::<Route>((), "tx/00ff".into()),
         exchange::<Chord>("cmd-k".into(), ()),
         exchange::<Id>("msg".into(), "msg-1".into()),
         exchange::<Ticks>(1000, ()),

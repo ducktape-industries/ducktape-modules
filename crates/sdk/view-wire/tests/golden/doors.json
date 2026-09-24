@@ -429,6 +429,11 @@
     "reply": null
   },
   {
+    "kind": "host.route",
+    "request": null,
+    "reply": "tx/00ff"
+  },
+  {
     "kind": "host.chord",
     "request": "cmd-k",
     "reply": null

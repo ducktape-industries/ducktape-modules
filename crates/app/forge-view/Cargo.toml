@@ -17,6 +17,7 @@ abi.workspace = true
 base64.workspace = true
 borsh.workspace = true
 chat.workspace = true
+ducklink.workspace = true
 forge.workspace = true
 futures.workspace = true
 identity = { workspace = true, features = ["view"] }

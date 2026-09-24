@@ -17,7 +17,7 @@ mod ui;
 
 use std::collections::BTreeSet;
 
-use ducktape_view_guest::doors::{Live, Visible};
+use ducktape_view_guest::doors::{Live, Route, Visible};
 use ducktape_view_guest::host::Refusal;
 use ducktape_view_guest::view::Loaded;
 use ducktape_view_guest::{Context, IntoElement, Render, View, Window, export_view};
@@ -62,6 +62,20 @@ impl View for Forge {
                         }
                         cx.notify();
                     })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        }));
+        // `duck://<chain>/forge/<name>`: a link opened into this view names
+        // the repository to open
+        let mut routes = cx.host().subscribe::<Route>(());
+        self.watches.push(cx.spawn(async move |this, cx| {
+            while let Some(route) = routes.next().await {
+                let Ok(route) = route else { break };
+                if this
+                    .update(cx, |forge, cx| forge.open_route(&route, cx))
                     .is_err()
                 {
                     break;

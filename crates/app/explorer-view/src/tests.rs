@@ -3,8 +3,9 @@ use std::rc::Rc;
 
 use super::*;
 use abi::BlobId;
+use ducktape_view_guest::doors::Session;
 use ducktape_view_guest::doors::{Status, Tx};
-use ducktape_view_guest::testing::TestAppContext;
+use ducktape_view_guest::testing::{Feed, TestAppContext};
 
 const ADA: [u8; 32] = [1; 32];
 const STRANGER: [u8; 32] = [2; 32];
@@ -92,7 +93,8 @@ fn ada() -> identity::Account {
 }
 
 /// A node at `tip`, whose tip the test may move.
-fn node(cx: &mut TestAppContext, tip: Rc<RefCell<u64>>) {
+fn node(cx: &mut TestAppContext, tip: Rc<RefCell<u64>>) -> (Feed<Props>, Feed<LinkRoute>) {
+    let feeds = (cx.host().stream::<Props>(), cx.host().stream::<LinkRoute>());
     let host = cx.host();
     let head = tip.clone();
     host.handle::<Status>(move |()| Ok(status(*head.borrow())));
@@ -115,6 +117,7 @@ fn node(cx: &mut TestAppContext, tip: Rc<RefCell<u64>>) {
     });
     host.handle::<Query<Valset>>(|_| Ok(valset::Reply::Validators(vec![VALIDATOR.to_vec()])));
     respond(cx);
+    feeds
 }
 
 fn entry(program: &str, code: u8) -> registry::Entry {
@@ -476,6 +479,8 @@ fn a_snapshot_restores_without_reading_the_window_again() {
     let mut restored = TestAppContext::new();
     restored.host().stream::<Ticks>();
     restored.host().never::<Status>();
+    restored.host().never::<Props>();
+    restored.host().never::<LinkRoute>();
     restored.host().never::<Blocks>();
     restored.host().never::<Query<Identity>>();
     restored.host().never::<Query<Valset>>();
@@ -557,4 +562,64 @@ fn the_search_field_holds_only_what_is_being_typed() {
     cx.simulate_submit("explorer-search");
     cx.run_until_parked();
     assert_eq!(field(&cx), "nobody", "a search that finds nothing keeps it");
+}
+
+#[test]
+fn a_link_opens_the_page_it_names() {
+    let mut cx = TestAppContext::new();
+    cx.host().stream::<Ticks>();
+    let (_, routes) = node(&mut cx, Rc::new(RefCell::new(12)));
+    cx.open::<Explorer>();
+    cx.run_until_parked();
+    let open = |cx: &mut TestAppContext, route: &str| {
+        routes.push(route.to_string());
+        cx.run_until_parked();
+    };
+    open(&mut cx, &format!("tx/{}", abi::hex(&[0xa1; 32])));
+    assert!(cx.has_text("In block 11") && cx.has_text("hello there"));
+    open(&mut cx, "block/12");
+    assert!(cx.has_text(&abi::hex(&[112; 32])), "{:?}", cx.texts());
+    open(&mut cx, &format!("block/{}", abi::hex(&[105; 32])));
+    assert!(cx.has_text(&abi::hex(&[105; 32])), "a block by its hash");
+    open(&mut cx, "account/3");
+    assert!(cx.has_text("account 3   1 device"));
+    open(&mut cx, "program/chat");
+    assert!(cx.has_text("Transactions · chat"));
+    // a transaction the window does not hold says how far it looked
+    open(&mut cx, &format!("tx/{}", abi::hex(&[0xee; 32])));
+    assert!(cx.has_text("Transaction not found"));
+    assert!(cx.has_text("It is not in the last 13 blocks this explorer reads."));
+    open(&mut cx, "nowhere/1");
+    assert!(cx.has_text("This link names nothing the Explorer shows: nowhere/1"));
+}
+
+#[test]
+fn a_page_copies_its_link_once_the_session_names_a_chain() {
+    let mut cx = TestAppContext::new();
+    cx.host().stream::<Ticks>();
+    let (props, _routes) = node(&mut cx, Rc::new(RefCell::new(12)));
+    let copied = Rc::new(RefCell::new(String::new()));
+    let seen = copied.clone();
+    cx.host().handle::<ClipboardWrite>(move |text| {
+        *seen.borrow_mut() = text;
+        Ok(())
+    });
+    cx.open::<Explorer>();
+    cx.run_until_parked();
+    cx.simulate_click("explorer-block-11");
+    cx.run_until_parked();
+    assert!(cx.find("explorer-copy-link").is_none(), "no chain, no link");
+    props.push(Session {
+        chain: "testkit#0a1b2c3d".into(),
+        ..Session::default()
+    });
+    cx.run_until_parked();
+    cx.simulate_click("explorer-copy-link");
+    cx.run_until_parked();
+    assert_eq!(
+        *copied.borrow(),
+        "duck://testkit-0a1b2c3d/explorer/block/11"
+    );
+    assert!(cx.has_text("Copied the link."));
+    cx.assert_accessible();
 }
