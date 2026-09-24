@@ -108,7 +108,6 @@ fn repo(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
         .gap_2()
         .px_4()
         .pt_3()
-        .pb_2()
         .border_b_1()
         .border_color(theme.border);
     let mut title = div()
@@ -153,7 +152,8 @@ fn repo(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
                 theme,
                 open,
             )
-            .selected(forge.nav().tab == tab),
+            .selected(forge.nav().tab == tab)
+            .tab(true),
         );
     }
     let about = cx.listener(|forge, _: &ClickEvent, _, cx| forge.toggle_dock(Dock::About, cx));

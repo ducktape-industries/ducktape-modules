@@ -114,7 +114,8 @@ fn header(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
                 theme,
                 pick,
             )
-            .selected(forge.nav().change_tab == tab),
+            .selected(forge.nav().change_tab == tab)
+            .tab(true),
         );
     }
     bar = bar.child(div().flex_1());

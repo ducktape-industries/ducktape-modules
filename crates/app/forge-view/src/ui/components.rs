@@ -22,6 +22,8 @@ where
     enabled: bool,
     primary: bool,
     selected: bool,
+    /// a tab: quiet text, the chosen one underlined, no fill
+    tab: bool,
     click: F,
 }
 
@@ -41,6 +43,7 @@ where
         enabled: true,
         primary: false,
         selected: false,
+        tab: false,
         click,
     }
 }
@@ -61,6 +64,10 @@ where
         self.selected = selected;
         self
     }
+    pub fn tab(mut self, tab: bool) -> Self {
+        self.tab = tab;
+        self
+    }
 }
 
 impl<F> RenderOnce for Button<F>
@@ -69,31 +76,56 @@ where
 {
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
         let theme = self.theme;
-        let background = if self.primary {
-            theme.primary
-        } else if self.selected {
-            theme.accent_soft
-        } else {
-            theme.surface
-        };
-        let foreground = if self.primary {
-            theme.primary_foreground
-        } else {
-            theme.foreground
-        };
         let mut element = div()
             .id(self.id)
             .px_2()
             .py_1()
-            .bg(background)
-            .text_color(foreground)
             .text_size(px(12.))
-            .role(Role::Button)
+            .role(if self.tab { Role::Tab } else { Role::Button })
             .child(self.label);
+        // The chosen one is the ink one: fg text on the window, an fg edge
+        // (under a tab, around a button); the rest stay quiet.
+        element = if self.tab {
+            element
+                .text_color(if self.selected {
+                    theme.foreground
+                } else {
+                    theme.muted
+                })
+                .border_b_2()
+                .border_color(if self.selected {
+                    theme.foreground
+                } else {
+                    theme.background
+                })
+        } else if self.primary {
+            element
+                .bg(theme.primary)
+                .text_color(theme.primary_foreground)
+        } else if self.selected {
+            element
+                .bg(theme.background)
+                .text_color(theme.foreground)
+                .border_1()
+                .border_color(theme.foreground)
+        } else {
+            element
+                .bg(theme.surface)
+                .text_color(theme.foreground)
+                .border_1()
+                .border_color(theme.surface)
+        };
+        if self.selected {
+            element = element.font_weight(FontWeight::MEDIUM);
+        }
         if self.enabled {
+            let (tab, quiet) = (self.tab, !self.primary && !self.selected);
             element = element
-                .hover(|style| style.bg(theme.surface_raised))
-                .active(|style| style.bg(theme.accent_soft))
+                .hover(move |style| match (tab, quiet) {
+                    (true, _) => style.text_color(theme.foreground),
+                    (false, true) => style.bg(theme.surface_raised),
+                    (false, false) => style,
+                })
                 .focusable()
                 .on_click(self.click);
         } else {

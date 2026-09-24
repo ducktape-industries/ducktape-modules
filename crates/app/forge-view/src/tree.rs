@@ -1,7 +1,7 @@
 //! The Code tab's file tree: a directory's children open inline beneath
 //! it. Each expanded directory is its own lazy `Query::Tree`; the rows on
 //! screen are a walk of whatever of those has landed.
-use ducktape_view_guest::Context;
+use ducktape_view_guest::{Context, ScrollStrategy};
 
 use crate::queries::PAGE;
 use crate::state::Forge;
@@ -185,6 +185,13 @@ impl Forge {
                 }
             }
             Key::Right => {}
+        }
+        let all = self.tree_rows();
+        if let Some(at) = all
+            .iter()
+            .position(|row| Some(&row.path) == self.nav.cursor.as_ref())
+        {
+            self.tree_scroll.scroll_to_item(at, ScrollStrategy::Nearest);
         }
         cx.notify();
     }
