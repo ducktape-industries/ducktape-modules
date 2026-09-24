@@ -9,11 +9,13 @@
 /// The longest a field's value runs before it is clipped.
 const MAX_VALUE: usize = 160;
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// Bounded (every value clipped), so a view snapshot keeps it in place of
+/// the payload.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Op {
     /// what the operation does, in words: `Post in #design`
     pub title: String,
-    pub fields: Vec<(&'static str, String)>,
+    pub fields: Vec<(String, String)>,
 }
 
 /// What a program's `describe` gives: a title and its fields.
@@ -40,7 +42,7 @@ pub fn decode(program: &str, payload: &[u8]) -> Op {
             title: clip(&title),
             fields: fields
                 .into_iter()
-                .map(|(name, value)| (name, clip(&value)))
+                .map(|(name, value)| (name.to_owned(), clip(&value)))
                 .collect(),
         },
         None => Op {
@@ -48,7 +50,7 @@ pub fn decode(program: &str, payload: &[u8]) -> Op {
                 "{program} · {}",
                 plural(payload.len() as u64, "byte", "bytes")
             ),
-            fields: vec![("bytes", abi::preview(payload))],
+            fields: vec![("bytes".into(), abi::preview(payload))],
         },
     }
 }

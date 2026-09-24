@@ -126,7 +126,7 @@ pub(super) fn tx(view: &Explorer, hash: &[u8; 32], cx: Cx, theme: &Theme) -> Any
                 .flex()
                 .gap_4()
                 .child(
-                    mono(*name)
+                    mono(name.clone())
                         .w(px(90.))
                         .flex_shrink_0()
                         .text_color(theme.muted),

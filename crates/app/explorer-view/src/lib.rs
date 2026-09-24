@@ -20,6 +20,7 @@ use ducktape_view_guest::{Context, Host, IntoElement, Render, Task, View, Window
 use futures::StreamExt;
 use module_registry as registry;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 
 mod decode;
 pub(crate) mod ui;
@@ -32,7 +33,9 @@ pub const WINDOW: usize = 1_000;
 /// Blocks per `rpc.blocks` page (the node caps a page at 100). Small, so
 /// one reply's decoding stays well inside a tick's fuel.
 const PAGE: u32 = 20;
-/// How often the head is re-read, in milliseconds.
+/// How often the head is re-read, in milliseconds. Polled, not `rpc.live`:
+/// that door signals only blocks that wrote to one named program, and the
+/// head also moves on empty blocks and on programs the view does not know.
 const TICK: i64 = 2_000;
 
 use module_registry::view::Registry;
@@ -112,7 +115,7 @@ pub struct BlockRow {
     pub txs: usize,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TxRow {
     pub hash: [u8; 32],
     pub height: u64,
@@ -120,12 +123,10 @@ pub struct TxRow {
     pub signer: Vec<u8>,
     pub seq: u64,
     pub target: String,
-    /// the payload as it landed, decoded only once a row is on screen; hex in
-    /// the snapshot, not a JSON array of numbers
-    // ponytail: kept whole, so a snapshot carries a big push too; clip here if snapshots grow
-    #[serde(with = "hex_bytes")]
+    /// the payload as it landed, decoded only once a row is on screen; never
+    /// in the snapshot, which keeps the decoded [`Op`] instead (a restored
+    /// row has an empty payload and its op already set)
     pub payload: Vec<u8>,
-    #[serde(skip)]
     op: std::cell::OnceCell<Op>,
 }
 
@@ -135,6 +136,49 @@ impl TxRow {
     pub fn op(&self) -> &Op {
         self.op
             .get_or_init(|| decode::decode(&self.target, &self.payload))
+    }
+}
+
+/// A [`TxRow`] as the snapshot holds it: the op, not the payload.
+#[derive(Serialize, Deserialize)]
+struct StoredTx<'a> {
+    hash: [u8; 32],
+    height: u64,
+    time: u64,
+    signer: Cow<'a, [u8]>,
+    seq: u64,
+    target: Cow<'a, str>,
+    op: Cow<'a, Op>,
+}
+
+impl Serialize for TxRow {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        StoredTx {
+            hash: self.hash,
+            height: self.height,
+            time: self.time,
+            signer: Cow::Borrowed(&self.signer),
+            seq: self.seq,
+            target: Cow::Borrowed(&self.target),
+            op: Cow::Borrowed(self.op()),
+        }
+        .serialize(s)
+    }
+}
+
+impl<'de> Deserialize<'de> for TxRow {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let stored = StoredTx::deserialize(d)?;
+        Ok(TxRow {
+            hash: stored.hash,
+            height: stored.height,
+            time: stored.time,
+            signer: stored.signer.into_owned(),
+            seq: stored.seq,
+            target: stored.target.into_owned(),
+            payload: Vec::new(),
+            op: stored.op.into_owned().into(),
+        })
     }
 }
 
@@ -256,18 +300,6 @@ pub struct Entry {
     pub program: String,
     pub code: String,
     pub params: usize,
-}
-
-mod hex_bytes {
-    use serde::{Deserialize, Deserializer, Serializer};
-
-    pub fn serialize<S: Serializer>(bytes: &[u8], s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_str(&abi::hex(bytes))
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
-        abi::unhex(&String::deserialize(d)?).ok_or_else(|| serde::de::Error::custom("not hex"))
-    }
 }
 
 /// A borsh value in the view's serde snapshot, as its bytes: the registry's
