@@ -65,8 +65,10 @@ pub(crate) struct Nav {
     pub tab: RepoTab,
     /// the picked ref, a full name such as `refs/heads/main`
     pub rev: Option<Vec<u8>>,
-    /// the directory the code tree is showing
-    pub path: Vec<u8>,
+    /// the directories the code tree has open, by full path
+    pub expanded: BTreeSet<Vec<u8>>,
+    /// the tree row the keyboard is on (a file or a directory)
+    pub cursor: Option<Vec<u8>>,
     /// the open file: its path and blob oid
     pub blob: Option<(Vec<u8>, String)>,
     pub commit: Option<String>,
@@ -85,7 +87,9 @@ impl Nav {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum RepoTab {
+    /// the repository's front page: its README, rendered
     #[default]
+    Readme,
     Code,
     Commits,
     Changes,
@@ -94,7 +98,8 @@ pub(crate) enum RepoTab {
 }
 
 impl RepoTab {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
+        Self::Readme,
         Self::Code,
         Self::Commits,
         Self::Changes,
@@ -103,6 +108,7 @@ impl RepoTab {
     ];
     pub fn label(self) -> &'static str {
         match self {
+            Self::Readme => "README",
             Self::Code => "Code",
             Self::Commits => "Commits",
             Self::Changes => "Changes",
@@ -112,6 +118,7 @@ impl RepoTab {
     }
     pub fn slug(self) -> &'static str {
         match self {
+            Self::Readme => "readme",
             Self::Code => "code",
             Self::Commits => "commits",
             Self::Changes => "changes",
@@ -335,10 +342,14 @@ pub(crate) struct Pending {
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(default)]
 pub(crate) struct Layout {
     pub width: f32,
     pub height: f32,
+    /// the repositories rail
     pub tree: f32,
+    /// the Code tab's file tree
+    pub files: f32,
     pub tree_open: bool,
     pub dock_open: bool,
 }
@@ -349,6 +360,7 @@ impl Default for Layout {
             width: 1180.,
             height: 760.,
             tree: 248.,
+            files: 300.,
             tree_open: false,
             dock_open: false,
         }
@@ -356,6 +368,11 @@ impl Default for Layout {
 }
 
 impl Layout {
+    /// A dragged pane keeps its neighbour usable.
+    pub fn clamp(&mut self) {
+        self.tree = self.tree.clamp(160., 480.);
+        self.files = self.files.clamp(180., 640.);
+    }
     pub fn narrow(&self) -> bool {
         self.width < 880.
     }

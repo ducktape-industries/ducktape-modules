@@ -67,6 +67,7 @@ fn answer(query: &Query, mode: &str) -> Reply {
             path,
             ..
         } if path.is_empty() => reply("tree"),
+        Query::Tree { path, .. } if path.is_empty() => reply("tree-next"),
         Query::Tree { .. } => reply("tree-directory"),
         Query::Blob { oid, .. } => match oid.as_str() {
             "95d586e774a04676a07a142f0e2f97a4f32562cb" => reply("blob-binary"),
@@ -446,15 +447,23 @@ fn the_about_panel_docks_what_the_repo_record_carries() {
 }
 
 #[test]
-fn code_reads_the_tree_then_one_file_and_says_what_it_cannot_show() {
+fn a_repo_opens_on_its_readme_and_code_holds_the_tree() {
     let (mut cx, view) = opened("default");
     cx.simulate_click("forge-ref-refs/heads/clean");
     cx.run_until_parked();
-    view.read(|forge| assert_eq!(forge.head_name(), b"refs/heads/clean".to_vec()));
+    view.read(|forge| {
+        assert_eq!(forge.head_name(), b"refs/heads/clean".to_vec());
+        assert_eq!(forge.nav().tab, RepoTab::Readme, "README first");
+    });
+    // The README is the page, rendered, under the repository header.
+    assert!(cx.find("forge-repo-header").is_some());
+    assert!(cx.find("forge-readme-body").is_some(), "{:?}", cx.texts());
+    assert!(cx.find("forge-tree").is_none(), "no tree on the front page");
+    cx.simulate_click("forge-tab-code");
+    cx.run_until_parked();
     assert!(cx.has_text("README.md"), "{:?}", cx.texts());
     assert!(cx.has_text("empty.txt"));
-    // The root tree carries a README, so it is what the pane shows.
-    assert!(cx.find("forge-readme-body").is_some());
+    assert!(cx.find("forge-code-empty").is_some(), "nothing open yet");
     cx.simulate_input("forge-tree-search", "empty");
     cx.run_until_parked();
     assert!(
@@ -462,20 +471,113 @@ fn code_reads_the_tree_then_one_file_and_says_what_it_cannot_show() {
         "the filter drops the row"
     );
     cx.simulate_input("forge-tree-search", "");
-    cx.simulate_click("forge-tree-README.md");
+    cx.simulate_click("forge-tree-empty.txt");
     cx.run_until_parked();
     view.read(|forge| assert!(forge.nav().blob.is_some()));
     assert!(cx.find("forge-blob-lines").is_some(), "{:?}", cx.texts());
     assert!(cx.has_text("one"), "the first source line is drawn");
+    // a markdown file is rendered, not listed
+    cx.simulate_click("forge-tree-README.md");
+    cx.run_until_parked();
+    assert!(cx.find("forge-blob-markdown").is_some());
+    assert!(cx.find("forge-blob-lines").is_none());
     cx.simulate_click("forge-blob-close");
     cx.run_until_parked();
     view.read(|forge| assert!(forge.nav().blob.is_none()));
 }
 
 #[test]
+fn a_folder_opens_its_children_inline_and_keeps_its_state() {
+    let (mut cx, view) = opened("default");
+    cx.simulate_click("forge-ref-refs/heads/clean");
+    cx.simulate_click("forge-tab-code");
+    cx.run_until_parked();
+    let before = view.read(|forge| forge.tree_rows());
+    let src = before
+        .iter()
+        .position(|row| row.path == b"src" && row.is_dir())
+        .expect("src is a directory of the root");
+    assert!(before.iter().all(|row| row.depth == 0));
+    cx.simulate_click("forge-tree-src");
+    cx.run_until_parked();
+    let asked = cx.host().asked::<Ask>();
+    assert!(
+        asked
+            .iter()
+            .any(|query| matches!(query, Query::Tree { path, .. } if path == b"src")),
+        "expanding reads the folder lazily"
+    );
+    let after = view.read(|forge| forge.tree_rows());
+    // every root row stays where it was; the children sit right under src
+    assert_eq!(after[..=src], before[..=src]);
+    let children: Vec<_> = after[src + 1..]
+        .iter()
+        .take_while(|row| row.depth == 1)
+        .collect();
+    assert!(!children.is_empty(), "{after:?}");
+    assert!(children.iter().all(|row| row.path.starts_with(b"src/")));
+    assert_eq!(after[src + 1 + children.len()..], before[src + 1..]);
+    let child = path_of(&children[0].path);
+    assert!(cx.find(&format!("forge-tree-{child}")).is_some());
+    // another tab and back: the folder is still open
+    cx.simulate_click("forge-tab-readme");
+    cx.run_until_parked();
+    cx.simulate_click("forge-tab-code");
+    cx.run_until_parked();
+    view.read(|forge| assert!(forge.nav().expanded.contains(b"src".as_slice())));
+    assert!(cx.find(&format!("forge-tree-{child}")).is_some());
+    // pressing it again folds it
+    cx.simulate_click("forge-tree-src");
+    cx.run_until_parked();
+    assert_eq!(view.read(|forge| forge.tree_rows()), before);
+}
+
+fn path_of(path: &[u8]) -> String {
+    String::from_utf8_lossy(path).into_owned()
+}
+
+#[test]
+fn the_tree_walks_by_keyboard() {
+    use crate::tree::Key;
+    let (mut cx, view) = opened("default");
+    cx.simulate_click("forge-ref-refs/heads/clean");
+    cx.simulate_click("forge-tab-code");
+    cx.run_until_parked();
+    let press = |cx: &mut TestAppContext, key| {
+        view.update(cx, |forge, _, cx| forge.tree_key(key, cx));
+        cx.run_until_parked();
+    };
+    let cursor = |cx: &mut TestAppContext| {
+        let _ = cx;
+        view.read(|forge| forge.nav().cursor.clone().map(|path| path_of(&path)))
+    };
+    // directories sort first: the first key lands on the first row, src
+    press(&mut cx, Key::Down);
+    assert_eq!(cursor(&mut cx).as_deref(), Some("src"));
+    press(&mut cx, Key::Right);
+    view.read(|forge| assert!(forge.nav().expanded.contains(b"src".as_slice())));
+    press(&mut cx, Key::Right);
+    let child = cursor(&mut cx).expect("stepped into src");
+    assert!(child.starts_with("src/"), "{child}");
+    press(&mut cx, Key::Left);
+    assert_eq!(cursor(&mut cx).as_deref(), Some("src"), "left steps out");
+    press(&mut cx, Key::Left);
+    view.read(|forge| assert!(forge.nav().expanded.is_empty(), "left folds"));
+    press(&mut cx, Key::Down);
+    press(&mut cx, Key::Enter);
+    view.read(|forge| {
+        let (path, _) = forge.nav().blob.clone().expect("enter opens the file");
+        assert_eq!(Some(path), forge.nav().cursor.clone());
+    });
+    press(&mut cx, Key::Up);
+    assert_eq!(cursor(&mut cx).as_deref(), Some("src"));
+}
+
+#[test]
 fn an_oversize_blob_is_a_header_not_a_body() {
     let (mut cx, view) = opened("default");
     cx.simulate_click("forge-ref-refs/heads/clean");
+    cx.simulate_click("forge-tab-code");
     cx.run_until_parked();
     view.update(&mut cx, |forge, _, cx| {
         forge.open_file(

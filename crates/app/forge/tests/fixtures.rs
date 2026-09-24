@@ -201,7 +201,7 @@ fn replay(tape: &mut Tape) {
             },
         },
     );
-    tape.capture(
+    let Reply::Tree { page, .. } = tape.capture(
         &rig,
         "tree",
         Query::Tree {
@@ -209,6 +209,21 @@ fn replay(tape: &mut Tape) {
             at: story.feature.clone(),
             path: vec![],
             page: Page::first(2),
+        },
+    ) else {
+        panic!();
+    };
+    tape.capture(
+        &rig,
+        "tree-next",
+        Query::Tree {
+            repo: REPO.into(),
+            at: story.feature.clone(),
+            path: vec![],
+            page: Page {
+                after: page.next,
+                limit: Some(64),
+            },
         },
     );
     tape.capture(

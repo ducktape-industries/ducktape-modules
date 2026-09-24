@@ -244,11 +244,10 @@ pub(crate) fn rail(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> Any
     let column = div()
         .id(id("forge-rail"))
         .w(px(forge.layout.tree))
+        .flex_none()
         .flex()
         .flex_col()
         .min_h(px(0.))
-        .border_r_1()
-        .border_color(theme.sidebar_border)
         .bg(theme.sidebar)
         .text_color(theme.sidebar_foreground)
         .child(

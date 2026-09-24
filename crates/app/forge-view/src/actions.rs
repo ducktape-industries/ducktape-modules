@@ -46,11 +46,13 @@ impl Forge {
     }
 
     pub(crate) fn open_tab(&mut self, tab: RepoTab, cx: &mut Context<Self>) {
-        let repo = self.nav.repo.clone();
-        let rev = self.nav.rev.clone();
-        self.nav = Default::default();
-        self.nav.repo = repo;
-        self.nav.rev = rev;
+        // the tree keeps what it had open across tabs
+        let kept = std::mem::take(&mut self.nav);
+        self.nav.repo = kept.repo;
+        self.nav.rev = kept.rev;
+        self.nav.expanded = kept.expanded;
+        self.nav.cursor = kept.cursor;
+        self.nav.blob = kept.blob;
         self.nav.tab = tab;
         if tab == RepoTab::Settings {
             let head = self.default_head();
@@ -75,20 +77,15 @@ impl Forge {
 
     pub(crate) fn pick_ref(&mut self, name: Vec<u8>, cx: &mut Context<Self>) {
         self.nav.rev = Some(name);
-        self.nav.path.clear();
+        self.nav.expanded.clear();
+        self.nav.cursor = None;
         self.nav.blob = None;
         self.nav.commit = None;
         self.moved(cx);
     }
 
-    pub(crate) fn open_dir(&mut self, path: Vec<u8>, cx: &mut Context<Self>) {
-        self.nav.path = path;
-        self.nav.blob = None;
-        self.tree_search.clear();
-        self.moved(cx);
-    }
-
     pub(crate) fn open_file(&mut self, path: Vec<u8>, oid: String, cx: &mut Context<Self>) {
+        self.nav.cursor = Some(path.clone());
         self.nav.blob = Some((path, oid));
         self.moved(cx);
     }
