@@ -33,7 +33,9 @@ pub(crate) fn render(forge: &mut Forge, cx: &mut Context<Forge>) -> impl IntoEle
         .flex()
         .size_full()
         .min_h(px(0.));
-    if forge.layout.tree_visible() {
+    // The rail switches between repositories; with none open, the list
+    // itself is the screen, and a rail beside it would say it twice.
+    if forge.layout.tree_visible() && forge.nav().repo.is_some() {
         columns = columns.child(repos::rail(forge, cx, &theme));
     }
     columns = columns.child(main(forge, cx, &theme));
@@ -99,8 +101,7 @@ fn repo(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
         .pt_3()
         .pb_2()
         .border_b_1()
-        .border_color(theme.border)
-        .pr(px(PANE_CONTROLS));
+        .border_color(theme.border);
     let mut title = div()
         .id(id("forge-repo-title"))
         .flex()
@@ -122,8 +123,9 @@ fn repo(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
             ))
             .child(quiet(
                 format!(
-                    "{} refs · last activity at height {}",
-                    info.repo.refs_count, info.repo.last_activity
+                    "{} · active at block {}",
+                    repos::refs(info.repo.refs_count),
+                    info.repo.last_activity
                 ),
                 theme,
             ));
@@ -266,7 +268,6 @@ fn panel(forge: &Forge, dock: Dock, cx: &mut Context<Forge>, theme: &Theme) -> A
                 .gap_2()
                 .px_3()
                 .py_2()
-                .pr(px(PANE_CONTROLS))
                 .child(heading(id("forge-dock-title"), dock.label(), 2, theme))
                 .child(div().flex_1())
                 .child(button(id("forge-dock-close"), "Close", theme, close)),

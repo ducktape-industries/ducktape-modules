@@ -29,7 +29,6 @@ pub fn thread(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
                 .items_center()
                 .gap_2()
                 .p_3()
-                .pr(px(PANE_CONTROLS))
                 .border_b_1()
                 .border_color(theme.border)
                 .child(
@@ -136,7 +135,6 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
                 .id("chat-details-header")
                 .flex()
                 .items_center()
-                .pr(px(PANE_CONTROLS))
                 .child(
                     div()
                         .id("chat-details-title")
