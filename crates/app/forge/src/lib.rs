@@ -14,9 +14,11 @@ mod reads;
 mod repo;
 mod review_contract;
 mod store;
+#[cfg(feature = "view")]
+pub mod view;
 
 pub use contract::*;
-pub use ops::{execute, init};
+pub use ops::{PROGRAM, execute, init};
 pub use queries::query;
 
 /// An op as a person reads it: a title and its fields.

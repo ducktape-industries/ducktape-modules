@@ -12,8 +12,11 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 program = ["dep:guest", "store/program"]
+# `view` adds the marker a view names this program by.
+view = ["dep:ducktape-view-guest"]
 
 [dependencies]
+ducktape-view-guest = { workspace = true, optional = true }
 abi = { workspace = true }
 guest = { workspace = true, optional = true }
 borsh = { workspace = true }

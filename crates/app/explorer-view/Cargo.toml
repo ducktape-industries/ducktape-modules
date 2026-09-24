@@ -22,9 +22,9 @@ ducklink.workspace = true
 # reads as its operation rather than bytes.
 chat.workspace = true
 forge.workspace = true
-identity.workspace = true
-module-registry.workspace = true
-valset.workspace = true
+identity = { workspace = true, features = ["view"] }
+module-registry = { workspace = true, features = ["view"] }
+valset = { workspace = true, features = ["view"] }
 serde.workspace = true
 
 # What a test needs to play the node: the borsh replies the program would
