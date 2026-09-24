@@ -8,6 +8,8 @@ pub(crate) mod commits;
 pub(crate) mod components;
 pub(crate) mod diff;
 pub(crate) mod dock;
+pub(crate) mod highlight;
+pub(crate) mod markdown;
 pub(crate) mod refs;
 pub(crate) mod repos;
 pub(crate) mod settings;
@@ -36,7 +38,14 @@ pub(crate) fn render(forge: &mut Forge, cx: &mut Context<Forge>) -> impl IntoEle
     // The rail switches between repositories; with none open, the list
     // itself is the screen, and a rail beside it would say it twice.
     if forge.layout.tree_visible() && forge.nav().repo.is_some() {
-        columns = columns.child(repos::rail(forge, cx, &theme));
+        columns = columns.child(repos::rail(forge, cx, &theme)).child(divider(
+            "forge-rail-resize",
+            &theme,
+            cx,
+            |forge, dx| {
+                forge.layout.tree += dx;
+            },
+        ));
     }
     columns = columns.child(main(forge, cx, &theme));
     if let Some(dock) = forge.nav().dock.filter(|_| forge.layout.dock_visible()) {
@@ -153,6 +162,7 @@ fn repo(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
             .selected(forge.nav().dock == Some(Dock::About)),
     );
     let body: AnyElement = match forge.nav().tab {
+        RepoTab::Readme => code::readme(forge, cx, theme),
         RepoTab::Code => code::render(forge, cx, theme),
         RepoTab::Commits => commits::render(forge, cx, theme),
         RepoTab::Changes => changes::render(forge, cx, theme),
@@ -453,27 +463,18 @@ pub(crate) fn bold(text: impl Into<String>) -> AnyElement {
         .into_any_element()
 }
 
-/// A prose body — README, change bodies, change overview. The host paints no
-/// markdown surface (forge-view.asks.md), so the source is shown as it was
-/// written: paragraphs split on blank lines, nothing swallowed.
-pub(crate) fn prose(name: &str, text: &str) -> AnyElement {
-    let mut column = div()
-        .id(id(name.to_owned()))
-        .flex()
-        .flex_col()
-        .gap_2()
-        .text_size(px(13.));
-    for (at, paragraph) in text
-        .split("\n\n")
-        .map(str::trim)
-        .filter(|paragraph| !paragraph.is_empty())
-        .enumerate()
-    {
-        column = column.child(
-            div()
-                .id(id(format!("{name}-{at}")))
-                .child(paragraph.to_owned()),
-        );
-    }
-    column.into_any_element()
+/// The line between two panes, dragged to move it. The shared
+/// `resize_handle` is the grab zone; `drag` applies the horizontal delta.
+pub(crate) fn divider(
+    name: &'static str,
+    theme: &Theme,
+    cx: &mut Context<Forge>,
+    drag: impl Fn(&mut Forge, f32) + 'static,
+) -> impl IntoElement {
+    let dragged = cx.listener(move |forge, delta: &(Pixels, Pixels), _, cx| {
+        drag(forge, delta.0.into());
+        forge.layout.clamp();
+        cx.notify();
+    });
+    resize_handle(id(name), div().w(px(1.)).h_full().bg(theme.border)).on_drag(dragged)
 }

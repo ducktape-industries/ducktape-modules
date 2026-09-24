@@ -10,6 +10,7 @@
 mod api;
 mod queries;
 mod state;
+mod tree;
 
 mod actions;
 mod review;
@@ -297,27 +298,24 @@ impl Forge {
             return wanted;
         }
         match self.nav.tab {
-            RepoTab::Code => {
-                if let Some(at) = self.head_oid() {
-                    wanted.push(Query::Tree {
-                        repo: repo.clone(),
-                        at,
-                        path: self.nav.path.clone(),
-                        page: PAGE,
-                    });
-                }
-                match (&self.nav.blob, self.readme()) {
-                    (Some((_, oid)), _) => wanted.push(Query::Blob {
-                        repo,
-                        oid: oid.clone(),
-                        range: None,
-                    }),
-                    (None, Some((_, oid))) => wanted.push(Query::Blob {
+            RepoTab::Readme => {
+                wanted.extend(self.tree_query(Vec::new()));
+                if let Some((_, oid)) = self.readme() {
+                    wanted.push(Query::Blob {
                         repo,
                         oid,
                         range: None,
-                    }),
-                    (None, None) => {}
+                    });
+                }
+            }
+            RepoTab::Code => {
+                wanted.extend(self.tree_queries());
+                if let Some((_, oid)) = &self.nav.blob {
+                    wanted.push(Query::Blob {
+                        repo,
+                        oid: oid.clone(),
+                        range: None,
+                    });
                 }
             }
             RepoTab::Commits => {
@@ -505,27 +503,20 @@ impl Forge {
             .map(|info| info.target.clone())
     }
 
-    /// The README of the root tree, when the tree on screen has one.
+    /// The README of the root tree: `README.md` over any other `README*`.
     pub(crate) fn readme(&self) -> Option<(Vec<u8>, String)> {
-        if !self.nav.path.is_empty() {
-            return None;
-        }
-        let Reply::Tree { page, .. } = self.ready(&Query::Tree {
-            repo: self.nav.repo.clone()?,
-            at: self.head_oid()?,
-            path: Vec::new(),
-            page: PAGE,
-        })?
-        else {
+        let Reply::Tree { page, .. } = self.ready(&self.tree_query(Vec::new())?)? else {
             return None;
         };
         page.items
             .iter()
-            .find(|entry| {
-                String::from_utf8_lossy(&entry.name)
-                    .to_lowercase()
-                    .starts_with("readme")
+            .filter(|entry| {
+                entry.kind != forge::EntryKind::Directory
+                    && String::from_utf8_lossy(&entry.name)
+                        .to_lowercase()
+                        .starts_with("readme")
             })
+            .min_by_key(|entry| !entry.name.eq_ignore_ascii_case(b"readme.md"))
             .map(|entry| (entry.name.clone(), entry.oid.clone()))
     }
 

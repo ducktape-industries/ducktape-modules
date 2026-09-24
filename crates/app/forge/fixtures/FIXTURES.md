@@ -26,6 +26,7 @@ fixtures`; without the variable the test must reproduce the committed bytes.
 | `log` | `Query` → `Reply` | First history page, full message/signatures/parents and `next`. |
 | `log-next` | `Query` → `Reply` | Root commit on the final history page. |
 | `tree` | `Query` → `Reply` | First root directory page with continuation. |
+| `tree-next` | `Query` → `Reply` | The rest of the root directory, after the first page's cursor. |
 | `tree-directory` | `Query` → `Reply` | Lazy child-directory page. |
 | `blob` | `Query` → `Reply` | Complete UTF-8 text bytes, including an unterminated last line. |
 | `blob-binary` | `Query` → `Reply` | Binary header with no bytes. |

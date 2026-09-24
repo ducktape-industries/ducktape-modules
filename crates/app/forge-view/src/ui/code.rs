@@ -1,29 +1,29 @@
-//! Code: a lazy file tree beside one file's bytes. Text is drawn as mono
-//! rows with a numbered gutter; a binary or oversize blob is the header the
-//! program returned and nothing else.
+//! Code: a file tree beside one file's bytes. A directory opens its
+//! children inline beneath it; a text file is drawn highlighted with a
+//! numbered gutter, a markdown file rendered; a binary or oversize blob is
+//! the header the program returned and nothing else.
+use ducktape_view_guest::KeyDownEvent;
 use ducktape_view_guest::prelude::*;
 
 use crate::Forge;
-use crate::queries::PAGE;
-use crate::ui::components::{button, empty_state, heading, id, mono, path_text, quiet, row};
-use crate::ui::{prose, scroller, staged};
-use forge::{Content, EntryKind, Query, Reply, TreeInfo};
+use crate::tree::{Key, Slot};
+use crate::ui::components::{button, empty_state, heading, id, path_text, quiet};
+use crate::ui::{divider, highlight, markdown, staged};
+use forge::{Content, EntryKind, Query, Reply};
 
 pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
     let mut columns = div().id(id("forge-code")).flex().flex_1().min_h(px(0.));
     if forge.layout.tree_visible() || forge.nav().blob.is_none() {
-        columns = columns.child(tree(forge, cx, theme));
+        columns = columns.child(tree(forge, cx, theme)).child(divider(
+            "forge-files-resize",
+            theme,
+            cx,
+            |forge, dx| {
+                forge.layout.files += dx;
+            },
+        ));
     }
     columns.child(body(forge, cx, theme)).into_any_element()
-}
-
-fn tree_query(forge: &Forge) -> Option<Query> {
-    Some(Query::Tree {
-        repo: forge.nav().repo.clone()?,
-        at: forge.head_oid()?,
-        path: forge.nav().path.clone(),
-        page: PAGE,
-    })
 }
 
 fn tree(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
@@ -31,54 +31,45 @@ fn tree(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
         forge.tree_search = text.clone();
         cx.notify();
     });
+    let pressed = cx.listener(|forge, event: &KeyDownEvent, _, cx| {
+        if let Some(key) = Key::parse(&event.keystroke.key) {
+            forge.tree_key(key, cx);
+        }
+    });
     let column = div()
         .id(id("forge-tree"))
-        .w(px(300.))
+        .w(px(forge.layout.files))
+        .flex_none()
         .flex()
         .flex_col()
         .min_h(px(0.))
-        .border_r_1()
-        .border_color(theme.border)
         .child(
-            div()
-                .id(id("forge-tree-header"))
-                .flex()
-                .flex_col()
-                .gap_1()
-                .p_2()
-                .child(breadcrumb(forge, cx, theme))
-                .child(
-                    Input::new(id("forge-tree-search"))
-                        .h(px(26.))
-                        .w_full()
-                        .px_2()
-                        .border_1()
-                        .border_color(theme.border_strong)
-                        .bg(theme.surface)
-                        .text_color(theme.foreground)
-                        .value(forge.tree_search.clone())
-                        .placeholder("Filter this directory")
-                        .label("Filter files")
-                        .on_input(typed),
-                ),
+            div().id(id("forge-tree-header")).p_2().child(
+                Input::new(id("forge-tree-search"))
+                    .h(px(26.))
+                    .w_full()
+                    .px_2()
+                    .border_1()
+                    .border_color(theme.border_strong)
+                    .bg(theme.surface)
+                    .text_color(theme.foreground)
+                    .value(forge.tree_search.clone())
+                    .placeholder("Filter files")
+                    .label("Filter files")
+                    .on_input(typed),
+            ),
         );
-    let Some(query) = tree_query(forge) else {
+    let Some(query) = forge.tree_query(Vec::new()) else {
         // `refs()` lands (even empty) before `head_oid()` ever resolves for
         // a repo with no commits: without this, a freshly created repo sat
         // on "Resolving the ref…" forever instead of saying so.
         let waiting = match forge.refs() {
-            Some(_) => empty_state(
-                id("forge-tree-no-commits"),
-                "No commits yet",
-                "Push code to this ref to browse it here: `git push duck://<network>/forge/<name> main`.",
-                theme,
-            )
-            .into_any_element(),
+            Some(_) => no_commits(theme),
             None => quiet("Resolving the ref…", theme).into_any_element(),
         };
         return column.child(waiting).into_any_element();
     };
-    let reply = match staged(
+    if let Err(state) = staged(
         forge,
         &query,
         "forge-tree-list",
@@ -86,105 +77,125 @@ fn tree(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
         cx,
         theme,
     ) {
-        Ok(reply) => reply,
-        Err(state) => return column.child(state).into_any_element(),
-    };
-    let Reply::Tree { page, .. } = reply else {
-        return column.into_any_element();
-    };
-    let needle = forge.tree_search.trim().to_lowercase();
-    let shown: Vec<&TreeInfo> = page
-        .items
-        .iter()
-        .filter(|entry| {
-            needle.is_empty() || path_text(&entry.name).to_lowercase().contains(&needle)
-        })
-        .collect();
-    if shown.is_empty() {
+        return column.child(state).into_any_element();
+    }
+    let rows = forge.tree_rows();
+    if rows.is_empty() {
         return column
             .child(empty_state(
                 id("forge-tree-empty"),
                 "Nothing here",
-                "This directory holds no entry the filter keeps.",
+                "This tree holds no file the filter keeps.",
                 theme,
             ))
             .into_any_element();
     }
-    let mut list = scroller("forge-tree-list");
-    for entry in shown {
-        let name = path_text(&entry.name);
-        let full = join(&forge.nav().path, &entry.name);
-        let (glyph, kind) = match entry.kind {
-            EntryKind::Directory => ("▸", "directory"),
-            EntryKind::Gitlink => ("◆", "submodule"),
-            EntryKind::Symlink => ("↪", "symlink"),
-            EntryKind::Executable => ("▪", "executable"),
-            EntryKind::File => ("▪", "file"),
+    let open = forge.nav().blob.as_ref().map(|(path, _)| path.clone());
+    let mut list = div()
+        .id(id("forge-tree-list"))
+        .flex_1()
+        .min_h(px(0.))
+        .overflow_y_scroll()
+        .flex()
+        .flex_col()
+        .pb_2()
+        .role(Role::Tree)
+        .aria_label("Files")
+        .focusable()
+        .on_key_down(pressed);
+    for entry in rows {
+        let indent = px(8. + entry.depth as f32 * 14.);
+        let (kind, oid) = match entry.slot {
+            Slot::Entry { kind, oid } => (kind, oid),
+            Slot::Loading | Slot::Failed(_) => {
+                let text = match entry.slot {
+                    Slot::Failed(sentence) => sentence,
+                    _ => "Reading…".to_owned(),
+                };
+                list = list.child(div().pl(indent + px(18.)).py_1().child(quiet(text, theme)));
+                continue;
+            }
         };
-        let oid = entry.oid.clone();
-        let is_dir = entry.kind == EntryKind::Directory;
-        let open = cx.listener({
-            let full = full.clone();
+        let is_dir = kind == EntryKind::Directory;
+        let expanded = is_dir && forge.nav().expanded.contains(&entry.path);
+        let glyph = match kind {
+            EntryKind::Directory if expanded => "▾",
+            EntryKind::Directory => "▸",
+            EntryKind::Gitlink => "◆",
+            EntryKind::Symlink => "↪",
+            EntryKind::Executable | EntryKind::File => "",
+        };
+        let press = cx.listener({
+            let path = entry.path.clone();
             move |forge, _: &ClickEvent, _, cx| {
                 if is_dir {
-                    forge.open_dir(full.clone(), cx)
+                    forge.toggle_dir(path.clone(), cx)
                 } else {
-                    forge.open_file(full.clone(), oid.clone(), cx)
+                    forge.open_file(path.clone(), oid.clone(), cx)
                 }
             }
         });
-        list = list.child(
-            row(id(format!("forge-tree-{}", path_text(&full))), theme)
-                .on_click(open)
-                .selected(
-                    forge
-                        .nav()
-                        .blob
-                        .as_ref()
-                        .is_some_and(|(path, _)| *path == full),
-                )
-                .cell(div().w(px(16.)).text_color(theme.muted).child(glyph))
-                .cell(div().flex_1().truncate().child(name))
-                .cell(quiet(kind, theme)),
-        );
+        // A row is pressed, never focused: the list holds focus, so Enter
+        // reaches the tree's key handler alone and not a focused row too.
+        let selected = open.as_deref() == Some(&entry.path[..]);
+        let cursor = forge.nav().cursor.as_deref() == Some(&entry.path[..]);
+        let mut line = div()
+            .id(id(format!("forge-tree-{}", path_text(&entry.path))))
+            .flex()
+            .items_center()
+            .gap_1()
+            .min_h(px(26.))
+            .pl(indent)
+            .pr_2()
+            .role(Role::TreeItem)
+            .aria_level(entry.depth + 1)
+            .aria_selected(selected)
+            .hover(|style| style.bg(theme.hover))
+            .on_click(press)
+            .child(
+                div()
+                    .w(px(12.))
+                    .flex_none()
+                    .text_size(px(10.))
+                    .text_color(theme.muted)
+                    .child(glyph),
+            )
+            .child(div().flex_1().truncate().child(entry.name));
+        if is_dir {
+            line = line.aria_expanded(expanded);
+        }
+        if selected {
+            line = line.bg(theme.accent_soft);
+        } else if cursor {
+            line = line.bg(theme.hover);
+        }
+        list = list.child(line);
     }
     column.child(list).into_any_element()
 }
 
-fn breadcrumb(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
-    let root = cx.listener(|forge, _: &ClickEvent, _, cx| forge.open_dir(Vec::new(), cx));
-    let mut bar = div()
-        .id(id("forge-tree-breadcrumb"))
-        .flex()
-        .flex_wrap()
-        .items_center()
-        .gap_1()
-        .child(button(id("forge-tree-root"), "/", theme, root));
-    let mut walked: Vec<u8> = Vec::new();
-    for segment in forge.nav().path.split(|byte| *byte == b'/') {
-        if segment.is_empty() {
-            continue;
-        }
-        if !walked.is_empty() {
-            walked.push(b'/');
-        }
-        walked.extend_from_slice(segment);
-        let here = walked.clone();
-        let open =
-            cx.listener(move |forge, _: &ClickEvent, _, cx| forge.open_dir(here.clone(), cx));
-        bar = bar.child(button(
-            id(format!("forge-crumb-{}", path_text(&walked))),
-            path_text(segment),
-            theme,
-            open,
-        ));
-    }
-    bar.into_any_element()
+fn no_commits(theme: &Theme) -> AnyElement {
+    empty_state(
+        id("forge-tree-no-commits"),
+        "No commits yet",
+        "Push code to this ref to browse it here: `git push duck://<network>/forge/<name> main`.",
+        theme,
+    )
+    .into_any_element()
 }
 
 fn body(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
     let Some((path, oid)) = forge.nav().blob.clone() else {
-        return readme(forge, cx, theme);
+        return div()
+            .id(id("forge-code-blank"))
+            .flex_1()
+            .child(empty_state(
+                id("forge-code-empty"),
+                "Pick a file",
+                "Open a folder in the tree to see what it holds; press a file to read it here.",
+                theme,
+            ))
+            .into_any_element();
     };
     let close = cx.listener(|forge, _: &ClickEvent, _, cx| {
         forge.nav_close_blob(cx);
@@ -202,6 +213,14 @@ fn body(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
         .child(quiet(crate::ui::components::short_oid(&oid), theme))
         .child(div().flex_1())
         .child(button(id("forge-blob-close"), "Close", theme, close));
+    let pane = div()
+        .id(id("forge-blob"))
+        .flex_1()
+        .min_w(px(0.))
+        .flex()
+        .flex_col()
+        .min_h(px(0.))
+        .child(header);
     let query = Query::Blob {
         repo: forge.repo_name(),
         oid,
@@ -209,23 +228,27 @@ fn body(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
     };
     let reply = match staged(forge, &query, "forge-blob", "Reading the file…", cx, theme) {
         Ok(reply) => reply,
-        Err(state) => {
-            return div()
-                .id(id("forge-blob"))
-                .flex_1()
-                .flex()
-                .flex_col()
-                .min_h(px(0.))
-                .child(header)
-                .child(state)
-                .into_any_element();
-        }
+        Err(state) => return pane.child(state).into_any_element(),
     };
     let Reply::Blob { blob, .. } = reply else {
-        return div().into_any_element();
+        return pane.into_any_element();
     };
+    let name = path_text(&path);
     let content: AnyElement = match blob.content {
-        Content::Text => lines(&blob.bytes, theme),
+        Content::Text if is_markdown(&name) => div()
+            .id(id("forge-blob-doc"))
+            .flex_1()
+            .min_h(px(0.))
+            .overflow_y_scroll()
+            .px_5()
+            .py_4()
+            .child(markdown::render(
+                "forge-blob-markdown",
+                &String::from_utf8_lossy(&blob.bytes),
+                theme,
+            ))
+            .into_any_element(),
+        Content::Text => lines(&name, &blob.bytes, theme),
         Content::Binary => empty_state(
             id("forge-blob-binary"),
             "Binary file",
@@ -251,28 +274,48 @@ fn body(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
         )
         .into_any_element(),
     };
-    div()
-        .id(id("forge-blob"))
-        .flex_1()
-        .min_w(px(0.))
-        .flex()
-        .flex_col()
-        .min_h(px(0.))
-        .child(header)
-        .child(content)
-        .into_any_element()
+    pane.child(content).into_any_element()
 }
 
-/// The README of the root tree, when the tree has one.
-fn readme(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
+fn is_markdown(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.ends_with(".md") || lower.ends_with(".markdown")
+}
+
+/// The README tab: the root README rendered whole, the repository's front
+/// page. The Code tab is where the tree lives.
+pub(crate) fn readme(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
+    let page = div()
+        .id(id("forge-readme"))
+        .flex_1()
+        .min_h(px(0.))
+        .overflow_y_scroll()
+        .flex()
+        .flex_col();
+    let Some(root) = forge.tree_query(Vec::new()) else {
+        return page
+            .child(match forge.refs() {
+                Some(_) => no_commits(theme),
+                None => quiet("Resolving the ref…", theme),
+            })
+            .into_any_element();
+    };
+    if let Err(state) = staged(
+        forge,
+        &root,
+        "forge-readme-tree",
+        "Reading the tree…",
+        cx,
+        theme,
+    ) {
+        return page.child(state).into_any_element();
+    }
     let Some((name, oid)) = forge.readme() else {
-        return div()
-            .id(id("forge-code-blank"))
-            .flex_1()
+        return page
             .child(empty_state(
-                id("forge-code-empty"),
-                "Pick a file",
-                "The tree beside this pane holds what this ref carries.",
+                id("forge-readme-none"),
+                "No README",
+                "This ref carries no README at its root. The Code tab has its files.",
                 theme,
             ))
             .into_any_element();
@@ -285,64 +328,85 @@ fn readme(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
     let reply = match staged(
         forge,
         &query,
-        "forge-readme",
+        "forge-readme-blob",
         "Reading the README…",
         cx,
         theme,
     ) {
         Ok(reply) => reply,
-        Err(state) => return state,
+        Err(state) => return page.child(state).into_any_element(),
     };
     let Reply::Blob { blob, .. } = reply else {
-        return div().into_any_element();
+        return page.into_any_element();
     };
-    let text = String::from_utf8_lossy(&blob.bytes).into_owned();
-    div()
-        .id(id("forge-readme"))
-        .flex_1()
-        .min_w(px(0.))
-        .flex()
-        .flex_col()
-        .min_h(px(0.))
-        .p_3()
-        .gap_2()
-        .child(heading(
-            id("forge-readme-title"),
-            path_text(&name),
-            2,
+    let body = if matches!(blob.content, Content::Text) {
+        markdown::render(
+            "forge-readme-body",
+            &String::from_utf8_lossy(&blob.bytes),
             theme,
-        ))
-        .child(if matches!(blob.content, Content::Text) {
-            prose("forge-readme-body", &text)
-        } else {
-            quiet("This README is not text.", theme).into_any_element()
-        })
-        .into_any_element()
+        )
+    } else {
+        quiet("This README is not text.", theme)
+    };
+    page.child(
+        div()
+            .id(id("forge-readme-page"))
+            .w_full()
+            .max_w(px(880.))
+            .px_6()
+            .py_5()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(
+                div()
+                    .id(id("forge-readme-title"))
+                    .pb_2()
+                    .border_b_1()
+                    .border_color(theme.border)
+                    .font_family(highlight::MONO)
+                    .text_size(px(12.))
+                    .text_color(theme.muted)
+                    .child(path_text(&name)),
+            )
+            .child(body),
+    )
+    .into_any_element()
 }
 
-/// Source lines, numbered. The gutter is the permalink target a reader
-/// points at; it carries no comment in this screen.
-fn lines(bytes: &[u8], theme: &Theme) -> AnyElement {
+/// Source lines, highlighted, numbered in a mono gutter.
+fn lines(name: &str, bytes: &[u8], theme: &Theme) -> AnyElement {
     let text = String::from_utf8_lossy(bytes).into_owned();
     let rows: Vec<String> = text.split('\n').map(str::to_owned).collect();
+    let tokens = highlight::tokens(name, &rows.iter().map(String::as_str).collect::<Vec<_>>());
     let count = rows.len();
-    let muted = theme.muted;
-    let foreground = theme.foreground;
+    let gutter = count.to_string().len() as f32 * 7.5 + 16.;
+    let theme = *theme;
     crate::ui::components::rows("forge-blob-lines", count, None, None, move |index| {
         div()
             .id(id(format!("forge-blob-line-{}", index + 1)))
             .flex()
-            .gap_2()
-            .px_2()
+            .gap_3()
             .child(
                 div()
-                    .w(px(48.))
-                    .font_family("monospace")
+                    .w(px(gutter))
+                    .flex_none()
+                    .pr_2()
+                    .flex()
+                    .justify_end()
+                    .border_r_1()
+                    .border_color(theme.border)
+                    .font_family(highlight::MONO)
                     .text_size(px(12.))
-                    .text_color(muted)
+                    .text_color(theme.faint)
                     .child((index + 1).to_string()),
             )
-            .child(mono(rows[index].clone(), foreground))
+            .child(highlight::line(
+                id(format!("forge-blob-text-{}", index + 1)),
+                &rows[index],
+                &tokens[index],
+                &theme,
+            ))
             .into_any_element()
     })
 }

@@ -8,7 +8,7 @@ use crate::ui::changes::{revision_name, state_chip};
 use crate::ui::components::{
     button, chip, empty_state, heading, id, path_text, quiet, ref_label, row, short_oid,
 };
-use crate::ui::{commits, diff, pending, prose, scroller, staged};
+use crate::ui::{commits, diff, pending, scroller, staged};
 use forge::{ChangeState, Query, Reply, Verdict};
 
 pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
@@ -166,7 +166,11 @@ fn conversation(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyEle
                 .id(id("forge-change-body"))
                 .p_2()
                 .bg(theme.surface)
-                .child(prose("forge-change-body-text", &change.body)),
+                .child(crate::ui::markdown::render(
+                    "forge-change-body-text",
+                    &change.body,
+                    theme,
+                )),
         );
     }
     let names = forge.names.ready();

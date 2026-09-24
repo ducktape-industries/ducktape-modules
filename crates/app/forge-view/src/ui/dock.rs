@@ -5,7 +5,7 @@ use ducktape_view_guest::prelude::*;
 use crate::Forge;
 use crate::ui::changes::revision_name;
 use crate::ui::components::{empty_state, heading, id, path_text, quiet, ref_label, short_oid};
-use crate::ui::{fact, prose};
+use crate::ui::{fact, markdown};
 use forge::Mergeability;
 
 pub(crate) fn overview(forge: &Forge, theme: &Theme) -> AnyElement {
@@ -33,7 +33,7 @@ pub(crate) fn overview(forge: &Forge, theme: &Theme) -> AnyElement {
         .child(fact("Reviews", change.review_count.to_string(), theme))
         .child(fact("Comments", change.comment_count.to_string(), theme))
         .child(fact("Channel", change.channel.clone(), theme))
-        .child(prose("forge-overview-body", &change.body))
+        .child(markdown::render("forge-overview-body", &change.body, theme))
         .into_any_element()
 }
 
