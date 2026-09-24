@@ -199,9 +199,8 @@ fn every_mark_is_the_same_square_and_the_field_writes_at_body_size() {
             interactivity,
             ..
         }) if interactivity.role == Some(Role::Button) => {
-            if style.size.width == Some(gpui::px(24.).into())
-                && style.size.height == Some(gpui::px(24.).into())
-            {
+            let side = gpui::px(design::height::CONTROL as f32);
+            if style.size.width == Some(side.into()) && style.size.height == Some(side.into()) {
                 marks.push(interactivity.aria.label.clone());
             }
         }
@@ -214,7 +213,7 @@ fn every_mark_is_the_same_square_and_the_field_writes_at_body_size() {
     assert_eq!(
         marks.len(),
         5,
-        "attach, bold, italic, code and quote are square marks"
+        "attach, bold, italic, code and quote are control-high squares"
     );
     assert_eq!(
         body_size,

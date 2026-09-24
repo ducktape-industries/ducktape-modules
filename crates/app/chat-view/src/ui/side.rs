@@ -62,13 +62,13 @@ pub fn thread(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
                 channel: room.id.clone(),
                 thread: Some(thread_state.root),
             };
-            pane = pane.child(room::composer(
+            pane = pane.child(div().p_3().child(room::composer(
                 chat,
                 target,
                 "Reply in thread",
                 chat.session.connected && !thread_state.replies.is_loading(),
                 cx,
-            ));
+            )));
         }
     } else {
         pane = pane.child(empty_state(
