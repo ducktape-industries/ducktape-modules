@@ -446,3 +446,51 @@ mod tests {
         assert_eq!(inline("a ` b").0, "a ` b");
     }
 }
+
+#[cfg(test)]
+mod view_tests {
+    use ducktape_view_guest::testing::TestAppContext;
+    use ducktape_view_guest::{Context, IntoElement, Render, View, Window};
+
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct Doc;
+
+    impl View for Doc {
+        fn new(_: &mut Window, _: &mut Context<Self>) -> Self {
+            Doc
+        }
+    }
+
+    impl Render for Doc {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let theme = *cx.global::<ducktape_view_guest::Theme>();
+            super::render(
+                "doc",
+                "# Title\n\nSee [rfcs](duck://net-1/forge/rfcs), [local](../a.md) or https://x.example",
+                &theme,
+            )
+        }
+    }
+
+    #[test]
+    fn a_pressed_link_goes_to_the_host() {
+        let mut cx = TestAppContext::new();
+        cx.open::<Doc>();
+        cx.run_until_parked();
+        assert!(cx.has_text("Title"));
+        // chat's tokenizer takes `[label](url)` with a scheme only: the
+        // relative reference stays literal text, and two links are pressable
+        assert!(
+            cx.texts()
+                .iter()
+                .any(|text| text.contains("[local](../a.md)"))
+        );
+        for index in 0..2 {
+            cx.simulate_rich_click("doc-1", index);
+        }
+        assert_eq!(
+            cx.host().opened_links(),
+            vec!["duck://net-1/forge/rfcs", "https://x.example"]
+        );
+    }
+}
