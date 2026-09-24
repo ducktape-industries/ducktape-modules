@@ -14,6 +14,20 @@ fn founding_seats_the_validators_and_every_program_answers() {
         ] {
             assert!(programs.contains_key(program), "{program} is not rostered");
         }
+        assert!(!programs.contains_key("lens"), "a view is never admitted");
+        let module_registry::Reply::Views(views) = net
+            .ask(module_registry::PROGRAM, &module_registry::Query::Views(0))
+            .await
+        else {
+            panic!()
+        };
+        let names: Vec<&str> = views.iter().map(|view| view.name.as_str()).collect();
+        assert_eq!(names, ["lens"]);
+        assert_eq!(
+            net.host.blob(&views[0].view).unwrap().as_deref(),
+            Some(&b"program 6\0a view"[..]),
+            "the founding stored the view's bytes"
+        );
         let memberships = net.memberships().await;
         assert_eq!(memberships.len(), 2);
         assert!(

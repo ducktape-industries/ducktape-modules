@@ -23,7 +23,7 @@ pub const AUTHORITY: &str = "governance";
 use abi::ProgramId;
 use borsh::{BorshDeserialize, BorshSerialize};
 
-pub use abi::module_registry::{Entry, Genesis, PROGRAM};
+pub use abi::module_registry::{Entry, Genesis, PROGRAM, View};
 
 pub const CODE_KIND: &str = "program";
 
@@ -31,13 +31,17 @@ pub const CODE_KIND: &str = "program";
 pub enum Change {
     Set(Entry),
     Remove(ProgramId),
+    /// A view with no program behind it, listed under its name.
+    SetView(View),
+    RemoveView(ProgramId),
 }
 
 impl Change {
     pub fn program(&self) -> &str {
         match self {
             Change::Set(entry) => &entry.program,
-            Change::Remove(program) => program,
+            Change::SetView(view) => &view.name,
+            Change::Remove(program) | Change::RemoveView(program) => program,
         }
     }
 }
@@ -58,8 +62,12 @@ pub enum Op {
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Query {
     At(u64),
-    Scheduled { page: Page },
+    Scheduled {
+        page: Page,
+    },
     Program(ProgramId),
+    /// The view-only entries at a height, by name.
+    Views(u64),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
@@ -67,4 +75,5 @@ pub enum Reply {
     Programs(Vec<Entry>),
     Scheduled(PageReply<Scheduled>),
     Program { height: u64, entry: Option<Entry> },
+    Views(Vec<View>),
 }

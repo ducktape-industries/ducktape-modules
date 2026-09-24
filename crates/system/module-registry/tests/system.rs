@@ -6,7 +6,10 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use commonware_cryptography::{Signer as _, ed25519};
 use commonware_runtime::{Runner as _, deterministic};
 use fixture_probe::Step;
-use host::{Applied, Block, BlockId, Founding, Genesis, Host, Layer, Limits, Receipt, Submission};
+use host::{
+    Applied, Block, BlockId, Founding, FoundingView, Genesis, Host, Layer, Limits, Receipt,
+    Submission,
+};
 use identity::AccountNumber;
 use keyscheme::testkit;
 use module_registry::{AUTHORITY, Page};
@@ -119,6 +122,10 @@ impl Net {
                 probe(AUTHORITY),
                 probe("probe"),
             ],
+            views: vec![FoundingView {
+                name: "lens".into(),
+                view: b"a view".to_vec(),
+            }],
             limits: Limits::default(),
             epoch_length: EPOCH_LENGTH,
             time: TIME,

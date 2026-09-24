@@ -3,7 +3,7 @@
 use abi::{BlobId, Cause, Env, Origin, reason};
 use store::{Memory, Page};
 
-use crate::{AUTHORITY, Change, Entry, Genesis, Op, Query, Reply, Scheduled};
+use crate::{AUTHORITY, Change, Entry, Genesis, Op, Query, Reply, Scheduled, View};
 
 fn env(height: u64, origin: Origin) -> Env {
     Env {
@@ -34,6 +34,10 @@ fn founded() -> (Memory, BlobId) {
         &mut store,
         Genesis {
             programs: vec![entry("boot", BlobId::Sha256([1; 32]))],
+            views: vec![View {
+                name: "lens".into(),
+                view: BlobId::Sha256([2; 32]),
+            }],
         },
     );
     crate::execute(
@@ -187,6 +191,67 @@ fn the_schedule_pages_in_height_order_and_a_cancel_removes_one_change() {
     );
     assert_eq!(gone.unwrap_err().reason, reason::NOT_FOUND);
     assert_eq!(ask(&store, Page::default()).items.len(), 2);
+}
+
+fn views(store: &Memory, height: u64) -> Vec<(String, BlobId)> {
+    match crate::query(store, &env(height, Origin::System), Query::Views(height)).unwrap() {
+        Reply::Views(views) => views.into_iter().map(|v| (v.name, v.view)).collect(),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_view_is_listed_apart_from_the_programs_and_scheduled_like_one() {
+    let (mut store, code) = founded();
+    assert_eq!(views(&store, 1), [("lens".into(), BlobId::Sha256([2; 32]))]);
+    assert_eq!(programs(&store, 1), ["boot"], "a view is never a program");
+    let explorer = Change::SetView(View {
+        name: "explorer".into(),
+        view: code,
+    });
+    let stranger = crate::execute(
+        &mut store,
+        &env(1, Origin::External(vec![9])),
+        Op::Schedule(Scheduled {
+            height: 5,
+            change: explorer.clone(),
+        }),
+    );
+    assert_eq!(stranger.unwrap_err().reason, reason::UNAUTHORIZED);
+    let unpublished = Change::SetView(View {
+        name: "explorer".into(),
+        view: BlobId::Sha256([7; 32]),
+    });
+    assert_eq!(
+        schedule(&mut store, 5, unpublished).unwrap_err().reason,
+        reason::NOT_FOUND
+    );
+    let over_a_program = Change::SetView(View {
+        name: "boot".into(),
+        view: code,
+    });
+    assert_eq!(
+        schedule(&mut store, 5, over_a_program).unwrap_err().reason,
+        reason::ALREADY_EXISTS
+    );
+    schedule(&mut store, 5, explorer).unwrap();
+    schedule(&mut store, 6, Change::RemoveView("lens".into())).unwrap();
+    assert_eq!(views(&store, 4).len(), 1);
+    assert_eq!(
+        views(&store, 5),
+        [
+            ("explorer".into(), code),
+            ("lens".into(), BlobId::Sha256([2; 32]))
+        ]
+    );
+    crate::execute(
+        &mut store,
+        &env(6, Origin::External(vec![9])),
+        Op::Publish { body: vec![1] },
+    )
+    .unwrap();
+    assert_eq!(views(&store, 6), [("explorer".into(), code)]);
+    assert_eq!(programs(&store, 6), ["boot"]);
 }
 
 #[test]
