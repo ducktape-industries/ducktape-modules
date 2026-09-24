@@ -67,8 +67,8 @@ through; another literal is a compile error.
 The ABI gate (`view-wire/src/abi.rs`, `tools/check-view-abi.py`): exactly one
 import, `ducktape_view.panicked`, and exactly five function exports,
 `alloc`/`init`/`tick`/`snapshot`/`restore`. `make wasm-views` builds every
-view in `VIEWS`, runs `wasm-opt`, checks the ABI and the size limit (1.2 MB;
-2.5 MB for chat and forge, 1.3 MB for settings); `make view-wasm-check`
+view in `VIEWS`, runs `wasm-opt`, checks the ABI and prints the size;
+`make view-wasm-check`
 proves nothing in `VIEW_LINKABLE` reaches `VIEW_FORBIDDEN`. Wire bytes are
 pinned by `view-wire/tests/golden.rs`: a shape change bumps `WIRE_EPOCH`.
 

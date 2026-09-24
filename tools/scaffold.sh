@@ -336,7 +336,7 @@ EOF
     cat <<EOF
 $dir/{Cargo.toml,src/lib.rs,src/tests.rs}, VIEWS and workspace members.
 Next:
-  1. \`make dev V=$name\` builds, gates (ABI, 1,200,000 bytes) and tests it; a larger view needs LIMIT_$name in the Makefile
+  1. \`make dev V=$name\` builds, gates (ABI) and tests it
   2. replace the screen in src/lib.rs with what the program's Query answers
   3. tell qa's kit to pack $snake into $program (crates/view-pack in kit's build)
 EOF
