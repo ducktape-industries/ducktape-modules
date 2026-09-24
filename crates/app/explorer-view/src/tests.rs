@@ -134,6 +134,10 @@ fn respond(cx: &mut TestAppContext) {
             registry::Query::At(0) => {
                 registry::Reply::Programs(vec![entry("chat", 0xab), entry("identity", 0xcd)])
             }
+            registry::Query::Views(0) => registry::Reply::Views(vec![registry::View {
+                name: "explorer".into(),
+                view: BlobId::Sha256([0xef; 32]),
+            }]),
             registry::Query::Scheduled { .. } => {
                 registry::Reply::Scheduled(module_registry::PageReply {
                     height: 1,
@@ -469,6 +473,10 @@ fn programs_lists_what_runs_and_what_is_scheduled() {
     assert!(cx.has_text("2 programs") && cx.has_text("identity"));
     assert!(cx.has_text("Remove") && cx.has_text("forge") && cx.has_text("at 120"));
     assert!(cx.texts().iter().any(|text| text == "abababababab…"));
+    assert!(
+        cx.has_text("1 view") && cx.has_text("explorer") && cx.has_text("view only"),
+        "a view-only entry is listed beside the programs"
+    );
     cx.assert_accessible();
 }
 

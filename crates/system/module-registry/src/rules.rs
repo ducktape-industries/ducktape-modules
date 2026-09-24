@@ -1,5 +1,7 @@
 // The rules over any store: the schedule folded at each block, then the ops and queries.
 
+use std::collections::BTreeMap;
+
 use abi::{Env, HashKind, ProgramId, Refusal};
 use store::{Item, Map, Reads, Writes, already_exists, invalid, not_found};
 
@@ -74,16 +76,25 @@ fn schedule(store: &mut impl Writes, env: &Env, scheduled: Scheduled) -> Result<
         return Err(not_found(format!("code {blob:?} is not published")));
     }
     let name = scheduled.change.program();
-    let taken = match &scheduled.change {
-        Change::Set(_) => views_at(store, scheduled.height)?
-            .iter()
-            .any(|view| view.name == name),
-        Change::SetView(_) => at(store, scheduled.height)?
-            .iter()
-            .any(|entry| entry.program == name),
+    let (programs, views) = roster(store, scheduled.height)?;
+    let clash = match &scheduled.change {
+        Change::Set(_) => views.contains_key(name) || pending(store, name, Kind::View)?,
+        Change::SetView(_) => programs.contains_key(name) || pending(store, name, Kind::Program)?,
+        Change::Remove(_) if !programs.contains_key(name) => {
+            return Err(not_found(format!(
+                "no program {name} runs at {}",
+                scheduled.height
+            )));
+        }
+        Change::RemoveView(_) if !views.contains_key(name) => {
+            return Err(not_found(format!(
+                "no view {name} is listed at {}",
+                scheduled.height
+            )));
+        }
         Change::Remove(_) | Change::RemoveView(_) => false,
     };
-    if taken {
+    if clash {
         return Err(already_exists(format!(
             "{name} already names a program or a view"
         )));
@@ -107,8 +118,23 @@ fn cancel(
 ) -> Result<(), Refusal> {
     crate::helpers::from(env, AUTHORITY)?;
     let key = (height, program);
-    if !SCHEDULE.has(store, &key) {
+    let Some(change) = SCHEDULE.get(store, &key)? else {
         return Err(not_found(format!("{} does not change at {height}", key.1)));
+    };
+    // A removal cancelled keeps its name held, which a pending set of the
+    // other kind may since have claimed.
+    let reinstated = match change {
+        Change::Remove(_) => Some(Kind::View),
+        Change::RemoveView(_) => Some(Kind::Program),
+        Change::Set(_) | Change::SetView(_) => None,
+    };
+    if let Some(other) = reinstated
+        && pending(store, &key.1, other)?
+    {
+        return Err(already_exists(format!(
+            "{} is claimed by a pending change of the other kind",
+            key.1
+        )));
     }
     SCHEDULE.remove(store, &key);
     Ok(())
@@ -138,41 +164,54 @@ fn due(store: &impl Reads, height: u64) -> Result<Vec<(At, Change)>, Refusal> {
 }
 
 fn at(store: &impl Reads, height: u64) -> Result<Vec<Entry>, Refusal> {
-    let mut entries: Vec<Entry> = PROGRAMS
-        .all(store)?
-        .into_iter()
-        .map(|(_, entry)| entry)
-        .collect();
-    for (_, change) in due(store, height)? {
-        match change {
-            Change::Set(entry) => {
-                entries.retain(|running| running.program != entry.program);
-                entries.push(entry);
-            }
-            Change::Remove(program) => entries.retain(|running| running.program != program),
-            Change::SetView(_) | Change::RemoveView(_) => {}
-        }
-    }
-    entries.sort_by(|a, b| a.program.cmp(&b.program));
-    Ok(entries)
+    Ok(roster(store, height)?.0.into_values().collect())
 }
 
 fn views_at(store: &impl Reads, height: u64) -> Result<Vec<View>, Refusal> {
-    let mut views: Vec<View> = VIEWS
-        .all(store)?
-        .into_iter()
-        .map(|(_, view)| view)
-        .collect();
+    Ok(roster(store, height)?.1.into_values().collect())
+}
+
+type Roster = (BTreeMap<ProgramId, Entry>, BTreeMap<ProgramId, View>);
+
+/// Both lists at a height, by name: what is folded, and every change due by then.
+fn roster(store: &impl Reads, height: u64) -> Result<Roster, Refusal> {
+    let mut programs: BTreeMap<_, _> = PROGRAMS.all(store)?.into_iter().collect();
+    let mut views: BTreeMap<_, _> = VIEWS.all(store)?.into_iter().collect();
     for (_, change) in due(store, height)? {
         match change {
-            Change::SetView(view) => {
-                views.retain(|listed| listed.name != view.name);
-                views.push(view);
+            Change::Set(entry) => {
+                programs.insert(entry.program.clone(), entry);
             }
-            Change::RemoveView(name) => views.retain(|listed| listed.name != name),
-            Change::Set(_) | Change::Remove(_) => {}
+            Change::Remove(program) => {
+                programs.remove(&program);
+            }
+            Change::SetView(view) => {
+                views.insert(view.name.clone(), view);
+            }
+            Change::RemoveView(name) => {
+                views.remove(&name);
+            }
         }
     }
-    views.sort_by(|a, b| a.name.cmp(&b.name));
-    Ok(views)
+    Ok((programs, views))
+}
+
+#[derive(Clone, Copy)]
+enum Kind {
+    Program,
+    View,
+}
+
+/// Whether a set of `kind` under `name` waits anywhere in the schedule, at any height.
+fn pending(store: &impl Reads, name: &str, kind: Kind) -> Result<bool, Refusal> {
+    Ok(SCHEDULE
+        .all(store)?
+        .into_iter()
+        .any(|((_, program), change)| {
+            program == name
+                && matches!(
+                    (kind, change),
+                    (Kind::Program, Change::Set(_)) | (Kind::View, Change::SetView(_))
+                )
+        }))
 }
