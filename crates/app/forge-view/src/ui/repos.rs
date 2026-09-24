@@ -4,7 +4,7 @@ use ducktape_view_guest::prelude::*;
 
 use crate::Forge;
 use crate::queries::PAGE;
-use crate::ui::components::{button, chip, empty_state, heading, id, quiet, ref_label, row};
+use crate::ui::components::{button, empty_state, heading, id, quiet, ref_label, row};
 use crate::ui::{pending, scroller, staged};
 use forge::{Query, Reply, RepoInfo};
 
@@ -23,6 +23,155 @@ fn listed<'a>(forge: &'a Forge, reply: &'a Reply) -> Vec<&'a RepoInfo> {
         .collect()
 }
 
+/// One repository: its name over the address it clones from, and what it
+/// is (owner, default branch, refs, last activity) on the right.
+fn repo_row(
+    forge: &Forge,
+    info: &RepoInfo,
+    owner: String,
+    cx: &mut Context<Forge>,
+    theme: &Theme,
+) -> AnyElement {
+    let name = info.name.clone();
+    let url = format!("duck://{}/forge/{name}", crate::ui::chain(forge));
+    let group = format!("forge-repo-{name}-row");
+    let open = cx.listener({
+        let name = name.clone();
+        move |forge, _: &ClickEvent, _, cx| forge.open_repo(name.clone(), cx)
+    });
+    let copy = cx.listener({
+        let (name, url) = (name.clone(), url.clone());
+        move |forge, _: &ClickEvent, _, cx| {
+            cx.host()
+                .notify::<ducktape_view_guest::doors::ClipboardWrite>(url.clone());
+            forge.copied = Some(name.clone());
+            cx.notify();
+        }
+    });
+    let copied = forge.copied.as_deref() == Some(name.as_str());
+    let copy = div()
+        .id(id(format!("forge-repo-{name}-copy")))
+        .role(Role::Button)
+        .aria_label(format!("Copy the address of {name}"))
+        .focusable()
+        // a click here is not also a click on the row that opens the repo
+        .occlude()
+        .px_1p5()
+        .border_1()
+        .border_color(theme.border)
+        .bg(theme.background)
+        .text_size(px(11.))
+        .text_color(theme.muted)
+        .hover(|style| style.text_color(theme.foreground))
+        .on_click(copy)
+        .child(if copied { "Copied" } else { "Copy" });
+    let copy = match copied {
+        true => copy,
+        false => copy
+            .invisible()
+            .group_hover(group.clone(), |style| style.visible()),
+    };
+    let initial = owner
+        .chars()
+        .next()
+        .unwrap_or('?')
+        .to_uppercase()
+        .to_string();
+    div()
+        .id(id(format!("forge-repo-{name}")))
+        .group(group)
+        .flex()
+        .items_center()
+        .gap_4()
+        .px_4()
+        .py(px(8.))
+        .border_b_1()
+        .border_color(theme.border)
+        .hover(|style| style.bg(theme.surface))
+        .role(Role::Button)
+        .aria_label(format!("Open {name}"))
+        .focusable()
+        .on_click(open)
+        .child(
+            div()
+                .flex_1()
+                .min_w(px(0.))
+                .flex()
+                .flex_col()
+                .gap(px(3.))
+                .child(
+                    div()
+                        .text_size(px(13.5))
+                        .font_weight(ducktape_view_guest::FontWeight::SEMIBOLD)
+                        .truncate()
+                        .child(name.clone()),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            div()
+                                .min_w(px(0.))
+                                .truncate()
+                                .font_family("JetBrains Mono")
+                                .text_size(px(11.5))
+                                .text_color(theme.faint)
+                                .child(url),
+                        )
+                        .child(copy),
+                ),
+        )
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_5()
+                .flex_shrink_0()
+                .text_size(px(12.))
+                .text_color(theme.muted)
+                .child(
+                    div()
+                        .w(px(140.))
+                        .flex()
+                        .items_center()
+                        .gap_1p5()
+                        .child(
+                            div()
+                                .size(px(18.))
+                                .flex_shrink_0()
+                                .rounded_full()
+                                .bg(theme.surface_raised)
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .text_size(px(10.))
+                                .font_weight(ducktape_view_guest::FontWeight::SEMIBOLD)
+                                .child(initial),
+                        )
+                        .child(div().min_w(px(0.)).truncate().child(owner)),
+                )
+                .child(
+                    div()
+                        .w(px(72.))
+                        .truncate()
+                        .font_family("JetBrains Mono")
+                        .text_size(px(11.5))
+                        .child(ref_label(&info.repo.settings.head)),
+                )
+                .child(div().w(px(52.)).child(refs(info.repo.refs_count)))
+                .child(
+                    div()
+                        .w(px(96.))
+                        .text_right()
+                        .whitespace_nowrap()
+                        .child(format!("block {}", info.repo.last_activity)),
+                ),
+        )
+        .into_any_element()
+}
+
 /// "1 ref", "3 refs".
 pub(crate) fn refs(count: u64) -> String {
     match count == 1 {
@@ -33,25 +182,27 @@ pub(crate) fn refs(count: u64) -> String {
 
 /// The screen: every repository of this network, newest activity first.
 pub(crate) fn overview(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
-    let mut column = div()
-        .id(id("forge-repos"))
-        .flex()
-        .flex_col()
-        .flex_1()
-        .min_h(px(0.))
-        .child(header(forge, cx, theme, "forge-repos-search"));
-    if let Some(form) = &forge.new_repo {
-        column = column.child(dialog(form, cx, theme));
-    }
-    column = column.child(pending(forge, "repos", theme));
-    let body = match staged(
+    let body = staged(
         forge,
         &query(),
         "forge-repos-list",
         "Reading the repositories…",
         cx,
         theme,
-    ) {
+    );
+    let count = body.as_ref().ok().map(|reply| listed(forge, reply).len());
+    let mut column = div()
+        .id(id("forge-repos"))
+        .flex()
+        .flex_col()
+        .flex_1()
+        .min_h(px(0.))
+        .child(header(forge, count, cx, theme, "forge-repos-search"));
+    if let Some(form) = &forge.new_repo {
+        column = column.child(dialog(form, cx, theme));
+    }
+    column = column.child(pending(forge, "repos", theme));
+    let body = match body {
         Ok(reply) => reply,
         Err(state) => return column.child(state).into_any_element(),
     };
@@ -75,32 +226,14 @@ pub(crate) fn overview(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) ->
             .into_any_element();
     }
     let names = forge.names.ready();
-    let mut list = scroller("forge-repos-list");
+    // rows run edge to edge, a hairline between them
+    let mut list = scroller("forge-repos-list").p_0().gap_0();
     for info in rows {
-        let name = info.name.clone();
-        let open = cx.listener({
-            let name = name.clone();
-            move |forge, _: &ClickEvent, _, cx| forge.open_repo(name.clone(), cx)
-        });
         let owner = names.map_or_else(
             || crate::state::short(&abi::hex(&info.repo.owner)),
             |names| names.key(&info.repo.owner),
         );
-        list = list.child(
-            row(id(format!("forge-repo-{name}")), theme)
-                .on_click(open)
-                .cell(div().w(px(220.)).truncate().child(crate::ui::bold(name)))
-                .cell(chip(
-                    id(format!("forge-repo-head-{}", info.name)),
-                    ref_label(&info.repo.settings.head),
-                    theme.muted,
-                    theme.surface_raised,
-                ))
-                .cell(div().w(px(140.)).truncate().child(quiet(owner, theme)))
-                .cell(quiet(refs(info.repo.refs_count), theme))
-                .cell(div().flex_1())
-                .cell(quiet(format!("block {}", info.repo.last_activity), theme)),
-        );
+        list = list.child(repo_row(forge, info, owner, cx, theme));
     }
     column.child(list).into_any_element()
 }
@@ -198,7 +331,13 @@ pub(crate) fn rail(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> Any
     column.child(list).into_any_element()
 }
 
-fn header(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme, search_id: &str) -> AnyElement {
+fn header(
+    forge: &Forge,
+    count: Option<usize>,
+    cx: &mut Context<Forge>,
+    theme: &Theme,
+    search_id: &str,
+) -> AnyElement {
     let typed = cx.listener(|forge, text: &String, _, cx| {
         forge.search = text.clone();
         cx.notify();
@@ -214,10 +353,11 @@ fn header(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme, search_id: &str
         .border_b_1()
         .border_color(theme.border)
         .child(heading(id("forge-repos-title"), "Repositories", 1, theme))
+        .children(count.map(|count| quiet(count.to_string(), theme)))
         .child(
             Input::new(id(search_id.to_owned()))
                 .h(px(28.))
-                .flex_1()
+                .w(px(320.))
                 .px_2()
                 .border_1()
                 .border_color(theme.border_strong)
@@ -228,6 +368,7 @@ fn header(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme, search_id: &str
                 .label("Filter repositories")
                 .on_input(typed),
         )
+        .child(div().flex_1())
         .child(
             button(id("forge-new-repo"), "+ New", theme, new)
                 .primary(true)

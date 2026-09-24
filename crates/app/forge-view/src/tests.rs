@@ -334,6 +334,10 @@ fn the_repositories_list_shows_every_column_of_the_plan() {
     assert!(cx.has_text("Ada"), "the owner key resolves to a name");
     assert!(cx.has_text("6 refs"));
     assert!(cx.has_text("block 2"));
+    assert!(
+        cx.has_text("duck://testnet#0a1b2c3d/forge/project"),
+        "the row shows where it clones from"
+    );
 }
 
 #[test]
@@ -695,4 +699,21 @@ mod screen_tests;
 fn one_ref_is_not_refs() {
     assert_eq!(crate::ui::repos::refs(1), "1 ref");
     assert_eq!(crate::ui::repos::refs(0), "0 refs");
+}
+
+#[test]
+fn copy_puts_the_address_on_the_clipboard_without_opening_the_repository() {
+    let (mut cx, view) = booted("default");
+    let copied = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
+    let seen = copied.clone();
+    cx.host()
+        .handle::<ducktape_view_guest::doors::ClipboardWrite>(move |text| {
+            *seen.borrow_mut() = text;
+            Ok(())
+        });
+    cx.simulate_click("forge-repo-project-copy");
+    cx.run_until_parked();
+    assert_eq!(*copied.borrow(), "duck://testnet#0a1b2c3d/forge/project");
+    assert!(cx.has_text("Copied"));
+    view.read(|forge| assert!(forge.nav.repo.is_none(), "copy is not open"));
 }
