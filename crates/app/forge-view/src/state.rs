@@ -19,8 +19,11 @@ pub struct Forge {
     #[serde(skip)]
     pub(crate) me: Loaded<Option<u64>>,
     pub(crate) filter: Filter,
-    /// the repo-list / change-list filter box
+    /// the repo-list filter box
     pub(crate) search: String,
+    /// the change-list search box, apart from the repo filter so a name
+    /// typed to find a repository never hides that repository's changes
+    pub(crate) change_search: String,
     /// the file-tree filter box
     pub(crate) tree_search: String,
     pub(crate) reviews: BTreeMap<String, ReviewSession>,

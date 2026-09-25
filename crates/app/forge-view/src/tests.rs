@@ -192,7 +192,11 @@ pub(crate) fn configure(cx: &mut TestAppContext, mode: &'static str) {
                         .map(|seq| chat::MsgRow {
                             channel_id: channel_id.clone(),
                             message_id: format!("forge:{seq:016x}"),
-                            ..message(seq, "module:forge", "raw forge text")
+                            ..message(
+                                seq,
+                                chat::Party::Module(forge::PROGRAM.into()),
+                                "raw forge text",
+                            )
                         })
                         .collect(),
                     _ => Vec::new(),

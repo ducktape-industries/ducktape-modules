@@ -93,17 +93,17 @@ fn header(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
     if let Some(head) = source {
         top = top.child(quiet(format!("head {}", short_hex(head)), theme));
     }
-    // an ended change has nothing left to edit or close
+    // an ended change has nothing left to edit, close or merge
     if open {
         top = top
             .child(button(id("forge-edit-change"), "Edit", theme, edit).enabled(mine))
-            .child(button(id("forge-close-change"), "Close", theme, close));
+            .child(button(id("forge-close-change"), "Close", theme, close))
+            .child(
+                button(id("forge-merge"), "Merge", theme, merge)
+                    .kind(design::Kind::Primary)
+                    .enabled(blocked.is_none() && forge.session.connected),
+            );
     }
-    top = top.child(
-        button(id("forge-merge"), "Merge", theme, merge)
-            .kind(design::Kind::Primary)
-            .enabled(blocked.is_none() && forge.session.connected),
-    );
     let mut bar = div().id(id("forge-change-tabs")).flex().gap_1();
     for tab in ChangeTab::ALL {
         let pick = cx.listener(move |forge, _: &ClickEvent, _, cx| forge.open_change_tab(tab, cx));

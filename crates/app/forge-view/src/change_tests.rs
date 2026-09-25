@@ -1,6 +1,6 @@
 //! The Change screens: the list, the detail header, the conversation, the
 //! reviewer's Files tab, and the one operation a review becomes.
-use super::{change_screen, opened};
+use super::{booted, change_screen, opened};
 use crate::api::{ChatApi, SubmitForge};
 use crate::state::ChangeTab;
 use ducktape_view_guest::view::Submit;
@@ -105,6 +105,18 @@ fn an_operation_shows_its_submission_then_a_refusal_reverts_it_with_the_reason()
 }
 
 #[test]
+fn a_repository_filter_does_not_carry_into_its_change_search() {
+    let (mut cx, _view) = booted("default");
+    cx.simulate_input("forge-repos-search", "proj");
+    cx.run_until_parked();
+    cx.simulate_click("forge-repo-project");
+    cx.run_until_parked();
+    cx.simulate_click("forge-tab-changes");
+    cx.run_until_parked();
+    assert!(cx.has_text("Review this change"), "{:?}", cx.texts());
+}
+
+#[test]
 fn a_merged_change_wears_its_state_and_offers_nothing_more() {
     let (cx, _view) = change_screen("merged", ChangeTab::Conversation);
     assert!(cx.has_text("merged"), "{:?}", cx.texts());
@@ -127,8 +139,9 @@ fn a_merged_change_wears_its_state_and_offers_nothing_more() {
         "{:?}",
         cx.texts()
     );
-    assert!(cx.find("forge-edit-change").is_none());
-    assert!(cx.find("forge-close-change").is_none());
+    for button in ["forge-edit-change", "forge-close-change", "forge-merge"] {
+        assert!(cx.find(button).is_none(), "{button} on an ended change");
+    }
 }
 
 #[test]
@@ -141,8 +154,9 @@ fn a_closed_change_names_who_closed_it_and_offers_no_edit_or_close() {
         "the closer is named from the record: {:?}",
         cx.texts()
     );
-    assert!(cx.find("forge-edit-change").is_none());
-    assert!(cx.find("forge-close-change").is_none());
+    for button in ["forge-edit-change", "forge-close-change", "forge-merge"] {
+        assert!(cx.find(button).is_none(), "{button} on an ended change");
+    }
 }
 
 #[test]
