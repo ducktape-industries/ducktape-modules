@@ -14,7 +14,7 @@ const VALIDATOR: [u8; 32] = [9; 32];
 const T0: u64 = 1_790_000_000_000;
 
 fn post(channel: &str, text: &str) -> Vec<u8> {
-    borsh::to_vec(&chat::ChatMsg::PostMessage {
+    borsh::to_vec(&chat::Op::PostMessage {
         channel_id: channel.into(),
         message_id: "m1".into(),
         blocks: chat::parse_message(text),

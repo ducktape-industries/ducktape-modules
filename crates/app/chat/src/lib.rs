@@ -1,39 +1,51 @@
-//! The `chat` program: channels, messages, threads, reactions, memberships,
-//! huddles. The reference program on the kernel abi.
+//! The `chat` program: channels, messages, threads, reactions, members and
+//! huddles.
 //!
-//! Writes are a [`ChatMsg`] (borsh), reads a
-//! [`ChatViewQuery`] answered by a [`ChatViewReply`] (borsh) — the same
-//! types `chat-view` links. The acting [`Party`] is the frame's origin: an
-//! external key resolved through the `identity` program to its account.
-//! The rules run over any [`store::Reads`]/[`store::Writes`] store; the
-//! `program` feature adds the wasm32 program over the host (`program.rs`),
-//! which a view never enables.
+//! A write is an [`Op`], a read a [`Query`] answered by a [`Reply`], all
+//! borsh, the same types `chat-view` links. The acting [`Party`] is the
+//! frame's origin: an external key resolved through `identity` to its
+//! account. The layout, in reading order:
 //!
-//! Keys: `chan/<id>` → [`ChannelRow`], `seq/<id>` → head seq,
-//! `msg/<ch>/<seq>` → [`MsgRow`], `root/<ch>/<!seq>` timeline roots newest
-//! first, `thread/<ch>/<root>/<reply>`, `msgid/<id>`, `member/<ch>/<handle>`
-//! → [`MemberRow`], `react/<ch>/<seq>/<emoji>/<handle>`, `tok/<token>/<ch>/<seq>`
-//! and `tag/<label>/<!time>/<ch>/<seq>` + `tagc/<ch>/<label>/<!seq>` postings.
-//! `attention/<ch>/<author>/<!last_reply>` stores a Borsh root sequence; one
-//! entry per answered thread lets callers find the latest reply without scanning messages.
+//! - `lib.rs` (here): the types on the wire and the rows they carry
+//! - `state.rs`: every table and index the program keeps, declared once
+//! - `rules.rs`: the checks an op passes before it writes
+//! - `ops.rs`: [`execute`], one short function per op
+//! - `queries.rs`: [`query`], one short function per question
+//! - `text.rs`: what search and tags read out of a message
+//! - `description.rs`: [`describe`], an op in a person's words
+//! - `program.rs` (`program` feature): the wasm32 program over the host
+//!
+//! The rules run over any [`store::Reads`]/[`store::Writes`], so a native
+//! test runs them over [`store::Memory`] exactly as the host does.
+mod description;
 pub mod message;
+mod ops;
+mod party;
+#[cfg(feature = "program")]
+mod program;
+mod queries;
+mod rules;
+mod state;
+#[cfg(test)]
+mod tests;
+mod text;
 #[cfg(feature = "view")]
 pub mod view;
 
+use borsh::{BorshDeserialize, BorshSerialize};
+use serde::{Deserialize, Serialize};
+
+pub use abi::hex;
+pub use description::describe;
+pub use message::{Block, Mark, Span, parse_message};
+pub use ops::execute;
+pub use party::{AccountNumber, Party};
+pub use queries::{query, roots_below};
+pub use store::{Cursor, Page, PageReply};
+pub use text::{plain_text, tags, tokens};
+
 /// The name this program runs under.
 pub const PROGRAM: &str = "chat";
-
-use std::collections::BTreeSet;
-
-use abi::{Entry, Refusal, Scan, reason};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
-pub use store::{Cursor, Page, PageReply};
-use store::{
-    Reads, Writes, already_exists, capacity, invalid, not_found, unauthorized, wrong_state,
-};
-use unicode_normalization::UnicodeNormalization;
-
-pub use message::{AccountNumber, Block, Mark, Party, Span, parse_message};
 
 pub const MAX_ID_BYTES: usize = 64;
 pub const MAX_NAME_BYTES: usize = 128;
@@ -52,413 +64,292 @@ pub const MAX_TAG_CHARS: usize = 64;
 /// How many postings a search reads before it reports `capped`.
 pub const SEARCH_POSTING_CAP: usize = 1024;
 
-// ── keys ────────────────────────────────────────────────────────────────────
-
-fn chan_key(id: &str) -> String {
-    format!("chan/{id}")
-}
-fn seq_key(id: &str) -> String {
-    format!("seq/{id}")
-}
-fn msg_key(ch: &str, seq: u64) -> String {
-    format!("msg/{ch}/{seq:016x}")
-}
-fn root_key(ch: &str, seq: u64) -> String {
-    format!("root/{ch}/{:016x}", u64::MAX - seq)
-}
-/// The `Roots` cursor that resumes below `seq`: `Page::after` for the page
-/// of roots older than the one on screen. Chat's listings are append-only,
-/// so a cursor's height is not checked.
-pub fn roots_below(channel_id: &str, seq: u64) -> Vec<u8> {
-    let scope = roots_prefix(channel_id).into_bytes();
-    abi::encode(&store::Cursor {
-        height: 0,
-        scope,
-        after: root_key(channel_id, seq).into_bytes(),
-    })
-}
-fn roots_prefix(ch: &str) -> String {
-    format!("root/{ch}/")
-}
-fn msgid_key(id: &str) -> String {
-    format!("msgid/{id}")
-}
-fn thread_key(ch: &str, root: u64, reply: u64) -> String {
-    format!("thread/{ch}/{root:016x}/{reply:016x}")
-}
-fn attention_prefix(ch: &str, author: &str) -> String {
-    format!("attention/{ch}/{author}/")
-}
-fn attention_key(ch: &str, author: &str, reply: u64) -> String {
-    format!(
-        "{}{last:016x}",
-        attention_prefix(ch, author),
-        last = u64::MAX - reply
-    )
-}
-fn member_key(ch: &str, handle: &str) -> String {
-    format!("member/{ch}/{handle}")
-}
-fn react_prefix(ch: &str, seq: u64) -> String {
-    format!("react/{ch}/{seq:016x}/")
-}
-fn react_key(ch: &str, seq: u64, emoji: &str, handle: &str) -> String {
-    format!("{}{emoji}/{handle}", react_prefix(ch, seq))
-}
-fn tok_key(token: &str, ch: &str, seq: u64) -> String {
-    format!("tok/{token}/{ch}/{seq:016x}")
-}
-fn tag_key(label: &str, time: u64, ch: &str, seq: u64) -> String {
-    format!("tag/{label}/{:016x}/{ch}/{seq:016x}", u64::MAX - time)
-}
-fn tagc_key(ch: &str, label: &str, seq: u64) -> String {
-    format!("tagc/{ch}/{label}/{:016x}", u64::MAX - seq)
-}
-
-// ── store helpers ───────────────────────────────────────────────────────────
-
-fn load<T: DeserializeOwned>(store: &impl Reads, key: &str) -> Result<Option<T>, Refusal> {
-    store
-        .get(key.as_bytes())
-        .map(|b| {
-            serde_json::from_slice(&b).map_err(|e| Refusal::new(reason::CORRUPT, e.to_string()))
-        })
-        .transpose()
+/// A write. The enum only grows at its end (see `op_variants_only_append`).
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
+pub enum Op {
+    CreateChannel {
+        channel_id: String,
+        name: String,
+        post_policy: PostPolicy,
+    },
+    CreateVoiceChannel {
+        channel_id: String,
+        name: String,
+    },
+    /// A members-only room between the actor's account and `counterpart`,
+    /// id [`dm_channel_id`]; creating it twice is a no-op. The only way a
+    /// dm id opens.
+    CreateDmChannel {
+        counterpart: AccountNumber,
+        name: String,
+    },
+    RenameChannel {
+        channel_id: String,
+        name: String,
+    },
+    SetChannelArchived {
+        channel_id: String,
+        archived: bool,
+    },
+    /// `thread` names the root this message replies to.
+    PostMessage {
+        channel_id: String,
+        message_id: String,
+        blocks: Vec<Block>,
+        thread: Option<u64>,
+    },
+    /// `base_rev` is what the editor started from, recorded, never judged.
+    EditMessage {
+        channel_id: String,
+        seq: u64,
+        blocks: Vec<Block>,
+        base_rev: Option<u32>,
+    },
+    DeleteMessage {
+        channel_id: String,
+        seq: u64,
+    },
+    AddReaction {
+        channel_id: String,
+        seq: u64,
+        emoji: String,
+    },
+    RemoveReaction {
+        channel_id: String,
+        seq: u64,
+        emoji: String,
+    },
+    SetMembership {
+        channel_id: String,
+        party: Party,
+        member: bool,
+    },
+    /// `node_proof` is `node`'s signature over [`HUDDLE_JOIN_NS`] + channel
+    /// id + the origin key (verified by the program, not the rules).
+    JoinHuddle {
+        channel_id: String,
+        node: Vec<u8>,
+        node_proof: Vec<u8>,
+    },
+    LeaveHuddle {
+        channel_id: String,
+    },
 }
 
-fn save<T: Serialize>(store: &mut impl Writes, key: String, value: &T) {
-    store.set(
-        key.into_bytes(),
-        serde_json::to_vec(value).expect("a chat row serializes"),
-    );
+/// A read. `viewer` is the reader's parties: they decide
+/// [`Reaction::reacted_by_me`]. Every list takes a [`Page`] and answers a
+/// [`PageReply`] whose `next` resumes it.
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
+pub enum Query {
+    Channels {
+        page: Page,
+    },
+    Channel {
+        channel_id: String,
+    },
+    /// The message an emitted id names (forge finds its own posts so).
+    MessageById {
+        message_id: String,
+    },
+    /// The author's most recently answered thread in this channel, if any.
+    ThreadAttention {
+        channel_id: String,
+        author: Party,
+    },
+    /// One page of timeline roots, newest first.
+    Roots {
+        channel_id: String,
+        viewer: Vec<Party>,
+        page: Page,
+    },
+    /// `page.limit` messages centred on `seq`.
+    MessagesAround {
+        channel_id: String,
+        seq: u64,
+        viewer: Vec<Party>,
+        page: Page,
+    },
+    /// The root plus one page of replies, in post order.
+    Thread {
+        channel_id: String,
+        root_seq: u64,
+        viewer: Vec<Party>,
+        page: Page,
+    },
+    Members {
+        channel_id: String,
+        page: Page,
+    },
+    /// Every token of `text`, newest first, at most `page.limit` hits.
+    Search {
+        text: String,
+        viewer: Vec<Party>,
+        channel_id: Option<String>,
+        page: Page,
+    },
+    TagSearch {
+        tag: String,
+        viewer: Vec<Party>,
+        channel_id: Option<String>,
+        page: Page,
+    },
+    /// The identity roster, ascending by number: the program asks identity,
+    /// so a view links one program.
+    Accounts {
+        page: Page,
+    },
 }
 
-fn mark(store: &mut impl Writes, key: String) {
-    store.set(key.into_bytes(), Vec::new());
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
+pub enum Reply {
+    Channels(PageReply<ChannelInfo>),
+    Channel(Option<ChannelInfo>),
+    Message(Option<MsgRow>),
+    Attention(Option<MsgRow>),
+    Roots(PageReply<MsgRow>),
+    Messages(Vec<MsgRow>),
+    Thread {
+        root: Option<MsgRow>,
+        replies: PageReply<MsgRow>,
+    },
+    Members(PageReply<MemberRow>),
+    Hits(MessageHits),
+    TagHits(PageReply<MsgRow>),
+    Accounts(Vec<AccountRow>),
 }
 
-fn channel(store: &impl Reads, id: &str) -> Result<ChannelRow, Refusal> {
-    load(store, &chan_key(id))?.ok_or_else(|| not_found(format!("no channel {id}")))
+#[derive(
+    BorshSerialize, BorshDeserialize, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq,
+)]
+pub enum PostPolicy {
+    Open,
+    MembersOnly,
 }
 
-fn head_seq(store: &impl Reads, id: &str) -> u64 {
-    load(store, &seq_key(id)).ok().flatten().unwrap_or(0)
+#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct ChannelRow {
+    pub id: String,
+    pub name: String,
+    pub created_at: u64,
+    pub post_policy: PostPolicy,
+    pub owner: Party,
+    pub archived: bool,
+    pub huddle: Vec<HuddleEntry>,
+    pub voice: bool,
 }
 
-fn row(store: &impl Reads, ch: &str, seq: u64) -> Result<MsgRow, Refusal> {
-    load(store, &msg_key(ch, seq))?.ok_or_else(|| not_found(format!("no message {ch}/{seq}")))
-}
-
-fn checked_id(what: &str, id: &str) -> Result<(), Refusal> {
-    if id.is_empty() || id.len() > MAX_ID_BYTES || id.contains('/') {
-        return Err(invalid(format!(
-            "{what} is 1..={MAX_ID_BYTES} bytes without '/'"
-        )));
-    }
-    Ok(())
-}
-
-fn checked_name(name: &str) -> Result<(), Refusal> {
-    if name.trim().is_empty() || name.len() > MAX_NAME_BYTES {
-        return Err(invalid(format!("a name is 1..={MAX_NAME_BYTES} bytes")));
-    }
-    Ok(())
-}
-
-fn writable(store: &impl Reads, ch: &ChannelRow, party: &Party) -> Result<(), Refusal> {
-    if ch.archived {
-        return Err(wrong_state(format!("{} is archived", ch.id)));
-    }
-    let handle = party_handle(party);
-    let allowed = ch.post_policy == PostPolicy::Open
-        || ch.owner == handle
-        || store.get(member_key(&ch.id, &handle).as_bytes()).is_some();
-    if !allowed {
-        return Err(unauthorized(format!(
-            "{handle} is not a member of {}",
-            ch.id
-        )));
-    }
-    Ok(())
-}
-
-fn owned(ch: &ChannelRow, party: &Party) -> Result<(), Refusal> {
-    if ch.owner != party_handle(party) {
-        return Err(unauthorized(format!("only the owner of {} may", ch.id)));
-    }
-    Ok(())
-}
-
-// ── text: flattening, search tokens, tags ───────────────────────────────────
-
-pub fn plain_text(blocks: &[Block]) -> String {
-    let mut out = String::new();
-    for block in blocks {
-        let piece = match block {
-            Block::Paragraph(spans) | Block::Quote(spans) => spans
-                .iter()
-                .map(|s| s.text.as_str())
-                .collect::<Vec<_>>()
-                .join(" "),
-            Block::Code { text, .. } => text.clone(),
-            Block::Divider => continue,
-        };
-        if !out.is_empty() {
-            out.push(' ');
-        }
-        out.push_str(&piece);
-    }
-    out
-}
-
-/// NFC lowercase alphanumeric runs of two or more chars.
-pub fn tokens(text: &str) -> BTreeSet<String> {
-    text.nfc()
-        .collect::<String>()
-        .to_lowercase()
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|t| t.chars().count() >= 2)
-        .map(str::to_string)
-        .collect()
-}
-
-/// `#tag` labels in appearance order: NFC lowercase, `[alnum_-]`, opened at
-/// a word boundary (never `##`, `/#`, `&#`), outside code and links.
-pub fn tags(blocks: &[Block]) -> Vec<String> {
-    let mut out = Vec::new();
-    for block in blocks {
-        let spans = match block {
-            Block::Paragraph(spans) | Block::Quote(spans) => spans,
-            Block::Code { .. } | Block::Divider => continue,
-        };
-        for span in spans {
-            if span.marks.iter().any(|m| matches!(m, Mark::Link(_))) {
-                continue;
-            }
-            let mut prev: Option<char> = None;
-            let mut rest = span.text.as_str();
-            while let Some(at) = rest.find('#') {
-                let before = if at == 0 {
-                    prev
-                } else {
-                    rest[..at].chars().next_back()
-                };
-                let opens =
-                    before.is_none_or(|p| !p.is_alphanumeric() && !matches!(p, '#' | '/' | '&'));
-                let body: String = rest[at + 1..]
-                    .chars()
-                    .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
-                    .collect();
-                if opens && (1..=MAX_TAG_CHARS).contains(&body.chars().count()) {
-                    let label = body.nfc().collect::<String>().to_lowercase();
-                    if !out.contains(&label) {
-                        out.push(label);
-                    }
-                }
-                prev = Some(body.chars().next_back().unwrap_or('#'));
-                rest = &rest[at + 1 + body.len()..];
-            }
-        }
-    }
-    out.truncate(MAX_TAGS_PER_MESSAGE);
-    out
-}
-
-fn index(store: &mut impl Writes, row: &MsgRow, on: bool) {
-    let posting = serde_json::to_vec(&(&row.channel_id, row.seq)).expect("a posting serializes");
-    let mut keys: Vec<String> = tokens(&row.text)
-        .iter()
-        .map(|t| tok_key(t, &row.channel_id, row.seq))
-        .collect();
-    for label in &row.tags {
-        keys.push(tag_key(label, row.time, &row.channel_id, row.seq));
-        keys.push(tagc_key(&row.channel_id, label, row.seq));
-    }
-    for key in keys {
-        if on {
-            store.set(key.into_bytes(), posting.clone());
-        } else {
-            store.delete(key.as_bytes());
-        }
+impl ChannelRow {
+    pub fn members_only(&self) -> bool {
+        self.post_policy == PostPolicy::MembersOnly
     }
 }
 
-fn put_row(store: &mut impl Writes, row: &MsgRow) -> Result<(), Refusal> {
-    let bytes = serde_json::to_vec(row).expect("a chat row serializes");
-    if bytes.len() > MAX_MESSAGE_BYTES {
-        return Err(capacity(format!(
-            "a message is at most {MAX_MESSAGE_BYTES} bytes"
-        )));
-    }
-    store.set(msg_key(&row.channel_id, row.seq).into_bytes(), bytes);
-    Ok(())
+/// A channel and the seq of its newest message.
+#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct ChannelInfo {
+    pub channel: ChannelRow,
+    pub head_seq: u64,
 }
 
-mod ops;
-#[cfg(feature = "program")]
-mod program;
-mod queries;
-mod wire;
-pub use ops::execute;
-pub use queries::query;
-pub use wire::*;
-#[cfg(test)]
-mod tests;
-
-/// An op as a person reads it: a title and its fields. The source of the
-/// `ducktape.describe` module this program ships (`make wasm-describes`).
-pub fn describe(op: &ChatMsg) -> describe::Description {
-    use describe::{Value, field};
-    let party = |party: &Party| match party {
-        Party::Account(number) => Value::Account(*number),
-        Party::Key(key) => Value::Key(key.clone()),
-        Party::Module(module) => Value::Program(module.clone()),
-        Party::System => Value::text("system"),
-    };
-    let seq = |seq: &u64| field("seq", Value::text(seq.to_string()));
-    let (title, channel, fields) = match op {
-        ChatMsg::CreateChannel {
-            channel_id,
-            name,
-            post_policy,
-        } => (
-            "Create channel",
-            channel_id,
-            vec![
-                field("name", Value::text(name)),
-                field(
-                    "posting",
-                    Value::text(match post_policy {
-                        PostPolicy::Open => "open",
-                        PostPolicy::MembersOnly => "members only",
-                    }),
-                ),
-            ],
-        ),
-        ChatMsg::CreateVoiceChannel { channel_id, name } => (
-            "Create voice channel",
-            channel_id,
-            vec![field("name", Value::text(name))],
-        ),
-        ChatMsg::CreateDmChannel { counterpart, name } => {
-            return describe::Description {
-                title: "Open a DM".into(),
-                fields: vec![
-                    field("with", Value::Account(*counterpart)),
-                    field("name", Value::text(name)),
-                ],
-            };
-        }
-        ChatMsg::RenameChannel { channel_id, name } => (
-            "Rename channel",
-            channel_id,
-            vec![field("name", Value::text(name))],
-        ),
-        ChatMsg::SetChannelArchived {
-            channel_id,
-            archived,
-        } => (
-            if *archived {
-                "Archive channel"
-            } else {
-                "Unarchive channel"
-            },
-            channel_id,
-            vec![],
-        ),
-        ChatMsg::PostMessage {
-            channel_id,
-            message_id,
-            blocks,
-            thread,
-        } => {
-            let mut fields = place(channel_id);
-            fields.extend([
-                field("text", Value::Text(plain_text(blocks))),
-                field("message", Value::text(message_id)),
-                field(
-                    "thread",
-                    Value::Text(thread.map_or_else(|| "—".into(), |t| t.to_string())),
-                ),
-            ]);
-            return describe::Description {
-                title: match dm_peers(channel_id) {
-                    Some(_) => "Direct message".into(),
-                    None => format!("Post in #{channel_id}"),
-                },
-                fields,
-            };
-        }
-        ChatMsg::EditMessage {
-            channel_id,
-            seq: at,
-            blocks,
-            ..
-        } => (
-            "Edit message",
-            channel_id,
-            vec![seq(at), field("text", Value::Text(plain_text(blocks)))],
-        ),
-        ChatMsg::DeleteMessage {
-            channel_id,
-            seq: at,
-        } => ("Delete message", channel_id, vec![seq(at)]),
-        ChatMsg::AddReaction {
-            channel_id,
-            seq: at,
-            emoji,
-        } => (
-            "React",
-            channel_id,
-            vec![seq(at), field("emoji", Value::text(emoji))],
-        ),
-        ChatMsg::RemoveReaction {
-            channel_id,
-            seq: at,
-            emoji,
-        } => (
-            "Remove reaction",
-            channel_id,
-            vec![seq(at), field("emoji", Value::text(emoji))],
-        ),
-        ChatMsg::SetMembership {
-            channel_id,
-            party: who,
-            member,
-        } => (
-            if *member {
-                "Add member"
-            } else {
-                "Remove member"
-            },
-            channel_id,
-            vec![field("party", party(who))],
-        ),
-        ChatMsg::JoinHuddle {
-            channel_id, node, ..
-        } => (
-            "Join huddle",
-            channel_id,
-            vec![field("node", Value::Key(node.clone()))],
-        ),
-        ChatMsg::LeaveHuddle { channel_id } => ("Leave huddle", channel_id, vec![]),
-    };
-    let mut all = place(channel);
-    all.extend(fields);
-    describe::Description {
-        title: format!("{title} · {}", room(channel)),
-        fields: all,
-    }
+#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct HuddleEntry {
+    pub party: Party,
+    /// the node key, hex
+    pub node: String,
+    pub joined_at: u64,
 }
 
-describe::export!(ChatMsg, describe);
+#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct MemberRow {
+    pub party: Party,
+    pub height: u64,
+    pub time: u64,
+}
+
+#[derive(
+    BorshSerialize, BorshDeserialize, Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq,
+)]
+pub struct MsgRow {
+    pub channel_id: String,
+    pub seq: u64,
+    pub message_id: String,
+    pub author: Party,
+    pub height: u64,
+    pub time: u64,
+    pub blocks: Vec<Block>,
+    /// the flattened text search indexes; a tombstone's is empty
+    pub text: String,
+    pub deleted: bool,
+    pub edited: bool,
+    pub rev: u32,
+    pub edited_at: Option<u64>,
+    /// what the last edit claimed to be based on, recorded, never judged
+    pub base_rev: Option<u32>,
+    /// `Some(root_seq)` marks a thread reply
+    pub thread: Option<u64>,
+    pub reply_count: u64,
+    pub last_reply_seq: Option<u64>,
+    pub reactions: Vec<Reaction>,
+    pub tags: Vec<String>,
+}
+
+/// One emoji on a message: how many parties chose it.
+#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct Reaction {
+    pub emoji: String,
+    pub count: u64,
+    /// filled per reader from the query's `viewer`
+    pub reacted_by_me: bool,
+}
+
+#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct MessageHits {
+    pub hits: Vec<MsgRow>,
+    pub capped: bool,
+}
+
+#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct AccountRow {
+    pub number: AccountNumber,
+    pub name: String,
+    /// a program-controlled account: an agent, not a person
+    pub program: bool,
+    /// the account's keys, hex
+    pub keys: Vec<String>,
+}
+
+/// The frame a write runs in: who acts, and when.
+#[derive(Clone, Debug)]
+pub struct Frame {
+    pub party: Party,
+    pub height: u64,
+    pub time: u64,
+}
+
+/// The room two accounts share: `dm-<lower>-<higher>`.
+pub fn dm_channel_id(a: AccountNumber, b: AccountNumber) -> String {
+    format!("dm-{}-{}", a.min(b), a.max(b))
+}
+
+/// The two accounts of a dm room id, or `None` for any other channel.
+pub fn dm_peers(channel_id: &str) -> Option<(AccountNumber, AccountNumber)> {
+    let (a, b) = channel_id.strip_prefix("dm-")?.split_once('-')?;
+    Some((a.parse().ok()?, b.parse().ok()?))
+}
+
+/// The program a `<program>:<name>` channel id belongs to, or `None` for a
+/// channel people opened. Only that program creates one (a review thread,
+/// say); a reader reaches it through its program, not the channel list.
+pub fn program_of(channel_id: &str) -> Option<&str> {
+    channel_id.split_once(':').map(|(program, _)| program)
+}
 
 /// Old op bytes are described with the current code (`describe`): the op
 /// enum only grows at its end. Append a new variant here; never reorder.
 #[test]
 fn op_variants_only_append() {
     assert_eq!(
-        describe::variants::<ChatMsg>(),
+        describe::variants::<Op>(),
         [
             "CreateChannel",
             "CreateVoiceChannel",
@@ -475,28 +366,4 @@ fn op_variants_only_append() {
             "LeaveHuddle",
         ]
     );
-}
-
-/// A channel as `describe` titles it: `#design`, or `DM` for a dm room,
-/// whose id is no name a person picked. Its two accounts are the
-/// `between` field, drawn as accounts (a name, an avatar), never numbers.
-fn room(channel_id: &str) -> String {
-    match dm_peers(channel_id) {
-        Some(_) => "DM".into(),
-        None => format!("#{channel_id}"),
-    }
-}
-
-/// The fields that say where an op happened: its `channel`, and for a dm
-/// room the two accounts it is `between`.
-fn place(channel_id: &str) -> Vec<describe::Field> {
-    use describe::{Value, field};
-    let mut fields = vec![field("channel", Value::Text(room(channel_id)))];
-    fields.extend(dm_peers(channel_id).map(|(a, b)| {
-        field(
-            "between",
-            Value::List(vec![Value::Account(a), Value::Account(b)]),
-        )
-    }));
-    fields
 }

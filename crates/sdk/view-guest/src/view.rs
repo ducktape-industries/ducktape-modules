@@ -2,6 +2,7 @@
 pub use crate::doors::{Door, Program, Query, Submit};
 use crate::host::Refusal;
 use crate::{Context, IntoElement, Task, Window};
+use futures::{Stream, StreamExt};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::future::Future;
@@ -131,6 +132,29 @@ impl<V: View> Context<'_, V> {
         });
         Loaded::Loading(task)
     }
+    /// Runs `each` on every item `stream` yields, in order, until the
+    /// stream ends or the view is gone; the view is re-rendered after each.
+    /// Keep the task: dropping it unsubscribes. A refused item is handed to
+    /// `each` like any other and does not end the stream, so each follower
+    /// says what a refusal means to it.
+    pub fn follow<T: 'static>(
+        &mut self,
+        mut stream: impl Stream<Item = T> + Unpin + 'static,
+        mut each: impl FnMut(&mut V, T, &mut Window, &mut Context<V>) + 'static,
+    ) -> Task<()> {
+        self.spawn(async move |this, cx| {
+            while let Some(item) = stream.next().await {
+                let landed = this.update_in(cx, |view, window, cx| {
+                    each(view, item, window, cx);
+                    cx.notify();
+                });
+                if landed.is_err() {
+                    break;
+                }
+            }
+        })
+    }
+
     pub fn refresh<T: 'static>(
         &mut self,
         work: impl Future<Output = Result<T, Refusal>> + 'static,
@@ -146,29 +170,61 @@ impl<V: View> Context<'_, V> {
         })
         .detach();
     }
-
-    /// Follows a host stream for as long as the view lives: every item — a
-    /// refusal included, so the view decides what one means — lands through
-    /// `land`. It ends when the host ends the stream or the view is gone;
-    /// dropping the returned task stops it.
-    pub fn follow<T: 'static>(
-        &mut self,
-        mut stream: impl futures::Stream<Item = T> + Unpin + 'static,
-        mut land: impl FnMut(&mut V, T, &mut Context<V>) + 'static,
-    ) -> Task<()> {
-        use futures::StreamExt;
-        self.spawn(async move |this, cx| {
-            while let Some(item) = stream.next().await {
-                if this.update(cx, |view, cx| land(view, item, cx)).is_err() {
-                    break;
-                }
-            }
-        })
-    }
 }
 #[macro_export]
 macro_rules! export_view {
     ($view:ty, $name:expr, $description:expr, [$($capability:literal),* $(,)?]) => {
         $crate::export_driver!($view, $name, $description, [$($capability),*]);
     };
+}
+
+#[cfg(test)]
+mod follow_tests {
+    use crate::doors::RpcLive;
+    use crate::testing::TestAppContext;
+    use crate::{Context, IntoElement, ParentElement, Render, Task, View, Window};
+    use serde::{Deserialize, Serialize};
+
+    /// Counts the heads a program's live stream announces.
+    #[derive(Default, Serialize, Deserialize)]
+    struct Heads {
+        seen: usize,
+        #[serde(skip)]
+        live: Option<Task<()>>,
+    }
+    impl View for Heads {
+        fn new(_: &mut Window, cx: &mut Context<Self>) -> Self {
+            let live = cx.host().subscribe::<RpcLive>("chat".into());
+            Self {
+                seen: 0,
+                live: Some(cx.follow(live, |view: &mut Heads, _, _, _| view.seen += 1)),
+            }
+        }
+    }
+    impl crate::Declared for Heads {
+        const CAPABILITIES: &'static [&'static str] = &["rpc"];
+    }
+    impl Render for Heads {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            crate::div().child(self.seen.to_string())
+        }
+    }
+
+    #[test]
+    fn a_follower_hears_every_item_until_its_task_is_dropped() {
+        let mut cx = TestAppContext::new();
+        let feed = cx.host().stream::<RpcLive>();
+        let view = cx.open::<Heads>();
+        cx.run_until_parked();
+        feed.push(None);
+        feed.push(None);
+        cx.run_until_parked();
+        view.read(|heads| assert_eq!(heads.seen, 2));
+        assert!(cx.has_text("2"), "each item re-renders the view");
+        view.update(&mut cx, |heads, _, _| heads.live = None);
+        cx.run_until_parked();
+        feed.push(None);
+        cx.run_until_parked();
+        view.read(|heads| assert_eq!(heads.seen, 2));
+    }
 }

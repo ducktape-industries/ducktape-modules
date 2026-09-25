@@ -1,22 +1,55 @@
-// The wasm32 program over the rules: guest contexts as the store, the origin resolved through identity, the huddle node proof checked, then `execute`/`query`.
+// The wasm32 program over the rules: the origin resolved to a party through
+// identity, a huddle join's node proof checked, then `execute`/`query`.
 
-use crate::{
-    AccountRow, ChatMsg, ChatViewQuery, ChatViewReply, Frame, HUDDLE_JOIN_NS, MsgRow, Party,
-};
 use abi::{Env, Origin, Refusal, Scheme, reason};
-use guest::{Execute, Program, Query};
-use store::{Page, Reads, decoded, invalid};
+use guest::{Execute, Program, Query as QueryCtx};
+use store::{Page, Reads, decoded, invalid, unauthorized};
 
-use crate::PROGRAM;
+use crate::{AccountRow, Frame, HUDDLE_JOIN_NS, MsgRow, Op, PROGRAM, Party, Query, Reply};
 
-fn bad(e: impl ToString) -> Refusal {
-    invalid(e.to_string())
+struct Chat;
+
+impl Program for Chat {
+    fn execute(ctx: &mut Execute, env: &Env, payload: &[u8]) -> Result<(), Refusal> {
+        let op = decoded::<Op>(PROGRAM, "Op", payload)?;
+        if let Op::JoinHuddle {
+            channel_id,
+            node,
+            node_proof,
+        } = &op
+        {
+            node_consents(ctx, env, channel_id, node, node_proof)?;
+        }
+        let frame = Frame {
+            party: party_of(ctx, &env.origin)?,
+            height: env.height,
+            time: env.time,
+        };
+        crate::execute(ctx, &frame, op)
+    }
+
+    fn query(ctx: &mut QueryCtx, env: &Env, request: &[u8]) -> Result<(), Refusal> {
+        let reply = match decoded::<Query>(PROGRAM, "Query", request)? {
+            Query::Accounts { page } => accounts(ctx, page)?,
+            Query::ThreadAttention {
+                channel_id,
+                author: Party::Key(key),
+            } => attention_of_key(ctx, env, channel_id, key)?,
+            query => crate::query(ctx, env.height, query)?,
+        };
+        ctx.reply(&reply);
+        Ok(())
+    }
 }
 
+guest::program!(Chat);
+
+/// Who an origin is to chat: a key is the account identity says holds it,
+/// or itself while it holds none (or identity is not deployed).
 fn party_of(ctx: &impl Reads, origin: &Origin) -> Result<Party, Refusal> {
     Ok(match origin {
         Origin::External(key) if key.is_empty() => {
-            return Err(bad("an external origin carries a key"));
+            return Err(invalid("an external origin carries a key"));
         }
         Origin::External(key) => match identity::account_of(ctx, key) {
             Ok(Some(number)) => Party::Account(number),
@@ -29,109 +62,78 @@ fn party_of(ctx: &impl Reads, origin: &Origin) -> Result<Party, Refusal> {
     })
 }
 
-fn node_joins(ctx: &impl Reads, env: &Env, msg: &ChatMsg) -> Result<(), Refusal> {
-    let ChatMsg::JoinHuddle {
-        channel_id,
-        node,
-        node_proof,
-    } = msg
-    else {
-        return Ok(());
-    };
+/// A huddle seat names a node, and the node signed its consent to seat
+/// this key in this channel.
+fn node_consents(
+    ctx: &impl Reads,
+    env: &Env,
+    channel_id: &str,
+    node: &[u8],
+    proof: &[u8],
+) -> Result<(), Refusal> {
     let Origin::External(key) = &env.origin else {
-        return Err(Refusal::new(
-            reason::UNAUTHORIZED,
-            "only a key joins a huddle",
-        ));
+        return Err(unauthorized("only a key joins a huddle"));
     };
-    let node_consents = ctx.verify(
+    let message = [channel_id.as_bytes(), key].concat();
+    let signed = ctx.verify(
         Scheme::Ed25519,
-        node.clone(),
+        node.to_vec(),
         HUDDLE_JOIN_NS,
-        [channel_id.as_bytes(), key].concat(),
-        node_proof.clone(),
+        message,
+        proof.to_vec(),
     )?;
-    if !node_consents {
-        return Err(bad("the node proof does not verify"));
+    if !signed {
+        return Err(invalid("the node proof does not verify"));
     }
     Ok(())
 }
 
-/// Identity's roster as the view reads it: one door, chat's.
-fn accounts(ctx: &impl Reads, page: Page) -> Result<ChatViewReply, Refusal> {
-    let identity::Reply::Accounts(accounts) = ctx.ask::<identity::Query, identity::Reply>(
-        identity::PROGRAM,
-        &identity::Query::List { page },
-    )?
+/// Identity's roster as the view reads it, so a view links one program.
+fn accounts(ctx: &impl Reads, page: Page) -> Result<Reply, Refusal> {
+    let list = identity::Query::List { page };
+    let identity::Reply::Accounts(accounts) =
+        ctx.ask::<identity::Query, identity::Reply>(identity::PROGRAM, &list)?
     else {
         return Err(Refusal::new(
             reason::UNEXPECTED_REPLY,
             "identity answered List with something else",
         ));
     };
-    Ok(ChatViewReply::Accounts(
-        accounts
-            .items
-            .into_iter()
-            .map(|a| AccountRow {
-                number: a.number,
-                program: matches!(a.control, identity::Control::Program { .. }),
-                keys: a.keys().iter().map(|k| crate::hex(&k.key)).collect(),
-                name: a.name,
-            })
-            .collect(),
+    let row = |account: identity::Account| AccountRow {
+        number: account.number,
+        program: matches!(account.control, identity::Control::Program { .. }),
+        keys: account.keys().iter().map(|k| crate::hex(&k.key)).collect(),
+        name: account.name,
+    };
+    Ok(Reply::Accounts(
+        accounts.items.into_iter().map(row).collect(),
     ))
 }
 
-struct Chat;
-
-impl Program for Chat {
-    fn execute(ctx: &mut Execute, env: &Env, payload: &[u8]) -> Result<(), Refusal> {
-        let msg: ChatMsg = decoded(PROGRAM, "ChatMsg", payload)?;
-        node_joins(ctx, env, &msg)?;
-        let frame = Frame {
-            party: party_of(ctx, &env.origin)?,
-            height: env.height,
-            time: env.time,
+/// A key may have posted before or after it gained an account: the newer
+/// answered thread of the two.
+fn attention_of_key(
+    ctx: &impl Reads,
+    env: &Env,
+    channel_id: String,
+    key: Vec<u8>,
+) -> Result<Reply, Refusal> {
+    let account = party_of(ctx, &Origin::External(key.clone()))?;
+    let mut newest: Option<MsgRow> = None;
+    for author in [Party::Key(key), account] {
+        let asked = Query::ThreadAttention {
+            channel_id: channel_id.clone(),
+            author,
         };
-        crate::execute(ctx, &frame, msg)
-    }
-
-    fn query(ctx: &mut Query, env: &Env, request: &[u8]) -> Result<(), Refusal> {
-        let q: ChatViewQuery = decoded(PROGRAM, "ChatViewQuery", request)?;
-        let reply = match q {
-            ChatViewQuery::Accounts { page } => accounts(ctx, page)?,
-            ChatViewQuery::ThreadAttention {
-                channel_id,
-                author: Party::Key(key),
-            } => {
-                // A key may have posted before or after acquiring an account.
-                let resolved = party_of(ctx, &Origin::External(key.clone()))?;
-                let mut newest = None;
-                for author in [Party::Key(key), resolved] {
-                    let reply = crate::query(
-                        ctx,
-                        env.height,
-                        ChatViewQuery::ThreadAttention {
-                            channel_id: channel_id.clone(),
-                            author,
-                        },
-                    )?;
-                    if let ChatViewReply::Attention(Some(row)) = reply
-                        && newest
-                            .as_ref()
-                            .is_none_or(|old: &MsgRow| old.last_reply_seq < row.last_reply_seq)
-                    {
-                        newest = Some(row);
-                    }
-                }
-                ChatViewReply::Attention(newest)
-            }
-            q => crate::query(ctx, env.height, q)?,
+        let Reply::Attention(Some(row)) = crate::query(ctx, env.height, asked)? else {
+            continue;
         };
-        ctx.reply(&reply);
-        Ok(())
+        if newest
+            .as_ref()
+            .is_none_or(|old| old.last_reply_seq < row.last_reply_seq)
+        {
+            newest = Some(row);
+        }
     }
+    Ok(Reply::Attention(newest))
 }
-
-guest::program!(Chat);

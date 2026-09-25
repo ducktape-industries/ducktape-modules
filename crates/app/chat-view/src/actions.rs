@@ -1,21 +1,20 @@
-//! What a press does: the message menus, reactions, edits and deletes, the
-//! channel's details, copying, links, the search and the live-run poll.
+//! What a press does: the message menus, the writes (reactions, deletes,
+//! the channel's details, new channels), copying and links.
+use chat::{MsgRow, Op, Party, PostPolicy};
 use ducktape_view_guest::Context;
+use ducktape_view_guest::host::Refusal;
 use ducktape_view_guest::wire;
 
-use crate::api::ClipboardWrite;
-use crate::chat::{ChatMsg, party_of};
-use crate::client::{ChatMessage, NameDirectory, chat_message};
-use crate::{Chat, Hits, Menu, Mode, Pane};
+use crate::api::{ChatApi, ClipboardWrite, HostId, Submit};
+use crate::composer::Target;
+use crate::message::{ChatMessage, chat_message, mark_message_groups};
+use crate::names::NameDirectory;
+use crate::{Chat, Menu, Mode, Pane, links};
+
+/// A refusal the archive gives every reaction, said before it is asked.
+const ARCHIVED_REACTIONS: &str = "This channel is archived — reactions are closed. Unarchive it from Channel details to react here again.";
 
 impl Chat {
-    pub(crate) fn room_id(&self) -> String {
-        self.room
-            .as_ref()
-            .map(|room| room.id.clone())
-            .unwrap_or_default()
-    }
-
     // ---------- menus ----------
 
     /// A press on a message's body: chosen, its actions stay open.
@@ -65,21 +64,21 @@ impl Chat {
             return;
         }
         if mode == Mode::Reactions && self.room_info().is_some_and(|i| i.channel.archived) {
-            self.notice = "This channel is archived — reactions are closed. Unarchive it from Channel details to react here again.".into();
+            self.notice = ARCHIVED_REACTIONS.into();
             return;
         }
         if mode == Mode::Editing {
             let Some(body) = self.edit_body(pane, seq) else {
                 return;
             };
-            let target = crate::composer::Target::Edit {
+            let target = Target::Edit {
                 channel: self.room_id(),
                 seq,
                 base_rev: rev,
             };
             let choices = self.mention_choices();
             self.drafts
-                .entry(crate::draft_key(&target))
+                .entry(target.key())
                 .or_default()
                 .seed(&body, &choices);
         }
@@ -114,7 +113,7 @@ impl Chat {
     }
 
     /// The rows one pane shows, fetched and pending, as the index served them.
-    pub(crate) fn rows(&self, pane: Pane) -> Vec<crate::chat::MsgRow> {
+    pub(crate) fn rows(&self, pane: Pane) -> Vec<MsgRow> {
         let Some(room) = &self.room else {
             return Vec::new();
         };
@@ -159,28 +158,26 @@ impl Chat {
             .map(|row| chat_message(row, names))
             .collect();
         let boundary = (pane == Pane::Timeline).then_some(self.reads.boundary);
-        crate::client::mark_message_groups(&mut messages, boundary);
+        mark_message_groups(&mut messages, boundary);
         messages
     }
 
     /// Whether the reader wrote the message at `seq`: only its author
     /// edits it, and the chat module refuses anyone else.
     pub(crate) fn wrote(&self, pane: Pane, seq: u64) -> bool {
-        let me = self.my_handle();
-        !me.is_empty()
-            && self
-                .rows(pane)
-                .iter()
-                .any(|row| row.seq == seq && row.author == me)
+        let Some(me) = self.me() else { return false };
+        self.rows(pane)
+            .iter()
+            .any(|row| row.seq == seq && row.author == me)
     }
 
     /// Whether the reader may delete the message at `seq`: its author, or
     /// the channel's owner.
     pub(crate) fn may_delete(&self, pane: Pane, seq: u64) -> bool {
         self.wrote(pane, seq)
-            || self.room_info().is_some_and(|info| {
-                !info.channel.owner.is_empty() && info.channel.owner == self.my_handle()
-            })
+            || self
+                .room_info()
+                .is_some_and(|info| Some(&info.channel.owner) == self.me().as_ref())
     }
 
     // ---------- writes ----------
@@ -191,7 +188,7 @@ impl Chat {
             return;
         }
         if self.room_info().is_some_and(|i| i.channel.archived) {
-            self.notice = "This channel is archived — reactions are closed. Unarchive it from Channel details to react here again.".into();
+            self.notice = ARCHIVED_REACTIONS.into();
             return;
         }
         if self
@@ -206,13 +203,13 @@ impl Chat {
             self.save_emoji(cx);
         }
         let op = if add {
-            ChatMsg::AddReaction {
+            Op::AddReaction {
                 channel_id,
                 seq,
                 emoji,
             }
         } else {
-            ChatMsg::RemoveReaction {
+            Op::RemoveReaction {
                 channel_id,
                 seq,
                 emoji,
@@ -228,7 +225,7 @@ impl Chat {
         }
         let channel_id = self.room_id();
         self.submit(
-            ChatMsg::DeleteMessage {
+            Op::DeleteMessage {
                 channel_id,
                 seq: menu.seq,
             },
@@ -243,7 +240,7 @@ impl Chat {
             return;
         }
         let channel_id = self.room_id();
-        self.submit(ChatMsg::RenameChannel { channel_id, name }, cx);
+        self.submit(Op::RenameChannel { channel_id, name }, cx);
     }
 
     pub(crate) fn set_archived(&mut self, archived: bool, cx: &mut Context<Self>) {
@@ -252,7 +249,7 @@ impl Chat {
             return;
         }
         self.submit(
-            ChatMsg::SetChannelArchived {
+            Op::SetChannelArchived {
                 channel_id,
                 archived,
             },
@@ -260,20 +257,29 @@ impl Chat {
         );
     }
 
-    pub(crate) fn set_member(&mut self, text: &str, member: bool, cx: &mut Context<Self>) {
-        let channel_id = self.room_id();
-        if channel_id.is_empty() {
-            return;
-        }
-        let Some(party) = party_of(text) else {
+    /// The member typed in the details pane joins the room.
+    pub(crate) fn add_member(&mut self, cx: &mut Context<Self>) {
+        let typed = self
+            .details
+            .as_ref()
+            .map(|details| details.member_draft.as_str());
+        let Some(party) = typed.and_then(Party::parse) else {
             self.notice = "A member is an account number or a key hex".into();
             return;
         };
         if let Some(details) = &mut self.details {
             details.member_draft.clear();
         }
+        self.set_member(party, true, cx);
+    }
+
+    pub(crate) fn set_member(&mut self, party: Party, member: bool, cx: &mut Context<Self>) {
+        let channel_id = self.room_id();
+        if channel_id.is_empty() {
+            return;
+        }
         self.submit(
-            ChatMsg::SetMembership {
+            Op::SetMembership {
                 channel_id,
                 party,
                 member,
@@ -336,96 +342,96 @@ impl Chat {
 
     /// None before the session names a chain: Copy link is not offered.
     pub(crate) fn message_link(&self, seq: u64) -> Option<String> {
-        crate::chat::channel_link(&self.session.chain, &self.room_id(), Some(seq))
+        links::channel_link(&self.session.chain, &self.room_id(), Some(seq))
     }
 
     pub(crate) fn open_link(&mut self, link: String, cx: &mut Context<Self>) {
         self.create = None;
-        match crate::chat::pressed_link(link, &self.session.chain) {
+        match links::pressed_link(link, &self.session.chain) {
             Some(url) => cx.host().open_link(&url),
             None => cx.host().log("no link to open: the session names no chain"),
         }
     }
 
-    // ---------- search ----------
+    // ---------- submitting ----------
 
-    pub(crate) fn search_submit(&mut self, cx: &mut Context<Self>) {
-        let query = self.search.draft.trim().to_owned();
-        if query.is_empty() {
-            return;
-        }
-        self.search.query = query;
-        self.search_now(cx);
-    }
-
-    pub(crate) fn search_now(&mut self, cx: &mut Context<Self>) {
-        let (text, viewer) = (self.search.query.clone(), self.viewer());
-        let host = cx.host();
-        self.search.hits = cx.load(
-            async move {
-                let (rows, capped, next_after) =
-                    crate::search_hits(host, text, None, viewer, None).await?;
-                Ok(Hits {
-                    rows,
-                    capped,
-                    has_more: next_after.is_some(),
-                    next_after,
-                })
-            },
-            |chat| &mut chat.search.hits,
-        );
-    }
-
-    pub(crate) fn search_more(&mut self, cx: &mut Context<Self>) {
-        let Some(after) = self.search.hits.ready().and_then(|h| h.next_after.clone()) else {
-            return;
-        };
-        if self.search.more_loading {
-            return;
-        }
-        self.search.more_loading = true;
-        let (text, viewer) = (self.search.query.clone(), self.viewer());
+    /// One op to the chat program; a refusal lands in the banner.
+    pub(crate) fn submit(&mut self, op: Op, cx: &mut Context<Self>) {
+        self.notice.clear();
         cx.spawn(async move |this, cx| {
             let host = cx.host();
-            let result = crate::search_hits(host, text, None, viewer, Some(after)).await;
+            let result = host.ask::<Submit<ChatApi>>(op).await;
             let _ = this.update(cx, |chat, cx| {
                 cx.notify();
-                chat.search.more_loading = false;
-                let Ok((rows, _, next_after)) = result else {
-                    return;
-                };
-                if let Some(hits) = chat.search.hits.ready_mut() {
-                    for row in rows {
-                        if !hits
-                            .rows
-                            .iter()
-                            .any(|h| h.channel_id == row.channel_id && h.seq == row.seq)
-                        {
-                            hits.rows.push(row);
-                        }
+                match result {
+                    Ok(_) => chat.refresh(cx),
+                    Err(refusal) => {
+                        chat.notice = format!("That didn’t go through: {}", refusal.sentence)
                     }
-                    hits.has_more = next_after.is_some();
-                    hits.next_after = next_after;
                 }
             });
         })
         .detach();
     }
 
-    pub(crate) fn search_clear(&mut self) {
-        self.search = crate::Search::default();
+    /// The create dialog's channel: the host names it, chat opens it.
+    pub(crate) fn create_channel(&mut self, cx: &mut Context<Self>) {
+        let ready = self.holds_account() && self.session.connected;
+        let Some(create) = self.create.as_mut().filter(|create| ready && !create.busy) else {
+            return;
+        };
+        let name = create.name.trim().to_string();
+        if name.is_empty() || name.len() > chat::MAX_NAME_BYTES || name.contains('\0') {
+            create.error = "Enter a channel name of at most 128 bytes".into();
+            return;
+        }
+        create.error.clear();
+        create.busy = true;
+        let (voice, members_only) = (create.voice, create.members_only);
+        cx.spawn(async move |this, cx| {
+            let host = cx.host();
+            let created = async {
+                let channel_id = host.ask::<HostId>("channel".into()).await?;
+                let op = new_channel(channel_id.clone(), name, voice, members_only);
+                host.ask::<Submit<ChatApi>>(op).await?;
+                Ok::<_, Refusal>(channel_id)
+            };
+            let result = created.await;
+            let _ = this.update_in(cx, |chat, window, cx| {
+                cx.notify();
+                match result {
+                    Ok(id) => {
+                        chat.create = None;
+                        chat.reread_channels(cx);
+                        if !voice {
+                            chat.choose(id, window, cx);
+                        }
+                    }
+                    Err(refusal) => {
+                        if let Some(create) = &mut chat.create {
+                            create.busy = false;
+                            create.error =
+                                format!("Couldn’t create this channel: {}", refusal.sentence);
+                        }
+                    }
+                }
+            });
+        })
+        .detach();
     }
+}
 
-    /// A hit opens its room around the message.
-    pub(crate) fn open_hit(
-        &mut self,
-        channel_id: String,
-        seq: u64,
-        window: &mut ducktape_view_guest::Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.search_clear();
-        self.create = None;
-        self.open_at(channel_id, seq, window, cx);
+fn new_channel(channel_id: String, name: String, voice: bool, members_only: bool) -> Op {
+    if voice {
+        return Op::CreateVoiceChannel { channel_id, name };
+    }
+    let post_policy = match members_only {
+        true => PostPolicy::MembersOnly,
+        false => PostPolicy::Open,
+    };
+    Op::CreateChannel {
+        channel_id,
+        name,
+        post_policy,
     }
 }

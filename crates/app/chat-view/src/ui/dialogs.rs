@@ -39,7 +39,7 @@ pub fn channel_create(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Opt
         cx.notify();
     });
     let mut name = Input::new("chat-create-name")
-        .h(px(28.))
+        .h(design::size::CONTROL)
         .px_2()
         .py_1()
         .border_1()

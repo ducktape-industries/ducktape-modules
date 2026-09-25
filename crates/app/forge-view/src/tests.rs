@@ -127,12 +127,12 @@ fn accounts() -> Vec<chat::AccountRow> {
     ]
 }
 
-fn message(seq: u64, author: &str, text: &str) -> chat::MsgRow {
+fn message(seq: u64, author: chat::Party, text: &str) -> chat::MsgRow {
     chat::MsgRow {
         channel_id: "forge:project:1".into(),
         seq,
         message_id: format!("m{seq}"),
-        author: author.into(),
+        author,
         blocks: vec![chat::Block::paragraph(text)],
         text: text.into(),
         ..chat::MsgRow::default()
@@ -151,13 +151,21 @@ fn forge_lines() -> Vec<chat::MsgRow> {
         });
     let forge_line = |seq: u64, message_id: String| chat::MsgRow {
         message_id,
-        ..message(seq, "module:forge", "raw forge text")
+        ..message(
+            seq,
+            chat::Party::Module(forge::PROGRAM.into()),
+            "raw forge text",
+        )
     };
     let mut rows = vec![forge_line(1, "forge:0000000000000001".into())];
     for review in reviews {
         rows.push(forge_line(rows.len() as u64 + 1, review.message_id));
     }
-    rows.push(message(rows.len() as u64 + 1, "acct:8", "Reading it now"));
+    rows.push(message(
+        rows.len() as u64 + 1,
+        chat::Party::Account(8),
+        "Reading it now",
+    ));
     rows.push(forge_line(
         rows.len() as u64 + 1,
         "forge:00000000000000ff".into(),
@@ -174,18 +182,16 @@ pub(crate) fn configure(cx: &mut TestAppContext, mode: &'static str) {
     });
     cx.host().handle::<Door<ChatApi>>(|query| {
         Ok(match query {
-            chat::ChatViewQuery::Accounts { .. } => chat::ChatViewReply::Accounts(accounts()),
-            chat::ChatViewQuery::Roots { channel_id, .. } => {
-                chat::ChatViewReply::Roots(PageReply {
-                    height: 1,
-                    items: if channel_id == "forge:project:1" {
-                        forge_lines()
-                    } else {
-                        Vec::new()
-                    },
-                    next: None,
-                })
-            }
+            chat::Query::Accounts { .. } => chat::Reply::Accounts(accounts()),
+            chat::Query::Roots { channel_id, .. } => chat::Reply::Roots(PageReply {
+                height: 1,
+                items: if channel_id == "forge:project:1" {
+                    forge_lines()
+                } else {
+                    Vec::new()
+                },
+                next: None,
+            }),
             other => panic!("unexpected chat query: {other:?}"),
         })
     });
@@ -391,7 +397,7 @@ fn a_refused_read_keeps_its_reason_and_offers_one_retry() {
     cx.host()
         .handle::<Ask>(|_| Err(refusal("refused-object-not-held")));
     cx.host()
-        .handle::<Door<ChatApi>>(|_| Ok(chat::ChatViewReply::Accounts(accounts())));
+        .handle::<Door<ChatApi>>(|_| Ok(chat::Reply::Accounts(accounts())));
     cx.host().never::<RpcLive>();
     cx.host().never::<HostVisible>();
     cx.host().never::<HostProps>();

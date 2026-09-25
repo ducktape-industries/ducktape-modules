@@ -63,7 +63,7 @@ impl Rig {
         forge::query(&self.sandbox, &self.env(), &abi::encode(query))
     }
 
-    pub fn chat_execute(&mut self, party: chat::Party, msg: chat::ChatMsg) {
+    pub fn chat_execute(&mut self, party: chat::Party, msg: chat::Op) {
         self.advance();
         let frame = chat::Frame {
             party,

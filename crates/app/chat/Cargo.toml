@@ -26,7 +26,6 @@ guest = { workspace = true, optional = true }
 identity = { workspace = true, optional = true }
 serde = { workspace = true }
 store = { workspace = true }
-serde_json = { workspace = true }
 unicode-normalization = { workspace = true }
 
 [dev-dependencies]

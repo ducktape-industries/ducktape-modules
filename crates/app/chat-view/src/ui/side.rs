@@ -83,17 +83,15 @@ pub fn thread(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
     pane
 }
 
+/// The open channel's details: its name, archiving, and its members.
 pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement {
+    let (Some(details), Some(info)) = (chat.details.as_ref(), chat.room_info()) else {
+        return div().into_any_element();
+    };
     let close = cx.listener(|chat, _: &ClickEvent, _window, cx| {
         chat.toggle_details();
         cx.notify();
     });
-    let Some(details) = chat.details.as_ref() else {
-        return div().into_any_element();
-    };
-    let Some(info) = chat.room_info() else {
-        return div().into_any_element();
-    };
     let typed_name = cx.listener(|chat, event: &String, _window, cx| {
         if let Some(details) = &mut chat.details {
             details.name_draft = event.clone();
@@ -117,13 +115,13 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
     });
     let add_member = cx.listener(|chat, _: &ClickEvent, _window, cx| {
         cx.notify();
-        let text = chat
-            .details
-            .as_ref()
-            .map_or(String::new(), |details| details.member_draft.clone());
-        chat.set_member(&text, true, cx);
+        chat.add_member(cx);
     });
-    let mut content = div()
+    let archive_label = match archived {
+        true => "Unarchive channel",
+        false => "Archive channel",
+    };
+    div()
         .id("chat-details-pane")
         .w(px(chat.layout.details))
         .h_full()
@@ -150,24 +148,16 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
                 )
                 .child(button("chat-details-close", "Close", theme, close)),
         )
-        .child(div().h(px(1.)).w_full().bg(theme.border))
+        .child(rule(theme))
+        .child(section("Name", theme))
         .child(
-            div()
-                .text_size(design::text::SECONDARY)
-                .text_color(theme.muted)
-                .child("Name"),
-        )
-        .child(
-            Input::new("chat-details-name-input")
-                .h(px(28.))
-                .px_2()
-                .py_1()
-                .border_1()
-                .border_color(theme.border_strong)
-                .bg(theme.background)
-                .value(details.name_draft.clone())
-                .label("Channel name")
-                .on_input(typed_name),
+            field(
+                "chat-details-name-input",
+                &details.name_draft,
+                "Channel name",
+                theme,
+            )
+            .on_input(typed_name),
         )
         .child(button(
             "chat-details-rename-button",
@@ -177,32 +167,20 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
         ))
         .child(button(
             "chat-details-archive",
-            if info.channel.archived {
-                "Unarchive channel"
-            } else {
-                "Archive channel"
-            },
+            archive_label,
             theme,
             archive,
         ))
-        .child(div().h(px(1.)).w_full().bg(theme.border))
+        .child(rule(theme))
+        .child(section("Members", theme))
         .child(
-            div()
-                .text_size(design::text::SECONDARY)
-                .text_color(theme.muted)
-                .child("Members"),
-        )
-        .child(
-            Input::new("chat-details-member-input")
-                .h(px(28.))
-                .px_2()
-                .py_1()
-                .border_1()
-                .border_color(theme.border_strong)
-                .bg(theme.background)
-                .value(details.member_draft.clone())
-                .label("Add member")
-                .on_input(typed_member),
+            field(
+                "chat-details-member-input",
+                &details.member_draft,
+                "Add member",
+                theme,
+            )
+            .on_input(typed_member),
         )
         .child(button(
             "chat-details-add-member",
@@ -215,31 +193,59 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
                 .text_size(design::text::CAPTION)
                 .text_color(theme.faint)
                 .child("Select a member below to remove it from this channel."),
-        );
-    let roster = chat.members();
+        )
+        .children(members(chat, cx, theme))
+        .into_any_element()
+}
+
+fn rule(theme: &Theme) -> impl IntoElement {
+    div().h(px(1.)).w_full().bg(theme.border)
+}
+
+fn section(name: &'static str, theme: &Theme) -> impl IntoElement {
+    div()
+        .text_size(design::text::SECONDARY)
+        .text_color(theme.muted)
+        .child(name)
+}
+
+fn field(id: &'static str, value: &str, label: &'static str, theme: &Theme) -> Input {
+    Input::new(id)
+        .h(design::size::CONTROL)
+        .px_2()
+        .py_1()
+        .border_1()
+        .border_color(theme.border_strong)
+        .bg(theme.background)
+        .value(value.to_owned())
+        .label(label)
+}
+
+/// A row per member, each with its way out; a word when there are none.
+fn members(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Vec<AnyElement> {
+    let roster = chat.roster();
     if roster.is_empty() {
-        content = content.child(
-            div()
-                .id("chat-details-no-members")
-                .text_size(design::text::CAPTION)
-                .text_color(theme.faint)
-                .child("No members added. An open channel needs none."),
-        );
+        let none = div()
+            .id("chat-details-no-members")
+            .text_size(design::text::CAPTION)
+            .text_color(theme.faint)
+            .child("No members added. An open channel needs none.");
+        return vec![none.into_any_element()];
     }
-    for (index, member) in roster.iter().enumerate() {
-        let party = member.key.clone();
+    let mut rows = Vec::new();
+    for (index, (party, label)) in roster.into_iter().enumerate() {
         let remove = cx.listener(move |chat, _: &ClickEvent, _window, cx| {
             cx.notify();
-            chat.set_member(&party, false, cx);
+            chat.set_member(party.clone(), false, cx);
         });
-        let mut remove_button = div()
+        let remove = div()
             .id(ElementId::named_usize("chat-details-remove", index))
             .px_2()
             .py_1()
             .bg(theme.surface)
             .hover(|s| s.bg(theme.surface_raised))
-            .child("Remove");
-        remove_button = remove_button.on_click(remove);
+            .child("Remove")
+            .on_click(remove);
         let row = div()
             .id(ElementId::named_usize("chat-details-member", index))
             .flex()
@@ -249,10 +255,10 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
                 div()
                     .flex_1()
                     .text_size(design::text::SECONDARY)
-                    .child(member.label.clone()),
+                    .child(label),
             )
-            .child(remove_button);
-        content = content.child(row);
+            .child(remove);
+        rows.push(row.into_any_element());
     }
-    content.into_any_element()
+    rows
 }

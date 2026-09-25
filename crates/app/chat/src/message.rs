@@ -2,107 +2,7 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
-use std::collections::BTreeMap;
-
-pub type AccountNumber = u64;
-
-/// Reconstruct a committed body from the original payload and its assigned
-/// key resolutions. Every distinct key consumes one account, in appearance
-/// order; repeated keys reuse that resolution. This never consults identity,
-/// whose current key ownership may differ from the committed operation's.
-pub fn resolve_assigned_mentions(
-    mut blocks: Vec<Block>,
-    key_mentions: &[AccountNumber],
-) -> Result<Vec<Block>, String> {
-    let mut accounts = key_mentions.iter();
-    let mut resolved = BTreeMap::new();
-    for block in &mut blocks {
-        let spans = match block {
-            Block::Paragraph(spans) | Block::Quote(spans) => spans,
-            Block::Code { .. } | Block::Divider => continue,
-        };
-        for span in spans {
-            for mark in &mut span.marks {
-                let Mark::Mention(Party::Key(key)) = mark else {
-                    continue;
-                };
-                let account = match resolved.get(key) {
-                    Some(account) => *account,
-                    None => {
-                        let account = *accounts.next().ok_or("missing assigned mention account")?;
-                        if account == 0 {
-                            return Err("assigned mention account is zero".into());
-                        }
-                        resolved.insert(key.clone(), account);
-                        account
-                    }
-                };
-                *mark = Mark::Mention(Party::Account(account));
-            }
-        }
-    }
-    if accounts.next().is_some() {
-        return Err("unused assigned mention accounts".into());
-    }
-    Ok(blocks)
-}
-
-/// who acts on chat state — the ONE party shape every author, owner, member,
-/// huddle participant, reactor and mention target takes.
-///
-/// the module derives the acting party from `Env.origin` at write time, never
-/// from a payload: a member key resolves through identity to the account
-/// holding it, a program origin IS its account, a signed key that identity
-/// does not know stays a key (a node operating a channel under its own key
-/// holds no account and is never spelled as one), a module is itself. an
-/// account is the stable identity a person's many keys and a keyless program
-/// share, so it is what relations and rosters name whenever one exists.
-#[derive(
-    Serialize,
-    Deserialize,
-    BorshSerialize,
-    BorshDeserialize,
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub enum Party {
-    /// an identity account: a resolved member key, or the program account the
-    /// host ran the write as.
-    Account(AccountNumber),
-    /// an authenticated signing key that holds no account (non-empty).
-    Key(Vec<u8>),
-    /// a module that emitted the write as a follow-up.
-    Module(String),
-    /// genesis / system-internal.
-    System,
-}
-
-impl Party {
-    /// the account this party is, if it is one — the recipient an attribution
-    /// relation can name. a key, a module and the system are not accounts.
-    pub fn account(&self) -> Option<AccountNumber> {
-        match self {
-            Party::Account(account) => Some(*account),
-            Party::Key(_) | Party::Module(_) | Party::System => None,
-        }
-    }
-
-    /// a person's party — an account or a key — as opposed to trusted code.
-    /// post policy, the `:` channel namespace, creation caps and huddles all
-    /// distinguish people from modules and the system on exactly this line.
-    pub fn is_person(&self) -> bool {
-        match self {
-            Party::Account(_) | Party::Key(_) => true,
-            Party::Module(_) | Party::System => false,
-        }
-    }
-}
+use crate::Party;
 
 /// inline formatting applied to a [`Span`]. mentions are structured so
 /// hook parsing stays deterministic.
@@ -112,10 +12,8 @@ pub enum Mark {
     Bold,
     Italic,
     Link(String),
-    /// a mention NAMES AN ACCOUNT: `Party::Account` names it directly and must
-    /// exist; `Party::Key` names the account holding that key and is resolved
-    /// at write time; a module or system mention is rejected. a write whose
-    /// mention resolves to no account is rejected whole.
+    /// a mention names a party: `<@7>` an account, `<@key:hex>` a key.
+    /// chat keeps it as typed; a view names it at render time.
     Mention(Party),
 }
 
@@ -320,8 +218,10 @@ fn flush_plain(plain: &mut String, spans: &mut Vec<Span>) {
 /// (`backend/duck_uri.rs`) and refuses what it cannot open, so the tokenizer
 /// marks the run and decides nothing about where it points.
 fn url_len(chars: &[char], at: usize) -> Option<usize> {
-    let rest: String = chars[at..].iter().collect();
-    let starts_link = LINK_SCHEMES.iter().any(|scheme| rest.starts_with(scheme));
+    let starts_link = LINK_SCHEMES.iter().any(|scheme| {
+        let mut rest = chars[at..].iter();
+        scheme.chars().all(|c| rest.next() == Some(&c))
+    });
     if !starts_link {
         return None;
     }
@@ -455,56 +355,3 @@ fn hex_bytes(hex: &str) -> Option<Vec<u8>> {
 }
 
 const LINK_SCHEMES: [&str; 3] = ["http://", "https://", "duck://"];
-
-/// Resolve display labels for mention tokens while preserving fenced code and byte ranges.
-pub fn draft_mentions(
-    text: &str,
-    label: impl Fn(&Party) -> String,
-) -> (String, Vec<(std::ops::Range<usize>, Party)>) {
-    let chars: Vec<char> = text.chars().collect();
-    let mut display = String::new();
-    let mut mentions = Vec::new();
-    let mut index = 0;
-    while index < chars.len() {
-        if let Some(consumed) = code_fence_len(&chars, index) {
-            display.extend(&chars[index..index + consumed]);
-            index += consumed;
-            continue;
-        }
-        if let Some((party, consumed)) = mention_at(&chars, index) {
-            let start = display.len();
-            display.push_str(&label(&party));
-            mentions.push((start..display.len(), party));
-            index += consumed;
-        } else {
-            display.push(chars[index]);
-            index += 1;
-        }
-    }
-    (display, mentions)
-}
-
-/// Fenced code is literal, including token-shaped text inside it.
-fn code_fence_len(chars: &[char], at: usize) -> Option<usize> {
-    let line_start = at == 0 || chars[at - 1] == '\n';
-    if !line_start {
-        return None;
-    }
-    let mut lines = chars[at..].split_inclusive(|ch| *ch == '\n');
-    let opener = lines.next()?;
-    let opener_text: String = opener.iter().collect();
-    let opens_fence = opener_text.trim().starts_with("```");
-    if !opens_fence {
-        return None;
-    }
-    let mut consumed = opener.len();
-    for line in lines {
-        consumed += line.len();
-        let line_text: String = line.iter().collect();
-        let closes_fence = line_text.trim() == "```";
-        if closes_fence {
-            break;
-        }
-    }
-    Some(consumed)
-}

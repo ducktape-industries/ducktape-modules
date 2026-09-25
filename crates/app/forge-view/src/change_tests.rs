@@ -157,7 +157,7 @@ fn the_conversation_is_the_hidden_chat_channel_and_the_forge_body() {
             .iter()
             .any(|op| matches!(
                 op,
-                chat::ChatMsg::PostMessage { channel_id, .. } if channel_id == "forge:project:1"
+                chat::Op::PostMessage { channel_id, .. } if channel_id == "forge:project:1"
             ))
     );
     view.read(|forge| assert!(forge.reply.is_empty()));

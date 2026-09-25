@@ -4,12 +4,15 @@
 //! badge counts such messages in rooms still unread.
 use std::collections::BTreeMap;
 
+use chat::{Block, ChannelInfo, Mark, MsgRow, Party, Query, Reply};
 use ducktape_view_guest::Context;
 use ducktape_view_guest::doors::{HostBadge, NotifyPost, NotifyRead, Post};
 
-use crate::chat::{Block, ChannelInfo, Mark, MsgRow, Party};
-use crate::client::{self, NameDirectory};
-use crate::{Chat, ChatApi, ChatViewQuery, ChatViewReply};
+use crate::api::{Ask, ChatApi};
+use crate::message::message_body;
+use crate::names::{NameDirectory, dm_peer_of};
+use crate::watch::log;
+use crate::{Chat, links};
 
 /// The most new messages read out of one room per change.
 const MAX_NEW: u64 = 20;
@@ -83,22 +86,24 @@ impl Chat {
         let viewer = self.viewer();
         cx.spawn(async move |this, cx| {
             let host = cx.host();
-            let Ok(ChatViewReply::Messages(rows)) = host
-                .ask::<ducktape_view_guest::doors::Query<ChatApi>>(ChatViewQuery::MessagesAround {
+            let asked = host
+                .ask::<Ask<ChatApi>>(Query::MessagesAround {
                     channel_id: channel.clone(),
                     seq: head,
-                    viewer_handles: viewer,
-                    page: ::chat::Page {
+                    viewer,
+                    page: chat::Page {
                         after: None,
                         limit: Some(fresh * 2),
                     },
                 })
-                .await
-            else {
-                return;
-            };
+                .await;
             let _ = this.update(cx, |chat, cx| {
                 cx.notify();
+                let rows = match asked {
+                    Ok(Reply::Messages(rows)) => rows,
+                    Ok(_) => return log(cx, "news", &crate::queries::wrong_reply()),
+                    Err(refusal) => return log(cx, "news", &refusal),
+                };
                 let empty = NameDirectory::default();
                 let names = chat.names.ready().unwrap_or(&empty);
                 let name = chat
@@ -165,34 +170,31 @@ impl Chat {
 /// The notice `row` makes for account `me`, if it is meant for her: it
 /// mentions her, or it is in a direct room she is in. Her own never is.
 fn notice(row: &MsgRow, me: u64, name: &str, chain: &str, names: &NameDirectory) -> Option<Post> {
-    if row.deleted || row.author == format!("acct:{me}") {
+    if row.deleted || row.author == Party::Account(me) {
         return None;
     }
-    let direct = client::dm_peer_of(me, &row.channel_id).is_some();
+    let direct = dm_peer_of(me, &row.channel_id).is_some();
     if !direct && !mentions(&row.blocks, me) {
         return None;
     }
-    let sender = client::author_display(&row.author, names);
+    let sender = names.author(&row.author);
     Some(Post {
         title: match direct {
             true => sender,
             false => format!("{sender} mentioned you"),
         },
-        body: client::message_body(&row.blocks, names),
+        body: message_body(&row.blocks, names),
         tag: tag(me, &row.channel_id, name, names),
         // a notice without a link is one the centre cannot open, not a bad one
-        link: crate::chat::channel_link(chain, &row.channel_id, Some(row.seq)).unwrap_or_default(),
+        link: links::channel_link(chain, &row.channel_id, Some(row.seq)).unwrap_or_default(),
     })
 }
 
 /// The tag a room's notices go under: `@peer` for a direct room, the
 /// channel's `#name` otherwise.
 fn tag(me: u64, room: &str, name: &str, names: &NameDirectory) -> String {
-    match client::dm_peer_of(me, room) {
-        Some(peer) => format!(
-            "@{}",
-            client::author_display(&format!("acct:{peer}"), names)
-        ),
+    match dm_peer_of(me, room) {
+        Some(peer) => format!("@{}", names.author(&Party::Account(peer))),
         None => format!("#{name}"),
     }
 }
@@ -209,13 +211,13 @@ fn mentions(blocks: &[Block], me: u64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chat::Span;
+    use chat::Span;
 
-    fn row(channel: &str, author: &str, blocks: Vec<Block>) -> MsgRow {
+    fn row(channel: &str, author: u64, blocks: Vec<Block>) -> MsgRow {
         MsgRow {
             channel_id: channel.into(),
             seq: 7,
-            author: author.into(),
+            author: Party::Account(author),
             blocks,
             ..MsgRow::default()
         }
@@ -236,7 +238,7 @@ mod tests {
         let names = NameDirectory::default();
         let chain = "testnet-0a1b2c3d";
         let me = Mark::Mention(Party::Account(3));
-        let mention = row("design", "acct:5", said("@me", vec![me.clone()]));
+        let mention = row("design", 5, said("@me", vec![me.clone()]));
         let post = notice(&mention, 3, "design", chain, &names).unwrap();
         assert_eq!(post.title, "account 5 mentioned you");
         assert_eq!(post.tag, "#design");
@@ -245,7 +247,7 @@ mod tests {
         let other = Mark::Mention(Party::Account(4));
         assert!(
             notice(
-                &row("design", "acct:5", said("@x", vec![other])),
+                &row("design", 5, said("@x", vec![other])),
                 3,
                 "design",
                 chain,
@@ -255,7 +257,7 @@ mod tests {
         );
         assert!(
             notice(
-                &row("design", "acct:5", said("hi", vec![])),
+                &row("design", 5, said("hi", vec![])),
                 3,
                 "design",
                 chain,
@@ -265,7 +267,7 @@ mod tests {
         );
         assert!(
             notice(
-                &row("design", "acct:3", said("@me", vec![me])),
+                &row("design", 3, said("@me", vec![me])),
                 3,
                 "design",
                 chain,
@@ -274,27 +276,11 @@ mod tests {
             .is_none()
         );
 
-        let direct = notice(
-            &row("dm-3-5", "acct:5", said("hi", vec![])),
-            3,
-            "",
-            chain,
-            &names,
-        )
-        .unwrap();
+        let direct = notice(&row("dm-3-5", 5, said("hi", vec![])), 3, "", chain, &names).unwrap();
         assert_eq!(
             (direct.title.as_str(), direct.body.as_str()),
             ("account 5", "hi")
         );
-        assert!(
-            notice(
-                &row("dm-4-5", "acct:5", said("hi", vec![])),
-                3,
-                "",
-                chain,
-                &names
-            )
-            .is_none()
-        );
+        assert!(notice(&row("dm-4-5", 5, said("hi", vec![])), 3, "", chain, &names).is_none());
     }
 }

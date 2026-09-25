@@ -5,12 +5,27 @@ use ducktape_view_guest::view::Submit;
 use ducktape_view_guest::wire;
 
 use crate::api::{ChatApi, ClipboardRead, ClipboardWrite, HostId};
-use crate::chat::{ChatMsg, MsgRow};
-use crate::composer::Target;
-use crate::composer::{Event, Outcome, Send};
-use crate::{Chat, Mode, draft_key};
+use crate::composer::{Event, MentionChoice, Outcome, Send, Target, pending_row};
+use crate::names::mention_token;
+use crate::{Chat, Mode};
 
 impl Chat {
+    /// Who the composer offers after `@`: the roster, and the room's members.
+    pub(crate) fn mention_choices(&self) -> Vec<MentionChoice> {
+        let Some(names) = self.names.ready() else {
+            return Vec::new();
+        };
+        let members: Vec<_> = self.roster().into_iter().map(|(party, _)| party).collect();
+        names
+            .mention_choices(&members)
+            .into_iter()
+            .map(|choice| MentionChoice {
+                token: mention_token(&choice.party),
+                label: choice.label,
+            })
+            .collect()
+    }
+
     pub(crate) fn composer(
         &mut self,
         target: Target,
@@ -20,7 +35,7 @@ impl Chat {
     ) {
         cx.notify();
         let choices = self.mention_choices();
-        let key = draft_key(&target);
+        let key = target.key();
         let draft = self.drafts.entry(key.clone()).or_default();
         match draft.handle(event, &choices, cx) {
             Outcome::Updated => {}
@@ -118,7 +133,7 @@ impl Chat {
                 draft.complete_send(&send);
                 match result {
                     Ok(pending) => {
-                        let me = chat.my_handle();
+                        let me = chat.me().unwrap_or_default();
                         if let (Some(mut row), Some(room)) = (pending, chat.room.as_mut())
                             && room.id == target.channel()
                         {
@@ -144,24 +159,4 @@ impl Chat {
         })
         .detach();
     }
-}
-
-/// The row a just-accepted post shows as until the index serves it: the
-/// reader as author, seq 0. An edit shows nothing early.
-pub(crate) fn pending_row(op: &ChatMsg) -> Option<MsgRow> {
-    let ChatMsg::PostMessage {
-        message_id,
-        blocks,
-        thread,
-        ..
-    } = op
-    else {
-        return None;
-    };
-    Some(MsgRow {
-        message_id: message_id.clone(),
-        blocks: blocks.clone(),
-        thread: *thread,
-        ..MsgRow::default()
-    })
 }
