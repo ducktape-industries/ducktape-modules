@@ -191,3 +191,34 @@ fn a_handle_reads_back_as_its_party() {
         assert_eq!(party_of_handle(nothing), None, "{nothing}");
     }
 }
+
+#[test]
+fn a_dm_title_names_no_account_numbers_and_its_accounts_are_fields() {
+    use describe::Value;
+    let dm = dm_channel_id(1, 3);
+    let react = describe(&ChatMsg::AddReaction {
+        channel_id: dm.clone(),
+        seq: 4,
+        emoji: "👍".into(),
+    });
+    assert_eq!(react.title, "React · DM");
+    let between = react.fields.iter().find(|f| f.label == "between").unwrap();
+    assert_eq!(
+        between.value,
+        Value::List(vec![Value::Account(1), Value::Account(3)])
+    );
+    let edit = describe(&ChatMsg::EditMessage {
+        channel_id: dm,
+        seq: 4,
+        blocks: Vec::new(),
+        base_rev: None,
+    });
+    assert_eq!(edit.title, "Edit message · DM");
+    // a channel keeps the name a person picked, and no `between`
+    let channel = describe(&ChatMsg::DeleteMessage {
+        channel_id: "old-launch".into(),
+        seq: 1,
+    });
+    assert_eq!(channel.title, "Delete message · #old-launch");
+    assert!(channel.fields.iter().all(|f| f.label != "between"));
+}

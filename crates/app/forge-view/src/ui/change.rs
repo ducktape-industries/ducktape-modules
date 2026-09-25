@@ -169,6 +169,7 @@ fn conversation(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyEle
                     "forge-change-body-text",
                     &change.body,
                     theme,
+                    &crate::ui::code::links(Vec::new(), cx),
                 )),
         );
     }

@@ -256,7 +256,7 @@ fn panel(forge: &Forge, dock: Dock, cx: &mut Context<Forge>, theme: &Theme) -> A
     let close = cx.listener(move |forge, _: &ClickEvent, _, cx| forge.toggle_dock(dock, cx));
     let body: AnyElement = match dock {
         Dock::About => about(forge, theme),
-        Dock::Overview => dock::overview(forge, theme),
+        Dock::Overview => dock::overview(forge, cx, theme),
         Dock::Comments => dock::comments(forge, cx, theme),
         Dock::MergeStatus => dock::merge_status(forge, theme),
     };

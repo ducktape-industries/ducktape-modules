@@ -208,7 +208,7 @@ fn an_op_reads_as_its_program_describes_it_through_the_host() {
     cx.run_until_parked();
     let texts = cx.texts();
     assert!(cx.has_text("Direct message"), "{texts:?}");
-    assert!(cx.has_text("DM · account 3 ↔ account 7"), "{texts:?}");
+    assert!(!texts.iter().any(|t| t.contains("↔")), "{texts:?}");
     assert!(cx.has_text("between") && cx.has_text("Ada") && cx.has_text("account 7"));
     cx.simulate_click("explorer-value-1-0");
     cx.run_until_parked();

@@ -339,7 +339,7 @@ pub fn describe(op: &ChatMsg) -> describe::Description {
         ),
         ChatMsg::CreateDmChannel { counterpart, name } => {
             return describe::Description {
-                title: format!("Open a DM with account {counterpart}"),
+                title: "Open a DM".into(),
                 fields: vec![
                     field("with", Value::Account(*counterpart)),
                     field("name", Value::text(name)),
@@ -369,13 +369,7 @@ pub fn describe(op: &ChatMsg) -> describe::Description {
             blocks,
             thread,
         } => {
-            let mut fields = vec![field("channel", Value::Text(room(channel_id)))];
-            fields.extend(dm_peers(channel_id).map(|(a, b)| {
-                field(
-                    "between",
-                    Value::List(vec![Value::Account(a), Value::Account(b)]),
-                )
-            }));
+            let mut fields = place(channel_id);
             fields.extend([
                 field("text", Value::Text(plain_text(blocks))),
                 field("message", Value::text(message_id)),
@@ -446,7 +440,7 @@ pub fn describe(op: &ChatMsg) -> describe::Description {
         ),
         ChatMsg::LeaveHuddle { channel_id } => ("Leave huddle", channel_id, vec![]),
     };
-    let mut all = vec![field("channel", Value::Text(room(channel)))];
+    let mut all = place(channel);
     all.extend(fields);
     describe::Description {
         title: format!("{title} · {}", room(channel)),
@@ -480,11 +474,26 @@ fn op_variants_only_append() {
     );
 }
 
-/// A channel as `describe` names it: `#design`, or `DM · account 1 ↔ account 2`
-/// for a dm room, whose id is no name a person picked.
+/// A channel as `describe` titles it: `#design`, or `DM` for a dm room,
+/// whose id is no name a person picked. Its two accounts are the
+/// `between` field, drawn as accounts (a name, an avatar), never numbers.
 fn room(channel_id: &str) -> String {
     match dm_peers(channel_id) {
-        Some((a, b)) => format!("DM · account {a} ↔ account {b}"),
+        Some(_) => "DM".into(),
         None => format!("#{channel_id}"),
     }
+}
+
+/// The fields that say where an op happened: its `channel`, and for a dm
+/// room the two accounts it is `between`.
+fn place(channel_id: &str) -> Vec<describe::Field> {
+    use describe::{Value, field};
+    let mut fields = vec![field("channel", Value::Text(room(channel_id)))];
+    fields.extend(dm_peers(channel_id).map(|(a, b)| {
+        field(
+            "between",
+            Value::List(vec![Value::Account(a), Value::Account(b)]),
+        )
+    }));
+    fields
 }
