@@ -487,6 +487,52 @@ fn a_repo_opens_on_its_readme_and_code_holds_the_tree() {
 }
 
 #[test]
+fn a_relative_link_opens_its_file_in_the_code_tab() {
+    let (mut cx, view) = opened("default");
+    cx.simulate_click("forge-ref-refs/heads/clean");
+    cx.run_until_parked();
+    let follow = |cx: &mut TestAppContext, dir: &[u8], dest: &str| {
+        view.update(cx, |forge, _, cx| forge.follow_link(dir, dest, cx));
+        cx.run_until_parked();
+    };
+    // a folder unfolds, from a document one folder down
+    follow(&mut cx, b"docs", "../src");
+    view.read(|forge| {
+        assert_eq!(forge.nav().tab, RepoTab::Code);
+        assert!(forge.nav().expanded.contains(b"src".as_slice()));
+    });
+    let child = view.read(|forge| {
+        forge
+            .tree_rows()
+            .into_iter()
+            .find(|row| row.depth == 1 && !row.is_dir())
+            .expect("a file inside src")
+            .path
+    });
+    // a file inside it opens by its path alone, once its folder is read
+    view.update(&mut cx, |forge, _, cx| {
+        forge.nav_close_blob(cx);
+        forge.open_tab(RepoTab::Readme, cx);
+        forge.nav.expanded.clear();
+    });
+    cx.run_until_parked();
+    follow(&mut cx, b"", &format!("./{}#top", path_of(&child)));
+    view.read(|forge| {
+        assert_eq!(forge.nav().tab, RepoTab::Code);
+        assert_eq!(forge.nav().blob.as_ref().map(|(p, _)| p), Some(&child));
+    });
+    assert!(cx.find("forge-blob").is_some());
+    // the root README is its own tab; a missing file says so
+    follow(&mut cx, b"src", "../README.md");
+    view.read(|forge| assert_eq!(forge.nav().tab, RepoTab::Readme));
+    follow(&mut cx, b"", "missing.md");
+    view.read(|forge| assert!(forge.notice.contains("missing.md"), "{}", forge.notice));
+    // the web still goes to the host
+    follow(&mut cx, b"", "https://x.example");
+    assert_eq!(cx.host().opened_links(), vec!["https://x.example"]);
+}
+
+#[test]
 fn a_folder_opens_its_children_inline_and_keeps_its_state() {
     let (mut cx, view) = opened("default");
     cx.simulate_click("forge-ref-refs/heads/clean");

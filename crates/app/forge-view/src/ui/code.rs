@@ -276,6 +276,7 @@ fn body(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
         return pane.into_any_element();
     };
     let name = path_text(&path);
+    let dir = path[..path.iter().rposition(|b| *b == b'/').unwrap_or(0)].to_vec();
     let content: AnyElement = match blob.content {
         Content::Text if is_markdown(&name) => div()
             .id(id("forge-blob-doc"))
@@ -288,6 +289,7 @@ fn body(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
                 "forge-blob-markdown",
                 &forge.blob_cache.doc(&oid, &blob.bytes),
                 theme,
+                &links(dir, cx),
             ))
             .into_any_element(),
         Content::Text => lines(forge.blob_cache.lines(&oid, &name, &blob.bytes), theme),
@@ -317,6 +319,11 @@ fn body(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
         .into_any_element(),
     };
     pane.child(content).into_any_element()
+}
+
+/// A document's links, a relative one resolved against `dir`, its folder.
+fn links(dir: Vec<u8>, cx: &mut Context<Forge>) -> markdown::OnLink {
+    Rc::new(cx.listener(move |forge, dest: &String, _, cx| forge.follow_link(&dir, dest, cx)))
 }
 
 fn is_markdown(name: &str) -> bool {
@@ -386,6 +393,7 @@ pub(crate) fn readme(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
             "forge-readme-body",
             &forge.blob_cache.doc(&oid, &blob.bytes),
             theme,
+            &links(Vec::new(), cx),
         )
     } else {
         quiet("This README is not text.", theme)

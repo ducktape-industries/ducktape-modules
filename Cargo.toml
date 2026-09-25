@@ -93,6 +93,8 @@ sha2 = "0.10"
 tempfile = "3"
 base64 = "0.22"
 futures = "0.3"
+# Forge's markdown: CommonMark + GFM, no HTML writer and no CLI.
+pulldown-cmark = { version = "0.13", default-features = false }
 # duckfs path normalization: NFC so visually-identical names collide instead
 # of coexisting (a consensus-determinism requirement, not cosmetics).
 unicode-normalization = "0.1"

@@ -73,6 +73,9 @@ pub(crate) struct Nav {
     pub cursor: Option<Vec<u8>>,
     /// the open file: its path and blob oid
     pub blob: Option<(Vec<u8>, String)>,
+    /// a file a link named, opened once its folder's tree lands
+    #[serde(skip)]
+    pub goto: Option<Vec<u8>>,
     pub commit: Option<String>,
     pub change: Option<u64>,
     pub change_tab: ChangeTab,

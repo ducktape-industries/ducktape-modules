@@ -9,12 +9,14 @@ use ducktape_view_guest::doors::HostId;
 use ducktape_view_guest::view::Submit;
 use ducktape_view_guest::{Context, Window};
 
+use crate::Stage;
 use crate::api::{ChatApi, SubmitForge};
 use crate::state::{
     ChangeForm, ChangeTab, Dock, Filter, Forge, NewRepo, Pending, RepoTab, SettingsForm,
     change_key, unhex,
 };
-use forge::{Mergeability, Op, Revision, Settings, valid_repo_name};
+use crate::ui::markdown::Target;
+use forge::{Mergeability, Op, Reply, Revision, Settings, valid_repo_name};
 
 impl Forge {
     // --------------------------------------------------------- navigation
@@ -53,6 +55,7 @@ impl Forge {
         self.nav.expanded = kept.expanded;
         self.nav.cursor = kept.cursor;
         self.nav.blob = kept.blob;
+        self.nav.goto = kept.goto;
         self.nav.tab = tab;
         if tab == RepoTab::Settings {
             let head = self.default_head();
@@ -88,6 +91,66 @@ impl Forge {
         self.nav.cursor = Some(path.clone());
         self.nav.blob = Some((path, oid));
         self.moved(cx);
+    }
+
+    /// A pressed link in a document whose folder is `dir`: the web through
+    /// the host, a file of this repository in the Code tab (the root README
+    /// in its own tab).
+    pub(crate) fn follow_link(&mut self, dir: &[u8], dest: &str, cx: &mut Context<Self>) {
+        match crate::ui::markdown::target(dir, dest) {
+            Some(Target::Web(url)) => cx.host().open_link(&url),
+            Some(Target::Path(path)) => self.open_path(path, cx),
+            None => {}
+        }
+    }
+
+    /// Opens a file by its path alone: its folders unfold, and the file
+    /// opens once the tree that holds it names its blob.
+    pub(crate) fn open_path(&mut self, path: Vec<u8>, cx: &mut Context<Self>) {
+        if self.readme().is_some_and(|(name, _)| name == path) {
+            return self.open_tab(RepoTab::Readme, cx);
+        }
+        let mut dir = &path[..];
+        while let Some(at) = dir.iter().rposition(|b| *b == b'/') {
+            dir = &dir[..at];
+            self.nav.expanded.insert(dir.to_vec());
+        }
+        self.nav.goto = Some(path);
+        self.open_tab(RepoTab::Code, cx);
+    }
+
+    /// Lands a pending [`Self::open_path`] once its folder's tree is read.
+    pub(crate) fn land_goto(&mut self) {
+        let Some(path) = self.nav.goto.clone() else {
+            return;
+        };
+        let split = path.iter().rposition(|b| *b == b'/');
+        let (dir, name) = match split {
+            Some(at) => (path[..at].to_vec(), &path[at + 1..]),
+            None => (Vec::new(), &path[..]),
+        };
+        let Some(query) = self.tree_query(dir) else {
+            return;
+        };
+        let entry = match self.stage(&query) {
+            Stage::Loading => return,
+            Stage::Failed(_) => None,
+            Stage::Ready(Reply::Tree { page, .. }) => page
+                .items
+                .iter()
+                .find(|entry| entry.name == name)
+                .map(|entry| (entry.kind, entry.oid.clone())),
+            Stage::Ready(_) => None,
+        };
+        self.nav.goto = None;
+        self.nav.cursor = Some(path.clone());
+        match entry {
+            Some((forge::EntryKind::Directory, _)) => {
+                self.nav.expanded.insert(path);
+            }
+            Some((_, oid)) => self.nav.blob = Some((path, oid)),
+            None => self.notice = format!("No {} on this ref.", String::from_utf8_lossy(&path)),
+        }
     }
 
     pub(crate) fn nav_close_blob(&mut self, cx: &mut Context<Self>) {
