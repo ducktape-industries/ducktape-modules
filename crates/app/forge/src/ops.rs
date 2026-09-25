@@ -1,11 +1,15 @@
-// The execute path: who signed, which op, and the repository ops (create, configure, grant, revoke, push). Change ops live in `changes`.
+//! The execute path: who acts, which op, and the repository ops (create,
+//! configure, grant, revoke, push). Change ops live in `changes`.
 
-use abi::{Env, HashKind, Origin, Refusal};
+use abi::{HashKind, Refusal};
 use gitcore::server::{Policy, RefUpdate};
 use gitcore::{Error, Limits, server};
 use store::{Reads, Writes, already_exists, capacity, decoded, invalid, unauthorized};
 
-use crate::contract::{Bounds, MAX_KEY_BYTES, MAX_PATH_BYTES, Op, Repo, Settings, valid_repo_name};
+use crate::changes::{self, Draft, Edit, MergeRequest};
+use crate::contract::{
+    Bounds, Frame, MAX_KEY_BYTES, MAX_PATH_BYTES, Op, Party, Repo, Settings, valid_repo_name,
+};
 use crate::objects::{ObjectWriter, object_not_held};
 use crate::state::{
     WRITERS, delete_ref, is_writer, load_bounds, load_refs, load_repo, repo_exists, repo_hash,
@@ -31,31 +35,86 @@ pub fn init(store: &mut impl Writes, params: &[u8]) -> Result<(), Refusal> {
     Ok(())
 }
 
-pub fn execute(store: &mut impl Writes, env: &Env, payload: &[u8]) -> Result<(), Refusal> {
-    let actor = signer(env)?;
-    let op: Op = decoded(PROGRAM, "Op", payload)?;
+/// Runs one op as `frame.party`, whom the program resolved from the
+/// signer ([`chat::party_of`]). Every op names its repository; an accepted one
+/// marks it active.
+pub fn execute(store: &mut impl Writes, frame: &Frame, op: Op) -> Result<(), Refusal> {
+    let actor = person(&frame.party)?;
     let repo = op.repo().to_owned();
-    match op {
-        Op::Create { repo, hash } => create(store, actor, &repo, hash),
-        Op::Configure { repo, settings } => configure(store, actor, &repo, settings),
-        Op::Grant { repo, key } => grant(store, actor, &repo, key),
-        Op::Revoke { repo, key } => revoke(store, actor, &repo, key),
-        Op::Push { repo, request } => push(store, actor, &repo, &request),
-        change => crate::changes::execute(store, env, actor, change),
+    let reply = match op {
+        Op::Create { repo, hash } => create(store, actor, &repo, hash).map(|()| None),
+        Op::Configure { repo, settings } => configure(store, actor, &repo, settings).map(|()| None),
+        Op::Grant { repo, party } => grant(store, actor, &repo, party).map(|()| None),
+        Op::Revoke { repo, party } => revoke(store, actor, &repo, party).map(|()| None),
+        Op::Push { repo, request } => push(store, actor, &repo, &request).map(|()| None),
+        Op::Merge {
+            repo,
+            into,
+            from,
+            expected_into,
+            expected_from,
+            result,
+            change,
+        } => {
+            let merge = MergeRequest {
+                into,
+                from,
+                expected_into,
+                expected_from,
+                result,
+                change,
+            };
+            changes::merge_heads(store, frame, actor, &repo, merge).map(Some)
+        }
+        Op::ChangeOpen {
+            repo,
+            from,
+            into,
+            title,
+            body,
+            reviewers,
+        } => {
+            let draft = Draft {
+                from,
+                into,
+                title,
+                body,
+                reviewers,
+            };
+            changes::open(store, frame, actor, &repo, draft).map(Some)
+        }
+        Op::ChangeEdit {
+            repo,
+            n,
+            title,
+            body,
+            reviewers,
+        } => {
+            let fields = Edit {
+                title,
+                body,
+                reviewers,
+            };
+            changes::edit(store, frame, actor, &repo, n, fields).map(Some)
+        }
+        Op::ChangeClose { repo, n } => changes::close(store, frame, actor, &repo, n).map(Some),
+        Op::ReviewSubmit { repo, n, review } => {
+            changes::submit_review(store, frame, actor, &repo, n, review).map(Some)
+        }
     }?;
-    touch(store, &repo, env.height)
+    if let Some(reply) = reply {
+        store.output(abi::encode(&reply));
+    }
+    touch(store, &repo, frame.height)
 }
 
-/// The key that signed the op. Forge is written by people, never by a
-/// program or the system.
-fn signer(env: &Env) -> Result<&[u8], Refusal> {
-    let Origin::External(actor) = &env.origin else {
-        return Err(unauthorized("a repository op is signed by a member key"));
-    };
-    if actor.is_empty() {
-        return Err(unauthorized("an external origin carries a key"));
+/// Forge is written by people (an account, or a key that holds none),
+/// never by a program or the system.
+fn person(party: &Party) -> Result<&Party, Refusal> {
+    if !party.is_person() {
+        return Err(unauthorized("a repository op is signed by a person"));
     }
-    Ok(actor)
+    Ok(party)
 }
 
 /// Every accepted op marks its repository active at this height.
@@ -67,7 +126,7 @@ fn touch(store: &mut impl Writes, name: &str, height: u64) -> Result<(), Refusal
 
 fn create(
     store: &mut impl Writes,
-    actor: &[u8],
+    actor: &Party,
     name: &str,
     hash: HashKind,
 ) -> Result<(), Refusal> {
@@ -79,7 +138,7 @@ fn create(
     }
     let repo = Repo {
         hash,
-        owner: actor.to_vec(),
+        owner: actor.clone(),
         settings: Settings::default(),
         refs_count: 0,
         last_activity: 0,
@@ -89,7 +148,7 @@ fn create(
 
 fn configure(
     store: &mut impl Writes,
-    actor: &[u8],
+    actor: &Party,
     name: &str,
     settings: Settings,
 ) -> Result<(), Refusal> {
@@ -104,23 +163,23 @@ fn configure(
     save_repo(store, name, &repo)
 }
 
-fn grant(store: &mut impl Writes, actor: &[u8], name: &str, key: Vec<u8>) -> Result<(), Refusal> {
+fn grant(store: &mut impl Writes, actor: &Party, name: &str, party: Party) -> Result<(), Refusal> {
     require_owner(&load_repo(store, name)?, actor)?;
-    require_key(&key)?;
-    WRITERS.insert(store, &(name.to_owned(), key));
+    require_named(&party)?;
+    WRITERS.insert(store, &(name.to_owned(), party));
     Ok(())
 }
 
-fn revoke(store: &mut impl Writes, actor: &[u8], name: &str, key: Vec<u8>) -> Result<(), Refusal> {
+fn revoke(store: &mut impl Writes, actor: &Party, name: &str, party: Party) -> Result<(), Refusal> {
     require_owner(&load_repo(store, name)?, actor)?;
-    require_key(&key)?;
-    WRITERS.remove(store, &(name.to_owned(), key));
+    require_named(&party)?;
+    WRITERS.remove(store, &(name.to_owned(), party));
     Ok(())
 }
 
 /// A git receive-pack: the objects land as blobs, then each accepted ref
 /// moves; git's own report is the op's output.
-fn push(store: &mut impl Writes, actor: &[u8], name: &str, request: &[u8]) -> Result<(), Refusal> {
+fn push(store: &mut impl Writes, actor: &Party, name: &str, request: &[u8]) -> Result<(), Refusal> {
     let mut repo = load_repo(store, name)?;
     require_writer(store, name, &repo, actor)?;
     let bounds = load_bounds(store)?;
@@ -140,7 +199,8 @@ fn push(store: &mut impl Writes, actor: &[u8], name: &str, request: &[u8]) -> Re
         &policy,
         cap(bounds.push_walk),
     )
-    .map_err(|error| objects.refused.take().unwrap_or_else(|| refusal_of(error)))?;
+    .map_err(refusal_of)?;
+    objects.flush()?;
     for (reference, update) in &outcome.moves {
         match update {
             RefUpdate::Set(target) => {
@@ -160,8 +220,8 @@ fn push(store: &mut impl Writes, actor: &[u8], name: &str, request: &[u8]) -> Re
     Ok(())
 }
 
-fn require_owner(repo: &Repo, actor: &[u8]) -> Result<(), Refusal> {
-    if repo.owner != actor {
+fn require_owner(repo: &Repo, actor: &Party) -> Result<(), Refusal> {
+    if repo.owner != *actor {
         return Err(unauthorized("only the owner changes a repository"));
     }
     Ok(())
@@ -171,23 +231,28 @@ pub(crate) fn require_writer(
     store: &impl Reads,
     name: &str,
     repo: &Repo,
-    actor: &[u8],
+    actor: &Party,
 ) -> Result<(), Refusal> {
-    let may_write = repo.owner == actor || is_writer(store, name, actor);
+    let may_write = repo.owner == *actor || is_writer(store, name, actor);
     if !may_write {
         return Err(unauthorized("only the owner and its writers push"));
     }
     Ok(())
 }
 
-fn require_key(key: &[u8]) -> Result<(), Refusal> {
-    if key.is_empty() {
-        return Err(invalid("a writer is named by its key"));
+/// A person an op names (a writer, a reviewer): an account, or a
+/// non-empty key of at most [`MAX_KEY_BYTES`].
+pub(crate) fn require_named(party: &Party) -> Result<(), Refusal> {
+    match party {
+        Party::Account(_) => Ok(()),
+        Party::Key(key) if key.is_empty() => Err(invalid("a key party names a key")),
+        Party::Key(key) if key.len() > MAX_KEY_BYTES => Err(capacity(format!(
+            "a key is at most {MAX_KEY_BYTES} bytes, not {}",
+            key.len()
+        ))),
+        Party::Key(_) => Ok(()),
+        Party::Module(_) | Party::System => Err(invalid("only a person is named here")),
     }
-    if key.len() > MAX_KEY_BYTES {
-        return Err(capacity("a key is at most MAX_KEY_BYTES"));
-    }
-    Ok(())
 }
 
 pub fn limits_of(bounds: &Bounds) -> Limits {

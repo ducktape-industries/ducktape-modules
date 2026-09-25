@@ -1,6 +1,8 @@
-// git::Objects over the store's blobs: a git object's blob id is its oid, so no map sits between them.
+//! `gitcore::Objects` over the store's blobs: a git object's blob id is
+//! its oid, so no map sits between them.
 
 use std::cell::Cell;
+use std::collections::BTreeMap;
 
 use abi::{BlobHeader, BlobId, HashKind, Refusal};
 use gitcore::{Error, Hash, Kind, Object, Objects, Oid};
@@ -79,12 +81,14 @@ fn get(sandbox: &impl Reads, id: &Oid) -> gitcore::Result<Option<Object>> {
     Ok(Some(Object::new(kind, blob.body)))
 }
 
-/// The object store a push writes into; a refused blob write is kept for
-/// the caller to hand back (`gitcore` sees only `Error::Storage`).
+/// The object store a push writes into. Objects wait here until the push
+/// is accepted ([`ObjectWriter::flush`]), so a refused push stores nothing.
+// ponytail: holds a push's objects in memory until accepted; the pack is
+// in memory already and `Bounds.max_objects`/`max_object_size` cap both.
 pub struct ObjectWriter<'a, S: Writes> {
     sandbox: &'a mut S,
     hash: Hash,
-    pub refused: Option<Refusal>,
+    pending: BTreeMap<Oid, (Kind, Vec<u8>)>,
 }
 
 impl<'a, S: Writes> ObjectWriter<'a, S> {
@@ -92,31 +96,36 @@ impl<'a, S: Writes> ObjectWriter<'a, S> {
         ObjectWriter {
             sandbox,
             hash,
-            refused: None,
+            pending: BTreeMap::new(),
         }
+    }
+
+    /// Stores every object the accepted push brought.
+    pub fn flush(self) -> Result<(), Refusal> {
+        for (_, (kind, body)) in self.pending {
+            self.sandbox
+                .blob_put(hash_kind_of(self.hash), kind.as_str(), body)?;
+        }
+        Ok(())
     }
 }
 
 impl<S: Writes> Objects for ObjectWriter<'_, S> {
     fn get(&self, id: &Oid) -> gitcore::Result<Option<Object>> {
+        if let Some((kind, body)) = self.pending.get(id) {
+            return Ok(Some(Object::new(*kind, body.clone())));
+        }
         get(&*self.sandbox, id)
     }
 
     fn has(&self, id: &Oid) -> gitcore::Result<bool> {
-        Ok(self.sandbox.blob_stat(blob_id_of(id)).is_some())
+        Ok(self.pending.contains_key(id) || self.sandbox.blob_stat(blob_id_of(id)).is_some())
     }
 
     fn put(&mut self, kind: Kind, body: &[u8]) -> gitcore::Result<Oid> {
-        match self
-            .sandbox
-            .blob_put(hash_kind_of(self.hash), kind.as_str(), body.to_vec())
-        {
-            Ok(id) => Ok(oid_of_blob(&id)),
-            Err(refusal) => {
-                self.refused = Some(refusal);
-                Err(Error::Storage)
-            }
-        }
+        let id = gitcore::oid_of(self.hash, kind, body)?;
+        self.pending.insert(id, (kind, body.to_vec()));
+        Ok(id)
     }
 }
 
@@ -138,12 +147,5 @@ pub fn blob_id_of(oid: &Oid) -> BlobId {
     match oid {
         Oid::Sha1(digest) => BlobId::Sha1(*digest),
         Oid::Sha256(digest) => BlobId::Sha256(*digest),
-    }
-}
-
-pub fn oid_of_blob(id: &BlobId) -> Oid {
-    match id {
-        BlobId::Sha1(digest) => Oid::Sha1(*digest),
-        BlobId::Sha256(digest) => Oid::Sha256(*digest),
     }
 }

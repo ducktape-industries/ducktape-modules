@@ -1,4 +1,7 @@
-// Every table forge keeps, declared once: the records, the indexes over them and the counters. Git objects are not here: an object's blob id is its oid (`objects`).
+//! Every table forge keeps, declared once: the records, the indexes over
+//! them and the counters. Git objects are not here: an object's blob id is
+//! its oid (`objects`). People are [`Party`]s: an account, or a key that
+//! holds none.
 
 use std::collections::BTreeMap;
 
@@ -6,7 +9,7 @@ use abi::{Refusal, reason};
 use gitcore::{Hash, Oid};
 use store::{Item, Map, Reads, Set, Writes, invalid, not_found};
 
-use crate::contract::{Bounds, Change, Repo, Review, Revision, valid_repo_name};
+use crate::contract::{Bounds, Change, Party, Repo, Review, Revision, valid_repo_name};
 use crate::objects::hash_of;
 
 /// The bounds forge was founded with.
@@ -14,22 +17,22 @@ const BOUNDS: Item<Bounds> = Item::new("bounds");
 /// One record per repository, by name.
 const REPOS: Map<String, Repo> = Map::new("p/");
 /// Index: every repository by its last activity, newest first.
-pub const ACTIVITY: Set<(u64, String)> = Set::new("a/");
-/// The keys the owner granted writes to, by repository.
-pub const WRITERS: Set<(String, Vec<u8>)> = Set::new("w/");
+pub(crate) const ACTIVITY: Set<(u64, String)> = Set::new("a/");
+/// The parties the owner granted writes to, by repository.
+pub(crate) const WRITERS: Set<(String, Party)> = Set::new("w/");
 /// Each repository's refs and the oid bytes each points at.
-pub const REFS: Map<(String, Vec<u8>), Vec<u8>> = Map::new("r/");
+pub(crate) const REFS: Map<(String, Vec<u8>), Vec<u8>> = Map::new("r/");
 /// The last change number each repository gave out.
 const NUMBERS: Map<String, u64> = Map::new("n/");
 /// Changes by repository and number; a scan across repositories lists them
 /// by name (Judgment pages this table whole).
-pub const CHANGES: Map<(String, u64), Change> = Map::new("c/");
+pub(crate) const CHANGES: Map<(String, u64), Change> = Map::new("c/");
 /// Reviews by repository, change number and review id.
-pub const REVIEWS: Map<(String, u64, u64), Review> = Map::new("v/");
-/// Index: the reviews one key submitted on one change, oldest first.
-pub const AUTHORED: Set<(String, u64, Vec<u8>, u64)> = Set::new("u/");
-/// Index: the changes a key authored, is asked to review, or reviewed.
-pub const INVOLVED: Set<(Vec<u8>, String, u64)> = Set::new("i/");
+pub(crate) const REVIEWS: Map<(String, u64, u64), Review> = Map::new("v/");
+/// Index: the reviews one party submitted on one change, oldest first.
+pub(crate) const AUTHORED: Set<(String, u64, Party, u64)> = Set::new("u/");
+/// Index: the changes a party authored, is asked to review, or reviewed.
+pub(crate) const INVOLVED: Set<(Party, String, u64)> = Set::new("i/");
 /// The last system message id forge posted into chat.
 const MESSAGES: Item<u64> = Item::new("system-message-seq");
 
@@ -81,8 +84,8 @@ pub fn repo_hash(repo: &Repo) -> Hash {
     hash_of(repo.hash)
 }
 
-pub fn is_writer(store: &impl Reads, name: &str, key: &[u8]) -> bool {
-    WRITERS.has(store, &(name.to_owned(), key.to_vec()))
+pub fn is_writer(store: &impl Reads, name: &str, party: &Party) -> bool {
+    WRITERS.has(store, &(name.to_owned(), party.clone()))
 }
 
 pub fn ref_key(name: &str, reference: &[u8]) -> (String, Vec<u8>) {
@@ -162,15 +165,28 @@ pub fn next_number(store: &impl Reads, name: &str) -> Result<u64, Refusal> {
     next(NUMBERS.get(store, &name.to_owned())?.unwrap_or(0))
 }
 
-/// The next id of a system line forge posts into chat.
+/// The id the next system line forge posts into chat takes, unclaimed.
+pub fn peek_message(store: &impl Reads) -> Result<String, Refusal> {
+    Ok(message_id(next_message_number(store)?))
+}
+
+/// Claims the next id of a system line forge posts into chat.
 pub fn next_message(store: &mut impl Writes) -> Result<String, Refusal> {
-    let n = MESSAGES
+    let n = next_message_number(store)?;
+    MESSAGES.put(store, &n);
+    Ok(message_id(n))
+}
+
+fn next_message_number(store: &impl Reads) -> Result<u64, Refusal> {
+    MESSAGES
         .get(store)?
         .unwrap_or(0)
         .checked_add(1)
-        .ok_or_else(|| Refusal::new(reason::EXHAUSTED, "system message counter exhausted"))?;
-    MESSAGES.put(store, &n);
-    Ok(format!("forge:{n:016x}"))
+        .ok_or_else(|| Refusal::new(reason::EXHAUSTED, "system message counter exhausted"))
+}
+
+fn message_id(n: u64) -> String {
+    format!("forge:{n:016x}")
 }
 
 /// A counter one step on, refused rather than wrapped.
@@ -193,36 +209,36 @@ pub fn save_change(store: &mut impl Writes, repo: &str, change: &Change) -> Resu
     match CHANGES.get(store, &row)? {
         None => NUMBERS.put(store, &repo.to_owned(), &change.n),
         Some(old) => {
-            let dropped: Vec<Vec<u8>> = old
+            let dropped: Vec<Party> = old
                 .reviewers
                 .into_iter()
-                .filter(|key| {
-                    !change.reviewers.contains(key)
-                        && *key != change.author
-                        && !has_reviewed(store, repo, change.n, key)
+                .filter(|party| {
+                    !change.reviewers.contains(party)
+                        && *party != change.author
+                        && !has_reviewed(store, repo, change.n, party)
                 })
                 .collect();
-            for key in dropped {
-                INVOLVED.remove(store, &(key, repo.to_owned(), change.n));
+            for party in dropped {
+                INVOLVED.remove(store, &(party, repo.to_owned(), change.n));
             }
         }
     }
-    for key in std::iter::once(&change.author).chain(&change.reviewers) {
-        involve(store, key, repo, change.n);
+    for party in std::iter::once(&change.author).chain(&change.reviewers) {
+        involve(store, party, repo, change.n);
     }
     CHANGES.put(store, &row, change);
     Ok(())
 }
 
-pub fn involve(store: &mut impl Writes, key: &[u8], repo: &str, n: u64) {
-    INVOLVED.insert(store, &(key.to_vec(), repo.to_owned(), n));
+pub fn involve(store: &mut impl Writes, party: &Party, repo: &str, n: u64) {
+    INVOLVED.insert(store, &(party.clone(), repo.to_owned(), n));
 }
 
-fn has_reviewed(store: &impl Reads, repo: &str, n: u64, key: &[u8]) -> bool {
+fn has_reviewed(store: &impl Reads, repo: &str, n: u64, party: &Party) -> bool {
     !store
         .scan(
             AUTHORED
-                .prefix_of(&(repo.to_owned(), n, key.to_vec()))
+                .prefix_of(&(repo.to_owned(), n, party.clone()))
                 .limit(1),
         )
         .is_empty()
@@ -256,7 +272,7 @@ mod tests {
             into: b"refs/heads/main".to_vec(),
             title: "t".into(),
             body: String::new(),
-            author: b"ada".to_vec(),
+            author: Party::Key(b"ada".to_vec()),
             state: ChangeState::Open,
             reviewers: Vec::new(),
             created_height: 1,

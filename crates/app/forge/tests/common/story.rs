@@ -1,4 +1,6 @@
-// The fixture story, natively: the same objects real git built through the harness (Ada, one fixed second, the same files), pushed as one op, then heights that move like the kernel's.
+//! The fixture story, natively: the same objects real git built through
+//! the harness (Ada, one fixed second, the same files), pushed as one op,
+//! then heights that move like the kernel's.
 
 use super::*;
 use forge::{ChangeFilter, Query, ReviewDraft, Revision, Verdict};
@@ -6,6 +8,9 @@ use gitcore::Tag;
 
 pub const REPO: &str = "project";
 pub const TESTER: &[u8] = b"tester";
+/// The story's accounts: the tester is account 1 and the reviewer 2; a
+/// talker in chat is 4. Every other key holds no account.
+pub const HELD: [(&[u8], u64); 3] = [(TESTER, 1), (b"reviewer", 2), (b"talker", 4)];
 
 /// One program over `MemorySandbox` with the kernel's height discipline: an
 /// op lands in a new block, whose queue (forge's chat emissions) is delivered
@@ -19,6 +24,9 @@ pub struct Rig {
 impl Rig {
     pub fn start(bounds: Bounds, hash: HashKind) -> Rig {
         let mut sandbox = MemorySandbox::default();
+        for (key, account) in HELD {
+            sandbox.hold(key, account);
+        }
         forge::init(&mut sandbox, &abi::encode(&bounds)).unwrap();
         let mut rig = Rig {
             sandbox,
@@ -33,15 +41,19 @@ impl Rig {
         rig
     }
 
-    pub fn env(&self) -> Env {
-        Env {
-            network: b"harness".to_vec(),
+    /// The frame the actor's next op runs in, its key resolved through
+    /// identity as the program resolves it.
+    pub fn frame(&self) -> Frame {
+        Frame {
+            party: self.sandbox.party(&self.actor),
             height: self.height,
             time: TIME,
-            me: "forge".into(),
-            origin: Origin::External(self.actor.clone()),
-            cause: Cause::Direct,
         }
+    }
+
+    /// Who `key` signs as.
+    pub fn party(&self, key: &[u8]) -> Party {
+        self.sandbox.party(key)
     }
 
     pub fn advance(&mut self) {
@@ -51,16 +63,29 @@ impl Rig {
         }
     }
 
-    // ponytail: no rollback on a refused op; the story never refuses one.
+    /// The actor's op in a new block; a refusal left forge's store as it was.
+    #[track_caller]
     pub fn execute(&mut self, op: &Op) -> Result<Vec<u8>, abi::Refusal> {
         self.advance();
-        let env = self.env();
-        forge::execute(&mut self.sandbox, &env, &abi::encode(op))?;
+        let frame = self.frame();
+        self.sandbox
+            .forge
+            .attempt(|store| forge::execute(store, &frame, op.clone()))?;
         Ok(self.sandbox.forge.take_output())
     }
 
+    /// The refusal of the actor's op, which left forge's store as it was.
+    #[track_caller]
+    pub fn refused(&mut self, op: &Op) -> abi::Refusal {
+        self.advance();
+        let frame = self.frame();
+        self.sandbox
+            .forge
+            .refused(|store| forge::execute(store, &frame, op.clone()))
+    }
+
     pub fn query(&self, query: &Query) -> Result<Vec<u8>, abi::Refusal> {
-        forge::query(&self.sandbox, &self.env(), &abi::encode(query))
+        forge::query(&self.sandbox, self.height, query.clone())
     }
 
     pub fn chat_execute(&mut self, party: chat::Party, msg: chat::Op) {
@@ -254,7 +279,7 @@ impl Story {
             into: b"refs/heads/main".to_vec(),
             title: title.into(),
             body: "The author's body.".into(),
-            reviewers: vec![b"reviewer".to_vec()],
+            reviewers: vec![Party::Account(2)],
         }
     }
 }

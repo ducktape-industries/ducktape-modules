@@ -1,4 +1,5 @@
-//! Read projections: paths and source text are bytes, exactly as Git stores them.
+//! Read projections: paths and source text are bytes, exactly as Git
+//! stores them.
 use borsh::{BorshDeserialize, BorshSerialize};
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq, BorshSerialize, BorshDeserialize)]

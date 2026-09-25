@@ -37,6 +37,45 @@ impl Memory {
         std::mem::take(&mut self.emissions)
     }
 
+    /// Runs `write` and, when it refuses, checks it left this store as it
+    /// found it: no state, blob, emission, event or output. The attack
+    /// check every program's harness shares: a rule checks before it
+    /// writes, so a refusal needs no rollback.
+    #[track_caller]
+    pub fn attempt<T>(
+        &mut self,
+        write: impl FnOnce(&mut Memory) -> Result<T, Refusal>,
+    ) -> Result<T, Refusal> {
+        let state = self.state.clone();
+        let blobs = self.blobs.clone();
+        let sent = (
+            self.output.clone(),
+            self.emissions.clone(),
+            self.events.clone(),
+        );
+        let result = write(self);
+        if result.is_err() {
+            assert_eq!(self.state, state, "a refused write changed state");
+            assert_eq!(self.blobs, blobs, "a refused write stored a blob");
+            let after = (
+                self.output.clone(),
+                self.emissions.clone(),
+                self.events.clone(),
+            );
+            assert_eq!(after, sent, "a refused write sent something");
+        }
+        result
+    }
+
+    /// [`Memory::attempt`] a write that must refuse: its refusal.
+    #[track_caller]
+    pub fn refused<T: std::fmt::Debug>(
+        &mut self,
+        write: impl FnOnce(&mut Memory) -> Result<T, Refusal>,
+    ) -> Refusal {
+        self.attempt(write).expect_err("the write was refused")
+    }
+
     fn scan_state(&self, scan: &Scan) -> Vec<Entry> {
         let admitted = self
             .state

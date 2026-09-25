@@ -42,7 +42,7 @@ pub use abi::hex;
 pub use description::describe;
 pub use message::{Block, Mark, Span, parse_message};
 pub use ops::execute;
-pub use origin::execute_from;
+pub use origin::{execute_from, party_of};
 pub use party::{AccountNumber, Party};
 pub use queries::{query, roots_below};
 pub use store::{Cursor, Page, PageReply};

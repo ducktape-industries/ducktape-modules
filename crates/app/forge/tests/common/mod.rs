@@ -1,10 +1,11 @@
 #![allow(dead_code, unused_imports)]
-// The forge program end to end over MemorySandbox: founding, access, pushes in steps, advertisement, fetch, merge, sha256.
+//! The forge program end to end over MemorySandbox: founding, access,
+//! pushes in steps, advertisement, fetch, merge, sha256.
 
 pub use std::collections::{BTreeMap, BTreeSet};
 
 pub use abi::{Cause, Env, HashKind, Origin, reason};
-pub use forge::{Bounds, Op, Page, Query, Reply, Service, Settings};
+pub use forge::{Bounds, Frame, Op, Page, Party, Query, Reply, Service, Settings};
 pub use gitcore::wire::pktline::{self, Pkt, Reader};
 pub use gitcore::{
     Commit, Hash, Kind, Limits, MemoryObjects, Mode, Object, Objects, Oid, Signature, Tree,
@@ -55,13 +56,42 @@ pub fn founded() -> MemorySandbox {
     sandbox
 }
 
+/// A key as the party it signs as while it holds no account.
+pub fn key(key: &[u8]) -> Party {
+    Party::Key(key.to_vec())
+}
+
+/// The frame the program runs `actor`'s op in: the key resolved through
+/// identity, as the wasm program resolves it.
+pub fn frame(sandbox: &MemorySandbox, actor: &[u8]) -> Frame {
+    Frame {
+        party: sandbox.party(actor),
+        height: 1,
+        time: TIME,
+    }
+}
+
+/// `actor`'s op; a refusal left forge's store as it was.
+#[track_caller]
 pub fn act(sandbox: &mut MemorySandbox, actor: &[u8], op: &Op) -> Result<Vec<u8>, abi::Refusal> {
-    forge::execute(sandbox, &env(actor), &abi::encode(op))?;
+    let frame = frame(sandbox, actor);
+    sandbox
+        .forge
+        .attempt(|store| forge::execute(store, &frame, op.clone()))?;
     Ok(sandbox.forge.take_output())
 }
 
+/// The refusal of `actor`'s op, which left forge's store as it was.
+#[track_caller]
+pub fn refused(sandbox: &mut MemorySandbox, actor: &[u8], op: &Op) -> abi::Refusal {
+    let frame = frame(sandbox, actor);
+    sandbox
+        .forge
+        .refused(|store| forge::execute(store, &frame, op.clone()))
+}
+
 pub fn ask(sandbox: &MemorySandbox, query: &Query) -> Result<Vec<u8>, abi::Refusal> {
-    forge::query(sandbox, &env(OWNER), &abi::encode(query))
+    forge::query(sandbox, 1, query.clone())
 }
 
 pub fn create(sandbox: &mut MemorySandbox, name: &str, hash: HashKind) {

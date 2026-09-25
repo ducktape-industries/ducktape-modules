@@ -1,4 +1,5 @@
-//! Structured hunks are built from git::diff's edit ranges, never parsed from patch text.
+//! Structured hunks are built from git::diff's edit ranges, never parsed
+//! from patch text.
 use crate::contract::*;
 use crate::ops::cap;
 use crate::reads::{Reading, entry_kind};
@@ -37,51 +38,13 @@ pub fn query<S: Reads>(
     })
 }
 
+/// One side of a file change: its mode and blob.
+type Side = Option<(Mode, Oid)>;
+
 fn file<S: Reads>(r: &Reading<'_, S>, c: &diff::Change) -> Result<FileDiff, Refusal> {
-    use diff::ChangeKind as K;
-    let (old, new, status) = match c.kind {
-        K::Added { mode, id } => (None, Some((mode, id)), FileStatus::Added),
-        K::Deleted { mode, id } => (Some((mode, id)), None, FileStatus::Deleted),
-        K::Modified {
-            old_mode,
-            new_mode,
-            old,
-            new,
-        } => (
-            Some((old_mode, old)),
-            Some((new_mode, new)),
-            if old_mode.is_file() != new_mode.is_file()
-                || (old_mode != new_mode && !old_mode.is_file())
-            {
-                FileStatus::TypeChanged
-            } else {
-                FileStatus::Modified
-            },
-        ),
-        K::ModeChanged {
-            old_mode,
-            new_mode,
-            id,
-        } => (
-            Some((old_mode, id)),
-            Some((new_mode, id)),
-            FileStatus::ModeChanged,
-        ),
-    };
-    let size = |item: Option<(Mode, Oid)>| -> Result<u64, Refusal> {
-        match item {
-            Some((Mode::Gitlink, _)) | None => Ok(0),
-            Some((_, id)) => {
-                let header = r.result(r.store.header(&id))?;
-                if header.kind != "blob" {
-                    return Err(invalid("tree leaf must name a blob"));
-                }
-                Ok(header.len)
-            }
-        }
-    };
-    let old_size = size(old)?;
-    let new_size = size(new)?;
+    let (old, new, status) = sides(&c.kind);
+    let old_size = size(r, old)?;
+    let new_size = size(r, new)?;
     let mut result = FileDiff {
         old_path: old.map(|_| c.path.clone()),
         new_path: new.map(|_| c.path.clone()),
@@ -97,11 +60,11 @@ fn file<S: Reads>(r: &Reading<'_, S>, c: &diff::Change) -> Result<FileDiff, Refu
         deletions: 0,
         hunks: Vec::new(),
     };
-    if [old, new]
+    let gitlink = [old, new]
         .into_iter()
         .flatten()
-        .any(|(m, _)| m == Mode::Gitlink)
-    {
+        .any(|(m, _)| m == Mode::Gitlink);
+    if gitlink {
         result.content = Content::Gitlink;
         return Ok(result);
     }
@@ -109,16 +72,13 @@ fn file<S: Reads>(r: &Reading<'_, S>, c: &diff::Change) -> Result<FileDiff, Refu
         result.content = Content::Oversize;
         return Ok(result);
     }
-    let read = |item: Option<(Mode, Oid)>| -> Result<Option<BlobView>, Refusal> {
-        item.map(|(_, id)| r.blob(&id, None)).transpose()
-    };
-    let old_blob = read(old)?;
-    let new_blob = read(new)?;
-    if [&old_blob, &new_blob]
+    let read = |side: Side| side.map(|(_, id)| r.blob(&id, None)).transpose();
+    let (old_blob, new_blob) = (read(old)?, read(new)?);
+    let binary = [&old_blob, &new_blob]
         .into_iter()
         .flatten()
-        .any(|b| b.content == Content::Binary)
-    {
+        .any(|b| b.content == Content::Binary);
+    if binary {
         result.content = Content::Binary;
         return Ok(result);
     }
@@ -132,90 +92,133 @@ fn file<S: Reads>(r: &Reading<'_, S>, c: &diff::Change) -> Result<FileDiff, Refu
     Ok(result)
 }
 
-fn hunks(old: &[u8], new: &[u8], cost: usize) -> gitcore::Result<Vec<DiffHunk>> {
-    let a = diff::split_lines(old);
-    let b = diff::split_lines(new);
-    let edits = diff::lines(old, new, cost)?;
-    let mut rows = Vec::new();
-    for edit in edits {
-        match edit.op {
-            diff::Op::Equal => {
-                for (i, j) in edit.old.zip(edit.new) {
-                    rows.push((
-                        i,
-                        j,
-                        DiffLine {
-                            kind: LineKind::Context,
-                            old_line: Some(i as u64 + 1),
-                            new_line: Some(j as u64 + 1),
-                            bytes: a[i].to_vec(),
-                        },
-                    ));
-                }
+/// A change's old and new sides, and what kind of change it is.
+fn sides(kind: &diff::ChangeKind) -> (Side, Side, FileStatus) {
+    use diff::ChangeKind as K;
+    match *kind {
+        K::Added { mode, id } => (None, Some((mode, id)), FileStatus::Added),
+        K::Deleted { mode, id } => (Some((mode, id)), None, FileStatus::Deleted),
+        K::Modified {
+            old_mode,
+            new_mode,
+            old,
+            new,
+        } => {
+            let retyped = old_mode.is_file() != new_mode.is_file()
+                || (old_mode != new_mode && !old_mode.is_file());
+            let status = if retyped {
+                FileStatus::TypeChanged
+            } else {
+                FileStatus::Modified
+            };
+            (Some((old_mode, old)), Some((new_mode, new)), status)
+        }
+        K::ModeChanged {
+            old_mode,
+            new_mode,
+            id,
+        } => (
+            Some((old_mode, id)),
+            Some((new_mode, id)),
+            FileStatus::ModeChanged,
+        ),
+    }
+}
+
+/// A side's blob size; a gitlink or an absent side has none.
+fn size<S: Reads>(r: &Reading<'_, S>, side: Side) -> Result<u64, Refusal> {
+    match side {
+        Some((Mode::Gitlink, _)) | None => Ok(0),
+        Some((_, id)) => {
+            let header = r.result(r.store.header(&id))?;
+            if header.kind != "blob" {
+                return Err(invalid("tree leaf must name a blob"));
             }
-            diff::Op::Delete => {
-                for i in edit.old {
-                    rows.push((
-                        i,
-                        edit.new.start,
-                        DiffLine {
-                            kind: LineKind::Deleted,
-                            old_line: Some(i as u64 + 1),
-                            new_line: None,
-                            bytes: a[i].to_vec(),
-                        },
-                    ));
-                }
-            }
-            diff::Op::Insert => {
-                for j in edit.new {
-                    rows.push((
-                        edit.old.start,
-                        j,
-                        DiffLine {
-                            kind: LineKind::Added,
-                            old_line: None,
-                            new_line: Some(j as u64 + 1),
-                            bytes: b[j].to_vec(),
-                        },
-                    ));
-                }
-            }
+            Ok(header.len)
         }
     }
+}
+
+/// A diff line at its (old, new) row position.
+type Row = (usize, usize, DiffLine);
+
+/// Lines of context kept around each change.
+const CONTEXT: usize = 3;
+
+fn hunks(old: &[u8], new: &[u8], cost: usize) -> gitcore::Result<Vec<DiffHunk>> {
+    let rows = rows(old, new, cost)?;
+    Ok(groups(&rows)
+        .into_iter()
+        .map(|(start, end)| hunk(&rows, start, end))
+        .collect())
+}
+
+/// Every line of both sides, in order, as context, deleted or added.
+fn rows(old: &[u8], new: &[u8], cost: usize) -> gitcore::Result<Vec<Row>> {
+    let a = diff::split_lines(old);
+    let b = diff::split_lines(new);
+    let line = |kind, old: Option<usize>, new: Option<usize>, bytes: &[u8]| DiffLine {
+        kind,
+        old_line: old.map(|i| i as u64 + 1),
+        new_line: new.map(|j| j as u64 + 1),
+        bytes: bytes.to_vec(),
+    };
+    let mut rows = Vec::new();
+    for edit in diff::lines(old, new, cost)? {
+        match edit.op {
+            diff::Op::Equal => rows.extend(
+                edit.old
+                    .zip(edit.new)
+                    .map(|(i, j)| (i, j, line(LineKind::Context, Some(i), Some(j), a[i]))),
+            ),
+            diff::Op::Delete => rows.extend(edit.old.map(|i| {
+                let at = edit.new.start;
+                (i, at, line(LineKind::Deleted, Some(i), None, a[i]))
+            })),
+            diff::Op::Insert => rows.extend(edit.new.map(|j| {
+                let at = edit.old.start;
+                (at, j, line(LineKind::Added, None, Some(j), b[j]))
+            })),
+        }
+    }
+    Ok(rows)
+}
+
+/// The row ranges each hunk covers: every change with its context, ranges
+/// that touch merged.
+fn groups(rows: &[Row]) -> Vec<(usize, usize)> {
     let mut groups: Vec<(usize, usize)> = Vec::new();
     for (i, (_, _, line)) in rows.iter().enumerate() {
         if line.kind == LineKind::Context {
             continue;
         }
-        let start = i.saturating_sub(3);
-        let end = (i + 4).min(rows.len());
+        let start = i.saturating_sub(CONTEXT);
+        let end = (i + CONTEXT + 1).min(rows.len());
         if let Some(last) = groups.last_mut().filter(|last| start <= last.1) {
             last.1 = end;
         } else {
             groups.push((start, end));
         }
     }
-    Ok(groups
-        .into_iter()
-        .map(|(start, end)| {
-            let lines: Vec<_> = rows[start..end]
-                .iter()
-                .map(|(_, _, line)| line.clone())
-                .collect();
-            let old_count = lines.iter().filter(|l| l.old_line.is_some()).count() as u64;
-            let new_count = lines.iter().filter(|l| l.new_line.is_some()).count() as u64;
-            DiffHunk {
-                old: LineRange {
-                    start: rows[start].0 as u64 + u64::from(old_count != 0),
-                    count: old_count,
-                },
-                new: LineRange {
-                    start: rows[start].1 as u64 + u64::from(new_count != 0),
-                    count: new_count,
-                },
-                lines,
-            }
-        })
-        .collect())
+    groups
+}
+
+fn hunk(rows: &[Row], start: usize, end: usize) -> DiffHunk {
+    let lines: Vec<_> = rows[start..end]
+        .iter()
+        .map(|(_, _, line)| line.clone())
+        .collect();
+    let old_count = lines.iter().filter(|l| l.old_line.is_some()).count() as u64;
+    let new_count = lines.iter().filter(|l| l.new_line.is_some()).count() as u64;
+    DiffHunk {
+        old: LineRange {
+            start: rows[start].0 as u64 + u64::from(old_count != 0),
+            count: old_count,
+        },
+        new: LineRange {
+            start: rows[start].1 as u64 + u64::from(new_count != 0),
+            count: new_count,
+        },
+        lines,
+    }
 }

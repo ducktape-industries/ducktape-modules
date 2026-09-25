@@ -1,50 +1,39 @@
-// The query path: one height-bearing borsh `Reply` for the screens, or git's own bytes for a git client.
+//! The query path: one height-bearing borsh `Reply` for the screens, or
+//! git's own bytes for a git client.
 
-use abi::{Env, Refusal};
+use abi::Refusal;
 use gitcore::wire::receive::advertise_refs;
 use gitcore::wire::smart_http_service_header;
 use gitcore::wire::upload::{
     Command, capability_advertisement, fetch, ls_refs_response, parse_command,
 };
-use store::{Listing, Reads, decoded, invalid, stale};
+use store::{Listing, Reads, stale};
 
 use crate::contract::*;
 use crate::objects::ObjectStore;
-use crate::ops::{PROGRAM, cap, refusal_of};
+use crate::ops::{cap, refusal_of};
 use crate::state::{
     ACTIVITY, REFS, WRITERS, load_bounds, load_refs, load_repo, repo_hash, storage,
 };
+use crate::{change_queries, reads};
 
 const AGENT: &[u8] = b"ducktape-forge";
 
 /// A UI query's response bytes (one `Reply`), or a git protocol query's raw
 /// git bytes; a refusal is `Err` through the ABI like any program's.
-pub fn query(store: &impl Reads, env: &Env, request: &[u8]) -> Result<Vec<u8>, Refusal> {
-    let query: Query = decoded(PROGRAM, "Query", request)?;
-    match &query {
-        Query::Advertise { repo, service } => advertise(store, repo, *service),
-        Query::Upload { repo, request } => upload(store, repo, request),
-        _ => Ok(abi::encode(&answer(store, env.height, &query)?)),
-    }
-}
-
-fn answer(store: &impl Reads, height: u64, query: &Query) -> Result<Reply, Refusal> {
+pub fn query(store: &impl Reads, height: u64, query: Query) -> Result<Vec<u8>, Refusal> {
     let bounds = load_bounds(store)?;
-    let listing = query
-        .page()
-        .map(|page| listing(page.bounded(bounds.page_size as u64), query, height))
-        .transpose()?;
-    let paged = || {
-        listing
-            .as_ref()
-            .ok_or_else(|| invalid("this query has no page"))
-    };
-    Ok(match query {
-        Query::Repos { .. } => Reply::Repos {
+    let scope = query.scope();
+    let listing =
+        |page: &Page| listing(page.bounded(bounds.page_size as u64), scope.clone(), height);
+    let reply = match &query {
+        Query::Advertise { repo, service } => return advertise(store, repo, *service),
+        Query::Upload { repo, request } => return upload(store, repo, request),
+        Query::Repos { page } => Reply::Repos {
             height,
-            page: repos(store, paged()?)?,
+            page: repos(store, &listing(page)?)?,
         },
-        Query::Repo { repo, .. } => Reply::Repo {
+        Query::Repo { repo, page } => Reply::Repo {
             height,
             repo: RepoInfo {
                 name: repo.clone(),
@@ -52,22 +41,59 @@ fn answer(store: &impl Reads, height: u64, query: &Query) -> Result<Reply, Refus
             },
             bounds,
             writers: WRITERS
-                .page_of(store, &repo.clone(), paged()?)?
-                .map(|(_, key)| key),
+                .page_of(store, repo, &listing(page)?)?
+                .map(|(_, party)| party),
         },
-        Query::Refs { repo, .. } => Reply::Refs {
+        Query::Refs { repo, page } => Reply::Refs {
             height,
-            page: refs(store, repo, paged()?)?,
+            page: refs(store, repo, &listing(page)?)?,
         },
         Query::Activity { repo } => Reply::Activity {
             height,
             last_height: load_repo(store, repo)?.last_activity,
         },
-        Query::Changes { .. } | Query::Change { .. } | Query::Judgment { .. } => {
-            crate::change_queries::answer(store, height, query, paged()?)?
+        Query::Log { repo, from, page } => {
+            reads::log(store, height, &bounds, repo, from, &listing(page)?)?
         }
-        _ => crate::reads::answer(store, height, query, &bounds, listing.as_ref())?,
-    })
+        Query::Tree {
+            repo,
+            at,
+            path,
+            page,
+        } => reads::tree(store, height, &bounds, repo, at, path, &listing(page)?)?,
+        Query::Blob { repo, oid, range } => reads::blob(store, height, &bounds, repo, oid, *range)?,
+        Query::Diff {
+            repo,
+            base,
+            head,
+            path,
+            page,
+        } => reads::diff(
+            store,
+            height,
+            &bounds,
+            repo,
+            base,
+            head,
+            path.as_deref(),
+            &listing(page)?,
+        )?,
+        Query::Compare { repo, from, into } => {
+            reads::comparison(store, height, &bounds, repo, from, into)?
+        }
+        Query::Changes { repo, filter, page } => Reply::Changes {
+            height,
+            page: change_queries::changes(store, repo, filter, &listing(page)?)?,
+        },
+        Query::Change { repo, n, page } => {
+            change_queries::change(store, height, repo, *n, &listing(page)?)?
+        }
+        Query::Judgment { party, page } => Reply::Judgment {
+            height,
+            page: change_queries::judgment(store, party, &listing(page)?)?,
+        },
+    };
+    Ok(abi::encode(&reply))
 }
 
 /// Repositories, the most recently active first.
@@ -95,8 +121,8 @@ fn refs(store: &impl Reads, name: &str, listing: &Listing) -> Result<PageReply<R
 
 /// A forge listing can be rewritten by a push, so a cursor is good for the
 /// height that answered it and no other.
-fn listing(page: Page, query: &Query, height: u64) -> Result<Listing, Refusal> {
-    let listing = page.listing(query.scope(), height)?;
+fn listing(page: Page, scope: Vec<u8>, height: u64) -> Result<Listing, Refusal> {
+    let listing = page.listing(scope, height)?;
     if listing.cursor_height.is_some_and(|h| h != height) {
         return Err(stale("cursor height changed; restart the listing"));
     }

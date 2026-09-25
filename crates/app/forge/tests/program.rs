@@ -14,18 +14,21 @@ fn founding_requires_bounds_and_ops_require_a_signer() {
     );
     forge::init(&mut sandbox, &abi::encode(&bounds())).unwrap();
 
-    let by_system = forge::execute(
-        &mut sandbox,
-        &Env {
-            origin: Origin::System,
-            ..env(OWNER)
-        },
-        &abi::encode(&Op::Create {
-            repo: "r".into(),
-            hash: HashKind::Sha1,
-        }),
-    );
-    assert_eq!(by_system.unwrap_err().reason, reason::UNAUTHORIZED);
+    let create = Op::Create {
+        repo: "r".into(),
+        hash: HashKind::Sha1,
+    };
+    for party in [Party::System, Party::Module("chat".into())] {
+        let frame = Frame {
+            party,
+            height: 1,
+            time: TIME,
+        };
+        let refusal = sandbox
+            .forge
+            .refused(|store| forge::execute(store, &frame, create.clone()));
+        assert_eq!(refusal.reason, reason::UNAUTHORIZED);
+    }
 }
 
 #[test]
@@ -72,7 +75,7 @@ fn create_names_an_owner_and_refuses_bad_or_taken_names() {
     let repos = page.items;
     assert_eq!(repos.len(), 1);
     assert_eq!(repos[0].name, "project");
-    assert_eq!(repos[0].repo.owner, OWNER);
+    assert_eq!(repos[0].repo.owner, key(OWNER));
     assert_eq!(repos[0].repo.settings, Settings::default());
 }
 
@@ -119,7 +122,7 @@ fn only_the_owner_and_granted_writers_push() {
         STRANGER,
         &Op::Grant {
             repo: "project".into(),
-            key: WRITER.to_vec(),
+            party: key(WRITER),
         },
     );
     assert_eq!(grant_by_stranger.unwrap_err().reason, reason::UNAUTHORIZED);
@@ -129,7 +132,7 @@ fn only_the_owner_and_granted_writers_push() {
         OWNER,
         &Op::Grant {
             repo: "project".into(),
-            key: WRITER.to_vec(),
+            party: key(WRITER),
         },
     )
     .unwrap();
@@ -141,7 +144,7 @@ fn only_the_owner_and_granted_writers_push() {
         OWNER,
         &Op::Revoke {
             repo: "project".into(),
-            key: WRITER.to_vec(),
+            party: key(WRITER),
         },
     )
     .unwrap();
