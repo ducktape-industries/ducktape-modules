@@ -9,7 +9,7 @@ use ducktape_view_guest::view::Submit;
 use ducktape_view_guest::{Context, Window};
 
 use crate::api::{ChatApi, SubmitForge};
-use crate::state::{ChangeForm, Forge, NewRepo, Pending, Progress, change_key, unhex};
+use crate::state::{ChangeForm, Forge, NewRepo, Pending, Progress, change_key};
 use forge::{Mergeability, Op, Revision, Settings, valid_repo_name};
 
 /// Why a change cannot merge from this view.
@@ -76,9 +76,10 @@ impl Forge {
         };
         let name = form.name.trim().to_owned();
         if !valid_repo_name(&name) {
-            form.error =
-                "A repository name is 1–37 bytes of letters, digits, dot, dash or underscore"
-                    .into();
+            form.error = format!(
+                "A repository name is 1–{} bytes of letters, digits, dot, dash or underscore",
+                forge::MAX_REPO_NAME
+            );
             cx.notify();
             return;
         }
@@ -278,12 +279,7 @@ impl Forge {
             .as_ref()
             .map(|form| form.grant.trim().to_owned())
             .unwrap_or_default();
-        let key = unhex(&typed).or_else(|| {
-            let names = self.names.ready()?;
-            let number = chat::Party::parse(&typed)?.account()?;
-            names.key_of(number)
-        });
-        let Some(key) = key else {
+        let Some(party) = chat::Party::parse(&typed) else {
             self.notice = "Grant takes an account number or a key in hex".into();
             cx.notify();
             return;
@@ -292,17 +288,17 @@ impl Forge {
             form.grant.clear();
         }
         self.submit(
-            Op::Grant { repo, key },
+            Op::Grant { repo, party },
             "settings".into(),
             "Granting write access",
             cx,
         );
     }
 
-    pub(crate) fn revoke(&mut self, key: Vec<u8>, cx: &mut Context<Self>) {
+    pub(crate) fn revoke(&mut self, party: chat::Party, cx: &mut Context<Self>) {
         let repo = self.repo_name();
         self.submit(
-            Op::Revoke { repo, key },
+            Op::Revoke { repo, party },
             "settings".into(),
             "Revoking write access",
             cx,

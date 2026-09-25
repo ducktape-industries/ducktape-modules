@@ -4,6 +4,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 
 pub use crate::read_contract::*;
 pub use crate::review_contract::*;
+pub use chat::{Frame, Party};
 pub use store::{Page, PageReply};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
@@ -46,7 +47,9 @@ impl Default for Settings {
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct Repo {
     pub hash: HashKind,
-    pub owner: Vec<u8>,
+    /// The person who created the repository: an account, or a key that
+    /// holds none.
+    pub owner: Party,
     pub settings: Settings,
     pub refs_count: u64,
     pub last_activity: u64,
@@ -62,13 +65,15 @@ pub enum Op {
         repo: String,
         settings: Settings,
     },
+    /// Lets a person push, merge and close: an account (all its keys), or
+    /// a key that holds no account.
     Grant {
         repo: String,
-        key: Vec<u8>,
+        party: Party,
     },
     Revoke {
         repo: String,
-        key: Vec<u8>,
+        party: Party,
     },
     Push {
         repo: String,
@@ -90,14 +95,14 @@ pub enum Op {
         into: Vec<u8>,
         title: String,
         body: String,
-        reviewers: Vec<Vec<u8>>,
+        reviewers: Vec<Party>,
     },
     ChangeEdit {
         repo: String,
         n: u64,
         title: Option<String>,
         body: Option<String>,
-        reviewers: Option<Vec<Vec<u8>>>,
+        reviewers: Option<Vec<Party>>,
     },
     ChangeClose {
         repo: String,
@@ -139,7 +144,8 @@ pub enum Query {
     Repos {
         page: Page,
     },
-    /// Settings plus a page of granted keys; the owner is on the repo record.
+    /// Settings plus a page of granted writers; the owner is on the repo
+    /// record.
     Repo {
         repo: String,
         page: Page,
@@ -198,8 +204,9 @@ pub enum Query {
         n: u64,
         page: Page,
     },
+    /// What one person owes across every repository.
     Judgment {
-        key: Vec<u8>,
+        party: Party,
         page: Page,
     },
 }
@@ -267,6 +274,9 @@ pub struct RefInfo {
     pub target: String,
 }
 
+/// One read's answer. A reply is decoded once and read in place, so its
+/// widest variant (a whole change record) is not boxed.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Reply {
     Repos {
@@ -277,7 +287,7 @@ pub enum Reply {
         height: u64,
         repo: RepoInfo,
         bounds: Bounds,
-        writers: PageReply<Vec<u8>>,
+        writers: PageReply<Party>,
     },
     Refs {
         height: u64,
@@ -348,7 +358,7 @@ pub enum OpReply {
 }
 
 pub const MAX_REPO_NAME: usize = 37; // forge:<repo>:<u64> fits chat's 64-byte id.
-/// The longest signing key a writer or reviewer is named by (a BLS key is 96).
+/// The longest key a bare-key party is named by (a BLS key is 96).
 pub const MAX_KEY_BYTES: usize = 128;
 
 pub fn valid_repo_name(name: &str) -> bool {

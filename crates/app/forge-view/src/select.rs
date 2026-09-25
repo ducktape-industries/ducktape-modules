@@ -1,6 +1,5 @@
 //! What the screens read out of the view: the replies that have landed,
 //! picked by the query that asked them, and the reader's own identity.
-use ducktape_view_guest::design;
 use ducktape_view_guest::host::Refusal;
 use ducktape_view_guest::view::Loaded;
 
@@ -73,7 +72,7 @@ impl Forge {
         }
     }
 
-    pub(crate) fn repo(&self) -> Option<(&RepoInfo, &Bounds, &PageReply<Vec<u8>>)> {
+    pub(crate) fn repo(&self) -> Option<(&RepoInfo, &Bounds, &PageReply<Party>)> {
         match self.ready(&self.repo_query())? {
             Reply::Repo {
                 repo,
@@ -208,31 +207,19 @@ impl Forge {
         })
     }
 
-    /// The reader's signing key, joined from the roster: `host.session` names
-    /// an account and forge is keyed by keys.
-    pub(crate) fn me_key(&self) -> Option<Vec<u8>> {
-        self.names.ready()?.key_of(self.my_account()?)
-    }
-
     /// The parties chat marks as the reader's own: at most one.
     pub(crate) fn viewer(&self) -> Vec<Party> {
         self.me_party().into_iter().collect()
     }
 
-    /// What a raw forge key is called: its account name once the roster
-    /// has landed, its short hex until then (or when it holds none).
-    pub(crate) fn key_name(&self, key: &[u8]) -> String {
-        match self.names.ready() {
-            Some(names) => names.key(key),
-            None => design::short_hex(&abi::hex(key)),
-        }
-    }
-
-    /// What a chat author is called.
+    /// What a person or chat author is called: their account name once
+    /// the roster has landed.
     pub(crate) fn party_name(&self, party: &Party) -> String {
-        match self.names.ready() {
-            Some(names) => names.party(party),
-            None => crate::state::unnamed(party),
+        match (party, self.names.ready()) {
+            // forge's own lines in a change's channel
+            (Party::System, _) => "Forge".into(),
+            (_, Some(names)) => names.member(party),
+            (_, None) => chat::view::unnamed(party),
         }
     }
 

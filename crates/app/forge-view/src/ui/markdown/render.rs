@@ -13,6 +13,9 @@ use super::parse::{Block, Text, parse};
 use crate::ui::components::id;
 use crate::ui::highlight;
 
+/// A list item's marker column: room for a two-digit number and its dot.
+const LIST_MARKER_W: Pixels = px(18.);
+
 /// What a pressed link does, given its raw destination.
 pub(crate) type OnLink = Rc<dyn Fn(&String, &mut Window, &mut App)>;
 
@@ -122,7 +125,7 @@ fn column(name: &str, blocks: &[Block], theme: &Theme, on_link: &OnLink) -> Stat
                 .gap_2()
                 .child(
                     div()
-                        .min_w(px(18.))
+                        .min_w(LIST_MARKER_W)
                         .text_color(theme.muted)
                         .font_family(design::fonts::FAMILY_MONO)
                         .text_size(design::text::SECONDARY)

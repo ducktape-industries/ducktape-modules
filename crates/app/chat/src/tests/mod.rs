@@ -32,13 +32,18 @@ impl Chat {
         chat
     }
 
-    fn run(&mut self, who: &Party, op: Op) -> Result<(), abi::Refusal> {
+    /// The frame of the next block.
+    fn next(&mut self, who: &Party) -> crate::Frame {
         self.height += 1;
-        let frame = crate::Frame {
+        crate::Frame {
             party: who.clone(),
             height: self.height,
             time: self.height * 1000,
-        };
+        }
+    }
+
+    fn run(&mut self, who: &Party, op: Op) -> Result<(), abi::Refusal> {
+        let frame = self.next(who);
         execute(&mut self.store, &frame, op)
     }
 
@@ -52,10 +57,10 @@ impl Chat {
     /// The refusal's reason; the store is untouched by it.
     #[track_caller]
     fn refused(&mut self, who: &Party, op: Op) -> String {
-        let before = self.store.state.clone();
-        let refusal = self.run(who, op).expect_err("the op was refused");
-        assert_eq!(self.store.state, before, "a refused op wrote");
-        refusal.reason
+        let frame = self.next(who);
+        self.store
+            .refused(|store| execute(store, &frame, op))
+            .reason
     }
 
     fn post(&mut self, who: &Party, id: &str, text: &str, thread: Option<u64>) {

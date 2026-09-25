@@ -64,7 +64,7 @@ pub(crate) fn comments(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) ->
         }
     }
     for review in &reviews.items {
-        let author = forge.key_name(&review.author);
+        let author = forge.party_name(&review.author);
         for comment in &review.draft.comments {
             any = true;
             let path = comment.path.clone();
@@ -154,7 +154,7 @@ pub(crate) fn merge_status(forge: &Forge, theme: &Theme) -> AnyElement {
         column = column.child(quiet("Nobody was asked by name.", theme));
     }
     for key in &change.reviewers {
-        column = column.child(quiet(forge.key_name(key), theme));
+        column = column.child(quiet(forge.party_name(key), theme));
     }
     column
         .child(quiet(

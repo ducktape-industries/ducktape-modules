@@ -40,6 +40,17 @@ pub enum Party {
 }
 
 impl Party {
+    /// The party as a describe field shows it: an account, a key, a program.
+    pub fn value(&self) -> describe::Value {
+        use describe::Value;
+        match self {
+            Party::Account(number) => Value::Account(*number),
+            Party::Key(key) => Value::Key(key.clone()),
+            Party::Module(module) => Value::Program(module.clone()),
+            Party::System => Value::text("system"),
+        }
+    }
+
     /// The account this party is, if it is one.
     pub fn account(&self) -> Option<AccountNumber> {
         match self {

@@ -39,7 +39,7 @@ pub struct Forge {
     /// every read on screen, keyed by the query that asked it
     pub(crate) data: BTreeMap<Query, Loaded<Reply>>,
     #[serde(skip)]
-    pub(crate) names: Loaded<Names>,
+    pub(crate) names: Loaded<chat::view::Names>,
     #[serde(skip)]
     pub(crate) messages: BTreeMap<String, Loaded<Vec<chat::MsgRow>>>,
     #[serde(skip)]
@@ -322,7 +322,7 @@ pub(crate) struct ChangeForm {
     pub into: Vec<u8>,
     pub title: String,
     pub body: String,
-    pub reviewers: Vec<Vec<u8>>,
+    pub reviewers: Vec<chat::Party>,
     pub error: String,
 }
 
@@ -388,14 +388,23 @@ impl Default for Layout {
     }
 }
 
+/// The repositories rail and the Code tab's file tree, dragged, stay
+/// within these widths so the pane beside them stays usable.
+const TREE_MIN: f32 = 160.;
+const TREE_MAX: f32 = 480.;
+const FILES_MIN: f32 = 180.;
+const FILES_MAX: f32 = 640.;
+/// Under this window width the side panes fold away behind toggles.
+const NARROW_BELOW: f32 = 880.;
+
 impl Layout {
     /// A dragged pane keeps its neighbour usable.
     pub fn clamp(&mut self) {
-        self.tree = self.tree.clamp(160., 480.);
-        self.files = self.files.clamp(180., 640.);
+        self.tree = self.tree.clamp(TREE_MIN, TREE_MAX);
+        self.files = self.files.clamp(FILES_MIN, FILES_MAX);
     }
     pub fn narrow(&self) -> bool {
-        self.width < 880.
+        self.width < NARROW_BELOW
     }
     pub fn tree_visible(&self) -> bool {
         !self.narrow() || self.tree_open
@@ -405,64 +414,7 @@ impl Layout {
     }
 }
 
-/// The identity roster, folded to what a key or chat party is called.
-#[derive(Clone, Debug, Default)]
-pub(crate) struct Names {
-    rows: Vec<chat::AccountRow>,
-}
-
-impl Names {
-    pub fn new(rows: Vec<chat::AccountRow>) -> Self {
-        Self { rows }
-    }
-    pub fn rows(&self) -> &[chat::AccountRow] {
-        &self.rows
-    }
-    /// What a raw forge key is called, or its short hex.
-    pub fn key(&self, key: &[u8]) -> String {
-        let hex = abi::hex(key);
-        self.rows
-            .iter()
-            .find(|row| row.keys.iter().any(|held| held.eq_ignore_ascii_case(&hex)))
-            .map(|row| row.name.clone())
-            .unwrap_or_else(|| ducktape_view_guest::design::short_hex(&hex))
-    }
-    /// What a chat author is called.
-    pub fn party(&self, party: &chat::Party) -> String {
-        match party {
-            chat::Party::Account(number) => self
-                .rows
-                .iter()
-                .find(|row| row.number == *number)
-                .map_or_else(|| unnamed(party), |row| row.name.clone()),
-            chat::Party::Key(key) => self.key(key),
-            chat::Party::Module(_) | chat::Party::System => unnamed(party),
-        }
-    }
-    /// The signing key of an account number: `host.session` names no key, and
-    /// forge's filters and judgment are keyed by the exact key.
-    pub fn key_of(&self, number: u64) -> Option<Vec<u8>> {
-        let row = self.rows.iter().find(|row| row.number == number)?;
-        unhex(row.keys.first()?)
-    }
-}
-
-/// [`abi::unhex`], where the empty string is not a key either.
-pub(crate) fn unhex(text: &str) -> Option<Vec<u8>> {
-    abi::unhex(text).filter(|bytes| !bytes.is_empty())
-}
-
 /// The key a change's screens and drafts hang on.
 pub(crate) fn change_key(repo: &str, n: u64) -> String {
     format!("{repo}#{n}")
-}
-
-/// A chat author no roster names: its account number, its module, or Forge.
-pub fn unnamed(party: &chat::Party) -> String {
-    match party {
-        chat::Party::Account(number) => format!("account {number}"),
-        chat::Party::Key(key) => ducktape_view_guest::design::short_hex(&abi::hex(key)),
-        chat::Party::Module(module) => module.clone(),
-        chat::Party::System => "Forge".into(),
-    }
 }

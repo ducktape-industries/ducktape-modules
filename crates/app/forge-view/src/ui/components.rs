@@ -106,16 +106,16 @@ pub(crate) fn loading(id: impl Into<ElementId>, text: &str, theme: &Theme) -> An
         .into_any_element()
 }
 
-/// Under this many rows a list is drawn whole. Virtualization buys nothing
-/// at that size, and a renderer that has not sent a visible range yet — a
-/// headless screenshot, a first frame — still gets the screen.
+/// Under this many rows a list is drawn whole: a few hundred rows lay out
+/// in well under a frame, so virtualizing them buys nothing, and a list
+/// drawn whole needs no visible range from the renderer before its first
+/// frame shows every row.
 pub(crate) const VIRTUALIZE_ABOVE: usize = 200;
 
 /// A scrolling list of `count` rows. Over [`VIRTUALIZE_ABOVE`] it is virtual;
-/// at or under it the rows are drawn whole, because virtualization buys
-/// nothing at that size and a renderer that has not asked for a visible range
-/// yet — a first frame, a headless screenshot — would otherwise be handed the
-/// single measured row instead of the screen.
+/// at or under it the rows are drawn whole (see [`VIRTUALIZE_ABOVE`]): a
+/// virtual list's first frame, before the renderer names a visible range,
+/// holds only the one row it measured.
 pub(crate) fn rows(
     element_id: &str,
     count: usize,

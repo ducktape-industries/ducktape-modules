@@ -3,11 +3,10 @@
 //! hands the screen a single reply. A typed refusal becomes a `Refusal`, so
 //! the four states of a `Loaded` slot stay honest.
 use ducktape_view_guest::Host;
-use ducktape_view_guest::host::{Refusal, malformed};
+use ducktape_view_guest::host::{Refusal, pages, wrong_reply};
 use ducktape_view_guest::methods::Query as Ask;
 
 use crate::api::{Ask as Forge, ChatApi};
-use crate::state::Names;
 use forge::{Page, PageReply, Query, Reply};
 
 /// What one page asks for: 64 rows, from the start. A limit above the
@@ -17,22 +16,26 @@ pub(crate) const PAGE: Page = Page::first(64);
 /// it read and says more follows, rather than walking a repository forever.
 const MAX_PAGES: usize = 16;
 
-fn wrong_reply() -> Refusal {
-    malformed("the module answered another question".into())
-}
-
-/// One read of forge, `next` followed.
+/// One read of forge, `next` followed: the pages after the first fold into
+/// it.
 pub(crate) async fn fetch(host: Host, query: Query) -> Result<Reply, Refusal> {
     let mut reply = host.ask::<Forge>(query.clone()).await?;
-    for _ in 1..MAX_PAGES {
-        let Some(after) = next_cursor(&reply).cloned() else {
-            break;
-        };
-        let Some(query) = with_cursor(&query, after) else {
-            break;
-        };
-        let more = host.ask::<Forge>(query).await?;
-        extend(&mut reply, more);
+    let (more, _) = pages(next_cursor(&reply).cloned(), MAX_PAGES - 1, |after| {
+        let ask = after
+            .and_then(|after| with_cursor(&query, after))
+            .map(|query| host.ask::<Forge>(query));
+        async move {
+            let Some(ask) = ask else {
+                return Ok((Vec::new(), None));
+            };
+            let page = ask.await?;
+            let next = next_cursor(&page).cloned();
+            Ok((vec![page], next))
+        }
+    })
+    .await?;
+    for page in more {
+        extend(&mut reply, page);
     }
     Ok(reply)
 }
@@ -81,45 +84,26 @@ fn extend(into: &mut Reply, more: Reply) {
     }
 }
 
-/// The identity roster, through chat — the one method that already joins
-/// accounts, their names and the keys they hold.
-pub(crate) async fn roster(host: Host) -> Result<Names, Refusal> {
-    match host
-        .ask::<Ask<ChatApi>>(chat::Query::Accounts {
-            page: Page::first(256),
-        })
-        .await?
-    {
-        chat::Reply::Accounts(page) => Ok(Names::new(page.items)),
-        _ => Err(wrong_reply()),
-    }
-}
-
 /// A change's hidden channel, oldest first.
 pub(crate) async fn conversation(
     host: Host,
     channel_id: String,
     viewer: Vec<chat::Party>,
 ) -> Result<Vec<chat::MsgRow>, Refusal> {
-    let mut all: Vec<chat::MsgRow> = Vec::new();
-    let mut page = PAGE;
-    for _ in 0..MAX_PAGES {
-        let chat::Reply::Roots(roots) = host
-            .ask::<Ask<ChatApi>>(chat::Query::Roots {
-                channel_id: channel_id.clone(),
-                viewer: viewer.clone(),
-                page: page.clone(),
-            })
-            .await?
-        else {
-            return Err(wrong_reply());
-        };
-        all.extend(roots.items);
-        match roots.next {
-            Some(next) => page.after = Some(next),
-            None => break,
+    let (mut all, _) = pages(None, MAX_PAGES, |after| {
+        let ask = host.ask::<Ask<ChatApi>>(chat::Query::Roots {
+            channel_id: channel_id.clone(),
+            viewer: viewer.clone(),
+            page: Page { after, ..PAGE },
+        });
+        async move {
+            match ask.await? {
+                chat::Reply::Roots(roots) => Ok((roots.items, roots.next)),
+                _ => Err(wrong_reply()),
+            }
         }
-    }
-    all.sort_by_key(|row| row.seq);
+    })
+    .await?;
+    all.sort_by_key(|row: &chat::MsgRow| row.seq);
     Ok(all)
 }

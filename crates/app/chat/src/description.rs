@@ -6,12 +6,7 @@ use describe::{Description, Field, Value, field};
 use crate::{Op, Party, PostPolicy, dm_peers, plain_text};
 
 pub fn describe(op: &Op) -> Description {
-    let party = |party: &Party| match party {
-        Party::Account(number) => Value::Account(*number),
-        Party::Key(key) => Value::Key(key.clone()),
-        Party::Module(module) => Value::Program(module.clone()),
-        Party::System => Value::text("system"),
-    };
+    let party = Party::value;
     let seq = |seq: &u64| field("seq", Value::text(seq.to_string()));
     let (title, channel, fields) = match op {
         Op::CreateChannel {

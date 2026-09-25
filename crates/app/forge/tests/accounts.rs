@@ -1,0 +1,236 @@
+//! Forge names people by account: one person with two device keys is one
+//! owner, author, reviewer and writer; a key that holds no account is its
+//! own party. The system lines forge posts into chat name no one.
+
+mod common;
+use common::story::*;
+use common::*;
+use forge::{ChangeFilter, ChangeState, OpReply, Verdict};
+
+const LAPTOP: &[u8] = b"tester-laptop";
+const PHONE: &[u8] = b"reviewer-phone";
+
+fn story() -> (Rig, Story) {
+    let mut rig = Rig::start(bounds(), HashKind::Sha1);
+    rig.sandbox.hold(LAPTOP, 1);
+    rig.sandbox.hold(PHONE, 2);
+    let story = Story::pushed(&mut rig);
+    (rig, story)
+}
+
+fn as_key(rig: &mut Rig, key: &[u8], op: &Op) -> Vec<u8> {
+    rig.actor = key.to_vec();
+    let output = rig.execute(op).unwrap();
+    rig.actor = TESTER.to_vec();
+    output
+}
+
+fn reply(rig: &Rig, query: Query) -> Reply {
+    abi::decode(&rig.query(&query).unwrap()).unwrap()
+}
+
+fn record(rig: &Rig, n: u64) -> (forge::Change, Vec<forge::Review>) {
+    let Reply::Change {
+        change, reviews, ..
+    } = reply(rig, change(n))
+    else {
+        panic!()
+    };
+    (change, reviews.items)
+}
+
+fn owed(rig: &Rig, party: Party) -> Vec<(u64, bool)> {
+    let Reply::Judgment { page, .. } = reply(
+        rig,
+        Query::Judgment {
+            party,
+            page: Page::first(8),
+        },
+    ) else {
+        panic!()
+    };
+    page.items
+        .iter()
+        .map(|judgment| (judgment.change.n, judgment.requested))
+        .collect()
+}
+
+fn involving(rig: &Rig, party: Party) -> Vec<u64> {
+    let Reply::Changes { page, .. } = reply(
+        rig,
+        Query::Changes {
+            repo: REPO.into(),
+            filter: ChangeFilter {
+                involves: Some(party),
+                ..ChangeFilter::default()
+            },
+            page: Page::first(8),
+        },
+    ) else {
+        panic!()
+    };
+    page.items.iter().map(|summary| summary.n).collect()
+}
+
+#[test]
+fn one_person_with_two_keys_is_one_owner_author_and_reviewer() {
+    let (mut rig, story) = story();
+    let Reply::Repos { page, .. } = reply(
+        &rig,
+        Query::Repos {
+            page: Page::first(2),
+        },
+    ) else {
+        panic!()
+    };
+    assert_eq!(page.items[0].repo.owner, Party::Account(1));
+    as_key(
+        &mut rig,
+        LAPTOP,
+        &Op::Configure {
+            repo: REPO.into(),
+            settings: Settings::default(),
+        },
+    );
+
+    let output = as_key(&mut rig, LAPTOP, &story.open("From the laptop"));
+    let OpReply::Change { n, .. } = abi::decode(&output).unwrap() else {
+        panic!()
+    };
+    let retitle = Op::ChangeEdit {
+        repo: REPO.into(),
+        n,
+        title: Some("Edited from the desk".into()),
+        body: None,
+        reviewers: None,
+    };
+    rig.execute(&retitle).unwrap();
+    assert_eq!(record(&rig, n).0.author, Party::Account(1));
+    assert_eq!(involving(&rig, Party::Account(1)), [n]);
+
+    assert_eq!(owed(&rig, Party::Account(2)), [(n, true)]);
+    let approve = review(&story.feature, &story.root, Verdict::Approve);
+    as_key(&mut rig, PHONE, &approve);
+    as_key(&mut rig, b"reviewer", &approve);
+    let (_, reviews) = record(&rig, n);
+    assert!(reviews.iter().all(|r| r.author == Party::Account(2)));
+    assert_eq!(owed(&rig, Party::Account(2)), [], "reviewed at the head");
+    assert_eq!(involving(&rig, Party::Account(2)), [n]);
+
+    let close = Op::ChangeClose {
+        repo: REPO.into(),
+        n,
+    };
+    as_key(&mut rig, LAPTOP, &close);
+    assert_eq!(record(&rig, n).0.closed_by, Some(Party::Account(1)));
+}
+
+#[test]
+fn a_granted_account_writes_from_every_key_and_a_bare_key_only_from_itself() {
+    let (mut rig, story) = story();
+    rig.sandbox.hold(b"k1", 3);
+    rig.sandbox.hold(b"k2", 3);
+    rig.execute(&Op::Grant {
+        repo: REPO.into(),
+        party: Party::Account(3),
+    })
+    .unwrap();
+    let n = opened(&mut rig, &story);
+    as_key(
+        &mut rig,
+        b"k2",
+        &Op::ChangeClose {
+            repo: REPO.into(),
+            n,
+        },
+    );
+    assert_eq!(record(&rig, n).0.closed_by, Some(Party::Account(3)));
+
+    rig.execute(&Op::Grant {
+        repo: REPO.into(),
+        party: key(b"loose"),
+    })
+    .unwrap();
+    let n = opened(&mut rig, &story);
+    let close = Op::ChangeClose {
+        repo: REPO.into(),
+        n,
+    };
+    rig.actor = b"stray".to_vec();
+    assert_eq!(rig.refused(&close).reason, reason::UNAUTHORIZED);
+    rig.actor = b"loose".to_vec();
+    rig.execute(&close).unwrap();
+    assert_eq!(record(&rig, n).0.closed_by, Some(key(b"loose")));
+}
+
+#[test]
+fn an_ended_change_is_not_edited() {
+    let (mut rig, story) = story();
+    let n = opened(&mut rig, &story);
+    rig.execute(&Op::ChangeClose {
+        repo: REPO.into(),
+        n,
+    })
+    .unwrap();
+    assert_eq!(record(&rig, n).0.state, ChangeState::Closed);
+    let retitle = Op::ChangeEdit {
+        repo: REPO.into(),
+        n,
+        title: Some("Too late".into()),
+        body: None,
+        reviewers: None,
+    };
+    assert_eq!(rig.refused(&retitle).reason, reason::WRONG_STATE);
+}
+
+/// Each line is an event code in a `forge` block: no key, no name, no
+/// sentence. Who and what are on forge's records.
+#[test]
+fn system_lines_carry_an_event_code_and_no_name() {
+    let (mut rig, story) = story();
+    let n = opened(&mut rig, &story);
+    let approve = review(&story.feature, &story.root, Verdict::Approve);
+    as_key(&mut rig, PHONE, &approve);
+    rig.execute(&Op::ChangeClose {
+        repo: REPO.into(),
+        n,
+    })
+    .unwrap();
+    let lines: Vec<chat::Block> = rig
+        .sandbox
+        .forge
+        .emissions
+        .iter()
+        .filter_map(|message| match abi::decode(&message.payload).unwrap() {
+            chat::Op::PostMessage { blocks, .. } => Some(blocks),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    let code = |text: &str| chat::Block::Code {
+        lang: Some("forge".into()),
+        text: text.into(),
+    };
+    assert_eq!(lines, [code("closed")]);
+    let chat::Reply::Roots(page) = rig
+        .sandbox
+        .chat_query(chat::Query::Roots {
+            channel_id: format!("forge:{REPO}:{n}"),
+            viewer: Vec::new(),
+            page: Page::first(8),
+        })
+        .unwrap()
+    else {
+        panic!()
+    };
+    let texts: Vec<&str> = page.items.iter().map(|row| row.text.as_str()).collect();
+    assert_eq!(texts, ["review 1", "opened"], "delivered, newest first");
+}
+
+fn opened(rig: &mut Rig, story: &Story) -> u64 {
+    let output = rig.execute(&story.open("Feature")).unwrap();
+    let OpReply::Change { n, .. } = abi::decode(&output).unwrap() else {
+        panic!()
+    };
+    n
+}

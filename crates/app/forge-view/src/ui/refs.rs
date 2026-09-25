@@ -6,7 +6,7 @@ use ducktape_view_guest::prelude::*;
 use crate::Forge;
 use crate::ui::components::{badge, button, empty_state, id, quiet, ref_label, row, short_hex};
 use crate::ui::{pending, scroller, staged};
-use forge::{Mergeability, Query, Reply, Revision};
+use forge::{Mergeability, Query, RefInfo, Reply, Revision};
 
 pub(crate) fn render(
     forge: &Forge,
@@ -48,7 +48,81 @@ pub(crate) fn render(
             ))
             .into_any_element();
     }
-    let default = forge.default_head();
+    let mut list = scroller("forge-refs-list");
+    for info in &page.items {
+        list = list.child(ref_row(forge, info, head, cx, theme));
+    }
+    column
+        .child(list.children(forbidden(forge, theme)))
+        .into_any_element()
+}
+
+/// The ref name and target columns.
+const NAME_W: Pixels = px(200.);
+const TARGET_W: Pixels = px(100.);
+
+/// One ref: its name, kind, target and standing, and Compare for a branch
+/// other than the default head.
+fn ref_row(
+    forge: &Forge,
+    info: &RefInfo,
+    head: &[u8],
+    cx: &mut Context<Forge>,
+    theme: &Theme,
+) -> AnyElement {
+    let name = info.name.clone();
+    let label = ref_label(&name);
+    let tag = name.starts_with(b"refs/tags/");
+    let pick = cx.listener({
+        let name = name.clone();
+        move |forge, _: &ClickEvent, _, cx| forge.pick_ref(name.clone(), cx)
+    });
+    let start = cx.listener({
+        let name = name.clone();
+        move |forge, _: &ClickEvent, _, cx| forge.start_change(name.clone(), cx)
+    });
+    let mut line = row(id(format!("forge-ref-row-{label}")), theme)
+        .on_click(pick)
+        .selected(name == forge.head_name())
+        .cell(
+            div()
+                .w(NAME_W)
+                .truncate()
+                .child(crate::ui::bold(label.clone())),
+        )
+        .cell(badge(
+            id(format!("forge-ref-kind-{label}")),
+            if tag { "tag" } else { "branch" },
+            theme.muted,
+            theme.surface_raised,
+        ))
+        .cell(
+            div()
+                .w(TARGET_W)
+                .whitespace_nowrap()
+                .font_family(design::fonts::FAMILY_MONO)
+                .text_size(design::text::SECONDARY)
+                .text_color(theme.muted)
+                .child(short_hex(&info.target)),
+        )
+        .cell(standing(forge, &name, head, theme))
+        .cell(div().flex_1());
+    if name != forge.default_head() && !tag {
+        line = line.cell(
+            button(
+                id(format!("forge-compare-{label}")),
+                "Compare →",
+                theme,
+                start,
+            )
+            .enabled(forge.session.connected),
+        );
+    }
+    line.into_any_element()
+}
+
+/// What this repository's settings forbid, if anything.
+fn forbidden(forge: &Forge, theme: &Theme) -> Option<AnyElement> {
     let allow = forge
         .repo()
         .map(|(info, _, _)| {
@@ -58,73 +132,13 @@ pub(crate) fn render(
             )
         })
         .unwrap_or((false, false));
-    let mut list = scroller("forge-refs-list");
-    for info in &page.items {
-        let name = info.name.clone();
-        let label = ref_label(&name);
-        let tag = name.starts_with(b"refs/tags/");
-        let pick = cx.listener({
-            let name = name.clone();
-            move |forge, _: &ClickEvent, _, cx| forge.pick_ref(name.clone(), cx)
-        });
-        let start = cx.listener({
-            let name = name.clone();
-            move |forge, _: &ClickEvent, _, cx| forge.start_change(name.clone(), cx)
-        });
-        let mut line = row(id(format!("forge-ref-row-{label}")), theme)
-            .on_click(pick)
-            .selected(name == forge.head_name())
-            .cell(
-                div()
-                    .w(px(200.))
-                    .truncate()
-                    .child(crate::ui::bold(label.clone())),
-            )
-            .cell(badge(
-                id(format!("forge-ref-kind-{label}")),
-                if tag { "tag" } else { "branch" },
-                theme.muted,
-                theme.surface_raised,
-            ))
-            .cell(
-                div()
-                    .w(px(100.))
-                    .whitespace_nowrap()
-                    .font_family(design::fonts::FAMILY_MONO)
-                    .text_size(design::text::SECONDARY)
-                    .text_color(theme.muted)
-                    .child(short_hex(&info.target)),
-            )
-            .cell(standing(forge, &name, head, theme))
-            .cell(div().flex_1());
-        if name != default && !tag {
-            line = line.cell(
-                button(
-                    id(format!("forge-compare-{label}")),
-                    "Compare →",
-                    theme,
-                    start,
-                )
-                .enabled(forge.session.connected),
-            );
-        }
-        list = list.child(line);
-    }
-    if !allow.0 || !allow.1 {
-        list = list.child(quiet(
-            format!(
-                "This repository forbids {}.",
-                match allow {
-                    (false, false) => "force pushes and ref deletions",
-                    (false, true) => "force pushes",
-                    (true, false) => "ref deletions",
-                    (true, true) => "nothing",
-                }
-            ),
-            theme,
-        ));
-    }
-    column.child(list).into_any_element()
+    let what = match allow {
+        (false, false) => "force pushes and ref deletions",
+        (false, true) => "force pushes",
+        (true, false) => "ref deletions",
+        (true, true) => return None,
+    };
+    Some(quiet(format!("This repository forbids {what}."), theme))
 }
 
 /// Ahead/behind the default head, once the comparison for this ref lands.

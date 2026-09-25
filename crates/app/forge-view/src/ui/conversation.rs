@@ -12,6 +12,10 @@ use crate::ui::scroller;
 use ducktape_view_guest::view::Loaded;
 use forge::{ChangeState, Verdict};
 
+/// A review's body and comments start under its author's name, past the
+/// avatar and the gap beside it.
+const UNDER_NAME: Pixels = px(design::height::AVATAR as f32 + design::spacing::SM as f32);
+
 pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
     let Some((change, _, _, reviews)) = forge.change() else {
         return div().into_any_element();
@@ -47,7 +51,7 @@ pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
 /// One review as a timeline event: who, what they concluded, where, and
 /// the line comments it carried.
 fn review_card(forge: &Forge, review: &forge::Review, theme: &Theme) -> AnyElement {
-    let author = forge.key_name(&review.author);
+    let author = forge.party_name(&review.author);
     let outdated = forge.outdated(&review.draft.commit_oid);
     let comments = review.draft.comments.len();
     let mut card = div()
@@ -64,7 +68,7 @@ fn review_card(forge: &Forge, review: &forge::Review, theme: &Theme) -> AnyEleme
                 .flex_wrap()
                 .items_center()
                 .gap_2()
-                .child(design::avatar(&author, px(20.), theme))
+                .child(design::avatar(&author, design::size::AVATAR, theme))
                 .child(crate::ui::bold(author))
                 .child(badge(
                     id(format!("forge-review-verdict-{}", review.id)),
@@ -99,12 +103,12 @@ fn review_card(forge: &Forge, review: &forge::Review, theme: &Theme) -> AnyEleme
     if !review.draft.body.trim().is_empty() {
         card = card.child(
             div()
-                .pl(px(28.))
+                .pl(UNDER_NAME)
                 .child(quiet(review.draft.body.clone(), theme)),
         );
     }
     for comment in &review.draft.comments {
-        card = card.child(div().pl(px(28.)).child(quiet(
+        card = card.child(div().pl(UNDER_NAME).child(quiet(
             format!(
                 "{}:{} — {}",
                 path_text(&comment.path),
@@ -137,7 +141,7 @@ fn event(key: String, who: Option<String>, what: String, theme: &Theme) -> AnyEl
         .py_1()
         .when_some(who, |element, name| {
             element
-                .child(design::avatar(&name, px(20.), theme))
+                .child(design::avatar(&name, design::size::AVATAR, theme))
                 .child(crate::ui::bold(name))
         })
         .child(quiet(what, theme))
@@ -163,14 +167,14 @@ fn forge_line(
     }
     let key = row.message_id.clone();
     if opened {
-        let author = forge.key_name(&change.author);
+        let author = forge.party_name(&change.author);
         return Some(event(key, Some(author), "opened this change".into(), theme));
     }
     // a line matching no review yet may be one still paging in
     if reviews.next.is_some() {
         return None;
     }
-    let actor = |key: &Option<Vec<u8>>| key.as_ref().map(|key| forge.key_name(key));
+    let actor = |party: &Option<chat::Party>| party.as_ref().map(|party| forge.party_name(party));
     match (change.state, &change.merge_oid) {
         (ChangeState::Merged, Some(oid)) => Some(event(
             key,
@@ -243,7 +247,7 @@ fn messages(forge: &Forge, theme: &Theme) -> AnyElement {
                         .gap_2()
                         .p_2()
                         .bg(theme.surface)
-                        .child(design::avatar(&author, px(20.), theme))
+                        .child(design::avatar(&author, design::size::AVATAR, theme))
                         .child(
                             div()
                                 .flex()
@@ -276,7 +280,7 @@ fn composer(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement
         .items_center()
         .child(
             Input::new(id("forge-reply"))
-                .h(px(30.))
+                .h(design::size::CONTROL)
                 .flex_1()
                 .px_2()
                 .border_1()

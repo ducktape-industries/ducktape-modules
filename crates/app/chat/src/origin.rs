@@ -27,9 +27,10 @@ pub fn execute_from(store: &mut impl Writes, env: &Env, op: Op) -> Result<(), Re
     crate::execute(store, &frame, op)
 }
 
-/// Who an origin is to chat: a key is the account identity says holds it,
-/// or itself while it holds none (or identity is not deployed).
-pub(crate) fn party_of(store: &impl Reads, origin: &Origin) -> Result<Party, Refusal> {
+/// Who an origin is: a key is the account identity says holds it, or
+/// itself while it holds none (or identity is not deployed). Every program
+/// that names people by [`Party`] (chat, forge) resolves its signer here.
+pub fn party_of(store: &impl Reads, origin: &Origin) -> Result<Party, Refusal> {
     Ok(match origin {
         Origin::External(key) if key.is_empty() => {
             return Err(invalid("an external origin carries a key"));

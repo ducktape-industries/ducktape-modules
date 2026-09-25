@@ -9,12 +9,17 @@ use std::rc::Rc;
 use ducktape_view_guest::prelude::*;
 
 use crate::Forge;
+use crate::state::ReviewSession;
 use crate::ui::components::{badge, empty_state, id, path_text, quiet};
 use crate::ui::staged;
 use forge::{Content, FileDiff, FileStatus, LineKind, Query, Reply, Side};
 
 /// A route an event of a virtual row takes back into the view.
 pub(crate) type Route<E> = Rc<dyn Fn(&E, &mut Window, &mut App)>;
+
+/// A line-number gutter column, and the +/− marker's.
+const GUTTER_W: Pixels = px(44.);
+const MARKER_W: Pixels = px(12.);
 
 /// The anchor a gutter button carries: path, new side, line.
 pub(crate) type Anchor = (Vec<u8>, bool, u64);
@@ -174,6 +179,22 @@ fn status_label(status: FileStatus) -> &'static str {
     }
 }
 
+impl Painted {
+    /// A row that is not a source line: a file's header or a hunk's.
+    fn banner(kind: Kind, text: String, path: &[u8]) -> Painted {
+        Painted {
+            kind,
+            text,
+            path: path.to_vec(),
+            old: None,
+            new: None,
+            line: LineKind::Context,
+            draft: None,
+            published: Vec::new(),
+        }
+    }
+}
+
 fn paint(forge: &Forge, files: &[&FileDiff], reviewable: bool) -> Vec<Painted> {
     let review = reviewable.then(|| forge.review()).flatten();
     let published = if reviewable {
@@ -183,89 +204,76 @@ fn paint(forge: &Forge, files: &[&FileDiff], reviewable: bool) -> Vec<Painted> {
     };
     let mut rows = Vec::new();
     for file in files {
-        let path = path_of(file).unwrap_or_default();
-        let header = match (&file.old_path, &file.new_path) {
-            (Some(old), Some(new)) if old != new => {
-                format!("{} → {}", path_text(old), path_text(new))
-            }
-            _ => path_text(&path),
-        };
-        rows.push(Painted {
-            kind: Kind::File,
-            text: format!(
-                "{header} · {} · +{} −{}",
-                status_label(file.status),
-                file.additions,
-                file.deletions
-            ),
-            path: path.clone(),
-            old: None,
-            new: None,
-            line: LineKind::Context,
-            draft: None,
-            published: Vec::new(),
-        });
-        if file.hunks.is_empty() {
-            rows.push(Painted {
-                kind: Kind::Hunk,
-                text: match file.content {
-                    Content::Binary => "Binary file — no lines to show".into(),
-                    Content::Oversize => "Too large to diff inline".into(),
-                    Content::Gitlink => "Submodule pointer".into(),
-                    Content::Text => "No line changes".into(),
-                },
-                path: path.clone(),
-                old: None,
-                new: None,
-                line: LineKind::Context,
-                draft: None,
-                published: Vec::new(),
-            });
-            continue;
-        }
-        for hunk in &file.hunks {
-            rows.push(Painted {
-                kind: Kind::Hunk,
-                text: format!(
-                    "@@ -{},{} +{},{} @@",
-                    hunk.old.start, hunk.old.count, hunk.new.start, hunk.new.count
-                ),
-                path: path.clone(),
-                old: None,
-                new: None,
-                line: LineKind::Context,
-                draft: None,
-                published: Vec::new(),
-            });
-            for line in &hunk.lines {
-                let anchor_side = line.new_line.is_some();
-                let anchor_line = line.new_line.or(line.old_line).unwrap_or(0);
-                rows.push(Painted {
-                    kind: Kind::Line,
-                    text: String::from_utf8_lossy(&line.bytes)
-                        .trim_end_matches('\n')
-                        .to_owned(),
-                    path: path.clone(),
-                    old: line.old_line,
-                    new: line.new_line,
-                    line: line.kind,
-                    draft: review
-                        .and_then(|review| review.staged(&path, anchor_side, anchor_line))
-                        .map(|staged| staged.body.clone()),
-                    published: published
-                        .iter()
-                        .filter(|(p, side, at, _, _, _)| {
-                            *p == path && *side == anchor_side && *at == anchor_line
-                        })
-                        .map(|(_, _, _, author, body, outdated)| {
-                            (author.clone(), body.clone(), *outdated)
-                        })
-                        .collect(),
-                });
-            }
-        }
+        paint_file(&mut rows, file, review, &published);
     }
     rows
+}
+
+/// One file's rows: its header, then each hunk's header and lines, or one
+/// line saying why it has none.
+fn paint_file(
+    rows: &mut Vec<Painted>,
+    file: &FileDiff,
+    review: Option<&ReviewSession>,
+    published: &[Anchored],
+) {
+    let path = path_of(file).unwrap_or_default();
+    let header = match (&file.old_path, &file.new_path) {
+        (Some(old), Some(new)) if old != new => {
+            format!("{} → {}", path_text(old), path_text(new))
+        }
+        _ => path_text(&path),
+    };
+    let text = format!(
+        "{header} · {} · +{} −{}",
+        status_label(file.status),
+        file.additions,
+        file.deletions
+    );
+    rows.push(Painted::banner(Kind::File, text, &path));
+    if file.hunks.is_empty() {
+        let why = match file.content {
+            Content::Binary => "Binary file — no lines to show",
+            Content::Oversize => "Too large to diff inline",
+            Content::Gitlink => "Submodule pointer",
+            Content::Text => "No line changes",
+        };
+        rows.push(Painted::banner(Kind::Hunk, why.into(), &path));
+        return;
+    }
+    for hunk in &file.hunks {
+        let text = format!(
+            "@@ -{},{} +{},{} @@",
+            hunk.old.start, hunk.old.count, hunk.new.start, hunk.new.count
+        );
+        rows.push(Painted::banner(Kind::Hunk, text, &path));
+        for line in &hunk.lines {
+            let anchor_side = line.new_line.is_some();
+            let anchor_line = line.new_line.or(line.old_line).unwrap_or(0);
+            rows.push(Painted {
+                kind: Kind::Line,
+                text: String::from_utf8_lossy(&line.bytes)
+                    .trim_end_matches('\n')
+                    .to_owned(),
+                path: path.clone(),
+                old: line.old_line,
+                new: line.new_line,
+                line: line.kind,
+                draft: review
+                    .and_then(|review| review.staged(&path, anchor_side, anchor_line))
+                    .map(|staged| staged.body.clone()),
+                published: published
+                    .iter()
+                    .filter(|(p, side, at, _, _, _)| {
+                        *p == path && *side == anchor_side && *at == anchor_line
+                    })
+                    .map(|(_, _, _, author, body, outdated)| {
+                        (author.clone(), body.clone(), *outdated)
+                    })
+                    .collect(),
+            });
+        }
+    }
 }
 
 type Anchored = (Vec<u8>, bool, u64, String, String, bool);
@@ -277,7 +285,7 @@ fn published_comments(forge: &Forge) -> Vec<Anchored> {
     };
     let mut all = Vec::new();
     for review in &reviews.items {
-        let author = forge.key_name(&review.author);
+        let author = forge.party_name(&review.author);
         let outdated = forge.outdated(&review.draft.commit_oid);
         for comment in &review.draft.comments {
             all.push((
@@ -315,7 +323,7 @@ fn paint_row(
             .w_full()
             .px_2()
             .font_family(design::fonts::FAMILY_MONO)
-            .text_size(px(11.5))
+            .text_size(design::text::CAPTION)
             .text_color(theme.accent)
             .bg(theme.surface)
             .child(row.text.clone())
@@ -353,7 +361,7 @@ fn line_row(
         .child(gutter(row, true, reviewable, comment, theme))
         .child(
             div()
-                .w(px(12.))
+                .w(MARKER_W)
                 .font_family(design::fonts::FAMILY_MONO)
                 .text_size(design::text::SECONDARY)
                 .text_color(theme.muted)
@@ -376,36 +384,52 @@ fn line_row(
     if row.published.is_empty() {
         return body.into_any_element();
     }
-    let mut column = div()
+    div()
         .id(id(format!("forge-diff-thread-{index}")))
         .w_full()
         .flex()
         .flex_col()
-        .child(body);
-    for (at, (author, text, outdated)) in row.published.iter().enumerate() {
-        column = column.child(
-            div()
-                .id(id(format!("forge-diff-comment-{index}-{at}")))
-                .w_full()
-                .flex()
-                .gap_2()
-                .px_6()
-                .py_1()
-                .bg(theme.surface)
-                .text_size(design::text::SECONDARY)
-                .child(crate::ui::bold(author.clone()))
-                .child(div().flex_1().child(text.clone()))
-                .when(*outdated, |element| {
-                    element.child(badge(
-                        id(format!("forge-diff-outdated-{index}-{at}")),
-                        "outdated",
-                        theme.warning,
-                        theme.warning_soft,
-                    ))
+        .child(body)
+        .children(
+            row.published
+                .iter()
+                .enumerate()
+                .map(|(at, (author, text, outdated))| {
+                    published_comment(index, at, author, text, *outdated, theme)
                 }),
-        );
-    }
-    column.into_any_element()
+        )
+        .into_any_element()
+}
+
+/// One published line comment under its line.
+fn published_comment(
+    index: usize,
+    at: usize,
+    author: &str,
+    text: &str,
+    outdated: bool,
+    theme: &Theme,
+) -> AnyElement {
+    div()
+        .id(id(format!("forge-diff-comment-{index}-{at}")))
+        .w_full()
+        .flex()
+        .gap_2()
+        .px_6()
+        .py_1()
+        .bg(theme.surface)
+        .text_size(design::text::SECONDARY)
+        .child(crate::ui::bold(author.to_owned()))
+        .child(div().flex_1().child(text.to_owned()))
+        .when(outdated, |element| {
+            element.child(badge(
+                id(format!("forge-diff-outdated-{index}-{at}")),
+                "outdated",
+                theme.warning,
+                theme.warning_soft,
+            ))
+        })
+        .into_any_element()
 }
 
 /// A gutter number. Under a review it is the button that anchors a comment
@@ -420,9 +444,9 @@ fn gutter(
     let number = if new_side { row.new } else { row.old };
     let cell = || {
         div()
-            .w(px(44.))
+            .w(GUTTER_W)
             .font_family(design::fonts::FAMILY_MONO)
-            .text_size(px(11.5))
+            .text_size(design::text::CAPTION)
             .text_color(theme.muted)
     };
     let Some(number) = number else {

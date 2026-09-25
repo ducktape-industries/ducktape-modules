@@ -29,4 +29,5 @@ gitcore = { workspace = true }
 store = { workspace = true }
 
 [dev-dependencies]
+identity = { workspace = true }
 sha2 = { version = "0.10", default-features = false }

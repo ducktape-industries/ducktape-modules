@@ -1,91 +1,32 @@
-// The change ops: open, edit, close, review and merge. Acceptance reads refs and records only; no object a node holds or lacks decides an op.
+//! The change ops: open, edit, close, review and merge. Acceptance reads
+//! refs and records only; no object a node holds or lacks decides an op.
 
 use std::collections::BTreeSet;
 
-use abi::{Env, Refusal};
+use abi::Refusal;
 use store::{Writes, capacity, invalid, stale, unauthorized, wrong_state};
 
 use crate::contract::*;
-use crate::discussion;
-use crate::ops::require_writer;
+use crate::discussion::{self, Event};
+use crate::ops::{require_named, require_writer};
 use crate::state::{
     load_bounds, load_change, load_ref, load_repo, next, next_message, next_number, parse_oid,
-    repo_hash, resolve, save_change, save_review, set_ref,
+    peek_message, repo_hash, resolve, save_change, save_review, set_ref,
 };
 
-pub fn execute(store: &mut impl Writes, env: &Env, actor: &[u8], op: Op) -> Result<(), Refusal> {
-    let reply = match op {
-        Op::ChangeOpen {
-            repo,
-            from,
-            into,
-            title,
-            body,
-            reviewers,
-        } => {
-            let draft = Draft {
-                from,
-                into,
-                title,
-                body,
-                reviewers,
-            };
-            open(store, env, actor, &repo, draft)?
-        }
-        Op::ChangeEdit {
-            repo,
-            n,
-            title,
-            body,
-            reviewers,
-        } => {
-            let fields = Edit {
-                title,
-                body,
-                reviewers,
-            };
-            edit(store, env, actor, &repo, n, fields)?
-        }
-        Op::ChangeClose { repo, n } => close(store, env, actor, &repo, n)?,
-        Op::ReviewSubmit { repo, n, review } => submit_review(store, env, actor, &repo, n, review)?,
-        Op::Merge {
-            repo,
-            into,
-            from,
-            expected_into,
-            expected_from,
-            result,
-            change,
-        } => {
-            let merge = MergeRequest {
-                into,
-                from,
-                expected_into,
-                expected_from,
-                result,
-                change,
-            };
-            merge_heads(store, env, actor, &repo, merge)?
-        }
-        _ => return Err(invalid("not a change operation")),
-    };
-    store.output(abi::encode(&reply));
-    Ok(())
-}
-
 /// What `ChangeOpen` carries besides its repository.
-struct Draft {
-    from: Revision,
-    into: Vec<u8>,
-    title: String,
-    body: String,
-    reviewers: Vec<Vec<u8>>,
+pub(crate) struct Draft {
+    pub from: Revision,
+    pub into: Vec<u8>,
+    pub title: String,
+    pub body: String,
+    pub reviewers: Vec<Party>,
 }
 
-fn open(
+pub(crate) fn open(
     store: &mut impl Writes,
-    env: &Env,
-    actor: &[u8],
+    env: &Frame,
+    actor: &Party,
     repo: &str,
     mut draft: Draft,
 ) -> Result<OpReply, Refusal> {
@@ -109,7 +50,7 @@ fn open(
         into: draft.into,
         title: draft.title,
         body: draft.body,
-        author: actor.to_vec(),
+        author: actor.clone(),
         state: ChangeState::Open,
         reviewers: draft.reviewers,
         created_height: env.height,
@@ -129,12 +70,7 @@ fn open(
     let message = next_message(store)?;
     save_change(store, repo, &change)?;
     discussion::create(store, repo, &change);
-    discussion::post(
-        store,
-        &change,
-        message,
-        format!("Opened by {}", abi::hex(actor)),
-    );
+    discussion::post(store, &change, message, Event::Opened);
     Ok(OpReply::Change {
         height: env.height,
         n,
@@ -142,25 +78,27 @@ fn open(
 }
 
 /// What `ChangeEdit` changes; `None` leaves a field as it is.
-struct Edit {
-    title: Option<String>,
-    body: Option<String>,
-    reviewers: Option<Vec<Vec<u8>>>,
+pub(crate) struct Edit {
+    pub title: Option<String>,
+    pub body: Option<String>,
+    pub reviewers: Option<Vec<Party>>,
 }
 
-fn edit(
+/// The author edits an open change; an ended one is a record.
+pub(crate) fn edit(
     store: &mut impl Writes,
-    env: &Env,
-    actor: &[u8],
+    env: &Frame,
+    actor: &Party,
     repo: &str,
     n: u64,
     fields: Edit,
 ) -> Result<OpReply, Refusal> {
     load_repo(store, repo)?;
     let mut change = load_change(store, repo, n)?;
-    if change.author != actor {
+    if change.author != *actor {
         return Err(unauthorized("only the author edits a change"));
     }
+    require_open(&change)?;
     if let Some(title) = fields.title {
         check_title(&title)?;
         change.title = title;
@@ -182,31 +120,26 @@ fn edit(
 }
 
 /// Closing is terminal: the author or a writer ends an open change.
-fn close(
+pub(crate) fn close(
     store: &mut impl Writes,
-    env: &Env,
-    actor: &[u8],
+    env: &Frame,
+    actor: &Party,
     repo: &str,
     n: u64,
 ) -> Result<OpReply, Refusal> {
     let record = load_repo(store, repo)?;
     let mut change = load_change(store, repo, n)?;
-    if change.author != actor {
+    if change.author != *actor {
         require_writer(store, repo, &record, actor)?;
     }
     require_open(&change)?;
     change.state = ChangeState::Closed;
-    change.closed_by = Some(actor.to_vec());
+    change.closed_by = Some(actor.clone());
     touched(&mut change, env);
     change.system_seq = next(change.system_seq)?;
     let message = next_message(store)?;
     save_change(store, repo, &change)?;
-    discussion::post(
-        store,
-        &change,
-        message,
-        format!("Closed by {}", abi::hex(actor)),
-    );
+    discussion::post(store, &change, message, Event::Closed);
     Ok(OpReply::Change {
         height: env.height,
         n,
@@ -215,10 +148,10 @@ fn close(
 
 /// One immutable review: a verdict, a body and its line comments, pinned
 /// at the commits it read. Reviews stay appendable after a change ends.
-fn submit_review(
+pub(crate) fn submit_review(
     store: &mut impl Writes,
-    env: &Env,
-    actor: &[u8],
+    env: &Frame,
+    actor: &Party,
     repo: &str,
     n: u64,
     mut draft: ReviewDraft,
@@ -233,13 +166,13 @@ fn submit_review(
         .transpose()?;
     check_comments(&draft)?;
     let id = next(change.review_count)?;
-    let mut review = Review {
+    let review = Review {
         id,
-        author: actor.to_vec(),
+        author: actor.clone(),
         height: env.height,
         time: env.time,
         draft,
-        message_id: "forge:0000000000000000".into(),
+        message_id: peek_message(store)?,
     };
     fits(store, &review)?;
     change.review_count = id;
@@ -250,25 +183,11 @@ fn submit_review(
     count_verdict(&mut change.verdicts, review.draft.verdict)?;
     touched(&mut change, env);
     change.system_seq = next(change.system_seq)?;
-    review.message_id = next_message(store)?;
+    fits(store, &change)?;
+    let message = next_message(store)?;
     save_review(store, repo, n, &review);
     save_change(store, repo, &change)?;
-    discussion::post(
-        store,
-        &change,
-        review.message_id.clone(),
-        format!(
-            "Review {id} submitted by {}: {:?}; {} line comment{}",
-            abi::hex(actor),
-            review.draft.verdict,
-            review.draft.comments.len(),
-            if review.draft.comments.len() == 1 {
-                ""
-            } else {
-                "s"
-            }
-        ),
-    );
+    discussion::post(store, &change, message, Event::Reviewed(id));
     Ok(OpReply::Review {
         height: env.height,
         n,
@@ -277,21 +196,21 @@ fn submit_review(
 }
 
 /// What `Merge` carries besides its repository.
-struct MergeRequest {
-    into: Vec<u8>,
-    from: Revision,
-    expected_into: String,
-    expected_from: String,
-    result: String,
-    change: Option<u64>,
+pub(crate) struct MergeRequest {
+    pub into: Vec<u8>,
+    pub from: Revision,
+    pub expected_into: String,
+    pub expected_from: String,
+    pub result: String,
+    pub change: Option<u64>,
 }
 
 /// A compare-and-swap of both heads: the client built and published the
 /// result; forge only checks that neither endpoint moved since.
-fn merge_heads(
+pub(crate) fn merge_heads(
     store: &mut impl Writes,
-    env: &Env,
-    actor: &[u8],
+    env: &Frame,
+    actor: &Party,
     repo: &str,
     merge: MergeRequest,
 ) -> Result<OpReply, Refusal> {
@@ -322,18 +241,13 @@ fn merge_heads(
         }
         change.state = ChangeState::Merged;
         change.merge_oid = Some(result.to_hex());
-        change.merged_by = Some(actor.to_vec());
+        change.merged_by = Some(actor.clone());
         touched(&mut change, env);
         change.system_seq = next(change.system_seq)?;
         fits(store, &change)?;
         let message = next_message(store)?;
         save_change(store, repo, &change)?;
-        discussion::post(
-            store,
-            &change,
-            message,
-            format!("Merged by {} as {result}", abi::hex(actor)),
-        );
+        discussion::post(store, &change, message, Event::Merged);
     }
     set_ref(store, repo, &merge.into, &result);
     Ok(OpReply::Merged {
@@ -343,7 +257,7 @@ fn merge_heads(
     })
 }
 
-fn touched(change: &mut Change, env: &Env) {
+fn touched(change: &mut Change, env: &Frame) {
     change.updated_height = env.height;
     change.updated_time = env.time;
 }
@@ -369,30 +283,34 @@ fn require_open(change: &Change) -> Result<(), Refusal> {
 fn fits(store: &impl store::Reads, record: &impl borsh::BorshSerialize) -> Result<(), Refusal> {
     let bound = load_bounds(store)?.record_bytes;
     if abi::encode(record).len() as u64 > bound {
-        return Err(capacity("record exceeds Bounds.record_bytes"));
+        return Err(capacity(format!(
+            "a record is at most {bound} bytes (Bounds.record_bytes)"
+        )));
     }
     Ok(())
 }
 
 fn check_title(title: &str) -> Result<(), Refusal> {
     if title.trim().is_empty() || title.len() > MAX_TITLE_BYTES {
-        return Err(invalid(
-            "title must be nonblank and at most MAX_TITLE_BYTES",
-        ));
+        return Err(invalid(format!(
+            "a title is nonblank and at most {MAX_TITLE_BYTES} bytes"
+        )));
     }
     Ok(())
 }
 
-fn check_reviewers(keys: &[Vec<u8>]) -> Result<(), Refusal> {
-    if keys.len() > MAX_REVIEWERS {
-        return Err(capacity("too many requested reviewers"));
+fn check_reviewers(reviewers: &[Party]) -> Result<(), Refusal> {
+    if reviewers.len() > MAX_REVIEWERS {
+        return Err(capacity(format!(
+            "a change asks at most {MAX_REVIEWERS} reviewers"
+        )));
     }
     let mut seen = BTreeSet::new();
-    let well_named = keys
-        .iter()
-        .all(|key| !key.is_empty() && key.len() <= MAX_KEY_BYTES && seen.insert(key));
-    if !well_named {
-        return Err(invalid("reviewer keys must be nonempty and distinct"));
+    for reviewer in reviewers {
+        require_named(reviewer)?;
+        if !seen.insert(reviewer) {
+            return Err(invalid("each reviewer is asked once"));
+        }
     }
     Ok(())
 }
@@ -417,7 +335,9 @@ fn check_branch(name: &[u8]) -> Result<(), Refusal> {
 
 fn check_comments(draft: &ReviewDraft) -> Result<(), Refusal> {
     if draft.comments.len() > MAX_REVIEW_COMMENTS {
-        return Err(capacity("too many comments; use MAX_REVIEW_COMMENTS"));
+        return Err(capacity(format!(
+            "a review carries at most {MAX_REVIEW_COMMENTS} line comments"
+        )));
     }
     let mut anchors = BTreeSet::new();
     for comment in &draft.comments {

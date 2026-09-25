@@ -198,18 +198,9 @@ fn scan(lang: &Lang, line: &str, open: &mut bool) -> Vec<(Range<usize>, Token)> 
             continue;
         }
         if byte == b'"' || byte == b'\'' || byte == b'`' {
-            // a Rust lifetime (`'a`) is not a string: no closing quote soon
-            let end = close_quote(bytes, at)
-                .filter(|end| byte != b'\'' || !std::ptr::eq(lang, &RUST) || end - at <= 4);
-            let Some(end) = end else {
+            let Some((end, token)) = quoted(lang, bytes, at) else {
                 at += 1;
                 continue;
-            };
-            let key = bytes[end..].iter().find(|byte| !byte.is_ascii_whitespace()) == Some(&b':');
-            let token = if key && std::ptr::eq(lang, &JSON) {
-                Token::Property
-            } else {
-                Token::String
             };
             out.push((at..end, token));
             at = end;
@@ -223,18 +214,7 @@ fn scan(lang: &Lang, line: &str, open: &mut bool) -> Vec<(Range<usize>, Token)> 
         }
         if byte.is_ascii_alphabetic() || byte == b'_' || byte == b'$' {
             let end = at + 1 + word_len(&bytes[at + 1..], false);
-            let word = &line[at..end];
-            let next = bytes[end..].iter().find(|byte| !byte.is_ascii_whitespace());
-            let token = if lang.keyed && at == first_word && matches!(next, Some(b'=' | b':')) {
-                Some(Token::Property)
-            } else if lang.keywords.contains(&word) {
-                Some(Token::Keyword)
-            } else if byte.is_ascii_uppercase() && !lang.keyed {
-                Some(Token::Type)
-            } else {
-                None
-            };
-            if let Some(token) = token {
+            if let Some(token) = word(lang, line, at..end, at == first_word) {
                 out.push((at..end, token));
             }
             at = end;
@@ -244,6 +224,39 @@ fn scan(lang: &Lang, line: &str, open: &mut bool) -> Vec<(Range<usize>, Token)> 
         at += rest.chars().next().map_or(1, char::len_utf8);
     }
     out
+}
+
+/// The quoted run opening at `at` and what it is: a string, or a JSON
+/// key; `None` for a lone quote, a Rust lifetime (`'a`) among them.
+fn quoted(lang: &Lang, bytes: &[u8], at: usize) -> Option<(usize, Token)> {
+    let byte = bytes[at];
+    let end = close_quote(bytes, at)
+        .filter(|end| byte != b'\'' || !std::ptr::eq(lang, &RUST) || end - at <= 4)?;
+    let key = bytes[end..].iter().find(|byte| !byte.is_ascii_whitespace()) == Some(&b':');
+    let token = if key && std::ptr::eq(lang, &JSON) {
+        Token::Property
+    } else {
+        Token::String
+    };
+    Some((end, token))
+}
+
+/// What the word at `range` is: a config key leading its line, a keyword,
+/// a capitalised type, or nothing to colour.
+fn word(lang: &Lang, line: &str, range: Range<usize>, leads: bool) -> Option<Token> {
+    let bytes = line.as_bytes();
+    let next = bytes[range.end..]
+        .iter()
+        .find(|byte| !byte.is_ascii_whitespace());
+    if lang.keyed && leads && matches!(next, Some(b'=' | b':')) {
+        Some(Token::Property)
+    } else if lang.keywords.contains(&&line[range.clone()]) {
+        Some(Token::Keyword)
+    } else if bytes[range.start].is_ascii_uppercase() && !lang.keyed {
+        Some(Token::Type)
+    } else {
+        None
+    }
 }
 
 fn word_len(bytes: &[u8], number: bool) -> usize {

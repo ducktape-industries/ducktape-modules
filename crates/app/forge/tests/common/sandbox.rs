@@ -1,6 +1,9 @@
-// forge's store with chat beside it: the sibling forge queries, and where its emissions land when a block delivers them.
+//! forge's store with chat and identity beside it: the siblings forge
+//! queries, and where its emissions land when a block delivers them.
+//! `accounts` is identity's roster: each key the account it belongs to.
 
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use abi::{BlobId, HashKind, HostOp, HostReply, ItemRef, ProgramId, Refusal, reason};
@@ -9,6 +12,7 @@ use store::{Memory, Reads, Writes};
 pub struct MemorySandbox {
     pub forge: Memory,
     pub chat: Rc<RefCell<Memory>>,
+    pub accounts: Rc<RefCell<BTreeMap<Vec<u8>, u64>>>,
 }
 
 impl Default for MemorySandbox {
@@ -23,11 +27,40 @@ impl Default for MemorySandbox {
                 Ok(abi::encode(&reply))
             }),
         );
-        MemorySandbox { forge, chat }
+        let accounts = Rc::new(RefCell::new(BTreeMap::new()));
+        let roster = accounts.clone();
+        forge.siblings.insert(
+            identity::PROGRAM.into(),
+            Box::new(move |request| {
+                let identity::Query::OfKey { key } = abi::decode(request)? else {
+                    return Err(Refusal::new(
+                        reason::UNSUPPORTED,
+                        "the sandbox answers OfKey",
+                    ));
+                };
+                let held = roster.borrow().get(&key).copied();
+                Ok(abi::encode(&identity::Reply::Number(held)))
+            }),
+        );
+        MemorySandbox {
+            forge,
+            chat,
+            accounts,
+        }
     }
 }
 
 impl MemorySandbox {
+    /// Seats `key` in `account`, as identity would.
+    pub fn hold(&self, key: &[u8], account: u64) {
+        self.accounts.borrow_mut().insert(key.to_vec(), account);
+    }
+
+    /// Who `key` signs as: the party forge's program resolves.
+    pub fn party(&self, key: &[u8]) -> chat::Party {
+        chat::party_of(&self.forge, &abi::Origin::External(key.to_vec())).unwrap()
+    }
+
     /// Runs one chat message directly, as a key or module would in its own block.
     pub fn chat_execute(&self, frame: &chat::Frame, msg: chat::Op) -> Result<(), Refusal> {
         chat::execute(&mut *self.chat.borrow_mut(), frame, msg)

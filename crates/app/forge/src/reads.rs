@@ -1,4 +1,5 @@
-//! Object reads over the existing loose-object store; no pack parsing and no persistent writes.
+//! Object reads over the existing loose-object store; no pack parsing and
+//! no persistent writes.
 use crate::contract::*;
 use crate::objects::{ObjectStore, object_not_held};
 use crate::ops::{cap, refusal_of};
@@ -123,104 +124,146 @@ pub fn entry_kind(mode: Mode) -> EntryKind {
         Mode::Gitlink => EntryKind::Gitlink,
     }
 }
-pub fn answer<S: Reads>(
-    s: &S,
-    height: u64,
-    q: &Query,
-    bounds: &Bounds,
-    page: Option<&Listing>,
-) -> Result<Reply, Refusal> {
-    let name = match q {
-        Query::Log { repo, .. }
-        | Query::Tree { repo, .. }
-        | Query::Blob { repo, .. }
-        | Query::Diff { repo, .. }
-        | Query::Compare { repo, .. } => repo,
-        _ => return Err(invalid("not an object query")),
-    };
-    let repo = load_repo(s, name)?;
-    let hash = repo_hash(&repo);
-    let reads = match q {
-        Query::Log { .. } => bounds.log_walk.saturating_mul(2).saturating_add(1),
-        Query::Compare { .. } => bounds
-            .log_walk
-            .saturating_mul(8)
-            .saturating_add(bounds.tree_walk),
-        _ => bounds.tree_walk,
-    };
-    let mut r = Reading {
-        store: ObjectStore::querying(s, hash, bounds, reads),
+/// A repository's objects, read within `reads` object reads of `bounds`.
+fn reading<'a, S: Reads>(
+    store: &'a S,
+    name: &str,
+    bounds: &'a Bounds,
+    reads: u64,
+) -> Result<Reading<'a, S>, Refusal> {
+    let hash = repo_hash(&load_repo(store, name)?);
+    Ok(Reading {
+        store: ObjectStore::querying(store, hash, bounds, reads),
         hash,
         bounds,
-    };
-    let page = || page.ok_or_else(|| invalid("this query has no page"));
-    Ok(match q {
-        Query::Log { from, .. } => {
-            let tip = r.commit_id(resolve(s, name, from, hash)?)?;
-            // ponytail: repeat the complete walk up to log_walk; index history if larger repos need it.
-            let ids = r.result(gitcore::walk::commits(
-                &r.store,
-                &[tip],
-                &[],
-                cap(bounds.log_walk),
-            ))?;
-            let page = page()?.slice(&ids)?.try_map(|id| {
-                let c = r.commit(&id)?;
-                Ok(CommitInfo {
-                    oid: id.to_hex(),
-                    tree: c.tree.to_hex(),
-                    parents: c.parents.iter().map(Oid::to_hex).collect(),
-                    author: signature(c.author),
-                    committer: signature(c.committer),
-                    message: c.message,
-                })
-            })?;
-            Reply::Log {
-                height,
-                tip: tip.to_hex(),
-                page,
-            }
-        }
-        Query::Tree { at, path, .. } => {
-            crate::changes::check_path(path, true)?;
-            let root = r.tree_id(at)?;
-            let tree = if path.is_empty() {
-                root
-            } else {
-                let entry = r
-                    .result(gitcore::walk::tree_at_path(&r.store, &root, path))?
-                    .ok_or_else(|| not_found("no entry at this path"))?;
-                if entry.mode != Mode::Directory {
-                    return Err(invalid("tree path names a directory"));
-                }
-                entry.id
-            };
-            let entries = r.tree(&tree)?.entries;
-            Reply::Tree {
-                height,
-                tree: tree.to_hex(),
-                page: page()?.slice(&entries)?.map(|e| TreeInfo {
-                    name: e.name,
-                    oid: e.id.to_hex(),
-                    kind: entry_kind(e.mode),
-                }),
-            }
-        }
-        Query::Blob { oid, range, .. } => Reply::Blob {
-            height,
-            blob: r.blob(&r.oid(oid)?, *range)?,
-        },
-        Query::Diff {
-            base, head, path, ..
-        } => crate::diffs::query(&r, height, base, head, path.as_deref(), page()?)?,
-        Query::Compare { from, into, .. } => {
-            let from = r.commit_id(resolve(s, name, from, hash)?)?;
-            let into = r.commit_id(resolve(s, name, into, hash)?)?;
-            compare(&mut r, height, from, into)?
-        }
-        _ => return Err(invalid("not an object query")),
     })
 }
+
+/// A page of the history below `from`.
+pub fn log<S: Reads>(
+    store: &S,
+    height: u64,
+    bounds: &Bounds,
+    name: &str,
+    from: &Revision,
+    listing: &Listing,
+) -> Result<Reply, Refusal> {
+    let reads = bounds.log_walk.saturating_mul(2).saturating_add(1);
+    let r = reading(store, name, bounds, reads)?;
+    let tip = r.commit_id(resolve(store, name, from, r.hash)?)?;
+    // ponytail: repeat the complete walk up to log_walk; index history if larger repos need it.
+    let ids = r.result(gitcore::walk::commits(
+        &r.store,
+        &[tip],
+        &[],
+        cap(bounds.log_walk),
+    ))?;
+    let page = listing.slice(&ids)?.try_map(|id| {
+        let c = r.commit(&id)?;
+        Ok(CommitInfo {
+            oid: id.to_hex(),
+            tree: c.tree.to_hex(),
+            parents: c.parents.iter().map(Oid::to_hex).collect(),
+            author: signature(c.author),
+            committer: signature(c.committer),
+            message: c.message,
+        })
+    })?;
+    Ok(Reply::Log {
+        height,
+        tip: tip.to_hex(),
+        page,
+    })
+}
+
+/// A page of the directory at `path` under the commit or tree `at`.
+pub fn tree<S: Reads>(
+    store: &S,
+    height: u64,
+    bounds: &Bounds,
+    name: &str,
+    at: &str,
+    path: &[u8],
+    listing: &Listing,
+) -> Result<Reply, Refusal> {
+    crate::changes::check_path(path, true)?;
+    let r = reading(store, name, bounds, bounds.tree_walk)?;
+    let root = r.tree_id(at)?;
+    let tree = if path.is_empty() {
+        root
+    } else {
+        let entry = r
+            .result(gitcore::walk::tree_at_path(&r.store, &root, path))?
+            .ok_or_else(|| not_found("no entry at this path"))?;
+        if entry.mode != Mode::Directory {
+            return Err(invalid("tree path names a directory"));
+        }
+        entry.id
+    };
+    let entries = r.tree(&tree)?.entries;
+    Ok(Reply::Tree {
+        height,
+        tree: tree.to_hex(),
+        page: listing.slice(&entries)?.map(|e| TreeInfo {
+            name: e.name,
+            oid: e.id.to_hex(),
+            kind: entry_kind(e.mode),
+        }),
+    })
+}
+
+/// One blob, or the asked range of it.
+pub fn blob<S: Reads>(
+    store: &S,
+    height: u64,
+    bounds: &Bounds,
+    name: &str,
+    oid: &str,
+    range: Option<ByteRange>,
+) -> Result<Reply, Refusal> {
+    let r = reading(store, name, bounds, bounds.tree_walk)?;
+    Ok(Reply::Blob {
+        height,
+        blob: r.blob(&r.oid(oid)?, range)?,
+    })
+}
+
+/// A page of the files that differ from `base` (the empty tree if none)
+/// to `head`, under `path` if given.
+#[allow(clippy::too_many_arguments)]
+pub fn diff<S: Reads>(
+    store: &S,
+    height: u64,
+    bounds: &Bounds,
+    name: &str,
+    base: &Option<String>,
+    head: &str,
+    path: Option<&[u8]>,
+    listing: &Listing,
+) -> Result<Reply, Refusal> {
+    let r = reading(store, name, bounds, bounds.tree_walk)?;
+    crate::diffs::query(&r, height, base, head, path, listing)
+}
+
+/// How `from` stands against `into`: ahead, behind, and their base.
+pub fn comparison<S: Reads>(
+    store: &S,
+    height: u64,
+    bounds: &Bounds,
+    name: &str,
+    from: &Revision,
+    into: &Revision,
+) -> Result<Reply, Refusal> {
+    let reads = bounds
+        .log_walk
+        .saturating_mul(8)
+        .saturating_add(bounds.tree_walk);
+    let mut r = reading(store, name, bounds, reads)?;
+    let from = r.commit_id(resolve(store, name, from, r.hash)?)?;
+    let into = r.commit_id(resolve(store, name, into, r.hash)?)?;
+    compare(&mut r, height, from, into)
+}
+
 fn compare<S: Reads>(
     r: &mut Reading<'_, S>,
     height: u64,
@@ -272,57 +315,4 @@ fn compare<S: Reads>(
             mergeability,
         },
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use abi::{HashKind, reason};
-
-    fn bounds() -> Bounds {
-        Bounds {
-            max_objects: 1,
-            max_delta_depth: 1,
-            max_object_size: 1,
-            push_walk: 1,
-            fetch_walk: 1,
-            merge_cost: 1,
-            page_size: 1,
-            log_walk: 1,
-            tree_walk: 1,
-            diff_bytes: 1,
-            blob_bytes: 1,
-            record_bytes: 1,
-        }
-    }
-
-    /// A wrong variant, or a paged query handed no page, refuses: no panic
-    /// on the query path.
-    #[test]
-    fn a_misrouted_query_refuses() {
-        let mut s = store::Memory::default();
-        let repo = Repo {
-            hash: HashKind::Sha1,
-            owner: vec![],
-            settings: Settings::default(),
-            refs_count: 0,
-            last_activity: 0,
-        };
-        crate::state::save_repo(&mut s, "r", &repo).unwrap();
-        let page = store::Page::default();
-        let diff = Query::Diff {
-            repo: "r".into(),
-            base: None,
-            head: "0".repeat(40),
-            path: None,
-            page,
-        };
-        let refused = answer(&s, 1, &diff, &bounds(), None).unwrap_err();
-        assert_eq!(refused.reason, reason::INVALID_INPUT);
-        let repos = Query::Repos {
-            page: store::Page::default(),
-        };
-        let refused = answer(&s, 1, &repos, &bounds(), None).unwrap_err();
-        assert_eq!(refused.reason, reason::INVALID_INPUT);
-    }
 }

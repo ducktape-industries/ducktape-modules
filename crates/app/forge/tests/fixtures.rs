@@ -116,11 +116,7 @@ fn replay(tape: &mut Tape) {
     let q = Query::Repos {
         page: Page::first(2),
     };
-    let unfounded = Env {
-        height: 0,
-        ..rig.env()
-    };
-    let bytes = forge::query(&empty, &unfounded, &abi::encode(&q)).unwrap();
+    let bytes = forge::query(&empty, 0, q.clone()).unwrap();
     let _: Reply = abi::decode(&bytes).unwrap();
     tape.save("repos-empty", abi::encode(&q), bytes);
     tape.capture(
@@ -145,7 +141,7 @@ fn replay(tape: &mut Tape) {
         &rig,
         "judgment-empty",
         Query::Judgment {
-            key: b"reviewer".to_vec(),
+            party: Party::Account(2),
             page: Page::first(2),
         },
     );
@@ -159,7 +155,7 @@ fn replay(tape: &mut Tape) {
     );
     rig.execute(&Op::Grant {
         repo: REPO.into(),
-        key: b"writer".to_vec(),
+        party: Party::Key(b"writer".to_vec()),
     })
     .unwrap();
     tape.capture(
@@ -437,7 +433,7 @@ fn replay(tape: &mut Tape) {
         &rig,
         "judgment",
         Query::Judgment {
-            key: b"reviewer".to_vec(),
+            party: Party::Account(2),
             page: Page::first(2),
         },
     );
@@ -496,7 +492,7 @@ fn replay(tape: &mut Tape) {
         panic!();
     };
     rig.chat_execute(
-        chat::Party::Key(TESTER.to_vec()),
+        chat::Party::Account(1),
         chat::Op::PostMessage {
             channel_id: "forge:project:1".into(),
             message_id: "fixture-reply".into(),
@@ -508,7 +504,7 @@ fn replay(tape: &mut Tape) {
         &rig,
         "judgment-replies",
         Query::Judgment {
-            key: b"reviewer".to_vec(),
+            party: Party::Account(2),
             page: Page::first(2),
         },
     );
@@ -519,7 +515,7 @@ fn replay(tape: &mut Tape) {
         &rig,
         "judgment-head-moved",
         Query::Judgment {
-            key: b"reviewer".to_vec(),
+            party: Party::Account(2),
             page: Page::first(2),
         },
     );
@@ -569,12 +565,12 @@ fn replay(tape: &mut Tape) {
     }
     rig.execute(&conversation).unwrap();
     rig.advance();
-    for (key, id, thread) in [
-        (b"talker".as_slice(), "conversation-root", None),
-        (TESTER, "conversation-reply", Some(2)),
+    for (account, id, thread) in [
+        (4, "conversation-root", None),
+        (1, "conversation-reply", Some(2)),
     ] {
         rig.chat_execute(
-            chat::Party::Key(key.to_vec()),
+            chat::Party::Account(account),
             chat::Op::PostMessage {
                 channel_id: "forge:project:3".into(),
                 message_id: id.into(),
@@ -587,7 +583,7 @@ fn replay(tape: &mut Tape) {
         &rig,
         "judgment-conversation",
         Query::Judgment {
-            key: b"talker".to_vec(),
+            party: Party::Account(4),
             page: Page::first(128),
         },
     );

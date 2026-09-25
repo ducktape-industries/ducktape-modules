@@ -92,10 +92,8 @@ fn key(bytes: &[u8]) -> Origin {
 /// The refusal's reason; the store is untouched by it.
 #[track_caller]
 fn refused(store: &mut Memory, origin: Origin, op: Op) -> String {
-    let before = store.state.clone();
-    let refusal = execute_from(store, &env(origin), op).expect_err("the op was refused");
-    assert_eq!(store.state, before, "a refused op wrote");
-    refusal.reason
+    let env = env(origin);
+    store.refused(|store| execute_from(store, &env, op)).reason
 }
 
 fn owner(store: &Memory, id: &str) -> Party {

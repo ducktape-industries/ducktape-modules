@@ -24,6 +24,7 @@ mod navigate;
 mod review;
 mod ui;
 
+use ducktape_view_guest::host::Refusal;
 use ducktape_view_guest::methods::{Changes, HostRoute, HostVisible};
 use ducktape_view_guest::{Context, IntoElement, Render, View, Window, export_view};
 
@@ -67,26 +68,42 @@ impl View for Forge {
                 }
             }));
         // a block to any program the screens read re-reads them; a refused
-        // item is a block this view cannot see into, and the next reconciles
+        // item is a block this view cannot see into: the host's log keeps
+        // why, and the next block reconciles
         let forge = cx.host().subscribe::<Changes<ForgeProgram>>(());
         let chat = cx.host().subscribe::<Changes<ChatApi>>(());
         let identity = cx.host().subscribe::<Changes<Identity>>(());
         self.watches.extend([
-            cx.follow(forge, |forge, _, _, cx| forge.reconcile(cx)),
-            cx.follow(chat, |forge, _, _, cx| forge.reconcile(cx)),
-            cx.follow(identity, |forge, _, _, cx| forge.reconcile(cx)),
+            cx.follow(forge, |forge, head, _, cx| match head {
+                Ok(_) => forge.reconcile(cx),
+                Err(refusal) => log(cx, "forge's live heads", &refusal),
+            }),
+            cx.follow(chat, |forge, head, _, cx| match head {
+                Ok(_) => forge.reconcile(cx),
+                Err(refusal) => log(cx, "chat's live heads", &refusal),
+            }),
+            cx.follow(identity, |forge, head, _, cx| match head {
+                Ok(_) => forge.reconcile(cx),
+                Err(refusal) => log(cx, "identity's live heads", &refusal),
+            }),
         ]);
         let visible = cx.host().subscribe::<HostVisible>(());
-        self.watches.push(cx.follow(visible, |forge, shown, _, cx| {
-            if shown.unwrap_or(false) {
-                forge.refresh(cx);
-            }
-        }));
+        self.watches
+            .push(cx.follow(visible, |forge, shown, _, cx| match shown {
+                Ok(true) => forge.refresh(cx),
+                Ok(false) => {}
+                Err(refusal) => log(cx, "visibility", &refusal),
+            }));
         if self.names.is_idle() {
-            self.names = cx.load(queries::roster(cx.host()), |forge| &mut forge.names);
+            self.names = cx.load(chat::view::roster(cx.host()), |forge| &mut forge.names);
         }
         self.sync(cx);
     }
+}
+
+/// A refusal nothing on screen waits for, kept in the host's log.
+fn log(cx: &mut Context<Forge>, what: &str, refusal: &Refusal) {
+    cx.host().log(format!("forge: {what} refused: {refusal}"));
 }
 
 impl Render for Forge {

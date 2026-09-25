@@ -25,6 +25,11 @@ use crate::state::{Dock, Progress, RepoTab};
 use components::{badge, button, heading, id, quiet};
 use forge::Reply;
 
+/// The dock beside a change.
+const DOCK_W: Pixels = px(300.);
+/// A fact's label column.
+const FACT_LABEL_W: Pixels = px(120.);
+
 pub(crate) fn render(forge: &mut Forge, cx: &mut Context<Forge>) -> impl IntoElement {
     let theme = *cx.global::<Theme>();
     let measured = |cx: &mut Context<Forge>| {
@@ -40,14 +45,17 @@ pub(crate) fn render(forge: &mut Forge, cx: &mut Context<Forge>) -> impl IntoEle
     // The rail switches between repositories; with none open, the list
     // itself is the screen, and a rail beside it would say it twice.
     if forge.layout.tree_visible() && forge.nav().repo.is_some() {
-        columns = columns.child(repos::rail(forge, cx, &theme)).child(divider(
-            "forge-rail-resize",
-            &theme,
-            cx,
-            |forge, dx| {
-                forge.layout.tree += dx;
-            },
-        ));
+        columns = columns
+            .child(repos::rail(forge, cx, &theme))
+            .child(design::divider(
+                id("forge-rail-resize"),
+                &theme,
+                cx,
+                |forge: &mut Forge, dx| {
+                    forge.layout.tree += dx;
+                    forge.layout.clamp();
+                },
+            ));
     }
     columns = columns.child(main(forge, cx, &theme));
     if let Some(dock) = forge.nav().dock.filter(|_| forge.layout.dock_visible()) {
@@ -119,7 +127,7 @@ fn repo(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
         .gap_2()
         .child(heading(id("forge-repo-name"), name.clone(), 1, theme));
     if let Some((info, _, _)) = forge.repo() {
-        let owner = forge.key_name(&info.repo.owner);
+        let owner = forge.party_name(&info.repo.owner);
         title = title
             .child(badge(
                 id("forge-repo-owner"),
@@ -259,7 +267,7 @@ fn panel(forge: &Forge, dock: Dock, cx: &mut Context<Forge>, theme: &Theme) -> A
     };
     div()
         .id(id("forge-dock"))
-        .w(px(300.))
+        .w(DOCK_W)
         .flex()
         .flex_col()
         .min_h(px(0.))
@@ -313,7 +321,7 @@ fn about(forge: &Forge, theme: &Theme) -> AnyElement {
             },
             theme,
         ))
-        .child(fact("Owner", forge.key_name(&info.repo.owner), theme))
+        .child(fact("Owner", forge.party_name(&info.repo.owner), theme))
         .child(fact("Page size", bounds.page_size.to_string(), theme))
         .child(fact(
             "Inline blob bound",
@@ -325,7 +333,7 @@ fn about(forge: &Forge, theme: &Theme) -> AnyElement {
         column = column.child(quiet("Only the owner writes here.", theme));
     }
     for key in &writers.items {
-        column = column.child(quiet(forge.key_name(key), theme));
+        column = column.child(quiet(forge.party_name(key), theme));
     }
     column.into_any_element()
 }
@@ -337,7 +345,7 @@ pub(crate) fn fact(label: &str, value: impl Into<String>, theme: &Theme) -> AnyE
         .text_size(design::text::SECONDARY)
         .child(
             div()
-                .w(px(120.))
+                .w(FACT_LABEL_W)
                 .text_color(theme.muted)
                 .child(label.to_owned()),
         )
@@ -433,20 +441,4 @@ pub(crate) fn bold(text: impl Into<String>) -> AnyElement {
         .font_weight(FontWeight::MEDIUM)
         .child(text.into())
         .into_any_element()
-}
-
-/// The line between two panes, dragged to move it. The shared
-/// `resize_handle` is the grab zone; `drag` applies the horizontal delta.
-pub(crate) fn divider(
-    name: &'static str,
-    theme: &Theme,
-    cx: &mut Context<Forge>,
-    drag: impl Fn(&mut Forge, f32) + 'static,
-) -> impl IntoElement {
-    let dragged = cx.listener(move |forge, delta: &(Pixels, Pixels), _, cx| {
-        drag(forge, delta.0.into());
-        forge.layout.clamp();
-        cx.notify();
-    });
-    resize_handle(id(name), div().w(px(1.)).h_full().bg(theme.border)).on_drag(dragged)
 }

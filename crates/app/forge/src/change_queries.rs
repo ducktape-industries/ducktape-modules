@@ -1,51 +1,42 @@
-// The change queries: a repository's changes, one change with its reviews, and the judgment a key owes across every repository.
+//! The change queries: a repository's changes, one change with its
+//! reviews, and the judgment a person owes across every repository.
 
 use abi::{Refusal, Scan};
-use store::{Listing, Reads, capacity, invalid};
+use store::{Listing, Reads, capacity};
 
 use crate::contract::*;
 use crate::discussion;
+use crate::ops::require_named;
 use crate::state::{
     AUTHORED, CHANGES, INVOLVED, REVIEWS, load_bounds, load_change, load_ref, load_repo,
     load_review, repo_hash,
 };
 
-pub fn answer(
+/// One change, its two heads, and a page of its reviews.
+pub fn change(
     store: &impl Reads,
     height: u64,
-    query: &Query,
+    repo: &str,
+    n: u64,
     listing: &Listing,
 ) -> Result<Reply, Refusal> {
-    Ok(match query {
-        Query::Changes { repo, filter, .. } => Reply::Changes {
-            height,
-            page: changes(store, repo, filter, listing)?,
-        },
-        Query::Change { repo, n, .. } => {
-            let change = load_change(store, repo, *n)?;
-            let (source_head, target_head) = heads(store, repo, &change)?;
-            let reviews = REVIEWS
-                .page_of(store, &(repo.clone(), *n), listing)?
-                .map(|(_, review)| review);
-            Reply::Change {
-                height,
-                change,
-                source_head,
-                target_head,
-                reviews,
-            }
-        }
-        Query::Judgment { key, .. } => Reply::Judgment {
-            height,
-            page: judgment(store, key, listing)?,
-        },
-        _ => return Err(invalid("not a change query")),
+    let change = load_change(store, repo, n)?;
+    let (source_head, target_head) = heads(store, repo, &change)?;
+    let reviews = REVIEWS
+        .page_of(store, &(repo.to_owned(), n), listing)?
+        .map(|(_, review)| review);
+    Ok(Reply::Change {
+        height,
+        change,
+        source_head,
+        target_head,
+        reviews,
     })
 }
 
 /// One page of a repository's changes, filtered. A filter can empty a page
 /// that still has a `next`.
-fn changes(
+pub fn changes(
     store: &impl Reads,
     repo: &str,
     filter: &ChangeFilter,
@@ -64,11 +55,11 @@ fn changes(
                 && filter
                     .author
                     .as_ref()
-                    .is_none_or(|key| &change.author == key)
+                    .is_none_or(|party| &change.author == party)
                 && filter
                     .involves
                     .as_ref()
-                    .is_none_or(|key| INVOLVED.has(store, &(key.clone(), repo.clone(), *n)))
+                    .is_none_or(|party| INVOLVED.has(store, &(party.clone(), repo.clone(), *n)))
         })
         .map(|((repo, _), change)| summary(&repo, &change))
         .collect();
@@ -79,18 +70,18 @@ fn changes(
     })
 }
 
-/// One page of every open change, across repositories, that waits on `key`:
-/// its review is requested at the current head, or a thread it started was
-/// answered. Chat participants need not have submitted a forge op, so every
-/// change is paged.
-fn judgment(
+/// One page of every open change, across repositories, that waits on
+/// `party`: its review is requested at the current head, or a thread it
+/// started was answered. Chat participants need not have submitted a forge
+/// op, so every change is paged.
+// ponytail: pages every change of every repository and filters; an index of
+// open changes by waiting party replaces the scan once forge holds many.
+pub fn judgment(
     store: &impl Reads,
-    key: &[u8],
+    party: &Party,
     listing: &Listing,
 ) -> Result<PageReply<Judgment>, Refusal> {
-    if key.is_empty() {
-        return Err(invalid("judgment needs a key"));
-    }
+    require_named(party)?;
     let mut budget = load_bounds(store)?.log_walk;
     let page = CHANGES.page_of(store, &(), listing)?;
     let mut items = Vec::new();
@@ -98,7 +89,7 @@ fn judgment(
         if change.state != ChangeState::Open {
             continue;
         }
-        if let Some(judgment) = judge(store, repo, change, key, &mut budget)? {
+        if let Some(judgment) = judge(store, repo, change, party, &mut budget)? {
             items.push(judgment);
         }
     }
@@ -109,25 +100,25 @@ fn judgment(
     })
 }
 
-/// What `key` owes one open change, if anything.
+/// What `party` owes one open change, if anything.
 fn judge(
     store: &impl Reads,
     repo: &str,
     change: &Change,
-    key: &[u8],
+    party: &Party,
     budget: &mut u64,
 ) -> Result<Option<Judgment>, Refusal> {
     let (source, _) = heads(store, repo, change)?;
-    let authored = authored_newest_first(store, repo, change.n, key, budget)?;
+    let authored = authored_newest_first(store, repo, change.n, party, budget)?;
     let latest = authored
         .first()
         .map(|id| load_review(store, repo, change.n, *id))
         .transpose()?;
-    let requested = change.reviewers.iter().any(|reviewer| reviewer == key)
+    let requested = change.reviewers.contains(party)
         && latest
             .as_ref()
             .is_none_or(|review| source.as_ref() != Some(&review.draft.commit_oid));
-    let mut replies = discussion::attention(store, &change.channel, key)?.and_then(|root| {
+    let mut replies = discussion::attention(store, &change.channel, party)?.and_then(|root| {
         root.last_reply_seq.map(|last_reply_seq| ReplyAttention {
             review: None,
             root_seq: root.seq,
@@ -156,16 +147,16 @@ fn judge(
     }))
 }
 
-/// The ids of the reviews `key` submitted on a change, newest first, each
-/// one spent from the query's `Bounds.log_walk` budget.
+/// The ids of the reviews `party` submitted on a change, newest first,
+/// each one spent from the query's `Bounds.log_walk` budget.
 fn authored_newest_first(
     store: &impl Reads,
     repo: &str,
     n: u64,
-    key: &[u8],
+    party: &Party,
     budget: &mut u64,
 ) -> Result<Vec<u64>, Refusal> {
-    let scan: Scan = AUTHORED.prefix_of(&(repo.to_owned(), n, key.to_vec()));
+    let scan: Scan = AUTHORED.prefix_of(&(repo.to_owned(), n, party.clone()));
     let ids: Vec<u64> = AUTHORED
         .scan(store, scan.reverse().limit(budget.saturating_add(1)))?
         .into_iter()
