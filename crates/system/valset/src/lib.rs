@@ -1,7 +1,6 @@
 //! The `valset` program: who validates and who resides on a network. The
-//! types and rules are always built; a view links them with `program` off.
-//! The `program` feature adds the wasm32 program over the host (`program.rs`).
-#[cfg(feature = "program")]
+//! types, rules and [`Valset`] module are always built; a view links them
+//! with `program` off. The `program` feature adds its wasm exports.
 mod program;
 mod rules;
 #[cfg(test)]
@@ -9,7 +8,7 @@ mod tests;
 #[cfg(feature = "view")]
 pub mod view;
 
-pub use rules::{execute, init, query};
+pub use program::Valset;
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use module_registry::{Page, PageReply};
@@ -61,7 +60,7 @@ pub enum Reply {
 }
 
 /// The ask another program makes of valset.
-pub fn standing(ctx: &impl store::Reads, key: &[u8]) -> Result<Option<Standing>, abi::Refusal> {
+pub fn standing(ctx: &guest::QueryCtx, key: &[u8]) -> Result<Option<Standing>, abi::Refusal> {
     match ctx.ask::<Query, Reply>(PROGRAM, &Query::Membership { key: key.to_vec() })? {
         Reply::Membership(membership) => Ok(membership.map(|membership| membership.standing)),
         other => Err(abi::Refusal::new(

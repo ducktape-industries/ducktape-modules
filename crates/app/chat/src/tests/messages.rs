@@ -120,9 +120,13 @@ fn the_author_or_the_owner_deletes_and_a_tombstone_stays() {
     assert_eq!(chat.search("hello"), [2]);
     assert!(tagged(&chat, "launch").is_empty());
     assert_eq!(attention(&chat, BO), None);
-    let once = chat.store.state.clone();
+    let once = chat.store.borrow().state.clone();
     chat.ok(&BO, delete(1));
-    assert_eq!(chat.store.state, once, "deleting twice changes nothing");
+    assert_eq!(
+        chat.store.borrow().state,
+        once,
+        "deleting twice changes nothing"
+    );
     chat.ok(&BO, delete(2));
 }
 
@@ -134,9 +138,8 @@ fn search_needs_every_word_and_tags_page_newest_first() {
     chat.post(&BO, "m3", "there", None);
     assert_eq!(chat.search("HELLO"), [2, 1]);
     assert_eq!(chat.search("hello there"), [2]);
-    let empty = query(
-        &chat.store,
-        1,
+    let empty = crate::Chat::query(
+        &chat.reads(),
         Query::Search {
             text: "!".into(),
             viewer: vec![],
@@ -191,10 +194,10 @@ fn a_read_names_a_bounded_number_of_viewers() {
     let most = (0..crate::MAX_VIEWERS as u64)
         .map(Principal::Account)
         .collect();
-    query(&chat.store, 1, roots(most)).unwrap();
+    crate::Chat::query(&chat.reads(), roots(most)).unwrap();
     let over = (0..=crate::MAX_VIEWERS as u64)
         .map(Principal::Account)
         .collect();
-    let refusal = query(&chat.store, 1, roots(over)).unwrap_err();
+    let refusal = crate::Chat::query(&chat.reads(), roots(over)).unwrap_err();
     assert_eq!(refusal.reason, reason::CAPACITY);
 }

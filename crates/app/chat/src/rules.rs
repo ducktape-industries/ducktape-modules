@@ -1,7 +1,6 @@
 //! The checks an op passes before it writes. Each refuses with the reason a
-//! view can act on (`store::refuse`); none writes.
-use abi::Refusal;
-use store::{Reads, invalid, unauthorized, wrong_state};
+//! view can act on (`guest::refuse`); none writes.
+use guest::{QueryCtx, Refusal, invalid, unauthorized, wrong_state};
 
 use crate::state::MEMBERS;
 use crate::{
@@ -64,14 +63,14 @@ pub(crate) fn emoji(emoji: &str) -> Result<(), Refusal> {
 /// `principal` may write in `channel`: it is not archived, and posting is open,
 /// or `principal` owns it or is a member.
 pub(crate) fn writable(
-    store: &impl Reads,
+    ctx: &QueryCtx,
     channel: &ChannelRow,
     principal: &Principal,
 ) -> Result<(), Refusal> {
     if channel.archived {
         return Err(wrong_state(format!("{} is archived", channel.id)));
     }
-    let seated = MEMBERS.has(store, &(channel.id.clone(), principal.clone()));
+    let seated = MEMBERS.has(ctx, &(channel.id.clone(), principal.clone()));
     if !channel.admits(principal, seated) {
         return Err(unauthorized(format!(
             "{} is not a member of {}",

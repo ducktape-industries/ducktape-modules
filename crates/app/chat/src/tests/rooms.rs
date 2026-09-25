@@ -55,10 +55,11 @@ fn leaving_a_huddle_frees_the_seat() {
     chat.ok(&BO, join(1));
     chat.ok(&BO, leave());
     assert!(chat.channel().huddle.is_empty());
-    let unseated = chat.store.state.clone();
+    let unseated = chat.store.borrow().state.clone();
     chat.ok(&CY, leave());
     assert_eq!(
-        chat.store.state, unseated,
+        chat.store.borrow().state,
+        unseated,
         "leaving unseated changes nothing"
     );
     let nowhere = Op::LeaveHuddle {

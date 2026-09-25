@@ -3,20 +3,11 @@ name = "store"
 version.workspace = true
 edition.workspace = true
 
-# What a program holds in its hands: the `Reads`/`Writes` store traits, the
-# typed `Map`/`Set`/`Item` descriptors over them, `Page`/`PageReply`, the
-# refusal constructors and the decode helper. Always built; a view links it
-# with `program` off. `program` adds the impls over `guest`'s contexts (wasm32
-# only); natively `Memory` is the store a test runs a program's rules over.
-[features]
-program = ["dep:guest"]
-
+# The optional typed layer over `guest`: the `Map`/`Set`/`Item` descriptors
+# with `KeyCodec`, and `Page`/`PageReply`. Their methods take `guest`'s
+# contexts. A view links it (and `guest`) and calls none of them.
 [dependencies]
 abi = { workspace = true }
 borsh = { workspace = true }
-guest = { workspace = true, optional = true }
+guest = { workspace = true }
 serde = { workspace = true }
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-sha1 = "0.10"
-sha2 = { workspace = true }

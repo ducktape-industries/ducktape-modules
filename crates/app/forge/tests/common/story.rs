@@ -23,11 +23,11 @@ pub struct Rig {
 
 impl Rig {
     pub fn start(bounds: Bounds, hash: HashKind) -> Rig {
-        let mut sandbox = MemorySandbox::default();
+        let sandbox = MemorySandbox::default();
         for (key, account) in HELD {
             sandbox.hold(key, account);
         }
-        forge::init(&mut sandbox, &abi::encode(&bounds)).unwrap();
+        Forge::init(&sandbox.exec(0), &abi::encode(&bounds)).unwrap();
         let mut rig = Rig {
             sandbox,
             height: 0,
@@ -62,7 +62,7 @@ impl Rig {
         let (actor, height) = (self.actor.clone(), self.height);
         self.sandbox
             .forge
-            .attempt(|store| signed_op(store, &actor, height, op))?;
+            .attempt(|| signed_op(&self.sandbox.forge, &actor, height, op))?;
         Ok(self.sandbox.forge.take_output())
     }
 
@@ -73,21 +73,32 @@ impl Rig {
         let (actor, height) = (self.actor.clone(), self.height);
         self.sandbox
             .forge
-            .refused(|store| signed_op(store, &actor, height, op))
+            .refused(|| signed_op(&self.sandbox.forge, &actor, height, op))
     }
 
     pub fn query(&self, query: &Query) -> Result<Vec<u8>, abi::Refusal> {
-        forge::query(&self.sandbox, self.height, query.clone())
+        Forge::query(&self.sandbox.reads(self.height), query.clone()).map(|reply| reply.0)
     }
 
+    /// `principal`'s chat message in a new block, signed by the key that
+    /// holds its account.
     pub fn chat_execute(&mut self, principal: Principal, msg: chat::Op) {
         self.advance();
-        let frame = Frame {
-            principal,
-            height: self.height,
-            time: TIME,
+        let origin = match principal {
+            Principal::Account(number) => {
+                let accounts = self.sandbox.accounts.borrow();
+                let (key, _) = accounts
+                    .iter()
+                    .find(|(_, held)| **held == number)
+                    .expect("a key holds the account");
+                Origin::External(key.clone())
+            }
+            Principal::Module(module) => Origin::Program(module),
+            Principal::System => Origin::System,
         };
-        self.sandbox.chat_execute(&frame, msg).unwrap();
+        self.sandbox
+            .chat_execute(origin, self.height, TIME, msg)
+            .unwrap();
     }
 }
 

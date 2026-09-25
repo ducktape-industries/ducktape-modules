@@ -5,17 +5,17 @@
 pub use std::collections::{BTreeMap, BTreeSet};
 
 pub use abi::{Cause, Env, HashKind, Origin, reason};
-pub use forge::{Bounds, Frame, Op, Page, Principal, Query, Reply, Service, Settings};
+pub use forge::{Bounds, Forge, Op, Page, Principal, Query, Reply, Service, Settings};
 pub use gitcore::wire::pktline::{self, Pkt, Reader};
 pub use gitcore::{
     Commit, Hash, Kind, Limits, MemoryObjects, Mode, Object, Objects, Oid, Signature, Tree,
     TreeEntry, pack,
 };
-pub use store::{Memory, Reads, Writes};
+pub use guest::{MockHost, Module};
 
 pub mod sandbox;
 pub mod story;
-pub use sandbox::MemorySandbox;
+pub use sandbox::{MemorySandbox, env_at};
 
 pub const OWNER: &[u8] = b"owner-key";
 pub const WRITER: &[u8] = b"writer-key";
@@ -51,8 +51,8 @@ pub fn bounds() -> Bounds {
 }
 
 pub fn founded() -> MemorySandbox {
-    let mut sandbox = MemorySandbox::default();
-    forge::init(&mut sandbox, &abi::encode(&bounds())).unwrap();
+    let sandbox = MemorySandbox::default();
+    Forge::init(&sandbox.exec(1), &abi::encode(&bounds())).unwrap();
     sandbox
 }
 
@@ -71,18 +71,9 @@ pub fn person(key: &[u8]) -> Principal {
 
 /// `actor`'s op at `height`, run as the wasm program runs it: the signer
 /// resolved through identity, then the typed execute.
-pub fn signed_op(
-    store: &mut Memory,
-    actor: &[u8],
-    height: u64,
-    op: &Op,
-) -> Result<(), abi::Refusal> {
-    let frame = Frame {
-        principal: identity::principal_of(store, &Origin::External(actor.to_vec()))?,
-        height,
-        time: TIME,
-    };
-    forge::execute(store, &frame, op.clone())
+pub fn signed_op(store: &MockHost, actor: &[u8], height: u64, op: &Op) -> Result<(), abi::Refusal> {
+    let origin = Origin::External(actor.to_vec());
+    Forge::execute(&store.exec(env_at(origin, height, TIME)), op.clone())
 }
 
 /// `actor`'s op; a refusal left forge's store as it was.
@@ -90,7 +81,7 @@ pub fn signed_op(
 pub fn act(sandbox: &mut MemorySandbox, actor: &[u8], op: &Op) -> Result<Vec<u8>, abi::Refusal> {
     sandbox
         .forge
-        .attempt(|store| signed_op(store, actor, 1, op))?;
+        .attempt(|| signed_op(&sandbox.forge, actor, 1, op))?;
     Ok(sandbox.forge.take_output())
 }
 
@@ -99,11 +90,11 @@ pub fn act(sandbox: &mut MemorySandbox, actor: &[u8], op: &Op) -> Result<Vec<u8>
 pub fn refused(sandbox: &mut MemorySandbox, actor: &[u8], op: &Op) -> abi::Refusal {
     sandbox
         .forge
-        .refused(|store| signed_op(store, actor, 1, op))
+        .refused(|| signed_op(&sandbox.forge, actor, 1, op))
 }
 
 pub fn ask(sandbox: &MemorySandbox, query: &Query) -> Result<Vec<u8>, abi::Refusal> {
-    forge::query(sandbox, 1, query.clone())
+    Forge::query(&sandbox.reads(1), query.clone()).map(|reply| reply.0)
 }
 
 pub fn create(sandbox: &mut MemorySandbox, name: &str, hash: HashKind) {

@@ -1,7 +1,7 @@
 #!/bin/sh
 # `make new-program NAME=x` / `make new-view NAME=x-view`: a program in
-# chat's shape (types and rules always built, the wasm32 program behind
-# `program`, a native test over `store::Memory`) or a view in members-view's
+# chat's shape (types, rules and module always built, its wasm exports
+# behind `program`, a native test over `guest::MockHost`) or a view in members-view's
 # shape (links its program with `program` off, `export_view!`, one screen
 # test), registered in the Makefile and the workspace. Run from the repo root.
 #   tools/scaffold.sh program <name> | view <name>-view
@@ -21,6 +21,8 @@ register() { # <Makefile list> <name>
 }
 
 program() {
+    # The module type: TitleCase of the program name.
+    title=$(echo "$name" | awk -F- '{ for (i = 1; i <= NF; i++) printf "%s%s", toupper(substr($i, 1, 1)), substr($i, 2) }')
     mkdir -p "$dir/src" "$dir/tests"
     cat > "$dir/Cargo.toml" <<EOF
 [package]
@@ -28,34 +30,32 @@ name = "$name"
 version.workspace = true
 edition.workspace = true
 
-# The types and rules are always built; the view links them with \`program\`
-# off. \`program\` adds the wasm32 program over the host: \`guest\`'s contexts,
-# the \`alloc\`/\`call\` exports and the \`ducktape.*\` imports.
+# The types, rules and module are always built; the view links them with
+# \`program\` off. \`program\` adds its wasm exports (\`guest::export!\`),
+# which only its own wasm build turns on.
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [features]
-program = ["dep:guest", "store/program"]
+program = []
 
 [dependencies]
 abi = { workspace = true }
 borsh = { workspace = true }
-guest = { workspace = true, optional = true }
+guest = { workspace = true }
 store = { workspace = true }
 EOF
     cat > "$dir/src/lib.rs" <<EOF
 //! The \`$name\` program: one counter, to be replaced by what it keeps.
 //!
 //! Writes are an [\`Op\`] (borsh), reads a [\`Query\`] answered by a [\`Reply\`]
-//! (borsh); \`$name-view\` links the same types. The rules run over any
-//! [\`store::Reads\`]/[\`store::Writes\`] store; the \`program\` feature adds the
-//! wasm32 program over the host (\`program.rs\`), which a view never enables.
-use abi::{Env, Refusal};
+//! (borsh); \`$name-view\` links the same types. [\`$title\`] is the module:
+//! one match over every op and one over every query. It runs natively over
+//! \`guest::MockHost\`; the \`program\` feature adds its wasm exports, which a
+//! view never enables.
 use borsh::{BorshDeserialize, BorshSerialize};
-use store::{Item, Reads, Writes};
-
-#[cfg(feature = "program")]
-mod program;
+use guest::{ExecCtx, Module, QueryCtx, Refusal};
+use store::Item;
 
 pub const PROGRAM: &str = "$name";
 
@@ -77,50 +77,38 @@ pub enum Reply {
     Count(u64),
 }
 
-pub fn execute(store: &mut impl Writes, _env: &Env, op: Op) -> Result<(), Refusal> {
-    match op {
-        Op::Bump { by } => {
-            COUNT.update(store, |count| *count = count.saturating_add(by))?;
+pub struct $title;
+
+impl Module for $title {
+    type Op = Op;
+    type Query = Query;
+    type Response = Reply;
+
+    fn execute(ctx: &ExecCtx, op: Op) -> Result<(), Refusal> {
+        match op {
+            Op::Bump { by } => bump(ctx, by),
         }
     }
+
+    fn query(ctx: &QueryCtx, query: Query) -> Result<Reply, Refusal> {
+        match query {
+            Query::Count => Ok(Reply::Count(COUNT.get(ctx)?.unwrap_or_default())),
+        }
+    }
+}
+
+#[cfg(feature = "program")]
+guest::export!($title);
+
+fn bump(ctx: &ExecCtx, by: u64) -> Result<(), Refusal> {
+    COUNT.update(ctx, |count| *count = count.saturating_add(by))?;
     Ok(())
 }
-
-pub fn query(store: &impl Reads, _env: &Env, query: Query) -> Result<Reply, Refusal> {
-    match query {
-        Query::Count => Ok(Reply::Count(COUNT.get(store)?.unwrap_or_default())),
-    }
-}
-EOF
-    cat > "$dir/src/program.rs" <<EOF
-// The wasm32 program over the rules: guest contexts as the store, the bytes decoded and answered.
-
-use abi::{Env, Refusal};
-use guest::{Execute, Program, Query as QueryCtx};
-use store::decoded;
-
-use crate::{Op, PROGRAM, Query};
-
-struct This;
-
-impl Program for This {
-    fn execute(ctx: &mut Execute, env: &Env, payload: &[u8]) -> Result<(), Refusal> {
-        crate::execute(ctx, env, decoded::<Op>(PROGRAM, "Op", payload)?)
-    }
-
-    fn query(ctx: &mut QueryCtx, env: &Env, request: &[u8]) -> Result<(), Refusal> {
-        let reply = crate::query(ctx, env, decoded::<Query>(PROGRAM, "Query", request)?)?;
-        ctx.reply(&reply);
-        Ok(())
-    }
-}
-
-guest::program!(This);
 EOF
     cat > "$dir/tests/$snake.rs" <<EOF
 use abi::{Cause, Env, Origin};
-use store::Memory;
-use $snake::{Op, Query, Reply};
+use guest::{MockHost, Module};
+use $snake::{$title, Op, Query, Reply};
 
 fn env() -> Env {
     Env {
@@ -135,20 +123,20 @@ fn env() -> Env {
 
 #[test]
 fn bumps_add_up_and_read_back() {
-    let mut store = Memory::default();
-    $snake::execute(&mut store, &env(), Op::Bump { by: 2 }).unwrap();
-    $snake::execute(&mut store, &env(), Op::Bump { by: 3 }).unwrap();
-    let Reply::Count(count) = $snake::query(&store, &env(), Query::Count).unwrap();
+    let host = MockHost::default();
+    $title::execute(&host.exec(env()), Op::Bump { by: 2 }).unwrap();
+    $title::execute(&host.exec(env()), Op::Bump { by: 3 }).unwrap();
+    let Reply::Count(count) = $title::query(&host.query(env()), Query::Count).unwrap();
     assert_eq!(count, 5);
 }
 EOF
     register PROGRAMS "$name"
     sed -i "s|^forge = { path = \"crates/app/forge\" }|&\n$name = { path = \"$dir\" }|" Cargo.toml
     cat <<EOF
-$dir/{Cargo.toml,src/lib.rs,src/program.rs,tests/$snake.rs}, PROGRAMS, workspace members and dependencies.
+$dir/{Cargo.toml,src/lib.rs,tests/$snake.rs}, PROGRAMS, workspace members and dependencies.
 Next:
   1. name \`$name\` in a founding (qa's founding.toml, or the program's params it seats with)
-  2. write the contract: replace Op/Query/Reply and the rules in src/lib.rs; \`make dev P=$name\`
+  2. write the contract: replace Op/Query/Reply and the module in src/lib.rs; \`make dev P=$name\`
   3. tell qa's kit about it (the pack step in kit's build, if it ships a view)
 EOF
 }

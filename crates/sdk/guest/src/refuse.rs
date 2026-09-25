@@ -1,4 +1,4 @@
-//! The refusals a program hands back: abi's reason tokens, each with one sentence.
+//! The refusals a module hands back: abi's reason tokens, each with one sentence.
 
 use abi::{Refusal, reason};
 use borsh::BorshDeserialize;

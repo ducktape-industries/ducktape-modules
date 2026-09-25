@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use abi::{BlobHeader, BlobId, HashKind, Refusal};
 use gitcore::{Error, Hash, Kind, Object, Objects, Oid};
-use store::{Reads, Writes, not_found};
+use guest::{ExecCtx, QueryCtx, not_found};
 
 /// A different serving node or object replication can satisfy this query.
 pub(crate) fn object_not_held(oid: impl std::fmt::Display) -> Refusal {
@@ -16,15 +16,15 @@ pub(crate) fn object_not_held(oid: impl std::fmt::Display) -> Refusal {
 /// Reads objects; a `put` computes the id and persists nothing (a compare
 /// may build a prospective tree off consensus). A push writes through
 /// [`ObjectWriter`].
-pub struct ObjectStore<'a, S: Reads> {
-    sandbox: &'a S,
+pub struct ObjectStore<'a> {
+    sandbox: &'a QueryCtx,
     hash: Hash,
     budget: Option<Cell<(u64, u64)>>,
     max_object_size: u64,
 }
 
-impl<'a, S: Reads> ObjectStore<'a, S> {
-    pub fn new(sandbox: &'a S, hash: Hash) -> ObjectStore<'a, S> {
+impl<'a> ObjectStore<'a> {
+    pub fn new(sandbox: &'a QueryCtx, hash: Hash) -> ObjectStore<'a> {
         ObjectStore {
             sandbox,
             hash,
@@ -33,7 +33,7 @@ impl<'a, S: Reads> ObjectStore<'a, S> {
         }
     }
 
-    pub fn querying(sandbox: &'a S, hash: Hash, bounds: &crate::Bounds, reads: u64) -> Self {
+    pub fn querying(sandbox: &'a QueryCtx, hash: Hash, bounds: &crate::Bounds, reads: u64) -> Self {
         Self {
             budget: Some(Cell::new((reads, bounds.diff_bytes))),
             max_object_size: bounds.max_object_size,
@@ -48,7 +48,7 @@ impl<'a, S: Reads> ObjectStore<'a, S> {
     }
 }
 
-impl<S: Reads> Objects for ObjectStore<'_, S> {
+impl Objects for ObjectStore<'_> {
     fn get(&self, id: &Oid) -> gitcore::Result<Option<Object>> {
         if let Some(budget) = &self.budget {
             let header = match self.sandbox.blob_stat(blob_id_of(id)) {
@@ -73,7 +73,7 @@ impl<S: Reads> Objects for ObjectStore<'_, S> {
     }
 }
 
-fn get(sandbox: &impl Reads, id: &Oid) -> gitcore::Result<Option<Object>> {
+fn get(sandbox: &QueryCtx, id: &Oid) -> gitcore::Result<Option<Object>> {
     let Some(blob) = sandbox.blob_get(blob_id_of(id)) else {
         return Ok(None);
     };
@@ -85,14 +85,14 @@ fn get(sandbox: &impl Reads, id: &Oid) -> gitcore::Result<Option<Object>> {
 /// is accepted ([`ObjectWriter::flush`]), so a refused push stores nothing.
 // ponytail: holds a push's objects in memory until accepted; the pack is
 // in memory already and `Bounds.max_objects`/`max_object_size` cap both.
-pub struct ObjectWriter<'a, S: Writes> {
-    sandbox: &'a mut S,
+pub struct ObjectWriter<'a> {
+    sandbox: &'a ExecCtx,
     hash: Hash,
     pending: BTreeMap<Oid, (Kind, Vec<u8>)>,
 }
 
-impl<'a, S: Writes> ObjectWriter<'a, S> {
-    pub fn new(sandbox: &'a mut S, hash: Hash) -> Self {
+impl<'a> ObjectWriter<'a> {
+    pub fn new(sandbox: &'a ExecCtx, hash: Hash) -> Self {
         ObjectWriter {
             sandbox,
             hash,
@@ -110,12 +110,12 @@ impl<'a, S: Writes> ObjectWriter<'a, S> {
     }
 }
 
-impl<S: Writes> Objects for ObjectWriter<'_, S> {
+impl Objects for ObjectWriter<'_> {
     fn get(&self, id: &Oid) -> gitcore::Result<Option<Object>> {
         if let Some((kind, body)) = self.pending.get(id) {
             return Ok(Some(Object::new(*kind, body.clone())));
         }
-        get(&*self.sandbox, id)
+        get(self.sandbox, id)
     }
 
     fn has(&self, id: &Oid) -> gitcore::Result<bool> {

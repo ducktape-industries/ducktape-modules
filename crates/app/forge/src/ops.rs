@@ -4,12 +4,9 @@
 use abi::{HashKind, Refusal};
 use gitcore::server::{Policy, RefUpdate};
 use gitcore::{Error, Limits, server};
-use store::{Reads, Writes, already_exists, capacity, decoded, invalid, unauthorized};
+use guest::{ExecCtx, QueryCtx, already_exists, capacity, decoded, invalid, unauthorized};
 
-use crate::changes::{self, Draft, Edit, MergeRequest};
-use crate::contract::{
-    Bounds, Frame, MAX_PATH_BYTES, Op, Principal, Repo, Settings, valid_repo_name,
-};
+use crate::contract::{Bounds, MAX_PATH_BYTES, Principal, Repo, Settings, valid_repo_name};
 use crate::objects::{ObjectWriter, object_not_held};
 use crate::state::{
     WRITERS, delete_ref, is_writer, load_bounds, load_refs, load_repo, repo_exists, repo_hash,
@@ -18,7 +15,7 @@ use crate::state::{
 
 pub const PROGRAM: &str = "forge";
 
-pub fn init(store: &mut impl Writes, params: &[u8]) -> Result<(), Refusal> {
+pub(crate) fn init(ctx: &ExecCtx, params: &[u8]) -> Result<(), Refusal> {
     let bounds: Bounds = decoded(PROGRAM, "Bounds", params)?;
     let usable = bounds.page_size > 0
         && bounds.log_walk > 0
@@ -31,87 +28,14 @@ pub fn init(store: &mut impl Writes, params: &[u8]) -> Result<(), Refusal> {
             "bounds need a positive page size and positive read/record budgets; diff_bytes >= blob_bytes",
         ));
     }
-    save_bounds(store, &bounds);
+    save_bounds(ctx, &bounds);
     Ok(())
-}
-
-/// Runs one op as `frame.principal`, whom the program resolved from the
-/// signer ([`identity::principal_of`]). Every op names its repository; an accepted one
-/// marks it active.
-pub fn execute(store: &mut impl Writes, frame: &Frame, op: Op) -> Result<(), Refusal> {
-    let actor = person(&frame.principal)?;
-    let repo = op.repo().to_owned();
-    let reply = match op {
-        Op::Create { repo, hash } => create(store, actor, &repo, hash).map(|()| None),
-        Op::Configure { repo, settings } => configure(store, actor, &repo, settings).map(|()| None),
-        Op::Grant { repo, principal } => grant(store, actor, &repo, principal).map(|()| None),
-        Op::Revoke { repo, principal } => revoke(store, actor, &repo, principal).map(|()| None),
-        Op::Push { repo, request } => push(store, actor, &repo, &request).map(|()| None),
-        Op::Merge {
-            repo,
-            into,
-            from,
-            expected_into,
-            expected_from,
-            result,
-            change,
-        } => {
-            let merge = MergeRequest {
-                into,
-                from,
-                expected_into,
-                expected_from,
-                result,
-                change,
-            };
-            changes::merge_heads(store, frame, actor, &repo, merge).map(Some)
-        }
-        Op::ChangeOpen {
-            repo,
-            from,
-            into,
-            title,
-            body,
-            reviewers,
-        } => {
-            let draft = Draft {
-                from,
-                into,
-                title,
-                body,
-                reviewers,
-            };
-            changes::open(store, frame, actor, &repo, draft).map(Some)
-        }
-        Op::ChangeEdit {
-            repo,
-            n,
-            title,
-            body,
-            reviewers,
-        } => {
-            let fields = Edit {
-                title,
-                body,
-                reviewers,
-            };
-            changes::edit(store, frame, actor, &repo, n, fields).map(Some)
-        }
-        Op::ChangeClose { repo, n } => changes::close(store, frame, actor, &repo, n).map(Some),
-        Op::ReviewSubmit { repo, n, review } => {
-            changes::submit_review(store, frame, actor, &repo, n, review).map(Some)
-        }
-    }?;
-    if let Some(reply) = reply {
-        store.output(abi::encode(&reply));
-    }
-    touch(store, &repo, frame.height)
 }
 
 /// Forge is written by people (an account), never by a program or the
 /// system. A key that holds no account never gets here: identity's
 /// [`principal_of`](identity::principal_of) refuses it.
-fn person(principal: &Principal) -> Result<&Principal, Refusal> {
+pub(crate) fn person(principal: &Principal) -> Result<&Principal, Refusal> {
     if !principal.is_person() {
         return Err(unauthorized("a repository op is signed by a person"));
     }
@@ -119,14 +43,14 @@ fn person(principal: &Principal) -> Result<&Principal, Refusal> {
 }
 
 /// Every accepted op marks its repository active at this height.
-fn touch(store: &mut impl Writes, name: &str, height: u64) -> Result<(), Refusal> {
-    let mut repo = load_repo(store, name)?;
+pub(crate) fn touch(ctx: &ExecCtx, name: &str, height: u64) -> Result<(), Refusal> {
+    let mut repo = load_repo(ctx, name)?;
     repo.last_activity = height;
-    save_repo(store, name, &repo)
+    save_repo(ctx, name, &repo)
 }
 
-fn create(
-    store: &mut impl Writes,
+pub(crate) fn create(
+    ctx: &ExecCtx,
     actor: &Principal,
     name: &str,
     hash: HashKind,
@@ -134,7 +58,7 @@ fn create(
     if !valid_repo_name(name) {
         return Err(invalid(format!("{name:?} is not a repository name")));
     }
-    if repo_exists(store, name) {
+    if repo_exists(ctx, name) {
         return Err(already_exists(format!("a repository named {name} exists")));
     }
     let repo = Repo {
@@ -144,16 +68,16 @@ fn create(
         refs_count: 0,
         last_activity: 0,
     };
-    save_repo(store, name, &repo)
+    save_repo(ctx, name, &repo)
 }
 
-fn configure(
-    store: &mut impl Writes,
+pub(crate) fn configure(
+    ctx: &ExecCtx,
     actor: &Principal,
     name: &str,
     settings: Settings,
 ) -> Result<(), Refusal> {
-    let mut repo = load_repo(store, name)?;
+    let mut repo = load_repo(ctx, name)?;
     require_owner(&repo, actor)?;
     let head_is_a_ref =
         settings.head.len() <= MAX_PATH_BYTES && server::valid_ref_name(&settings.head);
@@ -161,51 +85,51 @@ fn configure(
         return Err(invalid("head names a ref under refs/"));
     }
     repo.settings = settings;
-    save_repo(store, name, &repo)
+    save_repo(ctx, name, &repo)
 }
 
-fn grant(
-    store: &mut impl Writes,
+pub(crate) fn grant(
+    ctx: &ExecCtx,
     actor: &Principal,
     name: &str,
     principal: Principal,
 ) -> Result<(), Refusal> {
-    require_owner(&load_repo(store, name)?, actor)?;
+    require_owner(&load_repo(ctx, name)?, actor)?;
     require_named(&principal)?;
-    WRITERS.insert(store, &(name.to_owned(), principal));
+    WRITERS.insert(ctx, &(name.to_owned(), principal));
     Ok(())
 }
 
-fn revoke(
-    store: &mut impl Writes,
+pub(crate) fn revoke(
+    ctx: &ExecCtx,
     actor: &Principal,
     name: &str,
     principal: Principal,
 ) -> Result<(), Refusal> {
-    require_owner(&load_repo(store, name)?, actor)?;
+    require_owner(&load_repo(ctx, name)?, actor)?;
     require_named(&principal)?;
-    WRITERS.remove(store, &(name.to_owned(), principal));
+    WRITERS.remove(ctx, &(name.to_owned(), principal));
     Ok(())
 }
 
 /// A git receive-pack: the objects land as blobs, then each accepted ref
 /// moves; git's own report is the op's output.
-fn push(
-    store: &mut impl Writes,
+pub(crate) fn push(
+    ctx: &ExecCtx,
     actor: &Principal,
     name: &str,
     request: &[u8],
 ) -> Result<(), Refusal> {
-    let mut repo = load_repo(store, name)?;
-    require_writer(store, name, &repo, actor)?;
-    let bounds = load_bounds(store)?;
+    let mut repo = load_repo(ctx, name)?;
+    require_writer(ctx, name, &repo, actor)?;
+    let bounds = load_bounds(ctx)?;
     let hash = repo_hash(&repo);
-    let refs = load_refs(store, name, hash)?;
+    let refs = load_refs(ctx, name, hash)?;
     let policy = Policy {
         allow_force: repo.settings.allow_force,
         allow_delete: repo.settings.allow_delete,
     };
-    let mut objects = ObjectWriter::new(store, hash);
+    let mut objects = ObjectWriter::new(ctx, hash);
     let outcome = server::push(
         &mut objects,
         &refs,
@@ -223,16 +147,16 @@ fn push(
                 if !refs.contains_key(reference) {
                     repo.refs_count += 1;
                 }
-                set_ref(store, name, reference, target);
+                set_ref(ctx, name, reference, target);
             }
             RefUpdate::Delete => {
                 repo.refs_count -= 1;
-                delete_ref(store, name, reference);
+                delete_ref(ctx, name, reference);
             }
         }
     }
-    save_repo(store, name, &repo)?;
-    store.output(outcome.report);
+    save_repo(ctx, name, &repo)?;
+    ctx.output(outcome.report);
     Ok(())
 }
 
@@ -244,12 +168,12 @@ fn require_owner(repo: &Repo, actor: &Principal) -> Result<(), Refusal> {
 }
 
 pub(crate) fn require_writer(
-    store: &impl Reads,
+    ctx: &QueryCtx,
     name: &str,
     repo: &Repo,
     actor: &Principal,
 ) -> Result<(), Refusal> {
-    let may_write = repo.owner == *actor || is_writer(store, name, actor);
+    let may_write = repo.owner == *actor || is_writer(ctx, name, actor);
     if !may_write {
         return Err(unauthorized("only the owner and its writers push"));
     }
@@ -278,7 +202,7 @@ pub fn cap(bound: u64) -> usize {
 
 pub fn refusal_of(error: Error) -> Refusal {
     match error {
-        Error::Storage => storage("the blob store refused a write"),
+        Error::Storage => storage("the blob ctx refused a write"),
         Error::CapReached | Error::ObjectTooLarge => {
             capacity("query or operation exceeds its configured work/byte bound")
         }

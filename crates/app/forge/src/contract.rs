@@ -4,7 +4,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 
 pub use crate::read_contract::*;
 pub use crate::review_contract::*;
-pub use identity::{Frame, Principal};
+pub use identity::Principal;
 pub use store::{Page, PageReply};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]

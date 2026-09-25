@@ -1,28 +1,51 @@
-// The wasm32 program over the rules: guest contexts as the store, the bytes decoded and answered.
+//! The module: the schedule folded at each block, then every op and every
+//! query, each handed to its rule.
 
-use abi::{Env, Refusal};
-use guest::{Execute, Program, Query as QueryCtx};
-use store::decoded;
+use guest::{ExecCtx, Module, QueryCtx, Refusal, decoded};
 
-use crate::{Genesis, Op, PROGRAM, Query};
+use crate::rules::{SCHEDULE, at, cancel, fold, init, publish, schedule, views_at};
+use crate::{Genesis, Op, PROGRAM, Query, Reply, Scheduled};
 
-struct Modules;
+pub struct Modules;
 
-impl Program for Modules {
-    fn init(ctx: &mut Execute, _env: &Env, params: &[u8]) -> Result<(), Refusal> {
-        crate::rules::init(ctx, decoded::<Genesis>(PROGRAM, "Genesis", params)?);
+impl Module for Modules {
+    type Op = Op;
+    type Query = Query;
+    type Response = Reply;
+
+    fn init(ctx: &ExecCtx, params: &[u8]) -> Result<(), Refusal> {
+        init(ctx, decoded::<Genesis>(PROGRAM, "Genesis", params)?);
         Ok(())
     }
 
-    fn execute(ctx: &mut Execute, env: &Env, payload: &[u8]) -> Result<(), Refusal> {
-        crate::rules::execute(ctx, env, decoded::<Op>(PROGRAM, "Op", payload)?)
+    fn execute(ctx: &ExecCtx, op: Op) -> Result<(), Refusal> {
+        fold(ctx, ctx.env().height)?;
+        match op {
+            Op::Publish { body } => publish(ctx, body),
+            Op::Schedule(scheduled) => schedule(ctx, scheduled),
+            Op::Cancel { height, program } => cancel(ctx, height, program),
+        }
     }
 
-    fn query(ctx: &mut QueryCtx, env: &Env, request: &[u8]) -> Result<(), Refusal> {
-        let reply = crate::rules::query(ctx, env, decoded::<Query>(PROGRAM, "Query", request)?)?;
-        ctx.reply(&reply);
-        Ok(())
+    fn query(ctx: &QueryCtx, query: Query) -> Result<Reply, Refusal> {
+        let height = ctx.env().height;
+        Ok(match query {
+            Query::At(height) => Reply::Programs(at(ctx, height)?),
+            Query::Views(height) => Reply::Views(views_at(ctx, height)?),
+            Query::Scheduled { page } => Reply::Scheduled(
+                SCHEDULE
+                    .range(ctx, &page, height)?
+                    .map(|((height, _), change)| Scheduled { height, change }),
+            ),
+            Query::Program(program) => Reply::Program {
+                height,
+                entry: at(ctx, height)?
+                    .into_iter()
+                    .find(|entry| entry.program == program),
+            },
+        })
     }
 }
 
-guest::program!(Modules);
+#[cfg(feature = "program")]
+guest::export!(Modules);

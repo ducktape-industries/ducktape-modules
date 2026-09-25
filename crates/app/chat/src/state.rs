@@ -3,8 +3,8 @@
 //! typed (`store::KeyCodec`: integers big-endian, strings and principals
 //! NUL-terminated, so names list by name), values borsh. A tuple key scans by its leading
 //! elements, which is how every "in this channel" read works.
-use abi::Refusal;
-use store::{Map, Reads, Set, Writes, capacity, not_found};
+use guest::{ExecCtx, QueryCtx, Refusal, capacity, not_found};
+use store::{Map, Set};
 
 use crate::{ChannelRow, MAX_MESSAGE_BYTES, MemberRow, MsgRow, Principal, tokens};
 
@@ -41,25 +41,25 @@ pub(crate) fn newest_first(n: u64) -> u64 {
     u64::MAX - n
 }
 
-pub(crate) fn channel(store: &impl Reads, id: &str) -> Result<ChannelRow, Refusal> {
+pub(crate) fn channel(ctx: &QueryCtx, id: &str) -> Result<ChannelRow, Refusal> {
     CHANNELS
-        .get(store, &id.to_owned())?
+        .get(ctx, &id.to_owned())?
         .ok_or_else(|| not_found(format!("no channel {id}")))
 }
 
-pub(crate) fn message(store: &impl Reads, channel_id: &str, seq: Seq) -> Result<MsgRow, Refusal> {
+pub(crate) fn message(ctx: &QueryCtx, channel_id: &str, seq: Seq) -> Result<MsgRow, Refusal> {
     MESSAGES
-        .get(store, &(channel_id.to_owned(), seq))?
+        .get(ctx, &(channel_id.to_owned(), seq))?
         .ok_or_else(|| not_found(format!("no message {channel_id}/{seq}")))
 }
 
 /// The rows at these addresses; one gone (never, in chat) is skipped.
 pub(crate) fn messages(
-    store: &impl Reads,
+    ctx: &QueryCtx,
     at: impl IntoIterator<Item = (ChannelId, Seq)>,
 ) -> Result<Vec<MsgRow>, Refusal> {
     at.into_iter()
-        .filter_map(|key| MESSAGES.get(store, &key).transpose())
+        .filter_map(|key| MESSAGES.get(ctx, &key).transpose())
         .collect()
 }
 
@@ -76,26 +76,26 @@ pub(crate) fn fits(row: &MsgRow) -> Result<(), Refusal> {
 
 /// Stores `row` in place of `old` (none for a new message), moving its
 /// search and tag postings with it. The caller has checked [`fits`].
-pub(crate) fn replace_message(store: &mut impl Writes, old: Option<&MsgRow>, row: &MsgRow) {
+pub(crate) fn replace_message(ctx: &ExecCtx, old: Option<&MsgRow>, row: &MsgRow) {
     if let Some(old) = old {
-        postings(store, old, false);
+        postings(ctx, old, false);
     }
-    postings(store, row, true);
-    MESSAGES.put(store, &(row.channel_id.clone(), row.seq), row);
+    postings(ctx, row, true);
+    MESSAGES.put(ctx, &(row.channel_id.clone(), row.seq), row);
 }
 
 /// Every search and tag posting a row makes, on or off.
-fn postings(store: &mut impl Writes, row: &MsgRow, on: bool) {
+fn postings(ctx: &ExecCtx, row: &MsgRow, on: bool) {
     let (channel, seq) = (row.channel_id.clone(), row.seq);
     for word in tokens(&row.text) {
-        toggle(store, &WORDS, &(word, channel.clone(), seq), on);
+        toggle(ctx, &WORDS, &(word, channel.clone(), seq), on);
     }
     for tag in &row.tags {
         let when = newest_first(row.time);
-        toggle(store, &TAGS, &(tag.clone(), when, channel.clone(), seq), on);
+        toggle(ctx, &TAGS, &(tag.clone(), when, channel.clone(), seq), on);
         let newest = newest_first(seq);
         toggle(
-            store,
+            ctx,
             &CHANNEL_TAGS,
             &(channel.clone(), tag.clone(), newest),
             on,
@@ -103,10 +103,10 @@ fn postings(store: &mut impl Writes, row: &MsgRow, on: bool) {
     }
 }
 
-pub(crate) fn toggle<K: store::KeyCodec>(store: &mut impl Writes, set: &Set<K>, key: &K, on: bool) {
+pub(crate) fn toggle<K: store::KeyCodec>(ctx: &ExecCtx, set: &Set<K>, key: &K, on: bool) {
     if on {
-        set.insert(store, key);
+        set.insert(ctx, key);
     } else {
-        set.remove(store, key);
+        set.remove(ctx, key);
     }
 }

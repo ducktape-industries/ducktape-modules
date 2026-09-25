@@ -6,7 +6,8 @@ use std::collections::BTreeMap;
 
 use abi::{Refusal, reason};
 use gitcore::{Hash, Oid};
-use store::{Item, Map, Reads, Set, Writes, invalid, not_found};
+use guest::{ExecCtx, QueryCtx, invalid, not_found};
+use store::{Item, Map, Set};
 
 use crate::contract::{Bounds, Change, Principal, Repo, Review, Revision, valid_repo_name};
 use crate::objects::hash_of;
@@ -40,37 +41,37 @@ pub(crate) fn storage(sentence: impl Into<String>) -> Refusal {
     Refusal::new(reason::CORRUPT, sentence)
 }
 
-pub fn save_bounds(store: &mut impl Writes, bounds: &Bounds) {
-    BOUNDS.put(store, bounds);
+pub fn save_bounds(ctx: &ExecCtx, bounds: &Bounds) {
+    BOUNDS.put(ctx, bounds);
 }
 
-pub fn load_bounds(store: &impl Reads) -> Result<Bounds, Refusal> {
+pub fn load_bounds(ctx: &QueryCtx) -> Result<Bounds, Refusal> {
     BOUNDS
-        .get(store)?
+        .get(ctx)?
         .ok_or_else(|| Refusal::new(reason::PROTOCOL, "the program was founded without bounds"))
 }
 
-pub fn repo_exists(store: &impl Reads, name: &str) -> bool {
-    REPOS.has(store, &name.to_owned())
+pub fn repo_exists(ctx: &QueryCtx, name: &str) -> bool {
+    REPOS.has(ctx, &name.to_owned())
 }
 
-pub fn load_repo(store: &impl Reads, name: &str) -> Result<Repo, Refusal> {
+pub fn load_repo(ctx: &QueryCtx, name: &str) -> Result<Repo, Refusal> {
     if !valid_repo_name(name) {
         return Err(invalid(format!("{name:?} is not a repository name")));
     }
     REPOS
-        .get(store, &name.to_owned())?
+        .get(ctx, &name.to_owned())?
         .ok_or_else(|| not_found(format!("no repository named {name}")))
 }
 
 /// Stores the record and moves it in the activity index, so the index
 /// holds exactly one row per repository.
-pub fn save_repo(store: &mut impl Writes, name: &str, repo: &Repo) -> Result<(), Refusal> {
-    if let Some(old) = REPOS.get(store, &name.to_owned())? {
-        ACTIVITY.remove(store, &(newest_first(old.last_activity), name.to_owned()));
+pub fn save_repo(ctx: &ExecCtx, name: &str, repo: &Repo) -> Result<(), Refusal> {
+    if let Some(old) = REPOS.get(ctx, &name.to_owned())? {
+        ACTIVITY.remove(ctx, &(newest_first(old.last_activity), name.to_owned()));
     }
-    ACTIVITY.insert(store, &(newest_first(repo.last_activity), name.to_owned()));
-    REPOS.put(store, &name.to_owned(), repo);
+    ACTIVITY.insert(ctx, &(newest_first(repo.last_activity), name.to_owned()));
+    REPOS.put(ctx, &name.to_owned(), repo);
     Ok(())
 }
 
@@ -83,8 +84,8 @@ pub fn repo_hash(repo: &Repo) -> Hash {
     hash_of(repo.hash)
 }
 
-pub fn is_writer(store: &impl Reads, name: &str, principal: &Principal) -> bool {
-    WRITERS.has(store, &(name.to_owned(), principal.clone()))
+pub fn is_writer(ctx: &QueryCtx, name: &str, principal: &Principal) -> bool {
+    WRITERS.has(ctx, &(name.to_owned(), principal.clone()))
 }
 
 pub fn ref_key(name: &str, reference: &[u8]) -> (String, Vec<u8>) {
@@ -93,11 +94,11 @@ pub fn ref_key(name: &str, reference: &[u8]) -> (String, Vec<u8>) {
 
 /// Every ref of a repository: what a push is checked against and git is told.
 pub fn load_refs(
-    store: &impl Reads,
+    ctx: &QueryCtx,
     name: &str,
     hash: Hash,
 ) -> Result<BTreeMap<Vec<u8>, Oid>, Refusal> {
-    REFS.scan(store, REFS.prefix_of(&name.to_owned()))?
+    REFS.scan(ctx, REFS.prefix_of(&name.to_owned()))?
         .into_iter()
         .map(|((_, reference), bytes)| {
             let target = Oid::from_bytes(hash, &bytes).map_err(|error| {
@@ -109,31 +110,27 @@ pub fn load_refs(
 }
 
 pub fn load_ref(
-    store: &impl Reads,
+    ctx: &QueryCtx,
     name: &str,
     reference: &[u8],
     hash: Hash,
 ) -> Result<Option<Oid>, Refusal> {
-    REFS.get(store, &ref_key(name, reference))?
+    REFS.get(ctx, &ref_key(name, reference))?
         .map(|bytes| Oid::from_bytes(hash, &bytes).map_err(|e| storage(e.to_string())))
         .transpose()
 }
 
-pub fn set_ref(store: &mut impl Writes, name: &str, reference: &[u8], target: &Oid) {
-    REFS.put(
-        store,
-        &ref_key(name, reference),
-        &target.as_bytes().to_vec(),
-    );
+pub fn set_ref(ctx: &ExecCtx, name: &str, reference: &[u8], target: &Oid) {
+    REFS.put(ctx, &ref_key(name, reference), &target.as_bytes().to_vec());
 }
 
-pub fn delete_ref(store: &mut impl Writes, name: &str, reference: &[u8]) {
-    REFS.remove(store, &ref_key(name, reference));
+pub fn delete_ref(ctx: &ExecCtx, name: &str, reference: &[u8]) {
+    REFS.remove(ctx, &ref_key(name, reference));
 }
 
 /// Resolving an op's endpoint reads consensus refs only, never objects.
 pub fn resolve(
-    store: &impl Reads,
+    ctx: &QueryCtx,
     name: &str,
     revision: &Revision,
     hash: Hash,
@@ -144,8 +141,7 @@ pub fn resolve(
             if !gitcore::server::valid_ref_name(reference) {
                 return Err(invalid("revision must name a full ref"));
             }
-            load_ref(store, name, reference, hash)?
-                .ok_or_else(|| not_found("the ref does not exist"))
+            load_ref(ctx, name, reference, hash)?.ok_or_else(|| not_found("the ref does not exist"))
         }
     }
 }
@@ -160,25 +156,25 @@ pub fn parse_oid(hash: Hash, hex: &str) -> Result<Oid, Refusal> {
 }
 
 /// The number a new change of this repository takes. Issues would share it.
-pub fn next_number(store: &impl Reads, name: &str) -> Result<u64, Refusal> {
-    next(NUMBERS.get(store, &name.to_owned())?.unwrap_or(0))
+pub fn next_number(ctx: &QueryCtx, name: &str) -> Result<u64, Refusal> {
+    next(NUMBERS.get(ctx, &name.to_owned())?.unwrap_or(0))
 }
 
 /// The id the next system line forge posts into chat takes, unclaimed.
-pub fn peek_message(store: &impl Reads) -> Result<String, Refusal> {
-    Ok(message_id(next_message_number(store)?))
+pub fn peek_message(ctx: &QueryCtx) -> Result<String, Refusal> {
+    Ok(message_id(next_message_number(ctx)?))
 }
 
 /// Claims the next id of a system line forge posts into chat.
-pub fn next_message(store: &mut impl Writes) -> Result<String, Refusal> {
-    let n = next_message_number(store)?;
-    MESSAGES.put(store, &n);
+pub fn next_message(ctx: &ExecCtx) -> Result<String, Refusal> {
+    let n = next_message_number(ctx)?;
+    MESSAGES.put(ctx, &n);
     Ok(message_id(n))
 }
 
-fn next_message_number(store: &impl Reads) -> Result<u64, Refusal> {
+fn next_message_number(ctx: &QueryCtx) -> Result<u64, Refusal> {
     MESSAGES
-        .get(store)?
+        .get(ctx)?
         .unwrap_or(0)
         .checked_add(1)
         .ok_or_else(|| Refusal::new(reason::EXHAUSTED, "system message counter exhausted"))
@@ -194,19 +190,19 @@ pub fn next(n: u64) -> Result<u64, Refusal> {
         .ok_or_else(|| Refusal::new(reason::EXHAUSTED, "counter exhausted"))
 }
 
-pub fn load_change(store: &impl Reads, repo: &str, n: u64) -> Result<Change, Refusal> {
+pub fn load_change(ctx: &QueryCtx, repo: &str, n: u64) -> Result<Change, Refusal> {
     CHANGES
-        .get(store, &(repo.to_owned(), n))?
+        .get(ctx, &(repo.to_owned(), n))?
         .ok_or_else(|| not_found(format!("no change {repo}#{n}")))
 }
 
 /// Stores the change and keeps [`INVOLVED`] in step with it: its author and
 /// every requested reviewer are involved; a reviewer taken off the request
 /// stays involved only if they reviewed it. A new change claims its number.
-pub fn save_change(store: &mut impl Writes, repo: &str, change: &Change) -> Result<(), Refusal> {
+pub fn save_change(ctx: &ExecCtx, repo: &str, change: &Change) -> Result<(), Refusal> {
     let row = (repo.to_owned(), change.n);
-    match CHANGES.get(store, &row)? {
-        None => NUMBERS.put(store, &repo.to_owned(), &change.n),
+    match CHANGES.get(ctx, &row)? {
+        None => NUMBERS.put(ctx, &repo.to_owned(), &change.n),
         Some(old) => {
             let dropped: Vec<Principal> = old
                 .reviewers
@@ -214,47 +210,43 @@ pub fn save_change(store: &mut impl Writes, repo: &str, change: &Change) -> Resu
                 .filter(|principal| {
                     !change.reviewers.contains(principal)
                         && *principal != change.author
-                        && !has_reviewed(store, repo, change.n, principal)
+                        && !has_reviewed(ctx, repo, change.n, principal)
                 })
                 .collect();
             for principal in dropped {
-                INVOLVED.remove(store, &(principal, repo.to_owned(), change.n));
+                INVOLVED.remove(ctx, &(principal, repo.to_owned(), change.n));
             }
         }
     }
     for principal in std::iter::once(&change.author).chain(&change.reviewers) {
-        involve(store, principal, repo, change.n);
+        involve(ctx, principal, repo, change.n);
     }
-    CHANGES.put(store, &row, change);
+    CHANGES.put(ctx, &row, change);
     Ok(())
 }
 
-pub fn involve(store: &mut impl Writes, principal: &Principal, repo: &str, n: u64) {
-    INVOLVED.insert(store, &(principal.clone(), repo.to_owned(), n));
+pub fn involve(ctx: &ExecCtx, principal: &Principal, repo: &str, n: u64) {
+    INVOLVED.insert(ctx, &(principal.clone(), repo.to_owned(), n));
 }
 
-fn has_reviewed(store: &impl Reads, repo: &str, n: u64, principal: &Principal) -> bool {
-    !store
-        .scan(
-            AUTHORED
-                .prefix_of(&(repo.to_owned(), n, principal.clone()))
-                .limit(1),
-        )
-        .is_empty()
+fn has_reviewed(ctx: &QueryCtx, repo: &str, n: u64, principal: &Principal) -> bool {
+    !ctx.scan(
+        AUTHORED
+            .prefix_of(&(repo.to_owned(), n, principal.clone()))
+            .limit(1),
+    )
+    .is_empty()
 }
 
-pub fn save_review(store: &mut impl Writes, repo: &str, n: u64, review: &Review) {
-    REVIEWS.put(store, &(repo.to_owned(), n, review.id), review);
-    AUTHORED.insert(
-        store,
-        &(repo.to_owned(), n, review.author.clone(), review.id),
-    );
-    involve(store, &review.author, repo, n);
+pub fn save_review(ctx: &ExecCtx, repo: &str, n: u64, review: &Review) {
+    REVIEWS.put(ctx, &(repo.to_owned(), n, review.id), review);
+    AUTHORED.insert(ctx, &(repo.to_owned(), n, review.author.clone(), review.id));
+    involve(ctx, &review.author, repo, n);
 }
 
-pub fn load_review(store: &impl Reads, repo: &str, n: u64, id: u64) -> Result<Review, Refusal> {
+pub fn load_review(ctx: &QueryCtx, repo: &str, n: u64, id: u64) -> Result<Review, Refusal> {
     REVIEWS
-        .get(store, &(repo.to_owned(), n, id))?
+        .get(ctx, &(repo.to_owned(), n, id))?
         .ok_or_else(|| storage("authored review missing"))
 }
 
@@ -262,7 +254,8 @@ pub fn load_review(store: &impl Reads, repo: &str, n: u64, id: u64) -> Result<Re
 mod tests {
     use super::*;
     use crate::contract::{ChangeState, ReviewCounts};
-    use store::Memory;
+    use abi::{Cause, Env, Origin};
+    use guest::MockHost;
 
     fn change(n: u64) -> Change {
         Change {
@@ -293,12 +286,19 @@ mod tests {
     /// name length, and one repository's prefix never reaches a longer name.
     #[test]
     fn changes_across_repositories_list_by_name() {
-        let mut store = Memory::default();
+        let ctx = MockHost::default().exec(Env {
+            network: vec![],
+            height: 1,
+            time: 1,
+            me: crate::PROGRAM.into(),
+            origin: Origin::System,
+            cause: Cause::Direct,
+        });
         for (repo, n) in [("zz", 1), ("abc", 2), ("ab", 1), ("abc", 1)] {
-            save_change(&mut store, repo, &change(n)).unwrap();
+            save_change(&ctx, repo, &change(n)).unwrap();
         }
         let order: Vec<(String, u64)> = CHANGES
-            .all(&store)
+            .all(&ctx)
             .unwrap()
             .into_iter()
             .map(|((repo, n), _)| (repo, n))
@@ -306,7 +306,7 @@ mod tests {
         let expected = [("ab", 1), ("abc", 1), ("abc", 2), ("zz", 1)];
         assert_eq!(order, expected.map(|(r, n)| (r.to_owned(), n)));
         let ab = CHANGES
-            .scan(&store, CHANGES.prefix_of(&"ab".to_string()))
+            .scan(&ctx, CHANGES.prefix_of(&"ab".to_string()))
             .unwrap();
         assert_eq!(ab.len(), 1);
     }

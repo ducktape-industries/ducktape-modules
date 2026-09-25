@@ -3,8 +3,8 @@ use common::*;
 
 #[test]
 fn founding_requires_bounds_and_ops_require_a_signer() {
-    let mut sandbox = MemorySandbox::default();
-    let unfounded = forge::init(&mut sandbox, b"").unwrap_err();
+    let sandbox = MemorySandbox::default();
+    let unfounded = Forge::init(&sandbox.exec(1), b"").unwrap_err();
     assert_eq!(unfounded.reason, reason::INVALID_INPUT);
     assert!(
         unfounded
@@ -12,21 +12,17 @@ fn founding_requires_bounds_and_ops_require_a_signer() {
             .starts_with("forge: Bounds did not decode:"),
         "{unfounded}"
     );
-    forge::init(&mut sandbox, &abi::encode(&bounds())).unwrap();
+    Forge::init(&sandbox.exec(1), &abi::encode(&bounds())).unwrap();
 
     let create = Op::Create {
         repo: "r".into(),
         hash: HashKind::Sha1,
     };
-    for principal in [Principal::System, Principal::Module("chat".into())] {
-        let frame = Frame {
-            principal,
-            height: 1,
-            time: TIME,
-        };
+    for origin in [Origin::System, Origin::Program("chat".into())] {
+        let ctx = sandbox.forge.exec(env_at(origin, 1, TIME));
         let refusal = sandbox
             .forge
-            .refused(|store| forge::execute(store, &frame, create.clone()));
+            .refused(|| Forge::execute(&ctx, create.clone()));
         assert_eq!(refusal.reason, reason::UNAUTHORIZED);
     }
 }
@@ -328,8 +324,8 @@ fn an_import_arrives_as_fast_forward_steps_and_an_open_pack_is_refused_whole() {
 #[test]
 fn a_walk_past_the_bound_asks_for_smaller_steps() {
     let mut sandbox = MemorySandbox::default();
-    forge::init(
-        &mut sandbox,
+    Forge::init(
+        &sandbox.exec(1),
         &abi::encode(&Bounds {
             push_walk: 2,
             ..bounds()

@@ -3,27 +3,27 @@
 //!
 //! A write is an [`Op`], a read a [`Query`] answered by a [`Reply`], all
 //! borsh, the same types `chat-view` links. The acting [`Principal`] is the
-//! frame's origin: an external key resolved by identity's `principal_of` to its
+//! env's origin: an external key resolved by identity's `principal_of` to its
 //! account (a key that holds none writes nothing). The layout, in reading order:
 //!
 //! - `lib.rs` (here): the types on the wire and the rows they carry
+//! - `program.rs`: [`Chat`], the module: the signer resolved, then one match
+//!   over every op and one over every query
 //! - `state.rs`: every table and index the program keeps, declared once
 //! - `rules.rs`: the checks an op passes before it writes
-//! - `ops.rs`: [`execute`], one short function per op
-//! - `origin.rs`: [`execute_from`], an origin resolved to its principal
-//!   through identity, and identity's roster
-//! - `queries.rs`: [`query`], one short function per question
+//! - `ops.rs`: one short function per op
+//! - `origin.rs`: a huddle join's node proof, and identity's roster
+//! - `queries.rs`: one short function per question
 //! - `text.rs`: what search and tags read out of a message
 //! - `description.rs`: [`describe`], an op in a person's words
-//! - `program.rs` (`program` feature): the wasm32 glue over the host
 //!
-//! The rules run over any [`store::Reads`]/[`store::Writes`], so a native
-//! test runs them over [`store::Memory`] exactly as the host does.
+//! The module runs over `guest`'s contexts, so a native test runs it over
+//! [`guest::MockHost`] exactly as the host does. The `program` feature adds
+//! its wasm exports.
 mod description;
 pub mod message;
 mod ops;
 mod origin;
-#[cfg(feature = "program")]
 mod program;
 mod queries;
 mod rules;
@@ -39,11 +39,10 @@ use serde::{Deserialize, Serialize};
 
 pub use abi::hex;
 pub use description::describe;
-pub use identity::{AccountNumber, Frame, Principal};
+pub use identity::{AccountNumber, Principal};
 pub use message::{Block, Mark, Span, parse_message};
-pub use ops::execute;
-pub use origin::execute_from;
-pub use queries::{query, roots_below};
+pub use program::Chat;
+pub use queries::roots_below;
 pub use store::{Cursor, Page, PageReply};
 pub use text::{plain_text, tags, tokens};
 

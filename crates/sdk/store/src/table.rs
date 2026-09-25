@@ -1,15 +1,14 @@
-//! Typed tables over a store: `const` descriptors whose methods take the
-//! store. `const ACCOUNTS: Map<AccountNumber, Account> = Map::new("a");`
+//! Typed tables over a context: `const` descriptors whose methods take the
+//! context. `const ACCOUNTS: Map<AccountNumber, Account> = Map::new("a");`
 
 use std::marker::PhantomData;
 
 use abi::{Refusal, Scan};
 use borsh::{BorshDeserialize, BorshSerialize};
+use guest::{ExecCtx, QueryCtx, corrupt};
 
 use crate::key::KeyCodec;
 use crate::page::{Listing, Page, PageReply};
-use crate::refuse::corrupt;
-use crate::{Reads, Writes};
 
 pub struct Map<K, V> {
     prefix: &'static str,
@@ -44,31 +43,29 @@ impl<K: KeyCodec, V: BorshSerialize + BorshDeserialize> Map<K, V> {
         Scan::range(self.prefix.as_bytes().to_vec(), Some(hi))
     }
 
-    pub fn get(&self, store: &impl Reads, key: &K) -> Result<Option<V>, Refusal> {
+    pub fn get(&self, ctx: &QueryCtx, key: &K) -> Result<Option<V>, Refusal> {
         let bytes = self.key(key);
-        store
-            .get(&bytes)
+        ctx.get(&bytes)
             .map(|value| decode_value(self.prefix, &bytes, &value))
             .transpose()
     }
 
-    pub fn has(&self, store: &impl Reads, key: &K) -> bool {
-        store.get(self.key(key)).is_some()
+    pub fn has(&self, ctx: &QueryCtx, key: &K) -> bool {
+        ctx.get(self.key(key)).is_some()
     }
 
-    pub fn put(&self, store: &mut impl Writes, key: &K, value: &V) {
-        store.set(self.key(key), abi::encode(value));
+    pub fn put(&self, ctx: &ExecCtx, key: &K, value: &V) {
+        ctx.set(self.key(key), abi::encode(value));
     }
 
-    pub fn remove(&self, store: &mut impl Writes, key: &K) {
-        store.delete(self.key(key));
+    pub fn remove(&self, ctx: &ExecCtx, key: &K) {
+        ctx.delete(self.key(key));
     }
 
     /// The rows a scan admits, keys decoded back. The scan comes from
     /// `prefix_of`, `below`, or `Page::scan` over `self.prefix()`.
-    pub fn scan(&self, store: &impl Reads, scan: Scan) -> Result<Vec<(K, V)>, Refusal> {
-        store
-            .scan(scan)
+    pub fn scan(&self, ctx: &QueryCtx, scan: Scan) -> Result<Vec<(K, V)>, Refusal> {
+        ctx.scan(scan)
             .into_iter()
             .map(|entry| {
                 let key = decode_key(self.prefix, &entry.key)?;
@@ -78,30 +75,30 @@ impl<K: KeyCodec, V: BorshSerialize + BorshDeserialize> Map<K, V> {
             .collect()
     }
 
-    pub fn all(&self, store: &impl Reads) -> Result<Vec<(K, V)>, Refusal> {
-        self.scan(store, Scan::prefix(self.prefix))
+    pub fn all(&self, ctx: &QueryCtx) -> Result<Vec<(K, V)>, Refusal> {
+        self.scan(ctx, Scan::prefix(self.prefix))
     }
 
     /// One page of the table in key order, resumable through `PageReply::next`.
     pub fn range(
         &self,
-        store: &impl Reads,
+        ctx: &QueryCtx,
         page: &Page,
         height: u64,
     ) -> Result<PageReply<(K, V)>, Refusal> {
-        self.range_of(store, &(), page, height)
+        self.range_of(ctx, &(), page, height)
     }
 
     /// One page of the keys whose leading elements are `head`.
     pub fn range_of<H: KeyCodec>(
         &self,
-        store: &impl Reads,
+        ctx: &QueryCtx,
         head: &H,
         page: &Page,
         height: u64,
     ) -> Result<PageReply<(K, V)>, Refusal> {
         let listing = page.listing(self.key(head), height)?;
-        self.page_of(store, head, &listing)
+        self.page_of(ctx, head, &listing)
     }
 
     /// One page of the keys whose leading elements are `head`, over a
@@ -109,11 +106,11 @@ impl<K: KeyCodec, V: BorshSerialize + BorshDeserialize> Map<K, V> {
     /// more than the prefix: the whole query, a height).
     pub fn page_of<H: KeyCodec>(
         &self,
-        store: &impl Reads,
+        ctx: &QueryCtx,
         head: &H,
         listing: &Listing,
     ) -> Result<PageReply<(K, V)>, Refusal> {
-        let rows = store
+        let rows = ctx
             .scan(listing.scan_ahead(&self.key(head)))
             .into_iter()
             .map(|entry| {
@@ -149,60 +146,52 @@ impl<K: KeyCodec> Set<K> {
         self.map.prefix_of(head)
     }
 
-    pub fn has(&self, store: &impl Reads, key: &K) -> bool {
-        self.map.has(store, key)
+    pub fn has(&self, ctx: &QueryCtx, key: &K) -> bool {
+        self.map.has(ctx, key)
     }
 
-    pub fn insert(&self, store: &mut impl Writes, key: &K) {
-        self.map.put(store, key, &());
+    pub fn insert(&self, ctx: &ExecCtx, key: &K) {
+        self.map.put(ctx, key, &());
     }
 
-    pub fn remove(&self, store: &mut impl Writes, key: &K) {
-        self.map.remove(store, key);
+    pub fn remove(&self, ctx: &ExecCtx, key: &K) {
+        self.map.remove(ctx, key);
     }
 
-    pub fn scan(&self, store: &impl Reads, scan: Scan) -> Result<Vec<K>, Refusal> {
+    pub fn scan(&self, ctx: &QueryCtx, scan: Scan) -> Result<Vec<K>, Refusal> {
         Ok(self
             .map
-            .scan(store, scan)?
+            .scan(ctx, scan)?
             .into_iter()
             .map(|(k, ())| k)
             .collect())
     }
 
-    pub fn all(&self, store: &impl Reads) -> Result<Vec<K>, Refusal> {
-        self.scan(store, Scan::prefix(self.map.prefix))
+    pub fn all(&self, ctx: &QueryCtx) -> Result<Vec<K>, Refusal> {
+        self.scan(ctx, Scan::prefix(self.map.prefix))
     }
 
-    pub fn range(
-        &self,
-        store: &impl Reads,
-        page: &Page,
-        height: u64,
-    ) -> Result<PageReply<K>, Refusal> {
-        Ok(self.map.range(store, page, height)?.map(|(k, ())| k))
+    pub fn range(&self, ctx: &QueryCtx, page: &Page, height: u64) -> Result<PageReply<K>, Refusal> {
+        Ok(self.map.range(ctx, page, height)?.map(|(k, ())| k))
     }
 
     pub fn range_of<H: KeyCodec>(
         &self,
-        store: &impl Reads,
+        ctx: &QueryCtx,
         head: &H,
         page: &Page,
         height: u64,
     ) -> Result<PageReply<K>, Refusal> {
-        Ok(self
-            .map
-            .range_of(store, head, page, height)?
-            .map(|(k, ())| k))
+        Ok(self.map.range_of(ctx, head, page, height)?.map(|(k, ())| k))
     }
 
     pub fn page_of<H: KeyCodec>(
         &self,
-        store: &impl Reads,
+        ctx: &QueryCtx,
         head: &H,
         listing: &Listing,
     ) -> Result<PageReply<K>, Refusal> {
-        Ok(self.map.page_of(store, head, listing)?.map(|(k, ())| k))
+        Ok(self.map.page_of(ctx, head, listing)?.map(|(k, ())| k))
     }
 
     pub fn prefix(&self) -> &'static str {
@@ -223,25 +212,24 @@ impl<T: BorshSerialize + BorshDeserialize> Item<T> {
         }
     }
 
-    pub fn get(&self, store: &impl Reads) -> Result<Option<T>, Refusal> {
-        store
-            .get(self.key)
+    pub fn get(&self, ctx: &QueryCtx) -> Result<Option<T>, Refusal> {
+        ctx.get(self.key)
             .map(|value| decode_value(self.key, b"", &value))
             .transpose()
     }
 
-    pub fn put(&self, store: &mut impl Writes, value: &T) {
-        store.set(self.key.as_bytes().to_vec(), abi::encode(value));
+    pub fn put(&self, ctx: &ExecCtx, value: &T) {
+        ctx.set(self.key.as_bytes().to_vec(), abi::encode(value));
     }
 
     /// Reads the value (or its default), lets `change` alter it, stores and returns it.
-    pub fn update(&self, store: &mut impl Writes, change: impl FnOnce(&mut T)) -> Result<T, Refusal>
+    pub fn update(&self, ctx: &ExecCtx, change: impl FnOnce(&mut T)) -> Result<T, Refusal>
     where
         T: Default,
     {
-        let mut value = self.get(store)?.unwrap_or_default();
+        let mut value = self.get(ctx)?.unwrap_or_default();
         change(&mut value);
-        self.put(store, &value);
+        self.put(ctx, &value);
         Ok(value)
     }
 }
@@ -261,7 +249,20 @@ fn decode_value<V: BorshDeserialize>(table: &str, key: &[u8], value: &[u8]) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Memory;
+    use abi::{Cause, Env, Origin};
+    use guest::MockHost;
+
+    /// A context over a fresh host.
+    fn exec() -> ExecCtx {
+        MockHost::default().exec(Env {
+            network: vec![],
+            height: 0,
+            time: 0,
+            me: "test".into(),
+            origin: Origin::System,
+            cause: Cause::Direct,
+        })
+    }
 
     const NUMBERS: Map<u64, String> = Map::new("n/");
     const PAIRS: Map<(u64, String), u8> = Map::new("p/");
@@ -270,40 +271,40 @@ mod tests {
 
     #[test]
     fn tables_round_trip_scan_in_key_order_and_refuse_corrupt_rows() {
-        let mut store = Memory::default();
-        NUMBERS.put(&mut store, &10, &"ten".into());
-        NUMBERS.put(&mut store, &2, &"two".into());
-        assert_eq!(NUMBERS.get(&store, &2).unwrap().as_deref(), Some("two"));
-        assert!(NUMBERS.has(&store, &10) && !NUMBERS.has(&store, &3));
+        let ctx = exec();
+        NUMBERS.put(&ctx, &10, &"ten".into());
+        NUMBERS.put(&ctx, &2, &"two".into());
+        assert_eq!(NUMBERS.get(&ctx, &2).unwrap().as_deref(), Some("two"));
+        assert!(NUMBERS.has(&ctx, &10) && !NUMBERS.has(&ctx, &3));
         let keys: Vec<u64> = NUMBERS
-            .all(&store)
+            .all(&ctx)
             .unwrap()
             .into_iter()
             .map(|(k, _)| k)
             .collect();
         assert_eq!(keys, [2, 10], "numeric, not lexical");
-        NUMBERS.remove(&mut store, &2);
-        assert_eq!(NUMBERS.all(&store).unwrap().len(), 1);
+        NUMBERS.remove(&ctx, &2);
+        assert_eq!(NUMBERS.all(&ctx).unwrap().len(), 1);
 
-        PAIRS.put(&mut store, &(1, "b".into()), &1);
-        PAIRS.put(&mut store, &(1, "a".into()), &2);
-        PAIRS.put(&mut store, &(2, "a".into()), &3);
-        let under_one = PAIRS.scan(&store, PAIRS.prefix_of(&1u64)).unwrap();
+        PAIRS.put(&ctx, &(1, "b".into()), &1);
+        PAIRS.put(&ctx, &(1, "a".into()), &2);
+        PAIRS.put(&ctx, &(2, "a".into()), &3);
+        let under_one = PAIRS.scan(&ctx, PAIRS.prefix_of(&1u64)).unwrap();
         assert_eq!(under_one.len(), 2);
-        let paged = PAIRS.range_of(&store, &1u64, &Page::first(1), 0).unwrap();
+        let paged = PAIRS.range_of(&ctx, &1u64, &Page::first(1), 0).unwrap();
         assert_eq!((paged.items.len(), paged.next.is_some()), (1, true));
         assert_eq!(under_one[0].0.1, "a");
-        assert_eq!(PAIRS.scan(&store, PAIRS.below(&2u64)).unwrap().len(), 2);
+        assert_eq!(PAIRS.scan(&ctx, PAIRS.below(&2u64)).unwrap().len(), 2);
 
-        SEEN.insert(&mut store, &vec![7]);
-        assert!(SEEN.has(&store, &vec![7]));
-        assert_eq!(SEEN.all(&store).unwrap(), [vec![7]]);
+        SEEN.insert(&ctx, &vec![7]);
+        assert!(SEEN.has(&ctx, &vec![7]));
+        assert_eq!(SEEN.all(&ctx).unwrap(), [vec![7]]);
 
-        assert_eq!(NEXT.update(&mut store, |n| *n += 1).unwrap(), 1);
-        assert_eq!(NEXT.get(&store).unwrap(), Some(1));
+        assert_eq!(NEXT.update(&ctx, |n| *n += 1).unwrap(), 1);
+        assert_eq!(NEXT.get(&ctx).unwrap(), Some(1));
 
-        store.set(b"n/short".to_vec(), abi::encode(&"x".to_string()));
-        let refusal = NUMBERS.all(&store).unwrap_err();
+        ctx.set(b"n/short".to_vec(), abi::encode(&"x".to_string()));
+        let refusal = NUMBERS.all(&ctx).unwrap_err();
         assert_eq!(refusal.reason, abi::reason::CORRUPT);
         assert!(refusal.sentence.starts_with("n/["), "{refusal}");
     }
@@ -313,7 +314,7 @@ mod tests {
     #[test]
     fn string_keys_list_by_name_and_a_prefix_is_a_whole_element() {
         const NAMED: Map<(String, u64), ()> = Map::new("x/");
-        let mut store = Memory::default();
+        let ctx = exec();
         for (name, n) in [
             ("general", 1),
             ("abc", 2),
@@ -322,11 +323,11 @@ mod tests {
             ("docs", 1),
             ("a\0b", 1),
         ] {
-            NAMED.put(&mut store, &(name.into(), n), &());
+            NAMED.put(&ctx, &(name.into(), n), &());
         }
         let order = |scan| -> Vec<(String, u64)> {
             NAMED
-                .scan(&store, scan)
+                .scan(&ctx, scan)
                 .unwrap()
                 .into_iter()
                 .map(|(k, ())| k)
@@ -346,23 +347,23 @@ mod tests {
 
     #[test]
     fn a_range_pages_with_lookahead() {
-        let mut store = Memory::default();
+        let ctx = exec();
         for n in 0..5u64 {
-            NUMBERS.put(&mut store, &n, &n.to_string());
+            NUMBERS.put(&ctx, &n, &n.to_string());
         }
-        let reply = NUMBERS.range(&store, &Page::first(2), 3).unwrap();
+        let reply = NUMBERS.range(&ctx, &Page::first(2), 3).unwrap();
         assert_eq!((reply.items.len(), reply.height), (2, 3));
         let page = Page {
             after: reply.next,
             limit: Some(2),
         };
-        let reply = NUMBERS.range(&store, &page, 3).unwrap();
+        let reply = NUMBERS.range(&ctx, &page, 3).unwrap();
         assert_eq!(reply.items[0].0, 2);
         assert!(reply.next.is_some());
         let page = Page {
             after: reply.next,
             limit: Some(2),
         };
-        assert_eq!(NUMBERS.range(&store, &page, 3).unwrap().next, None);
+        assert_eq!(NUMBERS.range(&ctx, &page, 3).unwrap().next, None);
     }
 }

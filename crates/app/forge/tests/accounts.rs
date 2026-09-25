@@ -264,6 +264,7 @@ fn system_lines_carry_an_event_code_and_no_name() {
     let lines: Vec<chat::Block> = rig
         .sandbox
         .forge
+        .borrow()
         .emissions
         .iter()
         .filter_map(|message| match abi::decode(&message.payload).unwrap() {

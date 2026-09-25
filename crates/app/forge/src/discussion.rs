@@ -3,8 +3,8 @@
 
 use abi::{Refusal, reason};
 use chat::{Block, MsgRow, Op, PostPolicy, Query, Reply};
+use guest::{ExecCtx, QueryCtx};
 use identity::Principal;
-use store::{Reads, Writes};
 
 use crate::Change;
 
@@ -33,9 +33,9 @@ impl Event {
 }
 
 /// Queues the change's channel. Chat creates it in the next block.
-pub fn create(store: &mut impl Writes, repo: &str, change: &Change) {
+pub fn create(ctx: &ExecCtx, repo: &str, change: &Change) {
     emit(
-        store,
+        ctx,
         Op::CreateChannel {
             channel_id: change.channel.clone(),
             name: format!("{repo}#{}", change.n),
@@ -46,9 +46,9 @@ pub fn create(store: &mut impl Writes, repo: &str, change: &Change) {
 
 /// Queues one system line into the change's channel: the event's code in
 /// a `forge` block, no name and no sentence.
-pub fn post(store: &mut impl Writes, change: &Change, message_id: String, event: Event) {
+pub fn post(ctx: &ExecCtx, change: &Change, message_id: String, event: Event) {
     emit(
-        store,
+        ctx,
         Op::PostMessage {
             channel_id: change.channel.clone(),
             message_id,
@@ -61,16 +61,16 @@ pub fn post(store: &mut impl Writes, change: &Change, message_id: String, event:
     );
 }
 
-fn emit(store: &mut impl Writes, message: Op) {
-    store.emit(chat::PROGRAM, abi::encode(&message));
+fn emit(ctx: &ExecCtx, message: Op) {
+    ctx.emit(chat::PROGRAM, abi::encode(&message));
 }
 
 /// The chat root a review posted, by its message id.
-pub fn message(store: &impl Reads, id: &str) -> Result<Option<MsgRow>, Refusal> {
+pub fn message(ctx: &QueryCtx, id: &str) -> Result<Option<MsgRow>, Refusal> {
     let query = Query::MessageById {
         message_id: id.into(),
     };
-    match store.ask::<Query, Reply>(chat::PROGRAM, &query)? {
+    match ctx.ask::<Query, Reply>(chat::PROGRAM, &query)? {
         Reply::Message(row) => Ok(row),
         other => Err(unexpected("MessageById", &other)),
     }
@@ -78,7 +78,7 @@ pub fn message(store: &impl Reads, id: &str) -> Result<Option<MsgRow>, Refusal> 
 
 /// The newest thread in `channel` that `principal` started and someone answered.
 pub fn attention(
-    store: &impl Reads,
+    ctx: &QueryCtx,
     channel: &str,
     principal: &Principal,
 ) -> Result<Option<MsgRow>, Refusal> {
@@ -86,7 +86,7 @@ pub fn attention(
         channel_id: channel.into(),
         author: principal.clone(),
     };
-    match store.ask::<Query, Reply>(chat::PROGRAM, &query)? {
+    match ctx.ask::<Query, Reply>(chat::PROGRAM, &query)? {
         Reply::Attention(row) => Ok(row),
         other => Err(unexpected("ThreadAttention", &other)),
     }

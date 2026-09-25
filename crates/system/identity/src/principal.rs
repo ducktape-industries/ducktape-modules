@@ -5,8 +5,9 @@
 //! its signer through [`principal_of`], so the rule is written once.
 use abi::{Origin, Refusal, reason};
 use borsh::{BorshDeserialize, BorshSerialize};
+use guest::{QueryCtx, invalid, unauthorized};
 use serde::{Deserialize, Serialize};
-use store::{KeyCodec, Reads, invalid, unauthorized};
+use store::KeyCodec;
 
 use crate::AccountNumber;
 
@@ -96,12 +97,12 @@ pub const NO_ACCOUNT: &str = "a person writes through an account, and this key h
 /// Who an origin is: a key is the account identity says holds it; a key
 /// that holds none (or any key while identity is not deployed) is refused,
 /// since only an account writes as a person.
-pub fn principal_of(store: &impl Reads, origin: &Origin) -> Result<Principal, Refusal> {
+pub fn principal_of(ctx: &QueryCtx, origin: &Origin) -> Result<Principal, Refusal> {
     Ok(match origin {
         Origin::External(key) if key.is_empty() => {
             return Err(invalid("an external origin carries a key"));
         }
-        Origin::External(key) => match crate::account_of(store, key) {
+        Origin::External(key) => match crate::account_of(ctx, key) {
             Ok(Some(number)) => Principal::Account(number),
             Ok(None) => return Err(unauthorized(NO_ACCOUNT)),
             Err(r) if r.reason == reason::UNKNOWN_PROGRAM => return Err(unauthorized(NO_ACCOUNT)),
@@ -110,14 +111,6 @@ pub fn principal_of(store: &impl Reads, origin: &Origin) -> Result<Principal, Re
         Origin::Program(id) => Principal::Module(id.clone()),
         Origin::System => Principal::System,
     })
-}
-
-/// The frame a typed `execute` runs in: who acts, at what height and time.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Frame {
-    pub principal: Principal,
-    pub height: u64,
-    pub time: u64,
 }
 
 #[cfg(test)]

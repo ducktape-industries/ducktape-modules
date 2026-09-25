@@ -5,10 +5,11 @@ use crate::ops::cap;
 use crate::reads::{Reading, entry_kind};
 use abi::Refusal;
 use gitcore::{Mode, Oid, diff};
-use store::{Listing, Reads, invalid};
+use guest::invalid;
+use store::Listing;
 
-pub fn query<S: Reads>(
-    r: &Reading<'_, S>,
+pub fn query(
+    r: &Reading<'_>,
     height: u64,
     base: &Option<String>,
     head: &str,
@@ -41,7 +42,7 @@ pub fn query<S: Reads>(
 /// One side of a file change: its mode and blob.
 type Side = Option<(Mode, Oid)>;
 
-fn file<S: Reads>(r: &Reading<'_, S>, c: &diff::Change) -> Result<FileDiff, Refusal> {
+fn file(r: &Reading<'_>, c: &diff::Change) -> Result<FileDiff, Refusal> {
     let (old, new, status) = sides(&c.kind);
     let old_size = size(r, old)?;
     let new_size = size(r, new)?;
@@ -126,7 +127,7 @@ fn sides(kind: &diff::ChangeKind) -> (Side, Side, FileStatus) {
 }
 
 /// A side's blob size; a gitlink or an absent side has none.
-fn size<S: Reads>(r: &Reading<'_, S>, side: Side) -> Result<u64, Refusal> {
+fn size(r: &Reading<'_>, side: Side) -> Result<u64, Refusal> {
     match side {
         Some((Mode::Gitlink, _)) | None => Ok(0),
         Some((_, id)) => {

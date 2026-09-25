@@ -1,7 +1,7 @@
 //! forge: a git server as a ducktape program, `gitcore` (objects, packs,
-//! walks, diffs, the wire) over `store`. The rules run natively over
-//! `store::Memory` (tests, fixtures); the `program` feature adds the wasm32
-//! program over the host.
+//! walks, diffs, the wire) over `store`. The [`Forge`] module runs natively
+//! over `guest::MockHost` (tests, fixtures); the `program` feature adds its
+//! wasm exports.
 //!
 //! A write is an [`Op`] run as a [`Principal`] (an account: the signer resolved
 //! by identity's [`principal_of`](identity::principal_of), which refuses a key that
@@ -9,14 +9,15 @@
 //! a [`Query`] answered by a [`Reply`]. The layout, in reading order:
 //!
 //! - `contract.rs`, `read_contract.rs`, `review_contract.rs`: the wire
+//! - `program.rs`: [`Forge`], the module: the signer resolved, then one
+//!   match over every op and one over every query
 //! - `state.rs`: every table and index, declared once
-//! - `ops.rs`: [`execute`] and the repository ops; `changes.rs` the change ops
-//! - `queries.rs`: [`query`]; `reads.rs`, `diffs.rs`, `change_queries.rs`
-//!   answer its object and change questions
+//! - `ops.rs`: the repository ops; `changes.rs` the change ops
+//! - `queries.rs`, `reads.rs`, `diffs.rs`, `change_queries.rs`: the answers
+//!   to its repository, object and change questions
 //! - `objects.rs`: git objects over the store's blobs
 //! - `discussion.rs`: what forge asks of and posts into chat
 //! - `description.rs`: [`describe`], an op in a person's words
-//! - `program.rs` (`program` feature): the wasm32 glue
 
 // The wire, as a view and a git client see it.
 mod contract;
@@ -35,15 +36,14 @@ mod queries;
 mod reads;
 mod state;
 
-#[cfg(feature = "program")]
 mod program;
 #[cfg(feature = "view")]
 pub mod view;
 
 pub use contract::*;
 pub use description::describe;
-pub use ops::{PROGRAM, execute, init};
-pub use queries::query;
+pub use ops::PROGRAM;
+pub use program::{Forge, RawReply};
 
 describe::export!(Op, describe);
 
