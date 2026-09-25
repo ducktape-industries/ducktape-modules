@@ -14,18 +14,19 @@ use ducktape_view_guest::{Div, KeyDownEvent, Stateful};
 use crate::Forge;
 use crate::tree::{Key, Row, Slot};
 use crate::ui::components::{button, empty_state, heading, id, path_text, quiet};
-use crate::ui::{divider, highlight, markdown, staged};
+use crate::ui::{highlight, markdown, staged};
 use forge::{BlobView, Content, EntryKind, Query, Reply};
 
 pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
     let mut columns = div().id(id("forge-code")).flex().flex_1().min_h(px(0.));
     if forge.layout.tree_visible() || forge.nav().blob.is_none() {
-        columns = columns.child(tree(forge, cx, theme)).child(divider(
-            "forge-files-resize",
+        columns = columns.child(tree(forge, cx, theme)).child(design::divider(
+            id("forge-files-resize"),
             theme,
             cx,
-            |forge, dx| {
+            |forge: &mut Forge, dx| {
                 forge.layout.files += dx;
+                forge.layout.clamp();
             },
         ));
     }

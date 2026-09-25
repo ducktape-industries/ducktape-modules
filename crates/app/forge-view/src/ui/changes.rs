@@ -353,8 +353,8 @@ fn reviewers(
         .items_center()
         .gap_1()
         .child(quiet("Reviewers", theme));
-    for account in names.rows().iter().take(24) {
-        let key = chat::Party::Account(account.number);
+    for number in names.numbers().take(24) {
+        let key = chat::Party::Account(number);
         let picked = form.reviewers.contains(&key);
         let toggle = cx.listener({
             let key = key.clone();
@@ -371,8 +371,8 @@ fn reviewers(
         });
         bar = bar.child(
             button(
-                id(format!("forge-reviewer-{}", account.number)),
-                account.name.clone(),
+                id(format!("forge-reviewer-{number}")),
+                names.member(&key),
                 theme,
                 toggle,
             )

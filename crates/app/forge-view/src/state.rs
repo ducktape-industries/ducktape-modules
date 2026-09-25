@@ -39,7 +39,7 @@ pub struct Forge {
     /// every read on screen, keyed by the query that asked it
     pub(crate) data: BTreeMap<Query, Loaded<Reply>>,
     #[serde(skip)]
-    pub(crate) names: Loaded<Names>,
+    pub(crate) names: Loaded<chat::view::Names>,
     #[serde(skip)]
     pub(crate) messages: BTreeMap<String, Loaded<Vec<chat::MsgRow>>>,
     #[serde(skip)]
@@ -414,53 +414,7 @@ impl Layout {
     }
 }
 
-/// The identity roster, folded to what a key or chat party is called.
-#[derive(Clone, Debug, Default)]
-pub(crate) struct Names {
-    rows: Vec<chat::AccountRow>,
-}
-
-impl Names {
-    pub fn new(rows: Vec<chat::AccountRow>) -> Self {
-        Self { rows }
-    }
-    pub fn rows(&self) -> &[chat::AccountRow] {
-        &self.rows
-    }
-    /// What a raw forge key is called, or its short hex.
-    pub fn key(&self, key: &[u8]) -> String {
-        let hex = abi::hex(key);
-        self.rows
-            .iter()
-            .find(|row| row.keys.iter().any(|held| held.eq_ignore_ascii_case(&hex)))
-            .map(|row| row.name.clone())
-            .unwrap_or_else(|| ducktape_view_guest::design::short_hex(&hex))
-    }
-    /// What a chat author is called.
-    pub fn party(&self, party: &chat::Party) -> String {
-        match party {
-            chat::Party::Account(number) => self
-                .rows
-                .iter()
-                .find(|row| row.number == *number)
-                .map_or_else(|| unnamed(party), |row| row.name.clone()),
-            chat::Party::Key(key) => self.key(key),
-            chat::Party::Module(_) | chat::Party::System => unnamed(party),
-        }
-    }
-}
-
 /// The key a change's screens and drafts hang on.
 pub(crate) fn change_key(repo: &str, n: u64) -> String {
     format!("{repo}#{n}")
-}
-
-/// A chat author no roster names: its account number, its module, or Forge.
-pub fn unnamed(party: &chat::Party) -> String {
-    match party {
-        chat::Party::Account(number) => format!("account {number}"),
-        chat::Party::Key(key) => ducktape_view_guest::design::short_hex(&abi::hex(key)),
-        chat::Party::Module(module) => module.clone(),
-        chat::Party::System => "Forge".into(),
-    }
 }

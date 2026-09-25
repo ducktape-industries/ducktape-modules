@@ -95,7 +95,7 @@ impl View for Forge {
                 Err(refusal) => log(cx, "visibility", &refusal),
             }));
         if self.names.is_idle() {
-            self.names = cx.load(queries::roster(cx.host()), |forge| &mut forge.names);
+            self.names = cx.load(chat::view::roster(cx.host()), |forge| &mut forge.names);
         }
         self.sync(cx);
     }

@@ -21,7 +21,7 @@ impl Forge {
         let reader_changed = next.key != self.session.key;
         self.session = next;
         if reader_changed {
-            self.names = cx.load(queries::roster(cx.host()), |forge| &mut forge.names);
+            self.names = cx.load(chat::view::roster(cx.host()), |forge| &mut forge.names);
             self.data.clear();
         }
         self.sync(cx);

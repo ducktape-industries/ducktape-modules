@@ -215,9 +215,11 @@ impl Forge {
     /// What a person or chat author is called: their account name once
     /// the roster has landed.
     pub(crate) fn party_name(&self, party: &Party) -> String {
-        match self.names.ready() {
-            Some(names) => names.party(party),
-            None => crate::state::unnamed(party),
+        match (party, self.names.ready()) {
+            // forge's own lines in a change's channel
+            (Party::System, _) => "Forge".into(),
+            (_, Some(names)) => names.member(party),
+            (_, None) => chat::view::unnamed(party),
         }
     }
 
