@@ -625,5 +625,47 @@
     "kind": "notify.read",
     "request": "#design",
     "reply": null
+  },
+  {
+    "kind": "rpc.heads",
+    "request": null,
+    "reply": {
+      "height": 9,
+      "time": 1,
+      "id": [
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4,
+        4
+      ]
+    }
   }
 ]
