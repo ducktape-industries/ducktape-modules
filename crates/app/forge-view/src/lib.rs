@@ -619,7 +619,7 @@ export_view!(
     Forge,
     "Forge",
     "Repositories, code, commits and the changes waiting on your judgment.",
-    ["rpc", "op", "host"]
+    ["rpc", "op", "host", "clipboard"]
 );
 
 #[cfg(test)]
