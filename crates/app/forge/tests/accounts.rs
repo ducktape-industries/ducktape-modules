@@ -175,7 +175,7 @@ fn a_key_writes_only_once_it_holds_an_account() {
             repo: REPO.into(),
             party: Party::Account(3),
         },
-        story.open("From a bare key"),
+        story.open("From a key with no account"),
         Op::ChangeEdit {
             repo: REPO.into(),
             n,
@@ -208,7 +208,11 @@ fn a_key_writes_only_once_it_holds_an_account() {
         repo: REPO.into(),
         n,
     };
-    assert_eq!(rig.refused(&close).reason, reason::UNAUTHORIZED, "not a writer yet");
+    assert_eq!(
+        rig.refused(&close).reason,
+        reason::UNAUTHORIZED,
+        "not a writer yet"
+    );
     rig.actor = TESTER.to_vec();
     rig.execute(&Op::Grant {
         repo: REPO.into(),

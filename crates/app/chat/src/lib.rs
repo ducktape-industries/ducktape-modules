@@ -3,8 +3,8 @@
 //!
 //! A write is an [`Op`], a read a [`Query`] answered by a [`Reply`], all
 //! borsh, the same types `chat-view` links. The acting [`Party`] is the
-//! frame's origin: an external key resolved through `identity` to its
-//! account. The layout, in reading order:
+//! frame's origin: an external key resolved by identity's `party_of` to its
+//! account (a key that holds none writes nothing). The layout, in reading order:
 //!
 //! - `lib.rs` (here): the types on the wire and the rows they carry
 //! - `state.rs`: every table and index the program keeps, declared once
@@ -39,9 +39,9 @@ use serde::{Deserialize, Serialize};
 
 pub use abi::hex;
 pub use description::describe;
+pub use identity::{AccountNumber, Frame, Party};
 pub use message::{Block, Mark, Span, parse_message};
 pub use ops::execute;
-pub use identity::{AccountNumber, Frame, Party};
 pub use origin::execute_from;
 pub use queries::{query, roots_below};
 pub use store::{Cursor, Page, PageReply};
@@ -58,6 +58,8 @@ pub const MAX_EMOJI_BYTES: usize = 64;
 pub const MAX_REACTION_EMOJIS: usize = 64;
 pub const MAX_THREAD_REPLIES: u64 = 4096;
 pub const MAX_HUDDLE_MEMBERS: usize = 32;
+/// The most parties a read's `viewer` names (a reader is one account).
+pub const MAX_VIEWERS: usize = 8;
 pub const HUDDLE_NODE_KEY_BYTES: usize = 32;
 /// The namespace a node key signs under to join a huddle; the message is
 /// the channel id then the joining origin key.
@@ -382,10 +384,12 @@ pub fn program_post(row: &MsgRow) -> Option<(&str, &str)> {
     let program = program_of(&row.channel_id)?;
     let own = matches!(&row.author, Party::Module(module) if module == program);
     match row.blocks.as_slice() {
-        [Block::Code {
-            lang: Some(lang),
-            text,
-        }] if own && lang == program => Some((program, text)),
+        [
+            Block::Code {
+                lang: Some(lang),
+                text,
+            },
+        ] if own && lang == program => Some((program, text)),
         _ => None,
     }
 }

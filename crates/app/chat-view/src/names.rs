@@ -1,8 +1,8 @@
 //! What the network calls a party, as the composer offers and inserts it.
 //! The roster itself is [`chat::view::Names`], shared with every view that
 //! names chat parties.
-use chat::view::Names;
 use chat::Party;
+use chat::view::Names;
 
 /// Autocomplete candidates: every named account, then the room's
 /// account members, labelled without the `@`.

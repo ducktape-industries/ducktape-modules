@@ -80,8 +80,14 @@ fn create_channel(
     if CHANNELS.has(store, &id) {
         return Err(already_exists(format!("channel {id} exists")));
     }
-    let channel = ChannelRow {
-        id: id.clone(),
+    CHANNELS.put(store, &id, &room(frame, &id, name, post_policy, voice));
+    Ok(())
+}
+
+/// A new room the actor owns, unarchived with no one in its huddle.
+fn room(frame: &Frame, id: &str, name: String, post_policy: PostPolicy, voice: bool) -> ChannelRow {
+    ChannelRow {
+        id: id.to_owned(),
         name,
         created_at: frame.time,
         post_policy,
@@ -89,9 +95,7 @@ fn create_channel(
         archived: false,
         huddle: Vec::new(),
         voice,
-    };
-    CHANNELS.put(store, &id, &channel);
-    Ok(())
+    }
 }
 
 /// The members-only room of the actor's account and `counterpart`, both
@@ -113,16 +117,7 @@ fn open_dm(
         return Ok(());
     }
     rules::name(&name)?;
-    let channel = ChannelRow {
-        id: id.clone(),
-        name,
-        created_at: frame.time,
-        post_policy: PostPolicy::MembersOnly,
-        owner: frame.party.clone(),
-        archived: false,
-        huddle: Vec::new(),
-        voice: false,
-    };
+    let channel = room(frame, &id, name, PostPolicy::MembersOnly, false);
     CHANNELS.put(store, &id, &channel);
     for peer in [me, counterpart] {
         seat(store, frame, &id, Party::Account(peer));

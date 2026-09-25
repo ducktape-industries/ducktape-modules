@@ -1,7 +1,6 @@
 //! Every table forge keeps, declared once: the records, the indexes over
 //! them and the counters. Git objects are not here: an object's blob id is
-//! its oid (`objects`). People are [`Party`]s: an account, or a key that
-//! holds none.
+//! its oid (`objects`). People are [`Party`]s: accounts.
 
 use std::collections::BTreeMap;
 

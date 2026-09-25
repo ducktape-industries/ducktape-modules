@@ -60,7 +60,7 @@ pub enum SpanStyle {
     Italic,
     BoldItalic,
     Link(String),
-    /// the account the mention names, in decimal ("" for a bare key)
+    /// the account the mention names, in decimal ("" for a module)
     Mention(String),
 }
 

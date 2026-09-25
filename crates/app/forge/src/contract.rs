@@ -47,8 +47,7 @@ impl Default for Settings {
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct Repo {
     pub hash: HashKind,
-    /// The person who created the repository: an account, or a key that
-    /// holds none.
+    /// The person who created the repository: an account.
     pub owner: Party,
     pub settings: Settings,
     pub refs_count: u64,

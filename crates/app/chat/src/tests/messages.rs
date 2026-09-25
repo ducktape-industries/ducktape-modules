@@ -179,3 +179,20 @@ fn tagged(chat: &Chat, tag: &str) -> Vec<u64> {
     assert_eq!(ask(Some("general".into())), everywhere);
     everywhere
 }
+
+#[test]
+fn a_read_names_a_bounded_number_of_viewers() {
+    let chat = Chat::with_channel(PostPolicy::Open);
+    let roots = |viewer: Vec<Party>| Query::Roots {
+        channel_id: "general".into(),
+        viewer,
+        page: Page::first(8),
+    };
+    let most = (0..crate::MAX_VIEWERS as u64).map(Party::Account).collect();
+    query(&chat.store, 1, roots(most)).unwrap();
+    let over = (0..=crate::MAX_VIEWERS as u64)
+        .map(Party::Account)
+        .collect();
+    let refusal = query(&chat.store, 1, roots(over)).unwrap_err();
+    assert_eq!(refusal.reason, reason::CAPACITY);
+}

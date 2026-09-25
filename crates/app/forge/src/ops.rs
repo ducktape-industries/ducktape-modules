@@ -7,9 +7,7 @@ use gitcore::{Error, Limits, server};
 use store::{Reads, Writes, already_exists, capacity, decoded, invalid, unauthorized};
 
 use crate::changes::{self, Draft, Edit, MergeRequest};
-use crate::contract::{
-    Bounds, Frame, MAX_PATH_BYTES, Op, Party, Repo, Settings, valid_repo_name,
-};
+use crate::contract::{Bounds, Frame, MAX_PATH_BYTES, Op, Party, Repo, Settings, valid_repo_name};
 use crate::objects::{ObjectWriter, object_not_held};
 use crate::state::{
     WRITERS, delete_ref, is_writer, load_bounds, load_refs, load_repo, repo_exists, repo_hash,

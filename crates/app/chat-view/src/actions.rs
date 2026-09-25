@@ -379,7 +379,10 @@ impl Chat {
         };
         let name = create.name.trim().to_string();
         if name.is_empty() || name.len() > chat::MAX_NAME_BYTES || name.contains('\0') {
-            create.error = "Enter a channel name of at most 128 bytes".into();
+            create.error = format!(
+                "Enter a channel name of at most {} bytes",
+                chat::MAX_NAME_BYTES
+            );
             return;
         }
         create.error.clear();

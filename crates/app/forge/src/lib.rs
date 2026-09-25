@@ -3,8 +3,9 @@
 //! `store::Memory` (tests, fixtures); the `program` feature adds the wasm32
 //! program over the host.
 //!
-//! A write is an [`Op`] run as a [`Party`] (an account, or a key that holds
-//! none: the signer resolved through identity, as chat resolves it), a read
+//! A write is an [`Op`] run as a [`Party`] (an account: the signer resolved
+//! by identity's [`party_of`](identity::party_of), which refuses a key that
+//! holds none), a read
 //! a [`Query`] answered by a [`Reply`]. The layout, in reading order:
 //!
 //! - `contract.rs`, `read_contract.rs`, `review_contract.rs`: the wire

@@ -118,5 +118,8 @@ fn a_headers_block_number_opens_explorer_at_that_block() {
     assert!(cx.has_text("block 12,345"));
     cx.simulate_click("chat-message-late-height");
     let opened = cx.host().opened_links();
-    assert_eq!(opened.last().map(String::as_str), Some("duck://explorer/block/12345"));
+    assert_eq!(
+        opened.last().map(String::as_str),
+        Some("duck://explorer/block/12345")
+    );
 }

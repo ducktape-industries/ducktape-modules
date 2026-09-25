@@ -855,18 +855,16 @@ fn settings_shows_only_what_the_contract_exposes_and_grants_by_account() {
     cx.simulate_click("forge-settings-grant");
     cx.run_until_parked();
     assert!(
-        cx.host()
-            .asked::<SubmitForge>()
-            .iter()
-            .any(|op| matches!(op, Op::Grant { party, .. } if *party == identity::Party::Account(1)))
+        cx.host().asked::<SubmitForge>().iter().any(
+            |op| matches!(op, Op::Grant { party, .. } if *party == identity::Party::Account(1))
+        )
     );
     cx.simulate_click("forge-settings-revoke-acct-9");
     cx.run_until_parked();
     assert!(
-        cx.host()
-            .asked::<SubmitForge>()
-            .iter()
-            .any(|op| matches!(op, Op::Revoke { party, .. } if *party == identity::Party::Account(9)))
+        cx.host().asked::<SubmitForge>().iter().any(
+            |op| matches!(op, Op::Revoke { party, .. } if *party == identity::Party::Account(9))
+        )
     );
 }
 
@@ -1002,7 +1000,12 @@ fn a_forge_link_opens_its_repository() {
     // a change's room links here as `<repo>/<n>`
     routes.push("project/1".into());
     cx.run_until_parked();
-    view.read(|forge| assert_eq!((forge.nav().repo.as_deref(), forge.nav().change), (Some("project"), Some(1))));
+    view.read(|forge| {
+        assert_eq!(
+            (forge.nav().repo.as_deref(), forge.nav().change),
+            (Some("project"), Some(1))
+        )
+    });
     // a route forge does not read falls back to the list
     routes.push("project/extra".into());
     cx.run_until_parked();

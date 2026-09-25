@@ -138,7 +138,9 @@ fn title_line(
     if open {
         top = top
             .child(button(id("forge-edit-change"), "Edit", theme, edit).enabled(mine))
-            .child(button(id("forge-close-change"), "Close", theme, close).enabled(forge.may_write()))
+            .child(
+                button(id("forge-close-change"), "Close", theme, close).enabled(forge.may_write()),
+            )
             .child(
                 button(id("forge-merge"), "Merge", theme, merge)
                     .kind(design::Kind::Primary)

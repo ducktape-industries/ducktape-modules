@@ -2,7 +2,7 @@
 //! `state.rs`. Chat's listings only grow, so a page cursor from any height
 //! resumes where it left off.
 use abi::{Refusal, Scan};
-use store::{Page, PageReply, Reads, invalid};
+use store::{Page, PageReply, Reads, capacity, invalid};
 
 use crate::state::{
     ANSWERED, CHANNEL_TAGS, CHANNELS, HEADS, MEMBERS, MESSAGE_IDS, MESSAGES, REACTIONS, REPLIES,
@@ -10,7 +10,8 @@ use crate::state::{
 };
 use crate::text::tag_label;
 use crate::{
-    ChannelInfo, ChannelRow, MessageHits, MsgRow, Party, Query, Reply, SEARCH_POSTING_CAP, tokens,
+    ChannelInfo, ChannelRow, MAX_VIEWERS, MessageHits, MsgRow, Party, Query, Reply,
+    SEARCH_POSTING_CAP, tokens,
 };
 
 pub fn query(store: &impl Reads, height: u64, query: Query) -> Result<Reply, Refusal> {
@@ -72,6 +73,12 @@ pub fn query(store: &impl Reads, height: u64, query: Query) -> Result<Reply, Ref
             vec![],
         ),
     };
+    if viewer.len() > MAX_VIEWERS {
+        return Err(capacity(format!(
+            "a read names at most {MAX_VIEWERS} viewers, not {}",
+            viewer.len()
+        )));
+    }
     for row in rows_in(&mut reply) {
         mark_reacted(store, &viewer, row);
     }

@@ -6,8 +6,7 @@ mod common;
 use common::story::*;
 use common::*;
 use forge::{
-    ChangeFilter, ChangeState, LineComment, OpReply, ReviewDraft, Revision, Side,
-    Verdict,
+    ChangeFilter, ChangeState, LineComment, OpReply, ReviewDraft, Revision, Side, Verdict,
 };
 
 const REVIEWER: &[u8] = b"reviewer";
@@ -235,7 +234,9 @@ fn edit_is_the_authors_and_drops_the_reviewers_it_unasks() {
 
     // Asking a fleet of accounts and unasking them leaves nothing behind.
     for round in 0..3u8 {
-        let fleet = (0..64).map(|i| Party::Account(100 + 64 * round as u64 + i)).collect();
+        let fleet = (0..64)
+            .map(|i| Party::Account(100 + 64 * round as u64 + i))
+            .collect();
         rig.execute(&edit_reviewers(n, fleet)).unwrap();
     }
     rig.execute(&edit_reviewers(n, vec![])).unwrap();

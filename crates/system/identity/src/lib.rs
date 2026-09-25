@@ -3,9 +3,9 @@
 //! always built; a view links them with `program` off. The `program` feature
 //! adds the wasm32 program over the host (`program.rs`). The `view` feature
 //! adds the ask a view makes of identity directly (`view.rs`).
+mod party;
 #[cfg(feature = "program")]
 mod program;
-mod party;
 mod rules;
 #[cfg(test)]
 mod tests;

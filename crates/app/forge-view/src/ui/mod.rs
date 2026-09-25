@@ -109,7 +109,11 @@ fn main(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
     };
     column = column.child(body);
     if forge.cut_short() {
-        column = column.child(design::more_not_shown(id("forge-more"), theme).px_4().py_2());
+        column = column.child(
+            design::more_not_shown(id("forge-more"), theme)
+                .px_4()
+                .py_2(),
+        );
     }
     column.into_any_element()
 }

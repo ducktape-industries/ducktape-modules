@@ -5,10 +5,10 @@ use ducktape_view_guest::view::Loaded;
 
 use crate::queries::PAGE;
 use crate::state::{self, ChangeTab, Forge, Nav, change_key};
-use identity::Party;
 use forge::{
     Bounds, Change, Comparison, PageReply, Query, RefInfo, Reply, RepoInfo, Review, Revision,
 };
+use identity::Party;
 
 /// The open change, as its screens read it: the record, its two current
 /// endpoints (either can be gone) and the reviews landed so far.

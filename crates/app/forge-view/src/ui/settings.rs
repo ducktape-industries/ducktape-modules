@@ -164,10 +164,7 @@ fn grant_field(
                 .label("Grant write access")
                 .on_input(typed),
         )
-        .child(
-            button(id("forge-settings-grant"), "Grant", theme, grant)
-                .enabled(forge.may_write()),
-        )
+        .child(button(id("forge-settings-grant"), "Grant", theme, grant).enabled(forge.may_write()))
 }
 
 /// One row per writer with its Revoke, or the owner-only empty state.

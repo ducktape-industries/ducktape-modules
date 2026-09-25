@@ -38,7 +38,9 @@ pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
     // Until chat answers, the reviews stand on their own; once it has, each
     // sits in the timeline where forge posted its line.
     let placed = |review: &forge::Review| match forge.messages.get(&change.channel) {
-        Some(Loaded::Ready((rows, _))) => rows.iter().any(|row| row.message_id == review.message_id),
+        Some(Loaded::Ready((rows, _))) => {
+            rows.iter().any(|row| row.message_id == review.message_id)
+        }
         _ => false,
     };
     for review in reviews.items.iter().filter(|review| !placed(review)) {
@@ -174,7 +176,8 @@ fn forge_line(
     if reviews.next.is_some() {
         return None;
     }
-    let actor = |party: &Option<identity::Party>| party.as_ref().map(|party| forge.party_name(party));
+    let actor =
+        |party: &Option<identity::Party>| party.as_ref().map(|party| forge.party_name(party));
     match (change.state, &change.merge_oid) {
         (ChangeState::Merged, Some(oid)) => Some(event(
             key,

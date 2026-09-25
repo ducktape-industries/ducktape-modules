@@ -41,7 +41,11 @@ fn account(number: u64, keys: Vec<Vec<u8>>) -> Account {
 /// Account 2 holds [`LONE_KEY`] once `claimed` is set.
 fn identity(claimed: Rc<Cell<bool>>) -> store::Sibling {
     Box::new(move |request| {
-        let lone = if claimed.get() { vec![LONE_KEY.to_vec()] } else { vec![] };
+        let lone = if claimed.get() {
+            vec![LONE_KEY.to_vec()]
+        } else {
+            vec![]
+        };
         let roster = [
             account(1, vec![ADA_KEY.to_vec()]),
             account(2, lone),
