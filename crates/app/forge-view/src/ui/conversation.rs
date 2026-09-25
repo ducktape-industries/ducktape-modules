@@ -181,7 +181,7 @@ fn forge_line(
             ),
             theme,
         )),
-        (ChangeState::Closed, _) => Some(event(key, None, "Closed".into(), theme)),
+        (ChangeState::Closed, _) => Some(event(key, None, "This change was closed".into(), theme)),
         _ => None,
     }
 }
