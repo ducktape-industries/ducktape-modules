@@ -1,10 +1,10 @@
 # modules
 
 The ducktape contract line and the programs written against it, one
-repository. Only what compiles to wasm lives here, in three folders:
+repository. Only what compiles to wasm lives here:
 
 ```
-crates/sdk/     abi guest store ducklink view-wire view-guest view-guest-derive design
+crates/sdk/     abi guest store describe ducklink view-wire view-guest view-guest-derive design
 crates/system/  module-registry valset identity
 crates/app/     chat chat-view forge forge-view members-view node-view explorer-view settings-view
 crates/lib/     gitcore
@@ -15,6 +15,7 @@ crates/lib/     gitcore
 | `crates/sdk/abi` | the borsh bytes ABI a program and the host share: `GuestCall`, `HostOp`/`HostReply`, `Env`, `Refusal`, the `module_registry` and `valset` contracts. A copy of ducktape's `crates/kernel/abi`, like `guest` beside it |
 | `crates/sdk/guest` | what a program compiles against: the `Program` trait, the `Execute` and `Query` contexts its entry points receive, `program!` |
 | `crates/sdk/store` | what a program's rules are written over: `Reads`/`Writes` (the guest context's surface, implemented for `guest`'s contexts behind `program` and for `Memory` natively), the typed `Map`/`Set`/`Item` descriptors with `KeyCodec`, `Page`/`PageReply`, the refusal constructors and `decoded`. Every program links it; a view links it with `program` off |
+| `crates/sdk/describe` | what an op means to a person: the pure wasm module a program ships in its `ducktape.describe` section, and the sandbox that runs it |
 | `crates/sdk/ducklink` | the `duck://` link: `duck://<chain>/<program>/<tail…>`, one spelling per name, no program names known here |
 | `crates/sdk/view-wire`, `view-guest`, `view-guest-derive`, `design` | the host<->view wire, the runtime a wasm view is written against, the palette |
 | `crates/system/module-registry` | the boot set's root: the registry program (its `Op`, `Query`, `Reply`), `AUTHORITY`, `Page`/`PageReply` and the origin/key/refusal `helpers` every system program links. Its `tests/system.rs` founds ducktape's host over the bytes `make wasm-programs` built and drives every system program |
@@ -36,7 +37,7 @@ are in the qa repo, which packs and founds what this repo builds.
 
 `valset` and `module-registry` take their writes from the program named
 `module_registry::AUTHORITY` (`governance`); no program in this tree
-implements it. The eight system modules beyond the boot set are archived at
+implements it. The system modules beyond the boot set are archived at
 `ducktape-industries/ducktape-system-modules-archive`.
 
 ## A program
@@ -85,7 +86,7 @@ call `.detach()`; dropping it cancels the future and any owned subscription.
 Consume host streams with `while let Some(item) = stream.next().await` and update
 through `WeakEntity`. `TestAppContext` supplies typed fake handlers and feeds,
 input simulation, and tree assertions. See `examples/exported_view.rs` in
-`view-guest` and the four app view test modules.
+`view-guest` and each app view's `src/tests.rs`.
 
 Snapshot/restore transfers the root view's serde state, not entity identities.
 Snapshots wait for ordinary work to settle; parked host streams restart in

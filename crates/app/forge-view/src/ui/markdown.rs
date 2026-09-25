@@ -763,6 +763,12 @@ mod view_tests {
         }
     }
 
+    // the forge view's own manifest, so the doc reaches only what it does
+    impl ducktape_view_guest::Declared for Doc {
+        const CAPABILITIES: &'static [&'static str] =
+            <crate::Forge as ducktape_view_guest::Declared>::CAPABILITIES;
+    }
+
     impl Render for Doc {
         fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
             let theme = *cx.global::<ducktape_view_guest::Theme>();

@@ -222,3 +222,95 @@ fn a_dm_title_names_no_account_numbers_and_its_accounts_are_fields() {
     assert_eq!(channel.title, "Delete message · #old-launch");
     assert!(channel.fields.iter().all(|f| f.label != "between"));
 }
+
+#[test]
+fn nobody_squats_a_dm_id_with_a_plain_create() {
+    let dm = dm_channel_id(3, 5);
+    // a third account, and each peer, try the plain creates on the dm id
+    for who in [7, 3, 5] {
+        let mut store = Memory::default();
+        for op in [
+            ChatMsg::CreateChannel {
+                channel_id: dm.clone(),
+                name: "mine".into(),
+                post_policy: PostPolicy::Open,
+            },
+            ChatMsg::CreateVoiceChannel {
+                channel_id: dm.clone(),
+                name: "mine".into(),
+            },
+        ] {
+            let error = execute(&mut store, &frame(Party::Account(who)), op).unwrap_err();
+            assert_eq!(error.reason, reason::UNAUTHORIZED, "account {who}");
+        }
+        assert!(store.state.is_empty());
+        // the real dm still opens with both peers seated
+        execute(
+            &mut store,
+            &frame(Party::Account(3)),
+            ChatMsg::CreateDmChannel {
+                counterpart: 5,
+                name: "dm".into(),
+            },
+        )
+        .unwrap();
+        for peer in [3, 5] {
+            let handle = party_handle(&Party::Account(peer));
+            assert!(
+                load::<MemberRow>(&store, &member_key(&dm, &handle))
+                    .unwrap()
+                    .is_some()
+            );
+        }
+    }
+}
+
+#[test]
+fn deleting_a_message_drops_its_reaction_keys() {
+    let mut store = Memory::default();
+    let ada = frame(Party::Account(1));
+    execute(
+        &mut store,
+        &ada,
+        ChatMsg::CreateChannel {
+            channel_id: "general".into(),
+            name: "General".into(),
+            post_policy: PostPolicy::Open,
+        },
+    )
+    .unwrap();
+    post(&mut store, 1, "general", "m1", "hi", None).unwrap();
+    post(&mut store, 1, "general", "m2", "stays", None).unwrap();
+    for (who, seq, emoji) in [(1, 1, "👍"), (2, 1, "🎉"), (2, 2, "👍")] {
+        execute(
+            &mut store,
+            &frame(Party::Account(who)),
+            ChatMsg::AddReaction {
+                channel_id: "general".into(),
+                seq,
+                emoji: emoji.into(),
+            },
+        )
+        .unwrap();
+    }
+    let reacts = |store: &Memory, seq| {
+        let prefix = react_prefix("general", seq);
+        store
+            .state
+            .keys()
+            .filter(|k| k.starts_with(prefix.as_bytes()))
+            .count()
+    };
+    assert_eq!(reacts(&store, 1), 2);
+    execute(
+        &mut store,
+        &ada,
+        ChatMsg::DeleteMessage {
+            channel_id: "general".into(),
+            seq: 1,
+        },
+    )
+    .unwrap();
+    assert_eq!(reacts(&store, 1), 0);
+    assert_eq!(reacts(&store, 2), 1);
+}

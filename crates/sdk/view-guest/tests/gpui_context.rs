@@ -6,6 +6,9 @@ use view_guest::{testing::TestAppContext, wire, Driver, View};
 struct Counter {
     clicks: usize,
 }
+impl view_guest::Declared for Counter {
+    const CAPABILITIES: &'static [&'static str] = &[];
+}
 impl View for Counter {
     fn new(_: &mut Window, _: &mut Context<Self>) -> Self {
         Self::default()
@@ -331,6 +334,9 @@ struct GlobalReader {
 }
 struct Configuration(usize);
 impl Global for Configuration {}
+impl view_guest::Declared for GlobalReader {
+    const CAPABILITIES: &'static [&'static str] = &[];
+}
 impl View for GlobalReader {
     fn new(_: &mut Window, cx: &mut Context<Self>) -> Self {
         Self {

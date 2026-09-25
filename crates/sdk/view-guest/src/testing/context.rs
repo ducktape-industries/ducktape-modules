@@ -2,7 +2,7 @@ use super::{assert_accessible, find, texts, FakeHost};
 use crate::{
     host::Host,
     wire::{Event, Frame, Node},
-    App, Driver, Entity, View,
+    App, Declared, Driver, Entity, View,
 };
 
 trait TestDriver {
@@ -43,7 +43,8 @@ impl TestAppContext {
     pub fn host(&self) -> FakeHost {
         self.host.clone()
     }
-    pub fn open<V: View>(&mut self) -> Entity<V> {
+    pub fn open<V: View + Declared>(&mut self) -> Entity<V> {
+        self.host.declare(V::CAPABILITIES);
         let driver = Driver::<V>::initialize_in(self.fresh_app(), None).expect("view initializes");
         let entity = driver.entity();
         self.host.reset_connection();
@@ -55,7 +56,8 @@ impl TestAppContext {
     pub fn snapshot(&self) -> Result<Vec<u8>, String> {
         self.driver.as_ref().expect("open a view first").snapshot()
     }
-    pub fn restore<V: View>(&mut self, bytes: &[u8]) -> Result<Entity<V>, String> {
+    pub fn restore<V: View + Declared>(&mut self, bytes: &[u8]) -> Result<Entity<V>, String> {
+        self.host.declare(V::CAPABILITIES);
         let value = serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
         let driver = Driver::<V>::initialize_in(self.fresh_app(), Some(value))?;
         let entity = driver.entity();
@@ -207,6 +209,9 @@ mod tests {
             }));
         }
     }
+    impl Declared for LiveView {
+        const CAPABILITIES: &'static [&'static str] = &["rpc"];
+    }
     impl Render for LiveView {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl crate::IntoElement {
             crate::div().id("items").child(self.items.to_string())
@@ -229,5 +234,29 @@ mod tests {
         cx.run_until_parked();
         restored.read(|view| assert_eq!(view.items, 2));
         assert_eq!(cx.host().asked::<RpcLive>().len(), 2);
+    }
+
+    /// Logs through `host`, which its manifest leaves out.
+    #[derive(Default, Serialize, Deserialize)]
+    struct Undeclared;
+    impl View for Undeclared {
+        fn new(_: &mut Window, cx: &mut Context<Self>) -> Self {
+            cx.host().log("hello");
+            Self
+        }
+    }
+    impl Declared for Undeclared {
+        const CAPABILITIES: &'static [&'static str] = &["rpc"];
+    }
+    impl Render for Undeclared {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl crate::IntoElement {
+            crate::div()
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "undeclared_capability")]
+    fn a_door_the_manifest_leaves_out_fails_the_test() {
+        TestAppContext::new().open::<Undeclared>();
     }
 }

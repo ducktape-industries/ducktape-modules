@@ -114,10 +114,7 @@ impl Host {
         request: D::Request,
     ) -> impl Future<Output = Result<D::Reply, Refusal>> + 'static {
         let response = self.request(D::KIND, &D::encode_request(&request));
-        self.0
-            .borrow_mut()
-            .diagnostics
-            .insert(response.id, format!("{request:?}"));
+        self.remember(response.id, &request);
         async move { D::decode_reply(&response.await?).map_err(malformed) }
     }
     /// A subscription: an item per answer until the stream is dropped.
@@ -126,10 +123,7 @@ impl Host {
         request: D::Request,
     ) -> impl Stream<Item = Result<D::Reply, Refusal>> + Unpin + 'static {
         let subscription = self.raw_subscribe(D::KIND, &D::encode_request(&request));
-        self.0
-            .borrow_mut()
-            .diagnostics
-            .insert(subscription.id, format!("{request:?}"));
+        self.remember(subscription.id, &request);
         subscription
             .map(|answer| answer.and_then(|bytes| D::decode_reply(&bytes).map_err(malformed)))
     }
@@ -139,10 +133,17 @@ impl Host {
             .0
             .borrow_mut()
             .ask(D::KIND, &D::encode_request(&request));
-        self.0
-            .borrow_mut()
-            .diagnostics
-            .insert(id, format!("{request:?}"));
+        self.remember(id, &request);
+    }
+    /// The request as text, for a test's "unhandled request" panic. Views
+    /// run as wasm, where nothing reads it, so they skip the formatting.
+    fn remember(&self, id: u64, request: &impl std::fmt::Debug) {
+        if cfg!(not(target_arch = "wasm32")) {
+            self.0
+                .borrow_mut()
+                .diagnostics
+                .insert(id, format!("{request:?}"));
+        }
     }
     pub fn log(&self, message: impl AsRef<str>) {
         self.notify::<doors::HostLog>(message.as_ref().to_owned());

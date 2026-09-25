@@ -26,8 +26,8 @@ re-exported unchanged. `src/lib.rs:5-13` is the gpui list (`px`, `rems`,
 
 ## The doors
 
-`view-wire/src/doors.rs` is the one list of what a view may ask for: 28
-kinds, each a marker type naming its request and reply (borsh both ways;
+`view-wire/src/doors.rs` is the one list of what a view may ask for
+(`doors::ALL`): each kind a marker type naming its request and reply (borsh both ways;
 `host.widget` alone is MessagePack, because it names tree ids). The trait is
 sealed, so a view cannot invent a kind. Three verbs on `Host` (`src/host.rs`):
 
@@ -77,6 +77,8 @@ pinned by `view-wire/tests/golden.rs`: a shape change bumps `WIRE_EPOCH`.
 `testing::TestAppContext` (`src/testing/context.rs`) opens a view over a
 `FakeHost` (`src/testing/fake_host.rs`): `handle::<Door>`, `refuse`,
 `stream`, `asked`; then `simulate_click`, `texts`, `assert_accessible`.
+It holds the view to its `export_view!` capabilities as the app does: a door
+whose capability the manifest leaves out panics with `undeclared_capability`.
 Screen export: a test gated on `*_SCREEN_EXPORT=1` (`FORGE_SCREEN_EXPORT`,
 `crates/app/forge-view/src/screen_tests.rs`; `CHAT_SCREEN_EXPORT`,
 `crates/app/chat-view/src/tests.rs`) writes each screen's tree as JSON under

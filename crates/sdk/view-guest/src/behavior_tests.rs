@@ -10,6 +10,10 @@ struct BehaviorView {
     surface_event: String,
 }
 
+impl crate::Declared for BehaviorView {
+    const CAPABILITIES: &'static [&'static str] = &[];
+}
+
 impl View for BehaviorView {
     fn new(_: &mut Window, _: &mut Context<Self>) -> Self {
         Self::default()
@@ -18,6 +22,10 @@ impl View for BehaviorView {
 
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 struct DefaultSensorView;
+
+impl crate::Declared for DefaultSensorView {
+    const CAPABILITIES: &'static [&'static str] = &[];
+}
 
 impl View for DefaultSensorView {
     fn new(_: &mut Window, _: &mut Context<Self>) -> Self {
