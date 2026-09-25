@@ -306,10 +306,11 @@ fn a_link_to_a_forge_room_lands_in_it() {
     view.read(|chat| assert_eq!(chat.room.as_ref().unwrap().id, "forge:web:3"));
 }
 
-/// A dm seats its two peers for good: its details list them with no way to
-/// add a third or remove either, as the program refuses both.
+/// A dm belongs to its two peers alike: its details list them, with no way
+/// to add a third, remove either, rename or archive it, as the program
+/// refuses each.
 #[test]
-fn a_dms_details_offer_no_add_and_no_remove() {
+fn a_dms_details_show_its_two_people_and_nothing_to_reshape() {
     let (mut cx, view) = opened();
     let seat = |number| chat::MemberRow {
         party: Party::Account(number),
@@ -332,6 +333,14 @@ fn a_dms_details_offer_no_add_and_no_remove() {
     cx.simulate_click("chat-room-details");
     seat_both(&mut cx);
     assert!(cx.has_text("reviewer") && cx.has_text("eddy"));
+    assert!(cx.has_text("Conversation details") && !cx.has_text("Channel details"));
+    for id in [
+        "chat-details-name-input",
+        "chat-details-rename-button",
+        "chat-details-archive",
+    ] {
+        assert!(cx.find(id).is_none(), "{id} offered in a dm");
+    }
     assert!(cx.find("chat-details-add-member").is_none());
     assert!(cx.find("chat-details-member-input").is_none());
     assert!(!cx.has_text("Remove"));
