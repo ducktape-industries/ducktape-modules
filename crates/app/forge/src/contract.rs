@@ -4,7 +4,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 
 pub use crate::read_contract::*;
 pub use crate::review_contract::*;
-pub use identity::{Frame, Party};
+pub use identity::{Frame, Principal};
 pub use store::{Page, PageReply};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
@@ -48,7 +48,7 @@ impl Default for Settings {
 pub struct Repo {
     pub hash: HashKind,
     /// The person who created the repository: an account.
-    pub owner: Party,
+    pub owner: Principal,
     pub settings: Settings,
     pub refs_count: u64,
     pub last_activity: u64,
@@ -68,11 +68,11 @@ pub enum Op {
     /// a key that holds no account.
     Grant {
         repo: String,
-        party: Party,
+        principal: Principal,
     },
     Revoke {
         repo: String,
-        party: Party,
+        principal: Principal,
     },
     Push {
         repo: String,
@@ -94,14 +94,14 @@ pub enum Op {
         into: Vec<u8>,
         title: String,
         body: String,
-        reviewers: Vec<Party>,
+        reviewers: Vec<Principal>,
     },
     ChangeEdit {
         repo: String,
         n: u64,
         title: Option<String>,
         body: Option<String>,
-        reviewers: Option<Vec<Party>>,
+        reviewers: Option<Vec<Principal>>,
     },
     ChangeClose {
         repo: String,
@@ -205,7 +205,7 @@ pub enum Query {
     },
     /// What one person owes across every repository.
     Judgment {
-        party: Party,
+        principal: Principal,
         page: Page,
     },
 }
@@ -286,7 +286,7 @@ pub enum Reply {
         height: u64,
         repo: RepoInfo,
         bounds: Bounds,
-        writers: PageReply<Party>,
+        writers: PageReply<Principal>,
     },
     Refs {
         height: u64,

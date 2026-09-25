@@ -8,7 +8,7 @@ use crate::state::{self, ChangeTab, Forge, Nav, change_key};
 use forge::{
     Bounds, Change, Comparison, PageReply, Query, RefInfo, Reply, RepoInfo, Review, Revision,
 };
-use identity::Party;
+use identity::Principal;
 
 /// The open change, as its screens read it: the record, its two current
 /// endpoints (either can be gone) and the reviews landed so far.
@@ -32,17 +32,17 @@ impl Forge {
         self.session.account
     }
 
-    /// The reader as a party: her account; nobody while her seated key
-    /// holds none. [`Party::writer`] is the one rule every view gates its
-    /// writes on, as identity's `party_of` refuses them.
-    pub(crate) fn me_party(&self) -> Option<Party> {
-        Party::writer(self.my_account())
+    /// The reader as a principal: her account; nobody while her seated key
+    /// holds none. [`Principal::writer`] is the one rule every view gates its
+    /// writes on, as identity's `principal_of` refuses them.
+    pub(crate) fn me_principal(&self) -> Option<Principal> {
+        Principal::writer(self.my_account())
     }
 
     /// Whether the reader writes at all: connected, and an account to write
     /// as. A key that holds none reads everything and writes nothing.
     pub(crate) fn may_write(&self) -> bool {
-        self.session.connected && self.me_party().is_some()
+        self.session.connected && self.me_principal().is_some()
     }
 
     /// Whether a list on this screen stopped at its page budget: a read
@@ -92,7 +92,7 @@ impl Forge {
         }
     }
 
-    pub(crate) fn repo(&self) -> Option<(&RepoInfo, &Bounds, &PageReply<Party>)> {
+    pub(crate) fn repo(&self) -> Option<(&RepoInfo, &Bounds, &PageReply<Principal>)> {
         match self.ready(&self.repo_query())? {
             Reply::Repo {
                 repo,
@@ -227,19 +227,19 @@ impl Forge {
         })
     }
 
-    /// The parties chat marks as the reader's own: at most one.
-    pub(crate) fn viewer(&self) -> Vec<Party> {
-        self.me_party().into_iter().collect()
+    /// The principals chat marks as the reader's own: at most one.
+    pub(crate) fn viewer(&self) -> Vec<Principal> {
+        self.me_principal().into_iter().collect()
     }
 
     /// What a person or chat author is called: their account name once
     /// the roster has landed.
-    pub(crate) fn party_name(&self, party: &Party) -> String {
-        match (party, self.names.ready()) {
+    pub(crate) fn principal_name(&self, principal: &Principal) -> String {
+        match (principal, self.names.ready()) {
             // forge's own lines in a change's channel
-            (Party::System, _) => "Forge".into(),
-            (_, Some(names)) => names.member(party),
-            (_, None) => chat::view::unnamed(party),
+            (Principal::System, _) => "Forge".into(),
+            (_, Some(names)) => names.member(principal),
+            (_, None) => chat::view::unnamed(principal),
         }
     }
 

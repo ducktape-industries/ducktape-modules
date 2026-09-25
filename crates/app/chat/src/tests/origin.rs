@@ -114,12 +114,12 @@ fn refused(store: &mut Memory, origin: Origin, op: Op) -> String {
     store.refused(|store| execute_from(store, &env, op)).reason
 }
 
-fn owner(store: &Memory, id: &str) -> Party {
+fn owner(store: &Memory, id: &str) -> Principal {
     crate::state::channel(store, id).unwrap().owner
 }
 
 #[test]
-fn an_origin_acts_as_the_party_identity_names() {
+fn an_origin_acts_as_the_principal_identity_names() {
     let mut store = store();
     execute_from(
         &mut store,
@@ -127,17 +127,17 @@ fn an_origin_acts_as_the_party_identity_names() {
         create("a", PostPolicy::Open),
     )
     .unwrap();
-    assert_eq!(owner(&store, "a"), Party::Account(1));
+    assert_eq!(owner(&store, "a"), Principal::Account(1));
     let forge = Origin::Program("forge".into());
     execute_from(&mut store, &env(forge), create("forge:c", PostPolicy::Open)).unwrap();
-    assert_eq!(owner(&store, "forge:c"), Party::Module("forge".into()));
+    assert_eq!(owner(&store, "forge:c"), Principal::Module("forge".into()));
     execute_from(
         &mut store,
         &env(Origin::System),
         create("d", PostPolicy::Open),
     )
     .unwrap();
-    assert_eq!(owner(&store, "d"), Party::System);
+    assert_eq!(owner(&store, "d"), Principal::System);
     assert_eq!(
         refused(&mut store, key(&[]), create("e", PostPolicy::Open)),
         reason::INVALID_INPUT
@@ -193,7 +193,7 @@ fn every_op() -> Vec<Op> {
         },
         Op::SetMembership {
             channel_id: general(),
-            party: Party::Account(3),
+            principal: Principal::Account(3),
             member: true,
         },
         Op::JoinHuddle {
@@ -240,7 +240,7 @@ fn a_key_writes_only_once_it_holds_an_account() {
         create("bo", PostPolicy::Open),
     )
     .unwrap();
-    assert_eq!(owner(&store, "bo"), Party::Account(2));
+    assert_eq!(owner(&store, "bo"), Principal::Account(2));
     execute_from(
         &mut store,
         &env(key(&LONE_KEY)),
@@ -248,7 +248,7 @@ fn a_key_writes_only_once_it_holds_an_account() {
     )
     .unwrap();
     let row = crate::state::message(&store, "general", 2).unwrap();
-    assert_eq!(row.author, Party::Account(2));
+    assert_eq!(row.author, Principal::Account(2));
 }
 
 /// With no identity deployed, no key holds an account, so none writes.
@@ -317,7 +317,7 @@ fn a_huddle_join_needs_its_nodes_signature() {
     );
     execute_from(&mut store, &env(key(&ADA_KEY)), join(b"signed")).unwrap();
     let huddle = crate::state::channel(&store, "general").unwrap().huddle;
-    assert_eq!(huddle[0].party, Party::Account(1));
+    assert_eq!(huddle[0].principal, Principal::Account(1));
 }
 
 #[test]

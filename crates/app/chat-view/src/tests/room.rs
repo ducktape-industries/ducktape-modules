@@ -316,7 +316,7 @@ fn a_link_to_a_forge_room_lands_in_it() {
                 lang: Some("forge".into()),
                 text: "review 7".into(),
             }],
-            ..chat::MsgRow::by(Party::Module("forge".into()))
+            ..chat::MsgRow::by(Principal::Module("forge".into()))
         };
         let room = chat.room.as_mut().unwrap();
         room.messages = Loaded::Ready(vec![line]);
@@ -340,7 +340,7 @@ fn a_link_to_a_forge_room_lands_in_it() {
 fn a_dms_details_show_its_two_people_and_nothing_to_reshape() {
     let (mut cx, view) = opened();
     let seat = |number| chat::MemberRow {
-        party: Party::Account(number),
+        principal: Principal::Account(number),
         height: 1,
         time: 1,
     };

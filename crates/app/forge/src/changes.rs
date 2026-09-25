@@ -20,13 +20,13 @@ pub(crate) struct Draft {
     pub into: Vec<u8>,
     pub title: String,
     pub body: String,
-    pub reviewers: Vec<Party>,
+    pub reviewers: Vec<Principal>,
 }
 
 pub(crate) fn open(
     store: &mut impl Writes,
     env: &Frame,
-    actor: &Party,
+    actor: &Principal,
     repo: &str,
     mut draft: Draft,
 ) -> Result<OpReply, Refusal> {
@@ -81,14 +81,14 @@ pub(crate) fn open(
 pub(crate) struct Edit {
     pub title: Option<String>,
     pub body: Option<String>,
-    pub reviewers: Option<Vec<Party>>,
+    pub reviewers: Option<Vec<Principal>>,
 }
 
 /// The author edits an open change; an ended one is a record.
 pub(crate) fn edit(
     store: &mut impl Writes,
     env: &Frame,
-    actor: &Party,
+    actor: &Principal,
     repo: &str,
     n: u64,
     fields: Edit,
@@ -123,7 +123,7 @@ pub(crate) fn edit(
 pub(crate) fn close(
     store: &mut impl Writes,
     env: &Frame,
-    actor: &Party,
+    actor: &Principal,
     repo: &str,
     n: u64,
 ) -> Result<OpReply, Refusal> {
@@ -151,7 +151,7 @@ pub(crate) fn close(
 pub(crate) fn submit_review(
     store: &mut impl Writes,
     env: &Frame,
-    actor: &Party,
+    actor: &Principal,
     repo: &str,
     n: u64,
     mut draft: ReviewDraft,
@@ -210,7 +210,7 @@ pub(crate) struct MergeRequest {
 pub(crate) fn merge_heads(
     store: &mut impl Writes,
     env: &Frame,
-    actor: &Party,
+    actor: &Principal,
     repo: &str,
     merge: MergeRequest,
 ) -> Result<OpReply, Refusal> {
@@ -299,7 +299,7 @@ fn check_title(title: &str) -> Result<(), Refusal> {
     Ok(())
 }
 
-fn check_reviewers(reviewers: &[Party]) -> Result<(), Refusal> {
+fn check_reviewers(reviewers: &[Principal]) -> Result<(), Refusal> {
     if reviewers.len() > MAX_REVIEWERS {
         return Err(capacity(format!(
             "a change asks at most {MAX_REVIEWERS} reviewers"

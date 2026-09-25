@@ -1,5 +1,5 @@
 //! Who is asking, and what identity says about them: an origin resolved to
-//! a [`Party`](crate::Party) by identity's one rule, a huddle join's node
+//! a [`Principal`](crate::Principal) by identity's one rule, a huddle join's node
 //! proof checked, and identity's roster as chat's views read it. The wasm32 program is glue over
 //! [`execute_from`] and [`query`](crate::query); both run natively over
 //! [`store::Memory`] with an identity sibling and a verifier.
@@ -9,11 +9,11 @@ use store::{Page, PageReply, Reads, Writes, invalid, unauthorized};
 use crate::{AccountRow, Frame, HUDDLE_JOIN_NS, Op};
 
 /// An op as it arrives: from an origin at a height. The origin is resolved
-/// to its party first (a key that holds no account is refused here), then a
+/// to its principal first (a key that holds no account is refused here), then a
 /// huddle join's node proof is checked.
 pub fn execute_from(store: &mut impl Writes, env: &Env, op: Op) -> Result<(), Refusal> {
     let frame = Frame {
-        party: identity::party_of(store, &env.origin)?,
+        principal: identity::principal_of(store, &env.origin)?,
         height: env.height,
         time: env.time,
     };

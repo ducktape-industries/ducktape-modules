@@ -106,9 +106,9 @@ fn title_line(
     let edit = cx.listener(|forge, _: &ClickEvent, _, cx| forge.start_edit(cx));
     let close = cx.listener(|forge, _: &ClickEvent, _, cx| forge.close_change(cx));
     let merge = cx.listener(|forge, _: &ClickEvent, _, cx| forge.merge(cx));
-    let author = forge.party_name(&change.author);
+    let author = forge.principal_name(&change.author);
     let open = change.state == ChangeState::Open;
-    let mine = forge.me_party().as_ref() == Some(&change.author);
+    let mine = forge.me_principal().as_ref() == Some(&change.author);
     let mut top = div()
         .id(id("forge-change-head"))
         .flex()

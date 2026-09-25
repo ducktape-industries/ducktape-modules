@@ -210,11 +210,11 @@ impl Forge {
     /// The Changes tab's question. A filter about "me" asks nothing while
     /// the reader is nobody (no account): there is no one to judge.
     pub(crate) fn changes_query(&self, repo: &str) -> Option<Query> {
-        let me = self.me_party();
+        let me = self.me_principal();
         let state = match self.filter {
             Filter::Judgment => {
                 return Some(Query::Judgment {
-                    party: me?,
+                    principal: me?,
                     page: PAGE,
                 });
             }

@@ -1,7 +1,7 @@
 //! One message as the frame draws it: a row the program served, folded
 //! with the name directory into author lines, bodies and styled runs, and
 //! grouped into runs the way Slack groups them.
-use chat::{Block, Mark, MsgRow, Party, Reaction, Span};
+use chat::{Block, Mark, MsgRow, Principal, Reaction, Span};
 use ducktape_view_guest::design;
 
 use crate::names::mention_token;
@@ -13,8 +13,8 @@ pub struct ChatMessage {
     pub id: String,
     /// 0 for a pending row
     pub seq: u64,
-    /// who wrote it; a run of messages is one party's
-    pub from: Party,
+    /// who wrote it; a run of messages is one principal's
+    pub from: Principal,
     pub author: String,
     pub meta: String,
     /// the message as one run of plain text: the copy range's line
@@ -182,7 +182,7 @@ fn draft_spans(spans: &[Span]) -> String {
         .iter()
         .map(|span| {
             let mention = span.marks.iter().find_map(|mark| match mark {
-                Mark::Mention(party) => Some(mention_token(party)),
+                Mark::Mention(principal) => Some(mention_token(principal)),
                 _ => None,
             });
             let mut text = mention.unwrap_or_else(|| span.text.clone());
@@ -217,7 +217,7 @@ pub fn styled_spans(spans: &[Span], names: &Names) -> Vec<ChatSpan> {
                 _ => None,
             });
             let mention = span.marks.iter().find_map(|mark| match mark {
-                Mark::Mention(Party::Account(account)) => Some(account.to_string()),
+                Mark::Mention(Principal::Account(account)) => Some(account.to_string()),
                 Mark::Mention(_) => Some(String::new()),
                 _ => None,
             });
@@ -245,7 +245,7 @@ fn span_display(span: &Span, names: &Names) -> String {
     span.marks
         .iter()
         .find_map(|mark| match mark {
-            Mark::Mention(party) => Some(names.mention(party)),
+            Mark::Mention(principal) => Some(names.mention(principal)),
             _ => None,
         })
         .unwrap_or_else(|| span.text.clone())
@@ -264,7 +264,7 @@ mod tests {
                     seq,
                     time,
                     blocks: vec![Block::paragraph("hi")],
-                    ..MsgRow::by(Party::Account(7))
+                    ..MsgRow::by(Principal::Account(7))
                 },
                 &names,
             )

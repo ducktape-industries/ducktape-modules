@@ -1,6 +1,6 @@
 //! The open room: opening, landing, paging history, the thread beside it and
 //! what the reader has read.
-use chat::{ChannelInfo, MsgRow, Party};
+use chat::{ChannelInfo, MsgRow, Principal};
 use ducktape_view_guest::Context;
 use ducktape_view_guest::host::Refusal;
 use ducktape_view_guest::view::Loaded;
@@ -415,7 +415,7 @@ impl Chat {
     }
 
     /// The open room's members, as the roster names them.
-    pub(crate) fn roster(&self) -> Vec<(Party, String)> {
+    pub(crate) fn roster(&self) -> Vec<(Principal, String)> {
         let (Some(names), Some(members)) = (
             self.names.ready(),
             self.room.as_ref().and_then(|room| room.members.ready()),
@@ -424,7 +424,7 @@ impl Chat {
         };
         members
             .iter()
-            .map(|row| (row.party.clone(), names.member(&row.party)))
+            .map(|row| (row.principal.clone(), names.member(&row.principal)))
             .collect()
     }
 

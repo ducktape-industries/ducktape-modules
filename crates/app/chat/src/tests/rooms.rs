@@ -25,10 +25,10 @@ fn a_person_takes_one_huddle_seat_and_moves_it_to_a_new_node() {
     let huddle = chat.channel().huddle;
     assert_eq!(huddle.len(), 1);
     assert_eq!(
-        (huddle[0].party.clone(), huddle[0].node.clone()),
+        (huddle[0].principal.clone(), huddle[0].node.clone()),
         (BO, "02".repeat(32))
     );
-    let module = Party::Module("forge".into());
+    let module = Principal::Module("forge".into());
     assert_eq!(chat.refused(&module, join(1)), reason::UNAUTHORIZED);
     let short = Op::JoinHuddle {
         channel_id: "general".into(),
@@ -44,7 +44,7 @@ fn a_huddle_is_bounded_and_seats_only_who_may_write() {
     assert_eq!(chat.refused(&BO, join(1)), reason::UNAUTHORIZED);
     let mut chat = Chat::with_channel(PostPolicy::Open);
     for n in 0..MAX_HUDDLE_MEMBERS as u64 {
-        chat.ok(&Party::Account(100 + n), join(1));
+        chat.ok(&Principal::Account(100 + n), join(1));
     }
     assert_eq!(chat.refused(&BO, join(1)), reason::CAPACITY);
 }

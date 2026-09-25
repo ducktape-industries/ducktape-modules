@@ -1,6 +1,6 @@
 //! Typed reads of the chat module. Every list takes a `Page` and answers a
 //! `PageReply`; `next` is the cursor of the page after it.
-use chat::{ChannelInfo, MemberRow, MessageHits, MsgRow, Page, PageReply, Party, Query, Reply};
+use chat::{ChannelInfo, MemberRow, MessageHits, MsgRow, Page, PageReply, Principal, Query, Reply};
 use ducktape_view_guest::Host;
 use ducktape_view_guest::host::{Refusal, pages, wrong_reply};
 
@@ -39,7 +39,7 @@ pub(crate) async fn channels(host: Host) -> Result<(Vec<ChannelInfo>, bool), Ref
 pub(crate) async fn roots(
     host: Host,
     channel_id: String,
-    viewer: Vec<Party>,
+    viewer: Vec<Principal>,
     below: Option<Vec<u8>>,
     limit: usize,
 ) -> Result<(Vec<MsgRow>, bool), Refusal> {
@@ -65,7 +65,7 @@ pub(crate) async fn around(
     host: Host,
     channel_id: String,
     seq: u64,
-    viewer: Vec<Party>,
+    viewer: Vec<Principal>,
 ) -> Result<Vec<MsgRow>, Refusal> {
     match host
         .ask::<Ask<ChatApi>>(Query::MessagesAround {
@@ -104,7 +104,7 @@ pub(crate) async fn thread(
     host: Host,
     channel_id: String,
     root_seq: u64,
-    viewer: Vec<Party>,
+    viewer: Vec<Principal>,
     after: Option<Vec<u8>>,
 ) -> Result<(Vec<MsgRow>, Option<Vec<u8>>), Refusal> {
     match host
@@ -131,7 +131,7 @@ pub(crate) async fn search_hits(
     host: Host,
     text: String,
     channel_id: Option<String>,
-    viewer: Vec<Party>,
+    viewer: Vec<Principal>,
     after: Option<Vec<u8>>,
 ) -> Result<(Vec<MsgRow>, bool, Option<Vec<u8>>), Refusal> {
     let query = match text.strip_prefix('#') {

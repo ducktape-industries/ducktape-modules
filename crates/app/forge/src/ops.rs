@@ -7,7 +7,9 @@ use gitcore::{Error, Limits, server};
 use store::{Reads, Writes, already_exists, capacity, decoded, invalid, unauthorized};
 
 use crate::changes::{self, Draft, Edit, MergeRequest};
-use crate::contract::{Bounds, Frame, MAX_PATH_BYTES, Op, Party, Repo, Settings, valid_repo_name};
+use crate::contract::{
+    Bounds, Frame, MAX_PATH_BYTES, Op, Principal, Repo, Settings, valid_repo_name,
+};
 use crate::objects::{ObjectWriter, object_not_held};
 use crate::state::{
     WRITERS, delete_ref, is_writer, load_bounds, load_refs, load_repo, repo_exists, repo_hash,
@@ -33,17 +35,17 @@ pub fn init(store: &mut impl Writes, params: &[u8]) -> Result<(), Refusal> {
     Ok(())
 }
 
-/// Runs one op as `frame.party`, whom the program resolved from the
-/// signer ([`identity::party_of`]). Every op names its repository; an accepted one
+/// Runs one op as `frame.principal`, whom the program resolved from the
+/// signer ([`identity::principal_of`]). Every op names its repository; an accepted one
 /// marks it active.
 pub fn execute(store: &mut impl Writes, frame: &Frame, op: Op) -> Result<(), Refusal> {
-    let actor = person(&frame.party)?;
+    let actor = person(&frame.principal)?;
     let repo = op.repo().to_owned();
     let reply = match op {
         Op::Create { repo, hash } => create(store, actor, &repo, hash).map(|()| None),
         Op::Configure { repo, settings } => configure(store, actor, &repo, settings).map(|()| None),
-        Op::Grant { repo, party } => grant(store, actor, &repo, party).map(|()| None),
-        Op::Revoke { repo, party } => revoke(store, actor, &repo, party).map(|()| None),
+        Op::Grant { repo, principal } => grant(store, actor, &repo, principal).map(|()| None),
+        Op::Revoke { repo, principal } => revoke(store, actor, &repo, principal).map(|()| None),
         Op::Push { repo, request } => push(store, actor, &repo, &request).map(|()| None),
         Op::Merge {
             repo,
@@ -108,12 +110,12 @@ pub fn execute(store: &mut impl Writes, frame: &Frame, op: Op) -> Result<(), Ref
 
 /// Forge is written by people (an account), never by a program or the
 /// system. A key that holds no account never gets here: identity's
-/// [`party_of`](identity::party_of) refuses it.
-fn person(party: &Party) -> Result<&Party, Refusal> {
-    if !party.is_person() {
+/// [`principal_of`](identity::principal_of) refuses it.
+fn person(principal: &Principal) -> Result<&Principal, Refusal> {
+    if !principal.is_person() {
         return Err(unauthorized("a repository op is signed by a person"));
     }
-    Ok(party)
+    Ok(principal)
 }
 
 /// Every accepted op marks its repository active at this height.
@@ -125,7 +127,7 @@ fn touch(store: &mut impl Writes, name: &str, height: u64) -> Result<(), Refusal
 
 fn create(
     store: &mut impl Writes,
-    actor: &Party,
+    actor: &Principal,
     name: &str,
     hash: HashKind,
 ) -> Result<(), Refusal> {
@@ -147,7 +149,7 @@ fn create(
 
 fn configure(
     store: &mut impl Writes,
-    actor: &Party,
+    actor: &Principal,
     name: &str,
     settings: Settings,
 ) -> Result<(), Refusal> {
@@ -162,23 +164,38 @@ fn configure(
     save_repo(store, name, &repo)
 }
 
-fn grant(store: &mut impl Writes, actor: &Party, name: &str, party: Party) -> Result<(), Refusal> {
+fn grant(
+    store: &mut impl Writes,
+    actor: &Principal,
+    name: &str,
+    principal: Principal,
+) -> Result<(), Refusal> {
     require_owner(&load_repo(store, name)?, actor)?;
-    require_named(&party)?;
-    WRITERS.insert(store, &(name.to_owned(), party));
+    require_named(&principal)?;
+    WRITERS.insert(store, &(name.to_owned(), principal));
     Ok(())
 }
 
-fn revoke(store: &mut impl Writes, actor: &Party, name: &str, party: Party) -> Result<(), Refusal> {
+fn revoke(
+    store: &mut impl Writes,
+    actor: &Principal,
+    name: &str,
+    principal: Principal,
+) -> Result<(), Refusal> {
     require_owner(&load_repo(store, name)?, actor)?;
-    require_named(&party)?;
-    WRITERS.remove(store, &(name.to_owned(), party));
+    require_named(&principal)?;
+    WRITERS.remove(store, &(name.to_owned(), principal));
     Ok(())
 }
 
 /// A git receive-pack: the objects land as blobs, then each accepted ref
 /// moves; git's own report is the op's output.
-fn push(store: &mut impl Writes, actor: &Party, name: &str, request: &[u8]) -> Result<(), Refusal> {
+fn push(
+    store: &mut impl Writes,
+    actor: &Principal,
+    name: &str,
+    request: &[u8],
+) -> Result<(), Refusal> {
     let mut repo = load_repo(store, name)?;
     require_writer(store, name, &repo, actor)?;
     let bounds = load_bounds(store)?;
@@ -219,7 +236,7 @@ fn push(store: &mut impl Writes, actor: &Party, name: &str, request: &[u8]) -> R
     Ok(())
 }
 
-fn require_owner(repo: &Repo, actor: &Party) -> Result<(), Refusal> {
+fn require_owner(repo: &Repo, actor: &Principal) -> Result<(), Refusal> {
     if repo.owner != *actor {
         return Err(unauthorized("only the owner changes a repository"));
     }
@@ -230,7 +247,7 @@ pub(crate) fn require_writer(
     store: &impl Reads,
     name: &str,
     repo: &Repo,
-    actor: &Party,
+    actor: &Principal,
 ) -> Result<(), Refusal> {
     let may_write = repo.owner == *actor || is_writer(store, name, actor);
     if !may_write {
@@ -240,8 +257,8 @@ pub(crate) fn require_writer(
 }
 
 /// A person an op names (a writer, a reviewer): an account.
-pub(crate) fn require_named(party: &Party) -> Result<(), Refusal> {
-    if !party.is_person() {
+pub(crate) fn require_named(principal: &Principal) -> Result<(), Refusal> {
+    if !principal.is_person() {
         return Err(invalid("only a person is named here"));
     }
     Ok(())

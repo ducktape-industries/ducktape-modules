@@ -98,7 +98,7 @@ fn change_row(
 ) -> AnyElement {
     let n = summary.n;
     let open = cx.listener(move |forge, _: &ClickEvent, _, cx| forge.open_change(Some(n), cx));
-    let author = forge.party_name(&summary.author);
+    let author = forge.principal_name(&summary.author);
     let mut line = row(id(format!("forge-change-{n}")), theme)
         .on_click(open)
         .cell(
@@ -211,7 +211,7 @@ fn filters(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement 
                 filter == Filter::Open
                     || filter == Filter::Merged
                     || filter == Filter::Closed
-                    || forge.me_party().is_some(),
+                    || forge.me_principal().is_some(),
             ),
         );
     }
@@ -363,7 +363,7 @@ fn reviewers(
         .gap_1()
         .child(quiet("Reviewers", theme));
     for number in names.numbers().take(24) {
-        let key = identity::Party::Account(number);
+        let key = identity::Principal::Account(number);
         let picked = form.reviewers.contains(&key);
         let toggle = cx.listener({
             let key = key.clone();

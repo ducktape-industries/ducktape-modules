@@ -4,7 +4,9 @@
 use abi::reason;
 use store::Memory;
 
-use crate::{Op, Page, PageReply, Party, PostPolicy, Query, Reply, execute, parse_message, query};
+use crate::{
+    Op, Page, PageReply, PostPolicy, Principal, Query, Reply, execute, parse_message, query,
+};
 
 mod channels;
 mod messages;
@@ -13,9 +15,9 @@ mod properties;
 mod reactions;
 mod rooms;
 
-const ADA: Party = Party::Account(1);
-const BO: Party = Party::Account(2);
-const CY: Party = Party::Account(3);
+const ADA: Principal = Principal::Account(1);
+const BO: Principal = Principal::Account(2);
+const CY: Principal = Principal::Account(3);
 
 /// A chat store and a clock: every op runs one block later.
 #[derive(Default)]
@@ -33,22 +35,22 @@ impl Chat {
     }
 
     /// The frame of the next block.
-    fn next(&mut self, who: &Party) -> crate::Frame {
+    fn next(&mut self, who: &Principal) -> crate::Frame {
         self.height += 1;
         crate::Frame {
-            party: who.clone(),
+            principal: who.clone(),
             height: self.height,
             time: self.height * 1000,
         }
     }
 
-    fn run(&mut self, who: &Party, op: Op) -> Result<(), abi::Refusal> {
+    fn run(&mut self, who: &Principal, op: Op) -> Result<(), abi::Refusal> {
         let frame = self.next(who);
         execute(&mut self.store, &frame, op)
     }
 
     #[track_caller]
-    fn ok(&mut self, who: &Party, op: Op) {
+    fn ok(&mut self, who: &Principal, op: Op) {
         if let Err(refusal) = self.run(who, op) {
             panic!("refused: {refusal}");
         }
@@ -56,14 +58,14 @@ impl Chat {
 
     /// The refusal's reason; the store is untouched by it.
     #[track_caller]
-    fn refused(&mut self, who: &Party, op: Op) -> String {
+    fn refused(&mut self, who: &Principal, op: Op) -> String {
         let frame = self.next(who);
         self.store
             .refused(|store| execute(store, &frame, op))
             .reason
     }
 
-    fn post(&mut self, who: &Party, id: &str, text: &str, thread: Option<u64>) {
+    fn post(&mut self, who: &Principal, id: &str, text: &str, thread: Option<u64>) {
         self.ok(who, post("general", id, text, thread));
     }
 

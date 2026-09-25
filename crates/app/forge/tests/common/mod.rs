@@ -5,7 +5,7 @@
 pub use std::collections::{BTreeMap, BTreeSet};
 
 pub use abi::{Cause, Env, HashKind, Origin, reason};
-pub use forge::{Bounds, Frame, Op, Page, Party, Query, Reply, Service, Settings};
+pub use forge::{Bounds, Frame, Op, Page, Principal, Query, Reply, Service, Settings};
 pub use gitcore::wire::pktline::{self, Pkt, Reader};
 pub use gitcore::{
     Commit, Hash, Kind, Limits, MemoryObjects, Mode, Object, Objects, Oid, Signature, Tree,
@@ -61,12 +61,12 @@ pub fn founded() -> MemorySandbox {
 pub const HOLDERS: [(&[u8], u64); 3] = [(OWNER, 11), (WRITER, 12), (STRANGER, 13)];
 
 /// The person a harness key signs as: the account it holds.
-pub fn person(key: &[u8]) -> Party {
+pub fn person(key: &[u8]) -> Principal {
     let (_, account) = HOLDERS
         .iter()
         .find(|(held, _)| *held == key)
         .expect("a harness key");
-    Party::Account(*account)
+    Principal::Account(*account)
 }
 
 /// `actor`'s op at `height`, run as the wasm program runs it: the signer
@@ -78,7 +78,7 @@ pub fn signed_op(
     op: &Op,
 ) -> Result<(), abi::Refusal> {
     let frame = Frame {
-        party: identity::party_of(store, &Origin::External(actor.to_vec()))?,
+        principal: identity::principal_of(store, &Origin::External(actor.to_vec()))?,
         height,
         time: TIME,
     };

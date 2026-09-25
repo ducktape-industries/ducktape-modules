@@ -279,7 +279,7 @@ impl Forge {
             .as_ref()
             .map(|form| form.grant.trim().to_owned())
             .unwrap_or_default();
-        let Some(party) = identity::Party::parse(&typed) else {
+        let Some(principal) = identity::Principal::parse(&typed) else {
             self.notice = "Grant takes an account number".into();
             cx.notify();
             return;
@@ -288,17 +288,17 @@ impl Forge {
             form.grant.clear();
         }
         self.submit(
-            Op::Grant { repo, party },
+            Op::Grant { repo, principal },
             "settings".into(),
             "Granting write access",
             cx,
         );
     }
 
-    pub(crate) fn revoke(&mut self, party: identity::Party, cx: &mut Context<Self>) {
+    pub(crate) fn revoke(&mut self, principal: identity::Principal, cx: &mut Context<Self>) {
         let repo = self.repo_name();
         self.submit(
-            Op::Revoke { repo, party },
+            Op::Revoke { repo, principal },
             "settings".into(),
             "Revoking write access",
             cx,

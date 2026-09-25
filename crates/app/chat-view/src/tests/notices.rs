@@ -117,7 +117,7 @@ fn kept_cursors_bring_the_badge_back_after_a_relaunch() {
                 let mut ping = row(2, 8, "@eddy");
                 ping.blocks = vec![chat::Block::Paragraph(vec![chat::Span {
                     text: "@eddy".into(),
-                    marks: vec![chat::Mark::Mention(chat::Party::Account(7))],
+                    marks: vec![chat::Mark::Mention(chat::Principal::Account(7))],
                 }])];
                 if channel_id == "dm-7-8" {
                     ping = row(1, 8, "hi");

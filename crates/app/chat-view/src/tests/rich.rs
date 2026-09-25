@@ -18,7 +18,7 @@ fn rich_message_keeps_styles_and_dispatches_each_link_by_value() {
         },
         chat::Span {
             text: "reviewer".into(),
-            marks: vec![chat::Mark::Mention(chat::Party::Account(8))],
+            marks: vec![chat::Mark::Mention(chat::Principal::Account(8))],
         },
     ];
     view.update(&mut cx, |chat, _, cx| {
@@ -45,7 +45,7 @@ fn rich_message_keeps_styles_and_dispatches_each_link_by_value() {
                     }]),
                 ],
                 text: "rich".into(),
-                ..MsgRow::by(Party::Account(7))
+                ..MsgRow::by(Principal::Account(7))
             });
         cx.notify();
     });

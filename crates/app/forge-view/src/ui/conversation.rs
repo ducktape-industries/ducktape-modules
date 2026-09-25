@@ -53,7 +53,7 @@ pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
 /// One review as a timeline event: who, what they concluded, where, and
 /// the line comments it carried.
 fn review_card(forge: &Forge, review: &forge::Review, theme: &Theme) -> AnyElement {
-    let author = forge.party_name(&review.author);
+    let author = forge.principal_name(&review.author);
     let outdated = forge.outdated(&review.draft.commit_oid);
     let comments = review.draft.comments.len();
     let mut card = div()
@@ -169,15 +169,18 @@ fn forge_line(
     }
     let key = row.message_id.clone();
     if opened {
-        let author = forge.party_name(&change.author);
+        let author = forge.principal_name(&change.author);
         return Some(event(key, Some(author), "opened this change".into(), theme));
     }
     // a line matching no review yet may be one still paging in
     if reviews.next.is_some() {
         return None;
     }
-    let actor =
-        |party: &Option<identity::Party>| party.as_ref().map(|party| forge.party_name(party));
+    let actor = |principal: &Option<identity::Principal>| {
+        principal
+            .as_ref()
+            .map(|principal| forge.principal_name(principal))
+    };
     match (change.state, &change.merge_oid) {
         (ChangeState::Merged, Some(oid)) => Some(event(
             key,
@@ -200,7 +203,7 @@ fn forge_line(
 }
 
 fn is_forge(row: &chat::MsgRow) -> bool {
-    row.author == identity::Party::Module(forge::PROGRAM.into())
+    row.author == identity::Principal::Module(forge::PROGRAM.into())
 }
 
 /// The hidden chat channel of this change, in chat's row shape.
@@ -242,7 +245,7 @@ fn messages(forge: &Forge, theme: &Theme) -> AnyElement {
                     }
                     continue;
                 }
-                let author = forge.party_name(&message.author);
+                let author = forge.principal_name(&message.author);
                 column = column.child(
                     div()
                         .id(id(format!("forge-message-{}", message.message_id)))

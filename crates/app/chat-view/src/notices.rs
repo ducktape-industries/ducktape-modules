@@ -4,7 +4,7 @@
 //! badge counts such messages in rooms still unread.
 use std::collections::BTreeMap;
 
-use chat::{Block, ChannelInfo, Mark, MsgRow, Party, Query, Reply};
+use chat::{Block, ChannelInfo, Mark, MsgRow, Principal, Query, Reply};
 use ducktape_view_guest::Context;
 use ducktape_view_guest::methods::{HostBadge, NotifyPost, NotifySeen, Post};
 
@@ -171,7 +171,7 @@ impl Chat {
 /// The notice `row` makes for account `me`, if it is meant for her: it
 /// mentions her, or it is in a direct room she is in. Her own never is.
 fn notice(row: &MsgRow, me: u64, name: &str, chain: &str, names: &Names) -> Option<Post> {
-    if row.deleted || row.author == Party::Account(me) {
+    if row.deleted || row.author == Principal::Account(me) {
         return None;
     }
     let direct = dm_peer_of(me, &row.channel_id).is_some();
@@ -195,7 +195,7 @@ fn notice(row: &MsgRow, me: u64, name: &str, chain: &str, names: &Names) -> Opti
 /// channel's `#name` otherwise.
 fn tag(me: u64, room: &str, name: &str, names: &Names) -> String {
     match dm_peer_of(me, room) {
-        Some(peer) => format!("@{}", names.author(&Party::Account(peer))),
+        Some(peer) => format!("@{}", names.author(&Principal::Account(peer))),
         None => format!("#{name}"),
     }
 }
@@ -204,7 +204,7 @@ fn mentions(blocks: &[Block], me: u64) -> bool {
     blocks.iter().any(|block| match block {
         Block::Paragraph(spans) | Block::Quote(spans) => spans
             .iter()
-            .any(|span| span.marks.contains(&Mark::Mention(Party::Account(me)))),
+            .any(|span| span.marks.contains(&Mark::Mention(Principal::Account(me)))),
         Block::Code { .. } | Block::Divider => false,
     })
 }
@@ -219,7 +219,7 @@ mod tests {
             channel_id: channel.into(),
             seq: 7,
             blocks,
-            ..MsgRow::by(Party::Account(author))
+            ..MsgRow::by(Principal::Account(author))
         }
     }
 
@@ -237,14 +237,14 @@ mod tests {
     fn only_a_mention_or_a_direct_message_to_me_is_a_notice() {
         let names = Names::default();
         let chain = "testnet-0a1b2c3d";
-        let me = Mark::Mention(Party::Account(3));
+        let me = Mark::Mention(Principal::Account(3));
         let mention = row("design", 5, said("@me", vec![me.clone()]));
         let post = notice(&mention, 3, "design", chain, &names).unwrap();
         assert_eq!(post.title, "account 5 mentioned you");
         assert_eq!(post.tag, "#design");
         assert_eq!(post.link, "duck://testnet-0a1b2c3d/chat/design/7");
 
-        let other = Mark::Mention(Party::Account(4));
+        let other = Mark::Mention(Principal::Account(4));
         assert!(
             notice(
                 &row("design", 5, said("@x", vec![other])),

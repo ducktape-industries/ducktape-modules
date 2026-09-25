@@ -1,6 +1,6 @@
 //! Who reads: the session the host hands over (the seated key and the
 //! account it holds), and what that lets her do in the open room.
-use chat::Party;
+use chat::Principal;
 use ducktape_view_guest::Context;
 use ducktape_view_guest::view::Loaded;
 
@@ -91,14 +91,14 @@ impl Chat {
         self.session.account
     }
 
-    /// The party chat writes the reader as: her account; none while her
+    /// The principal chat writes the reader as: her account; none while her
     /// key holds none, since only an account writes.
-    pub(crate) fn me(&self) -> Option<Party> {
-        Party::writer(self.my_account())
+    pub(crate) fn me(&self) -> Option<Principal> {
+        Principal::writer(self.my_account())
     }
 
     /// The reader, as a query's `viewer`.
-    pub(crate) fn viewer(&self) -> Vec<Party> {
+    pub(crate) fn viewer(&self) -> Vec<Principal> {
         self.me().into_iter().collect()
     }
 
@@ -120,7 +120,7 @@ impl Chat {
             .room
             .as_ref()
             .and_then(|room| room.members.ready())
-            .is_some_and(|members| members.iter().any(|m| m.party == me));
+            .is_some_and(|members| members.iter().any(|m| m.principal == me));
         (!info.channel.admits(&me, seated)).then_some(Gate::NotMember)
     }
 

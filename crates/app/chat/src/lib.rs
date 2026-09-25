@@ -2,15 +2,15 @@
 //! huddles.
 //!
 //! A write is an [`Op`], a read a [`Query`] answered by a [`Reply`], all
-//! borsh, the same types `chat-view` links. The acting [`Party`] is the
-//! frame's origin: an external key resolved by identity's `party_of` to its
+//! borsh, the same types `chat-view` links. The acting [`Principal`] is the
+//! frame's origin: an external key resolved by identity's `principal_of` to its
 //! account (a key that holds none writes nothing). The layout, in reading order:
 //!
 //! - `lib.rs` (here): the types on the wire and the rows they carry
 //! - `state.rs`: every table and index the program keeps, declared once
 //! - `rules.rs`: the checks an op passes before it writes
 //! - `ops.rs`: [`execute`], one short function per op
-//! - `origin.rs`: [`execute_from`], an origin resolved to its party
+//! - `origin.rs`: [`execute_from`], an origin resolved to its principal
 //!   through identity, and identity's roster
 //! - `queries.rs`: [`query`], one short function per question
 //! - `text.rs`: what search and tags read out of a message
@@ -39,7 +39,7 @@ use serde::{Deserialize, Serialize};
 
 pub use abi::hex;
 pub use description::describe;
-pub use identity::{AccountNumber, Frame, Party};
+pub use identity::{AccountNumber, Frame, Principal};
 pub use message::{Block, Mark, Span, parse_message};
 pub use ops::execute;
 pub use origin::execute_from;
@@ -58,7 +58,7 @@ pub const MAX_EMOJI_BYTES: usize = 64;
 pub const MAX_REACTION_EMOJIS: usize = 64;
 pub const MAX_THREAD_REPLIES: u64 = 4096;
 pub const MAX_HUDDLE_MEMBERS: usize = 32;
-/// The most parties a read's `viewer` names (a reader is one account).
+/// The most principals a read's `viewer` names (a reader is one account).
 pub const MAX_VIEWERS: usize = 8;
 pub const HUDDLE_NODE_KEY_BYTES: usize = 32;
 /// The namespace a node key signs under to join a huddle; the message is
@@ -126,7 +126,7 @@ pub enum Op {
     },
     SetMembership {
         channel_id: String,
-        party: Party,
+        principal: Principal,
         member: bool,
     },
     /// `node_proof` is `node`'s signature over [`HUDDLE_JOIN_NS`] + channel
@@ -141,7 +141,7 @@ pub enum Op {
     },
 }
 
-/// A read. `viewer` is the reader's parties: they decide
+/// A read. `viewer` is the reader's principals: they decide
 /// [`Reaction::reacted_by_me`]. Every list takes a [`Page`] and answers a
 /// [`PageReply`] whose `next` resumes it.
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
@@ -159,26 +159,26 @@ pub enum Query {
     /// The author's most recently answered thread in this channel, if any.
     ThreadAttention {
         channel_id: String,
-        author: Party,
+        author: Principal,
     },
     /// One page of timeline roots, newest first.
     Roots {
         channel_id: String,
-        viewer: Vec<Party>,
+        viewer: Vec<Principal>,
         page: Page,
     },
     /// `page.limit` messages centred on `seq`.
     MessagesAround {
         channel_id: String,
         seq: u64,
-        viewer: Vec<Party>,
+        viewer: Vec<Principal>,
         page: Page,
     },
     /// The root plus one page of replies, in post order.
     Thread {
         channel_id: String,
         root_seq: u64,
-        viewer: Vec<Party>,
+        viewer: Vec<Principal>,
         page: Page,
     },
     Members {
@@ -188,13 +188,13 @@ pub enum Query {
     /// Every token of `text`, newest first, at most `page.limit` hits.
     Search {
         text: String,
-        viewer: Vec<Party>,
+        viewer: Vec<Principal>,
         channel_id: Option<String>,
         page: Page,
     },
     TagSearch {
         tag: String,
-        viewer: Vec<Party>,
+        viewer: Vec<Principal>,
         channel_id: Option<String>,
         page: Page,
     },
@@ -237,7 +237,7 @@ pub struct ChannelRow {
     pub name: String,
     pub created_at: u64,
     pub post_policy: PostPolicy,
-    pub owner: Party,
+    pub owner: Principal,
     pub archived: bool,
     pub huddle: Vec<HuddleEntry>,
     pub voice: bool,
@@ -248,11 +248,11 @@ impl ChannelRow {
         self.post_policy == PostPolicy::MembersOnly
     }
 
-    /// Whether the room lets `party` post, `seated` saying whether it holds
+    /// Whether the room lets `principal` post, `seated` saying whether it holds
     /// a member seat: posting is open, or it owns the room or sits in it.
     /// Archiving aside; the program and the view ask this one rule.
-    pub fn admits(&self, party: &Party, seated: bool) -> bool {
-        !self.members_only() || self.owner == *party || seated
+    pub fn admits(&self, principal: &Principal, seated: bool) -> bool {
+        !self.members_only() || self.owner == *principal || seated
     }
 }
 
@@ -265,7 +265,7 @@ pub struct ChannelInfo {
 
 #[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct HuddleEntry {
-    pub party: Party,
+    pub principal: Principal,
     /// the node key, hex
     pub node: String,
     pub joined_at: u64,
@@ -273,7 +273,7 @@ pub struct HuddleEntry {
 
 #[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct MemberRow {
-    pub party: Party,
+    pub principal: Principal,
     pub height: u64,
     pub time: u64,
 }
@@ -283,7 +283,7 @@ pub struct MsgRow {
     pub channel_id: String,
     pub seq: u64,
     pub message_id: String,
-    pub author: Party,
+    pub author: Principal,
     pub height: u64,
     pub time: u64,
     pub blocks: Vec<Block>,
@@ -306,7 +306,7 @@ pub struct MsgRow {
 impl MsgRow {
     /// A row with nothing yet but its author: a view's pending post before
     /// the program serves it, a test's base row.
-    pub fn by(author: Party) -> MsgRow {
+    pub fn by(author: Principal) -> MsgRow {
         MsgRow {
             channel_id: String::new(),
             seq: 0,
@@ -330,7 +330,7 @@ impl MsgRow {
     }
 }
 
-/// One emoji on a message: how many parties chose it.
+/// One emoji on a message: how many principals chose it.
 #[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Reaction {
     pub emoji: String,
@@ -382,7 +382,7 @@ pub fn program_of(channel_id: &str) -> Option<&str> {
 /// program itself shows the room. `(program, code)`.
 pub fn program_post(row: &MsgRow) -> Option<(&str, &str)> {
     let program = program_of(&row.channel_id)?;
-    let own = matches!(&row.author, Party::Module(module) if module == program);
+    let own = matches!(&row.author, Principal::Module(module) if module == program);
     match row.blocks.as_slice() {
         [
             Block::Code {
@@ -424,16 +424,16 @@ fn a_programs_own_code_block_in_its_room_is_its_post() {
         lang: Some(lang.into()),
         text: "review 7".into(),
     };
-    let row = |channel: &str, author: Party, blocks| MsgRow {
+    let row = |channel: &str, author: Principal, blocks| MsgRow {
         channel_id: channel.into(),
         blocks,
         ..MsgRow::by(author)
     };
-    let forge = || Party::Module("forge".into());
+    let forge = || Principal::Module("forge".into());
     let post = row("forge:web:3", forge(), vec![code("forge")]);
     assert_eq!(program_post(&post), Some(("forge", "review 7")));
     for other in [
-        row("forge:web:3", Party::Account(1), vec![code("forge")]),
+        row("forge:web:3", Principal::Account(1), vec![code("forge")]),
         row("forge:web:3", forge(), vec![code("rust")]),
         row("forge:web:3", forge(), vec![code("forge"), Block::Divider]),
         row("general", forge(), vec![code("forge")]),

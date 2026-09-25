@@ -7,7 +7,7 @@ fn session_key_resolves_to_its_account() {
     view.read(|chat| {
         assert_eq!(chat.my_account(), Some(7));
         assert!(chat.holds_account());
-        assert_eq!(chat.me(), Some(Party::Account(7)));
+        assert_eq!(chat.me(), Some(Principal::Account(7)));
     });
 }
 
@@ -282,7 +282,7 @@ fn the_roster_is_read_past_its_first_page() {
     view.read(|chat| {
         let names = chat.names.ready().expect("the roster landed");
         assert_eq!(names.numbers().count(), 600);
-        assert_eq!(names.name(&Party::Account(600)), Some("user600"));
+        assert_eq!(names.name(&Principal::Account(600)), Some("user600"));
         assert!(!names.more(), "the whole roster was read");
     });
     assert!(cx.find("chat-sidebar-more").is_none());

@@ -10,7 +10,7 @@ use crate::state::{
 };
 use crate::text::tag_label;
 use crate::{
-    ChannelInfo, ChannelRow, MAX_VIEWERS, MessageHits, MsgRow, Party, Query, Reply,
+    ChannelInfo, ChannelRow, MAX_VIEWERS, MessageHits, MsgRow, Principal, Query, Reply,
     SEARCH_POSTING_CAP, tokens,
 };
 
@@ -129,7 +129,7 @@ fn by_id(store: &impl Reads, message_id: &String) -> Result<Option<MsgRow>, Refu
 fn attention(
     store: &impl Reads,
     channel_id: &str,
-    author: Party,
+    author: Principal,
 ) -> Result<Option<MsgRow>, Refusal> {
     let channel_id = channel_id.to_owned();
     let newest = ANSWERED.prefix_of(&(channel_id.clone(), author)).limit(1);
@@ -265,14 +265,14 @@ fn rows_in(reply: &mut Reply) -> Vec<&mut MsgRow> {
 }
 
 /// Each reaction on `row` learns whether one of `viewer` chose it.
-fn mark_reacted(store: &impl Reads, viewer: &[Party], row: &mut MsgRow) {
+fn mark_reacted(store: &impl Reads, viewer: &[Principal], row: &mut MsgRow) {
     for reaction in &mut row.reactions {
-        reaction.reacted_by_me = viewer.iter().any(|party| {
+        reaction.reacted_by_me = viewer.iter().any(|principal| {
             let key = (
                 row.channel_id.clone(),
                 row.seq,
                 reaction.emoji.clone(),
-                party.clone(),
+                principal.clone(),
             );
             REACTIONS.has(store, &key)
         });

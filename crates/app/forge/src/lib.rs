@@ -3,8 +3,8 @@
 //! `store::Memory` (tests, fixtures); the `program` feature adds the wasm32
 //! program over the host.
 //!
-//! A write is an [`Op`] run as a [`Party`] (an account: the signer resolved
-//! by identity's [`party_of`](identity::party_of), which refuses a key that
+//! A write is an [`Op`] run as a [`Principal`] (an account: the signer resolved
+//! by identity's [`principal_of`](identity::principal_of), which refuses a key that
 //! holds none), a read
 //! a [`Query`] answered by a [`Reply`]. The layout, in reading order:
 //!
@@ -49,7 +49,7 @@ describe::export!(Op, describe);
 
 /// Old op bytes are described with the current code (`describe`): the op
 /// enum only grows at its end. Append a new variant here; never reorder.
-/// (Grant, Revoke, ChangeOpen and ChangeEdit name parties since the stage
+/// (Grant, Revoke, ChangeOpen and ChangeEdit name principals since the stage
 /// refound that made forge account-keyed; their names and order held.)
 #[test]
 fn op_variants_only_append() {

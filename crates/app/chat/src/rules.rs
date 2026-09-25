@@ -4,7 +4,9 @@ use abi::Refusal;
 use store::{Reads, invalid, unauthorized, wrong_state};
 
 use crate::state::MEMBERS;
-use crate::{ChannelRow, MAX_EMOJI_BYTES, MAX_ID_BYTES, MAX_NAME_BYTES, MsgRow, Party, dm_peers};
+use crate::{
+    ChannelRow, MAX_EMOJI_BYTES, MAX_ID_BYTES, MAX_NAME_BYTES, MsgRow, Principal, dm_peers,
+};
 
 /// A channel or message id: 1..=64 bytes, no `/` (a room link's separator).
 pub(crate) fn id(what: &str, id: &str) -> Result<(), Refusal> {
@@ -18,14 +20,14 @@ pub(crate) fn id(what: &str, id: &str) -> Result<(), Refusal> {
 
 /// An id with a `:` belongs to the program its prefix names: `forge:web:3`
 /// is forge's alone. The system may use any.
-pub(crate) fn namespace(id: &str, party: &Party) -> Result<(), Refusal> {
+pub(crate) fn namespace(id: &str, principal: &Principal) -> Result<(), Refusal> {
     let Some(prefix) = crate::program_of(id) else {
         return Ok(());
     };
-    let allowed = match party {
-        Party::Module(program) => prefix == program,
-        Party::System => true,
-        Party::Account(_) => false,
+    let allowed = match principal {
+        Principal::Module(program) => prefix == program,
+        Principal::System => true,
+        Principal::Account(_) => false,
     };
     if !allowed {
         return Err(unauthorized("colon ids belong to their program namespace"));
@@ -36,9 +38,9 @@ pub(crate) fn namespace(id: &str, party: &Party) -> Result<(), Refusal> {
 /// A plain channel id: an [`id`] in the actor's [`namespace`], and never a
 /// dm id, which opens only through `CreateDmChannel` with both peers
 /// seated (a plain create would let anyone own the room first).
-pub(crate) fn channel_id(channel_id: &str, party: &Party) -> Result<(), Refusal> {
+pub(crate) fn channel_id(channel_id: &str, principal: &Principal) -> Result<(), Refusal> {
     id("channel_id", channel_id)?;
-    namespace(channel_id, party)?;
+    namespace(channel_id, principal)?;
     if dm_peers(channel_id).is_some() {
         return Err(unauthorized("dm ids open only through CreateDmChannel"));
     }
@@ -59,29 +61,29 @@ pub(crate) fn emoji(emoji: &str) -> Result<(), Refusal> {
     Ok(())
 }
 
-/// `party` may write in `channel`: it is not archived, and posting is open,
-/// or `party` owns it or is a member.
+/// `principal` may write in `channel`: it is not archived, and posting is open,
+/// or `principal` owns it or is a member.
 pub(crate) fn writable(
     store: &impl Reads,
     channel: &ChannelRow,
-    party: &Party,
+    principal: &Principal,
 ) -> Result<(), Refusal> {
     if channel.archived {
         return Err(wrong_state(format!("{} is archived", channel.id)));
     }
-    let seated = MEMBERS.has(store, &(channel.id.clone(), party.clone()));
-    if !channel.admits(party, seated) {
+    let seated = MEMBERS.has(store, &(channel.id.clone(), principal.clone()));
+    if !channel.admits(principal, seated) {
         return Err(unauthorized(format!(
             "{} is not a member of {}",
-            handle(party),
+            handle(principal),
             channel.id
         )));
     }
     Ok(())
 }
 
-pub(crate) fn owned(channel: &ChannelRow, party: &Party) -> Result<(), Refusal> {
-    if channel.owner != *party {
+pub(crate) fn owned(channel: &ChannelRow, principal: &Principal) -> Result<(), Refusal> {
+    if channel.owner != *principal {
         return Err(unauthorized(format!(
             "only the owner of {} may",
             channel.id
@@ -103,8 +105,8 @@ pub(crate) fn not_dm(channel: &ChannelRow) -> Result<(), Refusal> {
 }
 
 /// A message only its author edits, and only while it stands.
-pub(crate) fn editable(row: &MsgRow, party: &Party) -> Result<(), Refusal> {
-    if row.author != *party {
+pub(crate) fn editable(row: &MsgRow, principal: &Principal) -> Result<(), Refusal> {
+    if row.author != *principal {
         return Err(unauthorized("only the author edits"));
     }
     if row.deleted {
@@ -113,11 +115,11 @@ pub(crate) fn editable(row: &MsgRow, party: &Party) -> Result<(), Refusal> {
     Ok(())
 }
 
-/// How a refusal sentence names a party.
-fn handle(party: &Party) -> String {
-    match party {
-        Party::Account(account) => format!("acct:{account}"),
-        Party::Module(module) => format!("module:{module}"),
-        Party::System => "system".to_string(),
+/// How a refusal sentence names a principal.
+fn handle(principal: &Principal) -> String {
+    match principal {
+        Principal::Account(account) => format!("acct:{account}"),
+        Principal::Module(module) => format!("module:{module}"),
+        Principal::System => "system".to_string(),
     }
 }

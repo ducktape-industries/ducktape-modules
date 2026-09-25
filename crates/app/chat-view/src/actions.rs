@@ -1,6 +1,6 @@
 //! What a press does: the message menus, the writes (reactions, deletes,
 //! the channel's details, new channels), copying and links.
-use chat::{MsgRow, Op, Party, PostPolicy};
+use chat::{MsgRow, Op, PostPolicy, Principal};
 use ducktape_view_guest::Context;
 use ducktape_view_guest::host::Refusal;
 use ducktape_view_guest::wire;
@@ -263,17 +263,22 @@ impl Chat {
             .details
             .as_ref()
             .map(|details| details.member_draft.as_str());
-        let Some(party) = typed.and_then(Party::parse) else {
+        let Some(principal) = typed.and_then(Principal::parse) else {
             self.notice = "A member is an account number".into();
             return;
         };
         if let Some(details) = &mut self.details {
             details.member_draft.clear();
         }
-        self.set_member(party, true, cx);
+        self.set_member(principal, true, cx);
     }
 
-    pub(crate) fn set_member(&mut self, party: Party, member: bool, cx: &mut Context<Self>) {
+    pub(crate) fn set_member(
+        &mut self,
+        principal: Principal,
+        member: bool,
+        cx: &mut Context<Self>,
+    ) {
         let channel_id = self.room_id();
         if channel_id.is_empty() {
             return;
@@ -281,7 +286,7 @@ impl Chat {
         self.submit(
             Op::SetMembership {
                 channel_id,
-                party,
+                principal,
                 member,
             },
             cx,

@@ -1,12 +1,12 @@
 //! Everything chat keeps, declared once: each table's key and value types,
 //! and the writes that keep a message and its indexes in step. Keys are
-//! typed (`store::KeyCodec`: integers big-endian, strings and parties
+//! typed (`store::KeyCodec`: integers big-endian, strings and principals
 //! NUL-terminated, so names list by name), values borsh. A tuple key scans by its leading
 //! elements, which is how every "in this channel" read works.
 use abi::Refusal;
 use store::{Map, Reads, Set, Writes, capacity, not_found};
 
-use crate::{ChannelRow, MAX_MESSAGE_BYTES, MemberRow, MsgRow, Party, tokens};
+use crate::{ChannelRow, MAX_MESSAGE_BYTES, MemberRow, MsgRow, Principal, tokens};
 
 type ChannelId = String;
 type Seq = u64;
@@ -17,9 +17,9 @@ pub(crate) const HEADS: Map<ChannelId, Seq> = Map::new("head/");
 pub(crate) const MESSAGES: Map<(ChannelId, Seq), MsgRow> = Map::new("message/");
 /// Where each message id lives: ids are unique across channels.
 pub(crate) const MESSAGE_IDS: Map<String, (ChannelId, Seq)> = Map::new("message-id/");
-pub(crate) const MEMBERS: Map<(ChannelId, Party), MemberRow> = Map::new("member/");
-/// Who chose which emoji: `(channel, seq, emoji, party)`.
-pub(crate) const REACTIONS: Set<(ChannelId, Seq, String, Party)> = Set::new("reaction/");
+pub(crate) const MEMBERS: Map<(ChannelId, Principal), MemberRow> = Map::new("member/");
+/// Who chose which emoji: `(channel, seq, emoji, principal)`.
+pub(crate) const REACTIONS: Set<(ChannelId, Seq, String, Principal)> = Set::new("reaction/");
 
 /// Timeline roots, newest first: `(channel, newest_first(seq))`.
 pub(crate) const ROOTS: Set<(ChannelId, Seq)> = Set::new("root/");
@@ -27,7 +27,7 @@ pub(crate) const ROOTS: Set<(ChannelId, Seq)> = Set::new("root/");
 pub(crate) const REPLIES: Set<(ChannelId, Seq, Seq)> = Set::new("reply/");
 /// Each author's answered threads, newest answer first:
 /// `(channel, root author, newest_first(last reply))` → the root's seq.
-pub(crate) const ANSWERED: Map<(ChannelId, Party, Seq), Seq> = Map::new("answered/");
+pub(crate) const ANSWERED: Map<(ChannelId, Principal, Seq), Seq> = Map::new("answered/");
 /// Search postings: `(word, channel, seq)`.
 pub(crate) const WORDS: Set<(String, ChannelId, Seq)> = Set::new("word/");
 /// Tag postings, newest first: `(tag, newest_first(time), channel, seq)`.

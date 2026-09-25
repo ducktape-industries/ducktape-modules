@@ -2,7 +2,7 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
-use crate::Party;
+use crate::Principal;
 
 /// inline formatting applied to a [`Span`]. mentions are structured so
 /// hook parsing stays deterministic.
@@ -12,9 +12,9 @@ pub enum Mark {
     Bold,
     Italic,
     Link(String),
-    /// a mention names a party: `<@7>` an account.
+    /// a mention names a principal: `<@7>` an account.
     /// chat keeps it as typed; a view names it at render time.
-    Mention(Party),
+    Mention(Principal),
 }
 
 /// a run of text with uniform marks.
@@ -279,7 +279,7 @@ fn reference_at(chars: &[char], at: usize) -> Option<(String, String, usize)> {
 
 /// A canonical `<@account>` token at `at` as a mention mark, and its length.
 /// Display names are never interpreted as recipient identities.
-pub fn mention_at(chars: &[char], at: usize) -> Option<(Party, usize)> {
+pub fn mention_at(chars: &[char], at: usize) -> Option<(Principal, usize)> {
     let opens = chars.get(at) == Some(&'<') && chars.get(at + 1) == Some(&'@');
     if !opens {
         return None;
@@ -290,7 +290,7 @@ pub fn mention_at(chars: &[char], at: usize) -> Option<(Party, usize)> {
     if !decimal {
         return None;
     }
-    Some((Party::Account(id.parse().ok()?), end + 1 - at))
+    Some((Principal::Account(id.parse().ok()?), end + 1 - at))
 }
 
 /// If `chars[at..]` opens with `marker` and has a later closing `marker`, the

@@ -58,9 +58,9 @@ impl MemorySandbox {
         self.accounts.borrow_mut().insert(key.to_vec(), account);
     }
 
-    /// Who `key` signs as: the party forge's program resolves.
-    pub fn party(&self, key: &[u8]) -> Result<forge::Party, Refusal> {
-        identity::party_of(&self.forge, &abi::Origin::External(key.to_vec()))
+    /// Who `key` signs as: the principal forge's program resolves.
+    pub fn principal(&self, key: &[u8]) -> Result<forge::Principal, Refusal> {
+        identity::principal_of(&self.forge, &abi::Origin::External(key.to_vec()))
     }
 
     /// Runs one chat message directly, as a key or module would in its own block.
@@ -76,7 +76,7 @@ impl MemorySandbox {
     /// the previous block's queue: as forge, at the delivering height.
     pub fn deliver(&mut self, height: u64, time: u64) -> Vec<Result<(), Refusal>> {
         let frame = forge::Frame {
-            party: forge::Party::Module("forge".into()),
+            principal: forge::Principal::Module("forge".into()),
             height,
             time,
         };

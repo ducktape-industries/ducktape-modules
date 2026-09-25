@@ -42,8 +42,10 @@ impl Rig {
     }
 
     /// Who `key` signs as; it holds an account.
-    pub fn party(&self, key: &[u8]) -> Party {
-        self.sandbox.party(key).expect("the key holds an account")
+    pub fn principal(&self, key: &[u8]) -> Principal {
+        self.sandbox
+            .principal(key)
+            .expect("the key holds an account")
     }
 
     pub fn advance(&mut self) {
@@ -78,10 +80,10 @@ impl Rig {
         forge::query(&self.sandbox, self.height, query.clone())
     }
 
-    pub fn chat_execute(&mut self, party: Party, msg: chat::Op) {
+    pub fn chat_execute(&mut self, principal: Principal, msg: chat::Op) {
         self.advance();
         let frame = Frame {
-            party,
+            principal,
             height: self.height,
             time: TIME,
         };
@@ -269,7 +271,7 @@ impl Story {
             into: b"refs/heads/main".to_vec(),
             title: title.into(),
             body: "The author's body.".into(),
-            reviewers: vec![Party::Account(2)],
+            reviewers: vec![Principal::Account(2)],
         }
     }
 }

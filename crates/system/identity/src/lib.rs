@@ -3,7 +3,7 @@
 //! always built; a view links them with `program` off. The `program` feature
 //! adds the wasm32 program over the host (`program.rs`). The `view` feature
 //! adds the ask a view makes of identity directly (`view.rs`).
-mod party;
+mod principal;
 #[cfg(feature = "program")]
 mod program;
 mod rules;
@@ -12,7 +12,7 @@ mod tests;
 #[cfg(feature = "view")]
 pub mod view;
 
-pub use party::{Frame, NO_ACCOUNT, Party, party_of};
+pub use principal::{Frame, NO_ACCOUNT, Principal, principal_of};
 pub use rules::{execute, query};
 
 use abi::{BlobId, ProgramId, Scheme};
@@ -171,11 +171,11 @@ pub enum Reply {
     Accounts(PageReply<Account>),
 }
 
-pub fn principal(number: AccountNumber) -> Vec<u8> {
+pub fn account_bytes(number: AccountNumber) -> Vec<u8> {
     number.to_le_bytes().to_vec()
 }
 
-pub fn account_of_principal(bytes: &[u8]) -> Option<AccountNumber> {
+pub fn account_of_bytes(bytes: &[u8]) -> Option<AccountNumber> {
     <[u8; 8]>::try_from(bytes).ok().map(u64::from_le_bytes)
 }
 

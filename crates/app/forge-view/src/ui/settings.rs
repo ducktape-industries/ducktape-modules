@@ -170,7 +170,7 @@ fn grant_field(
 /// One row per writer with its Revoke, or the owner-only empty state.
 fn writer_rows(
     forge: &Forge,
-    writers: &[identity::Party],
+    writers: &[identity::Principal],
     cx: &mut Context<Forge>,
     theme: &Theme,
 ) -> Vec<AnyElement> {
@@ -188,18 +188,18 @@ fn writer_rows(
     writers
         .iter()
         .map(|key| {
-            let label = forge.party_name(key);
+            let label = forge.principal_name(key);
             let revoke = cx.listener({
                 let key = key.clone();
                 move |forge, _: &ClickEvent, _, cx| forge.revoke(key.clone(), cx)
             });
             row::<fn(&ClickEvent, &mut Window, &mut App)>(
-                id(format!("forge-writer-{}", party_id(key))),
+                id(format!("forge-writer-{}", principal_id(key))),
                 theme,
             )
             .cell(div().flex_1().truncate().child(label))
             .cell(button(
-                id(format!("forge-settings-revoke-{}", party_id(key))),
+                id(format!("forge-settings-revoke-{}", principal_id(key))),
                 "Revoke",
                 theme,
                 revoke,
@@ -210,10 +210,10 @@ fn writer_rows(
 }
 
 /// A writer's element id: `acct-<n>` for an account.
-fn party_id(party: &identity::Party) -> String {
-    match party {
-        identity::Party::Account(number) => format!("acct-{number}"),
-        identity::Party::Module(module) => module.clone(),
-        identity::Party::System => "system".into(),
+fn principal_id(principal: &identity::Principal) -> String {
+    match principal {
+        identity::Principal::Account(number) => format!("acct-{number}"),
+        identity::Principal::Module(module) => module.clone(),
+        identity::Principal::System => "system".into(),
     }
 }

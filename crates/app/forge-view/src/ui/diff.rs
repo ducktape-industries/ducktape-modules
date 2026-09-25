@@ -285,7 +285,7 @@ fn published_comments(forge: &Forge) -> Vec<Anchored> {
     };
     let mut all = Vec::new();
     for review in &reviews.items {
-        let author = forge.party_name(&review.author);
+        let author = forge.principal_name(&review.author);
         let outdated = forge.outdated(&review.draft.commit_oid);
         for comment in &review.draft.comments {
             all.push((

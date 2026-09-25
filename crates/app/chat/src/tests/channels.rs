@@ -25,15 +25,15 @@ fn a_channel_id_is_bounded_and_a_colon_id_is_its_programs_alone() {
             reason::INVALID_INPUT
         );
     }
-    for who in [ADA, Party::Module("for".into())] {
+    for who in [ADA, Principal::Module("for".into())] {
         let squat = chat.refused(&who, create("forge:repo:1", PostPolicy::Open));
         assert_eq!(squat, reason::UNAUTHORIZED);
     }
     chat.ok(
-        &Party::Module("forge".into()),
+        &Principal::Module("forge".into()),
         create("forge:repo:1", PostPolicy::Open),
     );
-    chat.ok(&Party::System, create("system:room", PostPolicy::Open));
+    chat.ok(&Principal::System, create("system:room", PostPolicy::Open));
     let blank = Op::CreateChannel {
         channel_id: "blank".into(),
         name: "  ".into(),
@@ -61,7 +61,7 @@ fn nobody_squats_a_dm_id_with_a_plain_create() {
     // a third account, and each peer, try the plain creates on the dm id
     for who in [7, 3, 5] {
         let mut chat = Chat::default();
-        let who = Party::Account(who);
+        let who = Principal::Account(who);
         for op in [
             create(&dm, PostPolicy::Open),
             Op::CreateVoiceChannel {
@@ -73,9 +73,9 @@ fn nobody_squats_a_dm_id_with_a_plain_create() {
         }
         assert!(chat.store.state.is_empty());
         // the real dm still opens with both peers seated
-        chat.ok(&Party::Account(3), open_dm(5));
+        chat.ok(&Principal::Account(3), open_dm(5));
         for peer in [3, 5] {
-            assert!(is_member(&chat, &dm, Party::Account(peer)));
+            assert!(is_member(&chat, &dm, Principal::Account(peer)));
         }
     }
 }
@@ -94,7 +94,7 @@ fn a_dm_seats_both_accounts_opens_once_and_keeps_others_out() {
         reason::UNAUTHORIZED
     );
     assert_eq!(chat.refused(&ADA, open_dm(1)), reason::INVALID_INPUT);
-    let module = Party::Module("bot".into());
+    let module = Principal::Module("bot".into());
     assert_eq!(chat.refused(&module, open_dm(1)), reason::UNAUTHORIZED);
 }
 
@@ -105,12 +105,12 @@ fn neither_dm_peer_reshapes_the_room() {
     let mut chat = Chat::default();
     chat.ok(&ADA, open_dm(2));
     let dm = dm_channel_id(1, 2);
-    let seat = |party: Party, member: bool| Op::SetMembership {
+    let seat = |principal: Principal, member: bool| Op::SetMembership {
         channel_id: dm.clone(),
-        party,
+        principal,
         member,
     };
-    for (who, party, member) in [
+    for (who, principal, member) in [
         (&ADA, CY, true),
         (&ADA, BO, false),
         (&ADA, ADA, false),
@@ -118,7 +118,10 @@ fn neither_dm_peer_reshapes_the_room() {
         (&BO, ADA, false),
         (&CY, CY, true),
     ] {
-        assert_eq!(chat.refused(who, seat(party, member)), reason::UNAUTHORIZED);
+        assert_eq!(
+            chat.refused(who, seat(principal, member)),
+            reason::UNAUTHORIZED
+        );
     }
     let rename = |name: &str| Op::RenameChannel {
         channel_id: dm.clone(),
@@ -186,7 +189,7 @@ fn the_owner_seats_and_unseats_members() {
     }) else {
         panic!("members answer members");
     };
-    assert_eq!(members.items[0].party, BO);
+    assert_eq!(members.items[0].principal, BO);
     assert_eq!(
         chat.refused(&BO, membership(CY, true)),
         reason::UNAUTHORIZED
@@ -220,10 +223,10 @@ pub(super) fn archive(archived: bool) -> Op {
     }
 }
 
-fn membership(party: Party, member: bool) -> Op {
+fn membership(principal: Principal, member: bool) -> Op {
     Op::SetMembership {
         channel_id: "general".into(),
-        party,
+        principal,
         member,
     }
 }
@@ -237,6 +240,6 @@ pub(super) fn edit(seq: u64, text: &str) -> Op {
     }
 }
 
-fn is_member(chat: &Chat, channel: &str, party: Party) -> bool {
-    crate::state::MEMBERS.has(&chat.store, &(channel.to_owned(), party))
+fn is_member(chat: &Chat, channel: &str, principal: Principal) -> bool {
+    crate::state::MEMBERS.has(&chat.store, &(channel.to_owned(), principal))
 }

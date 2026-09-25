@@ -242,10 +242,10 @@ fn members(chat: &Chat, removable: bool, cx: &mut Context<Chat>, theme: &Theme) 
         return vec![none.into_any_element()];
     }
     let mut rows = Vec::new();
-    for (index, (party, label)) in roster.into_iter().enumerate() {
+    for (index, (principal, label)) in roster.into_iter().enumerate() {
         let remove = cx.listener(move |chat, _: &ClickEvent, _window, cx| {
             cx.notify();
-            chat.set_member(party.clone(), false, cx);
+            chat.set_member(principal.clone(), false, cx);
         });
         let remove = div()
             .id(ElementId::named_usize("chat-details-remove", index))

@@ -6,7 +6,7 @@ use ducktape_view_guest::prelude::*;
 use ducktape_view_guest::{ClickEvent, Context, ElementId, ParentElement, Styled, Theme, div, px};
 
 use chat::view::Names;
-use chat::{ChannelInfo, Party};
+use chat::{ChannelInfo, Principal};
 
 use crate::names::dm_peer_of;
 use crate::{ChannelCreate, Chat};
@@ -341,8 +341,8 @@ fn with_seats(chat: &Chat, info: &ChannelInfo, row: impl IntoElement, theme: &Th
     };
     let me = chat.me();
     for (index, seat) in info.channel.huddle.iter().enumerate() {
-        let label = names.member(&seat.party);
-        let is_you = Some(&seat.party) == me.as_ref();
+        let label = names.member(&seat.principal);
+        let is_you = Some(&seat.principal) == me.as_ref();
         let speaking = false;
         let note = if is_you { "you" } else { "" };
         content = content.child(
@@ -392,7 +392,7 @@ fn dm_button(
     let names = chat.names.ready();
     let name = names.map_or_else(
         || format!("account {peer}"),
-        |n| n.member(&Party::Account(peer)),
+        |n| n.member(&Principal::Account(peer)),
     );
     let agent = names.is_some_and(|n| n.is_program(peer));
     let unread = chat.unread(info) && !selected;
@@ -475,5 +475,8 @@ pub fn dm_peer(chat: &Chat) -> Option<(String, bool)> {
     let room = chat.room.as_ref()?;
     let names = chat.names.ready()?;
     let peer = dm_peer_of(chat.my_account()?, &room.id)?;
-    Some((names.member(&Party::Account(peer)), names.is_program(peer)))
+    Some((
+        names.member(&Principal::Account(peer)),
+        names.is_program(peer),
+    ))
 }
