@@ -321,8 +321,9 @@ fn body(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
     pane.child(content).into_any_element()
 }
 
-/// A document's links, a relative one resolved against `dir`, its folder.
-fn links(dir: Vec<u8>, cx: &mut Context<Forge>) -> markdown::OnLink {
+/// A document's links, a relative one resolved against `dir`, its folder
+/// (the root for a change's body).
+pub(crate) fn links(dir: Vec<u8>, cx: &mut Context<Forge>) -> markdown::OnLink {
     Rc::new(cx.listener(move |forge, dest: &String, _, cx| forge.follow_link(&dir, dest, cx)))
 }
 

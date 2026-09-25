@@ -336,8 +336,9 @@ pub(crate) enum Target {
 }
 
 /// Resolves a link's destination against `dir`, the directory of the file
-/// it sits in. An anchor alone, another scheme or a path above the root
-/// goes nowhere.
+/// it sits in (the root for a change's body). Each segment is read through
+/// ducklink's `%XX` decoding, so `My%20File.md` names `My File.md`. An
+/// anchor alone, another scheme or a path above the root goes nowhere.
 pub(crate) fn target(dir: &[u8], dest: &str) -> Option<Target> {
     if ["duck://", "http://", "https://"]
         .iter()
@@ -354,11 +355,12 @@ pub(crate) fn target(dir: &[u8], dest: &str) -> Option<Target> {
     {
         return None;
     }
-    let mut parts: Vec<&[u8]> = if path.starts_with('/') {
+    let mut parts: Vec<Vec<u8>> = if path.starts_with('/') {
         Vec::new()
     } else {
         dir.split(|b| *b == b'/')
             .filter(|p| !p.is_empty())
+            .map(<[u8]>::to_vec)
             .collect()
     };
     for part in path.split('/') {
@@ -367,24 +369,24 @@ pub(crate) fn target(dir: &[u8], dest: &str) -> Option<Target> {
             ".." => {
                 parts.pop()?;
             }
-            name => parts.push(name.as_bytes()),
+            name => parts.push(decoded(name)),
         }
     }
     (!parts.is_empty()).then(|| Target::Path(parts.join(&b'/')))
 }
 
+/// One path segment with its `%XX` escapes read. A segment ducklink will
+/// not read as one name (a literal `(`, lowercase hex, an escaped `/` or
+/// `..`) stays as written, so it can never climb or split a path.
+fn decoded(segment: &str) -> Vec<u8> {
+    match ducklink::tail(segment).as_deref() {
+        Ok([name]) => name.as_bytes().to_vec(),
+        _ => segment.as_bytes().to_vec(),
+    }
+}
+
 /// What a pressed link does, given its raw destination.
 pub(crate) type OnLink = Rc<dyn Fn(&String, &mut Window, &mut App)>;
-
-/// Web and `duck://` links go to the host; a relative one stays put, for a
-/// body (a change's) that is not a file of the tree.
-pub(crate) fn web_links() -> OnLink {
-    Rc::new(|dest, _, cx| {
-        if let Some(Target::Web(url)) = target(b"", dest) {
-            cx.host().open_link(&url);
-        }
-    })
-}
 
 /// Rich text for one paragraph: styled runs, links pressed through `on_link`.
 fn rich(element_id: String, text: &Text, theme: &Theme, on_link: &OnLink) -> AnyElement {
@@ -441,9 +443,10 @@ fn rich(element_id: String, text: &Text, theme: &Theme, on_link: &OnLink) -> Any
         .into_any_element()
 }
 
-/// A markdown body that is not a file (a change's): only web links press.
-pub(crate) fn render(name: &str, text: &str, theme: &Theme) -> AnyElement {
-    render_blocks(name, &parse(text), theme, &web_links())
+/// A markdown body that is not a file (a change's), its links pressed
+/// through `on_link`.
+pub(crate) fn render(name: &str, text: &str, theme: &Theme, on_link: &OnLink) -> AnyElement {
+    render_blocks(name, &parse(text), theme, on_link)
 }
 
 /// Blocks [`parse`] already made, drawn under the element `name`.
@@ -730,6 +733,11 @@ mod tests {
         assert_eq!(target(b"docs", "../../x.md"), None, "above the root");
         assert_eq!(target(b"docs", "#anchor"), None);
         assert_eq!(target(b"", "mailto:a@b.c"), None);
+        assert_eq!(target(b"docs", "My%20File.md"), path("docs/My File.md"));
+        assert_eq!(target(b"", "a%20b/%EB%B3%B4.md#x"), path("a b/\u{bcf4}.md"));
+        // not one decodable name: kept as written, never a traversal
+        assert_eq!(target(b"docs", "%2E%2E/x.md"), path("docs/%2E%2E/x.md"));
+        assert_eq!(target(b"", "a(1).md"), path("a(1).md"));
         assert_eq!(
             target(b"docs", "https://x.example/a"),
             Some(Target::Web("https://x.example/a".into()))
@@ -758,10 +766,16 @@ mod view_tests {
     impl Render for Doc {
         fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
             let theme = *cx.global::<ducktape_view_guest::Theme>();
+            let on_link: super::OnLink = std::rc::Rc::new(|dest, _, cx| {
+                if let Some(super::Target::Web(url)) = super::target(b"", dest) {
+                    cx.host().open_link(&url);
+                }
+            });
             super::render(
                 "doc",
                 "# Title\n\nSee [rfcs](duck://net-1/forge/rfcs), [local](../a.md) or https://x.example",
                 &theme,
+                &on_link,
             )
         }
     }
@@ -772,7 +786,7 @@ mod view_tests {
         cx.open::<Doc>();
         cx.run_until_parked();
         assert!(cx.has_text("Title"));
-        // three links press; a change body's relative one goes nowhere
+        // three links press; the relative one is the forge's to open, not the host's
         for index in 0..3 {
             cx.simulate_rich_click("doc-1", index);
         }
