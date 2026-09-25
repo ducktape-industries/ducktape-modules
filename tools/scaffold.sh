@@ -188,7 +188,7 @@ EOF
     cat > "$dir/src/lib.rs" <<EOF
 //! $title: the count the \`$program\` program keeps, re-read on every live
 //! bump of the program.
-use ducktape_view_guest::doors::{Live, Program, Query};
+use ducktape_view_guest::methods::{Changes, Program, Query};
 use ducktape_view_guest::export_view;
 use ducktape_view_guest::host::Refusal;
 use ducktape_view_guest::view::Loaded;
@@ -225,7 +225,7 @@ impl View for $title {
     }
 
     fn restored(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        let mut stream = cx.host().subscribe::<Live>($program_snake::PROGRAM.into());
+        let mut stream = cx.host().subscribe::<Changes<${title}Program>>(());
         self.live = Some(cx.spawn(async move |this, cx| {
             while stream.next().await.is_some() {
                 if this.update(cx, |view, cx| view.read(cx)).is_err() {
@@ -293,7 +293,7 @@ export_view!(
     $title,
     "$title",
     "The count the $program program keeps.",
-    ["rpc", "host"]
+    ["program"]
 );
 
 #[cfg(test)]
@@ -305,7 +305,7 @@ use ducktape_view_guest::testing::TestAppContext;
 
 fn ready() -> TestAppContext {
     let mut cx = TestAppContext::new();
-    cx.host().stream::<Live>();
+    cx.host().stream::<Changes<${title}Program>>();
     cx.host()
         .handle::<Query<${title}Program>>(|_| Ok($program_snake::Reply::Count(5)));
     cx.open::<$title>();

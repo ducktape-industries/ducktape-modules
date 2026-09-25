@@ -95,7 +95,7 @@ fn respond(cx: &mut TestAppContext) {
 
 fn ready() -> TestAppContext {
     let mut cx = TestAppContext::new();
-    cx.host().stream::<RpcLive>();
+    cx.host().stream::<Changes<Identity>>();
     respond(&mut cx);
     cx.open::<Members>();
     cx.run_until_parked();
@@ -124,16 +124,13 @@ fn the_roster_lists_each_account_with_its_standing() {
             .count(),
         1
     );
-    assert_eq!(
-        cx.host().asked::<RpcLive>(),
-        vec![identity::PROGRAM.to_string()]
-    );
+    assert_eq!(cx.host().asked::<Changes<Identity>>().len(), 1);
 }
 
 #[test]
 fn loading_waits_for_the_host() {
     let mut cx = TestAppContext::new();
-    cx.host().stream::<RpcLive>();
+    cx.host().stream::<Changes<Identity>>();
     cx.host().never::<Query<Identity>>();
     cx.open::<Members>();
     cx.run_until_parked();
@@ -143,7 +140,7 @@ fn loading_waits_for_the_host() {
 #[test]
 fn a_roster_with_nobody_in_it_says_so() {
     let mut cx = TestAppContext::new();
-    cx.host().stream::<RpcLive>();
+    cx.host().stream::<Changes<Identity>>();
     cx.host()
         .handle::<Query<Identity>>(|_| Ok(identity::Reply::Accounts(page(vec![]))));
     cx.host()
@@ -156,7 +153,7 @@ fn a_roster_with_nobody_in_it_says_so() {
 #[test]
 fn a_refusal_shows_its_sentence_and_retry_asks_again() {
     let mut cx = TestAppContext::new();
-    cx.host().stream::<RpcLive>();
+    cx.host().stream::<Changes<Identity>>();
     cx.host()
         .refuse::<Query<Identity>>("unavailable", "identity is not running here");
     cx.open::<Members>();
@@ -185,7 +182,7 @@ fn the_filter_narrows_the_list_without_asking_again() {
 #[test]
 fn a_live_bump_re_reads_and_a_snapshot_restores_the_screen() {
     let mut cx = TestAppContext::new();
-    let feed = cx.host().stream::<RpcLive>();
+    let feed = cx.host().stream::<Changes<Identity>>();
     respond(&mut cx);
     cx.open::<Members>();
     cx.run_until_parked();
@@ -206,17 +203,14 @@ fn a_live_bump_re_reads_and_a_snapshot_restores_the_screen() {
     cx.simulate_input("members-filter", "new");
     let bytes = cx.snapshot().unwrap();
     let mut restored = TestAppContext::new();
-    restored.host().stream::<RpcLive>();
+    restored.host().stream::<Changes<Identity>>();
     restored.host().never::<Query<Identity>>();
     let view = restored.restore::<Members>(&bytes).unwrap();
     restored.run_until_parked();
     assert!(restored.has_text("newcomer"));
     view.read(|view| assert_eq!(view.filter, "new"));
     assert_eq!(restored.host().asked::<Query<Identity>>().len(), 1);
-    assert_eq!(
-        restored.host().asked::<RpcLive>(),
-        vec![identity::PROGRAM.to_string()]
-    );
+    assert_eq!(restored.host().asked::<Changes<Identity>>().len(), 1);
 }
 
 #[test]

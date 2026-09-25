@@ -44,7 +44,7 @@ fn repo_row(
         let (name, url) = (name.clone(), url.clone());
         move |forge, _: &ClickEvent, _, cx| {
             cx.host()
-                .notify::<ducktape_view_guest::doors::ClipboardWrite>(url.clone());
+                .notify::<ducktape_view_guest::methods::ClipboardWrite>(url.clone());
             forge.copied = Some(name.clone());
             cx.notify();
         }

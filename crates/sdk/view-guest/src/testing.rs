@@ -390,3 +390,14 @@ mod context;
 mod fake_host;
 pub use context::TestAppContext;
 pub use fake_host::{FakeHost, Feed};
+
+/// A program for the SDK's own tests to follow with `Changes<Probe>`.
+#[cfg(test)]
+pub(crate) struct Probe;
+#[cfg(test)]
+impl crate::methods::Program for Probe {
+    const NAME: &'static str = "probe";
+    type Op = ();
+    type Query = ();
+    type Reply = ();
+}

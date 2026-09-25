@@ -6,18 +6,19 @@ use std::future::Future;
 use ducktape_view_guest::Context;
 use ducktape_view_guest::host::Refusal;
 
-use crate::api::{HostProps, HostRoute, HostVisible, RpcLive};
+use crate::api::{Changes, ChatApi, HostRoute, HostSession, HostVisible};
 use crate::{Chat, links};
+use identity::view::Identity;
 
 impl Chat {
     /// Subscribes every follower; the ones before are dropped with them.
     pub(crate) fn watch(&mut self, cx: &mut Context<Self>) {
         let host = cx.host();
-        let props = host.subscribe::<HostProps>(());
-        let changes = host.subscribe::<RpcLive>(chat::PROGRAM.into());
+        let props = host.subscribe::<HostSession>(());
+        let changes = host.subscribe::<Changes<ChatApi>>(());
         let routes = host.subscribe::<HostRoute>(());
         let visible = host.subscribe::<HostVisible>(());
-        let identity = host.subscribe::<RpcLive>(identity::PROGRAM.into());
+        let identity = host.subscribe::<Changes<Identity>>(());
         self.followers = vec![
             cx.follow(props, |chat, props, _, cx| match props {
                 Ok(next) => chat.session_changed(next, cx),
@@ -45,15 +46,10 @@ impl Chat {
                 Ok(visible) => chat.visibility_changed(visible, cx),
                 Err(refusal) => log(cx, "visibility", &refusal),
             }),
-            // a key that gains an account while this view is open (Settings,
-            // then back to Chat) writes an identity block, not a session
-            // change: re-resolve the reader on it, and re-read the roster so
-            // a name another signer claims replaces its "account N" fallback
+            // re-read the roster on identity's heads, so a name another
+            // signer claims replaces its "account N" fallback
             cx.follow(identity, |chat, head, _, cx| match head {
-                Ok(_) => {
-                    chat.load_names(cx);
-                    chat.refresh_me(cx);
-                }
+                Ok(_) => chat.load_names(cx),
                 Err(refusal) => log(cx, "identity's live heads", &refusal),
             }),
         ];

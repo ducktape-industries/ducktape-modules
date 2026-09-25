@@ -27,7 +27,7 @@ valset = { workspace = true, features = ["view"] }
 serde.workspace = true
 
 # What a test needs to play the node: the borsh replies the program would
-# write, and the envelope the host door would open.
+# write, and the envelope the host method would open.
 [dev-dependencies]
 # the ops a test posts, and the describe functions its host answers with,
 # as the modules in those programs' code would

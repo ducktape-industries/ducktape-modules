@@ -28,16 +28,16 @@ pub(crate) enum Stage<'a> {
 }
 
 impl Forge {
-    /// The reader's account number, once identity has answered.
+    /// The reader's account number, as the host resolved it.
     pub(crate) fn my_account(&self) -> Option<u64> {
-        self.me.ready().copied().flatten()
+        self.session.account
     }
 
     /// The reader as chat names a party: their account once the seated key
     /// holds one, the key itself while it holds none, nobody with no key
     /// seated at all.
     pub(crate) fn me_party(&self) -> Option<Party> {
-        Party::reader(self.my_account(), &self.session.account)
+        Party::reader(self.my_account(), &self.session.key)
     }
 
     pub(crate) fn stage(&self, query: &Query) -> Stage<'_> {
@@ -208,7 +208,7 @@ impl Forge {
         })
     }
 
-    /// The reader's signing key, joined from the roster: `host.props` names
+    /// The reader's signing key, joined from the roster: `host.session` names
     /// an account and forge is keyed by keys.
     pub(crate) fn me_key(&self) -> Option<Vec<u8>> {
         self.names.ready()?.key_of(self.my_account()?)

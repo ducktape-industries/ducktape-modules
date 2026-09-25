@@ -1,7 +1,7 @@
 //! Widget commands use the mounted host's scoped request channel.
 #[cfg(test)]
 mod tests {
-    use crate::doors::{Door, HostWidget};
+    use crate::methods::{HostWidget, Method};
     use crate::{host, wire, Context, Driver, ElementId, Host, Input, Render, View, Window};
     use serde::{Deserialize, Serialize};
 

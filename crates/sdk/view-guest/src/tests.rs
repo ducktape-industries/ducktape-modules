@@ -193,7 +193,7 @@ fn two_drivers_on_one_thread_have_independent_hosts() {
     assert!(second.tick(vec![]).requests.is_empty());
     let frame = first.tick(vec![]);
     assert_eq!(frame.requests.len(), 1);
-    assert_eq!(frame.requests[0].payload, doors::encode(&"only first"));
+    assert_eq!(frame.requests[0].payload, methods::encode(&"only first"));
 }
 
 #[test]
@@ -491,12 +491,12 @@ fn notifying_during_render_requests_another_frame() {
 }
 
 #[test]
-fn the_manifest_bytes_parse_back_with_the_epoch_and_the_doors() {
+fn the_manifest_bytes_parse_back_with_the_epoch_and_the_methods() {
     const TEXT: &str = "ducktape.view.manifest.v2\nApp\nWords\nclock,\n";
     let bytes: [u8; manifest_len(TEXT, "640,480")] = manifest_bytes(TEXT, "640,480");
     let manifest = wire::manifest::Manifest::parse(std::str::from_utf8(&bytes).unwrap()).unwrap();
     assert_eq!(manifest.wire_epoch, wire::WIRE_EPOCH);
-    assert_eq!(manifest.doors, wire::doors::DOORS_REVISION);
+    assert_eq!(manifest.methods, wire::methods::METHODS_REVISION);
     assert_eq!(manifest.capabilities, ["clock"]);
-    assert!(!manifest.needs_newer_doors());
+    assert!(!manifest.needs_newer_methods());
 }

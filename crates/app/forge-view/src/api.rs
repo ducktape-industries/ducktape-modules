@@ -1,8 +1,8 @@
-//! The programs this view speaks to, by the doors in `view_wire::doors`:
+//! The programs this view speaks to, by the methods in `view_wire::methods`:
 //! forge (its own) and chat (the discussion threads).
-use ducktape_view_guest::doors::{Query, Submit};
+use ducktape_view_guest::methods::{Query, Submit};
 
-pub use ducktape_view_guest::doors::{HostProps, Session};
+pub use ducktape_view_guest::methods::{HostSession, Session};
 
 /// The forge and chat programs, by their own markers (named apart from
 /// this view's `Forge` and the chat module's `Chat`).

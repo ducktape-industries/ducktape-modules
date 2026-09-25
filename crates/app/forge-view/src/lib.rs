@@ -2,7 +2,7 @@
 //! lives in, on the view-guest `View` shape.
 //!
 //! The forge program answers everything this screen shows, in borsh, through
-//! one door (`rpc.query_bytes`); conversation is chat's, through the door
+//! one method (`program.query`); conversation is chat's, through the method
 //! chat-view uses. Reads are a cache keyed by the query itself: `sync` asks
 //! what the current screen needs, issues what is missing, and drops what the
 //! reader has navigated away from. `render` never mutates — what an event
@@ -24,10 +24,11 @@ mod navigate;
 mod review;
 mod ui;
 
-use ducktape_view_guest::doors::{HostRoute, HostVisible, RpcLive};
+use ducktape_view_guest::methods::{Changes, HostRoute, HostVisible};
 use ducktape_view_guest::{Context, IntoElement, Render, View, Window, export_view};
 
-use api::HostProps;
+use api::{ChatApi, ForgeProgram, HostSession};
+use identity::view::Identity;
 pub(crate) use select::Stage;
 pub use state::Forge;
 
@@ -44,7 +45,7 @@ impl View for Forge {
     /// item says so in the notice; none ends its stream.
     fn restored(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         self.watches.clear();
-        let props = cx.host().subscribe::<HostProps>(());
+        let props = cx.host().subscribe::<HostSession>(());
         self.watches.push(cx.follow(props, |forge, item, _, cx| {
             match item {
                 Ok(session) => forge.session_changed(session, cx),
@@ -65,15 +66,16 @@ impl View for Forge {
                     cx.notify();
                 }
             }));
-        // identity's own block matters too: a key that gains an account
-        // while this view is open (Settings, then back to Forge) writes no
-        // session change of its own, only an identity block. A refused item
-        // is a block this view cannot see into; the next one reconciles.
-        for module in [forge::PROGRAM, chat::PROGRAM, identity::PROGRAM] {
-            let live = cx.host().subscribe::<RpcLive>(module.into());
-            self.watches
-                .push(cx.follow(live, |forge, _, _, cx| forge.reconcile(cx)));
-        }
+        // a block to any program the screens read re-reads them; a refused
+        // item is a block this view cannot see into, and the next reconciles
+        let forge = cx.host().subscribe::<Changes<ForgeProgram>>(());
+        let chat = cx.host().subscribe::<Changes<ChatApi>>(());
+        let identity = cx.host().subscribe::<Changes<Identity>>(());
+        self.watches.extend([
+            cx.follow(forge, |forge, _, _, cx| forge.reconcile(cx)),
+            cx.follow(chat, |forge, _, _, cx| forge.reconcile(cx)),
+            cx.follow(identity, |forge, _, _, cx| forge.reconcile(cx)),
+        ]);
         let visible = cx.host().subscribe::<HostVisible>(());
         self.watches.push(cx.follow(visible, |forge, shown, _, cx| {
             if shown.unwrap_or(false) {
@@ -82,9 +84,6 @@ impl View for Forge {
         }));
         if self.names.is_idle() {
             self.names = cx.load(queries::roster(cx.host()), |forge| &mut forge.names);
-        }
-        if self.me.is_idle() {
-            self.refresh_me(cx);
         }
         self.sync(cx);
     }
@@ -100,7 +99,7 @@ export_view!(
     Forge,
     "Forge",
     "Repositories, code, commits and the changes waiting on your judgment.",
-    ["rpc", "op", "host", "clipboard"]
+    ["program", "op", "host", "link", "clipboard"]
 );
 
 #[cfg(test)]

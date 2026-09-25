@@ -6,10 +6,10 @@
 //! reply is folded to [`Row`]s as it lands: nothing the programs speak is
 //! kept across a snapshot, only what the screen shows.
 use ducktape_view_guest::design;
-use ducktape_view_guest::doors::Query;
-use ducktape_view_guest::doors::RpcLive;
 use ducktape_view_guest::export_view;
 use ducktape_view_guest::host::{Refusal, malformed};
+use ducktape_view_guest::methods::Changes;
+use ducktape_view_guest::methods::Query;
 use ducktape_view_guest::view::Loaded;
 use ducktape_view_guest::{
     App, ClickEvent, Context, ElementId, Host, Input, InteractiveElement, IntoElement,
@@ -56,7 +56,7 @@ impl View for Members {
     }
 
     fn restored(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        let mut stream = cx.host().subscribe::<RpcLive>(identity::PROGRAM.into());
+        let mut stream = cx.host().subscribe::<Changes<Identity>>(());
         self.live = Some(cx.spawn(async move |this, cx| {
             while stream.next().await.is_some() {
                 if this.update(cx, |view, cx| view.read(cx)).is_err() {
@@ -362,7 +362,7 @@ export_view!(
     Members,
     "Members",
     "Every account of this network, with the standing of the keys it holds.",
-    ["rpc", "host"]
+    ["program"]
 );
 
 #[cfg(test)]

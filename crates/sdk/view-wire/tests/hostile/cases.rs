@@ -3,12 +3,12 @@ use super::*;
 // --------------------------------------------------------------- test 1
 
 /// Random trees, decoded and sanitized, always land inside every bound
-/// `sanitize` promises — or `decode` refused them for a reason the door
+/// `sanitize` promises — or `decode` refused them for a reason the method
 /// actually names, and the tree really was over it.
 #[test]
 fn random_trees_come_out_of_sanitize_inside_every_bound() {
     // The task asked for ~300; without decode's own recursion needing a
-    // dedicated thread (its depth door caps recursion at MAX_DEPTH, safe on
+    // dedicated thread (its depth method caps recursion at MAX_DEPTH, safe on
     // a normal stack — see `on_big_stack`'s doc comment), 200 trees with a
     // steep width/depth skew keep this test's slice of the file's ~10s
     // debug budget comfortably small.
@@ -28,13 +28,13 @@ fn random_trees_come_out_of_sanitize_inside_every_bound() {
                 assert!(
                     depth_over || count_over,
                     "{ctx}: decode refused a tree that was not actually over either \
-                     door (depth {}, nodes {}): {message}",
+                     method (depth {}, nodes {}): {message}",
                     tree_depth(root),
                     root.count()
                 );
-                let names_the_door = message.contains("deeper than the host renders")
+                let names_the_method = message.contains("deeper than the host renders")
                     || message.contains("more nodes than the host holds");
-                assert!(names_the_door, "{ctx}: unexpected refusal: {message}");
+                assert!(names_the_method, "{ctx}: unexpected refusal: {message}");
             }
             Ok(mut decoded) => {
                 let duplicate_ids = decoded
@@ -128,7 +128,7 @@ fn payload_message(payload: &(dyn std::any::Any + Send)) -> String {
 
 /// Bytes a hostile guest could have written — a sound frame with random
 /// bit flips, byte overwrites, truncations, insertions, and corrupted
-/// length prefixes — never make `decode` panic. `decode`'s own depth door
+/// length prefixes — never make `decode` panic. `decode`'s own depth method
 /// (checked before each level is even built) is what makes this safe on a
 /// plain stack: see `lib.rs`'s `bytes_a_hostile_guest_could_write_are_answered_not_survived`,
 /// which this test generalizes to frames far larger than a single flipped
@@ -171,7 +171,7 @@ fn mutated_bytes_never_panic() {
 /// sanitized tree or a refusal: every bound `check_bounds` covers holds of
 /// what `apply` returns `Ok` on, whatever the patches inserted, replaced or
 /// shuffled — including subtrees over every ceiling on their own, and keys
-/// the tree already holds. A refusal names one of the doors `apply` has.
+/// the tree already holds. A refusal names one of the methods `apply` has.
 #[test]
 fn a_patched_sanitized_tree_is_a_sanitized_tree() {
     const SEED: u64 = 0x9A7C_4E5D_0B1A_2F3E;
@@ -227,7 +227,7 @@ fn a_patched_sanitized_tree_is_a_sanitized_tree() {
                 patches,
                 ..Frame::default()
             };
-            // A patch's subtree meets the same door a root does: one nested
+            // A patch's subtree meets the same method a root does: one nested
             // past what the host walks is refused before it is built.
             let decoded: Frame = match decode(&encode(&patched)) {
                 Ok(decoded) => decoded,

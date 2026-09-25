@@ -17,7 +17,7 @@ const READ_ATTEMPTS: u32 = 3;
 impl Chat {
     /// The key the reader's cursors are kept under; none with no key seated.
     fn reads_key(&self) -> Option<String> {
-        (!self.session.account.is_empty()).then(|| format!("reads/{}", self.session.account))
+        (!self.session.key.is_empty()).then(|| format!("reads/{}", self.session.key))
     }
 
     /// The reader's cursors and reactions off the device. Until they land,

@@ -1,5 +1,5 @@
-//! The marker a view names this program by in `rpc.query`/`op.submit`.
-use ducktape_view_guest::doors::Program;
+//! The marker a view names this program by in `program.query`/`op.submit`.
+use ducktape_view_guest::methods::Program;
 
 pub struct Registry;
 impl Program for Registry {

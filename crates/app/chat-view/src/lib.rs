@@ -58,9 +58,6 @@ impl View for Chat {
         if self.channels.is_idle() {
             self.load_channels(cx);
         }
-        if self.me.is_idle() {
-            self.refresh_me(cx);
-        }
         if let Some(room) = &self.room {
             let (id, thread) = (room.id.clone(), room.thread.as_ref().map(|t| t.root));
             self.open(id, window, cx);
@@ -84,7 +81,15 @@ export_view!(
     Chat,
     "Chat",
     "Channels, direct messages, threads, search and the live call of this workspace.",
-    ["rpc", "op", "host", "clipboard", "notify", "store"]
+    [
+        "program",
+        "op",
+        "host",
+        "link",
+        "clipboard",
+        "notify",
+        "store"
+    ]
 );
 
 #[cfg(test)]

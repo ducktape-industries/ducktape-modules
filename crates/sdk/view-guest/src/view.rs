@@ -1,6 +1,6 @@
 //! A serializable root view and small loading conveniences.
-pub use crate::doors::{Door, Program, Query, Submit};
 use crate::host::Refusal;
+pub use crate::methods::{Method, Program, Query, Submit};
 use crate::{Context, IntoElement, Task, Window};
 use futures::{Stream, StreamExt};
 use serde::de::DeserializeOwned;
@@ -180,7 +180,8 @@ macro_rules! export_view {
 
 #[cfg(test)]
 mod follow_tests {
-    use crate::doors::RpcLive;
+    use crate::methods::Changes;
+    use crate::testing::Probe;
     use crate::testing::TestAppContext;
     use crate::{Context, IntoElement, ParentElement, Render, Task, View, Window};
     use serde::{Deserialize, Serialize};
@@ -194,7 +195,7 @@ mod follow_tests {
     }
     impl View for Heads {
         fn new(_: &mut Window, cx: &mut Context<Self>) -> Self {
-            let live = cx.host().subscribe::<RpcLive>("chat".into());
+            let live = cx.host().subscribe::<Changes<Probe>>(());
             Self {
                 seen: 0,
                 live: Some(cx.follow(live, |view: &mut Heads, _, _, _| view.seen += 1)),
@@ -202,7 +203,7 @@ mod follow_tests {
         }
     }
     impl crate::Declared for Heads {
-        const CAPABILITIES: &'static [&'static str] = &["rpc"];
+        const CAPABILITIES: &'static [&'static str] = &["program"];
     }
     impl Render for Heads {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
@@ -213,7 +214,7 @@ mod follow_tests {
     #[test]
     fn a_follower_hears_every_item_until_its_task_is_dropped() {
         let mut cx = TestAppContext::new();
-        let feed = cx.host().stream::<RpcLive>();
+        let feed = cx.host().stream::<Changes<Probe>>();
         let view = cx.open::<Heads>();
         cx.run_until_parked();
         feed.push(None);

@@ -1,12 +1,11 @@
-//! Who reads: the session the host hands over, the account identity says
-//! the seated key holds, and what that lets her do in the open room.
+//! Who reads: the session the host hands over (the seated key and the
+//! account it holds), and what that lets her do in the open room.
 use chat::Party;
 use ducktape_view_guest::Context;
-use ducktape_view_guest::view::Loaded;
 
 use crate::Chat;
 use crate::api::Session;
-use crate::queries::{channels, resolve_me, roster};
+use crate::queries::{channels, roster};
 
 /// Why the reader may not write in the open room.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -21,12 +20,19 @@ pub(crate) enum Gate {
 impl Chat {
     pub(crate) fn session_changed(&mut self, next: Session, cx: &mut Context<Self>) {
         let prev = std::mem::replace(&mut self.session, next);
-        let reader_changed = self.session.account != prev.account
+        let reader_changed = self.session.key != prev.key
             || self.session.endpoint != prev.endpoint
             || self.session.chain != prev.chain;
         if reader_changed {
             self.load_names(cx);
-            self.refresh_me(cx);
+        }
+        // a key that gains an account while this view stays open writes
+        // without a relaunch; the rooms are looked at again once she is
+        // known, since the recount of what is meant for her waits on it
+        if (reader_changed || self.session.account != prev.account)
+            && let Some(list) = self.channels.ready().cloned()
+        {
+            self.channels_landed(list, cx);
         }
         if reader_changed || (prev.connected && !self.session.connected) {
             for draft in self.drafts.values_mut() {
@@ -67,33 +73,14 @@ impl Chat {
         self.channels = cx.load(channels(cx.host()), |chat| &mut chat.channels);
     }
 
-    /// Re-asks identity for the account the seated key holds now: on every
-    /// key change and on identity's live heads, so a key that gains an
-    /// account while this view stays open writes without a relaunch. The
-    /// rooms are looked at again once she is known: the relaunch recount
-    /// of what is meant for her waits on her account.
-    pub(crate) fn refresh_me(&mut self, cx: &mut Context<Self>) {
-        let me = resolve_me(cx.host(), self.session.account.clone());
-        self.me = Loaded::Loading(cx.spawn(async move |this, cx| {
-            let me = me.await;
-            let _ = this.update(cx, |chat, cx| {
-                chat.me = Loaded::from(me);
-                if let Some(list) = chat.channels.ready().cloned() {
-                    chat.channels_landed(list, cx);
-                }
-                cx.notify();
-            });
-        }));
-    }
-
-    /// The reader's account number, once identity has answered.
+    /// The reader's account number, as the host resolved it.
     pub(crate) fn my_account(&self) -> Option<u64> {
-        self.me.ready().copied().flatten()
+        self.session.account
     }
 
     /// The party chat writes the reader as; none with no key seated.
     pub(crate) fn me(&self) -> Option<Party> {
-        Party::reader(self.my_account(), &self.session.account)
+        Party::reader(self.my_account(), &self.session.key)
     }
 
     /// The reader, as a query's `viewer`.

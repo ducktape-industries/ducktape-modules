@@ -49,7 +49,7 @@ fn a_send_shows_pending_then_lands_and_a_refusal_is_a_banner() {
     let bytes = cx.snapshot().unwrap();
     let mut restored = TestAppContext::new();
     configure(&mut restored);
-    restored.host().never::<HostProps>();
+    restored.host().never::<HostSession>();
     restored.host().never::<HostVisible>();
     let view = restored.restore::<Chat>(&bytes).unwrap();
     restored.run_until_parked();
@@ -98,7 +98,7 @@ fn channel_create_preserves_busy_account_and_voice_gates() {
         let create = chat.create.as_mut().unwrap();
         create.busy = false;
         create.voice = true;
-        chat.me = Loaded::Ready(None);
+        chat.session.account = None;
         cx.notify();
     });
     cx.run_until_parked();
@@ -112,7 +112,7 @@ fn channel_create_preserves_busy_account_and_voice_gates() {
     assert_eq!(cx.host().asked::<Submit<ChatApi>>().len(), submitted);
 
     view.update(&mut cx, |chat, _, cx| {
-        chat.me = Loaded::Ready(Some(7));
+        chat.session.account = Some(7);
         chat.session.connected = false;
         cx.notify();
     });

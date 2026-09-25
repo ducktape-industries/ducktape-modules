@@ -5,7 +5,7 @@ use super::*;
 /// The nesting depth `sanitize` would count for this node (root is 0, each
 /// container-like or one-child node adds one) — the same metric
 /// `decode`'s own depth budget counts, so it doubles as "was this tree
-/// really over the door" evidence when `decode` refuses one.
+/// really over the method" evidence when `decode` refuses one.
 pub(super) fn tree_depth(node: &Node) -> usize {
     match node {
         Node::Sensor { child: content, .. }

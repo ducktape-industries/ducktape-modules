@@ -57,7 +57,7 @@ pub(super) fn reaction_button(
     enabled: bool,
     click: impl Fn(&ClickEvent, &mut Window, &mut ducktape_view_guest::App) + 'static,
 ) -> impl IntoElement {
-    // `+` is the picker's door, not a toggle
+    // `+` is the picker's method, not a toggle
     let add = matches!(face, Face::Add);
     let mut control = div()
         .id(id)

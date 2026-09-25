@@ -25,27 +25,10 @@
 /// in the SAME commit as the shape change: a view built against the old shape is
 /// refused at load instead of faulting on its first frame.
 /// This is independent of the calling convention ([`abi`]) and the manifest text format.
-/// `tests/golden.rs` holds the bytes of every node, event and door: it fails on
+/// `tests/golden.rs` holds the bytes of every node, event and method: it fails on
 /// any change and says to bump this and regenerate with `WIRE_GOLDEN_WRITE=1`.
-///
-/// 8: `Event::Response` carries `Result<Vec<u8>, Refusal>` (1b4d8a0 changed the
-///    shape and left the epoch at 7; views deployed before it faulted with
-///    "invalid u8 while decoding bool" on the first refusal frame).
-/// 9: accessible names and roles: `label` on `Node::Editor`, `Slider`, `ComboBox`
-///    and `PickList`; `role`, `label`, `expanded`, `selected` and `checked` on
-///    `Node::MouseArea`; `selected` on `Node::Button`.
-/// 10: the rest of the accessible shape: `heading` and `live` on `Node::Text`,
-///    `label` on `Node::Overlay`, `role` on `Node::Button`.
-/// 1: reset with the two-codec rule — the tree and `Frame` are named
-///    MessagePack, every door in [`doors`] is borsh. Epochs 1–11 of the
-///    development era before it are not honoured.
-/// 2: a node's `Interactivity` and its `Aria` leave out what is unset (`None`,
-///    `false`, the default hover mode, an empty `Aria`), and a container leaves
-///    out a default `Interactivity`: an empty one was ~900 bytes of field
-///    names, so a room of chat rows ran past a view's per-tick fuel.
-/// 3: `notify.show` is gone; `notify.post` is the one way to hand the host a
-///    notice.
-pub const WIRE_EPOCH: u32 = 3;
+/// Within an epoch the methods only grow; a moved or dropped method is a new epoch.
+pub const WIRE_EPOCH: u32 = 1;
 
 /// For `skip_serializing_if`: a value that says nothing is left out.
 pub(crate) fn is_default<T: Default + PartialEq>(value: &T) -> bool {
@@ -53,8 +36,8 @@ pub(crate) fn is_default<T: Default + PartialEq>(value: &T) -> bool {
 }
 
 pub mod abi;
-pub mod doors;
 pub mod manifest;
+pub mod methods;
 #[cfg(feature = "schema")]
 pub mod schema;
 

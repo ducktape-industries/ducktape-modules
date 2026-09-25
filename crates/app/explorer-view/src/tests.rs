@@ -3,8 +3,8 @@ use std::rc::Rc;
 
 use super::*;
 use abi::BlobId;
-use ducktape_view_guest::doors::Session;
-use ducktape_view_guest::doors::{RpcStatus, Tx, Value};
+use ducktape_view_guest::methods::Session;
+use ducktape_view_guest::methods::{ChainStatus, Tx, Value};
 use ducktape_view_guest::testing::{Feed, TestAppContext};
 
 const ADA: [u8; 32] = [1; 32];
@@ -96,17 +96,17 @@ fn ada() -> identity::Account {
 }
 
 /// A node at `tip`, whose tip the test may move.
-fn node(cx: &mut TestAppContext, tip: Rc<RefCell<u64>>) -> (Feed<HostProps>, Feed<HostRoute>) {
+fn node(cx: &mut TestAppContext, tip: Rc<RefCell<u64>>) -> (Feed<HostSession>, Feed<HostRoute>) {
     let feeds = (
-        cx.host().stream::<HostProps>(),
+        cx.host().stream::<HostSession>(),
         cx.host().stream::<HostRoute>(),
     );
     let host = cx.host();
     let head = tip.clone();
-    host.handle::<RpcStatus>(move |()| Ok(status(*head.borrow())));
+    host.handle::<ChainStatus>(move |()| Ok(status(*head.borrow())));
     let head = tip.clone();
-    host.handle::<RpcBlocks>(move |ask| Ok(page(&chain(*head.borrow()), &ask)));
-    host.handle::<RpcBlock>(move |by| {
+    host.handle::<ChainBlocks>(move |ask| Ok(page(&chain(*head.borrow()), &ask)));
+    host.handle::<ChainBlock>(move |by| {
         let chain = chain(*tip.borrow());
         Ok(match by {
             BlockRef::Height(height) => chain.get(height as usize).cloned(),
@@ -162,7 +162,7 @@ fn respond(cx: &mut TestAppContext) {
 
 fn ready() -> (TestAppContext, Rc<RefCell<u64>>) {
     let mut cx = TestAppContext::new();
-    cx.host().stream::<RpcHeads>();
+    cx.host().stream::<ChainHeads>();
     let tip = Rc::new(RefCell::new(12));
     node(&mut cx, tip.clone());
     cx.open::<Explorer>();
@@ -320,7 +320,7 @@ fn the_overview_shows_the_head_and_the_latest_blocks_and_transactions() {
         "block 8 is folded: {texts:?}"
     );
     assert_eq!(
-        cx.host().asked::<RpcBlocks>(),
+        cx.host().asked::<ChainBlocks>(),
         vec![BlockPage {
             before: None,
             limit: PAGE
@@ -352,7 +352,7 @@ fn a_block_opens_with_its_fields_its_proposer_and_its_transactions() {
     cx.run_until_parked();
     assert!(cx.has_text("mystery · 4 bytes"));
     assert!(
-        cx.host().asked::<RpcBlock>().is_empty(),
+        cx.host().asked::<ChainBlock>().is_empty(),
         "both were in the window"
     );
 }
@@ -431,7 +431,7 @@ fn search_finds_heights_hashes_accounts_and_programs() {
     search(&mut cx, "1,000");
     assert!(cx.has_text("No block 1,000"), "{:?}", cx.texts());
     assert_eq!(
-        cx.host().asked::<RpcBlock>(),
+        cx.host().asked::<ChainBlock>(),
         vec![BlockRef::Id([0xee; 32]), BlockRef::Height(1000)]
     );
     search(&mut cx, "nobody");
@@ -441,7 +441,7 @@ fn search_finds_heights_hashes_accounts_and_programs() {
 #[test]
 fn a_pushed_head_reads_only_the_new_blocks() {
     let mut cx = TestAppContext::new();
-    let heads = cx.host().stream::<RpcHeads>();
+    let heads = cx.host().stream::<ChainHeads>();
     let tip = Rc::new(RefCell::new(12));
     node(&mut cx, tip.clone());
     cx.open::<Explorer>();
@@ -454,11 +454,11 @@ fn a_pushed_head_reads_only_the_new_blocks() {
     });
     cx.run_until_parked();
     assert!(cx.has_text("13–14 · 2 empty blocks"), "{:?}", cx.texts());
-    let explorer_asked = cx.host().asked::<RpcBlocks>();
+    let explorer_asked = cx.host().asked::<ChainBlocks>();
     assert_eq!(explorer_asked.len(), 2, "{explorer_asked:?}");
     assert!(explorer_asked.iter().all(|ask| ask.before.is_none()));
     assert_eq!(
-        cx.host().asked::<RpcStatus>().len(),
+        cx.host().asked::<ChainStatus>().len(),
         1,
         "a head moves the status without a read"
     );
@@ -468,7 +468,7 @@ fn a_pushed_head_reads_only_the_new_blocks() {
 fn a_refused_head_subscription_falls_back_to_polling() {
     let mut cx = TestAppContext::new();
     cx.host()
-        .refuse::<RpcHeads>("unknown_request", "this host has no rpc.heads");
+        .refuse::<ChainHeads>("unknown_request", "this host has no chain.heads");
     let ticks = cx.host().stream::<ClockTicks>();
     let tip = Rc::new(RefCell::new(12));
     node(&mut cx, tip.clone());
@@ -484,17 +484,17 @@ fn a_refused_head_subscription_falls_back_to_polling() {
 #[test]
 fn a_refused_window_says_why_and_retry_reads_again() {
     let mut cx = TestAppContext::new();
-    cx.host().stream::<RpcHeads>();
+    cx.host().stream::<ChainHeads>();
     let tip = Rc::new(RefCell::new(12));
     node(&mut cx, tip);
     cx.host()
-        .refuse::<RpcBlocks>("not_found", "this node serves no blocks");
+        .refuse::<ChainBlocks>("not_found", "this node serves no blocks");
     cx.open::<Explorer>();
     cx.run_until_parked();
     assert!(cx.has_text("this node serves no blocks"));
     let chain_ = chain(12);
     cx.host()
-        .handle::<RpcBlocks>(move |ask| Ok(page(&chain_, &ask)));
+        .handle::<ChainBlocks>(move |ask| Ok(page(&chain_, &ask)));
     cx.simulate_click("explorer-retry");
     cx.run_until_parked();
     assert!(cx.has_text("Latest blocks"));
@@ -520,11 +520,11 @@ fn a_snapshot_restores_without_reading_the_window_again() {
     let (cx, _) = ready();
     let bytes = cx.snapshot().unwrap();
     let mut restored = TestAppContext::new();
-    restored.host().stream::<RpcHeads>();
-    restored.host().never::<RpcStatus>();
-    restored.host().never::<HostProps>();
+    restored.host().stream::<ChainHeads>();
+    restored.host().never::<ChainStatus>();
+    restored.host().never::<HostSession>();
     restored.host().never::<HostRoute>();
-    restored.host().never::<RpcBlocks>();
+    restored.host().never::<ChainBlocks>();
     restored.host().never::<Query<Identity>>();
     restored.host().never::<Query<Valset>>();
     restored.host().never::<Query<Registry>>();
@@ -532,7 +532,7 @@ fn a_snapshot_restores_without_reading_the_window_again() {
     restored.restore::<Explorer>(&bytes).unwrap();
     restored.run_until_parked();
     assert!(restored.has_text("Post in #design"));
-    assert!(restored.host().asked::<RpcBlocks>().is_empty());
+    assert!(restored.host().asked::<ChainBlocks>().is_empty());
 }
 
 #[test]
@@ -584,7 +584,7 @@ fn runs_of_empty_blocks_fold_into_one_line_and_the_list_reaches_back() {
 #[test]
 fn the_search_field_holds_only_what_is_being_typed() {
     let mut cx = TestAppContext::new();
-    cx.host().stream::<RpcHeads>();
+    cx.host().stream::<ChainHeads>();
     node(&mut cx, Rc::new(RefCell::new(12)));
     let explorer = cx.open::<Explorer>();
     cx.run_until_parked();
@@ -611,7 +611,7 @@ fn the_search_field_holds_only_what_is_being_typed() {
 #[test]
 fn a_link_opens_the_page_it_names() {
     let mut cx = TestAppContext::new();
-    cx.host().stream::<RpcHeads>();
+    cx.host().stream::<ChainHeads>();
     let (_, routes) = node(&mut cx, Rc::new(RefCell::new(12)));
     cx.open::<Explorer>();
     cx.run_until_parked();
@@ -640,7 +640,7 @@ fn a_link_opens_the_page_it_names() {
 #[test]
 fn a_page_copies_its_link_once_the_session_names_a_chain() {
     let mut cx = TestAppContext::new();
-    cx.host().stream::<RpcHeads>();
+    cx.host().stream::<ChainHeads>();
     let (props, _routes) = node(&mut cx, Rc::new(RefCell::new(12)));
     let copied = Rc::new(RefCell::new(String::new()));
     let seen = copied.clone();
@@ -707,11 +707,11 @@ fn the_scheduled_changes_survive_a_snapshot() {
     cx.run_until_parked();
     let bytes = cx.snapshot().unwrap();
     let mut restored = TestAppContext::new();
-    restored.host().stream::<RpcHeads>();
-    restored.host().never::<RpcStatus>();
-    restored.host().never::<HostProps>();
+    restored.host().stream::<ChainHeads>();
+    restored.host().never::<ChainStatus>();
+    restored.host().never::<HostSession>();
     restored.host().never::<HostRoute>();
-    restored.host().never::<RpcBlocks>();
+    restored.host().never::<ChainBlocks>();
     restored.host().never::<Query<Identity>>();
     restored.host().never::<Query<Valset>>();
     restored.host().never::<Query<Registry>>();
@@ -751,13 +751,13 @@ fn heavy(cx: &mut TestAppContext) {
         })
         .collect();
     let host = cx.host();
-    host.stream::<RpcHeads>();
-    host.stream::<HostProps>();
+    host.stream::<ChainHeads>();
+    host.stream::<HostSession>();
     host.stream::<HostRoute>();
-    host.handle::<RpcStatus>(move |()| Ok(status(tip)));
+    host.handle::<ChainStatus>(move |()| Ok(status(tip)));
     let blocks = chain.clone();
-    host.handle::<RpcBlocks>(move |ask| Ok(page(&blocks, &ask)));
-    host.handle::<RpcBlock>(move |by| {
+    host.handle::<ChainBlocks>(move |ask| Ok(page(&blocks, &ask)));
+    host.handle::<ChainBlock>(move |by| {
         Ok(match by {
             BlockRef::Height(height) => chain.get(height as usize).cloned(),
             BlockRef::Id(id) => chain.iter().find(|block| block.id == id).cloned(),

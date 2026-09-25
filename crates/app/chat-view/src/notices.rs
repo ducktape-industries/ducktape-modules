@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use chat::{Block, ChannelInfo, Mark, MsgRow, Party, Query, Reply};
 use ducktape_view_guest::Context;
-use ducktape_view_guest::doors::{HostBadge, NotifyPost, NotifyRead, Post};
+use ducktape_view_guest::methods::{HostBadge, NotifyPost, NotifySeen, Post};
 
 use crate::api::{Ask, ChatApi};
 use crate::message::message_body;
@@ -140,7 +140,7 @@ impl Chat {
         let empty = NameDirectory::default();
         let names = self.names.ready().unwrap_or(&empty);
         cx.host()
-            .notify::<NotifyRead>(tag(me, room, &info.channel.name, names));
+            .notify::<NotifySeen>(tag(me, room, &info.channel.name, names));
     }
 
     /// The tab badge: messages meant for the reader in rooms still unread.

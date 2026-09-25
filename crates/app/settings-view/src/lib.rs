@@ -4,8 +4,8 @@ mod api;
 use account::{Account, read_account};
 use api::*;
 use ducktape_view_guest::design;
-use ducktape_view_guest::doors::RpcLive;
-use ducktape_view_guest::doors::{ClipboardWrite, ClockTicks};
+use ducktape_view_guest::methods::Changes;
+use ducktape_view_guest::methods::{ClipboardWrite, ClockTicks};
 use ducktape_view_guest::prelude::*;
 use ducktape_view_guest::view::Loaded;
 use ducktape_view_guest::{Context, Render, Task, View, Window, export_view};
@@ -44,13 +44,16 @@ impl View for Settings {
     }
     fn restored(&mut self, _: &mut Window, cx: &mut Context<Self>) {
         self.watches.clear();
-        let mut props = cx.host().subscribe::<HostProps>(());
+        let mut props = cx.host().subscribe::<HostSession>(());
         self.watches.push(cx.spawn(async move |this, cx| {
             while let Some(reply) = props.next().await {
                 if this
                     .update(cx, |view, cx| {
                         match reply {
                             Ok(session) => {
+                                if session.account.is_some() {
+                                    view.create_account = CreateAccount::default();
+                                }
                                 view.session = session;
                                 view.read_account(cx);
                             }
@@ -64,7 +67,7 @@ impl View for Settings {
                 }
             }
         }));
-        let mut live = cx.host().subscribe::<RpcLive>(valset::PROGRAM.into());
+        let mut live = cx.host().subscribe::<Changes<Valset>>(());
         self.watches.push(cx.spawn(async move |this, cx| {
             while live.next().await.is_some() {
                 if this
@@ -92,18 +95,17 @@ impl View for Settings {
 impl Settings {
     fn read(&mut self, cx: &mut Context<Self>) {
         if self.status.ready().is_some() {
-            cx.refresh(cx.host().ask::<RpcStatus>(()), |view, status, _| {
+            cx.refresh(cx.host().ask::<ChainStatus>(()), |view, status, _| {
                 view.status = Loaded::Ready(status)
             });
         } else if !self.status.is_loading() {
-            self.status = cx.load(cx.host().ask::<RpcStatus>(()), |v| &mut v.status);
+            self.status = cx.load(cx.host().ask::<ChainStatus>(()), |v| &mut v.status);
         }
         cx.notify();
     }
     fn read_account(&mut self, cx: &mut Context<Self>) {
-        self.account = cx.load(read_account(cx.host(), self.session.account.clone()), |v| {
-            &mut v.account
-        });
+        let (key, number) = (self.session.key.clone(), self.session.account);
+        self.account = cx.load(read_account(cx.host(), key, number), |v| &mut v.account);
         cx.notify();
     }
     fn node(&self, cx: &mut Context<Self>, theme: &Theme) -> AnyElement {
@@ -301,16 +303,12 @@ impl Settings {
                 })
                 .await;
             let _ = this.update(cx, |view, cx| {
-                view.create_account.busy = false;
-                match result {
-                    Ok(_) => {
-                        view.create_account = CreateAccount::default();
-                        view.read_account(cx);
-                    }
-                    Err(refusal) => {
-                        view.create_account.error =
-                            format!("Couldn’t create this account: {}", refusal.sentence);
-                    }
+                // created: the form stays busy until the host's session
+                // names the new account, which re-reads it
+                if let Err(refusal) = result {
+                    view.create_account.busy = false;
+                    view.create_account.error =
+                        format!("Couldn’t create this account: {}", refusal.sentence);
                 }
                 cx.notify();
             });
@@ -338,7 +336,7 @@ impl Settings {
         let mint = cx.listener(|v: &mut Self, _: &ClickEvent, _, cx| {
             v.copied.clear();
             v.invite = cx.load(
-                cx.host().ask::<RpcInvite>(Mint {
+                cx.host().ask::<InviteMint>(Mint {
                     ttl_days: TTL[v.ttl],
                 }),
                 |v| &mut v.invite,
@@ -574,7 +572,15 @@ export_view!(
     Settings,
     "Settings",
     "Node, account, invites and app preferences.",
-    ["rpc", "op", "host", "clock", "clipboard"]
+    [
+        "chain",
+        "program",
+        "op",
+        "invite",
+        "host",
+        "clock",
+        "clipboard"
+    ]
 );
 #[cfg(test)]
 mod tests;

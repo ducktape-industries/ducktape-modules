@@ -81,7 +81,7 @@ returns the ID used by `wire::Node`. Call `cx.notify()` after state changes.
 Unnotified frames retain their tree and event routes; native debug builds catch
 serialized state changes without notification.
 
-`cx.host()` is the typed host door. Keep the `Task` returned by `cx.spawn`, or
+`cx.host()` is the typed host method. Keep the `Task` returned by `cx.spawn`, or
 call `.detach()`; dropping it cancels the future and any owned subscription.
 Consume host streams with `while let Some(item) = stream.next().await` and update
 through `WeakEntity`. `TestAppContext` supplies typed fake handlers and feeds,

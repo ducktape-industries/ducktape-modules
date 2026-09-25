@@ -15,12 +15,12 @@ fn session_key_resolves_to_its_account() {
 fn an_unregistered_key_stays_read_only() {
     let mut cx = TestAppContext::new();
     configure(&mut cx);
-    let props = cx.host().stream::<HostProps>();
+    let props = cx.host().stream::<HostSession>();
     let visible = cx.host().stream::<HostVisible>();
     let view = cx.open::<Chat>();
     cx.run_until_parked();
     props.push(Session {
-        account: "ffff".into(),
+        key: "ffff".into(),
         connected: true,
         chain: "testnet#0a1b2c3d".into(),
         ..Session::default()
@@ -38,43 +38,33 @@ fn an_unregistered_key_stays_read_only() {
 }
 
 /// The reader creates the account in Settings, then switches to Chat: the
-/// seated key never changes, only identity's own state does, so this has to
-/// arrive over identity's live stream — not the session's.
+/// seated key never changes; the host resolves its new account and hands it
+/// over as a session change.
 #[test]
 fn an_account_gained_later_re_enables_create_channel() {
-    let registered = std::rc::Rc::new(std::cell::Cell::new(false));
     let mut cx = TestAppContext::new();
     configure(&mut cx);
-    let reply = registered.clone();
-    cx.host()
-        .handle::<Ask<identity::view::Identity>>(move |query| {
-            Ok(match query {
-                identity::Query::OfKey { key } if key == [0x01, 0x02] => {
-                    identity::Reply::Number(reply.get().then_some(7))
-                }
-                identity::Query::OfKey { .. } => identity::Reply::Number(None),
-                query => panic!("unexpected identity query: {query:?}"),
-            })
-        });
-    let props = cx.host().stream::<HostProps>();
+    let props = cx.host().stream::<HostSession>();
     let visible = cx.host().stream::<HostVisible>();
-    let live = cx.host().stream::<RpcLive>();
     let view = cx.open::<Chat>();
     cx.run_until_parked();
-    props.push(Session {
-        account: "0102".into(),
+    let unregistered = Session {
+        key: "0102".into(),
         connected: true,
         chain: "testnet#0a1b2c3d".into(),
         ..Session::default()
-    });
+    };
+    props.push(unregistered.clone());
     visible.push(true);
     cx.run_until_parked();
     cx.simulate_click("chat-sidebar-new-channel");
     cx.run_until_parked();
     assert!(cx.has_text("Create an account to create a channel"));
 
-    registered.set(true);
-    live.push(Some(1));
+    props.push(Session {
+        account: Some(7),
+        ..unregistered
+    });
     cx.run_until_parked();
 
     assert!(!cx.has_text("Create an account to create a channel"));
@@ -82,18 +72,17 @@ fn an_account_gained_later_re_enables_create_channel() {
 }
 
 /// A peer who registers their account AFTER this room's roster was first
-/// read still shows up under "account N" — the reader's own identity was
-/// re-resolved on identity's live stream, but the roster naming everyone
-/// ELSE never was, so a fresh signer's messages stayed numbered forever
+/// read still shows up under "account N" unless the roster naming everyone
+/// is re-read on identity's live stream: so a fresh signer's messages stayed numbered forever
 /// (regression: a two-account chat never named the other side's reply).
 #[test]
 fn a_peers_name_gained_later_replaces_its_numeric_fallback() {
     let known = std::rc::Rc::new(std::cell::Cell::new(false));
     let has_gary = known.clone();
     let mut cx = TestAppContext::new();
-    quiet_doors(&mut cx);
+    quiet_methods(&mut cx);
     cx.host()
-        .handle::<ducktape_view_guest::doors::HostWidget>(|command| {
+        .handle::<ducktape_view_guest::methods::HostWidget>(|command| {
             assert!(matches!(command, wire::WidgetCommand::Focus { .. }));
             Ok(())
         });
@@ -125,23 +114,16 @@ fn a_peers_name_gained_later_replaces_its_numeric_fallback() {
         })
     });
     cx.host().handle::<Submit<ChatApi>>(|_| Ok(Vec::new()));
-    cx.host().handle::<Ask<identity::view::Identity>>(|query| {
-        Ok(match query {
-            identity::Query::OfKey { key } if key == [0x01, 0x02] => {
-                identity::Reply::Number(Some(7))
-            }
-            identity::Query::OfKey { .. } => identity::Reply::Number(None),
-            query => panic!("unexpected identity query: {query:?}"),
-        })
-    });
 
-    let props = cx.host().stream::<HostProps>();
+    let props = cx.host().stream::<HostSession>();
     let visible = cx.host().stream::<HostVisible>();
-    let live = cx.host().stream::<RpcLive>();
+    cx.host().never::<Changes<ChatApi>>();
+    let live = cx.host().stream::<Changes<Identity>>();
     let view = cx.open::<Chat>();
     cx.run_until_parked();
     props.push(Session {
-        account: "0102".into(),
+        key: "0102".into(),
+        account: Some(7),
         connected: true,
         chain: "testnet#0a1b2c3d".into(),
         ..Session::default()
@@ -163,7 +145,7 @@ fn a_peers_name_gained_later_replaces_its_numeric_fallback() {
 
     assert!(
         cx.has_text("gary"),
-        "the roster re-reads on identity's live stream, same as \"me\""
+        "the roster re-reads on identity's live stream"
     );
     assert!(!cx.has_text("account 9"));
     let _ = view;
@@ -180,9 +162,9 @@ fn a_peers_mention_becomes_offerable_once_their_account_is_known() {
     let known = std::rc::Rc::new(std::cell::Cell::new(false));
     let has_gary = known.clone();
     let mut cx = TestAppContext::new();
-    quiet_doors(&mut cx);
+    quiet_methods(&mut cx);
     cx.host()
-        .handle::<ducktape_view_guest::doors::HostWidget>(|command| {
+        .handle::<ducktape_view_guest::methods::HostWidget>(|command| {
             assert!(matches!(command, wire::WidgetCommand::Focus { .. }));
             Ok(())
         });
@@ -212,23 +194,16 @@ fn a_peers_mention_becomes_offerable_once_their_account_is_known() {
         })
     });
     cx.host().handle::<Submit<ChatApi>>(|_| Ok(Vec::new()));
-    cx.host().handle::<Ask<identity::view::Identity>>(|query| {
-        Ok(match query {
-            identity::Query::OfKey { key } if key == [0x01, 0x02] => {
-                identity::Reply::Number(Some(7))
-            }
-            identity::Query::OfKey { .. } => identity::Reply::Number(None),
-            query => panic!("unexpected identity query: {query:?}"),
-        })
-    });
 
-    let props = cx.host().stream::<HostProps>();
+    let props = cx.host().stream::<HostSession>();
     let visible = cx.host().stream::<HostVisible>();
-    let live = cx.host().stream::<RpcLive>();
+    cx.host().never::<Changes<ChatApi>>();
+    let live = cx.host().stream::<Changes<Identity>>();
     let view = cx.open::<Chat>();
     cx.run_until_parked();
     props.push(Session {
-        account: "0102".into(),
+        key: "0102".into(),
+        account: Some(7),
         connected: true,
         chain: "testnet#0a1b2c3d".into(),
         ..Session::default()

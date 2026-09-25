@@ -18,23 +18,13 @@ const COMPARED_REFS: usize = 20;
 
 impl Forge {
     pub(crate) fn session_changed(&mut self, next: Session, cx: &mut Context<Self>) {
-        let reader_changed = next.account != self.session.account;
+        let reader_changed = next.key != self.session.key;
         self.session = next;
         if reader_changed {
             self.names = cx.load(queries::roster(cx.host()), |forge| &mut forge.names);
-            self.refresh_me(cx);
             self.data.clear();
         }
         self.sync(cx);
-    }
-
-    /// Re-asks identity for the account the seated key holds now. Called on
-    /// every key change and on identity's own live stream, so a key that
-    /// gains an account while this view stays open re-enables writes
-    /// without a relaunch.
-    pub(crate) fn refresh_me(&mut self, cx: &mut Context<Self>) {
-        let key = self.session.account.clone();
-        self.me = cx.load(queries::resolve_me(cx.host(), key), |forge| &mut forge.me);
     }
 
     /// One read, once. Landing it advances whatever depends on it.
@@ -78,12 +68,9 @@ impl Forge {
         self.sync(cx);
     }
 
-    /// A new block landed: retire what it carried, then re-read. Cheap
-    /// enough to also cover an identity block, so a gained account is never
-    /// missed for lack of its own dedicated watch.
+    /// A new block landed: retire what it carried, then re-read.
     pub(crate) fn reconcile(&mut self, cx: &mut Context<Self>) {
         self.pending.retain(|op| op.progress != Progress::Accepted);
-        self.refresh_me(cx);
         self.refresh(cx);
     }
 

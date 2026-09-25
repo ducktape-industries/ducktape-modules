@@ -6,7 +6,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 
-use crate::doors::{self, Door};
+use crate::methods::{self, Method};
 use futures::{Stream, StreamExt};
 use std::rc::Rc;
 
@@ -107,9 +107,9 @@ impl Host {
             host: self.clone(),
         }
     }
-    /// One request, answered once. The door names the kind and both codecs;
+    /// One request, answered once. The method names the kind and both codecs;
     /// there is no other way to ask, so there is no other codec.
-    pub fn ask<D: Door>(
+    pub fn ask<D: Method>(
         &self,
         request: D::Request,
     ) -> impl Future<Output = Result<D::Reply, Refusal>> + 'static {
@@ -118,7 +118,7 @@ impl Host {
         async move { D::decode_reply(&response.await?).map_err(malformed) }
     }
     /// A subscription: an item per answer until the stream is dropped.
-    pub fn subscribe<D: Door>(
+    pub fn subscribe<D: Method>(
         &self,
         request: D::Request,
     ) -> impl Stream<Item = Result<D::Reply, Refusal>> + Unpin + 'static {
@@ -128,7 +128,7 @@ impl Host {
             .map(|answer| answer.and_then(|bytes| D::decode_reply(&bytes).map_err(malformed)))
     }
     /// A request whose answer nobody waits for.
-    pub fn notify<D: Door>(&self, request: D::Request) {
+    pub fn notify<D: Method>(&self, request: D::Request) {
         let id = self
             .0
             .borrow_mut()
@@ -146,10 +146,10 @@ impl Host {
         }
     }
     pub fn log(&self, message: impl AsRef<str>) {
-        self.notify::<doors::HostLog>(message.as_ref().to_owned());
+        self.notify::<methods::HostLog>(message.as_ref().to_owned());
     }
     pub fn open_link(&self, link: &str) {
-        self.notify::<doors::HostOpenLink>(link.to_owned());
+        self.notify::<methods::LinkOpen>(link.to_owned());
     }
     pub(crate) fn diagnostic(&self, id: u64) -> Option<String> {
         self.0.borrow().diagnostics.get(&id).cloned()

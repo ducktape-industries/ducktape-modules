@@ -1,5 +1,5 @@
 //! Property tests for the wire's hostile-input contract: a random tree either
-//! comes back out of `decode` refused for a reason the door actually names,
+//! comes back out of `decode` refused for a reason the method actually names,
 //! or `sanitize` pulls it inside every bound `sanitize_node` promises; bytes a
 //! hostile guest could have written never make `decode` panic; and a
 //! hand-crafted length-prefix bomb is refused before it is walked.

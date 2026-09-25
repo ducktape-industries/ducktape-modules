@@ -3,7 +3,7 @@
 # half is here (`view-guest` and the views under `crates/app/*-view`); the host
 # half is the app repo, which pins this crate by git rev. The format is ours,
 # and `tests/golden.rs` holds its bytes: a shape change trips the golden and
-# bumps `WIRE_EPOCH`, which is what a host checks a view's `.wasm` against
+# starts a new `WIRE_EPOCH`, which is what a host checks a view's `.wasm` against
 # before running it.
 [package]
 name = "view-wire"
@@ -26,8 +26,8 @@ serde = { version = "1", features = ["derive"] }
 gpui.workspace = true
 accesskit = { version = "0.24.0", features = ["serde"] }
 rmp-serde = "1"
-# The data plane: every host door carries borsh, the codec the program abi is
-# written in, so a program's bytes ride a door without a second encoding.
+# The data plane: every host method carries borsh, the codec the program abi is
+# written in, so a program's bytes ride a method without a second encoding.
 borsh = { version = "1", default-features = false, features = ["derive", "std"] }
 slotmap = "1.0.6"
 uuid = "1.1.2"

@@ -12,9 +12,6 @@ use crate::names::NameDirectory;
 #[derive(Serialize, Deserialize, Default)]
 pub struct Chat {
     pub(crate) session: Session,
-    /// the account the seated key holds, resolved through identity
-    /// (`None` while unregistered or not yet answered)
-    pub(crate) me: Loaded<Option<u64>>,
     #[serde(skip)]
     pub(crate) names: Loaded<NameDirectory>,
     pub(crate) channels: Loaded<Vec<ChannelInfo>>,
