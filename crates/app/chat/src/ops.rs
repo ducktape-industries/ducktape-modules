@@ -133,6 +133,7 @@ fn open_dm(
 fn rename(store: &mut impl Writes, frame: &Frame, id: &str, name: String) -> Result<(), Refusal> {
     rules::name(&name)?;
     let mut channel = channel(store, id)?;
+    rules::not_dm(&channel)?;
     rules::owned(&channel, &frame.party)?;
     channel.name = name;
     CHANNELS.put(store, &channel.id, &channel);
@@ -146,6 +147,7 @@ fn set_archived(
     archived: bool,
 ) -> Result<(), Refusal> {
     let mut channel = channel(store, id)?;
+    rules::not_dm(&channel)?;
     rules::owned(&channel, &frame.party)?;
     channel.archived = archived;
     CHANNELS.put(store, &channel.id, &channel);

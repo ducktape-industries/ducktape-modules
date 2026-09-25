@@ -90,12 +90,12 @@ pub(crate) fn owned(channel: &ChannelRow, party: &Party) -> Result<(), Refusal> 
     Ok(())
 }
 
-/// A dm seats exactly its two peers: no one adds a third or removes
-/// either, the peer who opened it included.
+/// A dm belongs to its two peers alike: no one seats a third, removes
+/// either, renames or archives it, the peer who opened it included.
 pub(crate) fn not_dm(channel: &ChannelRow) -> Result<(), Refusal> {
     if dm_peers(&channel.id).is_some() {
         return Err(unauthorized(format!(
-            "{} is a dm; its two peers stay seated",
+            "{} is a dm; neither peer reshapes it",
             channel.id
         )));
     }

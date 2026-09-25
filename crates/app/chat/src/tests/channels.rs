@@ -98,8 +98,8 @@ fn a_dm_seats_both_accounts_opens_once_and_keeps_others_out() {
     assert_eq!(chat.refused(&key, open_dm(1)), reason::UNAUTHORIZED);
 }
 
-/// The peer who opened a dm owns it, but owning it seats no one: neither
-/// peer adds a third account or removes the other.
+/// The peer who opened a dm owns it, but owning it gives nothing: neither
+/// peer adds a third account, removes the other, renames or archives it.
 #[test]
 fn neither_dm_peer_reshapes_the_room() {
     let mut chat = Chat::default();
@@ -119,6 +119,19 @@ fn neither_dm_peer_reshapes_the_room() {
         (&CY, CY, true),
     ] {
         assert_eq!(chat.refused(who, seat(party, member)), reason::UNAUTHORIZED);
+    }
+    let rename = |name: &str| Op::RenameChannel {
+        channel_id: dm.clone(),
+        name: name.into(),
+    };
+    let archive = |archived| Op::SetChannelArchived {
+        channel_id: dm.clone(),
+        archived,
+    };
+    for who in [&ADA, &BO, &CY] {
+        assert_eq!(chat.refused(who, rename("ours")), reason::UNAUTHORIZED);
+        assert_eq!(chat.refused(who, archive(true)), reason::UNAUTHORIZED);
+        assert_eq!(chat.refused(who, archive(false)), reason::UNAUTHORIZED);
     }
     chat.ok(&BO, post(&dm, "m1", "still here", None));
     assert_eq!(

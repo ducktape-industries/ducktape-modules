@@ -100,26 +100,31 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
         .flex_col()
         .gap_3()
         .p_3()
-        .bg(theme.surface)
-        .child(details_header(cx, theme))
-        .child(rule(theme))
-        .children(name_section(
-            &details.name_draft,
-            info.channel.archived,
-            cx,
-            theme,
-        ))
-        .child(rule(theme))
-        .child(section("Members", theme));
+        .bg(theme.surface);
+    // a dm is its two people alike: nothing to rename, archive or seat
     let pane = match dm {
-        true => pane,
-        false => pane.children(member_adder(&details.member_draft, cx, theme)),
+        true => pane
+            .child(details_header("Conversation details", cx, theme))
+            .child(rule(theme))
+            .child(section("People", theme)),
+        false => pane
+            .child(details_header("Channel details", cx, theme))
+            .child(rule(theme))
+            .children(name_section(
+                &details.name_draft,
+                info.channel.archived,
+                cx,
+                theme,
+            ))
+            .child(rule(theme))
+            .child(section("Members", theme))
+            .children(member_adder(&details.member_draft, cx, theme)),
     };
     pane.children(members(chat, !dm, cx, theme))
         .into_any_element()
 }
 
-fn details_header(cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement {
+fn details_header(title: &'static str, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement {
     let close = cx.listener(|chat, _: &ClickEvent, _window, cx| {
         chat.toggle_details();
         cx.notify();
@@ -136,7 +141,7 @@ fn details_header(cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement {
                 .font_weight(ducktape_view_guest::FontWeight::SEMIBOLD)
                 .role(Role::Heading)
                 .aria_level(2)
-                .child("Channel details"),
+                .child(title),
         )
         .child(button("chat-details-close", "Close", theme, close))
 }
