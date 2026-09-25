@@ -667,5 +667,47 @@
         4
       ]
     }
+  },
+  {
+    "kind": "program.describe",
+    "request": [
+      "chat",
+      [
+        1,
+        2
+      ]
+    ],
+    "reply": {
+      "title": "Post in #design",
+      "fields": [
+        {
+          "label": "from",
+          "value": {
+            "List": [
+              {
+                "Account": 3
+              },
+              {
+                "Bytes": {
+                  "len": 40,
+                  "preview": [
+                    7,
+                    7,
+                    7,
+                    7,
+                    7,
+                    7,
+                    7,
+                    7,
+                    7,
+                    7
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
   }
 ]

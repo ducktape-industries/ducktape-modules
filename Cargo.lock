@@ -1637,6 +1637,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "describe"
+version = "0.1.0"
+dependencies = [
+ "borsh",
+ "serde",
+ "wasmtime",
+ "wat",
+]
+
+[[package]]
 name = "design"
 version = "0.1.0"
 
@@ -6397,6 +6407,7 @@ dependencies = [
  "abi",
  "accesskit",
  "borsh",
+ "describe",
  "design",
  "futures",
  "gpui-pre",

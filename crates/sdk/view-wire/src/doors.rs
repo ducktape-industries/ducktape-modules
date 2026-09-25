@@ -21,6 +21,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
 use crate::WidgetCommand;
+pub use describe::{Description, Field, Value};
 
 mod sealed {
     pub trait Sealed {}
@@ -497,6 +498,10 @@ doors! {
     /// could not fill a gap (a reconnect, a node with no archive); a view
     /// that must see every block reads the gap with `rpc.blocks`.
     RpcHeads, "rpc.heads", (), Head;
+    /// `program.describe`: an op as its program says a person reads it,
+    /// from the `ducktape.describe` module in the program's current code;
+    /// `None` where the code carries none or it cannot read these bytes.
+    ProgramDescribe, "program.describe", (String, Vec<u8>), Option<Description>;
 }
 
 /// The `<capability>` half of every kind in [`ALL`]: the names a view's
@@ -514,6 +519,7 @@ pub const CAPABILITIES: &[&str] = &[
     "video",
     "notify",
     "store",
+    "program",
 ];
 
 /// Whether `name` is in [`CAPABILITIES`]; `const` so a manifest literal is
