@@ -128,7 +128,10 @@ impl Chat {
 
     pub(crate) fn reread_channels(&mut self, cx: &mut Context<Self>) {
         let list = queries::channels(cx.host());
-        cx.refresh(list, Chat::channels_landed);
+        cx.refresh(list, |chat, (rooms, more), cx| {
+            chat.channels_more = more;
+            chat.channels_landed(rooms, cx);
+        });
     }
 
     /// Re-read what the room shows, keeping the rows there until fresh land.
@@ -369,14 +372,17 @@ impl Chat {
             }
         }
         // a room gone from the list takes its cursor with it: the kept map
-        // is written whole, and must not grow with every room ever seen
+        // is written whole, and must not grow with every room ever seen. A
+        // list cut at its page budget has not seen them all: it keeps them.
         let listed: std::collections::HashSet<&str> = channels
             .iter()
             .map(|info| info.channel.id.as_str())
             .collect();
-        self.reads
-            .cursors
-            .retain(|room, _| listed.contains(room.as_str()));
+        if !self.channels_more {
+            self.reads
+                .cursors
+                .retain(|room, _| listed.contains(room.as_str()));
+        }
         self.channels = Loaded::Ready(channels);
         if let Some(room) = read {
             self.read_notices(&room, cx);

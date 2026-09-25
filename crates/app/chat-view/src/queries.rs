@@ -17,8 +17,9 @@ fn page(after: Option<Vec<u8>>, limit: usize) -> Page {
     }
 }
 
-pub(crate) async fn channels(host: Host) -> Result<Vec<ChannelInfo>, Refusal> {
-    let (all, _) = pages(None, CHANNEL_PAGES, |after| {
+/// Every room, up to [`CHANNEL_PAGES`] pages, and whether more follow.
+pub(crate) async fn channels(host: Host) -> Result<(Vec<ChannelInfo>, bool), Refusal> {
+    let (all, next) = pages(None, CHANNEL_PAGES, |after| {
         let ask = host.ask::<Ask<ChatApi>>(Query::Channels {
             page: page(after, PAGE),
         });
@@ -30,7 +31,7 @@ pub(crate) async fn channels(host: Host) -> Result<Vec<ChannelInfo>, Refusal> {
         }
     })
     .await?;
-    Ok(all)
+    Ok((all, next.is_some()))
 }
 
 /// The `limit` roots below `below` (or the newest), oldest first, with

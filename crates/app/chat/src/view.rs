@@ -23,7 +23,7 @@ const ROSTER_PAGES: usize = 64;
 
 /// The identity roster, every page of it, folded into [`Names`].
 pub async fn roster(host: Host) -> Result<Names, Refusal> {
-    let (rows, _) = pages(None, ROSTER_PAGES, |after| {
+    let (rows, next) = pages(None, ROSTER_PAGES, |after| {
         let ask = host.ask::<Ask<Chat>>(Query::Accounts {
             page: Page {
                 after,
@@ -38,7 +38,9 @@ pub async fn roster(host: Host) -> Result<Names, Refusal> {
         }
     })
     .await?;
-    Ok(Names::from_roster(rows))
+    let mut names = Names::from_roster(rows);
+    names.more = next.is_some();
+    Ok(names)
 }
 
 /// The roster as a view reads it: each account's name, and which accounts
@@ -47,6 +49,8 @@ pub async fn roster(host: Host) -> Result<Names, Refusal> {
 pub struct Names {
     names: BTreeMap<u64, String>,
     programs: BTreeSet<u64>,
+    /// the roster read stopped at its page budget: more accounts exist
+    more: bool,
 }
 
 impl Names {
@@ -54,6 +58,7 @@ impl Names {
         Self {
             names: BTreeMap::new(),
             programs: BTreeSet::new(),
+            more: false,
         }
     }
 
@@ -66,6 +71,12 @@ impl Names {
             names.names.insert(account.number, account.name);
         }
         names
+    }
+
+    /// Whether the roster goes on past what was read: an account beyond it
+    /// reads as its number.
+    pub fn more(&self) -> bool {
+        self.more
     }
 
     /// Every named account, ascending.

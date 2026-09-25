@@ -5,6 +5,7 @@ use ducktape_view_guest::design;
 use ducktape_view_guest::prelude::*;
 use ducktape_view_guest::{ClickEvent, Context, ElementId, ParentElement, Styled, Theme, div, px};
 
+use chat::view::Names;
 use chat::{ChannelInfo, Party};
 
 use crate::names::dm_peer_of;
@@ -149,6 +150,10 @@ fn rooms(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement
             let selected = open == Some(info.channel.id.as_str());
             list = list.child(dm_button(chat, info, peer, selected, cx, theme));
         }
+    }
+    let roster_more = chat.names.ready().is_some_and(Names::more);
+    if chat.channels_more || roster_more {
+        list = list.child(design::more_not_shown("chat-sidebar-more", theme).px_2());
     }
     list
 }

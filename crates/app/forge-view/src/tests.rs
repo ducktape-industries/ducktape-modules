@@ -422,6 +422,39 @@ fn the_repositories_list_shows_every_column_of_the_plan() {
     assert_eq!(cx.host().opened_links(), ["duck://explorer/block/2"]);
 }
 
+/// A list read to its page budget with more still to read says it goes on
+/// rather than passing for the whole list.
+#[test]
+fn a_list_cut_at_its_budget_says_so() {
+    let (cx, _) = booted("default");
+    assert!(cx.find("forge-more").is_none(), "the fixture list ends");
+    let mut cx = TestAppContext::new();
+    configure(&mut cx, "default");
+    cx.host().handle::<Ask>(|query| {
+        let mut reply = answer(&query, "default");
+        if let (Query::Repos { page: asked }, Reply::Repos { page, .. }) = (&query, &mut reply) {
+            if asked.after.is_some() {
+                page.items.clear();
+            }
+            page.next = Some(vec![1]);
+        }
+        Ok(reply)
+    });
+    let props = cx.host().stream::<HostSession>();
+    cx.host()
+        .stream::<ducktape_view_guest::methods::HostRoute>();
+    cx.open::<Forge>();
+    cx.run_until_parked();
+    props.push(Session {
+        account: Some(2),
+        connected: true,
+        chain: "testnet#0a1b2c3d".into(),
+        ..Session::default()
+    });
+    cx.run_until_parked();
+    assert!(cx.find("forge-more").is_some());
+}
+
 #[test]
 fn an_empty_program_explains_how_a_repository_begins() {
     let (cx, _) = booted("empty");

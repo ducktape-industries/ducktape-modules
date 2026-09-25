@@ -45,6 +45,20 @@ impl Forge {
         self.session.connected && self.me_party().is_some()
     }
 
+    /// Whether a list on this screen stopped at its page budget: a read
+    /// with a cursor left over, or a change's conversation cut short.
+    pub(crate) fn cut_short(&self) -> bool {
+        let reads = self.data.values().any(|loaded| match loaded {
+            Loaded::Ready(reply) => crate::queries::cut_short(reply),
+            _ => false,
+        });
+        let talk = self
+            .messages
+            .values()
+            .any(|loaded| matches!(loaded, Loaded::Ready((_, true))));
+        reads || talk
+    }
+
     pub(crate) fn stage(&self, query: &Query) -> Stage<'_> {
         match self.data.get(query) {
             Some(Loaded::Ready(reply)) => Stage::Ready(reply),

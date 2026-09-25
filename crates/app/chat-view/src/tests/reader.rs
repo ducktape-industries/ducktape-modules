@@ -283,5 +283,44 @@ fn the_roster_is_read_past_its_first_page() {
         let names = chat.names.ready().expect("the roster landed");
         assert_eq!(names.numbers().count(), 600);
         assert_eq!(names.name(&Party::Account(600)), Some("user600"));
+        assert!(!names.more(), "the whole roster was read");
     });
+    assert!(cx.find("chat-sidebar-more").is_none());
+}
+
+/// A channel list that never ends is read to its page budget, and the
+/// sidebar says it goes on rather than passing for the whole list.
+#[test]
+fn a_channel_list_cut_at_its_budget_says_so() {
+    let mut cx = TestAppContext::new();
+    configure(&mut cx);
+    cx.host().handle::<Ask<ChatApi>>(|query| {
+        Ok(match query {
+            Query::Accounts { .. } => Reply::Accounts(page(Vec::new())),
+            Query::Channels { page } => {
+                let n = page.after.map_or(0, |after| after[0]);
+                Reply::Channels(::chat::PageReply {
+                    height: 1,
+                    items: vec![channel(&format!("room{n}"), "Room", 1)],
+                    next: Some(vec![n + 1]),
+                })
+            }
+            query => panic!("unexpected chat query: {query:?}"),
+        })
+    });
+    let props = cx.host().stream::<HostSession>();
+    let visible = cx.host().stream::<HostVisible>();
+    let view = cx.open::<Chat>();
+    cx.run_until_parked();
+    props.push(Session {
+        key: "0102".into(),
+        account: Some(7),
+        connected: true,
+        chain: "testnet#0a1b2c3d".into(),
+        ..Session::default()
+    });
+    visible.push(true);
+    cx.run_until_parked();
+    view.read(|chat| assert!(chat.channels_more));
+    assert!(cx.find("chat-sidebar-more").is_some());
 }

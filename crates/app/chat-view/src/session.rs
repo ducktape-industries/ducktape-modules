@@ -2,6 +2,7 @@
 //! account it holds), and what that lets her do in the open room.
 use chat::Party;
 use ducktape_view_guest::Context;
+use ducktape_view_guest::view::Loaded;
 
 use crate::Chat;
 use crate::api::Session;
@@ -71,7 +72,18 @@ impl Chat {
     }
 
     pub(crate) fn load_channels(&mut self, cx: &mut Context<Self>) {
-        self.channels = cx.load(channels(cx.host()), |chat| &mut chat.channels);
+        let list = channels(cx.host());
+        let task = cx.spawn(async move |this, cx| {
+            let result = list.await;
+            let _ = this.update(cx, |chat, cx| {
+                chat.channels = Loaded::from(result.map(|(rooms, more)| {
+                    chat.channels_more = more;
+                    rooms
+                }));
+                cx.notify();
+            });
+        });
+        self.channels = Loaded::Loading(task);
     }
 
     /// The reader's account number, as the host resolved it.

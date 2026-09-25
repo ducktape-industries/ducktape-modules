@@ -38,7 +38,7 @@ pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
     // Until chat answers, the reviews stand on their own; once it has, each
     // sits in the timeline where forge posted its line.
     let placed = |review: &forge::Review| match forge.messages.get(&change.channel) {
-        Some(Loaded::Ready(rows)) => rows.iter().any(|row| row.message_id == review.message_id),
+        Some(Loaded::Ready((rows, _))) => rows.iter().any(|row| row.message_id == review.message_id),
         _ => false,
     };
     for review in reviews.items.iter().filter(|review| !placed(review)) {
@@ -216,14 +216,14 @@ fn messages(forge: &Forge, theme: &Theme) -> AnyElement {
             .text_size(design::text::SECONDARY)
             .child(refusal.sentence.clone())
             .into_any_element(),
-        Some(Loaded::Ready(rows)) if rows.is_empty() => empty_state(
+        Some(Loaded::Ready((rows, _))) if rows.is_empty() => empty_state(
             id("forge-conversation-empty"),
             "No replies yet",
             "This change's channel is quiet.",
             theme,
         )
         .into_any_element(),
-        Some(Loaded::Ready(rows)) => {
+        Some(Loaded::Ready((rows, _))) => {
             let opened = rows.iter().find(|row| is_forge(row)).map(|row| row.seq);
             let mut column = div()
                 .id(id("forge-conversation-messages"))

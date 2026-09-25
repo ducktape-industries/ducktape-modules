@@ -117,6 +117,17 @@ pub fn quiet(text: impl Into<SharedString>, theme: &Theme) -> Div {
         .child(text.into())
 }
 
+/// Under a list whose read stopped at its page budget with more still to
+/// read: says the list goes on past what is shown, rather than letting a
+/// cut list pass for the whole of it.
+pub fn more_not_shown(id: impl Into<ElementId>, theme: &Theme) -> Stateful<Div> {
+    div()
+        .id(id)
+        .text_size(text::CAPTION)
+        .text_color(theme.muted)
+        .child("This list goes on past what is shown here.")
+}
+
 /// A heading: the title size at level 1, the section size under it.
 pub fn heading(
     id: impl Into<ElementId>,

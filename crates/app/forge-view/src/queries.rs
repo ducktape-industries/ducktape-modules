@@ -40,6 +40,13 @@ pub(crate) async fn fetch(host: Host, query: Query) -> Result<Reply, Refusal> {
     Ok(reply)
 }
 
+/// Whether a folded read stopped at the page budget with more to read:
+/// [`fetch`] follows every cursor it can, so one left over means exactly
+/// that.
+pub(crate) fn cut_short(reply: &Reply) -> bool {
+    next_cursor(reply).is_some()
+}
+
 fn next_cursor(reply: &Reply) -> Option<&Vec<u8>> {
     match reply {
         Reply::Repos { page, .. } => page.next.as_ref(),
@@ -84,13 +91,14 @@ fn extend(into: &mut Reply, more: Reply) {
     }
 }
 
-/// A change's hidden channel, oldest first.
+/// A change's hidden channel, oldest first, and whether more follow past
+/// the page budget.
 pub(crate) async fn conversation(
     host: Host,
     channel_id: String,
     viewer: Vec<identity::Party>,
-) -> Result<Vec<chat::MsgRow>, Refusal> {
-    let (mut all, _) = pages(None, MAX_PAGES, |after| {
+) -> Result<(Vec<chat::MsgRow>, bool), Refusal> {
+    let (mut all, next) = pages(None, MAX_PAGES, |after| {
         let ask = host.ask::<Ask<ChatApi>>(chat::Query::Roots {
             channel_id: channel_id.clone(),
             viewer: viewer.clone(),
@@ -105,5 +113,5 @@ pub(crate) async fn conversation(
     })
     .await?;
     all.sort_by_key(|row: &chat::MsgRow| row.seq);
-    Ok(all)
+    Ok((all, next.is_some()))
 }
