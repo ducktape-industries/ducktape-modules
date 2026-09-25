@@ -6,7 +6,7 @@ use store::{Listing, Reads, capacity, invalid};
 use crate::contract::*;
 use crate::discussion;
 use crate::state::{
-    AUTHORED, CHANGES, INVOLVED, REVIEWS, load_bounds, load_change, load_ref, load_repo,
+    AUTHORED, CHANGES, INVOLVED, REVIEWS, RepoKey, load_bounds, load_change, load_ref, load_repo,
     load_review, repo_hash,
 };
 
@@ -56,7 +56,7 @@ fn changes(
         height,
         items,
         next,
-    } = CHANGES.page_of(store, &repo.to_owned(), listing)?;
+    } = CHANGES.page_of(store, &RepoKey::of(repo), listing)?;
     let items = items
         .into_iter()
         .filter(|((repo, n), change)| {
@@ -68,9 +68,9 @@ fn changes(
                 && filter
                     .involves
                     .as_ref()
-                    .is_none_or(|key| INVOLVED.has(store, &(key.clone(), repo.clone(), *n)))
+                    .is_none_or(|key| INVOLVED.has(store, &(key.clone(), repo.0.clone(), *n)))
         })
-        .map(|((repo, _), change)| summary(&repo, &change))
+        .map(|((repo, _), change)| summary(&repo.0, &change))
         .collect();
     Ok(PageReply {
         height,
@@ -98,7 +98,7 @@ fn judgment(
         if change.state != ChangeState::Open {
             continue;
         }
-        if let Some(judgment) = judge(store, repo, change, key, &mut budget)? {
+        if let Some(judgment) = judge(store, &repo.0, change, key, &mut budget)? {
             items.push(judgment);
         }
     }

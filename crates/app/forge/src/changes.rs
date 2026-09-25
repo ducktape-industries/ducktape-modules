@@ -255,10 +255,15 @@ fn submit_review(
         &change,
         review.message_id.clone(),
         format!(
-            "Review {id} submitted by {}: {:?}; {} line comments",
+            "Review {id} submitted by {}: {:?}; {} line comment{}",
             abi::hex(actor),
             review.draft.verdict,
-            review.draft.comments.len()
+            review.draft.comments.len(),
+            if review.draft.comments.len() == 1 {
+                ""
+            } else {
+                "s"
+            }
         ),
     );
     Ok(OpReply::Review {

@@ -306,6 +306,15 @@ pub(crate) fn verdict_label(verdict: Verdict) -> &'static str {
     }
 }
 
+/// What a reviewer did, as the conversation says it after their name.
+pub(crate) fn verdict_verb(verdict: Verdict) -> &'static str {
+    match verdict {
+        Verdict::Approve => "approved",
+        Verdict::RequestChanges => "requested changes",
+        Verdict::Comment => "commented",
+    }
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub(crate) struct ChangeForm {
     /// `Some(n)` edits that change instead of opening a new one
