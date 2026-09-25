@@ -37,6 +37,8 @@ design = { path = "../design" }
 # `Refusal` is the program abi's: one type for a refusal a program wrote and
 # one the host wrote.
 abi = { workspace = true }
+# `program.describe` answers what a program says its op means.
+describe = { workspace = true, features = ["serde"] }
 memchr = "2"
 unicode-segmentation = "1"
 

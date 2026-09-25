@@ -1,0 +1,24 @@
+# What an op means to a person, as the program that runs it says. A program
+# ships a tiny standalone wasm module in the custom section `ducktape.describe`
+# of its code blob: no imports, one pure export from the borsh op bytes to a
+# borsh [`Description`]. `export!` is that module's glue; `host` (off by
+# default) is the runner a host puts the untrusted section through.
+[package]
+name = "describe"
+version.workspace = true
+edition.workspace = true
+
+[features]
+# The door carries a `Description`; view-wire's golden writes it as JSON.
+serde = ["dep:serde"]
+host = ["dep:wasmtime"]
+
+[dependencies]
+borsh = { workspace = true }
+serde = { workspace = true, optional = true }
+# pinned exactly: the host's runtime is the node's and the app's
+wasmtime = { version = "=46.0.3", optional = true }
+
+[dev-dependencies]
+wasmtime = { version = "=46.0.3" }
+wat = "1"

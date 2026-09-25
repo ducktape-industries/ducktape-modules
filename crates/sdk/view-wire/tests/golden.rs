@@ -378,6 +378,16 @@ fn every_door() -> Vec<(Exchange, serde_json::Value)> {
                 id: [4; 32],
             },
         ),
+        exchange::<ProgramDescribe>(
+            ("chat".into(), vec![1, 2]),
+            Some(Description {
+                title: "Post in #design".into(),
+                fields: vec![Field {
+                    label: "from".into(),
+                    value: Value::List(vec![Value::Account(3), Value::bytes(&[7; 40])]),
+                }],
+            }),
+        ),
     ]
 }
 
