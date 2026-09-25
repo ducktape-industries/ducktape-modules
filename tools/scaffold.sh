@@ -1,10 +1,10 @@
 #!/bin/sh
-# `make new-program NAME=x` / `make new-view NAME=x-view`: a program in
+# `make new-module NAME=x` / `make new-view NAME=x-view`: a module in
 # chat's shape (types, rules and module always built, its wasm exports
-# behind `program`, a native test over `guest::MockHost`) or a view in members-view's
-# shape (links its program with `program` off, `export_view!`, one screen
+# behind `module`, a native test over `guest::MockHost`) or a view in members-view's
+# shape (links its module with `module` off, `export_view!`, one screen
 # test), registered in the Makefile and the workspace. Run from the repo root.
-#   tools/scaffold.sh program <name> | view <name>-view
+#   tools/scaffold.sh module <name> | view <name>-view
 set -eu
 kind=$1
 name=$2
@@ -20,8 +20,8 @@ register() { # <Makefile list> <name>
     sed -i "s|^    \"crates/lib/gitcore\",|    \"crates/app/$2\",\n&|" Cargo.toml
 }
 
-program() {
-    # The module type: TitleCase of the program name.
+module() {
+    # The module type: TitleCase of the module name.
     title=$(echo "$name" | awk -F- '{ for (i = 1; i <= NF; i++) printf "%s%s", toupper(substr($i, 1, 1)), substr($i, 2) }')
     mkdir -p "$dir/src" "$dir/tests"
     cat > "$dir/Cargo.toml" <<EOF
@@ -31,13 +31,13 @@ version.workspace = true
 edition.workspace = true
 
 # The types, rules and module are always built; the view links them with
-# \`program\` off. \`program\` adds its wasm exports (\`guest::export!\`),
+# \`module\` off. \`module\` adds its wasm exports (\`guest::export!\`),
 # which only its own wasm build turns on.
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [features]
-program = []
+module = []
 
 [dependencies]
 abi = { workspace = true }
@@ -46,20 +46,20 @@ guest = { workspace = true }
 store = { workspace = true }
 EOF
     cat > "$dir/src/lib.rs" <<EOF
-//! The \`$name\` program: one counter, to be replaced by what it keeps.
+//! The \`$name\` module: one counter, to be replaced by what it keeps.
 //!
 //! Writes are an [\`Op\`] (borsh), reads a [\`Query\`] answered by a [\`Reply\`]
 //! (borsh); \`$name-view\` links the same types. [\`$title\`] is the module:
 //! one match over every op and one over every query. It runs natively over
-//! \`guest::MockHost\`; the \`program\` feature adds its wasm exports, which a
+//! \`guest::MockHost\`; the \`module\` feature adds its wasm exports, which a
 //! view never enables.
 use borsh::{BorshDeserialize, BorshSerialize};
-use guest::{ExecCtx, Module, QueryCtx, Refusal};
+use guest::{Error, ExecCtx, Module, QueryCtx};
 use store::Item;
 
-pub const PROGRAM: &str = "$name";
+pub const MODULE: &str = "$name";
 
-/// The one value this program keeps.
+/// The one value this module keeps.
 const COUNT: Item<u64> = Item::new("count");
 
 #[derive(Clone, Debug, BorshSerialize, BorshDeserialize)]
@@ -84,39 +84,38 @@ impl Module for $title {
     type Query = Query;
     type Response = Reply;
 
-    fn execute(ctx: &ExecCtx, op: Op) -> Result<(), Refusal> {
+    fn execute(ctx: &ExecCtx, op: Op) -> Result<(), Error> {
         match op {
             Op::Bump { by } => bump(ctx, by),
         }
     }
 
-    fn query(ctx: &QueryCtx, query: Query) -> Result<Reply, Refusal> {
+    fn query(ctx: &QueryCtx, query: Query) -> Result<Reply, Error> {
         match query {
             Query::Count => Ok(Reply::Count(COUNT.get(ctx)?.unwrap_or_default())),
         }
     }
 }
 
-#[cfg(feature = "program")]
+#[cfg(feature = "module")]
 guest::export!($title);
 
-fn bump(ctx: &ExecCtx, by: u64) -> Result<(), Refusal> {
+fn bump(ctx: &ExecCtx, by: u64) -> Result<(), Error> {
     COUNT.update(ctx, |count| *count = count.saturating_add(by))?;
     Ok(())
 }
 EOF
     cat > "$dir/tests/$snake.rs" <<EOF
-use abi::{Cause, Env, Origin};
-use guest::{MockHost, Module};
+use guest::{Cause, Env, MockHost, Module, Origin};
 use $snake::{$title, Op, Query, Reply};
 
 fn env() -> Env {
     Env {
-        network: b"net".to_vec(),
+        chain_id: b"net".to_vec(),
         height: 7,
         time: 100,
-        me: $snake::PROGRAM.into(),
-        origin: Origin::External(vec![1]),
+        module: $snake::MODULE.into(),
+        origin: Origin::Signed(vec![1]),
         cause: Cause::Direct,
     }
 }
@@ -135,19 +134,19 @@ EOF
     cat <<EOF
 $dir/{Cargo.toml,src/lib.rs,tests/$snake.rs}, PROGRAMS, workspace members and dependencies.
 Next:
-  1. name \`$name\` in a founding (qa's founding.toml, or the program's params it seats with)
+  1. name \`$name\` in a founding (qa's founding.toml, or the module's params it seats with)
   2. write the contract: replace Op/Query/Reply and the module in src/lib.rs; \`make dev P=$name\`
   3. tell qa's kit about it (the pack step in kit's build, if it ships a view)
 EOF
 }
 
 view() {
-    case "$name" in *-view) ;; *) echo "$name: a view is named <program>-view" >&2; exit 1 ;; esac
+    case "$name" in *-view) ;; *) echo "$name: a view is named <module>-view" >&2; exit 1 ;; esac
     program=${name%-view}
     program_snake=$(echo "$program" | tr - _)
-    test -d "crates/app/$program" || { echo "crates/app/$program is not there: make new-program NAME=$program first" >&2; exit 1; }
+    test -d "crates/app/$program" || { echo "crates/app/$program is not there: make new-module NAME=$program first" >&2; exit 1; }
     upper=$(echo "$program_snake" | tr a-z A-Z)
-    # The view type: TitleCase of the program name.
+    # The view type: TitleCase of the module name.
     title=$(echo "$program" | awk -F- '{ for (i = 1; i <= NF; i++) printf "%s%s", toupper(substr($i, 1, 1)), substr($i, 2) }')
     mkdir -p "$dir/src"
     cat > "$dir/Cargo.toml" <<EOF
@@ -163,7 +162,7 @@ publish = false
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-# The program is linked with \`program\` off: its types, no host import.
+# The module is linked with \`module\` off: its types, no host import.
 [dependencies]
 futures.workspace = true
 ducktape-view-guest.workspace = true
@@ -190,7 +189,7 @@ use serde::{Deserialize, Serialize};
 /// The program's query surface, as this view reads it.
 struct ${title}Program;
 impl Program for ${title}Program {
-    const NAME: &'static str = $program_snake::PROGRAM;
+    const NAME: &'static str = $program_snake::MODULE;
     type Op = $program_snake::Op;
     type Query = $program_snake::Query;
     type Reply = $program_snake::Reply;
@@ -331,4 +330,4 @@ EOF
 }
 
 # Import order and line width follow the name, so rustfmt has the last word.
-case "$kind" in program | view) "$kind" && ${CARGO:-cargo} fmt -p "$name" ;; *) echo "usage: tools/scaffold.sh program <name> | view <name>-view" >&2; exit 1 ;; esac
+case "$kind" in module | program) module && ${CARGO:-cargo} fmt -p "$name" ;; view) view && ${CARGO:-cargo} fmt -p "$name" ;; *) echo "usage: tools/scaffold.sh module <name> | view <name>-view" >&2; exit 1 ;; esac

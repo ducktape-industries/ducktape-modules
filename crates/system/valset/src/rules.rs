@@ -1,28 +1,28 @@
 // The rules: governance-only writes, the last validator kept seated.
 
-use guest::{ExecCtx, QueryCtx, Refusal, invalid, wrong_state};
+use guest::{Error, ExecCtx, QueryCtx, invalid, wrong_state};
 use store::Map;
 
-use crate::{Genesis, Membership, Standing};
+use crate::{Genesis, Membership, Role};
 
 pub(crate) const MEMBERS: Map<Vec<u8>, Membership> = Map::new("m/");
 const KEY_LEN: usize = 32;
 
-pub(crate) fn init(ctx: &ExecCtx, genesis: Genesis) -> Result<(), Refusal> {
+pub(crate) fn init(ctx: &ExecCtx, genesis: Genesis) -> Result<(), Error> {
     for member in genesis.validators {
         set(
             ctx,
             Membership {
                 key: member.key,
                 address: member.address,
-                standing: Standing::Validator,
+                role: Role::Validator,
             },
         )?;
     }
     Ok(())
 }
 
-pub(crate) fn memberships(ctx: &QueryCtx) -> Result<Vec<Membership>, Refusal> {
+pub(crate) fn memberships(ctx: &QueryCtx) -> Result<Vec<Membership>, Error> {
     Ok(MEMBERS
         .all(ctx)?
         .into_iter()
@@ -30,12 +30,12 @@ pub(crate) fn memberships(ctx: &QueryCtx) -> Result<Vec<Membership>, Refusal> {
         .collect())
 }
 
-pub(crate) fn set(ctx: &ExecCtx, membership: Membership) -> Result<(), Refusal> {
+pub(crate) fn set(ctx: &ExecCtx, membership: Membership) -> Result<(), Error> {
     let key_is_ed25519 = membership.key.len() == KEY_LEN;
     if !key_is_ed25519 {
         return Err(invalid("a member key is a 32-byte ed25519 public key"));
     }
-    let demotes = membership.standing == Standing::Resident;
+    let demotes = membership.role == Role::Resident;
     if demotes {
         unseat(ctx, &membership.key)?;
     }
@@ -43,22 +43,22 @@ pub(crate) fn set(ctx: &ExecCtx, membership: Membership) -> Result<(), Refusal> 
     Ok(())
 }
 
-pub(crate) fn remove(ctx: &ExecCtx, member: &Vec<u8>) -> Result<(), Refusal> {
+pub(crate) fn remove(ctx: &ExecCtx, member: &Vec<u8>) -> Result<(), Error> {
     unseat(ctx, member)?;
     MEMBERS.remove(ctx, member);
     Ok(())
 }
 
-fn unseat(ctx: &QueryCtx, member: &Vec<u8>) -> Result<(), Refusal> {
+fn unseat(ctx: &QueryCtx, member: &Vec<u8>) -> Result<(), Error> {
     let seated = MEMBERS
         .get(ctx, member)?
-        .is_some_and(|membership| membership.standing == Standing::Validator);
+        .is_some_and(|membership| membership.role == Role::Validator);
     if !seated {
         return Ok(());
     }
     let other_validators = memberships(ctx)?
         .iter()
-        .any(|membership| membership.standing == Standing::Validator && &membership.key != member);
+        .any(|membership| membership.role == Role::Validator && &membership.key != member);
     if !other_validators {
         return Err(wrong_state("the last validator cannot be unseated"));
     }

@@ -4,8 +4,8 @@
 
 use std::collections::BTreeMap;
 
-use abi::{Refusal, reason};
 use gitcore::{Hash, Oid};
+use guest::{Error, code};
 use guest::{ExecCtx, QueryCtx, invalid, not_found};
 use store::{Item, Map, Set};
 
@@ -37,25 +37,25 @@ pub(crate) const INVOLVED: Set<(Principal, String, u64)> = Set::new("i/");
 const MESSAGES: Item<u64> = Item::new("system-message-seq");
 
 /// Stored state that is not what forge wrote: an operator's problem.
-pub(crate) fn storage(sentence: impl Into<String>) -> Refusal {
-    Refusal::new(reason::CORRUPT, sentence)
+pub(crate) fn storage(sentence: impl Into<String>) -> Error {
+    Error::new(code::CORRUPT, sentence)
 }
 
 pub fn save_bounds(ctx: &ExecCtx, bounds: &Bounds) {
     BOUNDS.put(ctx, bounds);
 }
 
-pub fn load_bounds(ctx: &QueryCtx) -> Result<Bounds, Refusal> {
+pub fn load_bounds(ctx: &QueryCtx) -> Result<Bounds, Error> {
     BOUNDS
         .get(ctx)?
-        .ok_or_else(|| Refusal::new(reason::PROTOCOL, "the program was founded without bounds"))
+        .ok_or_else(|| Error::new(code::PROTOCOL, "the program was founded without bounds"))
 }
 
 pub fn repo_exists(ctx: &QueryCtx, name: &str) -> bool {
     REPOS.has(ctx, &name.to_owned())
 }
 
-pub fn load_repo(ctx: &QueryCtx, name: &str) -> Result<Repo, Refusal> {
+pub fn load_repo(ctx: &QueryCtx, name: &str) -> Result<Repo, Error> {
     if !valid_repo_name(name) {
         return Err(invalid(format!("{name:?} is not a repository name")));
     }
@@ -66,7 +66,7 @@ pub fn load_repo(ctx: &QueryCtx, name: &str) -> Result<Repo, Refusal> {
 
 /// Stores the record and moves it in the activity index, so the index
 /// holds exactly one row per repository.
-pub fn save_repo(ctx: &ExecCtx, name: &str, repo: &Repo) -> Result<(), Refusal> {
+pub fn save_repo(ctx: &ExecCtx, name: &str, repo: &Repo) -> Result<(), Error> {
     if let Some(old) = REPOS.get(ctx, &name.to_owned())? {
         ACTIVITY.remove(ctx, &(newest_first(old.last_activity), name.to_owned()));
     }
@@ -93,16 +93,12 @@ pub fn ref_key(name: &str, reference: &[u8]) -> (String, Vec<u8>) {
 }
 
 /// Every ref of a repository: what a push is checked against and git is told.
-pub fn load_refs(
-    ctx: &QueryCtx,
-    name: &str,
-    hash: Hash,
-) -> Result<BTreeMap<Vec<u8>, Oid>, Refusal> {
+pub fn load_refs(ctx: &QueryCtx, name: &str, hash: Hash) -> Result<BTreeMap<Vec<u8>, Oid>, Error> {
     REFS.scan(ctx, REFS.prefix_of(&name.to_owned()))?
         .into_iter()
         .map(|((_, reference), bytes)| {
             let target = Oid::from_bytes(hash, &bytes).map_err(|error| {
-                Refusal::new(reason::PROTOCOL, format!("ref {reference:?} holds {error}"))
+                Error::new(code::PROTOCOL, format!("ref {reference:?} holds {error}"))
             })?;
             Ok((reference, target))
         })
@@ -114,7 +110,7 @@ pub fn load_ref(
     name: &str,
     reference: &[u8],
     hash: Hash,
-) -> Result<Option<Oid>, Refusal> {
+) -> Result<Option<Oid>, Error> {
     REFS.get(ctx, &ref_key(name, reference))?
         .map(|bytes| Oid::from_bytes(hash, &bytes).map_err(|e| storage(e.to_string())))
         .transpose()
@@ -129,12 +125,7 @@ pub fn delete_ref(ctx: &ExecCtx, name: &str, reference: &[u8]) {
 }
 
 /// Resolving an op's endpoint reads consensus refs only, never objects.
-pub fn resolve(
-    ctx: &QueryCtx,
-    name: &str,
-    revision: &Revision,
-    hash: Hash,
-) -> Result<Oid, Refusal> {
+pub fn resolve(ctx: &QueryCtx, name: &str, revision: &Revision, hash: Hash) -> Result<Oid, Error> {
     match revision {
         Revision::Oid(hex) => parse_oid(hash, hex),
         Revision::Ref(reference) => {
@@ -146,7 +137,7 @@ pub fn resolve(
     }
 }
 
-pub fn parse_oid(hash: Hash, hex: &str) -> Result<Oid, Refusal> {
+pub fn parse_oid(hash: Hash, hex: &str) -> Result<Oid, Error> {
     let oid = Oid::from_hex(hash, hex)
         .map_err(|_| invalid("oid has the wrong length or hex for this repo"))?;
     if oid.is_zero() {
@@ -156,28 +147,28 @@ pub fn parse_oid(hash: Hash, hex: &str) -> Result<Oid, Refusal> {
 }
 
 /// The number a new change of this repository takes. Issues would share it.
-pub fn next_number(ctx: &QueryCtx, name: &str) -> Result<u64, Refusal> {
+pub fn next_number(ctx: &QueryCtx, name: &str) -> Result<u64, Error> {
     next(NUMBERS.get(ctx, &name.to_owned())?.unwrap_or(0))
 }
 
 /// The id the next system line forge posts into chat takes, unclaimed.
-pub fn peek_message(ctx: &QueryCtx) -> Result<String, Refusal> {
+pub fn peek_message(ctx: &QueryCtx) -> Result<String, Error> {
     Ok(message_id(next_message_number(ctx)?))
 }
 
 /// Claims the next id of a system line forge posts into chat.
-pub fn next_message(ctx: &ExecCtx) -> Result<String, Refusal> {
+pub fn next_message(ctx: &ExecCtx) -> Result<String, Error> {
     let n = next_message_number(ctx)?;
     MESSAGES.put(ctx, &n);
     Ok(message_id(n))
 }
 
-fn next_message_number(ctx: &QueryCtx) -> Result<u64, Refusal> {
+fn next_message_number(ctx: &QueryCtx) -> Result<u64, Error> {
     MESSAGES
         .get(ctx)?
         .unwrap_or(0)
         .checked_add(1)
-        .ok_or_else(|| Refusal::new(reason::EXHAUSTED, "system message counter exhausted"))
+        .ok_or_else(|| Error::new(code::EXHAUSTED, "system message counter exhausted"))
 }
 
 fn message_id(n: u64) -> String {
@@ -185,12 +176,12 @@ fn message_id(n: u64) -> String {
 }
 
 /// A counter one step on, refused rather than wrapped.
-pub fn next(n: u64) -> Result<u64, Refusal> {
+pub fn next(n: u64) -> Result<u64, Error> {
     n.checked_add(1)
-        .ok_or_else(|| Refusal::new(reason::EXHAUSTED, "counter exhausted"))
+        .ok_or_else(|| Error::new(code::EXHAUSTED, "counter exhausted"))
 }
 
-pub fn load_change(ctx: &QueryCtx, repo: &str, n: u64) -> Result<Change, Refusal> {
+pub fn load_change(ctx: &QueryCtx, repo: &str, n: u64) -> Result<Change, Error> {
     CHANGES
         .get(ctx, &(repo.to_owned(), n))?
         .ok_or_else(|| not_found(format!("no change {repo}#{n}")))
@@ -199,7 +190,7 @@ pub fn load_change(ctx: &QueryCtx, repo: &str, n: u64) -> Result<Change, Refusal
 /// Stores the change and keeps [`INVOLVED`] in step with it: its author and
 /// every requested reviewer are involved; a reviewer taken off the request
 /// stays involved only if they reviewed it. A new change claims its number.
-pub fn save_change(ctx: &ExecCtx, repo: &str, change: &Change) -> Result<(), Refusal> {
+pub fn save_change(ctx: &ExecCtx, repo: &str, change: &Change) -> Result<(), Error> {
     let row = (repo.to_owned(), change.n);
     match CHANGES.get(ctx, &row)? {
         None => NUMBERS.put(ctx, &repo.to_owned(), &change.n),
@@ -244,7 +235,7 @@ pub fn save_review(ctx: &ExecCtx, repo: &str, n: u64, review: &Review) {
     involve(ctx, &review.author, repo, n);
 }
 
-pub fn load_review(ctx: &QueryCtx, repo: &str, n: u64, id: u64) -> Result<Review, Refusal> {
+pub fn load_review(ctx: &QueryCtx, repo: &str, n: u64, id: u64) -> Result<Review, Error> {
     REVIEWS
         .get(ctx, &(repo.to_owned(), n, id))?
         .ok_or_else(|| storage("authored review missing"))
@@ -254,8 +245,8 @@ pub fn load_review(ctx: &QueryCtx, repo: &str, n: u64, id: u64) -> Result<Review
 mod tests {
     use super::*;
     use crate::contract::{ChangeState, ReviewCounts};
-    use abi::{Cause, Env, Origin};
     use guest::MockHost;
+    use guest::{Cause, Env, Origin};
 
     fn change(n: u64) -> Change {
         Change {
@@ -287,11 +278,11 @@ mod tests {
     #[test]
     fn changes_across_repositories_list_by_name() {
         let ctx = MockHost::default().exec(Env {
-            network: vec![],
+            chain_id: vec![],
             height: 1,
             time: 1,
-            me: crate::PROGRAM.into(),
-            origin: Origin::System,
+            module: crate::MODULE.into(),
+            origin: Origin::Root,
             cause: Cause::Direct,
         });
         for (repo, n) in [("zz", 1), ("abc", 2), ("ab", 1), ("abc", 1)] {

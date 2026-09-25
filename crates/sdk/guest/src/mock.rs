@@ -1,6 +1,6 @@
 //! The host a native test runs a module over: maps for state and blobs, and
 //! what the module sent (`output`, `response`, `emissions`, `events`) kept
-//! for the test to read. Sibling programs answer through `siblings`;
+//! for the test to read. Sibling modules answer through `siblings`;
 //! signatures verify through `verifier` (none set: verification is refused).
 //! A `MockHost` is a shared handle: the contexts made over it and the test
 //! see one host.
@@ -10,27 +10,27 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use abi::{
-    Blob, BlobHeader, BlobId, CryptoOp, CryptoReply, Entry, Env, HashKind, HostOp, HostReply,
-    ItemRef, Message, ProgramId, Refusal, Scan, Scheme, reason,
+    Blob, BlobHeader, BlobId, CryptoOp, CryptoReply, Entry, HashKind, HostOp, HostReply, Message,
+    Scheme,
 };
 use sha1::Digest as _;
 
-use crate::{ExecCtx, QueryCtx};
+use crate::{Env, Error, ExecCtx, ModuleId, Order, QueryCtx, Range, code};
 
-pub type Sibling = Box<dyn Fn(&[u8]) -> Result<Vec<u8>, Refusal>>;
+pub type Sibling = Box<dyn Fn(&[u8]) -> Result<Vec<u8>, Error>>;
 pub type Verifier = Box<dyn Fn(Scheme, &[u8], &[u8], &[u8], &[u8]) -> bool>;
 
 #[derive(Default)]
 pub struct MockState {
     pub state: BTreeMap<Vec<u8>, Vec<u8>>,
     pub blobs: BTreeMap<BlobId, Blob>,
-    /// The last `output`.
+    /// The last `set_return_data`.
     pub output: Vec<u8>,
     /// The last query's response.
     pub response: Vec<u8>,
     pub emissions: Vec<Message>,
     pub events: Vec<Vec<u8>>,
-    pub siblings: BTreeMap<ProgramId, Sibling>,
+    pub siblings: BTreeMap<ModuleId, Sibling>,
     pub verifier: Option<Verifier>,
 }
 
@@ -69,7 +69,7 @@ impl MockHost {
     /// check every module's harness shares: a rule checks before it
     /// writes, so a refusal needs no rollback.
     #[track_caller]
-    pub fn attempt<T>(&self, write: impl FnOnce() -> Result<T, Refusal>) -> Result<T, Refusal> {
+    pub fn attempt<T>(&self, write: impl FnOnce() -> Result<T, Error>) -> Result<T, Error> {
         let before = self.written();
         let result = write();
         if result.is_err() {
@@ -83,10 +83,7 @@ impl MockHost {
 
     /// [`MockHost::attempt`] a write that must refuse: its refusal.
     #[track_caller]
-    pub fn refused<T: std::fmt::Debug>(
-        &self,
-        write: impl FnOnce() -> Result<T, Refusal>,
-    ) -> Refusal {
+    pub fn refused<T: std::fmt::Debug>(&self, write: impl FnOnce() -> Result<T, Error>) -> Error {
         self.attempt(write).expect_err("the write was refused")
     }
 
@@ -118,11 +115,11 @@ impl MockHost {
             let sibling = self.borrow_mut().siblings.remove(&program);
             return HostReply::Query(match sibling {
                 Some(sibling) => {
-                    let answer = sibling(&request);
+                    let answer = sibling(&request).map_err(abi::Refusal::from);
                     self.borrow_mut().siblings.insert(program, sibling);
                     answer
                 }
-                None => Err(Refusal::new(reason::UNKNOWN_PROGRAM, program)),
+                None => Err(abi::Refusal::new(code::UNKNOWN_PROGRAM, program)),
             });
         }
         let mut mock = self.borrow_mut();
@@ -131,7 +128,7 @@ impl MockHost {
                 HostReply::Value(mock.state.get(&key).cloned())
             }
             HostOp::Scan(scan) | HostOp::CommittedScan(scan) => {
-                HostReply::Entries(mock.scan_state(&scan))
+                HostReply::Entries(mock.scan_state(&scan.into()))
             }
             HostOp::BlobGet(id) => HostReply::Blob(mock.blobs.get(&id).cloned()),
             HostOp::BlobStat(id) => {
@@ -161,8 +158,8 @@ impl MockHost {
                 Some(verify) => HostReply::Crypto(CryptoReply::Verified(verify(
                     scheme, &key, &namespace, &message, &signature,
                 ))),
-                None => HostReply::Refused(Refusal::new(
-                    reason::UNSUPPORTED,
+                None => HostReply::Refused(abi::Refusal::new(
+                    code::UNSUPPORTED,
                     "MockHost verifies nothing until a verifier is set",
                 )),
             },
@@ -179,11 +176,11 @@ impl MockHost {
                     mock.blobs.insert(id, Blob { kind, body });
                     HostReply::BlobId(id)
                 }
-                Err(refusal) => HostReply::Refused(refusal),
+                Err(error) => HostReply::Refused(error.into()),
             },
             HostOp::Emit(message) => {
                 mock.emissions.push(message);
-                HostReply::Item(ItemRef {
+                HostReply::Item(abi::ItemRef {
                     source: String::new(),
                     item: mock.emissions.len() as u64,
                 })
@@ -206,21 +203,21 @@ impl MockHost {
 }
 
 impl MockState {
-    fn scan_state(&self, scan: &Scan) -> Vec<Entry> {
-        let admitted = self
-            .state
-            .iter()
-            .filter(|(key, _)| scan.admits(key))
-            .map(|(key, value)| Entry {
-                key: key.clone(),
-                value: value.clone(),
-            });
-        let ordered: Vec<Entry> = if scan.reverse {
+    fn scan_state(&self, range: &Range) -> Vec<Entry> {
+        let admitted =
+            self.state
+                .iter()
+                .filter(|(key, _)| range.admits(key))
+                .map(|(key, value)| Entry {
+                    key: key.clone(),
+                    value: value.clone(),
+                });
+        let ordered: Vec<Entry> = if range.order == Order::Descending {
             admitted.rev().collect()
         } else {
             admitted.collect()
         };
-        match scan.limit {
+        match range.limit {
             Some(limit) => ordered.into_iter().take(limit as usize).collect(),
             None => ordered,
         }
@@ -228,11 +225,11 @@ impl MockState {
 }
 
 /// The host's framing: `<kind> <len>\0<body>`, hashed whole.
-pub fn blob_id(hash: HashKind, kind: &str, body: &[u8]) -> Result<BlobId, Refusal> {
+pub fn blob_id(hash: HashKind, kind: &str, body: &[u8]) -> Result<BlobId, Error> {
     let kind_is_a_word = !kind.is_empty() && !kind.contains([' ', '\0']);
     if !kind_is_a_word {
-        return Err(Refusal::new(
-            reason::INVALID_INPUT,
+        return Err(Error::new(
+            code::INVALID_INPUT,
             "a blob kind is one non-empty word without spaces or NUL",
         ));
     }

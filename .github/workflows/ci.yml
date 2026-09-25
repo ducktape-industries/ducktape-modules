@@ -33,7 +33,7 @@ jobs:
       # the founding suite runs `make wasm-programs` itself
       - run: cargo test --locked --workspace --no-fail-fast
       - run: cargo clippy --locked --workspace --tests --no-deps -- -D warnings
-      - run: make program-wasm-check CARGO="cargo --locked"
+      - run: make module-wasm-check CARGO="cargo --locked"
       - run: make view-wasm-check CARGO="cargo --locked"
       - run: make wasm-views CARGO="cargo --locked"
       - run: make wasm-reproducible CARGO="cargo --locked"

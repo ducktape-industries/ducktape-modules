@@ -4,17 +4,17 @@ edition.workspace = true
 version.workspace = true
 
 # The types and rules are always built and run natively over `guest::MockHost`;
-# `forge-view` links them with `program` off. `program` adds its wasm exports
+# `forge-view` links them with `module` off. `module` adds its wasm exports
 # (`guest::export!`), which only its own wasm build turns on.
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [features]
-program = []
-# `view` adds the marker a view names this program by.
+module = []
+# `view` adds the marker a view names this module by.
 view = ["dep:ducktape-view-guest"]
 # `describe` makes this crate\'s wasm build the `ducktape.describe` module:
-# the `describe` export alone, no program, no imports.
+# the `describe` export alone, no module, no imports.
 describe = []
 
 [dependencies]

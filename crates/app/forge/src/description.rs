@@ -1,12 +1,12 @@
 //! [`describe`]: an op as a person reads it, a title and its fields. The
-//! source of the `ducktape.describe` module this program ships
+//! source of the `ducktape.describe` module this module ships
 //! (`make wasm-describes`); people show as their accounts.
 use describe::{Description, Value, field};
 
 use crate::{Op, Principal, Revision, Verdict};
 
 /// An op as a person reads it: a title and its fields. The source of the
-/// `ducktape.describe` module this program ships (`make wasm-describes`).
+/// `ducktape.describe` module this module ships (`make wasm-describes`).
 pub fn describe(op: &Op) -> Description {
     let text = |bytes: &[u8]| Value::Text(String::from_utf8_lossy(bytes).into_owned());
     let revision = |revision: &Revision| match revision {

@@ -5,10 +5,10 @@ use common::*;
 fn founding_requires_bounds_and_ops_require_a_signer() {
     let sandbox = MemorySandbox::default();
     let unfounded = Forge::init(&sandbox.exec(1), b"").unwrap_err();
-    assert_eq!(unfounded.reason, reason::INVALID_INPUT);
+    assert_eq!(unfounded.code, code::INVALID_INPUT);
     assert!(
         unfounded
-            .sentence
+            .message
             .starts_with("forge: Bounds did not decode:"),
         "{unfounded}"
     );
@@ -18,12 +18,12 @@ fn founding_requires_bounds_and_ops_require_a_signer() {
         repo: "r".into(),
         hash: HashKind::Sha1,
     };
-    for origin in [Origin::System, Origin::Program("chat".into())] {
+    for origin in [Origin::Root, Origin::Module("chat".into())] {
         let ctx = sandbox.forge.exec(env_at(origin, 1, TIME));
         let refusal = sandbox
             .forge
             .refused(|| Forge::execute(&ctx, create.clone()));
-        assert_eq!(refusal.reason, reason::UNAUTHORIZED);
+        assert_eq!(refusal.code, code::UNAUTHORIZED);
     }
 }
 
@@ -39,7 +39,7 @@ fn create_names_an_owner_and_refuses_bad_or_taken_names() {
             hash: HashKind::Sha1,
         },
     );
-    assert_eq!(again.unwrap_err().reason, reason::ALREADY_EXISTS);
+    assert_eq!(again.unwrap_err().code, code::ALREADY_EXISTS);
     for bad in ["", "a/b", ".hidden", "x.git", "sp ace"] {
         let refused = act(
             &mut sandbox,
@@ -49,17 +49,13 @@ fn create_names_an_owner_and_refuses_bad_or_taken_names() {
                 hash: HashKind::Sha1,
             },
         );
-        assert_eq!(
-            refused.unwrap_err().reason,
-            reason::INVALID_INPUT,
-            "{bad:?}"
-        );
+        assert_eq!(refused.unwrap_err().code, code::INVALID_INPUT, "{bad:?}");
     }
     let listed: Reply = abi::decode(
         &ask(
             &sandbox,
             &Query::Repos {
-                page: Page::first(128),
+                page: PageRequest::first(128),
             },
         )
         .unwrap(),
@@ -110,7 +106,7 @@ fn only_the_owner_and_granted_writers_push() {
     let commands = [(zero, tip, "refs/heads/main")];
 
     let stranger = push(&mut sandbox, STRANGER, "project", &commands, &pack_bytes);
-    assert_eq!(stranger.unwrap_err().reason, reason::UNAUTHORIZED);
+    assert_eq!(stranger.unwrap_err().code, code::UNAUTHORIZED);
     assert_eq!(sandbox.blob_count(), 0);
 
     let grant_by_stranger = act(
@@ -121,7 +117,7 @@ fn only_the_owner_and_granted_writers_push() {
             principal: person(WRITER),
         },
     );
-    assert_eq!(grant_by_stranger.unwrap_err().reason, reason::UNAUTHORIZED);
+    assert_eq!(grant_by_stranger.unwrap_err().code, code::UNAUTHORIZED);
 
     act(
         &mut sandbox,
@@ -145,7 +141,7 @@ fn only_the_owner_and_granted_writers_push() {
     )
     .unwrap();
     let revoked = push(&mut sandbox, WRITER, "project", &commands, &pack_bytes);
-    assert_eq!(revoked.unwrap_err().reason, reason::UNAUTHORIZED);
+    assert_eq!(revoked.unwrap_err().code, code::UNAUTHORIZED);
 }
 
 #[test]

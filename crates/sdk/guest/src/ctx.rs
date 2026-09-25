@@ -8,10 +8,12 @@
 use std::ops::Deref;
 
 use abi::{
-    Blob, BlobHeader, BlobId, CryptoOp, CryptoReply, Entry, Env, HashKind, HostOp, HostReply,
-    ItemRef, Message, ProgramId, Refusal, Root, Scan, Scheme,
+    Blob, BlobHeader, BlobId, CryptoOp, CryptoReply, Entry, HashKind, HostOp, HostReply, Message,
+    Root, Scheme,
 };
 use borsh::{BorshDeserialize, BorshSerialize};
+
+use crate::{Env, Error, MessageId, ModuleId, Range};
 
 /// A query's context: the env and the reads. It has no write methods.
 pub struct QueryCtx {
@@ -21,8 +23,8 @@ pub struct QueryCtx {
 }
 
 /// An execute's (or init's) context: every read of [`QueryCtx`] and the
-/// writes: state, blobs, and what leaves the module (`emit`, `call`,
-/// `event`, `output`).
+/// writes: state, blobs, and what leaves the module (`send`, `call`,
+/// `event`, `set_return_data`).
 pub struct ExecCtx {
     reads: QueryCtx,
 }
@@ -94,7 +96,7 @@ impl ExecCtx {
 }
 
 impl QueryCtx {
-    /// Who called, at what height and time, on which network.
+    /// Who called, at what height and time, on which chain.
     pub fn env(&self) -> &Env {
         &self.env
     }
@@ -120,8 +122,8 @@ impl QueryCtx {
         }
     }
 
-    pub fn scan(&self, scan: Scan) -> Vec<Entry> {
-        match self.host(HostOp::Scan(scan)) {
+    pub fn scan(&self, range: Range) -> Vec<Entry> {
+        match self.host(HostOp::Scan(range.into())) {
             HostReply::Entries(entries) => entries,
             other => protocol("entries", other),
         }
@@ -134,19 +136,21 @@ impl QueryCtx {
         }
     }
 
-    pub fn committed_scan(&self, scan: Scan) -> Vec<Entry> {
-        match self.host(HostOp::CommittedScan(scan)) {
+    pub fn committed_scan(&self, range: Range) -> Vec<Entry> {
+        match self.host(HostOp::CommittedScan(range.into())) {
             HostReply::Entries(entries) => entries,
             other => protocol("entries", other),
         }
     }
 
-    pub fn record<T: BorshDeserialize>(&self, key: impl AsRef<[u8]>) -> Result<Option<T>, Refusal> {
-        self.get(key).map(|bytes| abi::decode(&bytes)).transpose()
+    pub fn record<T: BorshDeserialize>(&self, key: impl AsRef<[u8]>) -> Result<Option<T>, Error> {
+        self.get(key)
+            .map(|bytes| abi::decode(&bytes).map_err(Error::from))
+            .transpose()
     }
 
-    pub fn records<T: BorshDeserialize>(&self, scan: Scan) -> Result<Vec<(Vec<u8>, T)>, Refusal> {
-        self.scan(scan)
+    pub fn records<T: BorshDeserialize>(&self, range: Range) -> Result<Vec<(Vec<u8>, T)>, Error> {
+        self.scan(range)
             .into_iter()
             .map(|entry| Ok((entry.key, abi::decode(&entry.value)?)))
             .collect()
@@ -173,35 +177,35 @@ impl QueryCtx {
         }
     }
 
-    pub fn root(&self, program: impl Into<ProgramId>) -> Option<Root> {
-        match self.host(HostOp::Root(program.into())) {
+    pub fn root(&self, module: impl Into<ModuleId>) -> Option<Root> {
+        match self.host(HostOp::Root(module.into())) {
             HostReply::Root(root) => root,
             other => protocol("root", other),
         }
     }
 
-    /// Another program's answer to `request`, raw.
+    /// Another module's answer to `request`, raw.
     pub fn query(
         &self,
-        program: impl Into<ProgramId>,
+        module: impl Into<ModuleId>,
         request: impl Into<Vec<u8>>,
-    ) -> Result<Vec<u8>, Refusal> {
+    ) -> Result<Vec<u8>, Error> {
         match self.host(HostOp::Query {
-            program: program.into(),
+            program: module.into(),
             request: request.into(),
         }) {
-            HostReply::Query(answer) => answer,
+            HostReply::Query(answer) => answer.map_err(Error::from),
             other => protocol("query answer", other),
         }
     }
 
-    /// Another program's answer to `request`, borsh both ways.
+    /// Another module's answer to `request`, borsh both ways.
     pub fn ask<Q: BorshSerialize, R: BorshDeserialize>(
         &self,
-        program: impl Into<ProgramId>,
+        module: impl Into<ModuleId>,
         request: &Q,
-    ) -> Result<R, Refusal> {
-        abi::decode(&self.query(program, abi::encode(request))?)
+    ) -> Result<R, Error> {
+        Ok(abi::decode(&self.query(module, abi::encode(request))?)?)
     }
 
     pub fn sha256(&self, bytes: impl Into<Vec<u8>>) -> [u8; 32] {
@@ -218,7 +222,7 @@ impl QueryCtx {
         namespace: impl Into<Vec<u8>>,
         message: impl Into<Vec<u8>>,
         signature: impl Into<Vec<u8>>,
-    ) -> Result<bool, Refusal> {
+    ) -> Result<bool, Error> {
         match self.host(HostOp::Crypto(CryptoOp::Verify {
             scheme,
             key: key.into(),
@@ -227,7 +231,7 @@ impl QueryCtx {
             signature: signature.into(),
         })) {
             HostReply::Crypto(CryptoReply::Verified(valid)) => Ok(valid),
-            HostReply::Refused(refusal) => Err(refusal),
+            HostReply::Refused(refusal) => Err(refusal.into()),
             other => protocol("verdict", other),
         }
     }
@@ -259,40 +263,40 @@ impl ExecCtx {
         hash: HashKind,
         kind: impl Into<String>,
         body: impl Into<Vec<u8>>,
-    ) -> Result<BlobId, Refusal> {
+    ) -> Result<BlobId, Error> {
         match self.host(HostOp::BlobPut {
             hash,
             kind: kind.into(),
             body: body.into(),
         }) {
             HostReply::BlobId(id) => Ok(id),
-            HostReply::Refused(refusal) => Err(refusal),
+            HostReply::Refused(refusal) => Err(refusal.into()),
             other => protocol("blob id", other),
         }
     }
 
     /// Sends `payload` to `target`, delivered after this block; no reply.
-    pub fn emit(&self, target: impl Into<ProgramId>, payload: impl Into<Vec<u8>>) -> ItemRef {
-        self.send(target, payload, false)
+    pub fn send(&self, target: impl Into<ModuleId>, payload: impl Into<Vec<u8>>) -> MessageId {
+        self.message(target, payload, false)
     }
 
-    /// Sends `payload` to `target`; its outcome comes back as a completion.
-    pub fn call(&self, target: impl Into<ProgramId>, payload: impl Into<Vec<u8>>) -> ItemRef {
-        self.send(target, payload, true)
+    /// Sends `payload` to `target`; its outcome comes back as a reply.
+    pub fn call(&self, target: impl Into<ModuleId>, payload: impl Into<Vec<u8>>) -> MessageId {
+        self.message(target, payload, true)
     }
 
-    fn send(
+    fn message(
         &self,
-        target: impl Into<ProgramId>,
+        target: impl Into<ModuleId>,
         payload: impl Into<Vec<u8>>,
         reply: bool,
-    ) -> ItemRef {
+    ) -> MessageId {
         match self.host(HostOp::Emit(Message {
             target: target.into(),
             payload: payload.into(),
             reply,
         })) {
-            HostReply::Item(item) => item,
+            HostReply::Item(item) => item.into(),
             other => protocol("item", other),
         }
     }
@@ -302,7 +306,7 @@ impl ExecCtx {
     }
 
     /// The execute's return value (the last one set wins).
-    pub fn output(&self, bytes: impl Into<Vec<u8>>) {
+    pub fn set_return_data(&self, bytes: impl Into<Vec<u8>>) {
         self.done(HostOp::Output(bytes.into()))
     }
 }

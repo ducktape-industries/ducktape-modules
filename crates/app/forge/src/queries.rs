@@ -1,12 +1,12 @@
 //! The repository answers [`Forge::query`](crate::Forge) names, and git's
 //! own bytes for a git client.
 
-use abi::Refusal;
 use gitcore::wire::receive::advertise_refs;
 use gitcore::wire::smart_http_service_header;
 use gitcore::wire::upload::{
     Command, capability_advertisement, fetch, ls_refs_response, parse_command,
 };
+use guest::Error;
 use guest::{QueryCtx, stale};
 use store::Listing;
 
@@ -18,7 +18,7 @@ use crate::state::{ACTIVITY, REFS, load_bounds, load_refs, load_repo, repo_hash,
 const AGENT: &[u8] = b"ducktape-forge";
 
 /// Repositories, the most recently active first.
-pub(crate) fn repos(ctx: &QueryCtx, listing: &Listing) -> Result<PageReply<RepoInfo>, Refusal> {
+pub(crate) fn repos(ctx: &QueryCtx, listing: &Listing) -> Result<PageResponse<RepoInfo>, Error> {
     ACTIVITY.page_of(ctx, &(), listing)?.try_map(|(_, name)| {
         Ok(RepoInfo {
             repo: load_repo(ctx, &name)?,
@@ -32,7 +32,7 @@ pub(crate) fn refs(
     ctx: &QueryCtx,
     name: &str,
     listing: &Listing,
-) -> Result<PageReply<RefInfo>, Refusal> {
+) -> Result<PageResponse<RefInfo>, Error> {
     let hash = repo_hash(&load_repo(ctx, name)?);
     REFS.page_of(ctx, &name.to_owned(), listing)?
         .try_map(|((_, name), bytes)| {
@@ -46,7 +46,7 @@ pub(crate) fn refs(
 
 /// A forge listing can be rewritten by a push, so a cursor is good for the
 /// height that answered it and no other.
-pub(crate) fn listing(page: Page, scope: Vec<u8>, height: u64) -> Result<Listing, Refusal> {
+pub(crate) fn listing(page: PageRequest, scope: Vec<u8>, height: u64) -> Result<Listing, Error> {
     let listing = page.listing(scope, height)?;
     if listing.cursor_height.is_some_and(|h| h != height) {
         return Err(stale("cursor height changed; restart the listing"));
@@ -54,7 +54,7 @@ pub(crate) fn listing(page: Page, scope: Vec<u8>, height: u64) -> Result<Listing
     Ok(listing)
 }
 
-pub(crate) fn advertise(ctx: &QueryCtx, name: &str, service: Service) -> Result<Vec<u8>, Refusal> {
+pub(crate) fn advertise(ctx: &QueryCtx, name: &str, service: Service) -> Result<Vec<u8>, Error> {
     let repo = load_repo(ctx, name)?;
     let hash = repo_hash(&repo);
     let body = match service {
@@ -84,7 +84,7 @@ pub(crate) fn advertise(ctx: &QueryCtx, name: &str, service: Service) -> Result<
     Ok(body)
 }
 
-pub(crate) fn upload(ctx: &QueryCtx, name: &str, request: &[u8]) -> Result<Vec<u8>, Refusal> {
+pub(crate) fn upload(ctx: &QueryCtx, name: &str, request: &[u8]) -> Result<Vec<u8>, Error> {
     let repo = load_repo(ctx, name)?;
     let bounds = load_bounds(ctx)?;
     let hash = repo_hash(&repo);

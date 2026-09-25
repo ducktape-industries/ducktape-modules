@@ -1,6 +1,6 @@
-//! forge: a git server as a ducktape program, `gitcore` (objects, packs,
+//! forge: a git server as a ducktape module, `gitcore` (objects, packs,
 //! walks, diffs, the wire) over `store`. The [`Forge`] module runs natively
-//! over `guest::MockHost` (tests, fixtures); the `program` feature adds its
+//! over `guest::MockHost` (tests, fixtures); the `module` feature adds its
 //! wasm exports.
 //!
 //! A write is an [`Op`] run as a [`Principal`] (an account: the signer resolved
@@ -42,7 +42,7 @@ pub mod view;
 
 pub use contract::*;
 pub use description::describe;
-pub use ops::PROGRAM;
+pub use ops::MODULE;
 pub use program::{Forge, RawReply};
 
 describe::export!(Op, describe);

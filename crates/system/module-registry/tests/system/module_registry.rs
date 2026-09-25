@@ -8,7 +8,7 @@ fn a_published_program_is_scheduled_by_the_authority_and_seated_at_its_height() 
         let output = net
             .apply(
                 &public(7),
-                module_registry::PROGRAM,
+                module_registry::MODULE,
                 &module_registry::Op::Publish {
                     body: program("identity"),
                 },
@@ -23,7 +23,7 @@ fn a_published_program_is_scheduled_by_the_authority_and_seated_at_its_height() 
         let stranger = net
             .refuse(
                 &public(7),
-                module_registry::PROGRAM,
+                module_registry::MODULE,
                 &module_registry::Op::Schedule(module_registry::Scheduled {
                     height: net.height + 3,
                     change: module_registry::Change::Set(entry.clone()),
@@ -33,7 +33,7 @@ fn a_published_program_is_scheduled_by_the_authority_and_seated_at_its_height() 
         assert_eq!(stranger, reason::UNAUTHORIZED);
         let unpublished = net
             .as_authority(
-                module_registry::PROGRAM,
+                module_registry::MODULE,
                 &module_registry::Op::Schedule(module_registry::Scheduled {
                     height: net.height + 3,
                     change: module_registry::Change::Set(module_registry::Entry {
@@ -47,7 +47,7 @@ fn a_published_program_is_scheduled_by_the_authority_and_seated_at_its_height() 
         assert_eq!(refusal_of(&unpublished), reason::NOT_FOUND);
         let past = net
             .as_authority(
-                module_registry::PROGRAM,
+                module_registry::MODULE,
                 &module_registry::Op::Schedule(module_registry::Scheduled {
                     height: net.height,
                     change: module_registry::Change::Set(entry.clone()),
@@ -58,7 +58,7 @@ fn a_published_program_is_scheduled_by_the_authority_and_seated_at_its_height() 
         let lands_at = net.height + 6;
         let scheduled = net
             .as_authority(
-                module_registry::PROGRAM,
+                module_registry::MODULE,
                 &module_registry::Op::Schedule(module_registry::Scheduled {
                     height: lands_at,
                     change: module_registry::Change::Set(entry.clone()),
@@ -68,7 +68,7 @@ fn a_published_program_is_scheduled_by_the_authority_and_seated_at_its_height() 
         output_of(&scheduled);
         let taken = net
             .as_authority(
-                module_registry::PROGRAM,
+                module_registry::MODULE,
                 &module_registry::Op::Schedule(module_registry::Scheduled {
                     height: lands_at,
                     change: module_registry::Change::Remove("identity2".into()),
@@ -78,9 +78,9 @@ fn a_published_program_is_scheduled_by_the_authority_and_seated_at_its_height() 
         assert_eq!(refusal_of(&taken), reason::ALREADY_EXISTS);
         let module_registry::Reply::Scheduled(pending) = net
             .ask(
-                module_registry::PROGRAM,
+                module_registry::MODULE,
                 &module_registry::Query::Scheduled {
-                    page: Page::default(),
+                    page: PageRequest::default(),
                 },
             )
             .await
@@ -98,7 +98,7 @@ fn a_published_program_is_scheduled_by_the_authority_and_seated_at_its_height() 
         );
         let module_registry::Reply::Programs(later) = net
             .ask(
-                module_registry::PROGRAM,
+                module_registry::MODULE,
                 &module_registry::Query::At(lands_at),
             )
             .await
@@ -129,7 +129,7 @@ fn a_published_program_is_scheduled_by_the_authority_and_seated_at_its_height() 
             entry: Some(seated),
         } = net
             .ask(
-                module_registry::PROGRAM,
+                module_registry::MODULE,
                 &module_registry::Query::Program("identity2".into()),
             )
             .await
@@ -141,7 +141,7 @@ fn a_published_program_is_scheduled_by_the_authority_and_seated_at_its_height() 
         let removal_at = net.height + 5;
         let removal = net
             .as_authority(
-                module_registry::PROGRAM,
+                module_registry::MODULE,
                 &module_registry::Op::Schedule(module_registry::Scheduled {
                     height: removal_at,
                     change: module_registry::Change::Remove("identity2".into()),
@@ -151,7 +151,7 @@ fn a_published_program_is_scheduled_by_the_authority_and_seated_at_its_height() 
         output_of(&removal);
         let cancelled = net
             .as_authority(
-                module_registry::PROGRAM,
+                module_registry::MODULE,
                 &module_registry::Op::Cancel {
                     height: removal_at,
                     program: "identity2".into(),
@@ -164,7 +164,7 @@ fn a_published_program_is_scheduled_by_the_authority_and_seated_at_its_height() 
         let removal_at = net.height + 3;
         let removal = net
             .as_authority(
-                module_registry::PROGRAM,
+                module_registry::MODULE,
                 &module_registry::Op::Schedule(module_registry::Scheduled {
                     height: removal_at,
                     change: module_registry::Change::Remove("identity2".into()),
@@ -185,7 +185,7 @@ fn schedule_pages_and_missing_programs_report_the_answering_height() {
         let output = net
             .apply(
                 &public(7),
-                module_registry::PROGRAM,
+                module_registry::MODULE,
                 &module_registry::Op::Publish {
                     body: program("identity"),
                 },
@@ -195,7 +195,7 @@ fn schedule_pages_and_missing_programs_report_the_answering_height() {
         for program in ["z", "a", "m"] {
             let receipt = net
                 .as_authority(
-                    module_registry::PROGRAM,
+                    module_registry::MODULE,
                     &module_registry::Op::Schedule(module_registry::Scheduled {
                         height: 100,
                         change: module_registry::Change::Set(module_registry::Entry {
@@ -213,9 +213,9 @@ fn schedule_pages_and_missing_programs_report_the_answering_height() {
         loop {
             let module_registry::Reply::Scheduled(reply) = net
                 .ask(
-                    module_registry::PROGRAM,
+                    module_registry::MODULE,
                     &module_registry::Query::Scheduled {
-                        page: Page {
+                        page: PageRequest {
                             after,
                             limit: Some(2),
                         },
@@ -239,7 +239,7 @@ fn schedule_pages_and_missing_programs_report_the_answering_height() {
         assert_eq!(programs, ["a", "m", "z"]);
         let reply: module_registry::Reply = net
             .ask(
-                module_registry::PROGRAM,
+                module_registry::MODULE,
                 &module_registry::Query::Program("missing".into()),
             )
             .await;

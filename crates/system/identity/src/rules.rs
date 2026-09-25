@@ -1,15 +1,14 @@
 // The rules: the signer resolved to its account, then the ops and queries.
 
-use abi::{Env, Origin, Scheme};
+use guest::{Env, Origin, Scheme};
 use guest::{
-    ExecCtx, QueryCtx, Refusal, already_exists, invalid, not_found, unauthorized, wrong_state,
+    Error, ExecCtx, QueryCtx, already_exists, invalid, not_found, unauthorized, wrong_state,
 };
 use module_registry::helpers;
 use store::{Item, Map, Set};
 
 use crate::{
-    Account, AccountNumber, Admission, CONSENT_NAMESPACE, Consent, Control, Key, Reference,
-    Standing,
+    Account, AccountNumber, Admission, CONSENT_NAMESPACE, Consent, Control, Key, Reference, Status,
 };
 
 pub(crate) const ACCOUNTS: Map<AccountNumber, Account> = Map::new("a/");
@@ -19,7 +18,7 @@ const GENERATION: Map<Vec<u8>, u64> = Map::new("g/");
 pub(crate) const CONTROLLED: Set<(AccountNumber, AccountNumber)> = Set::new("c/");
 const NEXT: Item<AccountNumber> = Item::new("next");
 
-pub(crate) fn account(ctx: &QueryCtx, number: AccountNumber) -> Result<Account, Refusal> {
+pub(crate) fn account(ctx: &QueryCtx, number: AccountNumber) -> Result<Account, Error> {
     ACCOUNTS
         .get(ctx, &number)?
         .ok_or_else(|| not_found(format!("account {number}")))
@@ -28,24 +27,24 @@ pub(crate) fn account(ctx: &QueryCtx, number: AccountNumber) -> Result<Account, 
 pub(crate) fn resolve(
     ctx: &QueryCtx,
     reference: &Reference,
-) -> Result<Option<AccountNumber>, Refusal> {
+) -> Result<Option<AccountNumber>, Error> {
     match reference {
         Reference::Account(number) => Ok(ACCOUNTS.has(ctx, number).then_some(*number)),
         Reference::Key(key) => OF_KEY.get(ctx, key),
     }
 }
 
-pub(crate) fn generation(ctx: &QueryCtx, key: &Vec<u8>) -> Result<u64, Refusal> {
+pub(crate) fn generation(ctx: &QueryCtx, key: &Vec<u8>) -> Result<u64, Error> {
     Ok(GENERATION.get(ctx, key)?.unwrap_or(0))
 }
 
-fn next_number(ctx: &ExecCtx) -> Result<AccountNumber, Refusal> {
+fn next_number(ctx: &ExecCtx) -> Result<AccountNumber, Error> {
     let number = NEXT.get(ctx)?.unwrap_or(1);
     NEXT.put(ctx, &(number + 1));
     Ok(number)
 }
 
-fn admit_key(ctx: &ExecCtx, key: &Vec<u8>, number: AccountNumber) -> Result<(), Refusal> {
+fn admit_key(ctx: &ExecCtx, key: &Vec<u8>, number: AccountNumber) -> Result<(), Error> {
     if OF_KEY.has(ctx, key) {
         return Err(already_exists("this key already belongs to an account"));
     }
@@ -54,7 +53,7 @@ fn admit_key(ctx: &ExecCtx, key: &Vec<u8>, number: AccountNumber) -> Result<(), 
     Ok(())
 }
 
-fn named(name: String) -> Result<String, Refusal> {
+fn named(name: String) -> Result<String, Error> {
     let name = name.trim().to_owned();
     if name.is_empty() {
         return Err(invalid("a name is not empty"));
@@ -62,7 +61,7 @@ fn named(name: String) -> Result<String, Refusal> {
     Ok(name)
 }
 
-pub(crate) fn create(ctx: &ExecCtx, name: String, scheme: Scheme) -> Result<(), Refusal> {
+pub(crate) fn create(ctx: &ExecCtx, name: String, scheme: Scheme) -> Result<(), Error> {
     let env = ctx.env();
     let signer = helpers::external(env)?;
     let number = next_number(ctx)?;
@@ -84,7 +83,7 @@ pub(crate) fn create(ctx: &ExecCtx, name: String, scheme: Scheme) -> Result<(), 
             updated_at: env.time,
         },
     );
-    ctx.output(abi::encode(&number));
+    ctx.set_return_data(abi::encode(&number));
     Ok(())
 }
 
@@ -93,7 +92,7 @@ pub(crate) fn add_key(
     scheme: Scheme,
     label: Option<String>,
     consent: Consent,
-) -> Result<(), Refusal> {
+) -> Result<(), Error> {
     let env = ctx.env();
     let signer = helpers::external(env)?;
     let mut account = account(ctx, consent.account)?;
@@ -109,7 +108,7 @@ pub(crate) fn add_key(
         return Err(unauthorized("the consent has expired"));
     }
     let admission = Admission {
-        network: env.network.clone(),
+        network: env.chain_id.clone(),
         scheme,
         key: signer.clone(),
         generation: generation(ctx, &signer)?,
@@ -139,7 +138,7 @@ pub(crate) fn add_key(
     Ok(())
 }
 
-pub(crate) fn remove_key(ctx: &ExecCtx, key: &Vec<u8>) -> Result<(), Refusal> {
+pub(crate) fn remove_key(ctx: &ExecCtx, key: &Vec<u8>) -> Result<(), Error> {
     let env = ctx.env();
     let signer = helpers::external(env)?;
     let mut account = account_of_key(ctx, &signer)?;
@@ -170,17 +169,17 @@ pub(crate) fn remove_key(ctx: &ExecCtx, key: &Vec<u8>) -> Result<(), Refusal> {
     Ok(())
 }
 
-fn account_of_key(ctx: &QueryCtx, key: &Vec<u8>) -> Result<Account, Refusal> {
+fn account_of_key(ctx: &QueryCtx, key: &Vec<u8>) -> Result<Account, Error> {
     let number = OF_KEY
         .get(ctx, key)?
         .ok_or_else(|| unauthorized("this key holds no account"))?;
     account(ctx, number)
 }
 
-fn acts_for(env: &Env, account: &Account) -> Result<(), Refusal> {
+fn acts_for(env: &Env, account: &Account) -> Result<(), Error> {
     let acts = match (&env.origin, &account.control) {
-        (Origin::External(key), Control::Keys(_)) => account.holds(key),
-        (Origin::Program(program), Control::Program { executor, .. }) => program == executor,
+        (Origin::Signed(key), Control::Keys(_)) => account.holds(key),
+        (Origin::Module(program), Control::Program { executor, .. }) => program == executor,
         _ => false,
     };
     if !acts {
@@ -192,7 +191,7 @@ fn acts_for(env: &Env, account: &Account) -> Result<(), Refusal> {
     Ok(())
 }
 
-pub(crate) fn set_name(ctx: &ExecCtx, number: AccountNumber, name: String) -> Result<(), Refusal> {
+pub(crate) fn set_name(ctx: &ExecCtx, number: AccountNumber, name: String) -> Result<(), Error> {
     let env = ctx.env();
     let mut account = account(ctx, number)?;
     acts_for(env, &account)?;
@@ -207,7 +206,7 @@ pub(crate) fn set_profile(
     number: AccountNumber,
     avatar: Option<abi::BlobId>,
     bio: Option<String>,
-) -> Result<(), Refusal> {
+) -> Result<(), Error> {
     let env = ctx.env();
     let mut account = account(ctx, number)?;
     acts_for(env, &account)?;
@@ -224,7 +223,7 @@ pub(crate) fn create_program(
     ctx: &ExecCtx,
     name: String,
     controller: AccountNumber,
-) -> Result<(), Refusal> {
+) -> Result<(), Error> {
     let env = ctx.env();
     let executor = helpers::program(env)?;
     let controlling = account(ctx, controller)?;
@@ -241,7 +240,7 @@ pub(crate) fn create_program(
             control: Control::Program {
                 executor,
                 controller,
-                standing: Standing::Active,
+                status: Status::Active,
             },
             avatar: None,
             bio: None,
@@ -249,21 +248,21 @@ pub(crate) fn create_program(
         },
     );
     CONTROLLED.insert(ctx, &(controller, number));
-    ctx.output(abi::encode(&number));
+    ctx.set_return_data(abi::encode(&number));
     Ok(())
 }
 
-pub(crate) fn set_standing(
+pub(crate) fn set_status(
     ctx: &ExecCtx,
     number: AccountNumber,
-    standing: Standing,
-) -> Result<(), Refusal> {
+    status: Status,
+) -> Result<(), Error> {
     let env = ctx.env();
     let program = helpers::program(env)?;
     let mut account = account(ctx, number)?;
     let Control::Program {
         executor,
-        standing: current,
+        status: current,
         ..
     } = &mut account.control
     else {
@@ -277,13 +276,13 @@ pub(crate) fn set_standing(
             "{program} does not execute account {number}"
         )));
     }
-    *current = standing;
+    *current = status;
     account.updated_at = env.time;
     ACCOUNTS.put(ctx, &number, &account);
     Ok(())
 }
 
-fn controller_of(account: &Account) -> Result<AccountNumber, Refusal> {
+fn controller_of(account: &Account) -> Result<AccountNumber, Error> {
     match &account.control {
         Control::Program { controller, .. } => Ok(*controller),
         Control::Keys(_) | Control::Revoked { .. } => Err(wrong_state(format!(
@@ -293,7 +292,7 @@ fn controller_of(account: &Account) -> Result<AccountNumber, Refusal> {
     }
 }
 
-fn controls(ctx: &QueryCtx, controlled: &Account) -> Result<AccountNumber, Refusal> {
+fn controls(ctx: &QueryCtx, controlled: &Account) -> Result<AccountNumber, Error> {
     let env = ctx.env();
     let controller = controller_of(controlled)?;
     acts_for(env, &account(ctx, controller)?)?;
@@ -304,7 +303,7 @@ pub(crate) fn transfer_control(
     ctx: &ExecCtx,
     number: AccountNumber,
     to: AccountNumber,
-) -> Result<(), Refusal> {
+) -> Result<(), Error> {
     let env = ctx.env();
     let mut account = account(ctx, number)?;
     let controller = controls(ctx, &account)?;
@@ -335,7 +334,7 @@ pub(crate) fn transfer_control(
     Ok(())
 }
 
-fn ancestry(ctx: &QueryCtx, mut number: AccountNumber) -> Result<Vec<AccountNumber>, Refusal> {
+fn ancestry(ctx: &QueryCtx, mut number: AccountNumber) -> Result<Vec<AccountNumber>, Error> {
     let mut ancestors = Vec::new();
     loop {
         let Control::Program { controller, .. } = account(ctx, number)?.control else {
@@ -346,7 +345,7 @@ fn ancestry(ctx: &QueryCtx, mut number: AccountNumber) -> Result<Vec<AccountNumb
     }
 }
 
-pub(crate) fn revoke(ctx: &ExecCtx, number: AccountNumber) -> Result<(), Refusal> {
+pub(crate) fn revoke(ctx: &ExecCtx, number: AccountNumber) -> Result<(), Error> {
     let env = ctx.env();
     let mut account = account(ctx, number)?;
     let controller = controls(ctx, &account)?;

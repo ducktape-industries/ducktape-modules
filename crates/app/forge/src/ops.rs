@@ -1,9 +1,9 @@
 //! The execute path: who acts, which op, and the repository ops (create,
 //! configure, grant, revoke, push). Change ops live in `changes`.
 
-use abi::{HashKind, Refusal};
 use gitcore::server::{Policy, RefUpdate};
-use gitcore::{Error, Limits, server};
+use gitcore::{Error as GitError, Limits, server};
+use guest::{Error, HashKind};
 use guest::{ExecCtx, QueryCtx, already_exists, capacity, decoded, invalid, unauthorized};
 
 use crate::contract::{Bounds, MAX_PATH_BYTES, Principal, Repo, Settings, valid_repo_name};
@@ -13,10 +13,10 @@ use crate::state::{
     save_bounds, save_repo, set_ref, storage,
 };
 
-pub const PROGRAM: &str = "forge";
+pub const MODULE: &str = "forge";
 
-pub(crate) fn init(ctx: &ExecCtx, params: &[u8]) -> Result<(), Refusal> {
-    let bounds: Bounds = decoded(PROGRAM, "Bounds", params)?;
+pub(crate) fn init(ctx: &ExecCtx, params: &[u8]) -> Result<(), Error> {
+    let bounds: Bounds = decoded(MODULE, "Bounds", params)?;
     let usable = bounds.page_size > 0
         && bounds.log_walk > 0
         && bounds.tree_walk > 0
@@ -32,10 +32,10 @@ pub(crate) fn init(ctx: &ExecCtx, params: &[u8]) -> Result<(), Refusal> {
     Ok(())
 }
 
-/// Forge is written by people (an account), never by a program or the
+/// Forge is written by people (an account), never by a module or the
 /// system. A key that holds no account never gets here: identity's
 /// [`principal_of`](identity::principal_of) refuses it.
-pub(crate) fn person(principal: &Principal) -> Result<&Principal, Refusal> {
+pub(crate) fn person(principal: &Principal) -> Result<&Principal, Error> {
     if !principal.is_person() {
         return Err(unauthorized("a repository op is signed by a person"));
     }
@@ -43,7 +43,7 @@ pub(crate) fn person(principal: &Principal) -> Result<&Principal, Refusal> {
 }
 
 /// Every accepted op marks its repository active at this height.
-pub(crate) fn touch(ctx: &ExecCtx, name: &str, height: u64) -> Result<(), Refusal> {
+pub(crate) fn touch(ctx: &ExecCtx, name: &str, height: u64) -> Result<(), Error> {
     let mut repo = load_repo(ctx, name)?;
     repo.last_activity = height;
     save_repo(ctx, name, &repo)
@@ -54,7 +54,7 @@ pub(crate) fn create(
     actor: &Principal,
     name: &str,
     hash: HashKind,
-) -> Result<(), Refusal> {
+) -> Result<(), Error> {
     if !valid_repo_name(name) {
         return Err(invalid(format!("{name:?} is not a repository name")));
     }
@@ -76,7 +76,7 @@ pub(crate) fn configure(
     actor: &Principal,
     name: &str,
     settings: Settings,
-) -> Result<(), Refusal> {
+) -> Result<(), Error> {
     let mut repo = load_repo(ctx, name)?;
     require_owner(&repo, actor)?;
     let head_is_a_ref =
@@ -93,7 +93,7 @@ pub(crate) fn grant(
     actor: &Principal,
     name: &str,
     principal: Principal,
-) -> Result<(), Refusal> {
+) -> Result<(), Error> {
     require_owner(&load_repo(ctx, name)?, actor)?;
     require_named(&principal)?;
     WRITERS.insert(ctx, &(name.to_owned(), principal));
@@ -105,7 +105,7 @@ pub(crate) fn revoke(
     actor: &Principal,
     name: &str,
     principal: Principal,
-) -> Result<(), Refusal> {
+) -> Result<(), Error> {
     require_owner(&load_repo(ctx, name)?, actor)?;
     require_named(&principal)?;
     WRITERS.remove(ctx, &(name.to_owned(), principal));
@@ -119,7 +119,7 @@ pub(crate) fn push(
     actor: &Principal,
     name: &str,
     request: &[u8],
-) -> Result<(), Refusal> {
+) -> Result<(), Error> {
     let mut repo = load_repo(ctx, name)?;
     require_writer(ctx, name, &repo, actor)?;
     let bounds = load_bounds(ctx)?;
@@ -156,11 +156,11 @@ pub(crate) fn push(
         }
     }
     save_repo(ctx, name, &repo)?;
-    ctx.output(outcome.report);
+    ctx.set_return_data(outcome.report);
     Ok(())
 }
 
-fn require_owner(repo: &Repo, actor: &Principal) -> Result<(), Refusal> {
+fn require_owner(repo: &Repo, actor: &Principal) -> Result<(), Error> {
     if repo.owner != *actor {
         return Err(unauthorized("only the owner changes a repository"));
     }
@@ -172,7 +172,7 @@ pub(crate) fn require_writer(
     name: &str,
     repo: &Repo,
     actor: &Principal,
-) -> Result<(), Refusal> {
+) -> Result<(), Error> {
     let may_write = repo.owner == *actor || is_writer(ctx, name, actor);
     if !may_write {
         return Err(unauthorized("only the owner and its writers push"));
@@ -181,7 +181,7 @@ pub(crate) fn require_writer(
 }
 
 /// A person an op names (a writer, a reviewer): an account.
-pub(crate) fn require_named(principal: &Principal) -> Result<(), Refusal> {
+pub(crate) fn require_named(principal: &Principal) -> Result<(), Error> {
     if !principal.is_person() {
         return Err(invalid("only a person is named here"));
     }
@@ -200,13 +200,13 @@ pub fn cap(bound: u64) -> usize {
     usize::try_from(bound).unwrap_or(usize::MAX)
 }
 
-pub fn refusal_of(error: Error) -> Refusal {
+pub fn refusal_of(error: GitError) -> Error {
     match error {
-        Error::Storage => storage("the blob ctx refused a write"),
-        Error::CapReached | Error::ObjectTooLarge => {
+        GitError::Storage => storage("the blob ctx refused a write"),
+        GitError::CapReached | GitError::ObjectTooLarge => {
             capacity("query or operation exceeds its configured work/byte bound")
         }
-        Error::MissingObject(id) | Error::MissingBase(id) => object_not_held(id),
+        GitError::MissingObject(id) | GitError::MissingBase(id) => object_not_held(id),
         other => invalid(other.to_string()),
     }
 }

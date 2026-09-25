@@ -5,7 +5,7 @@
 use std::io::{self, Write};
 
 use borsh::BorshSerialize;
-use guest::{ExecCtx, Module, QueryCtx, Refusal};
+use guest::{Error, ExecCtx, Module, QueryCtx};
 
 use crate::change_queries::{change, changes, judgment};
 use crate::changes::{Draft, Edit, MergeRequest, close, edit, merge_heads, open, submit_review};
@@ -32,13 +32,13 @@ impl Module for Forge {
     type Query = Query;
     type Response = RawReply;
 
-    fn init(ctx: &ExecCtx, params: &[u8]) -> Result<(), Refusal> {
+    fn init(ctx: &ExecCtx, params: &[u8]) -> Result<(), Error> {
         init(ctx, params)
     }
 
     /// Runs one op as the signer's account ([`identity::principal_of`]).
     /// Every op names its repository; an accepted one marks it active.
-    fn execute(ctx: &ExecCtx, op: Op) -> Result<(), Refusal> {
+    fn execute(ctx: &ExecCtx, op: Op) -> Result<(), Error> {
         let sender = identity::principal_of(ctx, &ctx.env().origin)?;
         let actor = person(&sender)?;
         let repo = op.repo().to_owned();
@@ -106,18 +106,19 @@ impl Module for Forge {
             }
         }?;
         if let Some(reply) = reply {
-            ctx.output(abi::encode(&reply));
+            ctx.set_return_data(abi::encode(&reply));
         }
         touch(ctx, &repo, ctx.env().height)
     }
 
     /// One height-bearing `Reply`, or a git protocol query's raw git bytes.
-    fn query(ctx: &QueryCtx, query: Query) -> Result<RawReply, Refusal> {
+    fn query(ctx: &QueryCtx, query: Query) -> Result<RawReply, Error> {
         let height = ctx.env().height;
         let bounds = load_bounds(ctx)?;
         let scope = query.scope();
-        let listing =
-            |page: &Page| listing(page.bounded(bounds.page_size as u64), scope.clone(), height);
+        let listing = |page: &PageRequest| {
+            listing(page.bounded(bounds.page_size as u64), scope.clone(), height)
+        };
         let reply = match &query {
             Query::Advertise { repo, service } => {
                 return advertise(ctx, repo, *service).map(RawReply);
@@ -189,5 +190,5 @@ impl Module for Forge {
     }
 }
 
-#[cfg(feature = "program")]
+#[cfg(feature = "module")]
 guest::export!(Forge);

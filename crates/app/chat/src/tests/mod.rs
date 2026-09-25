@@ -2,10 +2,10 @@
 //! store exactly as it was. The harness is the [`crate::Chat`] module over a
 //! [`MockHost`] whose identity holds each account's key, and the accounts
 //! that act on it.
-use abi::{Cause, Env, Origin, reason};
+use guest::{Cause, Env, Origin, code};
 use guest::{ExecCtx, MockHost, Module, QueryCtx};
 
-use crate::{Op, Page, PageReply, PostPolicy, Principal, Query, Reply, parse_message};
+use crate::{Op, PageRequest, PageResponse, PostPolicy, Principal, Query, Reply, parse_message};
 
 mod channels;
 mod messages;
@@ -32,7 +32,7 @@ impl Default for Chat {
         let store = MockHost::default();
         store.borrow_mut().verifier = Some(Box::new(|_, _, _, _, _| true));
         store.borrow_mut().siblings.insert(
-            identity::PROGRAM.into(),
+            identity::MODULE.into(),
             Box::new(|request| {
                 let identity::Query::OfKey { key } = abi::decode(request)? else {
                     panic!("the harness answers identity's OfKey only");
@@ -48,9 +48,9 @@ impl Default for Chat {
 /// The origin that acts as `who`: an account's key, the module, the system.
 fn signer(who: &Principal) -> Origin {
     match who {
-        Principal::Account(number) => Origin::External(number.to_be_bytes().to_vec()),
-        Principal::Module(module) => Origin::Program(module.clone()),
-        Principal::System => Origin::System,
+        Principal::Account(number) => Origin::Signed(number.to_be_bytes().to_vec()),
+        Principal::Module(module) => Origin::Module(module.clone()),
+        Principal::Root => Origin::Root,
     }
 }
 
@@ -64,10 +64,10 @@ impl Chat {
 
     fn env(&self, origin: Origin) -> Env {
         Env {
-            network: vec![],
+            chain_id: vec![],
             height: self.height,
             time: self.height * 1000,
-            me: crate::PROGRAM.into(),
+            module: crate::MODULE.into(),
             origin,
             cause: Cause::Direct,
         }
@@ -81,10 +81,10 @@ impl Chat {
 
     /// A read at the current block.
     fn reads(&self) -> QueryCtx {
-        self.store.query(self.env(Origin::System))
+        self.store.query(self.env(Origin::Root))
     }
 
-    fn run(&mut self, who: &Principal, op: Op) -> Result<(), abi::Refusal> {
+    fn run(&mut self, who: &Principal, op: Op) -> Result<(), guest::Error> {
         let ctx = self.next(who);
         crate::Chat::execute(&ctx, op)
     }
@@ -100,7 +100,7 @@ impl Chat {
     #[track_caller]
     fn refused(&mut self, who: &Principal, op: Op) -> String {
         let ctx = self.next(who);
-        self.store.refused(|| crate::Chat::execute(&ctx, op)).reason
+        self.store.refused(|| crate::Chat::execute(&ctx, op)).code
     }
 
     fn post(&mut self, who: &Principal, id: &str, text: &str, thread: Option<u64>) {
@@ -125,7 +125,7 @@ impl Chat {
             text: text.into(),
             viewer: vec![],
             channel_id: None,
-            page: Page::default(),
+            page: PageRequest::default(),
         }) else {
             panic!("a search answers hits");
         };

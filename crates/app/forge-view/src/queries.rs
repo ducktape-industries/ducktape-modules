@@ -7,11 +7,11 @@ use ducktape_view_guest::host::{Refusal, pages, wrong_reply};
 use ducktape_view_guest::methods::Query as Ask;
 
 use crate::api::{Ask as Forge, ChatApi};
-use forge::{Page, PageReply, Query, Reply};
+use forge::{PageRequest, PageResponse, Query, Reply};
 
 /// What one page asks for: 64 rows, from the start. A limit above the
 /// program's `Bounds.page_size` is clamped to it.
-pub(crate) const PAGE: Page = Page::first(64);
+pub(crate) const PAGE: PageRequest = PageRequest::first(64);
 /// How many pages one read follows. A history longer than this shows what
 /// it read and says more follows, rather than walking a repository forever.
 const MAX_PAGES: usize = 16;
@@ -69,7 +69,7 @@ fn with_cursor(query: &Query, after: Vec<u8>) -> Option<Query> {
     Some(query)
 }
 
-fn absorb<T>(page: &mut PageReply<T>, more: PageReply<T>) {
+fn absorb<T>(page: &mut PageResponse<T>, more: PageResponse<T>) {
     page.items.extend(more.items);
     page.next = more.next;
 }
@@ -102,7 +102,7 @@ pub(crate) async fn conversation(
         let ask = host.ask::<Ask<ChatApi>>(chat::Query::Roots {
             channel_id: channel_id.clone(),
             viewer: viewer.clone(),
-            page: Page { after, ..PAGE },
+            page: PageRequest { after, ..PAGE },
         });
         async move {
             match ask.await? {

@@ -2,9 +2,9 @@
 //! node proof checked, and identity's roster as chat's views read it. The
 //! origin itself is resolved to a [`Principal`](crate::Principal) by
 //! identity's one rule, first thing in [`Chat::execute`](crate::Chat).
-use abi::{Origin, Scheme, reason};
-use guest::{QueryCtx, Refusal, invalid, unauthorized};
-use store::{Page, PageReply};
+use guest::{Error, QueryCtx, invalid, unauthorized};
+use guest::{Origin, Scheme, code};
+use store::{PageRequest, PageResponse};
 
 use crate::{AccountRow, HUDDLE_JOIN_NS};
 
@@ -16,8 +16,8 @@ pub(crate) fn node_consents(
     channel_id: &str,
     node: &[u8],
     proof: &[u8],
-) -> Result<(), Refusal> {
-    let Origin::External(key) = origin else {
+) -> Result<(), Error> {
+    let Origin::Signed(key) = origin else {
         return Err(unauthorized("only a key joins a huddle"));
     };
     let message = [channel_id.as_bytes(), key].concat();
@@ -35,14 +35,17 @@ pub(crate) fn node_consents(
 }
 
 /// One page of identity's roster as a view reads it, so a view links one
-/// program.
-pub(crate) fn accounts(ctx: &QueryCtx, page: Page) -> Result<PageReply<AccountRow>, Refusal> {
+/// module.
+pub(crate) fn accounts(
+    ctx: &QueryCtx,
+    page: PageRequest,
+) -> Result<PageResponse<AccountRow>, Error> {
     let list = identity::Query::List { page };
     let identity::Reply::Accounts(accounts) =
-        ctx.ask::<identity::Query, identity::Reply>(identity::PROGRAM, &list)?
+        ctx.ask::<identity::Query, identity::Reply>(identity::MODULE, &list)?
     else {
-        return Err(Refusal::new(
-            reason::UNEXPECTED_REPLY,
+        return Err(Error::new(
+            code::UNEXPECTED_REPLY,
             "identity answered List with something else",
         ));
     };

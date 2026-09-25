@@ -62,7 +62,7 @@ fn advertisement_lists_refs_for_receive_and_capabilities_for_upload() {
             service: Service::UploadPack,
         },
     );
-    assert_eq!(missing.unwrap_err().reason, reason::NOT_FOUND);
+    assert_eq!(missing.unwrap_err().code, code::NOT_FOUND);
 }
 
 #[test]

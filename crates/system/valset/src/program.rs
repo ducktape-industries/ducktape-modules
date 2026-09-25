@@ -1,10 +1,10 @@
 //! The module: every op and every query, each handed to its rule.
 
-use guest::{ExecCtx, Module, QueryCtx, Refusal, decoded};
+use guest::{Error, ExecCtx, Module, QueryCtx, decoded};
 use module_registry::AUTHORITY;
 
 use crate::rules::{MEMBERS, init, memberships, remove, set};
-use crate::{Genesis, Membership, Op, PROGRAM, Query, Reply, Standing};
+use crate::{Genesis, MODULE, Membership, Op, Query, Reply, Role};
 
 pub struct Valset;
 
@@ -13,11 +13,11 @@ impl Module for Valset {
     type Query = Query;
     type Response = Reply;
 
-    fn init(ctx: &ExecCtx, params: &[u8]) -> Result<(), Refusal> {
-        init(ctx, decoded::<Genesis>(PROGRAM, "Genesis", params)?)
+    fn init(ctx: &ExecCtx, params: &[u8]) -> Result<(), Error> {
+        init(ctx, decoded::<Genesis>(MODULE, "Genesis", params)?)
     }
 
-    fn execute(ctx: &ExecCtx, op: Op) -> Result<(), Refusal> {
+    fn execute(ctx: &ExecCtx, op: Op) -> Result<(), Error> {
         module_registry::helpers::from(ctx.env(), AUTHORITY)?;
         match op {
             Op::Set(membership) => set(ctx, membership),
@@ -25,12 +25,12 @@ impl Module for Valset {
         }
     }
 
-    fn query(ctx: &QueryCtx, query: Query) -> Result<Reply, Refusal> {
+    fn query(ctx: &QueryCtx, query: Query) -> Result<Reply, Error> {
         Ok(match query {
             Query::Validators => Reply::Validators(
                 memberships(ctx)?
                     .into_iter()
-                    .filter(|membership| membership.standing == Standing::Validator)
+                    .filter(|membership| membership.role == Role::Validator)
                     .map(|membership| membership.key)
                     .collect(),
             ),
@@ -47,5 +47,5 @@ impl Module for Valset {
     }
 }
 
-#[cfg(feature = "program")]
+#[cfg(feature = "module")]
 guest::export!(Valset);

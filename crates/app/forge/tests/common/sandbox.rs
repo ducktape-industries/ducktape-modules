@@ -8,7 +8,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use abi::{Cause, Env, Origin, Refusal, reason};
+use guest::{Cause, Env, Error, Origin, code};
 use guest::{ExecCtx, MockHost, Module, QueryCtx, Sibling};
 
 pub struct MemorySandbox {
@@ -21,10 +21,7 @@ pub struct MemorySandbox {
 fn identity(roster: Rc<RefCell<BTreeMap<Vec<u8>, u64>>>) -> Sibling {
     Box::new(move |request| {
         let identity::Query::OfKey { key } = abi::decode(request)? else {
-            return Err(Refusal::new(
-                reason::UNSUPPORTED,
-                "the sandbox answers OfKey",
-            ));
+            return Err(Error::new(code::UNSUPPORTED, "the sandbox answers OfKey"));
         };
         let held = roster.borrow().get(&key).copied();
         Ok(abi::encode(&identity::Reply::Number(held)))
@@ -34,10 +31,10 @@ fn identity(roster: Rc<RefCell<BTreeMap<Vec<u8>, u64>>>) -> Sibling {
 /// The env of a block at `height`, signed by `origin`.
 pub fn env_at(origin: Origin, height: u64, time: u64) -> Env {
     Env {
-        network: b"net".to_vec(),
+        chain_id: b"net".to_vec(),
         height,
         time,
-        me: "forge".into(),
+        module: "forge".into(),
         origin,
         cause: Cause::Direct,
     }
@@ -50,13 +47,13 @@ impl Default for MemorySandbox {
         let chat = MockHost::default();
         chat.borrow_mut()
             .siblings
-            .insert(identity::PROGRAM.into(), identity(accounts.clone()));
+            .insert(identity::MODULE.into(), identity(accounts.clone()));
         let forge = MockHost::default();
         let sibling = chat.clone();
         forge.borrow_mut().siblings.insert(
             "chat".into(),
             Box::new(move |request| {
-                let reads = sibling.query(env_at(Origin::System, 0, 0));
+                let reads = sibling.query(env_at(Origin::Root, 0, 0));
                 let reply = chat::Chat::query(&reads, abi::decode(request)?)?;
                 Ok(abi::encode(&reply))
             }),
@@ -64,7 +61,7 @@ impl Default for MemorySandbox {
         forge
             .borrow_mut()
             .siblings
-            .insert(identity::PROGRAM.into(), identity(accounts.clone()));
+            .insert(identity::MODULE.into(), identity(accounts.clone()));
         MemorySandbox {
             forge,
             chat,
@@ -81,18 +78,17 @@ impl MemorySandbox {
 
     /// A write to forge's host at `height`, signed by the system.
     pub fn exec(&self, height: u64) -> ExecCtx {
-        self.forge.exec(env_at(Origin::System, height, super::TIME))
+        self.forge.exec(env_at(Origin::Root, height, super::TIME))
     }
 
     /// A read of forge's host at `height`.
     pub fn reads(&self, height: u64) -> QueryCtx {
-        self.forge
-            .query(env_at(Origin::System, height, super::TIME))
+        self.forge.query(env_at(Origin::Root, height, super::TIME))
     }
 
-    /// Who `key` signs as: the principal forge's program resolves.
-    pub fn principal(&self, key: &[u8]) -> Result<forge::Principal, Refusal> {
-        identity::principal_of(&self.reads(0), &Origin::External(key.to_vec()))
+    /// Who `key` signs as: the principal forge's module resolves.
+    pub fn principal(&self, key: &[u8]) -> Result<forge::Principal, Error> {
+        identity::principal_of(&self.reads(0), &Origin::Signed(key.to_vec()))
     }
 
     /// Runs one chat message directly, signed by `origin` in its own block.
@@ -102,25 +98,25 @@ impl MemorySandbox {
         height: u64,
         time: u64,
         msg: chat::Op,
-    ) -> Result<(), Refusal> {
+    ) -> Result<(), Error> {
         chat::Chat::execute(&self.chat.exec(env_at(origin, height, time)), msg)
     }
 
-    pub fn chat_query(&self, q: chat::Query) -> Result<chat::Reply, Refusal> {
-        chat::Chat::query(&self.chat.query(env_at(Origin::System, 0, 0)), q)
+    pub fn chat_query(&self, q: chat::Query) -> Result<chat::Reply, Error> {
+        chat::Chat::query(&self.chat.query(env_at(Origin::Root, 0, 0)), q)
     }
 
     /// Delivers what forge emitted so far to chat, the way the kernel delivers
     /// the previous block's queue: as forge, at the delivering height.
-    pub fn deliver(&mut self, height: u64, time: u64) -> Vec<Result<(), Refusal>> {
+    pub fn deliver(&mut self, height: u64, time: u64) -> Vec<Result<(), Error>> {
         self.forge
             .take_emissions()
             .into_iter()
             .map(|m| {
                 if m.target != "chat" {
-                    return Err(Refusal::new(reason::UNKNOWN_PROGRAM, m.target));
+                    return Err(Error::new(code::UNKNOWN_PROGRAM, m.target));
                 }
-                let forge = Origin::Program("forge".into());
+                let forge = Origin::Module("forge".into());
                 self.chat_execute(forge, height, time, abi::decode(&m.payload)?)
             })
             .collect()

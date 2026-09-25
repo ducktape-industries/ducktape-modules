@@ -1,16 +1,16 @@
 #![allow(dead_code, unused_imports)]
-//! The forge program end to end over MemorySandbox: founding, access,
+//! The forge module end to end over MemorySandbox: founding, access,
 //! pushes in steps, advertisement, fetch, merge, sha256.
 
 pub use std::collections::{BTreeMap, BTreeSet};
 
-pub use abi::{Cause, Env, HashKind, Origin, reason};
-pub use forge::{Bounds, Forge, Op, Page, Principal, Query, Reply, Service, Settings};
+pub use forge::{Bounds, Forge, Op, PageRequest, Principal, Query, Reply, Service, Settings};
 pub use gitcore::wire::pktline::{self, Pkt, Reader};
 pub use gitcore::{
     Commit, Hash, Kind, Limits, MemoryObjects, Mode, Object, Objects, Oid, Signature, Tree,
     TreeEntry, pack,
 };
+pub use guest::{Cause, Env, HashKind, Origin, code};
 pub use guest::{MockHost, Module};
 
 pub mod sandbox;
@@ -24,11 +24,11 @@ pub const TIME: u64 = 1_700_000_000;
 
 pub fn env(actor: &[u8]) -> Env {
     Env {
-        network: b"net".to_vec(),
+        chain_id: b"net".to_vec(),
         height: 1,
         time: TIME,
-        me: "forge".into(),
-        origin: Origin::External(actor.to_vec()),
+        module: "forge".into(),
+        origin: Origin::Signed(actor.to_vec()),
         cause: Cause::Direct,
     }
 }
@@ -69,16 +69,16 @@ pub fn person(key: &[u8]) -> Principal {
     Principal::Account(*account)
 }
 
-/// `actor`'s op at `height`, run as the wasm program runs it: the signer
+/// `actor`'s op at `height`, run as the wasm module runs it: the signer
 /// resolved through identity, then the typed execute.
-pub fn signed_op(store: &MockHost, actor: &[u8], height: u64, op: &Op) -> Result<(), abi::Refusal> {
-    let origin = Origin::External(actor.to_vec());
+pub fn signed_op(store: &MockHost, actor: &[u8], height: u64, op: &Op) -> Result<(), guest::Error> {
+    let origin = Origin::Signed(actor.to_vec());
     Forge::execute(&store.exec(env_at(origin, height, TIME)), op.clone())
 }
 
 /// `actor`'s op; a refusal left forge's store as it was.
 #[track_caller]
-pub fn act(sandbox: &mut MemorySandbox, actor: &[u8], op: &Op) -> Result<Vec<u8>, abi::Refusal> {
+pub fn act(sandbox: &mut MemorySandbox, actor: &[u8], op: &Op) -> Result<Vec<u8>, guest::Error> {
     sandbox
         .forge
         .attempt(|| signed_op(&sandbox.forge, actor, 1, op))?;
@@ -87,13 +87,13 @@ pub fn act(sandbox: &mut MemorySandbox, actor: &[u8], op: &Op) -> Result<Vec<u8>
 
 /// The refusal of `actor`'s op, which left forge's store as it was.
 #[track_caller]
-pub fn refused(sandbox: &mut MemorySandbox, actor: &[u8], op: &Op) -> abi::Refusal {
+pub fn refused(sandbox: &mut MemorySandbox, actor: &[u8], op: &Op) -> guest::Error {
     sandbox
         .forge
         .refused(|| signed_op(&sandbox.forge, actor, 1, op))
 }
 
-pub fn ask(sandbox: &MemorySandbox, query: &Query) -> Result<Vec<u8>, abi::Refusal> {
+pub fn ask(sandbox: &MemorySandbox, query: &Query) -> Result<Vec<u8>, guest::Error> {
     Forge::query(&sandbox.reads(1), query.clone()).map(|reply| reply.0)
 }
 
@@ -202,7 +202,7 @@ pub fn push(
     repo: &str,
     commands: &[(Oid, Oid, &str)],
     pack_bytes: &[u8],
-) -> Result<Vec<String>, abi::Refusal> {
+) -> Result<Vec<String>, guest::Error> {
     let report = act(
         sandbox,
         actor,
@@ -236,7 +236,7 @@ pub fn refs_of(sandbox: &MemorySandbox, repo: &str) -> BTreeMap<String, String> 
             sandbox,
             &Query::Refs {
                 repo: repo.into(),
-                page: Page::first(128),
+                page: PageRequest::first(128),
             },
         )
         .unwrap(),

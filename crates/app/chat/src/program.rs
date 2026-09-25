@@ -1,7 +1,7 @@
 //! The module: the signer resolved to its principal, then every op and
 //! every query, each handed to its function in `ops.rs` or `queries.rs`.
 
-use guest::{ExecCtx, Module, QueryCtx, Refusal};
+use guest::{Error, ExecCtx, Module, QueryCtx};
 
 use crate::ops::{
     create_channel, delete, edit, join_huddle, leave_huddle, open_dm, post, react, rename,
@@ -20,7 +20,7 @@ impl Module for Chat {
     type Query = Query;
     type Response = Reply;
 
-    fn execute(ctx: &ExecCtx, op: Op) -> Result<(), Refusal> {
+    fn execute(ctx: &ExecCtx, op: Op) -> Result<(), Error> {
         let sender = identity::principal_of(ctx, &ctx.env().origin)?;
         match op {
             Op::CreateChannel {
@@ -74,7 +74,7 @@ impl Module for Chat {
         }
     }
 
-    fn query(ctx: &QueryCtx, query: Query) -> Result<Reply, Refusal> {
+    fn query(ctx: &QueryCtx, query: Query) -> Result<Reply, Error> {
         let height = ctx.env().height;
         let (reply, viewer) = match query {
             Query::Channels { page } => (Reply::Channels(channels(ctx, &page, height)?), vec![]),
@@ -131,5 +131,5 @@ impl Module for Chat {
     }
 }
 
-#[cfg(feature = "program")]
+#[cfg(feature = "module")]
 guest::export!(Chat);
