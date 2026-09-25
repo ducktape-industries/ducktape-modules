@@ -3,18 +3,18 @@ name = "store"
 version.workspace = true
 edition.workspace = true
 
-# The module SDK: the `Reads`/`Writes` store traits, the typed
-# `Map`/`Set`/`Item` tables, `PageRequest`/`PageResponse`, the error
-# constructors, and the kernel's types under the SDK's names (`kernel.rs`).
-# Always built; a view links it with `module` off. `module` adds the wasm32
-# glue `entrypoint!` expands to; natively `testing::MockHost` is the store a
-# test runs a module's rules over.
+# What a program holds in its hands: the `Reads`/`Writes` store traits, the
+# typed `Map`/`Set`/`Item` descriptors over them, `Page`/`PageReply`, the
+# refusal constructors and the decode helper. Always built; a view links it
+# with `program` off. `program` adds the impls over `guest`'s contexts (wasm32
+# only); natively `Memory` is the store a test runs a program's rules over.
 [features]
-module = []
+program = ["dep:guest"]
 
 [dependencies]
 abi = { workspace = true }
 borsh = { workspace = true }
+guest = { workspace = true, optional = true }
 serde = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

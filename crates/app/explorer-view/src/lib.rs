@@ -555,9 +555,9 @@ impl Explorer {
             .map(|tx| tx.target.as_str())
             .collect();
         let (identity, valset, registry) = (
-            fresh.contains(&identity::MODULE),
-            fresh.contains(&valset::MODULE),
-            fresh.contains(&registry::MODULE),
+            fresh.contains(&identity::PROGRAM),
+            fresh.contains(&valset::PROGRAM),
+            fresh.contains(&registry::PROGRAM),
         );
         if identity {
             self.read_accounts(cx);
@@ -796,7 +796,7 @@ async fn accounts(host: Host) -> Result<Vec<Account>, Refusal> {
     let mut accounts = Vec::new();
     let mut after = None;
     loop {
-        let page = store::PageRequest { after, limit: None };
+        let page = registry::Page { after, limit: None };
         let reply = match host
             .ask::<Query<Identity>>(identity::Query::List { page })
             .await?
@@ -841,10 +841,11 @@ async fn validators(host: Host) -> Result<Vec<Vec<u8>>, Refusal> {
 /// before the height asked, and it answers no height of its own, so there is
 /// no "as of now" to ask for — the scheduled list is what is still to come.
 async fn network(host: Host) -> Result<Network, Refusal> {
-    let unexpected =
-        |reply: &dyn std::fmt::Debug| malformed(format!("{} answered {reply:?}", registry::MODULE));
+    let unexpected = |reply: &dyn std::fmt::Debug| {
+        malformed(format!("{} answered {reply:?}", registry::PROGRAM))
+    };
     let programs = match host.ask::<Query<Registry>>(registry::Query::At(0)).await? {
-        registry::Reply::Modules(programs) => programs,
+        registry::Reply::Programs(programs) => programs,
         other => return Err(unexpected(&other)),
     };
     let views = match host
@@ -857,7 +858,7 @@ async fn network(host: Host) -> Result<Network, Refusal> {
     let mut scheduled = Vec::new();
     let mut after = None;
     loop {
-        let page = store::PageRequest { after, limit: None };
+        let page = registry::Page { after, limit: None };
         let reply = match host
             .ask::<Query<Registry>>(registry::Query::Scheduled { page })
             .await?

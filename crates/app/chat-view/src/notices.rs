@@ -92,7 +92,7 @@ impl Chat {
                     channel_id: channel.clone(),
                     seq: head,
                     viewer,
-                    page: chat::PageRequest {
+                    page: chat::Page {
                         after: None,
                         limit: Some(fresh * 2),
                     },

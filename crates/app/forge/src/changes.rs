@@ -3,7 +3,7 @@
 
 use std::collections::BTreeSet;
 
-use store::{Env, Error};
+use abi::Refusal;
 use store::{Writes, capacity, invalid, stale, unauthorized, wrong_state};
 
 use crate::contract::*;
@@ -25,11 +25,11 @@ pub(crate) struct Draft {
 
 pub(crate) fn open(
     store: &mut impl Writes,
-    env: &Env,
+    env: &Frame,
     actor: &Principal,
     repo: &str,
     mut draft: Draft,
-) -> Result<OpReply, Error> {
+) -> Result<OpReply, Refusal> {
     let record = load_repo(store, repo)?;
     check_title(&draft.title)?;
     check_reviewers(&draft.reviewers)?;
@@ -87,12 +87,12 @@ pub(crate) struct Edit {
 /// The author edits an open change; an ended one is a record.
 pub(crate) fn edit(
     store: &mut impl Writes,
-    env: &Env,
+    env: &Frame,
     actor: &Principal,
     repo: &str,
     n: u64,
     fields: Edit,
-) -> Result<OpReply, Error> {
+) -> Result<OpReply, Refusal> {
     load_repo(store, repo)?;
     let mut change = load_change(store, repo, n)?;
     if change.author != *actor {
@@ -122,11 +122,11 @@ pub(crate) fn edit(
 /// Closing is terminal: the author or a writer ends an open change.
 pub(crate) fn close(
     store: &mut impl Writes,
-    env: &Env,
+    env: &Frame,
     actor: &Principal,
     repo: &str,
     n: u64,
-) -> Result<OpReply, Error> {
+) -> Result<OpReply, Refusal> {
     let record = load_repo(store, repo)?;
     let mut change = load_change(store, repo, n)?;
     if change.author != *actor {
@@ -150,12 +150,12 @@ pub(crate) fn close(
 /// at the commits it read. Reviews stay appendable after a change ends.
 pub(crate) fn submit_review(
     store: &mut impl Writes,
-    env: &Env,
+    env: &Frame,
     actor: &Principal,
     repo: &str,
     n: u64,
     mut draft: ReviewDraft,
-) -> Result<OpReply, Error> {
+) -> Result<OpReply, Refusal> {
     let record = load_repo(store, repo)?;
     let mut change = load_change(store, repo, n)?;
     let hash = repo_hash(&record);
@@ -209,11 +209,11 @@ pub(crate) struct MergeRequest {
 /// result; forge only checks that neither endpoint moved since.
 pub(crate) fn merge_heads(
     store: &mut impl Writes,
-    env: &Env,
+    env: &Frame,
     actor: &Principal,
     repo: &str,
     merge: MergeRequest,
-) -> Result<OpReply, Error> {
+) -> Result<OpReply, Refusal> {
     let record = load_repo(store, repo)?;
     require_writer(store, repo, &record, actor)?;
     check_endpoints(&merge.into, &merge.from)?;
@@ -257,12 +257,12 @@ pub(crate) fn merge_heads(
     })
 }
 
-fn touched(change: &mut Change, env: &Env) {
+fn touched(change: &mut Change, env: &Frame) {
     change.updated_height = env.height;
     change.updated_time = env.time;
 }
 
-fn count_verdict(counts: &mut ReviewCounts, verdict: Verdict) -> Result<(), Error> {
+fn count_verdict(counts: &mut ReviewCounts, verdict: Verdict) -> Result<(), Refusal> {
     let count = match verdict {
         Verdict::Approve => &mut counts.approve,
         Verdict::RequestChanges => &mut counts.request_changes,
@@ -272,7 +272,7 @@ fn count_verdict(counts: &mut ReviewCounts, verdict: Verdict) -> Result<(), Erro
     Ok(())
 }
 
-fn require_open(change: &Change) -> Result<(), Error> {
+fn require_open(change: &Change) -> Result<(), Refusal> {
     if change.state != ChangeState::Open {
         return Err(wrong_state("change is not open"));
     }
@@ -280,9 +280,9 @@ fn require_open(change: &Change) -> Result<(), Error> {
 }
 
 /// A record over `Bounds.record_bytes` is refused whole.
-fn fits(store: &impl store::Reads, record: &impl borsh::BorshSerialize) -> Result<(), Error> {
+fn fits(store: &impl store::Reads, record: &impl borsh::BorshSerialize) -> Result<(), Refusal> {
     let bound = load_bounds(store)?.record_bytes;
-    if store::encode(record).len() as u64 > bound {
+    if abi::encode(record).len() as u64 > bound {
         return Err(capacity(format!(
             "a record is at most {bound} bytes (Bounds.record_bytes)"
         )));
@@ -290,7 +290,7 @@ fn fits(store: &impl store::Reads, record: &impl borsh::BorshSerialize) -> Resul
     Ok(())
 }
 
-fn check_title(title: &str) -> Result<(), Error> {
+fn check_title(title: &str) -> Result<(), Refusal> {
     if title.trim().is_empty() || title.len() > MAX_TITLE_BYTES {
         return Err(invalid(format!(
             "a title is nonblank and at most {MAX_TITLE_BYTES} bytes"
@@ -299,7 +299,7 @@ fn check_title(title: &str) -> Result<(), Error> {
     Ok(())
 }
 
-fn check_reviewers(reviewers: &[Principal]) -> Result<(), Error> {
+fn check_reviewers(reviewers: &[Principal]) -> Result<(), Refusal> {
     if reviewers.len() > MAX_REVIEWERS {
         return Err(capacity(format!(
             "a change asks at most {MAX_REVIEWERS} reviewers"
@@ -316,7 +316,7 @@ fn check_reviewers(reviewers: &[Principal]) -> Result<(), Error> {
 }
 
 /// Both ends of a change or a merge are branches under `refs/heads/`.
-fn check_endpoints(into: &[u8], from: &Revision) -> Result<(), Error> {
+fn check_endpoints(into: &[u8], from: &Revision) -> Result<(), Refusal> {
     check_branch(into)?;
     if let Revision::Ref(name) = from {
         check_branch(name)?;
@@ -324,7 +324,7 @@ fn check_endpoints(into: &[u8], from: &Revision) -> Result<(), Error> {
     Ok(())
 }
 
-fn check_branch(name: &[u8]) -> Result<(), Error> {
+fn check_branch(name: &[u8]) -> Result<(), Refusal> {
     if !name.starts_with(b"refs/heads/") || !gitcore::server::valid_ref_name(name) {
         return Err(invalid(
             "change endpoints must name branches under refs/heads/",
@@ -333,7 +333,7 @@ fn check_branch(name: &[u8]) -> Result<(), Error> {
     Ok(())
 }
 
-fn check_comments(draft: &ReviewDraft) -> Result<(), Error> {
+fn check_comments(draft: &ReviewDraft) -> Result<(), Refusal> {
     if draft.comments.len() > MAX_REVIEW_COMMENTS {
         return Err(capacity(format!(
             "a review carries at most {MAX_REVIEW_COMMENTS} line comments"
@@ -365,7 +365,7 @@ fn check_comments(draft: &ReviewDraft) -> Result<(), Error> {
 
 /// A relative git path with no empty, `.` or `..` component; `root` admits
 /// the empty path (a tree's root).
-pub fn check_path(path: &[u8], root: bool) -> Result<(), Error> {
+pub fn check_path(path: &[u8], root: bool) -> Result<(), Refusal> {
     if root && path.is_empty() {
         return Ok(());
     }

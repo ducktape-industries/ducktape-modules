@@ -1,13 +1,13 @@
-//! Bounded, resumable query pages over a store [`Range`](crate::Range): the one paging
-//! vocabulary every module's queries speak.
+//! Bounded, resumable query pages over the kernel's `Scan`: the one paging
+//! vocabulary every program's queries speak.
 
-use crate::{Error, Range};
+use abi::Refusal;
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
-use crate::error::{invalid, stale};
+use crate::refuse::{invalid, stale};
 
-/// What `PageRequest::after` and `PageResponse::next` carry, opaque to clients: the
+/// What `Page::after` and `PageReply::next` carry, opaque to clients: the
 /// listing the cursor belongs to (`scope`), the height that answered it, and
 /// the raw position to resume after.
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
@@ -30,16 +30,16 @@ pub struct Cursor {
     Serialize,
     Deserialize,
 )]
-pub struct PageRequest {
+pub struct Page {
     pub after: Option<Vec<u8>>,
     pub limit: Option<u64>,
 }
 
-impl PageRequest {
+impl Page {
     pub const MAX_LIMIT: u64 = 256;
 
-    pub const fn first(limit: u64) -> PageRequest {
-        PageRequest {
+    pub const fn first(limit: u64) -> Page {
+        Page {
             after: None,
             limit: Some(limit),
         }
@@ -51,9 +51,9 @@ impl PageRequest {
             .clamp(1, Self::MAX_LIMIT)
     }
 
-    /// The same page, its limit capped at `max` (a module's own bound).
-    pub fn bounded(&self, max: u64) -> PageRequest {
-        PageRequest {
+    /// The same page, its limit capped at `max` (a program's own bound).
+    pub fn bounded(&self, max: u64) -> Page {
+        Page {
             after: self.after.clone(),
             limit: Some(self.limit().min(max.max(1))),
         }
@@ -62,17 +62,17 @@ impl PageRequest {
     /// The scope a listing binds its cursors to: the borsh of the query's
     /// identifying arguments (a prefix, a channel, a repo and ref).
     pub fn scope_of(args: &impl BorshSerialize) -> Vec<u8> {
-        crate::encode(args)
+        abi::encode(args)
     }
 
     /// The cursor `after` carries, refused when it belongs to another
     /// listing than `scope`.
-    pub fn open(&self, scope: &[u8]) -> Result<Option<Cursor>, Error> {
+    pub fn open(&self, scope: &[u8]) -> Result<Option<Cursor>, Refusal> {
         let Some(bytes) = &self.after else {
             return Ok(None);
         };
         let cursor: Cursor =
-            crate::decode(bytes).map_err(|_| invalid("a page cursor does not decode"))?;
+            abi::decode(bytes).map_err(|_| invalid("a page cursor does not decode"))?;
         if cursor.scope != scope {
             return Err(stale("the cursor belongs to another listing"));
         }
@@ -81,7 +81,7 @@ impl PageRequest {
 
     /// This page over one listing: its cursor opened against `scope`, and
     /// every `next` it answers bound to `scope` and `height`.
-    pub fn listing(&self, scope: Vec<u8>, height: u64) -> Result<Listing, Error> {
+    pub fn listing(&self, scope: Vec<u8>, height: u64) -> Result<Listing, Refusal> {
         let cursor = self.open(&scope)?;
         Ok(Listing {
             limit: self.limit(),
@@ -93,14 +93,14 @@ impl PageRequest {
     }
 }
 
-/// A `PageRequest` opened over one listing (see `PageRequest::listing`).
+/// A `Page` opened over one listing (see `Page::listing`).
 #[derive(Debug)]
 pub struct Listing {
     limit: u64,
     after: Option<Vec<u8>>,
     scope: Vec<u8>,
     height: u64,
-    /// The height that answered the cursor, for a module whose listings
+    /// The height that answered the cursor, for a program whose listings
     /// are rewritten (forge refuses a cursor from another height).
     pub cursor_height: Option<u64>,
 }
@@ -111,30 +111,30 @@ impl Listing {
     }
 
     fn next(&self, after: Vec<u8>) -> Vec<u8> {
-        crate::encode(&Cursor {
+        abi::encode(&Cursor {
             height: self.height,
             scope: self.scope.clone(),
             after,
         })
     }
 
-    pub fn scan(&self, prefix: &[u8]) -> Range {
-        let mut scan = Range::prefix(prefix);
+    pub fn scan(&self, prefix: &[u8]) -> abi::Scan {
+        let mut scan = abi::Scan::prefix(prefix);
         if let Some(after) = &self.after {
-            let start = scan.start.clone();
+            let start = scan.lo.clone();
             scan = scan.after(after);
-            scan.start = scan.start.max(start);
+            scan.lo = scan.lo.max(start);
         }
         scan.limit = Some(self.limit);
         scan
     }
 
-    pub fn scan_ahead(&self, prefix: &[u8]) -> Range {
+    pub fn scan_ahead(&self, prefix: &[u8]) -> abi::Scan {
         self.scan(prefix).limit(self.limit + 1)
     }
 
     /// Consume ordered rows, retaining one lookahead to detect the final page.
-    pub fn reply<T>(&self, rows: impl IntoIterator<Item = (Vec<u8>, T)>) -> PageResponse<T> {
+    pub fn reply<T>(&self, rows: impl IntoIterator<Item = (Vec<u8>, T)>) -> PageReply<T> {
         let mut rows = rows
             .into_iter()
             .filter(|(key, _)| self.after.as_ref().is_none_or(|after| key > after));
@@ -145,7 +145,7 @@ impl Listing {
             items.push(item);
         }
         let next = rows.next().and(last).map(|key| self.next(key));
-        PageResponse {
+        PageReply {
             height: self.height,
             items,
             next,
@@ -154,7 +154,7 @@ impl Listing {
 
     /// A page of an in-memory list: the cursor's position is the big-endian
     /// offset of the next item.
-    pub fn slice<T: Clone>(&self, values: &[T]) -> Result<PageResponse<T>, Error> {
+    pub fn slice<T: Clone>(&self, values: &[T]) -> Result<PageReply<T>, Refusal> {
         let start = match &self.after {
             None => 0,
             Some(bytes) => <[u8; 8]>::try_from(bytes.as_slice())
@@ -165,7 +165,7 @@ impl Listing {
             return Err(invalid("cursor past the end of this listing"));
         }
         let end = start.saturating_add(self.limit as usize).min(values.len());
-        Ok(PageResponse {
+        Ok(PageReply {
             height: self.height,
             items: values[start..end].to_vec(),
             next: (end < values.len()).then(|| self.next((end as u64).to_be_bytes().to_vec())),
@@ -173,18 +173,18 @@ impl Listing {
     }
 }
 
-/// A bounded query result. Resume with `next` as `PageRequest::after` on the same query.
+/// A bounded query result. Resume with `next` as `Page::after` on the same query.
 /// Height identifies the answering state; pagination does not pin a snapshot.
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
-pub struct PageResponse<T> {
+pub struct PageReply<T> {
     pub height: u64,
     pub items: Vec<T>,
     pub next: Option<Vec<u8>>,
 }
 
-impl<T> PageResponse<T> {
-    pub fn map<U>(self, f: impl FnMut(T) -> U) -> PageResponse<U> {
-        PageResponse {
+impl<T> PageReply<T> {
+    pub fn map<U>(self, f: impl FnMut(T) -> U) -> PageReply<U> {
+        PageReply {
             height: self.height,
             items: self.items.into_iter().map(f).collect(),
             next: self.next,
@@ -193,9 +193,9 @@ impl<T> PageResponse<T> {
 
     pub fn try_map<U>(
         self,
-        f: impl FnMut(T) -> Result<U, Error>,
-    ) -> Result<PageResponse<U>, Error> {
-        Ok(PageResponse {
+        f: impl FnMut(T) -> Result<U, Refusal>,
+    ) -> Result<PageReply<U>, Refusal> {
+        Ok(PageReply {
             height: self.height,
             items: self.items.into_iter().map(f).collect::<Result<_, _>>()?,
             next: self.next,
@@ -207,40 +207,40 @@ impl<T> PageResponse<T> {
 mod tests {
     use super::*;
 
-    fn listing(page: &PageRequest) -> Listing {
+    fn listing(page: &Page) -> Listing {
         page.listing(b"p/".to_vec(), 7).unwrap()
     }
 
     #[test]
     fn a_page_scans_after_its_cursor_and_a_cursor_stays_in_its_listing() {
-        let first = listing(&PageRequest::first(2)).reply([
+        let first = listing(&Page::first(2)).reply([
             (b"p/3".to_vec(), 3u8),
             (b"p/4".to_vec(), 4),
             (b"p/5".to_vec(), 5),
         ]);
-        let page = PageRequest {
+        let page = Page {
             after: first.next.clone(),
             limit: Some(2),
         };
         let scan = listing(&page).scan(b"p/");
-        assert!(!scan.contains(b"p/4"));
-        assert!(scan.contains(b"p/5"));
+        assert!(!scan.admits(b"p/4"));
+        assert!(scan.admits(b"p/5"));
         assert_eq!(scan.limit, Some(2));
         assert_eq!(
-            listing(&PageRequest::default()).scan(b"p/").limit,
-            Some(PageRequest::MAX_LIMIT)
+            listing(&Page::default()).scan(b"p/").limit,
+            Some(Page::MAX_LIMIT)
         );
-        assert_eq!(PageRequest::first(500).bounded(10).limit(), 10);
+        assert_eq!(Page::first(500).bounded(10).limit(), 10);
         let other = page.listing(b"q/".to_vec(), 7).unwrap_err();
-        assert_eq!(other.code, crate::code::STALE);
+        assert_eq!(other.reason, abi::reason::STALE);
         assert_eq!(listing(&page).cursor_height, Some(7));
-        let garbage = PageRequest {
+        let garbage = Page {
             after: Some(vec![1]),
             limit: None,
         };
         assert_eq!(
-            garbage.open(b"p/").unwrap_err().code,
-            crate::code::INVALID_INPUT
+            garbage.open(b"p/").unwrap_err().reason,
+            abi::reason::INVALID_INPUT
         );
     }
 
@@ -252,18 +252,18 @@ mod tests {
             .collect();
         let total = rows.len();
         for limit in [None, Some(u64::MAX), Some(100), Some(0), Some(1)] {
-            let page = PageRequest { after: None, limit };
-            let encoded = crate::encode(&page);
-            let page: PageRequest = crate::decode(&encoded).unwrap();
+            let page = Page { after: None, limit };
+            let encoded = abi::encode(&page);
+            let page: Page = abi::decode(&encoded).unwrap();
             let first = listing(&page).reply(rows.clone());
             assert_eq!(first.items.len(), (page.limit() as usize).min(total));
             assert_eq!(first.height, 7);
-            let decoded: PageResponse<u8> = crate::decode(&crate::encode(&first)).unwrap();
+            let decoded: PageReply<u8> = abi::decode(&abi::encode(&first)).unwrap();
             assert_eq!(decoded, first);
             let mut all = first.items;
             let mut next = first.next;
             while let Some(after) = next {
-                let reply = listing(&PageRequest {
+                let reply = listing(&Page {
                     after: Some(after),
                     limit,
                 })
@@ -274,27 +274,27 @@ mod tests {
             }
             assert_eq!(all.len(), total);
         }
-        assert_eq!(listing(&PageRequest::default()).reply::<u8>([]).next, None);
+        assert_eq!(listing(&Page::default()).reply::<u8>([]).next, None);
     }
 
     #[test]
     fn a_cursor_cannot_escape_its_prefix() {
-        let past = PageRequest::default().listing(b"c/1/".to_vec(), 1).unwrap();
-        let page = PageRequest {
+        let past = Page::default().listing(b"c/1/".to_vec(), 1).unwrap();
+        let page = Page {
             after: Some(past.next(b"a/".to_vec())),
             limit: None,
         };
         let scan = page.listing(b"c/1/".to_vec(), 1).unwrap().scan(b"c/1/");
-        assert!(!scan.contains(b"b/2"));
-        assert!(scan.contains(b"c/1/2"));
-        assert!(!scan.contains(b"c/2/2"));
+        assert!(!scan.admits(b"b/2"));
+        assert!(scan.admits(b"c/1/2"));
+        assert!(!scan.admits(b"c/2/2"));
     }
 
     #[test]
     fn a_list_pages_by_offset() {
         let values: Vec<u32> = (0..5).collect();
         let at = |after| {
-            listing(&PageRequest {
+            listing(&Page {
                 after,
                 limit: Some(2),
             })
@@ -305,7 +305,7 @@ mod tests {
         assert_eq!(second.items, [2, 3]);
         let last = at(second.next).slice(&values).unwrap();
         assert_eq!((last.items, last.next), (vec![4], None));
-        let bad = listing(&PageRequest::default()).next(vec![1]);
+        let bad = listing(&Page::default()).next(vec![1]);
         assert!(at(Some(bad)).slice(&values).is_err());
     }
 }

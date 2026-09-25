@@ -249,7 +249,7 @@ fn the_roster_is_read_past_its_first_page() {
                 let start = page.after.map_or(1, |after| after[0] as u64 * 256 + 1);
                 let end = (start + 255).min(600);
                 let next = (end < 600).then(|| vec![(end / 256) as u8]);
-                Reply::Accounts(::chat::PageResponse {
+                Reply::Accounts(::chat::PageReply {
                     height: 1,
                     items: (start..=end)
                         .map(|number| chat::AccountRow {
@@ -299,7 +299,7 @@ fn a_channel_list_cut_at_its_budget_says_so() {
             Query::Accounts { .. } => Reply::Accounts(page(Vec::new())),
             Query::Channels { page } => {
                 let n = page.after.map_or(0, |after| after[0]);
-                Reply::Channels(::chat::PageResponse {
+                Reply::Channels(::chat::PageReply {
                     height: 1,
                     items: vec![channel(&format!("room{n}"), "Room", 1)],
                     next: Some(vec![n + 1]),

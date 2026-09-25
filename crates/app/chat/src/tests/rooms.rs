@@ -29,24 +29,24 @@ fn a_person_takes_one_huddle_seat_and_moves_it_to_a_new_node() {
         (BO, "02".repeat(32))
     );
     let module = Principal::Module("forge".into());
-    assert_eq!(chat.refused(&module, join(1)), code::UNAUTHORIZED);
+    assert_eq!(chat.refused(&module, join(1)), reason::UNAUTHORIZED);
     let short = Op::JoinHuddle {
         channel_id: "general".into(),
         node: vec![1],
         node_proof: vec![],
     };
-    assert_eq!(chat.refused(&CY, short), code::INVALID_INPUT);
+    assert_eq!(chat.refused(&CY, short), reason::INVALID_INPUT);
 }
 
 #[test]
 fn a_huddle_is_bounded_and_seats_only_who_may_write() {
     let mut chat = Chat::with_channel(PostPolicy::MembersOnly);
-    assert_eq!(chat.refused(&BO, join(1)), code::UNAUTHORIZED);
+    assert_eq!(chat.refused(&BO, join(1)), reason::UNAUTHORIZED);
     let mut chat = Chat::with_channel(PostPolicy::Open);
     for n in 0..MAX_HUDDLE_MEMBERS as u64 {
         chat.ok(&Principal::Account(100 + n), join(1));
     }
-    assert_eq!(chat.refused(&BO, join(1)), code::CAPACITY);
+    assert_eq!(chat.refused(&BO, join(1)), reason::CAPACITY);
 }
 
 #[test]
@@ -64,7 +64,7 @@ fn leaving_a_huddle_frees_the_seat() {
     let nowhere = Op::LeaveHuddle {
         channel_id: "nowhere".into(),
     };
-    assert_eq!(chat.refused(&CY, nowhere), code::NOT_FOUND);
+    assert_eq!(chat.refused(&CY, nowhere), reason::NOT_FOUND);
 }
 
 #[test]

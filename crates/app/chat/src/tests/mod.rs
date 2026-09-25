@@ -1,13 +1,11 @@
 //! Every op, once as meant and once as an attack: each refusal leaves the
-//! store exactly as it was. The harness is a [`MockHost`] store and the
+//! store exactly as it was. The harness is a [`Memory`] store and the
 //! accounts that act on it.
-use store::code;
-use store::testing::{MockHost, env};
-use store::{Env, Origin};
+use abi::reason;
+use store::Memory;
 
 use crate::{
-    Op, PageRequest, PageResponse, PostPolicy, Principal, Query, Reply, execute, parse_message,
-    query,
+    Op, Page, PageReply, PostPolicy, Principal, Query, Reply, execute, parse_message, query,
 };
 
 mod channels;
@@ -21,21 +19,11 @@ const ADA: Principal = Principal::Account(1);
 const BO: Principal = Principal::Account(2);
 const CY: Principal = Principal::Account(3);
 
-/// A chat store and a clock: every op runs one block later, signed by a key
-/// whose node proofs all verify (`origin.rs` checks the proof itself).
+/// A chat store and a clock: every op runs one block later.
+#[derive(Default)]
 struct Chat {
-    store: MockHost,
+    store: Memory,
     height: u64,
-}
-
-impl Default for Chat {
-    fn default() -> Chat {
-        let store = MockHost {
-            verifier: Some(Box::new(|_, _, _, _, _| true)),
-            ..MockHost::default()
-        };
-        Chat { store, height: 0 }
-    }
 }
 
 impl Chat {
@@ -46,19 +34,19 @@ impl Chat {
         chat
     }
 
-    /// The env of the next block.
-    fn next(&mut self) -> Env {
+    /// The frame of the next block.
+    fn next(&mut self, who: &Principal) -> crate::Frame {
         self.height += 1;
-        Env {
+        crate::Frame {
+            principal: who.clone(),
             height: self.height,
             time: self.height * 1000,
-            ..env(Origin::Signed(b"key".to_vec()))
         }
     }
 
-    fn run(&mut self, who: &Principal, op: Op) -> Result<(), store::Error> {
-        let env = self.next();
-        execute(&mut self.store, &env, who.clone(), op)
+    fn run(&mut self, who: &Principal, op: Op) -> Result<(), abi::Refusal> {
+        let frame = self.next(who);
+        execute(&mut self.store, &frame, op)
     }
 
     #[track_caller]
@@ -71,18 +59,10 @@ impl Chat {
     /// The refusal's reason; the store is untouched by it.
     #[track_caller]
     fn refused(&mut self, who: &Principal, op: Op) -> String {
-        let env = self.next();
+        let frame = self.next(who);
         self.store
-            .refused(|store| execute(store, &env, who.clone(), op))
-            .code
-    }
-
-    /// The env of the current block, for a query.
-    fn env(&self) -> Env {
-        Env {
-            height: self.height,
-            ..env(Origin::Root)
-        }
+            .refused(|store| execute(store, &frame, op))
+            .reason
     }
 
     fn post(&mut self, who: &Principal, id: &str, text: &str, thread: Option<u64>) {
@@ -90,7 +70,7 @@ impl Chat {
     }
 
     fn ask(&self, question: Query) -> Reply {
-        query(&self.store, &self.env(), question).unwrap()
+        query(&self.store, self.height, question).unwrap()
     }
 
     fn message(&self, seq: u64) -> crate::MsgRow {
@@ -107,7 +87,7 @@ impl Chat {
             text: text.into(),
             viewer: vec![],
             channel_id: None,
-            page: PageRequest::default(),
+            page: Page::default(),
         }) else {
             panic!("a search answers hits");
         };

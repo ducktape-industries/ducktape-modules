@@ -203,7 +203,7 @@ fn forge_line(
 }
 
 fn is_forge(row: &chat::MsgRow) -> bool {
-    row.author == identity::Principal::Module(forge::MODULE.into())
+    row.author == identity::Principal::Module(forge::PROGRAM.into())
 }
 
 /// The hidden chat channel of this change, in chat's row shape.

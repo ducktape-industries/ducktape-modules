@@ -1,6 +1,6 @@
-//! The host half: a module's [`SECTION`](crate::SECTION) read out of its
+//! The host half: a program's [`SECTION`](crate::SECTION) read out of its
 //! code blob, compiled, and called on an op. The section is UNTRUSTED
-//! input: anyone may publish a module. It is compiled from binary only,
+//! input: anyone may publish a program. It is compiled from binary only,
 //! must import nothing, runs with a fuel budget and a memory ceiling in a
 //! fresh instance per call, and its answer is bounded and strictly
 //! decoded. Every failure is `None`: the reader shows the op's bytes.

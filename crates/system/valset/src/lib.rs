@@ -1,27 +1,23 @@
-//! The `valset` module: who validates and who resides on a network. The
-//! types and rules are always built; a view links them with `module` off.
-//! The `module` feature adds the wasm32 module over the host (`store::entrypoint!`).
+//! The `valset` program: who validates and who resides on a network. The
+//! types and rules are always built; a view links them with `program` off.
+//! The `program` feature adds the wasm32 program over the host (`program.rs`).
+#[cfg(feature = "program")]
+mod program;
 mod rules;
 #[cfg(test)]
 mod tests;
 #[cfg(feature = "view")]
 pub mod view;
 
-store::entrypoint! {
-    init: Genesis => rules::init,
-    execute: Op => rules::execute,
-    query: Query => rules::query,
-}
-
 pub use rules::{execute, init, query};
 
 use borsh::{BorshDeserialize, BorshSerialize};
-use store::{PageRequest, PageResponse};
+use module_registry::{Page, PageReply};
 
-pub use abi::valset::{Genesis, Member, PROGRAM as MODULE};
+pub use abi::valset::{Genesis, Member, PROGRAM};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
-pub enum Role {
+pub enum Standing {
     Validator,
     Resident,
 }
@@ -30,7 +26,7 @@ pub enum Role {
 pub struct Membership {
     pub key: Vec<u8>,
     pub address: String,
-    pub role: Role,
+    pub standing: Standing,
 }
 
 impl Membership {
@@ -52,7 +48,7 @@ pub enum Op {
 pub enum Query {
     Validators,
     Members,
-    Memberships { page: PageRequest },
+    Memberships { page: Page },
     Membership { key: Vec<u8> },
 }
 
@@ -60,23 +56,23 @@ pub enum Query {
 pub enum Reply {
     Validators(Vec<Vec<u8>>),
     Members(Vec<Member>),
-    Memberships(PageResponse<Membership>),
+    Memberships(PageReply<Membership>),
     Membership(Option<Membership>),
 }
 
-/// The ask another module makes of valset.
-pub fn role(ctx: &impl store::Reads, key: &[u8]) -> Result<Option<Role>, store::Error> {
-    match ctx.ask::<Query, Reply>(MODULE, &Query::Membership { key: key.to_vec() })? {
-        Reply::Membership(membership) => Ok(membership.map(|membership| membership.role)),
-        other => Err(store::Error::new(
-            store::code::UNEXPECTED_REPLY,
+/// The ask another program makes of valset.
+pub fn standing(ctx: &impl store::Reads, key: &[u8]) -> Result<Option<Standing>, abi::Refusal> {
+    match ctx.ask::<Query, Reply>(PROGRAM, &Query::Membership { key: key.to_vec() })? {
+        Reply::Membership(membership) => Ok(membership.map(|membership| membership.standing)),
+        other => Err(abi::Refusal::new(
+            abi::reason::UNEXPECTED_REPLY,
             format!("valset answered Membership with {other:?}"),
         )),
     }
 }
 
 /// An op as a person reads it: a title and its fields. The source of the
-/// `ducktape.describe` module this module ships (`make wasm-describes`).
+/// `ducktape.describe` module this program ships (`make wasm-describes`).
 pub fn describe(op: &Op) -> describe::Description {
     use describe::{Value, field};
     let (title, fields) = match op {
@@ -86,10 +82,10 @@ pub fn describe(op: &Op) -> describe::Description {
                 field("key", Value::Key(membership.key.clone())),
                 field("address", Value::text(&membership.address)),
                 field(
-                    "role",
-                    Value::text(match membership.role {
-                        Role::Validator => "validator",
-                        Role::Resident => "resident",
+                    "standing",
+                    Value::text(match membership.standing {
+                        Standing::Validator => "validator",
+                        Standing::Resident => "resident",
                     }),
                 ),
             ],

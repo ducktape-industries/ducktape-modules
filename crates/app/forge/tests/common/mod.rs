@@ -1,18 +1,17 @@
 #![allow(dead_code, unused_imports)]
-//! The forge module end to end over MemorySandbox: founding, access,
+//! The forge program end to end over MemorySandbox: founding, access,
 //! pushes in steps, advertisement, fetch, merge, sha256.
 
 pub use std::collections::{BTreeMap, BTreeSet};
 
-pub use forge::{Bounds, Op, PageRequest, Principal, Query, Reply, Service, Settings};
+pub use abi::{Cause, Env, HashKind, Origin, reason};
+pub use forge::{Bounds, Frame, Op, Page, Principal, Query, Reply, Service, Settings};
 pub use gitcore::wire::pktline::{self, Pkt, Reader};
 pub use gitcore::{
     Commit, Hash, Kind, Limits, MemoryObjects, Mode, Object, Objects, Oid, Signature, Tree,
     TreeEntry, pack,
 };
-pub use store::testing::MockHost;
-pub use store::{Cause, Env, HashKind, Origin, code};
-pub use store::{Reads, Writes};
+pub use store::{Memory, Reads, Writes};
 
 pub mod sandbox;
 pub mod story;
@@ -25,11 +24,11 @@ pub const TIME: u64 = 1_700_000_000;
 
 pub fn env(actor: &[u8]) -> Env {
     Env {
-        chain_id: b"net".to_vec(),
+        network: b"net".to_vec(),
         height: 1,
         time: TIME,
-        module: "forge".into(),
-        origin: Origin::Signed(actor.to_vec()),
+        me: "forge".into(),
+        origin: Origin::External(actor.to_vec()),
         cause: Cause::Direct,
     }
 }
@@ -53,7 +52,7 @@ pub fn bounds() -> Bounds {
 
 pub fn founded() -> MemorySandbox {
     let mut sandbox = MemorySandbox::default();
-    forge::init(&mut sandbox, bounds()).unwrap();
+    forge::init(&mut sandbox, &abi::encode(&bounds())).unwrap();
     sandbox
 }
 
@@ -70,41 +69,41 @@ pub fn person(key: &[u8]) -> Principal {
     Principal::Account(*account)
 }
 
-/// `actor`'s op at `height`, run as the wasm module runs it: the signer
+/// `actor`'s op at `height`, run as the wasm program runs it: the signer
 /// resolved through identity, then the typed execute.
 pub fn signed_op(
-    store: &mut MockHost,
+    store: &mut Memory,
     actor: &[u8],
     height: u64,
     op: &Op,
-) -> Result<(), store::Error> {
-    let env = Env {
+) -> Result<(), abi::Refusal> {
+    let frame = Frame {
+        principal: identity::principal_of(store, &Origin::External(actor.to_vec()))?,
         height,
-        ..env(actor)
+        time: TIME,
     };
-    let sender = identity::principal_of(store, &env.origin)?;
-    forge::execute(store, &env, sender, op.clone())
+    forge::execute(store, &frame, op.clone())
 }
 
 /// `actor`'s op; a refusal left forge's store as it was.
 #[track_caller]
-pub fn act(sandbox: &mut MemorySandbox, actor: &[u8], op: &Op) -> Result<Vec<u8>, store::Error> {
+pub fn act(sandbox: &mut MemorySandbox, actor: &[u8], op: &Op) -> Result<Vec<u8>, abi::Refusal> {
     sandbox
         .forge
         .attempt(|store| signed_op(store, actor, 1, op))?;
-    Ok(sandbox.forge.take_return_data())
+    Ok(sandbox.forge.take_output())
 }
 
 /// The refusal of `actor`'s op, which left forge's store as it was.
 #[track_caller]
-pub fn refused(sandbox: &mut MemorySandbox, actor: &[u8], op: &Op) -> store::Error {
+pub fn refused(sandbox: &mut MemorySandbox, actor: &[u8], op: &Op) -> abi::Refusal {
     sandbox
         .forge
         .refused(|store| signed_op(store, actor, 1, op))
 }
 
-pub fn ask(sandbox: &MemorySandbox, query: &Query) -> Result<Vec<u8>, store::Error> {
-    forge::query(sandbox, &env(OWNER), query.clone()).map(|raw| raw.0)
+pub fn ask(sandbox: &MemorySandbox, query: &Query) -> Result<Vec<u8>, abi::Refusal> {
+    forge::query(sandbox, 1, query.clone())
 }
 
 pub fn create(sandbox: &mut MemorySandbox, name: &str, hash: HashKind) {
@@ -212,7 +211,7 @@ pub fn push(
     repo: &str,
     commands: &[(Oid, Oid, &str)],
     pack_bytes: &[u8],
-) -> Result<Vec<String>, store::Error> {
+) -> Result<Vec<String>, abi::Refusal> {
     let report = act(
         sandbox,
         actor,
@@ -241,12 +240,12 @@ pub fn report_lines(report: &[u8]) -> Vec<String> {
 }
 
 pub fn refs_of(sandbox: &MemorySandbox, repo: &str) -> BTreeMap<String, String> {
-    let reply: Reply = store::decode(
+    let reply: Reply = abi::decode(
         &ask(
             sandbox,
             &Query::Refs {
                 repo: repo.into(),
-                page: PageRequest::first(128),
+                page: Page::first(128),
             },
         )
         .unwrap(),

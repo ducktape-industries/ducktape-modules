@@ -32,7 +32,7 @@ pub struct MentionChoice {
 pub fn mention_token(principal: &Principal) -> String {
     match principal {
         Principal::Account(account) => format!("<@{account}>"),
-        Principal::Module(_) | Principal::Root => String::new(),
+        Principal::Module(_) | Principal::System => String::new(),
     }
 }
 

@@ -30,7 +30,7 @@ pub fn index(dir: &Path) -> Vec<Fixture> {
         .collect()
 }
 
-/// One committed fixture, exactly as the module answered it.
+/// One committed fixture, exactly as the program answered it.
 pub fn bytes(dir: &Path, name: &str) -> Vec<u8> {
     let all = std::fs::read(dir.join("replies.bin")).expect("replies.bin");
     let entry = index(dir)

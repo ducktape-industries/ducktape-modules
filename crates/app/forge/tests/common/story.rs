@@ -12,8 +12,8 @@ pub const TESTER: &[u8] = b"tester";
 /// talker in chat is 4. Every other key holds no account.
 pub const HELD: [(&[u8], u64); 3] = [(TESTER, 1), (b"reviewer", 2), (b"talker", 4)];
 
-/// One module over `MemorySandbox` with the kernel's height discipline: an
-/// op lands in a new block, whose queue (forge's chat sent) is delivered
+/// One program over `MemorySandbox` with the kernel's height discipline: an
+/// op lands in a new block, whose queue (forge's chat emissions) is delivered
 /// first; a chat write is a block of its own; a query moves nothing.
 pub struct Rig {
     pub sandbox: MemorySandbox,
@@ -27,7 +27,7 @@ impl Rig {
         for (key, account) in HELD {
             sandbox.hold(key, account);
         }
-        forge::init(&mut sandbox, bounds).unwrap();
+        forge::init(&mut sandbox, &abi::encode(&bounds)).unwrap();
         let mut rig = Rig {
             sandbox,
             height: 0,
@@ -57,18 +57,18 @@ impl Rig {
 
     /// The actor's op in a new block; a refusal left forge's store as it was.
     #[track_caller]
-    pub fn execute(&mut self, op: &Op) -> Result<Vec<u8>, store::Error> {
+    pub fn execute(&mut self, op: &Op) -> Result<Vec<u8>, abi::Refusal> {
         self.advance();
         let (actor, height) = (self.actor.clone(), self.height);
         self.sandbox
             .forge
             .attempt(|store| signed_op(store, &actor, height, op))?;
-        Ok(self.sandbox.forge.take_return_data())
+        Ok(self.sandbox.forge.take_output())
     }
 
     /// The refusal of the actor's op, which left forge's store as it was.
     #[track_caller]
-    pub fn refused(&mut self, op: &Op) -> store::Error {
+    pub fn refused(&mut self, op: &Op) -> abi::Refusal {
         self.advance();
         let (actor, height) = (self.actor.clone(), self.height);
         self.sandbox
@@ -76,25 +76,18 @@ impl Rig {
             .refused(|store| signed_op(store, &actor, height, op))
     }
 
-    pub fn query(&self, query: &Query) -> Result<Vec<u8>, store::Error> {
-        forge::query(
-            &self.sandbox,
-            &Env {
-                height: self.height,
-                ..env(OWNER)
-            },
-            query.clone(),
-        )
-        .map(|raw| raw.0)
+    pub fn query(&self, query: &Query) -> Result<Vec<u8>, abi::Refusal> {
+        forge::query(&self.sandbox, self.height, query.clone())
     }
 
     pub fn chat_execute(&mut self, principal: Principal, msg: chat::Op) {
         self.advance();
-        let env = Env {
+        let frame = Frame {
+            principal,
             height: self.height,
-            ..env(OWNER)
+            time: TIME,
         };
-        self.sandbox.chat_execute(&env, principal, msg).unwrap();
+        self.sandbox.chat_execute(&frame, msg).unwrap();
     }
 }
 
@@ -291,7 +284,7 @@ pub fn change(n: u64) -> Query {
     Query::Change {
         repo: REPO.into(),
         n,
-        page: PageRequest::first(128),
+        page: Page::first(128),
     }
 }
 
@@ -299,7 +292,7 @@ pub fn changes() -> Query {
     Query::Changes {
         repo: REPO.into(),
         filter: ChangeFilter::default(),
-        page: PageRequest::first(128),
+        page: Page::first(128),
     }
 }
 

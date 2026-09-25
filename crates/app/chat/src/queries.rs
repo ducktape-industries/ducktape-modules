@@ -1,8 +1,8 @@
 //! [`query`]: one function per [`Query`], each a read of the tables in
 //! `state.rs`. Chat's listings only grow, so a page cursor from any height
 //! resumes where it left off.
-use store::{Env, Error, Range};
-use store::{PageRequest, PageResponse, Reads, capacity, invalid};
+use abi::{Refusal, Scan};
+use store::{Page, PageReply, Reads, capacity, invalid};
 
 use crate::state::{
     ANSWERED, CHANNEL_TAGS, CHANNELS, HEADS, MEMBERS, MESSAGE_IDS, MESSAGES, REACTIONS, REPLIES,
@@ -14,8 +14,7 @@ use crate::{
     SEARCH_POSTING_CAP, tokens,
 };
 
-pub fn query(store: &impl Reads, env: &Env, query: Query) -> Result<Reply, Error> {
-    let height = env.height;
+pub fn query(store: &impl Reads, height: u64, query: Query) -> Result<Reply, Refusal> {
     let (mut reply, viewer) = match query {
         Query::Channels { page } => (Reply::Channels(channels(store, &page, height)?), vec![]),
         Query::Channel { channel_id } => (Reply::Channel(channel(store, &channel_id)?), vec![]),
@@ -86,40 +85,40 @@ pub fn query(store: &impl Reads, env: &Env, query: Query) -> Result<Reply, Error
     Ok(reply)
 }
 
-/// The `Roots` cursor that resumes below `seq`: `PageRequest::after` for the page
+/// The `Roots` cursor that resumes below `seq`: `Page::after` for the page
 /// of roots older than the one on screen.
 pub fn roots_below(channel_id: &str, seq: u64) -> Vec<u8> {
     let channel_id = channel_id.to_owned();
-    store::encode(&store::Cursor {
+    abi::encode(&store::Cursor {
         height: 0,
         scope: ROOTS.key(&channel_id),
         after: ROOTS.key(&(channel_id.clone(), newest_first(seq))),
     })
 }
 
-fn info(store: &impl Reads, channel: ChannelRow) -> Result<ChannelInfo, Error> {
+fn info(store: &impl Reads, channel: ChannelRow) -> Result<ChannelInfo, Refusal> {
     let head_seq = HEADS.get(store, &channel.id)?.unwrap_or(0);
     Ok(ChannelInfo { channel, head_seq })
 }
 
 fn channels(
     store: &impl Reads,
-    page: &PageRequest,
+    page: &Page,
     height: u64,
-) -> Result<PageResponse<ChannelInfo>, Error> {
+) -> Result<PageReply<ChannelInfo>, Refusal> {
     CHANNELS
         .range(store, page, height)?
         .try_map(|(_, channel)| info(store, channel))
 }
 
-fn channel(store: &impl Reads, id: &String) -> Result<Option<ChannelInfo>, Error> {
+fn channel(store: &impl Reads, id: &String) -> Result<Option<ChannelInfo>, Refusal> {
     CHANNELS
         .get(store, id)?
         .map(|channel| info(store, channel))
         .transpose()
 }
 
-fn by_id(store: &impl Reads, message_id: &String) -> Result<Option<MsgRow>, Error> {
+fn by_id(store: &impl Reads, message_id: &String) -> Result<Option<MsgRow>, Refusal> {
     MESSAGE_IDS
         .get(store, message_id)?
         .map(|(channel_id, seq)| message(store, &channel_id, seq))
@@ -131,7 +130,7 @@ fn attention(
     store: &impl Reads,
     channel_id: &str,
     author: Principal,
-) -> Result<Option<MsgRow>, Error> {
+) -> Result<Option<MsgRow>, Refusal> {
     let channel_id = channel_id.to_owned();
     let newest = ANSWERED.prefix_of(&(channel_id.clone(), author)).limit(1);
     ANSWERED
@@ -144,9 +143,9 @@ fn attention(
 fn roots(
     store: &impl Reads,
     channel_id: String,
-    page: &PageRequest,
+    page: &Page,
     height: u64,
-) -> Result<PageResponse<MsgRow>, Error> {
+) -> Result<PageReply<MsgRow>, Refusal> {
     let keys = ROOTS.range_of(store, &channel_id, page, height)?;
     rows_at(
         store,
@@ -158,9 +157,9 @@ fn thread(
     store: &impl Reads,
     channel_id: String,
     root: u64,
-    page: &PageRequest,
+    page: &Page,
     height: u64,
-) -> Result<Reply, Error> {
+) -> Result<Reply, Refusal> {
     let keys = REPLIES.range_of(store, &(channel_id.clone(), root), page, height)?;
     Ok(Reply::Thread {
         root: MESSAGES.get(store, &(channel_id, root))?,
@@ -176,12 +175,12 @@ fn around(
     store: &impl Reads,
     channel_id: String,
     seq: u64,
-    page: &PageRequest,
-) -> Result<Vec<MsgRow>, Error> {
+    page: &Page,
+) -> Result<Vec<MsgRow>, Refusal> {
     let half = page.limit() / 2;
     let lo = MESSAGES.key(&(channel_id.clone(), seq.saturating_sub(half)));
     let hi = MESSAGES.key(&(channel_id, seq.saturating_add(half + 1)));
-    let rows = MESSAGES.scan(store, Range::new(lo, Some(hi)))?;
+    let rows = MESSAGES.scan(store, Scan::range(lo, Some(hi)))?;
     Ok(rows.into_iter().map(|(_, row)| row).collect())
 }
 
@@ -192,8 +191,8 @@ fn search(
     store: &impl Reads,
     text: &str,
     channel_id: Option<String>,
-    page: &PageRequest,
-) -> Result<MessageHits, Error> {
+    page: &Page,
+) -> Result<MessageHits, Refusal> {
     let wanted = tokens(text);
     let Some(first) = wanted.first().cloned() else {
         return Err(invalid("nothing to search for"));
@@ -225,9 +224,9 @@ fn tagged(
     store: &impl Reads,
     tag: &str,
     channel_id: Option<String>,
-    page: &PageRequest,
+    page: &Page,
     height: u64,
-) -> Result<PageResponse<MsgRow>, Error> {
+) -> Result<PageReply<MsgRow>, Refusal> {
     let label = tag_label(tag);
     let keys = match channel_id {
         Some(channel_id) => CHANNEL_TAGS
@@ -243,9 +242,9 @@ fn tagged(
 /// A page of message addresses as the page of rows they name.
 fn rows_at(
     store: &impl Reads,
-    keys: PageResponse<(String, u64)>,
-) -> Result<PageResponse<MsgRow>, Error> {
-    Ok(PageResponse {
+    keys: PageReply<(String, u64)>,
+) -> Result<PageReply<MsgRow>, Refusal> {
+    Ok(PageReply {
         height: keys.height,
         items: messages(store, keys.items)?,
         next: keys.next,

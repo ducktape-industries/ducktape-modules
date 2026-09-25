@@ -16,7 +16,6 @@ futures.workspace = true
 abi.workspace = true
 borsh.workspace = true
 ducktape-view-guest.workspace = true
-store.workspace = true
 # mints the `duck://<chain>/explorer/…` link a page copies
 ducklink.workspace = true
 # The system programs the explorer asks: accounts, validators, the roster.

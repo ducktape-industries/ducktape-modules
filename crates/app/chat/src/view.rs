@@ -1,4 +1,4 @@
-//! What a view needs of chat: the marker it names this module by in
+//! What a view needs of chat: the marker it names this program by in
 //! `program.query`/`op.submit`, and the roster folded into what a principal is
 //! called. Names are display text, not identity: "the same person" is the
 //! account number.
@@ -8,11 +8,11 @@ use ducktape_view_guest::Host;
 use ducktape_view_guest::host::{Refusal, pages, wrong_reply};
 use ducktape_view_guest::methods::{Program, Query as Ask};
 
-use crate::{AccountRow, PageRequest, Principal, Query, Reply};
+use crate::{AccountRow, Page, Principal, Query, Reply};
 
 pub struct Chat;
 impl Program for Chat {
-    const NAME: &'static str = crate::MODULE;
+    const NAME: &'static str = crate::PROGRAM;
     type Op = crate::Op;
     type Query = crate::Query;
     type Reply = crate::Reply;
@@ -25,9 +25,9 @@ const ROSTER_PAGES: usize = 64;
 pub async fn roster(host: Host) -> Result<Names, Refusal> {
     let (rows, next) = pages(None, ROSTER_PAGES, |after| {
         let ask = host.ask::<Ask<Chat>>(Query::Accounts {
-            page: PageRequest {
+            page: Page {
                 after,
-                limit: Some(PageRequest::MAX_LIMIT),
+                limit: Some(Page::MAX_LIMIT),
             },
         });
         async move {
@@ -44,7 +44,7 @@ pub async fn roster(host: Host) -> Result<Names, Refusal> {
 }
 
 /// The roster as a view reads it: each account's name, and which accounts
-/// a module controls.
+/// a program controls.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Names {
     names: BTreeMap<u64, String>,
@@ -92,7 +92,7 @@ impl Names {
     pub fn name(&self, principal: &Principal) -> Option<&str> {
         let account = match principal {
             Principal::Account(number) => *number,
-            Principal::Module(_) | Principal::Root => return None,
+            Principal::Module(_) | Principal::System => return None,
         };
         self.names.get(&account).map(String::as_str)
     }
@@ -119,17 +119,16 @@ impl Names {
                 .filter(|name| !name.is_empty())
                 .map_or_else(|| format!("@account-{account}"), |name| format!("@{name}")),
             Principal::Module(module) => format!("@{module}"),
-            Principal::Root => "@system".into(),
+            Principal::System => "@system".into(),
         }
     }
 
-    /// An agent is an account software acts for (a module-controlled
-    /// account). A module is not an agent, nor is the chain itself: their
-    /// posts wear no badge.
+    /// A person's account is human; a program account (an agent's)
+    /// and every module or system author is software.
     pub fn is_agent(&self, principal: &Principal) -> bool {
         match principal {
             Principal::Account(number) => self.is_program(*number),
-            Principal::Module(_) | Principal::Root => false,
+            Principal::Module(_) | Principal::System => true,
         }
     }
 }
@@ -139,6 +138,6 @@ pub fn unnamed(principal: &Principal) -> String {
     match principal {
         Principal::Account(number) => format!("account {number}"),
         Principal::Module(module) => module.clone(),
-        Principal::Root => "system".into(),
+        Principal::System => "system".into(),
     }
 }

@@ -4,26 +4,30 @@ use common::*;
 #[test]
 fn founding_requires_bounds_and_ops_require_a_signer() {
     let mut sandbox = MemorySandbox::default();
-    // what the entrypoint refuses before `init` runs
-    let unfounded = store::decoded::<Bounds>("forge", "Bounds", b"").unwrap_err();
-    assert_eq!(unfounded.code, code::INVALID_INPUT);
+    let unfounded = forge::init(&mut sandbox, b"").unwrap_err();
+    assert_eq!(unfounded.reason, reason::INVALID_INPUT);
     assert!(
         unfounded
-            .message
+            .sentence
             .starts_with("forge: Bounds did not decode:"),
         "{unfounded}"
     );
-    forge::init(&mut sandbox, bounds()).unwrap();
+    forge::init(&mut sandbox, &abi::encode(&bounds())).unwrap();
 
     let create = Op::Create {
         repo: "r".into(),
         hash: HashKind::Sha1,
     };
-    for principal in [Principal::Root, Principal::Module("chat".into())] {
+    for principal in [Principal::System, Principal::Module("chat".into())] {
+        let frame = Frame {
+            principal,
+            height: 1,
+            time: TIME,
+        };
         let refusal = sandbox
             .forge
-            .refused(|store| forge::execute(store, &env(OWNER), principal.clone(), create.clone()));
-        assert_eq!(refusal.code, code::UNAUTHORIZED);
+            .refused(|store| forge::execute(store, &frame, create.clone()));
+        assert_eq!(refusal.reason, reason::UNAUTHORIZED);
     }
 }
 
@@ -39,7 +43,7 @@ fn create_names_an_owner_and_refuses_bad_or_taken_names() {
             hash: HashKind::Sha1,
         },
     );
-    assert_eq!(again.unwrap_err().code, code::ALREADY_EXISTS);
+    assert_eq!(again.unwrap_err().reason, reason::ALREADY_EXISTS);
     for bad in ["", "a/b", ".hidden", "x.git", "sp ace"] {
         let refused = act(
             &mut sandbox,
@@ -49,13 +53,17 @@ fn create_names_an_owner_and_refuses_bad_or_taken_names() {
                 hash: HashKind::Sha1,
             },
         );
-        assert_eq!(refused.unwrap_err().code, code::INVALID_INPUT, "{bad:?}");
+        assert_eq!(
+            refused.unwrap_err().reason,
+            reason::INVALID_INPUT,
+            "{bad:?}"
+        );
     }
-    let listed: Reply = store::decode(
+    let listed: Reply = abi::decode(
         &ask(
             &sandbox,
             &Query::Repos {
-                page: PageRequest::first(128),
+                page: Page::first(128),
             },
         )
         .unwrap(),
@@ -106,7 +114,7 @@ fn only_the_owner_and_granted_writers_push() {
     let commands = [(zero, tip, "refs/heads/main")];
 
     let stranger = push(&mut sandbox, STRANGER, "project", &commands, &pack_bytes);
-    assert_eq!(stranger.unwrap_err().code, code::UNAUTHORIZED);
+    assert_eq!(stranger.unwrap_err().reason, reason::UNAUTHORIZED);
     assert_eq!(sandbox.blob_count(), 0);
 
     let grant_by_stranger = act(
@@ -117,7 +125,7 @@ fn only_the_owner_and_granted_writers_push() {
             principal: person(WRITER),
         },
     );
-    assert_eq!(grant_by_stranger.unwrap_err().code, code::UNAUTHORIZED);
+    assert_eq!(grant_by_stranger.unwrap_err().reason, reason::UNAUTHORIZED);
 
     act(
         &mut sandbox,
@@ -141,7 +149,7 @@ fn only_the_owner_and_granted_writers_push() {
     )
     .unwrap();
     let revoked = push(&mut sandbox, WRITER, "project", &commands, &pack_bytes);
-    assert_eq!(revoked.unwrap_err().code, code::UNAUTHORIZED);
+    assert_eq!(revoked.unwrap_err().reason, reason::UNAUTHORIZED);
 }
 
 #[test]
@@ -322,10 +330,10 @@ fn a_walk_past_the_bound_asks_for_smaller_steps() {
     let mut sandbox = MemorySandbox::default();
     forge::init(
         &mut sandbox,
-        Bounds {
+        &abi::encode(&Bounds {
             push_walk: 2,
             ..bounds()
-        },
+        }),
     )
     .unwrap();
     create(&mut sandbox, "project", HashKind::Sha1);

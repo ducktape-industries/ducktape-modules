@@ -26,7 +26,7 @@ fn as_key(rig: &mut Rig, key: &[u8], op: &Op) -> Vec<u8> {
 }
 
 fn reply(rig: &Rig, query: Query) -> Reply {
-    store::decode(&rig.query(&query).unwrap()).unwrap()
+    abi::decode(&rig.query(&query).unwrap()).unwrap()
 }
 
 fn record(rig: &Rig, n: u64) -> (forge::Change, Vec<forge::Review>) {
@@ -44,7 +44,7 @@ fn owed(rig: &Rig, principal: Principal) -> Vec<(u64, bool)> {
         rig,
         Query::Judgment {
             principal,
-            page: PageRequest::first(8),
+            page: Page::first(8),
         },
     ) else {
         panic!()
@@ -64,7 +64,7 @@ fn involving(rig: &Rig, principal: Principal) -> Vec<u64> {
                 involves: Some(principal),
                 ..ChangeFilter::default()
             },
-            page: PageRequest::first(8),
+            page: Page::first(8),
         },
     ) else {
         panic!()
@@ -78,7 +78,7 @@ fn one_person_with_two_keys_is_one_owner_author_and_reviewer() {
     let Reply::Repos { page, .. } = reply(
         &rig,
         Query::Repos {
-            page: PageRequest::first(2),
+            page: Page::first(2),
         },
     ) else {
         panic!()
@@ -94,7 +94,7 @@ fn one_person_with_two_keys_is_one_owner_author_and_reviewer() {
     );
 
     let output = as_key(&mut rig, LAPTOP, &story.open("From the laptop"));
-    let OpReply::Change { n, .. } = store::decode(&output).unwrap() else {
+    let OpReply::Change { n, .. } = abi::decode(&output).unwrap() else {
         panic!()
     };
     let retitle = Op::ChangeEdit {
@@ -205,7 +205,7 @@ fn a_key_writes_only_once_it_holds_an_account() {
     rig.actor = b"loose".to_vec();
     for op in &ops {
         let refusal = rig.refused(op);
-        assert_eq!(refusal.code, code::UNAUTHORIZED, "{op:?}");
+        assert_eq!(refusal.reason, reason::UNAUTHORIZED, "{op:?}");
     }
     rig.sandbox.hold(b"loose", 5);
     let close = Op::ChangeClose {
@@ -213,8 +213,8 @@ fn a_key_writes_only_once_it_holds_an_account() {
         n,
     };
     assert_eq!(
-        rig.refused(&close).code,
-        code::UNAUTHORIZED,
+        rig.refused(&close).reason,
+        reason::UNAUTHORIZED,
         "not a writer yet"
     );
     rig.actor = TESTER.to_vec();
@@ -245,7 +245,7 @@ fn an_ended_change_is_not_edited() {
         body: None,
         reviewers: None,
     };
-    assert_eq!(rig.refused(&retitle).code, code::WRONG_STATE);
+    assert_eq!(rig.refused(&retitle).reason, reason::WRONG_STATE);
 }
 
 /// Each line is an event code in a `forge` block: no key, no name, no
@@ -264,9 +264,9 @@ fn system_lines_carry_an_event_code_and_no_name() {
     let lines: Vec<chat::Block> = rig
         .sandbox
         .forge
-        .sent
+        .emissions
         .iter()
-        .filter_map(|message| match store::decode(&message.payload).unwrap() {
+        .filter_map(|message| match abi::decode(&message.payload).unwrap() {
             chat::Op::PostMessage { blocks, .. } => Some(blocks),
             _ => None,
         })
@@ -282,7 +282,7 @@ fn system_lines_carry_an_event_code_and_no_name() {
         .chat_query(chat::Query::Roots {
             channel_id: format!("forge:{REPO}:{n}"),
             viewer: Vec::new(),
-            page: PageRequest::first(8),
+            page: Page::first(8),
         })
         .unwrap()
     else {
@@ -294,7 +294,7 @@ fn system_lines_carry_an_event_code_and_no_name() {
 
 fn opened(rig: &mut Rig, story: &Story) -> u64 {
     let output = rig.execute(&story.open("Feature")).unwrap();
-    let OpReply::Change { n, .. } = store::decode(&output).unwrap() else {
+    let OpReply::Change { n, .. } = abi::decode(&output).unwrap() else {
         panic!()
     };
     n

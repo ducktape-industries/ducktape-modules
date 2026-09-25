@@ -1,6 +1,6 @@
-//! What an op means to a person, as the module that runs it says.
+//! What an op means to a person, as the program that runs it says.
 //!
-//! A module ships a standalone wasm module in the custom section
+//! A program ships a standalone wasm module in the custom section
 //! [`SECTION`] of its code blob, beside `ducktape.view`; the kernel ignores
 //! both. The module has NO imports and exports one pure function:
 //!
@@ -12,21 +12,21 @@
 //!
 //! `describe` reads the borsh op bytes the host wrote into an `alloc`ed
 //! buffer and answers a borsh [`Description`]; `0` (an empty answer) when
-//! the bytes are no op of its. A module writes `describe(&Op) ->
+//! the bytes are no op of its. A program writes `describe(&Op) ->
 //! Description` and one [`export!`] line; its `describe` feature builds the
 //! module (`make wasm-describes`).
 //!
 //! [`Value`] is a small vocabulary, so a reader (Explorer) can show an
-//! account as a name, a module as a link, a hash short.
+//! account as a name, a program as a link, a hash short.
 //!
-//! VERSIONS: a host describes with the module's CURRENT code, whatever
+//! VERSIONS: a host describes with the program's CURRENT code, whatever
 //! height the op landed at. Old op bytes therefore have to read the same
 //! under new code: an `Op` enum only grows at its end, which each
-//! module's test holds over [`variants`]. An op the module cannot read
+//! program's test holds over [`variants`]. An op the module cannot read
 //! is `None`, and the reader falls back to its bytes.
 use borsh::{BorshDeserialize, BorshSerialize};
 
-/// The custom section of a module's code blob that carries the module.
+/// The custom section of a program's code blob that carries the module.
 pub const SECTION: &str = "ducktape.describe";
 
 /// An op as a person reads it: what it does, and its parts.
@@ -54,7 +54,7 @@ pub enum Value {
     Account(u64),
     /// a public key, which may belong to an account
     Key(Vec<u8>),
-    /// a module by name
+    /// a program by name
     Program(String),
     /// a digest: a blob id, a commit
     Hash(Vec<u8>),
@@ -75,7 +75,7 @@ pub enum Value {
 
 impl Value {
     /// Bytes as their length and a preview: all of them up to 32, else the
-    /// first 8 and the last 2 (what explorer's `decode::preview` shows).
+    /// first 8 and the last 2 (what `abi::preview` shows).
     pub fn bytes(bytes: &[u8]) -> Value {
         let preview = match bytes.len() {
             0..=32 => bytes.to_vec(),
@@ -187,7 +187,7 @@ pub mod guest {
 
 /// The module's `alloc` and `describe` exports over `describe(&Op) ->
 /// Description`. They exist only in a wasm build with the calling crate's
-/// `describe` feature on — the one build that is the module; a module or
+/// `describe` feature on — the one build that is the module; a program or
 /// view build of the same crate has its own `alloc`.
 #[macro_export]
 macro_rules! export {
@@ -212,7 +212,7 @@ macro_rules! export {
 /// THE VERSION RULE, as a test reads it: an op enum's variant names in tag
 /// order. Each variant is decoded from its tag and zero bytes (an empty
 /// string, a zero, `None`, the first variant), and named by its `Debug`. A
-/// module commits this list; a variant inserted, removed or moved changes
+/// program commits this list; a variant inserted, removed or moved changes
 /// a committed name, and only an append passes.
 pub fn variants<T: BorshDeserialize + std::fmt::Debug>() -> Vec<String> {
     let zeros = [0u8; 256];

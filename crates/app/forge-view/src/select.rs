@@ -6,7 +6,7 @@ use ducktape_view_guest::view::Loaded;
 use crate::queries::PAGE;
 use crate::state::{self, ChangeTab, Forge, Nav, change_key};
 use forge::{
-    Bounds, Change, Comparison, PageResponse, Query, RefInfo, Reply, RepoInfo, Review, Revision,
+    Bounds, Change, Comparison, PageReply, Query, RefInfo, Reply, RepoInfo, Review, Revision,
 };
 use identity::Principal;
 
@@ -16,7 +16,7 @@ pub(crate) type OpenChange<'a> = (
     &'a Change,
     &'a Option<String>,
     &'a Option<String>,
-    &'a PageResponse<Review>,
+    &'a PageReply<Review>,
 );
 
 /// A read, in the three states a screen draws.
@@ -92,7 +92,7 @@ impl Forge {
         }
     }
 
-    pub(crate) fn repo(&self) -> Option<(&RepoInfo, &Bounds, &PageResponse<Principal>)> {
+    pub(crate) fn repo(&self) -> Option<(&RepoInfo, &Bounds, &PageReply<Principal>)> {
         match self.ready(&self.repo_query())? {
             Reply::Repo {
                 repo,
@@ -237,7 +237,7 @@ impl Forge {
     pub(crate) fn principal_name(&self, principal: &Principal) -> String {
         match (principal, self.names.ready()) {
             // forge's own lines in a change's channel
-            (Principal::Root, _) => "Forge".into(),
+            (Principal::System, _) => "Forge".into(),
             (_, Some(names)) => names.member(principal),
             (_, None) => chat::view::unnamed(principal),
         }

@@ -3,18 +3,18 @@ name = "chat"
 version.workspace = true
 edition.workspace = true
 
-# The types and rules are always built; the view links them with `module`
-# off. `module` adds the wasm32 entry points `store::entrypoint!` expands to:
+# The types and rules are always built; the view links them with `program`
+# off. `program` adds the wasm32 program over the host: `guest`'s contexts,
 # the `alloc`/`call` exports and the `ducktape.*` imports.
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [features]
-module = ["store/module"]
-# `view` adds the marker a view names this module by.
+program = ["dep:guest", "store/program"]
+# `view` adds the marker a view names this program by.
 view = ["dep:ducktape-view-guest"]
 # `describe` makes this crate's wasm build the `ducktape.describe` module:
-# the `describe` export alone, no module, no imports.
+# the `describe` export alone, no program, no imports.
 describe = []
 
 [dependencies]
@@ -22,6 +22,7 @@ ducktape-view-guest = { workspace = true, optional = true }
 abi = { workspace = true }
 describe = { workspace = true }
 borsh = { workspace = true }
+guest = { workspace = true, optional = true }
 identity = { workspace = true }
 serde = { workspace = true }
 store = { workspace = true }

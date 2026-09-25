@@ -39,7 +39,7 @@ fn client_merge_fast_forwards_or_lands_the_merge_commit_the_client_built() {
         )
     };
     let compare = |sandbox: &MemorySandbox, from: &str| {
-        let reply: Reply = store::decode(
+        let reply: Reply = abi::decode(
             &ask(
                 sandbox,
                 &Query::Compare {
@@ -61,7 +61,7 @@ fn client_merge_fast_forwards_or_lands_the_merge_commit_the_client_built() {
         forge::Mergeability::FastForward
     );
     let forwarded: forge::OpReply =
-        store::decode(&merge(&mut sandbox, "refs/heads/feature", root, feature, feature).unwrap())
+        abi::decode(&merge(&mut sandbox, "refs/heads/feature", root, feature, feature).unwrap())
             .unwrap();
     assert_eq!(
         forwarded,
@@ -84,8 +84,8 @@ fn client_merge_fast_forwards_or_lands_the_merge_commit_the_client_built() {
             feature
         )
         .unwrap_err()
-        .code,
-        code::WRONG_STATE
+        .reason,
+        reason::WRONG_STATE
     );
     let diverged = push(
         &mut sandbox,
@@ -127,7 +127,7 @@ fn client_merge_fast_forwards_or_lands_the_merge_commit_the_client_built() {
         .unwrap()
         .tree;
     let author = Signature {
-        name: store::hex(OWNER).into_bytes(),
+        name: abi::hex(OWNER).into_bytes(),
         email: Vec::new(),
         time: TIME as i64,
         offset_minutes: 0,
@@ -160,12 +160,12 @@ fn client_merge_fast_forwards_or_lands_the_merge_commit_the_client_built() {
         panic!();
     };
     let actual = Commit::parse(
-        &sandbox.blob_get(store::BlobId::Sha1(digest)).unwrap().body,
+        &sandbox.blob_get(abi::BlobId::Sha1(digest)).unwrap().body,
         Hash::Sha1,
     )
     .unwrap();
     assert_eq!(actual.parents, [main, feature]);
-    assert_eq!(actual.author.name, store::hex(OWNER).into_bytes());
+    assert_eq!(actual.author.name, abi::hex(OWNER).into_bytes());
     assert_eq!(actual.author.time, TIME as i64);
     assert_eq!(
         compare(&sandbox, "refs/heads/clash").mergeability,
@@ -233,5 +233,5 @@ fn a_sha1_pack_is_refused_by_a_sha256_repository() {
             request,
         },
     );
-    assert_eq!(refused.unwrap_err().code, code::INVALID_INPUT);
+    assert_eq!(refused.unwrap_err().reason, reason::INVALID_INPUT);
 }

@@ -34,25 +34,25 @@ impl Tape {
     /// A UI reply: the bytes decode as `Reply` and re-encode to themselves.
     fn capture(&mut self, rig: &Rig, name: &'static str, q: Query) -> Reply {
         let bytes = rig.query(&q).unwrap();
-        let reply: Reply = store::decode(&bytes).unwrap();
-        assert_eq!(store::encode(&reply), bytes);
-        self.save(name, store::encode(&q), bytes);
+        let reply: Reply = abi::decode(&bytes).unwrap();
+        assert_eq!(abi::encode(&reply), bytes);
+        self.save(name, abi::encode(&q), bytes);
         reply
     }
 
     /// An op's output: the bytes decode as `OpReply`.
     fn output(&mut self, rig: &mut Rig, name: &'static str, op: Op) -> OpReply {
         let bytes = rig.execute(&op).unwrap();
-        let reply: OpReply = store::decode(&bytes).unwrap();
-        assert_eq!(store::encode(&reply), bytes);
-        self.save(name, store::encode(&op), bytes);
+        let reply: OpReply = abi::decode(&bytes).unwrap();
+        assert_eq!(abi::encode(&reply), bytes);
+        self.save(name, abi::encode(&op), bytes);
         reply
     }
 
-    /// A refusal: `Err` through the ABI, captured as the borsh `Error`.
-    fn refusal(&mut self, rig: &Rig, name: &'static str, q: Query) -> store::Error {
+    /// A refusal: `Err` through the ABI, captured as the borsh `Refusal`.
+    fn refusal(&mut self, rig: &Rig, name: &'static str, q: Query) -> abi::Refusal {
         let refusal = rig.query(&q).unwrap_err();
-        self.save(name, store::encode(&q), store::encode(&refusal));
+        self.save(name, abi::encode(&q), abi::encode(&refusal));
         refusal
     }
 
@@ -60,7 +60,7 @@ impl Tape {
     fn git_reply(&mut self, rig: &Rig, name: &'static str, q: Query) {
         let bytes = rig.query(&q).unwrap();
         assert!(!bytes.is_empty());
-        self.save(name, store::encode(&q), bytes);
+        self.save(name, abi::encode(&q), bytes);
     }
 }
 
@@ -77,8 +77,8 @@ fn write(tape: &Tape) {
             c.name,
             bin.len(),
             c.bytes.len(),
-            store::hex(&c.request),
-            store::hex(&Sha256::digest(&c.bytes))
+            abi::hex(&c.request),
+            abi::hex(&Sha256::digest(&c.bytes))
         );
         bin.extend_from_slice(&c.bytes);
     }
@@ -100,7 +100,7 @@ fn check(tape: &Tape) {
         assert_eq!(stored, c.bytes, "{}: actual program bytes", c.name);
         assert_eq!(
             f.sha256,
-            store::hex(&Sha256::digest(stored)),
+            abi::hex(&Sha256::digest(stored)),
             "{}: sha256",
             c.name
         );
@@ -112,28 +112,19 @@ fn replay(tape: &mut Tape) {
     let bounds = fixture_bounds();
     let mut rig = Rig::start(bounds, HashKind::Sha1);
     let mut empty = MemorySandbox::default();
-    forge::init(&mut empty, bounds).unwrap();
+    forge::init(&mut empty, &abi::encode(&bounds)).unwrap();
     let q = Query::Repos {
-        page: PageRequest::first(2),
+        page: Page::first(2),
     };
-    let bytes = forge::query(
-        &empty,
-        &Env {
-            height: 0,
-            ..env(OWNER)
-        },
-        q.clone(),
-    )
-    .unwrap()
-    .0;
-    let _: Reply = store::decode(&bytes).unwrap();
-    tape.save("repos-empty", store::encode(&q), bytes);
+    let bytes = forge::query(&empty, 0, q.clone()).unwrap();
+    let _: Reply = abi::decode(&bytes).unwrap();
+    tape.save("repos-empty", abi::encode(&q), bytes);
     tape.capture(
         &rig,
         "refs-empty",
         Query::Refs {
             repo: REPO.into(),
-            page: PageRequest::first(2),
+            page: Page::first(2),
         },
     );
     tape.refusal(
@@ -142,7 +133,7 @@ fn replay(tape: &mut Tape) {
         Query::Log {
             repo: REPO.into(),
             from: reference("main"),
-            page: PageRequest::first(2),
+            page: Page::first(2),
         },
     );
     tape.capture(&rig, "changes-empty", changes());
@@ -151,7 +142,7 @@ fn replay(tape: &mut Tape) {
         "judgment-empty",
         Query::Judgment {
             principal: Principal::Account(2),
-            page: PageRequest::first(2),
+            page: Page::first(2),
         },
     );
     let mut story = Story::pushed(&mut rig);
@@ -159,7 +150,7 @@ fn replay(tape: &mut Tape) {
         &rig,
         "repos",
         Query::Repos {
-            page: PageRequest::first(2),
+            page: Page::first(2),
         },
     );
     rig.execute(&Op::Grant {
@@ -172,7 +163,7 @@ fn replay(tape: &mut Tape) {
         "repo",
         Query::Repo {
             repo: REPO.into(),
-            page: PageRequest::first(2),
+            page: Page::first(2),
         },
     );
     tape.capture(
@@ -180,7 +171,7 @@ fn replay(tape: &mut Tape) {
         "refs",
         Query::Refs {
             repo: REPO.into(),
-            page: PageRequest::first(2),
+            page: Page::first(2),
         },
     );
     let Reply::Log { page, .. } = tape.capture(
@@ -189,7 +180,7 @@ fn replay(tape: &mut Tape) {
         Query::Log {
             repo: REPO.into(),
             from: reference("feature"),
-            page: PageRequest::first(1),
+            page: Page::first(1),
         },
     ) else {
         panic!();
@@ -200,7 +191,7 @@ fn replay(tape: &mut Tape) {
         Query::Log {
             repo: REPO.into(),
             from: reference("feature"),
-            page: PageRequest {
+            page: Page {
                 after: page.next,
                 limit: Some(1),
             },
@@ -213,7 +204,7 @@ fn replay(tape: &mut Tape) {
             repo: REPO.into(),
             at: story.feature.clone(),
             path: vec![],
-            page: PageRequest::first(2),
+            page: Page::first(2),
         },
     ) else {
         panic!();
@@ -225,7 +216,7 @@ fn replay(tape: &mut Tape) {
             repo: REPO.into(),
             at: story.feature.clone(),
             path: vec![],
-            page: PageRequest {
+            page: Page {
                 after: page.next,
                 limit: Some(64),
             },
@@ -238,7 +229,7 @@ fn replay(tape: &mut Tape) {
             repo: REPO.into(),
             at: story.feature.clone(),
             path: b"src".to_vec(),
-            page: PageRequest::first(2),
+            page: Page::first(2),
         },
     );
     for (name, path) in [
@@ -274,7 +265,7 @@ fn replay(tape: &mut Tape) {
             base: Some(story.root.clone()),
             head: story.feature.clone(),
             path: None,
-            page: PageRequest::first(2),
+            page: Page::first(2),
         },
     ) else {
         panic!();
@@ -287,7 +278,7 @@ fn replay(tape: &mut Tape) {
             base: Some(story.root.clone()),
             head: story.feature.clone(),
             path: None,
-            page: PageRequest {
+            page: Page {
                 after: page.next,
                 limit: Some(2),
             },
@@ -310,7 +301,7 @@ fn replay(tape: &mut Tape) {
                 base: Some(story.root.clone()),
                 head: story.feature.clone(),
                 path: Some(path.as_bytes().to_vec()),
-                page: PageRequest::first(2),
+                page: Page::first(2),
             },
         );
     }
@@ -322,7 +313,7 @@ fn replay(tape: &mut Tape) {
             base: None,
             head: story.root.clone(),
             path: Some(b"README.md".to_vec()),
-            page: PageRequest::first(2),
+            page: Page::first(2),
         },
     );
     tape.capture(
@@ -333,7 +324,7 @@ fn replay(tape: &mut Tape) {
             base: Some(story.root.clone()),
             head: story.root.clone(),
             path: None,
-            page: PageRequest::first(2),
+            page: Page::first(2),
         },
     );
     for (name, from, into) in [
@@ -396,7 +387,7 @@ fn replay(tape: &mut Tape) {
         Query::Log {
             repo: REPO.into(),
             from: reference("feature"),
-            page: PageRequest {
+            page: Page {
                 after: Some(vec![1]),
                 limit: Some(1),
             },
@@ -407,7 +398,7 @@ fn replay(tape: &mut Tape) {
         "refs-before-update",
         Query::Refs {
             repo: REPO.into(),
-            page: PageRequest::first(1),
+            page: Page::first(1),
         },
     ) else {
         panic!();
@@ -418,7 +409,7 @@ fn replay(tape: &mut Tape) {
         "refused-stale",
         Query::Refs {
             repo: REPO.into(),
-            page: PageRequest {
+            page: Page {
                 after: page.next.clone(),
                 limit: Some(1),
             },
@@ -429,7 +420,7 @@ fn replay(tape: &mut Tape) {
         "refused-other-listing",
         Query::Refs {
             repo: "other".into(),
-            page: PageRequest {
+            page: Page {
                 after: page.next,
                 limit: Some(1),
             },
@@ -443,7 +434,7 @@ fn replay(tape: &mut Tape) {
         "judgment",
         Query::Judgment {
             principal: Principal::Account(2),
-            page: PageRequest::first(2),
+            page: Page::first(2),
         },
     );
     tape.output(
@@ -472,7 +463,7 @@ fn replay(tape: &mut Tape) {
         Query::Change {
             repo: REPO.into(),
             n: 1,
-            page: PageRequest::first(2),
+            page: Page::first(2),
         },
     ) else {
         panic!();
@@ -483,7 +474,7 @@ fn replay(tape: &mut Tape) {
         Query::Change {
             repo: REPO.into(),
             n: 1,
-            page: PageRequest {
+            page: Page {
                 after: reviews.next,
                 limit: Some(2),
             },
@@ -514,7 +505,7 @@ fn replay(tape: &mut Tape) {
         "judgment-replies",
         Query::Judgment {
             principal: Principal::Account(2),
-            page: PageRequest::first(2),
+            page: Page::first(2),
         },
     );
     rig.actor = TESTER.to_vec();
@@ -525,7 +516,7 @@ fn replay(tape: &mut Tape) {
         "judgment-head-moved",
         Query::Judgment {
             principal: Principal::Account(2),
-            page: PageRequest::first(2),
+            page: Page::first(2),
         },
     );
     tape.output(
@@ -551,7 +542,7 @@ fn replay(tape: &mut Tape) {
                 state: Some(ChangeState::Closed),
                 ..Default::default()
             },
-            page: PageRequest::first(2),
+            page: Page::first(2),
         },
     );
     tape.output(
@@ -593,7 +584,7 @@ fn replay(tape: &mut Tape) {
         "judgment-conversation",
         Query::Judgment {
             principal: Principal::Account(4),
-            page: PageRequest::first(128),
+            page: Page::first(128),
         },
     );
     let mut narrow = Rig::start(
@@ -610,7 +601,7 @@ fn replay(tape: &mut Tape) {
         Query::Log {
             repo: REPO.into(),
             from: reference("feature"),
-            page: PageRequest::first(1),
+            page: Page::first(1),
         },
     );
 }

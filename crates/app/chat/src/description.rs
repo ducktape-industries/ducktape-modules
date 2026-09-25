@@ -1,5 +1,5 @@
 //! [`describe`]: an op as a person reads it, a title and its fields. The
-//! source of the `ducktape.describe` module this module ships
+//! source of the `ducktape.describe` module this program ships
 //! (`make wasm-describes`); the explorer shows it for every chat op.
 use describe::{Description, Field, Value, field};
 

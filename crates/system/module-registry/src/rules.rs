@@ -2,18 +2,18 @@
 
 use std::collections::BTreeMap;
 
-use store::{Env, Error, HashKind, ModuleId};
+use abi::{Env, HashKind, ProgramId, Refusal};
 use store::{Item, Map, Reads, Writes, already_exists, invalid, not_found};
 
 use crate::{AUTHORITY, CODE_KIND, Change, Entry, Genesis, Op, Query, Reply, Scheduled, View};
 
-const PROGRAMS: Map<ModuleId, Entry> = Map::new("p/");
-const VIEWS: Map<ModuleId, View> = Map::new("v/");
-type At = (u64, ModuleId);
+const PROGRAMS: Map<ProgramId, Entry> = Map::new("p/");
+const VIEWS: Map<ProgramId, View> = Map::new("v/");
+type At = (u64, ProgramId);
 const SCHEDULE: Map<At, Change> = Map::new("s/");
 const FOLDED: Item<u64> = Item::new("folded");
 
-pub fn init(store: &mut impl Writes, genesis: Genesis) -> Result<(), Error> {
+pub fn init(store: &mut impl Writes, genesis: Genesis) {
     for entry in genesis.programs {
         PROGRAMS.put(store, &entry.program, &entry);
     }
@@ -21,44 +21,43 @@ pub fn init(store: &mut impl Writes, genesis: Genesis) -> Result<(), Error> {
         VIEWS.put(store, &view.name, &view);
     }
     FOLDED.put(store, &0);
-    Ok(())
 }
 
-pub fn execute(store: &mut impl Writes, env: &Env, op: Op) -> Result<(), Error> {
+pub fn execute(store: &mut impl Writes, env: &Env, op: Op) -> Result<(), Refusal> {
     fold(store, env.height)?;
     match op {
         Op::Publish { body } => publish(store, body),
         Op::Schedule(scheduled) => schedule(store, env, scheduled),
-        Op::Cancel { height, module } => cancel(store, env, height, module),
+        Op::Cancel { height, program } => cancel(store, env, height, program),
     }
 }
 
-pub fn query(store: &impl Reads, env: &Env, query: Query) -> Result<Reply, Error> {
+pub fn query(store: &impl Reads, env: &Env, query: Query) -> Result<Reply, Refusal> {
     Ok(match query {
-        Query::At(height) => Reply::Modules(at(store, height)?),
+        Query::At(height) => Reply::Programs(at(store, height)?),
         Query::Views(height) => Reply::Views(views_at(store, height)?),
         Query::Scheduled { page } => Reply::Scheduled(
             SCHEDULE
                 .range(store, &page, env.height)?
                 .map(|((height, _), change)| Scheduled { height, change }),
         ),
-        Query::Module(module) => Reply::Module {
+        Query::Program(program) => Reply::Program {
             height: env.height,
             entry: at(store, env.height)?
                 .into_iter()
-                .find(|entry| entry.program == module),
+                .find(|entry| entry.program == program),
         },
     })
 }
 
-fn publish(store: &mut impl Writes, body: Vec<u8>) -> Result<(), Error> {
+fn publish(store: &mut impl Writes, body: Vec<u8>) -> Result<(), Refusal> {
     let id = store.blob_put(HashKind::Sha256, CODE_KIND, body)?;
-    store.set_return_data(store::encode(&id));
+    store.output(abi::encode(&id));
     Ok(())
 }
 
-fn schedule(store: &mut impl Writes, env: &Env, scheduled: Scheduled) -> Result<(), Error> {
-    env.require_module(AUTHORITY)?;
+fn schedule(store: &mut impl Writes, env: &Env, scheduled: Scheduled) -> Result<(), Refusal> {
+    crate::helpers::from(env, AUTHORITY)?;
     let in_the_future = scheduled.height > env.height;
     if !in_the_future {
         return Err(invalid(format!(
@@ -71,7 +70,7 @@ fn schedule(store: &mut impl Writes, env: &Env, scheduled: Scheduled) -> Result<
     {
         return Err(not_found(format!("code {blob:?} is not published")));
     }
-    let name = scheduled.change.module();
+    let name = scheduled.change.program();
     let (programs, views) = roster(store, scheduled.height)?;
     let clash = match &scheduled.change {
         Change::Set(_) => views.contains_key(name) || pending(store, name, Kind::View)?,
@@ -95,7 +94,7 @@ fn schedule(store: &mut impl Writes, env: &Env, scheduled: Scheduled) -> Result<
             "{name} already names a program or a view"
         )));
     }
-    let key = (scheduled.height, scheduled.change.module().to_owned());
+    let key = (scheduled.height, scheduled.change.program().to_owned());
     if SCHEDULE.has(store, &key) {
         return Err(already_exists(format!(
             "{} already changes at {}",
@@ -106,8 +105,13 @@ fn schedule(store: &mut impl Writes, env: &Env, scheduled: Scheduled) -> Result<
     Ok(())
 }
 
-fn cancel(store: &mut impl Writes, env: &Env, height: u64, program: ModuleId) -> Result<(), Error> {
-    env.require_module(AUTHORITY)?;
+fn cancel(
+    store: &mut impl Writes,
+    env: &Env,
+    height: u64,
+    program: ProgramId,
+) -> Result<(), Refusal> {
+    crate::helpers::from(env, AUTHORITY)?;
     let key = (height, program);
     let Some(change) = SCHEDULE.get(store, &key)? else {
         return Err(not_found(format!("{} does not change at {height}", key.1)));
@@ -131,7 +135,7 @@ fn cancel(store: &mut impl Writes, env: &Env, height: u64, program: ModuleId) ->
     Ok(())
 }
 
-fn fold(store: &mut impl Writes, height: u64) -> Result<(), Error> {
+fn fold(store: &mut impl Writes, height: u64) -> Result<(), Refusal> {
     let folded = FOLDED.get(store)?.unwrap_or(0);
     let nothing_new = folded >= height;
     if nothing_new {
@@ -150,22 +154,22 @@ fn fold(store: &mut impl Writes, height: u64) -> Result<(), Error> {
     Ok(())
 }
 
-fn due(store: &impl Reads, height: u64) -> Result<Vec<(At, Change)>, Error> {
+fn due(store: &impl Reads, height: u64) -> Result<Vec<(At, Change)>, Refusal> {
     SCHEDULE.scan(store, SCHEDULE.below(&(height + 1)))
 }
 
-fn at(store: &impl Reads, height: u64) -> Result<Vec<Entry>, Error> {
+fn at(store: &impl Reads, height: u64) -> Result<Vec<Entry>, Refusal> {
     Ok(roster(store, height)?.0.into_values().collect())
 }
 
-fn views_at(store: &impl Reads, height: u64) -> Result<Vec<View>, Error> {
+fn views_at(store: &impl Reads, height: u64) -> Result<Vec<View>, Refusal> {
     Ok(roster(store, height)?.1.into_values().collect())
 }
 
-type Roster = (BTreeMap<ModuleId, Entry>, BTreeMap<ModuleId, View>);
+type Roster = (BTreeMap<ProgramId, Entry>, BTreeMap<ProgramId, View>);
 
 /// Both lists at a height, by name: what is folded, and every change due by then.
-fn roster(store: &impl Reads, height: u64) -> Result<Roster, Error> {
+fn roster(store: &impl Reads, height: u64) -> Result<Roster, Refusal> {
     let mut programs: BTreeMap<_, _> = PROGRAMS.all(store)?.into_iter().collect();
     let mut views: BTreeMap<_, _> = VIEWS.all(store)?.into_iter().collect();
     for (_, change) in due(store, height)? {
@@ -194,7 +198,7 @@ enum Kind {
 }
 
 /// Whether a set of `kind` under `name` waits anywhere in the schedule, at any height.
-fn pending(store: &impl Reads, name: &str, kind: Kind) -> Result<bool, Error> {
+fn pending(store: &impl Reads, name: &str, kind: Kind) -> Result<bool, Refusal> {
     Ok(SCHEDULE
         .all(store)?
         .into_iter()

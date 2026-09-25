@@ -1,4 +1,4 @@
-# What an op means to a person, as the module that runs it says. A module
+# What an op means to a person, as the program that runs it says. A program
 # ships a tiny standalone wasm module in the custom section `ducktape.describe`
 # of its code blob: no imports, one pure export from the borsh op bytes to a
 # borsh [`Description`]. `export!` is that module's glue; `host` (off by

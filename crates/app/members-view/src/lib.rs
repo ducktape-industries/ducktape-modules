@@ -17,8 +17,8 @@ use ducktape_view_guest::{
     Window, div, px,
 };
 use futures::StreamExt;
+use module_registry::Page;
 use serde::{Deserialize, Serialize};
-use store::PageRequest;
 
 use identity::view::Identity;
 
@@ -293,13 +293,13 @@ async fn roster(host: Host) -> Result<Vec<Row>, Refusal> {
     let mut accounts = Vec::new();
     let mut after = None;
     loop {
-        let page = PageRequest { after, limit: None };
+        let page = Page { after, limit: None };
         let reply = match host
             .ask::<Query<Identity>>(identity::Query::List { page })
             .await?
         {
             identity::Reply::Accounts(reply) => reply,
-            other => return Err(unexpected(identity::MODULE, &other)),
+            other => return Err(unexpected(identity::PROGRAM, &other)),
         };
         accounts.extend(reply.items);
         match reply.next {
@@ -310,13 +310,13 @@ async fn roster(host: Host) -> Result<Vec<Row>, Refusal> {
     let mut members = Vec::new();
     let mut after = None;
     loop {
-        let page = PageRequest { after, limit: None };
+        let page = Page { after, limit: None };
         let reply = match host
             .ask::<Query<Valset>>(valset::Query::Memberships { page })
             .await?
         {
             valset::Reply::Memberships(reply) => reply,
-            other => return Err(unexpected(valset::MODULE, &other)),
+            other => return Err(unexpected(valset::PROGRAM, &other)),
         };
         members.extend(reply.items);
         match reply.next {
@@ -345,9 +345,9 @@ fn row(account: &identity::Account, members: &[valset::Membership]) -> Row {
             .iter()
             .find(|member| account.holds(&member.key))
             .map(|member| {
-                match member.role {
-                    valset::Role::Validator => "Validator",
-                    valset::Role::Resident => "Resident",
+                match member.standing {
+                    valset::Standing::Validator => "Validator",
+                    valset::Standing::Resident => "Resident",
                 }
                 .into()
             }),

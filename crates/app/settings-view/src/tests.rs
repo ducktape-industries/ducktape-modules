@@ -48,7 +48,7 @@ fn respond(cx: &TestAppContext) {
                 valset::Reply::Membership(Some(valset::Membership {
                     key,
                     address: "127.0.0.1:19001".into(),
-                    role: valset::Role::Validator,
+                    standing: valset::Standing::Validator,
                 }))
             }
             q => panic!("unexpected query: {q:?}"),

@@ -1,4 +1,4 @@
-//! The `chat` module: channels, messages, threads, reactions, members and
+//! The `chat` program: channels, messages, threads, reactions, members and
 //! huddles.
 //!
 //! A write is an [`Op`], a read a [`Query`] answered by a [`Reply`], all
@@ -7,23 +7,24 @@
 //! account (a key that holds none writes nothing). The layout, in reading order:
 //!
 //! - `lib.rs` (here): the types on the wire and the rows they carry
-//! - `state.rs`: every table and index the module keeps, declared once
+//! - `state.rs`: every table and index the program keeps, declared once
 //! - `rules.rs`: the checks an op passes before it writes
 //! - `ops.rs`: [`execute`], one short function per op
-//! - `origin.rs`: a huddle join's node proof checked against the signer,
-//!   and identity's roster
+//! - `origin.rs`: [`execute_from`], an origin resolved to its principal
+//!   through identity, and identity's roster
 //! - `queries.rs`: [`query`], one short function per question
 //! - `text.rs`: what search and tags read out of a message
 //! - `description.rs`: [`describe`], an op in a person's words
-//! - `store::entrypoint!` below (`module` feature): the wasm32 glue, the
-//!   sender resolved by identity's `principal_of`
+//! - `program.rs` (`program` feature): the wasm32 glue over the host
 //!
 //! The rules run over any [`store::Reads`]/[`store::Writes`], so a native
-//! test runs them over [`store::testing::MockHost`] exactly as the host does.
+//! test runs them over [`store::Memory`] exactly as the host does.
 mod description;
 pub mod message;
 mod ops;
 mod origin;
+#[cfg(feature = "program")]
+mod program;
 mod queries;
 mod rules;
 mod state;
@@ -36,23 +37,18 @@ pub mod view;
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
+pub use abi::hex;
 pub use description::describe;
-pub use identity::{AccountNumber, Principal};
+pub use identity::{AccountNumber, Frame, Principal};
 pub use message::{Block, Mark, Span, parse_message};
 pub use ops::execute;
+pub use origin::execute_from;
 pub use queries::{query, roots_below};
-pub use store::hex;
-pub use store::{Cursor, PageRequest, PageResponse};
-
-store::entrypoint! {
-    execute: Op => execute,
-    sender: identity::principal_of,
-    query: Query => query,
-}
+pub use store::{Cursor, Page, PageReply};
 pub use text::{plain_text, tags, tokens};
 
-/// The name this module runs under.
-pub const MODULE: &str = "chat";
+/// The name this program runs under.
+pub const PROGRAM: &str = "chat";
 
 pub const MAX_ID_BYTES: usize = 64;
 pub const MAX_NAME_BYTES: usize = 128;
@@ -134,7 +130,7 @@ pub enum Op {
         member: bool,
     },
     /// `node_proof` is `node`'s signature over [`HUDDLE_JOIN_NS`] + channel
-    /// id + the origin key (verified by the module, not the rules).
+    /// id + the origin key (verified by the program, not the rules).
     JoinHuddle {
         channel_id: String,
         node: Vec<u8>,
@@ -146,12 +142,12 @@ pub enum Op {
 }
 
 /// A read. `viewer` is the reader's principals: they decide
-/// [`Reaction::reacted_by_me`]. Every list takes a [`PageRequest`] and answers a
-/// [`PageResponse`] whose `next` resumes it.
+/// [`Reaction::reacted_by_me`]. Every list takes a [`Page`] and answers a
+/// [`PageReply`] whose `next` resumes it.
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
 pub enum Query {
     Channels {
-        page: PageRequest,
+        page: Page,
     },
     Channel {
         channel_id: String,
@@ -169,62 +165,62 @@ pub enum Query {
     Roots {
         channel_id: String,
         viewer: Vec<Principal>,
-        page: PageRequest,
+        page: Page,
     },
     /// `page.limit` messages centred on `seq`.
     MessagesAround {
         channel_id: String,
         seq: u64,
         viewer: Vec<Principal>,
-        page: PageRequest,
+        page: Page,
     },
     /// The root plus one page of replies, in post order.
     Thread {
         channel_id: String,
         root_seq: u64,
         viewer: Vec<Principal>,
-        page: PageRequest,
+        page: Page,
     },
     Members {
         channel_id: String,
-        page: PageRequest,
+        page: Page,
     },
     /// Every token of `text`, newest first, at most `page.limit` hits.
     Search {
         text: String,
         viewer: Vec<Principal>,
         channel_id: Option<String>,
-        page: PageRequest,
+        page: Page,
     },
     TagSearch {
         tag: String,
         viewer: Vec<Principal>,
         channel_id: Option<String>,
-        page: PageRequest,
+        page: Page,
     },
     /// The identity roster, ascending by number, a page at a time: the
-    /// module asks identity, so a view links one module.
+    /// program asks identity, so a view links one program.
     Accounts {
-        page: PageRequest,
+        page: Page,
     },
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
 pub enum Reply {
-    Channels(PageResponse<ChannelInfo>),
+    Channels(PageReply<ChannelInfo>),
     Channel(Option<ChannelInfo>),
     Message(Option<MsgRow>),
     Attention(Option<MsgRow>),
-    Roots(PageResponse<MsgRow>),
+    Roots(PageReply<MsgRow>),
     Messages(Vec<MsgRow>),
     Thread {
         root: Option<MsgRow>,
-        replies: PageResponse<MsgRow>,
+        replies: PageReply<MsgRow>,
     },
-    Members(PageResponse<MemberRow>),
+    Members(PageReply<MemberRow>),
     Hits(MessageHits),
-    TagHits(PageResponse<MsgRow>),
-    Accounts(PageResponse<AccountRow>),
+    TagHits(PageReply<MsgRow>),
+    Accounts(PageReply<AccountRow>),
 }
 
 #[derive(
@@ -254,7 +250,7 @@ impl ChannelRow {
 
     /// Whether the room lets `principal` post, `seated` saying whether it holds
     /// a member seat: posting is open, or it owns the room or sits in it.
-    /// Archiving aside; the module and the view ask this one rule.
+    /// Archiving aside; the program and the view ask this one rule.
     pub fn admits(&self, principal: &Principal, seated: bool) -> bool {
         !self.members_only() || self.owner == *principal || seated
     }
@@ -309,7 +305,7 @@ pub struct MsgRow {
 
 impl MsgRow {
     /// A row with nothing yet but its author: a view's pending post before
-    /// the module serves it, a test's base row.
+    /// the program serves it, a test's base row.
     pub fn by(author: Principal) -> MsgRow {
         MsgRow {
             channel_id: String::new(),
@@ -353,7 +349,7 @@ pub struct MessageHits {
 pub struct AccountRow {
     pub number: AccountNumber,
     pub name: String,
-    /// a module-controlled account: an agent, not a person
+    /// a program-controlled account: an agent, not a person
     pub program: bool,
     /// the account's keys, hex
     pub keys: Vec<String>,
@@ -370,22 +366,22 @@ pub fn dm_peers(channel_id: &str) -> Option<(AccountNumber, AccountNumber)> {
     Some((a.parse().ok()?, b.parse().ok()?))
 }
 
-/// The module a `<program>:<name>` channel id belongs to, or `None` for a
-/// channel people opened. Only that module creates one (a review thread,
-/// say); a reader reaches it through its module, not the channel list.
-/// The module's view opens the room at the id's own path: `forge:web:3`
+/// The program a `<program>:<name>` channel id belongs to, or `None` for a
+/// channel people opened. Only that program creates one (a review thread,
+/// say); a reader reaches it through its program, not the channel list.
+/// The program's view opens the room at the id's own path: `forge:web:3`
 /// is `duck://<chain>/forge/web/3`.
-pub fn module_of(channel_id: &str) -> Option<&str> {
+pub fn program_of(channel_id: &str) -> Option<&str> {
     channel_id.split_once(':').map(|(program, _)| program)
 }
 
-/// A module's own post in its own room: written by the module the
-/// `<program>:<name>` room belongs to, as one code block in that module's
-/// language (forge's `opened`, `review 7`). The code is the module's to
-/// word; a reader shows it as that module's event and points to where the
-/// module itself shows the room. `(program, code)`.
-pub fn module_post(row: &MsgRow) -> Option<(&str, &str)> {
-    let program = module_of(&row.channel_id)?;
+/// A program's own post in its own room: written by the module the
+/// `<program>:<name>` room belongs to, as one code block in that program's
+/// language (forge's `opened`, `review 7`). The code is the program's to
+/// word; a reader shows it as that program's event and points to where the
+/// program itself shows the room. `(program, code)`.
+pub fn program_post(row: &MsgRow) -> Option<(&str, &str)> {
+    let program = program_of(&row.channel_id)?;
     let own = matches!(&row.author, Principal::Module(module) if module == program);
     match row.blocks.as_slice() {
         [
@@ -435,7 +431,7 @@ fn a_programs_own_code_block_in_its_room_is_its_post() {
     };
     let forge = || Principal::Module("forge".into());
     let post = row("forge:web:3", forge(), vec![code("forge")]);
-    assert_eq!(module_post(&post), Some(("forge", "review 7")));
+    assert_eq!(program_post(&post), Some(("forge", "review 7")));
     for other in [
         row("forge:web:3", Principal::Account(1), vec![code("forge")]),
         row("forge:web:3", forge(), vec![code("rust")]),
@@ -443,6 +439,6 @@ fn a_programs_own_code_block_in_its_room_is_its_post() {
         row("general", forge(), vec![code("forge")]),
         row("chess:1", forge(), vec![code("forge")]),
     ] {
-        assert_eq!(module_post(&other), None, "{other:?}");
+        assert_eq!(program_post(&other), None, "{other:?}");
     }
 }
