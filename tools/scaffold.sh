@@ -1,11 +1,10 @@
 #!/bin/sh
-# `make new-module NAME=x` / `make new-view NAME=x-view`: a module in
-# chat's shape (types and rules always built, the wasm32 entry points behind
-# `module`, a native test over `store::testing::MockHost`) or a view in
-# members-view's shape (links its module with `module` off, `export_view!`,
-# one screen test), registered in the Makefile and the workspace. Run from
-# the repo root.
-#   tools/scaffold.sh module <name> | view <name>-view
+# `make new-program NAME=x` / `make new-view NAME=x-view`: a program in
+# chat's shape (types and rules always built, the wasm32 program behind
+# `program`, a native test over `store::Memory`) or a view in members-view's
+# shape (links its program with `program` off, `export_view!`, one screen
+# test), registered in the Makefile and the workspace. Run from the repo root.
+#   tools/scaffold.sh program <name> | view <name>-view
 set -eu
 kind=$1
 name=$2
@@ -21,7 +20,7 @@ register() { # <Makefile list> <name>
     sed -i "s|^    \"crates/lib/gitcore\",|    \"crates/app/$2\",\n&|" Cargo.toml
 }
 
-module() {
+program() {
     mkdir -p "$dir/src" "$dir/tests"
     cat > "$dir/Cargo.toml" <<EOF
 [package]
@@ -29,36 +28,38 @@ name = "$name"
 version.workspace = true
 edition.workspace = true
 
-# The types and rules are always built; the view links them with \`module\`
-# off. \`module\` adds the wasm32 entry points \`store::entrypoint!\` expands to.
+# The types and rules are always built; the view links them with \`program\`
+# off. \`program\` adds the wasm32 program over the host: \`guest\`'s contexts,
+# the \`alloc\`/\`call\` exports and the \`ducktape.*\` imports.
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [features]
-module = ["store/module"]
+program = ["dep:guest", "store/program"]
 
 [dependencies]
+abi = { workspace = true }
 borsh = { workspace = true }
+guest = { workspace = true, optional = true }
 store = { workspace = true }
 EOF
     cat > "$dir/src/lib.rs" <<EOF
-//! The \`$name\` module: one counter, to be replaced by what it keeps.
+//! The \`$name\` program: one counter, to be replaced by what it keeps.
 //!
 //! Writes are an [\`Op\`] (borsh), reads a [\`Query\`] answered by a [\`Reply\`]
 //! (borsh); \`$name-view\` links the same types. The rules run over any
-//! [\`store::Reads\`]/[\`store::Writes\`] store; the \`module\` feature adds the
-//! wasm32 entry points (\`store::entrypoint!\`), which a view never enables.
+//! [\`store::Reads\`]/[\`store::Writes\`] store; the \`program\` feature adds the
+//! wasm32 program over the host (\`program.rs\`), which a view never enables.
+use abi::{Env, Refusal};
 use borsh::{BorshDeserialize, BorshSerialize};
-use store::{Env, Error, Item, Reads, Writes};
+use store::{Item, Reads, Writes};
 
-pub const MODULE: &str = "$name";
+#[cfg(feature = "program")]
+mod program;
 
-store::entrypoint! {
-    execute: Op => execute,
-    query: Query => query,
-}
+pub const PROGRAM: &str = "$name";
 
-/// The one value this module keeps.
+/// The one value this program keeps.
 const COUNT: Item<u64> = Item::new("count");
 
 #[derive(Clone, Debug, BorshSerialize, BorshDeserialize)]
@@ -76,7 +77,7 @@ pub enum Reply {
     Count(u64),
 }
 
-pub fn execute(store: &mut impl Writes, _env: &Env, op: Op) -> Result<(), Error> {
+pub fn execute(store: &mut impl Writes, _env: &Env, op: Op) -> Result<(), Refusal> {
     match op {
         Op::Bump { by } => {
             COUNT.update(store, |count| *count = count.saturating_add(by))?;
@@ -85,33 +86,68 @@ pub fn execute(store: &mut impl Writes, _env: &Env, op: Op) -> Result<(), Error>
     Ok(())
 }
 
-pub fn query(store: &impl Reads, _env: &Env, query: Query) -> Result<Reply, Error> {
+pub fn query(store: &impl Reads, _env: &Env, query: Query) -> Result<Reply, Refusal> {
     match query {
         Query::Count => Ok(Reply::Count(COUNT.get(store)?.unwrap_or_default())),
     }
 }
 EOF
+    cat > "$dir/src/program.rs" <<EOF
+// The wasm32 program over the rules: guest contexts as the store, the bytes decoded and answered.
+
+use abi::{Env, Refusal};
+use guest::{Execute, Program, Query as QueryCtx};
+use store::decoded;
+
+use crate::{Op, PROGRAM, Query};
+
+struct This;
+
+impl Program for This {
+    fn execute(ctx: &mut Execute, env: &Env, payload: &[u8]) -> Result<(), Refusal> {
+        crate::execute(ctx, env, decoded::<Op>(PROGRAM, "Op", payload)?)
+    }
+
+    fn query(ctx: &mut QueryCtx, env: &Env, request: &[u8]) -> Result<(), Refusal> {
+        let reply = crate::query(ctx, env, decoded::<Query>(PROGRAM, "Query", request)?)?;
+        ctx.reply(&reply);
+        Ok(())
+    }
+}
+
+guest::program!(This);
+EOF
     cat > "$dir/tests/$snake.rs" <<EOF
-use store::Origin;
-use store::testing::{MockHost, env};
+use abi::{Cause, Env, Origin};
+use store::Memory;
 use $snake::{Op, Query, Reply};
+
+fn env() -> Env {
+    Env {
+        network: b"net".to_vec(),
+        height: 7,
+        time: 100,
+        me: $snake::PROGRAM.into(),
+        origin: Origin::External(vec![1]),
+        cause: Cause::Direct,
+    }
+}
 
 #[test]
 fn bumps_add_up_and_read_back() {
-    let mut host = MockHost::default();
-    let env = env(Origin::Signed(vec![1]));
-    $snake::execute(&mut host, &env, Op::Bump { by: 2 }).unwrap();
-    $snake::execute(&mut host, &env, Op::Bump { by: 3 }).unwrap();
-    let Reply::Count(count) = $snake::query(&host, &env, Query::Count).unwrap();
+    let mut store = Memory::default();
+    $snake::execute(&mut store, &env(), Op::Bump { by: 2 }).unwrap();
+    $snake::execute(&mut store, &env(), Op::Bump { by: 3 }).unwrap();
+    let Reply::Count(count) = $snake::query(&store, &env(), Query::Count).unwrap();
     assert_eq!(count, 5);
 }
 EOF
     register PROGRAMS "$name"
     sed -i "s|^forge = { path = \"crates/app/forge\" }|&\n$name = { path = \"$dir\" }|" Cargo.toml
     cat <<EOF
-$dir/{Cargo.toml,src/lib.rs,tests/$snake.rs}, PROGRAMS, workspace members and dependencies.
+$dir/{Cargo.toml,src/lib.rs,src/program.rs,tests/$snake.rs}, PROGRAMS, workspace members and dependencies.
 Next:
-  1. name \`$name\` in a founding (qa's founding.toml, or the module's params it seats with)
+  1. name \`$name\` in a founding (qa's founding.toml, or the program's params it seats with)
   2. write the contract: replace Op/Query/Reply and the rules in src/lib.rs; \`make dev P=$name\`
   3. tell qa's kit about it (the pack step in kit's build, if it ships a view)
 EOF
@@ -121,7 +157,7 @@ view() {
     case "$name" in *-view) ;; *) echo "$name: a view is named <program>-view" >&2; exit 1 ;; esac
     program=${name%-view}
     program_snake=$(echo "$program" | tr - _)
-    test -d "crates/app/$program" || { echo "crates/app/$program is not there: make new-module NAME=$program first" >&2; exit 1; }
+    test -d "crates/app/$program" || { echo "crates/app/$program is not there: make new-program NAME=$program first" >&2; exit 1; }
     upper=$(echo "$program_snake" | tr a-z A-Z)
     # The view type: TitleCase of the program name.
     title=$(echo "$program" | awk -F- '{ for (i = 1; i <= NF; i++) printf "%s%s", toupper(substr($i, 1, 1)), substr($i, 2) }')
@@ -139,7 +175,7 @@ publish = false
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-# The module is linked with \`module\` off: its types, no host import.
+# The program is linked with \`program\` off: its types, no host import.
 [dependencies]
 futures.workspace = true
 ducktape-view-guest.workspace = true
@@ -166,7 +202,7 @@ use serde::{Deserialize, Serialize};
 /// The program's query surface, as this view reads it.
 struct ${title}Program;
 impl Program for ${title}Program {
-    const NAME: &'static str = $program_snake::MODULE;
+    const NAME: &'static str = $program_snake::PROGRAM;
     type Op = $program_snake::Op;
     type Query = $program_snake::Query;
     type Reply = $program_snake::Reply;
@@ -307,4 +343,4 @@ EOF
 }
 
 # Import order and line width follow the name, so rustfmt has the last word.
-case "$kind" in module | view) "$kind" && ${CARGO:-cargo} fmt -p "$name" ;; *) echo "usage: tools/scaffold.sh module <name> | view <name>-view" >&2; exit 1 ;; esac
+case "$kind" in program | view) "$kind" && ${CARGO:-cargo} fmt -p "$name" ;; *) echo "usage: tools/scaffold.sh program <name> | view <name>-view" >&2; exit 1 ;; esac

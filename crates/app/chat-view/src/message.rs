@@ -40,7 +40,7 @@ pub struct ChatMessage {
     pub time: u64,
     pub reactions: Vec<Reaction>,
     /// `(program, code)` when this is a program's own post
-    /// ([`chat::module_post`]): shown as that program's event, not as a
+    /// ([`chat::program_post`]): shown as that program's event, not as a
     /// code block
     pub system: Option<(String, String)>,
 }
@@ -65,7 +65,7 @@ pub enum SpanStyle {
 }
 
 pub fn chat_message(row: MsgRow, names: &Names) -> ChatMessage {
-    let system = chat::module_post(&row).map(|(program, code)| (program.into(), code.into()));
+    let system = chat::program_post(&row).map(|(program, code)| (program.into(), code.into()));
     let edited = row.rev > 0;
     let meta = match (row.seq, edited) {
         (0, _) => "sending…".to_string(),

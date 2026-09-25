@@ -1,36 +1,37 @@
-# modules — the ducktape contract line and the modules written against it,
+# modules — the ducktape contract line and the programs written against it,
 # one repository.
 #
-#   crates/sdk/     the contracts: `abi` (the borsh bytes ABI a module and the
-#                   host share, a byte-for-byte copy of the kernel's),
-#                   `store` (the module SDK: the `Reads`/`Writes` store,
-#                   typed tables, paging, errors, `entrypoint!`, the kernel's
-#                   types under the SDK's names in `kernel.rs`, and
-#                   `testing::MockHost` to run a module natively), `ducklink`
-#                   (the `duck://` grammar), and the view contract
-#                   (`view-wire`, `view-guest`, `design`)
+#   crates/sdk/     the contracts: `abi` (the borsh bytes ABI a program and the
+#                   host share), `guest` (what a program compiles against),
+#                   `store` (what a program's rules are written over: the
+#                   `Reads`/`Writes` store, typed tables, paging, refusals;
+#                   `Memory` runs them natively), `ducklink` (the `duck://`
+#                   grammar), and the view contract (`view-wire`,
+#                   `view-guest`, `design`)
 #   crates/system/  the boot set: module-registry, valset and identity, one
-#                   crate each in the same shape as the app modules; the
+#                   crate each in the same shape as the app programs; the
 #                   suite under module-registry/tests founds ducktape's host
 #                   over the bytes `make wasm-programs` built
 #   crates/app/     the app modules: chat and forge (each one crate: types and
-#                   rules always, the wasm32 module behind the `module`
+#                   rules always, the wasm32 program behind the `program`
 #                   feature), chat-view and forge-view (which link their
-#                   module crate with the feature off) and the system views
-#   crates/lib/     libraries a module links: gitcore (git objects, packs,
+#                   program crate with the feature off) and the system views
+#   crates/lib/     libraries a program links: gitcore (git objects, packs,
 #                   walks, diffs, the wire's server side)
 #
 # A view links its module by path and reads its types; a view is a cdylib for
-# wasm32-unknown-unknown on `view-guest`. The host that runs the modules
+# wasm32-unknown-unknown on `view-guest`. The host that runs the programs
 # (runtime, state, blobs, host, node, consensus, the daemon) lives in ducktape,
-# and `crates/sdk/abi` is a copy of its `crates/kernel/abi`: the `[patch]`
-# below makes the host the suite links compile against the copy, and
-# `make kernel-abi-check` fails when the copy differs from the kernel's at all.
+# and `crates/sdk/abi` and `crates/sdk/guest` are copies of its
+# `crates/kernel/abi` and `crates/kernel/guest`: the `[patch]` below makes the
+# host the suite links compile against the copies, so a copy that drifts from
+# the kernel fails the build here.
 
 [workspace]
 resolver = "2"
 members = [
     "crates/sdk/abi",
+    "crates/sdk/guest",
     "crates/sdk/store",
     "crates/sdk/ducklink",
     "crates/sdk/design",
@@ -59,6 +60,7 @@ version = "0.1.0"
 [workspace.dependencies]
 # ---- the contracts, in tree
 abi = { path = "crates/sdk/abi" }
+guest = { path = "crates/sdk/guest" }
 store = { path = "crates/sdk/store" }
 gitcore = { path = "crates/lib/gitcore" }
 ducklink = { path = "crates/sdk/ducklink" }
@@ -85,7 +87,7 @@ commonware-runtime = "2026.9.0"
 # ---- external
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# borsh — the one codec the module abi is written in.
+# borsh — the one codec the program abi is written in.
 borsh = { version = "1", default-features = false, features = ["derive", "std"] }
 sha2 = "0.10"
 tempfile = "3"
@@ -99,6 +101,8 @@ unicode-normalization = "0.1"
 
 [patch."https://github.com/ducktape-industries/ducktape"]
 abi = { path = "crates/sdk/abi" }
+guest = { path = "crates/sdk/guest" }
+store = { path = "crates/sdk/store" }
 
 # proc-macro and build-script crates (serde_derive, async-trait, borsh-derive)
 # are compiled once and then run for every unit below them — unoptimized they
@@ -109,7 +113,7 @@ opt-level = 2
 [profile.dev.package.design]
 opt-level = 2
 
-# a view and a module ship as cdylibs for wasm32-unknown-unknown; the release
+# a view and a program ship as cdylibs for wasm32-unknown-unknown; the release
 # profile is what their bytes come out of.
 [profile.release]
 # Wire serde visitors dominate guests; optimize their shared code for size.

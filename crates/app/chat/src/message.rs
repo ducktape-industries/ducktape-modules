@@ -139,7 +139,7 @@ fn push_paragraph_block(lines: &[&str], start: usize, blocks: &mut Vec<Block>) -
     index
 }
 
-/// Range a single line of text for inline marks, preserving mention identity
+/// Scan a single line of text for inline marks, preserving mention identity
 /// inside emphasis. Bare `http(s)://` and `duck://`
 /// runs become `Link`s, as does a `[label](url)` reference — one span whose
 /// text is the label and whose mark carries the target.

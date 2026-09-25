@@ -1,11 +1,11 @@
-//! Borsh is the module contract; the view links these types as they are.
+//! Borsh is the program contract; the view links these types as they are.
+use abi::HashKind;
 use borsh::{BorshDeserialize, BorshSerialize};
-use store::HashKind;
 
 pub use crate::read_contract::*;
 pub use crate::review_contract::*;
-pub use identity::Principal;
-pub use store::{PageRequest, PageResponse};
+pub use identity::{Frame, Principal};
+pub use store::{Page, PageReply};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct Bounds {
@@ -141,17 +141,17 @@ pub enum Service {
 #[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Query {
     Repos {
-        page: PageRequest,
+        page: Page,
     },
     /// Settings plus a page of granted writers; the owner is on the repo
     /// record.
     Repo {
         repo: String,
-        page: PageRequest,
+        page: Page,
     },
     Refs {
         repo: String,
-        page: PageRequest,
+        page: Page,
     },
     Advertise {
         repo: String,
@@ -164,13 +164,13 @@ pub enum Query {
     Log {
         repo: String,
         from: Revision,
-        page: PageRequest,
+        page: Page,
     },
     Tree {
         repo: String,
         at: String,
         path: Vec<u8>,
-        page: PageRequest,
+        page: Page,
     },
     Blob {
         repo: String,
@@ -183,7 +183,7 @@ pub enum Query {
         base: Option<String>,
         head: String,
         path: Option<Vec<u8>>,
-        page: PageRequest,
+        page: Page,
     },
     Compare {
         repo: String,
@@ -196,17 +196,17 @@ pub enum Query {
     Changes {
         repo: String,
         filter: ChangeFilter,
-        page: PageRequest,
+        page: Page,
     },
     Change {
         repo: String,
         n: u64,
-        page: PageRequest,
+        page: Page,
     },
     /// What one person owes across every repository.
     Judgment {
         principal: Principal,
-        page: PageRequest,
+        page: Page,
     },
 }
 
@@ -216,13 +216,13 @@ impl Query {
     pub fn scope(&self) -> Vec<u8> {
         let mut scope = self.clone();
         if let Some(page) = scope.page_mut() {
-            *page = PageRequest::default();
+            *page = Page::default();
         }
-        PageRequest::scope_of(&scope)
+        Page::scope_of(&scope)
     }
 
     /// The page a listing asks for; an unpaged query has none.
-    pub fn page(&self) -> Option<&PageRequest> {
+    pub fn page(&self) -> Option<&Page> {
         match self {
             Query::Repos { page }
             | Query::Repo { page, .. }
@@ -242,7 +242,7 @@ impl Query {
     }
 
     /// [`Query::page`], to continue a listing with its `next` cursor.
-    pub fn page_mut(&mut self) -> Option<&mut PageRequest> {
+    pub fn page_mut(&mut self) -> Option<&mut Page> {
         match self {
             Query::Repos { page }
             | Query::Repo { page, .. }
@@ -280,27 +280,27 @@ pub struct RefInfo {
 pub enum Reply {
     Repos {
         height: u64,
-        page: PageResponse<RepoInfo>,
+        page: PageReply<RepoInfo>,
     },
     Repo {
         height: u64,
         repo: RepoInfo,
         bounds: Bounds,
-        writers: PageResponse<Principal>,
+        writers: PageReply<Principal>,
     },
     Refs {
         height: u64,
-        page: PageResponse<RefInfo>,
+        page: PageReply<RefInfo>,
     },
     Log {
         height: u64,
         tip: String,
-        page: PageResponse<CommitInfo>,
+        page: PageReply<CommitInfo>,
     },
     Tree {
         height: u64,
         tree: String,
-        page: PageResponse<TreeInfo>,
+        page: PageReply<TreeInfo>,
     },
     Blob {
         height: u64,
@@ -311,7 +311,7 @@ pub enum Reply {
         base: Option<String>,
         head: String,
         total_files: u64,
-        page: PageResponse<FileDiff>,
+        page: PageReply<FileDiff>,
     },
     Compare {
         height: u64,
@@ -323,18 +323,18 @@ pub enum Reply {
     },
     Changes {
         height: u64,
-        page: PageResponse<ChangeSummary>,
+        page: PageReply<ChangeSummary>,
     },
     Change {
         height: u64,
         change: Change,
         source_head: Option<String>,
         target_head: Option<String>,
-        reviews: PageResponse<Review>,
+        reviews: PageReply<Review>,
     },
     Judgment {
         height: u64,
-        page: PageResponse<Judgment>,
+        page: PageReply<Judgment>,
     },
 }
 

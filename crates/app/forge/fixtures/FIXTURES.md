@@ -4,7 +4,7 @@
 shape, `name offset len request-hex sha256` — the request is the borsh `Query`
 or `Op` that produced the bytes. `loader.rs` reads both and is shared by
 `#[path]` with forge-view's tests. The bytes are what the rules answered over
-`store::testing::MockHost` in `tests/fixtures.rs`, which is what `forge.wasm` answers over
+`store::Memory` in `tests/fixtures.rs`, which is what `forge.wasm` answers over
 the host: same code, same bytes (checked once against the wasm-on-runtime
 harness captures when the generator moved here). Three shapes carry git's own
 framing, not borsh; a refusal is the borsh `abi::Refusal` the program answered

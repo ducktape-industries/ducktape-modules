@@ -12,8 +12,7 @@ use host::{
 };
 use identity::AccountNumber;
 use keyscheme::testkit;
-use module_registry::AUTHORITY;
-use store::PageRequest;
+use module_registry::{AUTHORITY, Page};
 
 /// Where `make wasm-programs` left the boot set: the bytes are a build
 /// output, never committed.
@@ -75,11 +74,11 @@ fn member(seed: u64) -> valset::Member {
     }
 }
 
-fn membership(seed: u64, role: valset::Role) -> valset::Membership {
+fn membership(seed: u64, standing: valset::Standing) -> valset::Membership {
     valset::Membership {
         key: public(seed),
         address: format!("v{seed}:1"),
-        role,
+        standing,
     }
 }
 
@@ -119,7 +118,7 @@ impl Net {
             valset: program("valset"),
             validators: vec![member(1), member(2)],
             programs: vec![
-                founding(identity::MODULE, &program("identity")),
+                founding(identity::PROGRAM, &program("identity")),
                 probe(AUTHORITY),
                 probe("probe"),
             ],
@@ -242,7 +241,7 @@ impl Net {
         self.sent_by(AUTHORITY, target, op).await
     }
 
-    /// A query the module refuses.
+    /// A query the program refuses.
     async fn refused<Q: BorshSerialize>(&self, program: &str, query: &Q) -> abi::Refusal {
         self.host
             .query(
@@ -276,9 +275,9 @@ impl Net {
     async fn memberships(&self) -> Vec<valset::Membership> {
         match self
             .ask(
-                valset::MODULE,
+                valset::PROGRAM,
                 &valset::Query::Memberships {
-                    page: PageRequest::default(),
+                    page: Page::default(),
                 },
             )
             .await
@@ -289,7 +288,7 @@ impl Net {
     }
 
     async fn validators(&self) -> Vec<Vec<u8>> {
-        match self.ask(valset::MODULE, &valset::Query::Validators).await {
+        match self.ask(valset::PROGRAM, &valset::Query::Validators).await {
             valset::Reply::Validators(validators) => validators,
             other => panic!("{other:?}"),
         }

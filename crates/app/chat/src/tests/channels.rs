@@ -12,7 +12,7 @@ fn a_channel_is_created_once_owned_by_its_creator() {
     };
     assert_eq!((channel.owner, channel.voice, head_seq), (ADA, false, 0));
     let again = chat.refused(&BO, create("general", PostPolicy::Open));
-    assert_eq!(again, code::ALREADY_EXISTS);
+    assert_eq!(again, reason::ALREADY_EXISTS);
 }
 
 #[test]
@@ -22,24 +22,24 @@ fn a_channel_id_is_bounded_and_a_colon_id_is_its_programs_alone() {
     for bad in ["", "a/b", long.as_str()] {
         assert_eq!(
             chat.refused(&ADA, create(bad, PostPolicy::Open)),
-            code::INVALID_INPUT
+            reason::INVALID_INPUT
         );
     }
     for who in [ADA, Principal::Module("for".into())] {
         let squat = chat.refused(&who, create("forge:repo:1", PostPolicy::Open));
-        assert_eq!(squat, code::UNAUTHORIZED);
+        assert_eq!(squat, reason::UNAUTHORIZED);
     }
     chat.ok(
         &Principal::Module("forge".into()),
         create("forge:repo:1", PostPolicy::Open),
     );
-    chat.ok(&Principal::Root, create("system:room", PostPolicy::Open));
+    chat.ok(&Principal::System, create("system:room", PostPolicy::Open));
     let blank = Op::CreateChannel {
         channel_id: "blank".into(),
         name: "  ".into(),
         post_policy: PostPolicy::Open,
     };
-    assert_eq!(chat.refused(&ADA, blank), code::INVALID_INPUT);
+    assert_eq!(chat.refused(&ADA, blank), reason::INVALID_INPUT);
 }
 
 #[test]
@@ -52,7 +52,7 @@ fn a_voice_channel_is_open_and_marked_voice() {
     chat.ok(&ADA, voice("standup"));
     let channel = crate::state::channel(&chat.store, "standup").unwrap();
     assert!(channel.voice && channel.post_policy == PostPolicy::Open);
-    assert_eq!(chat.refused(&ADA, voice("forge:x")), code::UNAUTHORIZED);
+    assert_eq!(chat.refused(&ADA, voice("forge:x")), reason::UNAUTHORIZED);
 }
 
 #[test]
@@ -69,7 +69,7 @@ fn nobody_squats_a_dm_id_with_a_plain_create() {
                 name: "mine".into(),
             },
         ] {
-            assert_eq!(chat.refused(&who, op), code::UNAUTHORIZED, "{who:?}");
+            assert_eq!(chat.refused(&who, op), reason::UNAUTHORIZED, "{who:?}");
         }
         assert!(chat.store.state.is_empty());
         // the real dm still opens with both peers seated
@@ -91,11 +91,11 @@ fn a_dm_seats_both_accounts_opens_once_and_keeps_others_out() {
     chat.ok(&BO, post(&dm, "m1", "hi", None));
     assert_eq!(
         chat.refused(&CY, post(&dm, "m2", "me too", None)),
-        code::UNAUTHORIZED
+        reason::UNAUTHORIZED
     );
-    assert_eq!(chat.refused(&ADA, open_dm(1)), code::INVALID_INPUT);
+    assert_eq!(chat.refused(&ADA, open_dm(1)), reason::INVALID_INPUT);
     let module = Principal::Module("bot".into());
-    assert_eq!(chat.refused(&module, open_dm(1)), code::UNAUTHORIZED);
+    assert_eq!(chat.refused(&module, open_dm(1)), reason::UNAUTHORIZED);
 }
 
 /// The peer who opened a dm owns it, but owning it gives nothing: neither
@@ -120,7 +120,7 @@ fn neither_dm_peer_reshapes_the_room() {
     ] {
         assert_eq!(
             chat.refused(who, seat(principal, member)),
-            code::UNAUTHORIZED
+            reason::UNAUTHORIZED
         );
     }
     let rename = |name: &str| Op::RenameChannel {
@@ -132,14 +132,14 @@ fn neither_dm_peer_reshapes_the_room() {
         archived,
     };
     for who in [&ADA, &BO, &CY] {
-        assert_eq!(chat.refused(who, rename("ours")), code::UNAUTHORIZED);
-        assert_eq!(chat.refused(who, archive(true)), code::UNAUTHORIZED);
-        assert_eq!(chat.refused(who, archive(false)), code::UNAUTHORIZED);
+        assert_eq!(chat.refused(who, rename("ours")), reason::UNAUTHORIZED);
+        assert_eq!(chat.refused(who, archive(true)), reason::UNAUTHORIZED);
+        assert_eq!(chat.refused(who, archive(false)), reason::UNAUTHORIZED);
     }
     chat.ok(&BO, post(&dm, "m1", "still here", None));
     assert_eq!(
         chat.refused(&CY, post(&dm, "m2", "let me in", None)),
-        code::UNAUTHORIZED
+        reason::UNAUTHORIZED
     );
 }
 
@@ -148,27 +148,27 @@ fn only_the_owner_renames() {
     let mut chat = Chat::with_channel(PostPolicy::Open);
     chat.ok(&ADA, rename("General chat"));
     assert_eq!(chat.channel().name, "General chat");
-    assert_eq!(chat.refused(&BO, rename("mine")), code::UNAUTHORIZED);
-    assert_eq!(chat.refused(&ADA, rename("")), code::INVALID_INPUT);
+    assert_eq!(chat.refused(&BO, rename("mine")), reason::UNAUTHORIZED);
+    assert_eq!(chat.refused(&ADA, rename("")), reason::INVALID_INPUT);
     let nowhere = Op::RenameChannel {
         channel_id: "nowhere".into(),
         name: "x".into(),
     };
-    assert_eq!(chat.refused(&ADA, nowhere), code::NOT_FOUND);
+    assert_eq!(chat.refused(&ADA, nowhere), reason::NOT_FOUND);
 }
 
 #[test]
 fn an_archived_channel_takes_no_writes_until_unarchived() {
     let mut chat = Chat::with_channel(PostPolicy::Open);
     chat.post(&BO, "m1", "hello", None);
-    assert_eq!(chat.refused(&BO, archive(true)), code::UNAUTHORIZED);
+    assert_eq!(chat.refused(&BO, archive(true)), reason::UNAUTHORIZED);
     chat.ok(&ADA, archive(true));
     for op in [
         post("general", "m2", "late", None),
         react(1, "👍", true),
         edit(1, "changed"),
     ] {
-        assert_eq!(chat.refused(&BO, op), code::WRONG_STATE);
+        assert_eq!(chat.refused(&BO, op), reason::WRONG_STATE);
     }
     chat.ok(&ADA, archive(false));
     chat.post(&BO, "m2", "back", None);
@@ -179,23 +179,26 @@ fn the_owner_seats_and_unseats_members() {
     let mut chat = Chat::with_channel(PostPolicy::MembersOnly);
     assert_eq!(
         chat.refused(&BO, post("general", "m1", "hi", None)),
-        code::UNAUTHORIZED
+        reason::UNAUTHORIZED
     );
     chat.ok(&ADA, membership(BO, true));
     chat.post(&BO, "m1", "hi", None);
     let Reply::Members(members) = chat.ask(Query::Members {
         channel_id: "general".into(),
-        page: PageRequest::default(),
+        page: Page::default(),
     }) else {
         panic!("members answer members");
     };
     assert_eq!(members.items[0].principal, BO);
-    assert_eq!(chat.refused(&BO, membership(CY, true)), code::UNAUTHORIZED);
+    assert_eq!(
+        chat.refused(&BO, membership(CY, true)),
+        reason::UNAUTHORIZED
+    );
     chat.ok(&ADA, membership(BO, false));
     assert!(!is_member(&chat, "general", BO));
     assert_eq!(
         chat.refused(&BO, post("general", "m2", "hi", None)),
-        code::UNAUTHORIZED
+        reason::UNAUTHORIZED
     );
 }
 

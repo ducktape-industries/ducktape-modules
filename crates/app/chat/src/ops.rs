@@ -1,6 +1,6 @@
 //! [`execute`]: one function per [`Op`]. Each checks first (`rules`), then
 //! writes, so a refused op leaves the store as it found it.
-use store::{Env, Error};
+use abi::Refusal;
 use store::{Writes, already_exists, capacity, invalid, unauthorized, wrong_state};
 
 use crate::rules;
@@ -9,71 +9,59 @@ use crate::state::{
     fits, message, newest_first, replace_message, toggle,
 };
 use crate::{
-    AccountNumber, Block, ChannelRow, HUDDLE_NODE_KEY_BYTES, HuddleEntry, MAX_HUDDLE_MEMBERS,
-    MAX_REACTION_EMOJIS, MAX_REVISIONS, MAX_THREAD_REPLIES, MemberRow, MsgRow, Op, PostPolicy,
-    Principal, Reaction, dm_channel_id, hex, plain_text, tags,
+    AccountNumber, Block, ChannelRow, Frame, HUDDLE_NODE_KEY_BYTES, HuddleEntry,
+    MAX_HUDDLE_MEMBERS, MAX_REACTION_EMOJIS, MAX_REVISIONS, MAX_THREAD_REPLIES, MemberRow, MsgRow,
+    Op, PostPolicy, Principal, Reaction, dm_channel_id, hex, plain_text, tags,
 };
 
-/// Runs `op` as `sender`, whom the module resolved from `env.origin`
-/// (identity's [`principal_of`](identity::principal_of)). A huddle join's
-/// node proof is checked against the signing key first.
-pub fn execute(store: &mut impl Writes, env: &Env, sender: Principal, op: Op) -> Result<(), Error> {
-    if let Op::JoinHuddle {
-        channel_id,
-        node,
-        node_proof,
-    } = &op
-    {
-        crate::origin::node_consents(store, &env.origin, channel_id, node, node_proof)?;
-    }
-    let sender = &sender;
+pub fn execute(store: &mut impl Writes, frame: &Frame, op: Op) -> Result<(), Refusal> {
     match op {
         Op::CreateChannel {
             channel_id,
             name,
             post_policy,
-        } => create_channel(store, env, sender, channel_id, name, post_policy, false),
+        } => create_channel(store, frame, channel_id, name, post_policy, false),
         Op::CreateVoiceChannel { channel_id, name } => {
-            create_channel(store, env, sender, channel_id, name, PostPolicy::Open, true)
+            create_channel(store, frame, channel_id, name, PostPolicy::Open, true)
         }
-        Op::CreateDmChannel { counterpart, name } => open_dm(store, env, sender, counterpart, name),
-        Op::RenameChannel { channel_id, name } => rename(store, sender, &channel_id, name),
+        Op::CreateDmChannel { counterpart, name } => open_dm(store, frame, counterpart, name),
+        Op::RenameChannel { channel_id, name } => rename(store, frame, &channel_id, name),
         Op::SetChannelArchived {
             channel_id,
             archived,
-        } => set_archived(store, sender, &channel_id, archived),
+        } => set_archived(store, frame, &channel_id, archived),
         Op::PostMessage {
             channel_id,
             message_id,
             blocks,
             thread,
-        } => post(store, env, sender, channel_id, message_id, blocks, thread),
+        } => post(store, frame, channel_id, message_id, blocks, thread),
         Op::EditMessage {
             channel_id,
             seq,
             blocks,
             base_rev,
-        } => edit(store, env, sender, &channel_id, seq, blocks, base_rev),
-        Op::DeleteMessage { channel_id, seq } => delete(store, sender, &channel_id, seq),
+        } => edit(store, frame, &channel_id, seq, blocks, base_rev),
+        Op::DeleteMessage { channel_id, seq } => delete(store, frame, &channel_id, seq),
         Op::AddReaction {
             channel_id,
             seq,
             emoji,
-        } => react(store, sender, &channel_id, seq, &emoji, true),
+        } => react(store, frame, &channel_id, seq, &emoji, true),
         Op::RemoveReaction {
             channel_id,
             seq,
             emoji,
-        } => react(store, sender, &channel_id, seq, &emoji, false),
+        } => react(store, frame, &channel_id, seq, &emoji, false),
         Op::SetMembership {
             channel_id,
             principal,
             member,
-        } => set_membership(store, env, sender, &channel_id, principal, member),
+        } => set_membership(store, frame, &channel_id, principal, member),
         Op::JoinHuddle {
             channel_id, node, ..
-        } => join_huddle(store, env, sender, &channel_id, &node),
-        Op::LeaveHuddle { channel_id } => leave_huddle(store, sender, &channel_id),
+        } => join_huddle(store, frame, &channel_id, &node),
+        Op::LeaveHuddle { channel_id } => leave_huddle(store, frame, &channel_id),
     }
 }
 
@@ -81,41 +69,29 @@ pub fn execute(store: &mut impl Writes, env: &Env, sender: Principal, op: Op) ->
 
 fn create_channel(
     store: &mut impl Writes,
-    env: &Env,
-    sender: &Principal,
+    frame: &Frame,
     id: String,
     name: String,
     post_policy: PostPolicy,
     voice: bool,
-) -> Result<(), Error> {
-    rules::channel_id(&id, sender)?;
+) -> Result<(), Refusal> {
+    rules::channel_id(&id, &frame.principal)?;
     rules::name(&name)?;
     if CHANNELS.has(store, &id) {
         return Err(already_exists(format!("channel {id} exists")));
     }
-    CHANNELS.put(
-        store,
-        &id,
-        &room(env, sender, &id, name, post_policy, voice),
-    );
+    CHANNELS.put(store, &id, &room(frame, &id, name, post_policy, voice));
     Ok(())
 }
 
 /// A new room the actor owns, unarchived with no one in its huddle.
-fn room(
-    env: &Env,
-    sender: &Principal,
-    id: &str,
-    name: String,
-    post_policy: PostPolicy,
-    voice: bool,
-) -> ChannelRow {
+fn room(frame: &Frame, id: &str, name: String, post_policy: PostPolicy, voice: bool) -> ChannelRow {
     ChannelRow {
         id: id.to_owned(),
         name,
-        created_at: env.time,
+        created_at: frame.time,
         post_policy,
-        owner: sender.clone(),
+        owner: frame.principal.clone(),
         archived: false,
         huddle: Vec::new(),
         voice,
@@ -126,12 +102,11 @@ fn room(
 /// seated. Opening it again changes nothing.
 fn open_dm(
     store: &mut impl Writes,
-    env: &Env,
-    sender: &Principal,
+    frame: &Frame,
     counterpart: AccountNumber,
     name: String,
-) -> Result<(), Error> {
-    let Principal::Account(me) = *sender else {
+) -> Result<(), Refusal> {
+    let Principal::Account(me) = frame.principal else {
         return Err(unauthorized("only an account opens a dm"));
     };
     if me == counterpart {
@@ -142,24 +117,19 @@ fn open_dm(
         return Ok(());
     }
     rules::name(&name)?;
-    let channel = room(env, sender, &id, name, PostPolicy::MembersOnly, false);
+    let channel = room(frame, &id, name, PostPolicy::MembersOnly, false);
     CHANNELS.put(store, &id, &channel);
     for peer in [me, counterpart] {
-        seat(store, env, &id, Principal::Account(peer));
+        seat(store, frame, &id, Principal::Account(peer));
     }
     Ok(())
 }
 
-fn rename(
-    store: &mut impl Writes,
-    sender: &Principal,
-    id: &str,
-    name: String,
-) -> Result<(), Error> {
+fn rename(store: &mut impl Writes, frame: &Frame, id: &str, name: String) -> Result<(), Refusal> {
     rules::name(&name)?;
     let mut channel = channel(store, id)?;
     rules::not_dm(&channel)?;
-    rules::owned(&channel, sender)?;
+    rules::owned(&channel, &frame.principal)?;
     channel.name = name;
     CHANNELS.put(store, &channel.id, &channel);
     Ok(())
@@ -167,13 +137,13 @@ fn rename(
 
 fn set_archived(
     store: &mut impl Writes,
-    sender: &Principal,
+    frame: &Frame,
     id: &str,
     archived: bool,
-) -> Result<(), Error> {
+) -> Result<(), Refusal> {
     let mut channel = channel(store, id)?;
     rules::not_dm(&channel)?;
-    rules::owned(&channel, sender)?;
+    rules::owned(&channel, &frame.principal)?;
     channel.archived = archived;
     CHANNELS.put(store, &channel.id, &channel);
     Ok(())
@@ -181,28 +151,27 @@ fn set_archived(
 
 fn set_membership(
     store: &mut impl Writes,
-    env: &Env,
-    sender: &Principal,
+    frame: &Frame,
     id: &str,
     principal: Principal,
     member: bool,
-) -> Result<(), Error> {
+) -> Result<(), Refusal> {
     let channel = channel(store, id)?;
     rules::not_dm(&channel)?;
-    rules::owned(&channel, sender)?;
+    rules::owned(&channel, &frame.principal)?;
     if member {
-        seat(store, env, id, principal);
+        seat(store, frame, id, principal);
     } else {
         MEMBERS.remove(store, &(id.to_owned(), principal));
     }
     Ok(())
 }
 
-fn seat(store: &mut impl Writes, env: &Env, id: &str, principal: Principal) {
+fn seat(store: &mut impl Writes, frame: &Frame, id: &str, principal: Principal) {
     let row = MemberRow {
         principal: principal.clone(),
-        height: env.height,
-        time: env.time,
+        height: frame.height,
+        time: frame.time,
     };
     MEMBERS.put(store, &(id.to_owned(), principal), &row);
 }
@@ -211,16 +180,15 @@ fn seat(store: &mut impl Writes, env: &Env, id: &str, principal: Principal) {
 
 fn post(
     store: &mut impl Writes,
-    env: &Env,
-    sender: &Principal,
+    frame: &Frame,
     channel_id: String,
     message_id: String,
     blocks: Vec<Block>,
     thread: Option<u64>,
-) -> Result<(), Error> {
+) -> Result<(), Refusal> {
     rules::id("message_id", &message_id)?;
-    rules::namespace(&message_id, sender)?;
-    rules::writable(store, &channel(store, &channel_id)?, sender)?;
+    rules::namespace(&message_id, &frame.principal)?;
+    rules::writable(store, &channel(store, &channel_id)?, &frame.principal)?;
     if MESSAGE_IDS.has(store, &message_id) {
         return Err(already_exists(format!("message {message_id} exists")));
     }
@@ -229,13 +197,13 @@ fn post(
         channel_id: channel_id.clone(),
         seq,
         message_id: message_id.clone(),
-        height: env.height,
-        time: env.time,
+        height: frame.height,
+        time: frame.time,
         text: plain_text(&blocks),
         tags: tags(&blocks),
         blocks,
         thread,
-        ..MsgRow::by(sender.clone())
+        ..MsgRow::by(frame.principal.clone())
     };
     fits(&row)?;
     match thread {
@@ -250,7 +218,7 @@ fn post(
 
 /// Reply `seq` joins the thread under `root`: the root counts it, and its
 /// author's [`ANSWERED`] entry moves to this reply.
-fn answer(store: &mut impl Writes, channel_id: &str, root: u64, seq: u64) -> Result<(), Error> {
+fn answer(store: &mut impl Writes, channel_id: &str, root: u64, seq: u64) -> Result<(), Refusal> {
     let mut row = message(store, channel_id, root)?;
     if row.thread.is_some() {
         return Err(invalid("a reply cannot be a thread root"));
@@ -283,16 +251,15 @@ fn forget_answer(store: &mut impl Writes, root: &MsgRow) {
 
 fn edit(
     store: &mut impl Writes,
-    env: &Env,
-    sender: &Principal,
+    frame: &Frame,
     channel_id: &str,
     seq: u64,
     blocks: Vec<Block>,
     base_rev: Option<u32>,
-) -> Result<(), Error> {
-    rules::writable(store, &channel(store, channel_id)?, sender)?;
+) -> Result<(), Refusal> {
+    rules::writable(store, &channel(store, channel_id)?, &frame.principal)?;
     let old = message(store, channel_id, seq)?;
-    rules::editable(&old, sender)?;
+    rules::editable(&old, &frame.principal)?;
     if old.rev >= MAX_REVISIONS {
         return Err(capacity("the message has no revisions left"));
     }
@@ -302,7 +269,7 @@ fn edit(
         blocks,
         rev: old.rev + 1,
         edited: true,
-        edited_at: Some(env.time),
+        edited_at: Some(frame.time),
         base_rev,
         ..old.clone()
     };
@@ -316,13 +283,13 @@ fn edit(
 /// postings and its reactions go.
 fn delete(
     store: &mut impl Writes,
-    sender: &Principal,
+    frame: &Frame,
     channel_id: &str,
     seq: u64,
-) -> Result<(), Error> {
+) -> Result<(), Refusal> {
     let channel = channel(store, channel_id)?;
     let old = message(store, channel_id, seq)?;
-    if old.author != *sender && channel.owner != *sender {
+    if old.author != frame.principal && channel.owner != frame.principal {
         return Err(unauthorized("only the author or the owner deletes"));
     }
     if old.deleted {
@@ -351,19 +318,24 @@ fn delete(
 /// already chosen, or dropping what is not, changes nothing.
 fn react(
     store: &mut impl Writes,
-    sender: &Principal,
+    frame: &Frame,
     channel_id: &str,
     seq: u64,
     emoji: &str,
     on: bool,
-) -> Result<(), Error> {
+) -> Result<(), Refusal> {
     rules::emoji(emoji)?;
-    rules::writable(store, &channel(store, channel_id)?, sender)?;
+    rules::writable(store, &channel(store, channel_id)?, &frame.principal)?;
     let mut row = message(store, channel_id, seq)?;
     if row.deleted {
         return Err(wrong_state("the message is deleted"));
     }
-    let key = (channel_id.to_owned(), seq, emoji.to_owned(), sender.clone());
+    let key = (
+        channel_id.to_owned(),
+        seq,
+        emoji.to_owned(),
+        frame.principal.clone(),
+    );
     if REACTIONS.has(store, &key) == on {
         return Ok(());
     }
@@ -379,7 +351,7 @@ fn react(
 }
 
 /// One more `emoji`: its count grows, or it joins the list in emoji order.
-fn count_in(reactions: &mut Vec<Reaction>, emoji: &str) -> Result<(), Error> {
+fn count_in(reactions: &mut Vec<Reaction>, emoji: &str) -> Result<(), Refusal> {
     if let Some(reaction) = reactions.iter_mut().find(|r| r.emoji == emoji) {
         reaction.count += 1;
         return Ok(());
@@ -409,15 +381,14 @@ fn count_out(reactions: &mut Vec<Reaction>, emoji: &str) {
 // ── huddles ─────────────────────────────────────────────────────────────────
 
 /// Seats the actor's node in the channel's huddle, or moves her seat to a
-/// new node. The node's consent was checked by the module (`store::entrypoint!`).
+/// new node. The node's consent was checked by the program (`program.rs`).
 fn join_huddle(
     store: &mut impl Writes,
-    env: &Env,
-    sender: &Principal,
+    frame: &Frame,
     channel_id: &str,
     node: &[u8],
-) -> Result<(), Error> {
-    if !sender.is_person() {
+) -> Result<(), Refusal> {
+    if !frame.principal.is_person() {
         return Err(unauthorized("only people join a huddle"));
     }
     if node.len() != HUDDLE_NODE_KEY_BYTES {
@@ -426,13 +397,17 @@ fn join_huddle(
         )));
     }
     let mut channel = channel(store, channel_id)?;
-    rules::writable(store, &channel, sender)?;
+    rules::writable(store, &channel, &frame.principal)?;
     let seat = HuddleEntry {
-        principal: sender.clone(),
+        principal: frame.principal.clone(),
         node: hex(node),
-        joined_at: env.time,
+        joined_at: frame.time,
     };
-    match channel.huddle.iter().position(|e| e.principal == *sender) {
+    match channel
+        .huddle
+        .iter()
+        .position(|e| e.principal == frame.principal)
+    {
         Some(at) => channel.huddle[at] = seat,
         None if channel.huddle.len() >= MAX_HUDDLE_MEMBERS => {
             return Err(capacity("the huddle is full"));
@@ -443,13 +418,9 @@ fn join_huddle(
     Ok(())
 }
 
-fn leave_huddle(
-    store: &mut impl Writes,
-    sender: &Principal,
-    channel_id: &str,
-) -> Result<(), Error> {
+fn leave_huddle(store: &mut impl Writes, frame: &Frame, channel_id: &str) -> Result<(), Refusal> {
     let mut channel = channel(store, channel_id)?;
-    channel.huddle.retain(|e| e.principal != *sender);
+    channel.huddle.retain(|e| e.principal != frame.principal);
     CHANNELS.put(store, &channel.id, &channel);
     Ok(())
 }

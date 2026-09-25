@@ -1,20 +1,14 @@
-//! The module's own path, run natively: an origin resolved through an
+//! The program's own path, run natively: an origin resolved through an
 //! identity sibling, a huddle join's node proof, identity's roster paged
 //! through chat. Each refusal leaves the store as it was.
 use std::cell::Cell;
 use std::rc::Rc;
 
+use abi::{Cause, Env, Origin, Refusal};
 use identity::{Account, Control, Key};
-use store::{Cause, Env, Error, Origin};
 
 use super::*;
-use crate::{AccountRow, HUDDLE_JOIN_NS, HUDDLE_NODE_KEY_BYTES};
-
-/// What the entrypoint runs: the sender resolved through identity, then the op.
-fn execute_from(store: &mut MockHost, env: &Env, op: Op) -> Result<(), Error> {
-    let sender = identity::principal_of(store, &env.origin)?;
-    crate::execute(store, env, sender, op)
-}
+use crate::{AccountRow, HUDDLE_JOIN_NS, HUDDLE_NODE_KEY_BYTES, execute_from};
 
 /// Ada's key; she holds account 1.
 const ADA_KEY: [u8; 32] = [1; 32];
@@ -30,7 +24,7 @@ fn account(number: u64, keys: Vec<Vec<u8>>) -> Account {
         control: Control::Keys(
             keys.into_iter()
                 .map(|key| Key {
-                    scheme: store::Scheme::Ed25519,
+                    scheme: abi::Scheme::Ed25519,
                     key,
                     label: None,
                     added_at: 0,
@@ -45,7 +39,7 @@ fn account(number: u64, keys: Vec<Vec<u8>>) -> Account {
 
 /// Identity over three accounts, Ada's first; `List` pages by number.
 /// Account 2 holds [`LONE_KEY`] once `claimed` is set.
-fn identity(claimed: Rc<Cell<bool>>) -> store::testing::MockModule {
+fn identity(claimed: Rc<Cell<bool>>) -> store::Sibling {
     Box::new(move |request| {
         let lone = if claimed.get() {
             vec![LONE_KEY.to_vec()]
@@ -57,7 +51,7 @@ fn identity(claimed: Rc<Cell<bool>>) -> store::testing::MockModule {
             account(2, lone),
             account(3, vec![CY_KEY.to_vec()]),
         ];
-        let reply = match store::decode::<identity::Query>(request)? {
+        let reply = match abi::decode::<identity::Query>(request)? {
             identity::Query::OfKey { key } => identity::Reply::Number(
                 roster
                     .iter()
@@ -67,7 +61,7 @@ fn identity(claimed: Rc<Cell<bool>>) -> store::testing::MockModule {
             identity::Query::List { page } => {
                 let from = page.after.as_ref().map_or(0, |after| after[0] as usize);
                 let to = (from + page.limit() as usize).min(roster.len());
-                identity::Reply::Accounts(PageResponse {
+                identity::Reply::Accounts(PageReply {
                     height: 1,
                     items: roster[from..to].to_vec(),
                     next: (to < roster.len()).then(|| vec![to as u8]),
@@ -75,17 +69,17 @@ fn identity(claimed: Rc<Cell<bool>>) -> store::testing::MockModule {
             }
             other => panic!("chat never asks identity {other:?}"),
         };
-        Ok(store::encode(&reply))
+        Ok(abi::encode(&reply))
     })
 }
 
 /// A store with identity beside it and a verifier that takes `b"signed"`
 /// over exactly the join message; `claimed` hands [`LONE_KEY`] account 2.
-fn store_claiming(claimed: Rc<Cell<bool>>) -> MockHost {
-    let mut store = MockHost::default();
+fn store_claiming(claimed: Rc<Cell<bool>>) -> Memory {
+    let mut store = Memory::default();
     store
-        .modules
-        .insert(identity::MODULE.into(), identity(claimed));
+        .siblings
+        .insert(identity::PROGRAM.into(), identity(claimed));
     store.verifier = Some(Box::new(|_, _, namespace, message, signature| {
         let expected = [b"general".as_slice(), &ADA_KEY].concat();
         namespace == HUDDLE_JOIN_NS && message == expected && signature == b"signed"
@@ -94,33 +88,33 @@ fn store_claiming(claimed: Rc<Cell<bool>>) -> MockHost {
 }
 
 /// [`store_claiming`] where [`LONE_KEY`] stays unclaimed.
-fn store() -> MockHost {
+fn store() -> Memory {
     store_claiming(Rc::default())
 }
 
 fn env(origin: Origin) -> Env {
     Env {
-        chain_id: vec![],
+        network: vec![],
         height: 1,
         time: 1000,
-        module: crate::MODULE.into(),
+        me: crate::PROGRAM.into(),
         origin,
         cause: Cause::Direct,
     }
 }
 
 fn key(bytes: &[u8]) -> Origin {
-    Origin::Signed(bytes.to_vec())
+    Origin::External(bytes.to_vec())
 }
 
 /// The refusal's reason; the store is untouched by it.
 #[track_caller]
-fn refused(store: &mut MockHost, origin: Origin, op: Op) -> String {
+fn refused(store: &mut Memory, origin: Origin, op: Op) -> String {
     let env = env(origin);
-    store.refused(|store| execute_from(store, &env, op)).code
+    store.refused(|store| execute_from(store, &env, op)).reason
 }
 
-fn owner(store: &MockHost, id: &str) -> Principal {
+fn owner(store: &Memory, id: &str) -> Principal {
     crate::state::channel(store, id).unwrap().owner
 }
 
@@ -134,19 +128,19 @@ fn an_origin_acts_as_the_principal_identity_names() {
     )
     .unwrap();
     assert_eq!(owner(&store, "a"), Principal::Account(1));
-    let forge = Origin::Module("forge".into());
+    let forge = Origin::Program("forge".into());
     execute_from(&mut store, &env(forge), create("forge:c", PostPolicy::Open)).unwrap();
     assert_eq!(owner(&store, "forge:c"), Principal::Module("forge".into()));
     execute_from(
         &mut store,
-        &env(Origin::Root),
+        &env(Origin::System),
         create("d", PostPolicy::Open),
     )
     .unwrap();
-    assert_eq!(owner(&store, "d"), Principal::Root);
+    assert_eq!(owner(&store, "d"), Principal::System);
     assert_eq!(
         refused(&mut store, key(&[]), create("e", PostPolicy::Open)),
-        code::INVALID_INPUT
+        reason::INVALID_INPUT
     );
 }
 
@@ -235,7 +229,7 @@ fn a_key_writes_only_once_it_holds_an_account() {
         let why = format!("{op:?}");
         assert_eq!(
             refused(&mut store, key(&LONE_KEY), op),
-            code::UNAUTHORIZED,
+            reason::UNAUTHORIZED,
             "{why}"
         );
     }
@@ -260,23 +254,23 @@ fn a_key_writes_only_once_it_holds_an_account() {
 /// With no identity deployed, no key holds an account, so none writes.
 #[test]
 fn no_key_writes_until_identity_is_deployed() {
-    let mut store = MockHost::default();
+    let mut store = Memory::default();
     assert_eq!(
         refused(&mut store, key(&ADA_KEY), create("a", PostPolicy::Open)),
-        code::UNAUTHORIZED
+        reason::UNAUTHORIZED
     );
 }
 
 #[test]
 fn identity_refusing_refuses_the_op() {
-    let mut store = MockHost::default();
-    store.modules.insert(
-        identity::MODULE.into(),
-        Box::new(|_| Err(Error::new(code::WRONG_STATE, "identity is halted"))),
+    let mut store = Memory::default();
+    store.siblings.insert(
+        identity::PROGRAM.into(),
+        Box::new(|_| Err(Refusal::new(reason::WRONG_STATE, "identity is halted"))),
     );
     assert_eq!(
         refused(&mut store, key(&ADA_KEY), create("a", PostPolicy::Open)),
-        code::WRONG_STATE
+        reason::WRONG_STATE
     );
 }
 
@@ -296,30 +290,30 @@ fn a_huddle_join_needs_its_nodes_signature() {
     .unwrap();
     assert_eq!(
         refused(&mut store, key(&ADA_KEY), join(b"forged")),
-        code::INVALID_INPUT
+        reason::INVALID_INPUT
     );
     // the proof binds the key: another account's key cannot reuse Ada's
     assert_eq!(
         refused(&mut store, key(&CY_KEY), join(b"signed")),
-        code::INVALID_INPUT
+        reason::INVALID_INPUT
     );
     assert_eq!(
-        refused(&mut store, Origin::Root, join(b"signed")),
-        code::UNAUTHORIZED
+        refused(&mut store, Origin::System, join(b"signed")),
+        reason::UNAUTHORIZED
     );
-    let mut unverified = MockHost::default();
+    let mut unverified = Memory::default();
     unverified
-        .modules
-        .insert(identity::MODULE.into(), identity(Rc::default()));
+        .siblings
+        .insert(identity::PROGRAM.into(), identity(Rc::default()));
     execute_from(
         &mut unverified,
-        &env(Origin::Root),
+        &env(Origin::System),
         create("general", PostPolicy::Open),
     )
     .unwrap();
     assert_eq!(
         refused(&mut unverified, key(&ADA_KEY), join(b"signed")),
-        code::UNSUPPORTED
+        reason::UNSUPPORTED
     );
     execute_from(&mut store, &env(key(&ADA_KEY)), join(b"signed")).unwrap();
     let huddle = crate::state::channel(&store, "general").unwrap().huddle;
@@ -331,12 +325,12 @@ fn the_roster_pages_through_identity() {
     let store = store();
     let page = |after: Option<Vec<u8>>| {
         let asked = Query::Accounts {
-            page: PageRequest {
+            page: Page {
                 after,
                 limit: Some(2),
             },
         };
-        let Reply::Accounts(page) = query(&store, &env(key(&ADA_KEY)), asked).unwrap() else {
+        let Reply::Accounts(page) = query(&store, 1, asked).unwrap() else {
             panic!("accounts answer accounts");
         };
         page

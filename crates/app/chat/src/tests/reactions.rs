@@ -16,7 +16,7 @@ fn a_reaction_counts_once_per_principal_and_knows_its_reader() {
         let Reply::Roots(page) = chat.ask(Query::Roots {
             channel_id: "general".into(),
             viewer,
-            page: PageRequest::default(),
+            page: Page::default(),
         }) else {
             panic!("roots answer roots");
         };
@@ -48,12 +48,21 @@ fn a_reaction_needs_an_emoji_a_standing_message_and_a_seat() {
     chat.post(&ADA, "m1", "members only", None);
     let long = "x".repeat(MAX_EMOJI_BYTES + 1);
     for bad in ["", "a/b", long.as_str()] {
-        assert_eq!(chat.refused(&ADA, react(1, bad, true)), code::INVALID_INPUT);
+        assert_eq!(
+            chat.refused(&ADA, react(1, bad, true)),
+            reason::INVALID_INPUT
+        );
     }
-    assert_eq!(chat.refused(&BO, react(1, "👍", true)), code::UNAUTHORIZED);
-    assert_eq!(chat.refused(&ADA, react(9, "👍", true)), code::NOT_FOUND);
+    assert_eq!(
+        chat.refused(&BO, react(1, "👍", true)),
+        reason::UNAUTHORIZED
+    );
+    assert_eq!(chat.refused(&ADA, react(9, "👍", true)), reason::NOT_FOUND);
     chat.ok(&ADA, delete(1));
-    assert_eq!(chat.refused(&ADA, react(1, "👍", true)), code::WRONG_STATE);
+    assert_eq!(
+        chat.refused(&ADA, react(1, "👍", true)),
+        reason::WRONG_STATE
+    );
 }
 
 #[test]
@@ -65,16 +74,25 @@ fn removing_a_reaction_needs_what_adding_one_does() {
     for bad in ["", "a/b", long.as_str()] {
         assert_eq!(
             chat.refused(&ADA, react(1, bad, false)),
-            code::INVALID_INPUT
+            reason::INVALID_INPUT
         );
     }
-    assert_eq!(chat.refused(&BO, react(1, "👍", false)), code::UNAUTHORIZED);
-    assert_eq!(chat.refused(&ADA, react(9, "👍", false)), code::NOT_FOUND);
+    assert_eq!(
+        chat.refused(&BO, react(1, "👍", false)),
+        reason::UNAUTHORIZED
+    );
+    assert_eq!(chat.refused(&ADA, react(9, "👍", false)), reason::NOT_FOUND);
     chat.ok(&ADA, archive(true));
-    assert_eq!(chat.refused(&ADA, react(1, "👍", false)), code::WRONG_STATE);
+    assert_eq!(
+        chat.refused(&ADA, react(1, "👍", false)),
+        reason::WRONG_STATE
+    );
     chat.ok(&ADA, archive(false));
     chat.ok(&ADA, delete(1));
-    assert_eq!(chat.refused(&ADA, react(1, "👍", false)), code::WRONG_STATE);
+    assert_eq!(
+        chat.refused(&ADA, react(1, "👍", false)),
+        reason::WRONG_STATE
+    );
 }
 
 /// A deleted message leaves the store as if no one had reacted to it: the

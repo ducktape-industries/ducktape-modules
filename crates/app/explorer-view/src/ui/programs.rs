@@ -91,7 +91,7 @@ pub(super) fn programs(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
                         })
                         .child(change.verb()),
                 )
-                .child(mono(change.module().to_string()).flex_1())
+                .child(mono(change.program().to_string()).flex_1())
                 .child(
                     div()
                         .text_size(design::text::SECONDARY)

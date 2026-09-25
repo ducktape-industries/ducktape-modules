@@ -28,11 +28,11 @@ fn the_root_tracks_the_shared_theme() {
     assert_eq!(style.text.color, Some(dark.foreground));
 }
 
-fn membership(key: &[u8], address: &str, role: valset::Role) -> valset::Membership {
+fn membership(key: &[u8], address: &str, standing: valset::Standing) -> valset::Membership {
     valset::Membership {
         key: key.to_vec(),
         address: address.into(),
-        role,
+        standing,
     }
 }
 
@@ -40,8 +40,8 @@ fn validators() -> valset::Reply {
     valset::Reply::Validators(vec![vec![0xab, 0xcd]])
 }
 
-fn page<T>(items: Vec<T>) -> store::PageResponse<T> {
-    store::PageResponse {
+fn page<T>(items: Vec<T>) -> module_registry::PageReply<T> {
+    module_registry::PageReply {
         height: 1,
         items,
         next: None,
@@ -50,8 +50,8 @@ fn page<T>(items: Vec<T>) -> store::PageResponse<T> {
 
 fn memberships() -> valset::Reply {
     valset::Reply::Memberships(page(vec![
-        membership(b"\xab\xcd", "10.0.0.1:4000", valset::Role::Validator),
-        membership(b"\x01\x02", "10.0.0.2:4000", valset::Role::Resident),
+        membership(b"\xab\xcd", "10.0.0.1:4000", valset::Standing::Validator),
+        membership(b"\x01\x02", "10.0.0.2:4000", valset::Standing::Resident),
     ]))
 }
 
@@ -76,7 +76,7 @@ fn ready() -> TestAppContext {
         vec![
             valset::Query::Validators,
             valset::Query::Memberships {
-                page: store::PageRequest {
+                page: module_registry::Page {
                     after: None,
                     limit: None
                 }
@@ -189,7 +189,7 @@ fn a_live_bump_re_reads_and_a_snapshot_restores_the_screen() {
                 valset::Reply::Memberships(page(vec![membership(
                     b"\xab\xcd",
                     "10.9.9.9:4000",
-                    valset::Role::Validator,
+                    valset::Standing::Validator,
                 )]))
             }
             other => panic!("unexpected query: {other:?}"),

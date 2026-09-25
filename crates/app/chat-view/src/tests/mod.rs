@@ -18,8 +18,8 @@ mod rich;
 mod room;
 mod writing;
 
-fn page<T>(items: Vec<T>) -> ::chat::PageResponse<T> {
-    ::chat::PageResponse {
+fn page<T>(items: Vec<T>) -> ::chat::PageReply<T> {
+    ::chat::PageReply {
         height: 1,
         items,
         next: None,
