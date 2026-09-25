@@ -3,7 +3,7 @@
 //! typed (`store::KeyCodec`: integers big-endian, strings and principals
 //! NUL-terminated, so names list by name), values borsh. A tuple key scans by its leading
 //! elements, which is how every "in this channel" read works.
-use abi::Refusal;
+use store::Error;
 use store::{Map, Reads, Set, Writes, capacity, not_found};
 
 use crate::{ChannelRow, MAX_MESSAGE_BYTES, MemberRow, MsgRow, Principal, tokens};
@@ -41,13 +41,13 @@ pub(crate) fn newest_first(n: u64) -> u64 {
     u64::MAX - n
 }
 
-pub(crate) fn channel(store: &impl Reads, id: &str) -> Result<ChannelRow, Refusal> {
+pub(crate) fn channel(store: &impl Reads, id: &str) -> Result<ChannelRow, Error> {
     CHANNELS
         .get(store, &id.to_owned())?
         .ok_or_else(|| not_found(format!("no channel {id}")))
 }
 
-pub(crate) fn message(store: &impl Reads, channel_id: &str, seq: Seq) -> Result<MsgRow, Refusal> {
+pub(crate) fn message(store: &impl Reads, channel_id: &str, seq: Seq) -> Result<MsgRow, Error> {
     MESSAGES
         .get(store, &(channel_id.to_owned(), seq))?
         .ok_or_else(|| not_found(format!("no message {channel_id}/{seq}")))
@@ -57,7 +57,7 @@ pub(crate) fn message(store: &impl Reads, channel_id: &str, seq: Seq) -> Result<
 pub(crate) fn messages(
     store: &impl Reads,
     at: impl IntoIterator<Item = (ChannelId, Seq)>,
-) -> Result<Vec<MsgRow>, Refusal> {
+) -> Result<Vec<MsgRow>, Error> {
     at.into_iter()
         .filter_map(|key| MESSAGES.get(store, &key).transpose())
         .collect()
@@ -65,8 +65,8 @@ pub(crate) fn messages(
 
 /// Refused when the row would outgrow [`MAX_MESSAGE_BYTES`]: checked before
 /// an op writes anything.
-pub(crate) fn fits(row: &MsgRow) -> Result<(), Refusal> {
-    if abi::encode(row).len() > MAX_MESSAGE_BYTES {
+pub(crate) fn fits(row: &MsgRow) -> Result<(), Error> {
+    if store::encode(row).len() > MAX_MESSAGE_BYTES {
         return Err(capacity(format!(
             "a message is at most {MAX_MESSAGE_BYTES} bytes"
         )));

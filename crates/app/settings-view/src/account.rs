@@ -85,9 +85,6 @@ async fn read_key(host: &Host, key: &[u8], label: String) -> Result<Key, Refusal
     Ok(Key {
         label,
         key: ducktape_view_guest::design::short_hex(&abi::hex(key)),
-        validator: matches!(
-            membership.map(|m| m.standing),
-            Some(valset::Standing::Validator)
-        ),
+        validator: matches!(membership.map(|m| m.role), Some(valset::Role::Validator)),
     })
 }

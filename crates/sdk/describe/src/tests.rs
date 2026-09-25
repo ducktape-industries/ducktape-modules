@@ -131,7 +131,7 @@ const HI: &str = "\\02\\00\\00\\00hi\\00\\00\\00\\00";
 fn a_section_is_read_out_of_a_program_and_run() {
     let engine = engine();
     let section = answering(HI, "i64.const 0x4000000000a");
-    // a program: a core module with the describe module in its section
+    // a module: a core module with the describe module in its section
     let mut program = module("(module)");
     let name = SECTION.as_bytes();
     let mut body = vec![name.len() as u8];

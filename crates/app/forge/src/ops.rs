@@ -1,25 +1,22 @@
 //! The execute path: who acts, which op, and the repository ops (create,
 //! configure, grant, revoke, push). Change ops live in `changes`.
 
-use abi::{HashKind, Refusal};
 use gitcore::server::{Policy, RefUpdate};
-use gitcore::{Error, Limits, server};
-use store::{Reads, Writes, already_exists, capacity, decoded, invalid, unauthorized};
+use gitcore::{Error as GitError, Limits, server};
+use store::{Env, Error, HashKind};
+use store::{Reads, Writes, already_exists, capacity, invalid, unauthorized};
 
 use crate::changes::{self, Draft, Edit, MergeRequest};
-use crate::contract::{
-    Bounds, Frame, MAX_PATH_BYTES, Op, Principal, Repo, Settings, valid_repo_name,
-};
+use crate::contract::{Bounds, MAX_PATH_BYTES, Op, Principal, Repo, Settings, valid_repo_name};
 use crate::objects::{ObjectWriter, object_not_held};
 use crate::state::{
     WRITERS, delete_ref, is_writer, load_bounds, load_refs, load_repo, repo_exists, repo_hash,
     save_bounds, save_repo, set_ref, storage,
 };
 
-pub const PROGRAM: &str = "forge";
+pub const MODULE: &str = "forge";
 
-pub fn init(store: &mut impl Writes, params: &[u8]) -> Result<(), Refusal> {
-    let bounds: Bounds = decoded(PROGRAM, "Bounds", params)?;
+pub fn init(store: &mut impl Writes, bounds: Bounds) -> Result<(), Error> {
     let usable = bounds.page_size > 0
         && bounds.log_walk > 0
         && bounds.tree_walk > 0
@@ -35,11 +32,11 @@ pub fn init(store: &mut impl Writes, params: &[u8]) -> Result<(), Refusal> {
     Ok(())
 }
 
-/// Runs one op as `frame.principal`, whom the program resolved from the
-/// signer ([`identity::principal_of`]). Every op names its repository; an accepted one
-/// marks it active.
-pub fn execute(store: &mut impl Writes, frame: &Frame, op: Op) -> Result<(), Refusal> {
-    let actor = person(&frame.principal)?;
+/// Runs one op as `sender`, whom the module resolved from the signer
+/// ([`identity::principal_of`]). Every op names its repository; an accepted
+/// one marks it active.
+pub fn execute(store: &mut impl Writes, env: &Env, sender: Principal, op: Op) -> Result<(), Error> {
+    let actor = person(&sender)?;
     let repo = op.repo().to_owned();
     let reply = match op {
         Op::Create { repo, hash } => create(store, actor, &repo, hash).map(|()| None),
@@ -64,7 +61,7 @@ pub fn execute(store: &mut impl Writes, frame: &Frame, op: Op) -> Result<(), Ref
                 result,
                 change,
             };
-            changes::merge_heads(store, frame, actor, &repo, merge).map(Some)
+            changes::merge_heads(store, env, actor, &repo, merge).map(Some)
         }
         Op::ChangeOpen {
             repo,
@@ -81,7 +78,7 @@ pub fn execute(store: &mut impl Writes, frame: &Frame, op: Op) -> Result<(), Ref
                 body,
                 reviewers,
             };
-            changes::open(store, frame, actor, &repo, draft).map(Some)
+            changes::open(store, env, actor, &repo, draft).map(Some)
         }
         Op::ChangeEdit {
             repo,
@@ -95,23 +92,23 @@ pub fn execute(store: &mut impl Writes, frame: &Frame, op: Op) -> Result<(), Ref
                 body,
                 reviewers,
             };
-            changes::edit(store, frame, actor, &repo, n, fields).map(Some)
+            changes::edit(store, env, actor, &repo, n, fields).map(Some)
         }
-        Op::ChangeClose { repo, n } => changes::close(store, frame, actor, &repo, n).map(Some),
+        Op::ChangeClose { repo, n } => changes::close(store, env, actor, &repo, n).map(Some),
         Op::ReviewSubmit { repo, n, review } => {
-            changes::submit_review(store, frame, actor, &repo, n, review).map(Some)
+            changes::submit_review(store, env, actor, &repo, n, review).map(Some)
         }
     }?;
     if let Some(reply) = reply {
-        store.output(abi::encode(&reply));
+        store.set_return_data(store::encode(&reply));
     }
-    touch(store, &repo, frame.height)
+    touch(store, &repo, env.height)
 }
 
-/// Forge is written by people (an account), never by a program or the
+/// Forge is written by people (an account), never by a module or the
 /// system. A key that holds no account never gets here: identity's
 /// [`principal_of`](identity::principal_of) refuses it.
-fn person(principal: &Principal) -> Result<&Principal, Refusal> {
+fn person(principal: &Principal) -> Result<&Principal, Error> {
     if !principal.is_person() {
         return Err(unauthorized("a repository op is signed by a person"));
     }
@@ -119,7 +116,7 @@ fn person(principal: &Principal) -> Result<&Principal, Refusal> {
 }
 
 /// Every accepted op marks its repository active at this height.
-fn touch(store: &mut impl Writes, name: &str, height: u64) -> Result<(), Refusal> {
+fn touch(store: &mut impl Writes, name: &str, height: u64) -> Result<(), Error> {
     let mut repo = load_repo(store, name)?;
     repo.last_activity = height;
     save_repo(store, name, &repo)
@@ -130,7 +127,7 @@ fn create(
     actor: &Principal,
     name: &str,
     hash: HashKind,
-) -> Result<(), Refusal> {
+) -> Result<(), Error> {
     if !valid_repo_name(name) {
         return Err(invalid(format!("{name:?} is not a repository name")));
     }
@@ -152,7 +149,7 @@ fn configure(
     actor: &Principal,
     name: &str,
     settings: Settings,
-) -> Result<(), Refusal> {
+) -> Result<(), Error> {
     let mut repo = load_repo(store, name)?;
     require_owner(&repo, actor)?;
     let head_is_a_ref =
@@ -169,7 +166,7 @@ fn grant(
     actor: &Principal,
     name: &str,
     principal: Principal,
-) -> Result<(), Refusal> {
+) -> Result<(), Error> {
     require_owner(&load_repo(store, name)?, actor)?;
     require_named(&principal)?;
     WRITERS.insert(store, &(name.to_owned(), principal));
@@ -181,7 +178,7 @@ fn revoke(
     actor: &Principal,
     name: &str,
     principal: Principal,
-) -> Result<(), Refusal> {
+) -> Result<(), Error> {
     require_owner(&load_repo(store, name)?, actor)?;
     require_named(&principal)?;
     WRITERS.remove(store, &(name.to_owned(), principal));
@@ -195,7 +192,7 @@ fn push(
     actor: &Principal,
     name: &str,
     request: &[u8],
-) -> Result<(), Refusal> {
+) -> Result<(), Error> {
     let mut repo = load_repo(store, name)?;
     require_writer(store, name, &repo, actor)?;
     let bounds = load_bounds(store)?;
@@ -232,11 +229,11 @@ fn push(
         }
     }
     save_repo(store, name, &repo)?;
-    store.output(outcome.report);
+    store.set_return_data(outcome.report);
     Ok(())
 }
 
-fn require_owner(repo: &Repo, actor: &Principal) -> Result<(), Refusal> {
+fn require_owner(repo: &Repo, actor: &Principal) -> Result<(), Error> {
     if repo.owner != *actor {
         return Err(unauthorized("only the owner changes a repository"));
     }
@@ -248,7 +245,7 @@ pub(crate) fn require_writer(
     name: &str,
     repo: &Repo,
     actor: &Principal,
-) -> Result<(), Refusal> {
+) -> Result<(), Error> {
     let may_write = repo.owner == *actor || is_writer(store, name, actor);
     if !may_write {
         return Err(unauthorized("only the owner and its writers push"));
@@ -257,7 +254,7 @@ pub(crate) fn require_writer(
 }
 
 /// A person an op names (a writer, a reviewer): an account.
-pub(crate) fn require_named(principal: &Principal) -> Result<(), Refusal> {
+pub(crate) fn require_named(principal: &Principal) -> Result<(), Error> {
     if !principal.is_person() {
         return Err(invalid("only a person is named here"));
     }
@@ -276,13 +273,13 @@ pub fn cap(bound: u64) -> usize {
     usize::try_from(bound).unwrap_or(usize::MAX)
 }
 
-pub fn refusal_of(error: Error) -> Refusal {
+pub fn refusal_of(error: GitError) -> Error {
     match error {
-        Error::Storage => storage("the blob store refused a write"),
-        Error::CapReached | Error::ObjectTooLarge => {
+        GitError::Storage => storage("the blob store refused a write"),
+        GitError::CapReached | GitError::ObjectTooLarge => {
             capacity("query or operation exceeds its configured work/byte bound")
         }
-        Error::MissingObject(id) | Error::MissingBase(id) => object_not_held(id),
+        GitError::MissingObject(id) | GitError::MissingBase(id) => object_not_held(id),
         other => invalid(other.to_string()),
     }
 }

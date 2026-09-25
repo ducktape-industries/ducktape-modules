@@ -1,10 +1,11 @@
-// The rules natively over `store::Memory`: what the founding suite checks on the host, without the host.
+// The rules natively over `store::testing::MockHost`: what the founding suite checks on the host, without the host.
 
-use abi::{Cause, Env, Origin, reason};
 use module_registry::AUTHORITY;
-use store::{Memory, Page};
+use store::PageRequest;
+use store::testing::MockHost;
+use store::{Cause, Env, Origin, code};
 
-use crate::{Genesis, Member, Membership, Op, Query, Reply, Standing};
+use crate::{Genesis, Member, Membership, Op, Query, Reply, Role};
 
 fn key(n: u8) -> Vec<u8> {
     vec![n; 32]
@@ -12,17 +13,17 @@ fn key(n: u8) -> Vec<u8> {
 
 fn env(origin: Origin) -> Env {
     Env {
-        network: b"net".to_vec(),
+        chain_id: b"net".to_vec(),
         height: 3,
         time: 0,
-        me: crate::PROGRAM.into(),
+        module: crate::MODULE.into(),
         origin,
         cause: Cause::Direct,
     }
 }
 
-fn founded() -> Memory {
-    let mut store = Memory::default();
+fn founded() -> MockHost {
+    let mut store = MockHost::default();
     crate::init(
         &mut store,
         Genesis {
@@ -42,19 +43,19 @@ fn founded() -> Memory {
     store
 }
 
-fn govern(store: &mut Memory, op: Op) -> Result<(), abi::Refusal> {
-    crate::execute(store, &env(Origin::Program(AUTHORITY.into())), op)
+fn govern(store: &mut MockHost, op: Op) -> Result<(), store::Error> {
+    crate::execute(store, &env(Origin::Module(AUTHORITY.into())), op)
 }
 
-fn ask(store: &Memory, query: Query) -> Reply {
-    crate::query(store, &env(Origin::System), query).unwrap()
+fn ask(store: &MockHost, query: Query) -> Reply {
+    crate::query(store, &env(Origin::Root), query).unwrap()
 }
 
-fn membership(n: u8, standing: Standing) -> Membership {
+fn membership(n: u8, role: Role) -> Membership {
     Membership {
         key: key(n),
         address: format!("node-{n}"),
-        standing,
+        role,
     }
 }
 
@@ -76,23 +77,23 @@ fn only_the_authority_writes_and_a_key_is_32_bytes() {
     let mut store = founded();
     let stranger = crate::execute(
         &mut store,
-        &env(Origin::External(key(9))),
-        Op::Set(membership(3, Standing::Resident)),
+        &env(Origin::Signed(key(9))),
+        Op::Set(membership(3, Role::Resident)),
     );
-    assert_eq!(stranger.unwrap_err().reason, reason::UNAUTHORIZED);
+    assert_eq!(stranger.unwrap_err().code, code::UNAUTHORIZED);
     let short = govern(
         &mut store,
         Op::Set(Membership {
             key: vec![1, 2],
             address: "x".into(),
-            standing: Standing::Resident,
+            role: Role::Resident,
         }),
     );
-    assert_eq!(short.unwrap_err().reason, reason::INVALID_INPUT);
-    govern(&mut store, Op::Set(membership(3, Standing::Resident))).unwrap();
+    assert_eq!(short.unwrap_err().code, code::INVALID_INPUT);
+    govern(&mut store, Op::Set(membership(3, Role::Resident))).unwrap();
     assert_eq!(
         ask(&store, Query::Membership { key: key(3) }),
-        Reply::Membership(Some(membership(3, Standing::Resident)))
+        Reply::Membership(Some(membership(3, Role::Resident)))
     );
     assert_eq!(
         ask(&store, Query::Validators),
@@ -104,11 +105,11 @@ fn only_the_authority_writes_and_a_key_is_32_bytes() {
 fn the_last_validator_stays_seated() {
     let mut store = founded();
     govern(&mut store, Op::Remove { key: key(1) }).unwrap();
-    let demote = govern(&mut store, Op::Set(membership(2, Standing::Resident)));
-    assert_eq!(demote.unwrap_err().reason, reason::WRONG_STATE);
+    let demote = govern(&mut store, Op::Set(membership(2, Role::Resident)));
+    assert_eq!(demote.unwrap_err().code, code::WRONG_STATE);
     let remove = govern(&mut store, Op::Remove { key: key(2) });
-    assert_eq!(remove.unwrap_err().reason, reason::WRONG_STATE);
-    govern(&mut store, Op::Set(membership(5, Standing::Validator))).unwrap();
+    assert_eq!(remove.unwrap_err().code, code::WRONG_STATE);
+    govern(&mut store, Op::Set(membership(5, Role::Validator))).unwrap();
     govern(&mut store, Op::Remove { key: key(2) }).unwrap();
     assert_eq!(
         ask(&store, Query::Validators),
@@ -119,11 +120,11 @@ fn the_last_validator_stays_seated() {
 #[test]
 fn memberships_page_in_key_order_at_the_answering_height() {
     let mut store = founded();
-    govern(&mut store, Op::Set(membership(3, Standing::Resident))).unwrap();
+    govern(&mut store, Op::Set(membership(3, Role::Resident))).unwrap();
     let Reply::Memberships(first) = ask(
         &store,
         Query::Memberships {
-            page: Page::first(2),
+            page: PageRequest::first(2),
         },
     ) else {
         panic!()
@@ -136,7 +137,7 @@ fn memberships_page_in_key_order_at_the_answering_height() {
     let Reply::Memberships(rest) = ask(
         &store,
         Query::Memberships {
-            page: Page {
+            page: PageRequest {
                 after: first.next,
                 limit: Some(2),
             },
@@ -144,30 +145,30 @@ fn memberships_page_in_key_order_at_the_answering_height() {
     ) else {
         panic!()
     };
-    assert_eq!(rest.items, [membership(3, Standing::Resident)]);
+    assert_eq!(rest.items, [membership(3, Role::Resident)]);
     assert_eq!(rest.next, None);
 }
 
 #[test]
 fn the_host_contract_is_a_prefix_of_the_program_contract() {
     assert_eq!(
-        abi::encode(&abi::valset::Query::Validators),
-        abi::encode(&super::Query::Validators)
+        store::encode(&abi::valset::Query::Validators),
+        store::encode(&super::Query::Validators)
     );
     assert_eq!(
-        abi::encode(&abi::valset::Query::Members),
-        abi::encode(&super::Query::Members)
+        store::encode(&abi::valset::Query::Members),
+        store::encode(&super::Query::Members)
     );
     let member = abi::valset::Member {
         key: vec![1],
         address: "a".into(),
     };
     assert_eq!(
-        abi::encode(&abi::valset::Reply::Validators(vec![vec![1]])),
-        abi::encode(&super::Reply::Validators(vec![vec![1]]))
+        store::encode(&abi::valset::Reply::Validators(vec![vec![1]])),
+        store::encode(&super::Reply::Validators(vec![vec![1]]))
     );
     assert_eq!(
-        abi::encode(&abi::valset::Reply::Members(vec![member.clone()])),
-        abi::encode(&super::Reply::Members(vec![member]))
+        store::encode(&abi::valset::Reply::Members(vec![member.clone()])),
+        store::encode(&super::Reply::Members(vec![member]))
     );
 }

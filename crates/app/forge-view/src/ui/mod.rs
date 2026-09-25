@@ -220,7 +220,7 @@ fn repo(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
 /// minted by ducklink from the session's chain id (`<label>#<salt>`); a
 /// placeholder `duck://<network>/forge/<name>` while no chain is known.
 pub(crate) fn repo_link(forge: &Forge, name: &str) -> String {
-    ducklink::mint(&forge.session.chain, forge::PROGRAM, &[name])
+    ducklink::mint(&forge.session.chain, forge::MODULE, &[name])
         .unwrap_or_else(|| format!("duck://<network>/forge/{name}"))
 }
 

@@ -1,7 +1,7 @@
 //! The change queries: a repository's changes, one change with its
 //! reviews, and the judgment a person owes across every repository.
 
-use abi::{Refusal, Scan};
+use store::{Error, Range};
 use store::{Listing, Reads, capacity};
 
 use crate::contract::*;
@@ -19,7 +19,7 @@ pub fn change(
     repo: &str,
     n: u64,
     listing: &Listing,
-) -> Result<Reply, Refusal> {
+) -> Result<Reply, Error> {
     let change = load_change(store, repo, n)?;
     let (source_head, target_head) = heads(store, repo, &change)?;
     let reviews = REVIEWS
@@ -41,9 +41,9 @@ pub fn changes(
     repo: &str,
     filter: &ChangeFilter,
     listing: &Listing,
-) -> Result<PageReply<ChangeSummary>, Refusal> {
+) -> Result<PageResponse<ChangeSummary>, Error> {
     load_repo(store, repo)?;
-    let PageReply {
+    let PageResponse {
         height,
         items,
         next,
@@ -62,7 +62,7 @@ pub fn changes(
         })
         .map(|((repo, _), change)| summary(&repo, &change))
         .collect();
-    Ok(PageReply {
+    Ok(PageResponse {
         height,
         items,
         next,
@@ -79,7 +79,7 @@ pub fn judgment(
     store: &impl Reads,
     principal: &Principal,
     listing: &Listing,
-) -> Result<PageReply<Judgment>, Refusal> {
+) -> Result<PageResponse<Judgment>, Error> {
     require_named(principal)?;
     let mut budget = load_bounds(store)?.log_walk;
     let page = CHANGES.page_of(store, &(), listing)?;
@@ -92,7 +92,7 @@ pub fn judgment(
             items.push(judgment);
         }
     }
-    Ok(PageReply {
+    Ok(PageResponse {
         height: page.height,
         items,
         next: page.next,
@@ -106,7 +106,7 @@ fn judge(
     change: &Change,
     principal: &Principal,
     budget: &mut u64,
-) -> Result<Option<Judgment>, Refusal> {
+) -> Result<Option<Judgment>, Error> {
     let (source, _) = heads(store, repo, change)?;
     let authored = authored_newest_first(store, repo, change.n, principal, budget)?;
     let latest = authored
@@ -154,8 +154,8 @@ fn authored_newest_first(
     n: u64,
     principal: &Principal,
     budget: &mut u64,
-) -> Result<Vec<u64>, Refusal> {
-    let scan: Scan = AUTHORED.prefix_of(&(repo.to_owned(), n, principal.clone()));
+) -> Result<Vec<u64>, Error> {
+    let scan: Range = AUTHORED.prefix_of(&(repo.to_owned(), n, principal.clone()));
     let ids: Vec<u64> = AUTHORED
         .scan(store, scan.reverse().limit(budget.saturating_add(1)))?
         .into_iter()
@@ -173,7 +173,7 @@ fn heads(
     store: &impl Reads,
     repo: &str,
     change: &Change,
-) -> Result<(Option<String>, Option<String>), Refusal> {
+) -> Result<(Option<String>, Option<String>), Error> {
     let hash = repo_hash(&load_repo(store, repo)?);
     let source = match &change.from {
         Revision::Ref(name) => load_ref(store, repo, name, hash)?.map(|oid| oid.to_hex()),

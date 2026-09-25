@@ -7,16 +7,16 @@ fn founding_seats_the_validators_and_every_program_answers() {
         let net = Net::found(context, dir.path()).await;
         let programs = net.host.programs().unwrap();
         for program in [
-            module_registry::PROGRAM,
-            valset::PROGRAM,
-            identity::PROGRAM,
+            module_registry::MODULE,
+            valset::MODULE,
+            identity::MODULE,
             AUTHORITY,
         ] {
             assert!(programs.contains_key(program), "{program} is not rostered");
         }
         assert!(!programs.contains_key("lens"), "a view is never admitted");
         let module_registry::Reply::Views(views) = net
-            .ask(module_registry::PROGRAM, &module_registry::Query::Views(0))
+            .ask(module_registry::MODULE, &module_registry::Query::Views(0))
             .await
         else {
             panic!()
@@ -33,7 +33,7 @@ fn founding_seats_the_validators_and_every_program_answers() {
         assert!(
             memberships
                 .iter()
-                .all(|membership| membership.standing == valset::Standing::Validator)
+                .all(|membership| membership.role == valset::Role::Validator)
         );
         let seated = net.host.epoch_members(0).unwrap().unwrap();
         assert_eq!(seated.len(), 2);
@@ -41,9 +41,9 @@ fn founding_seats_the_validators_and_every_program_answers() {
         assert!(seated.contains(&member(2)));
         let identity::Reply::Accounts(accounts) = net
             .ask(
-                identity::PROGRAM,
+                identity::MODULE,
                 &identity::Query::List {
-                    page: Page::default(),
+                    page: PageRequest::default(),
                 },
             )
             .await

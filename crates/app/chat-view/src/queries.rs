@@ -1,6 +1,8 @@
-//! Typed reads of the chat module. Every list takes a `Page` and answers a
-//! `PageReply`; `next` is the cursor of the page after it.
-use chat::{ChannelInfo, MemberRow, MessageHits, MsgRow, Page, PageReply, Principal, Query, Reply};
+//! Typed reads of the chat module. Every list takes a `PageRequest` and answers a
+//! `PageResponse`; `next` is the cursor of the page after it.
+use chat::{
+    ChannelInfo, MemberRow, MessageHits, MsgRow, PageRequest, PageResponse, Principal, Query, Reply,
+};
 use ducktape_view_guest::Host;
 use ducktape_view_guest::host::{Refusal, pages, wrong_reply};
 
@@ -10,8 +12,8 @@ use crate::{PAGE, WINDOW};
 /// How many channel pages one read follows: 64 pages of 64 channels.
 const CHANNEL_PAGES: usize = 64;
 
-fn page(after: Option<Vec<u8>>, limit: usize) -> Page {
-    Page {
+fn page(after: Option<Vec<u8>>, limit: usize) -> PageRequest {
+    PageRequest {
         after,
         limit: Some(limit as u64),
     }
@@ -117,7 +119,7 @@ pub(crate) async fn thread(
         .await?
     {
         Reply::Thread {
-            replies: PageReply { items, next, .. },
+            replies: PageResponse { items, next, .. },
             ..
         } => Ok((sorted(items), next)),
         _ => Err(wrong_reply()),
@@ -150,7 +152,7 @@ pub(crate) async fn search_hits(
     };
     match host.ask::<Ask<ChatApi>>(query).await? {
         Reply::Hits(MessageHits { hits, capped }) => Ok((hits, capped, None)),
-        Reply::TagHits(PageReply { items, next, .. }) => Ok((items, false, next)),
+        Reply::TagHits(PageResponse { items, next, .. }) => Ok((items, false, next)),
         _ => Err(wrong_reply()),
     }
 }

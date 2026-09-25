@@ -182,7 +182,7 @@ are at most 37 bytes so even `forge:<repo>:<u64::MAX>` fits chat's channel ID.
 A UI query failure is an ABI `Refusal { reason, sentence }`. Stable reasons
 include `object_not_held`, `capacity`, `invalid_input`, `not_found`, `stale`, and
 `unexpected_reply`. Operation failures use ABI `Refusal`, including `unauthorized`
-and `wrong_state`; no record/emit survives a rejected operation. Malformed Borsh
+and `wrong_state`; no record/send survives a rejected operation. Malformed Borsh
 requests and Git protocol failures use the ABI refusal path.
 
 The current kernel revision `5d1d1f61d89960164cab919dfbb16a1d8cdb3b36` distinguishes
@@ -195,7 +195,7 @@ Core/SDK must provide a query-local nonblocking blob read/stat, or convert
 `BlobUnavailable` at the query boundary. Do not change required reads in execution
 into refusals. This limitation is not proven away by the in-process smoke in qa.
 
-Likewise, `emit` commits an outbox item, not the receiver's execution. The guarded
+Likewise, `send` commits an outbox item, not the receiver's execution. The guarded
 chat namespace and validated payloads prevent ordinary delivery refusals, but
 chat must be seated as `chat` and forge as `forge`. Truly simultaneous record+
 channel creation would require a host transaction spanning both programs; this

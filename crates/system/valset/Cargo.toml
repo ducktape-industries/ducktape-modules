@@ -3,19 +3,19 @@ name = "valset"
 version.workspace = true
 edition.workspace = true
 
-# The types, the rules over `store` and the ask another program makes of
-# valset (`standing`) are always built; a view links them with `program` off.
-# `program` adds the wasm32 program over the host: `guest`'s contexts, the
+# The types, the rules over `store` and the ask another module makes of
+# valset (`role`) are always built; a view links them with `module` off.
+# `module` adds the wasm32 entry points `store::entrypoint!` expands to: the
 # `alloc`/`call` exports and the `ducktape.*` imports.
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [features]
-program = ["dep:guest", "store/program"]
-# `view` adds the marker a view names this program by.
+module = ["store/module"]
+# `view` adds the marker a view names this module by.
 view = ["dep:ducktape-view-guest"]
 # `describe` makes this crate\'s wasm build the `ducktape.describe` module:
-# the `describe` export alone, no program, no imports.
+# the `describe` export alone, no module, no imports.
 describe = []
 
 [dependencies]
@@ -23,6 +23,5 @@ ducktape-view-guest = { workspace = true, optional = true }
 abi = { workspace = true }
 describe = { workspace = true }
 borsh = { workspace = true }
-guest = { workspace = true, optional = true }
 module-registry = { workspace = true }
 store = { workspace = true }

@@ -260,7 +260,7 @@ async fn set(host: Host) -> Result<Set, Refusal> {
     let mut memberships = Vec::new();
     let mut after = None;
     loop {
-        let page = module_registry::Page { after, limit: None };
+        let page = store::PageRequest { after, limit: None };
         let reply = match host
             .ask::<Query<Valset>>(valset::Query::Memberships { page })
             .await?
@@ -281,19 +281,19 @@ async fn set(host: Host) -> Result<Set, Refusal> {
             .map(|membership| Member {
                 key: hex(&membership.key),
                 address: membership.address.clone(),
-                standing: match membership.standing {
-                    valset::Standing::Validator => "Validator",
-                    valset::Standing::Resident => "Resident",
+                standing: match membership.role {
+                    valset::Role::Validator => "Validator",
+                    valset::Role::Resident => "Resident",
                 }
                 .into(),
-                validator: membership.standing == valset::Standing::Validator,
+                validator: membership.role == valset::Role::Validator,
             })
             .collect(),
     })
 }
 
 fn unexpected(reply: &impl std::fmt::Debug) -> Refusal {
-    malformed(format!("{} answered {reply:?}", valset::PROGRAM))
+    malformed(format!("{} answered {reply:?}", valset::MODULE))
 }
 
 export_view!(

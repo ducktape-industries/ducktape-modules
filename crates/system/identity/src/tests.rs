@@ -1,9 +1,10 @@
-// The rules natively over `store::Memory`: what the founding suite checks on the host, without the host.
+// The rules natively over `store::testing::MockHost`: what the founding suite checks on the host, without the host.
 
-use abi::{Cause, Env, Origin, Scheme, reason};
-use store::{Memory, Page};
+use store::PageRequest;
+use store::testing::MockHost;
+use store::{Cause, Env, Origin, Scheme, code};
 
-use crate::{Account, Admission, CONSENT_NAMESPACE, Consent, Control, Op, Query, Reply, Standing};
+use crate::{Account, Admission, CONSENT_NAMESPACE, Consent, Control, Op, Query, Reply, Status};
 
 const ALICE: &[u8] = b"alice-key";
 const SECOND: &[u8] = b"alice-second-key";
@@ -11,52 +12,52 @@ const EXECUTOR: &str = "agents";
 
 fn env(origin: Origin, time: u64) -> Env {
     Env {
-        network: b"net".to_vec(),
+        chain_id: b"net".to_vec(),
         height: 7,
         time,
-        me: crate::PROGRAM.into(),
+        module: crate::MODULE.into(),
         origin,
         cause: Cause::Direct,
     }
 }
 
 fn signed(key: &[u8]) -> Env {
-    env(Origin::External(key.to_vec()), 100)
+    env(Origin::Signed(key.to_vec()), 100)
 }
 
 fn by_program() -> Env {
-    env(Origin::Program(EXECUTOR.into()), 100)
+    env(Origin::Module(EXECUTOR.into()), 100)
 }
 
 /// A consent proof, natively: the signature is the preimage itself, and the
 /// verifier checks it names the consenting key.
-fn memory() -> Memory {
-    Memory {
+fn memory() -> MockHost {
+    MockHost {
         verifier: Some(Box::new(|_, key, namespace, message, signature| {
             namespace == CONSENT_NAMESPACE && message == signature && !key.is_empty()
         })),
-        ..Memory::default()
+        ..MockHost::default()
     }
 }
 
-fn run(store: &mut Memory, env: &Env, op: Op) -> Result<u64, abi::Refusal> {
+fn run(store: &mut MockHost, env: &Env, op: Op) -> Result<u64, store::Error> {
     crate::execute(store, env, op)?;
-    let output = store.take_output();
+    let output = store.take_return_data();
     Ok(if output.is_empty() {
         0
     } else {
-        abi::decode(&output).unwrap()
+        store::decode(&output).unwrap()
     })
 }
 
-fn get(store: &Memory, number: u64) -> Account {
+fn get(store: &MockHost, number: u64) -> Account {
     match crate::query(store, &signed(ALICE), Query::Get { number }).unwrap() {
         Reply::Account(account) => account.expect("the account exists"),
         other => panic!("{other:?}"),
     }
 }
 
-fn create(store: &mut Memory, key: &[u8], name: &str) -> u64 {
+fn create(store: &mut MockHost, key: &[u8], name: &str) -> u64 {
     run(
         store,
         &signed(key),
@@ -82,7 +83,7 @@ fn accounts_are_numbered_from_one_and_a_key_holds_one_account() {
             scheme: Scheme::Ed25519,
         },
     );
-    assert_eq!(again.unwrap_err().reason, reason::ALREADY_EXISTS);
+    assert_eq!(again.unwrap_err().code, code::ALREADY_EXISTS);
     assert_eq!(
         crate::query(
             &store,
@@ -102,7 +103,7 @@ fn accounts_are_numbered_from_one_and_a_key_holds_one_account() {
             scheme: Scheme::Ed25519,
         },
     );
-    assert_eq!(unsigned.unwrap_err().reason, reason::UNAUTHORIZED);
+    assert_eq!(unsigned.unwrap_err().code, code::UNAUTHORIZED);
 }
 
 #[test]
@@ -110,7 +111,7 @@ fn a_key_joins_by_consent_and_leaves_only_junior_to_its_remover() {
     let mut store = memory();
     create(&mut store, ALICE, "Alice");
     let admission = Admission {
-        network: b"net".to_vec(),
+        chain_id: b"net".to_vec(),
         scheme: Scheme::Ed25519,
         key: SECOND.to_vec(),
         generation: 0,
@@ -129,16 +130,16 @@ fn a_key_joins_by_consent_and_leaves_only_junior_to_its_remover() {
         consent: consent(proof, expires_at),
     };
     let forged = run(&mut store, &signed(SECOND), add(b"nope".to_vec(), 200));
-    assert_eq!(forged.unwrap_err().reason, reason::UNAUTHORIZED);
+    assert_eq!(forged.unwrap_err().code, code::UNAUTHORIZED);
     let expired = run(
         &mut store,
-        &env(Origin::External(SECOND.to_vec()), 300),
+        &env(Origin::Signed(SECOND.to_vec()), 300),
         add(admission.preimage(), 200),
     );
-    assert_eq!(expired.unwrap_err().reason, reason::UNAUTHORIZED);
+    assert_eq!(expired.unwrap_err().code, code::UNAUTHORIZED);
     run(
         &mut store,
-        &env(Origin::External(SECOND.to_vec()), 150),
+        &env(Origin::Signed(SECOND.to_vec()), 150),
         add(admission.preimage(), 200),
     )
     .unwrap();
@@ -156,15 +157,15 @@ fn a_key_joins_by_consent_and_leaves_only_junior_to_its_remover() {
     );
     let senior = run(
         &mut store,
-        &env(Origin::External(SECOND.to_vec()), 150),
+        &env(Origin::Signed(SECOND.to_vec()), 150),
         Op::RemoveKey {
             key: ALICE.to_vec(),
         },
     );
-    assert_eq!(senior.unwrap_err().reason, reason::UNAUTHORIZED);
+    assert_eq!(senior.unwrap_err().code, code::UNAUTHORIZED);
     run(
         &mut store,
-        &env(Origin::External(ALICE.to_vec()), 150),
+        &env(Origin::Signed(ALICE.to_vec()), 150),
         Op::RemoveKey {
             key: SECOND.to_vec(),
         },
@@ -178,7 +179,7 @@ fn a_key_joins_by_consent_and_leaves_only_junior_to_its_remover() {
             key: ALICE.to_vec(),
         },
     );
-    assert_eq!(last.unwrap_err().reason, reason::WRONG_STATE);
+    assert_eq!(last.unwrap_err().code, code::WRONG_STATE);
 }
 
 #[test]
@@ -204,13 +205,13 @@ fn a_program_account_is_controlled_transferred_and_revoked_by_its_controller() {
             name: "Mine".into(),
         },
     );
-    assert_eq!(stranger.unwrap_err().reason, reason::UNAUTHORIZED);
+    assert_eq!(stranger.unwrap_err().code, code::UNAUTHORIZED);
     run(
         &mut store,
         &by_program(),
-        Op::SetStanding {
+        Op::SetStatus {
             account: 3,
-            standing: Standing::Suspended,
+            status: Status::Suspended,
         },
     )
     .unwrap();
@@ -220,7 +221,7 @@ fn a_program_account_is_controlled_transferred_and_revoked_by_its_controller() {
         &signed(ALICE),
         Op::TransferControl { account: 3, to: 3 },
     );
-    assert_eq!(circular.unwrap_err().reason, reason::WRONG_STATE);
+    assert_eq!(circular.unwrap_err().code, code::WRONG_STATE);
     run(
         &mut store,
         &signed(ALICE),
@@ -232,7 +233,7 @@ fn a_program_account_is_controlled_transferred_and_revoked_by_its_controller() {
         Control::Program { controller: 2, .. }
     ));
     let former = run(&mut store, &signed(ALICE), Op::Revoke { account: 3 });
-    assert_eq!(former.unwrap_err().reason, reason::UNAUTHORIZED);
+    assert_eq!(former.unwrap_err().code, code::UNAUTHORIZED);
     run(&mut store, &signed(b"bob"), Op::Revoke { account: 3 }).unwrap();
     assert_eq!(get(&store, 3).control, Control::Revoked { controller: 2 });
 }
@@ -268,12 +269,12 @@ fn lists_page_in_number_order_and_controlled_lists_one_controller() {
         other => panic!("{other:?}"),
     };
     let first = list(Query::List {
-        page: Page::first(10),
+        page: PageRequest::first(10),
     });
     assert_eq!(first.height, 7);
     assert_eq!(first.items.len(), 10);
     let rest = list(Query::List {
-        page: Page {
+        page: PageRequest {
             after: first.next,
             limit: Some(10),
         },
@@ -285,7 +286,7 @@ fn lists_page_in_number_order_and_controlled_lists_one_controller() {
     );
     let controlled = list(Query::Controlled {
         by: 2,
-        page: Page::first(2),
+        page: PageRequest::first(2),
     });
     assert_eq!(
         controlled
@@ -297,7 +298,7 @@ fn lists_page_in_number_order_and_controlled_lists_one_controller() {
     );
     let more = list(Query::Controlled {
         by: 2,
-        page: Page {
+        page: PageRequest {
             after: controlled.next,
             limit: Some(2),
         },
