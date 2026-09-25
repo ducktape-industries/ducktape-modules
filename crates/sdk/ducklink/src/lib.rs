@@ -148,19 +148,18 @@ impl Link {
             return Err(empty(text));
         }
         let chain: ChainId = authority.parse()?;
-        let mut segments = Vec::new();
-        for segment in path.split('/') {
-            if segment.is_empty() {
-                return Err(empty(text));
-            }
-            segments.push(segment);
+        if path.split('/').any(str::is_empty) {
+            return Err(empty(text));
         }
-        let program = segments.remove(0).to_string();
-        program_segment(&program)?;
+        let (program, rest) = path.split_once('/').unwrap_or((path, ""));
+        program_segment(program)?;
         Ok(Link {
             chain,
-            program,
-            tail: segments.into_iter().map(decode).collect::<Result<_, _>>()?,
+            program: program.to_string(),
+            tail: match rest {
+                "" => Vec::new(),
+                rest => tail(rest)?,
+            },
         })
     }
 
@@ -207,6 +206,21 @@ pub fn mint(chain: &str, program: &str, tail: &[&str]) -> Option<String> {
     Link::new(chain.parse().ok()?, program, tail)
         .ok()
         .map(|link| link.to_string())
+}
+
+/// a `/`-separated path of tail segments, each read from its one spelling
+/// (`forge%3Aweb%3A3/42` → `["forge:web:3", "42"]`): the reading
+/// [`Link::parse`] gives a link's tail, for a reader holding the path alone.
+pub fn tail(path: &str) -> Result<Vec<String>, Refused> {
+    path.split('/')
+        .map(|segment| match segment.is_empty() {
+            true => Err(Refused::new(
+                INVALID_INPUT,
+                format!("A duck:// path has no empty segment, and `{path}` does."),
+            )),
+            false => decode(segment),
+        })
+        .collect()
 }
 
 /// a tail segment that spells a number: decimal, no sign, no leading zero (`0`
@@ -494,6 +508,23 @@ mod tests {
                 .is_err()
         );
         assert!("Net-b5b6ea90".parse::<ChainId>().is_err());
+    }
+
+    #[test]
+    fn a_tail_round_trips_any_name_and_refuses_a_broken_escape() {
+        for name in ["forge:web:3", "보고서 #1", "a b", "dm-3-5", "~x.y_z"] {
+            let link = mint("net#0a1b2c3d", "chat", &[name, "42"]).unwrap();
+            let path = link.split_once("/chat/").unwrap().1;
+            assert_eq!(tail(path).unwrap(), [name, "42"], "{link}");
+            assert_eq!(tail(path).unwrap().join("/"), format!("{name}/42"));
+        }
+        assert_eq!(
+            mint("net#0a1b2c3d", "chat", &["forge:web:3"]).unwrap(),
+            "duck://net-0a1b2c3d/chat/forge%3Aweb%3A3"
+        );
+        for broken in ["%", "a%4", "%G0", "%zz", "%3a", "%FF", "%2F", "a//b", "%00"] {
+            assert!(tail(broken).is_err(), "{broken}");
+        }
     }
 
     #[test]

@@ -246,6 +246,15 @@ pub struct Block {
     pub proposer: Option<Vec<u8>>,
     pub txs: Vec<Tx>,
 }
+/// One finalized head, as `rpc.heads` pushes it.
+#[derive(
+    Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
+)]
+pub struct Head {
+    pub height: u64,
+    pub time: u64,
+    pub id: [u8; 32],
+}
 // ---------- the host ----------
 
 /// The session facts every view is handed: the theme, the connection, the
@@ -430,8 +439,12 @@ doors! {
     HostOpenLink, "host.open_link", String, ();
     /// `host.route`: a subscription, one item per `duck://` link opened into
     /// this view: the path after the view's own segment (`tx/<hash>` of
-    /// `duck://<chain>/explorer/tx/<hash>`), segments of `[A-Za-z0-9._-]`.
-    /// A link that mounted the view is its first item.
+    /// `duck://<chain>/explorer/tx/<hash>`). The route is delivered DECODED:
+    /// the link spells each segment percent-encoded (`ducklink`), the host
+    /// decodes it and joins the segments with `/`, so `forge%3Aweb%3A3/42`
+    /// arrives as `forge:web:3/42`. A segment is nonempty, not `.` or `..`,
+    /// and holds no `/` and no control character; the whole route is at most
+    /// 256 bytes. A link that mounted the view is its first item.
     HostRoute, "host.route", (), String;
     /// `host.chord`: claim a command chord (`cmd[-shift][-alt]-<key>`); an
     /// item per press while the subscription stands.
@@ -479,6 +492,11 @@ doors! {
     StoreGet, "store.get", String, Option<Vec<u8>>;
     /// `store.set`: keep a value under a key, or drop it with `None`.
     StoreSet, "store.set", (String, Option<Vec<u8>>), ();
+    /// `rpc.heads`: a subscription, one item per finalized block, oldest
+    /// first, from the tip at subscribe on. Heights may skip where the host
+    /// could not fill a gap (a reconnect, a node with no archive); a view
+    /// that must see every block reads the gap with `rpc.blocks`.
+    RpcHeads, "rpc.heads", (), Head;
 }
 
 /// The `<capability>` half of every kind in [`ALL`]: the names a view's
