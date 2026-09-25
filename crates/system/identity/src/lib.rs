@@ -204,45 +204,52 @@ pub fn account(
     }
 }
 
-/// An op as a person reads it: a title and its fields.
-#[cfg(feature = "view")]
-pub fn describe(op: &Op) -> (String, Vec<(&'static str, String)>) {
-    let account = |number: &AccountNumber| ("account", number.to_string());
-    let scheme_name = |scheme: &abi::Scheme| {
-        match scheme {
-            abi::Scheme::Ed25519 => "Ed25519",
-            abi::Scheme::Secp256k1 => "secp256k1",
-            abi::Scheme::Secp256r1 => "secp256r1",
-            abi::Scheme::Bls12381 => "BLS12-381",
-        }
-        .to_string()
+/// An op as a person reads it: a title and its fields. The source of the
+/// `ducktape.describe` module this program ships (`make wasm-describes`).
+pub fn describe(op: &Op) -> describe::Description {
+    use describe::{Value, field};
+    let account = |number: &AccountNumber| field("account", Value::Account(*number));
+    let optional = |text: &Option<String>| Value::Text(text.clone().unwrap_or_else(|| "—".into()));
+    let scheme = |scheme: &abi::Scheme| {
+        field(
+            "scheme",
+            Value::text(match scheme {
+                abi::Scheme::Ed25519 => "Ed25519",
+                abi::Scheme::Secp256k1 => "secp256k1",
+                abi::Scheme::Secp256r1 => "secp256r1",
+                abi::Scheme::Bls12381 => "BLS12-381",
+            }),
+        )
     };
-    match op {
-        Op::Create { name, scheme } => (
+    let (title, fields) = match op {
+        Op::Create { name, scheme: s } => (
             format!("Create · {name}"),
-            vec![("name", name.clone()), ("scheme", scheme_name(scheme))],
+            vec![field("name", Value::text(name)), scheme(s)],
         ),
         Op::AddKey {
-            scheme,
+            scheme: s,
             label,
             consent,
         } => (
             "Add key".into(),
             vec![
-                ("scheme", scheme_name(scheme)),
-                ("label", label.clone().unwrap_or_else(|| "—".into())),
-                ("key", abi::preview(&consent.key)),
+                scheme(s),
+                field("label", optional(label)),
+                field("key", Value::Key(consent.key.clone())),
                 account(&consent.account),
-                ("expires at", consent.expires_at.to_string()),
+                field("expires at", Value::Time(consent.expires_at)),
             ],
         ),
-        Op::RemoveKey { key } => ("Remove key".into(), vec![("key", abi::preview(key))]),
+        Op::RemoveKey { key } => (
+            "Remove key".into(),
+            vec![field("key", Value::Key(key.clone()))],
+        ),
         Op::SetName {
             account: number,
             name,
         } => (
             format!("Set name · {name}"),
-            vec![account(number), ("name", name.clone())],
+            vec![account(number), field("name", Value::text(name))],
         ),
         Op::SetProfile {
             account: number,
@@ -252,18 +259,21 @@ pub fn describe(op: &Op) -> (String, Vec<(&'static str, String)>) {
             "Set profile".into(),
             vec![
                 account(number),
-                (
+                field(
                     "avatar",
-                    avatar.map_or_else(|| "—".into(), |blob| abi::hex(blob.digest())),
+                    avatar.map_or_else(
+                        || Value::text("—"),
+                        |blob| Value::Hash(blob.digest().to_vec()),
+                    ),
                 ),
-                ("bio", bio.clone().unwrap_or_else(|| "—".into())),
+                field("bio", optional(bio)),
             ],
         ),
         Op::CreateProgram { name, controller } => (
             format!("Create program · {name}"),
             vec![
-                ("name", name.clone()),
-                ("controller", controller.to_string()),
+                field("name", Value::text(name)),
+                field("controller", Value::Account(*controller)),
             ],
         ),
         Op::SetStanding {
@@ -273,13 +283,12 @@ pub fn describe(op: &Op) -> (String, Vec<(&'static str, String)>) {
             "Set standing".into(),
             vec![
                 account(number),
-                (
+                field(
                     "standing",
-                    match standing {
+                    Value::text(match standing {
                         Standing::Active => "active",
                         Standing::Suspended => "suspended",
-                    }
-                    .into(),
+                    }),
                 ),
             ],
         ),
@@ -288,8 +297,31 @@ pub fn describe(op: &Op) -> (String, Vec<(&'static str, String)>) {
             to,
         } => (
             "Transfer control".into(),
-            vec![account(number), ("to", to.to_string())],
+            vec![account(number), field("to", Value::Account(*to))],
         ),
         Op::Revoke { account: number } => ("Revoke".into(), vec![account(number)]),
-    }
+    };
+    describe::Description { title, fields }
+}
+
+describe::export!(Op, describe);
+
+/// Old op bytes are described with the current code (`describe`): the op
+/// enum only grows at its end. Append a new variant here; never reorder.
+#[test]
+fn op_variants_only_append() {
+    assert_eq!(
+        describe::variants::<Op>(),
+        [
+            "Create",
+            "AddKey",
+            "RemoveKey",
+            "SetName",
+            "SetProfile",
+            "CreateProgram",
+            "SetStanding",
+            "TransferControl",
+            "Revoke",
+        ]
+    );
 }

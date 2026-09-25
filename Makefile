@@ -36,7 +36,7 @@ VIEW_FORBIDDEN := blst commonware-cryptography wasm-bindgen js-sys web-sys
 BUILD_TARGET := $(abspath $(or $(CARGO_TARGET_DIR),target))
 RELEASE := $(BUILD_TARGET)/wasm32-unknown-unknown/release
 # The artifacts wasm-modules leaves there (the target dir may hold others).
-ARTIFACTS := $(foreach a,$(PROGRAMS) $(VIEWS),$(subst -,_,$(a)).wasm)
+ARTIFACTS := $(foreach a,$(PROGRAMS) $(VIEWS),$(subst -,_,$(a)).wasm) $(foreach p,$(PROGRAMS),$(subst -,_,$(p)).describe.wasm)
 
 # A wasm artifact must be the same bytes from any checkout on any machine:
 # panic locations would otherwise carry this checkout's, cargo's and the
@@ -112,12 +112,28 @@ wasm-programs:
 test:
 	$(CARGO) test --workspace
 
+.PHONY: wasm-describes
+
+# Each program's describe module builds in a target dir of its own, for the
+# reason `PROGRAM_TARGET` gives: the crate with `describe` on is another unit.
+DESCRIBE_TARGET = $(BUILD_TARGET)/describe/$1
+describe_build = $(WASM_BUILD) --target-dir $(call DESCRIBE_TARGET,$1) -p $1 --features describe
+describe_artifact = $(call DESCRIBE_TARGET,$1)/wasm32-unknown-unknown/release/$(subst -,_,$1).wasm
+
+## builds every program's describe module (its crate with `describe` on: the
+## `alloc`/`describe` exports over its `describe` fn, no imports) into
+## $(RELEASE)/<name>.describe.wasm, ABI-checked. qa's pack embeds each as
+## the `ducktape.describe` section of its program.
+wasm-describes:
+	@mkdir -p $(RELEASE)
+	@$(foreach p,$(PROGRAMS),$(call describe_build,$(p)) && cp $(call describe_artifact,$(p)) $(RELEASE)/$(subst -,_,$(p)).describe.wasm && python3 tools/check-describe-abi.py $(RELEASE)/$(subst -,_,$(p)).describe.wasm || exit 1;)
+
 .PHONY: wasm-modules wasm-reproducible
 
-## builds every program and every view under $(RELEASE)/, unpacked. Packing
-## a view into its program is genesis's job: qa's `make pack` runs view-pack
-## over these outputs.
-wasm-modules: wasm-programs wasm-views
+## builds every program, its describe module and every view under
+## $(RELEASE)/, unpacked. Packing a view and a describe module into its
+## program is genesis's job: qa's `kit` pack runs view-pack over these outputs.
+wasm-modules: wasm-programs wasm-describes wasm-views
 	@cd $(RELEASE) && ls -l $(ARTIFACTS)
 
 ## builds every program and view twice, the second time from a fresh target

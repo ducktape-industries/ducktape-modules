@@ -10,8 +10,8 @@
 //! finds. The window is the last [`WINDOW`] blocks, read a page at a time
 //! and then followed at the head as `rpc.heads` pushes it.
 use ducktape_view_guest::doors::{
-    Block, BlockPage, BlockRef, ClipboardWrite, ClockTicks, Head, HostProps, HostRoute, NodeStatus,
-    Query, RpcBlock, RpcBlocks, RpcHeads,
+    Block, BlockPage, BlockRef, ClipboardWrite, ClockTicks, Description, Head, HostProps,
+    HostRoute, NodeStatus, ProgramDescribe, Query, RpcBlock, RpcBlocks, RpcHeads,
 };
 use ducktape_view_guest::export_view;
 use ducktape_view_guest::host::{Refusal, malformed};
@@ -24,8 +24,6 @@ use std::borrow::Cow;
 
 mod decode;
 pub(crate) mod ui;
-
-pub use decode::Op;
 
 /// The recent window the explorer reads: activity, search by transaction
 /// hash and the transaction list reach this far back and no further.
@@ -122,23 +120,26 @@ pub struct TxRow {
     pub signer: Vec<u8>,
     pub seq: u64,
     pub target: String,
-    /// the payload as it landed, decoded only once a row is on screen; never
-    /// in the snapshot, which keeps the decoded [`Op`] instead (a restored
-    /// row has an empty payload and its op already set)
+    /// the payload as it landed, described only once a row is on screen
     pub payload: Vec<u8>,
-    op: std::cell::OnceCell<Op>,
+    /// what the host answered for it ([`Explorer::describe`]), or its bytes
+    op: std::cell::OnceCell<Description>,
+    asked: std::cell::Cell<bool>,
 }
 
 impl TxRow {
-    /// The payload as the op it names, decoded the first time a row is
-    /// drawn and kept: a render must not re-read a 1 MB push each frame.
-    pub fn op(&self) -> &Op {
-        self.op
-            .get_or_init(|| decode::decode(&self.target, &self.payload))
+    /// The op as its program described it, once the host has answered.
+    pub fn op(&self) -> Option<&Description> {
+        self.op.get()
     }
 }
 
-/// A [`TxRow`] as the snapshot holds it: the op, not the payload.
+/// The longest payload a snapshot keeps for a row not yet described; a
+/// longer one is kept as its bytes' description ([`decode::bytes`]).
+const KEPT_PAYLOAD: usize = 4 << 10;
+
+/// A [`TxRow`] as the snapshot holds it: the op where it was described,
+/// else a short payload, never a 1 MB push.
 #[derive(Serialize, Deserialize)]
 struct StoredTx<'a> {
     hash: [u8; 32],
@@ -147,11 +148,17 @@ struct StoredTx<'a> {
     signer: Cow<'a, [u8]>,
     seq: u64,
     target: Cow<'a, str>,
-    op: Cow<'a, Op>,
+    op: Option<Description>,
+    payload: Cow<'a, [u8]>,
 }
 
 impl Serialize for TxRow {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let (op, payload) = match self.op.get() {
+            Some(op) => (Some(op.clone()), &[][..]),
+            None if self.payload.len() <= KEPT_PAYLOAD => (None, &self.payload[..]),
+            None => (Some(decode::bytes(&self.target, &self.payload)), &[][..]),
+        };
         StoredTx {
             hash: self.hash,
             height: self.height,
@@ -159,7 +166,8 @@ impl Serialize for TxRow {
             signer: Cow::Borrowed(&self.signer),
             seq: self.seq,
             target: Cow::Borrowed(&self.target),
-            op: Cow::Borrowed(self.op()),
+            op,
+            payload: Cow::Borrowed(payload),
         }
         .serialize(s)
     }
@@ -175,8 +183,9 @@ impl<'de> Deserialize<'de> for TxRow {
             signer: stored.signer.into_owned(),
             seq: stored.seq,
             target: stored.target.into_owned(),
-            payload: Vec::new(),
-            op: stored.op.into_owned().into(),
+            payload: stored.payload.into_owned(),
+            op: stored.op.map(Into::into).unwrap_or_default(),
+            asked: Default::default(),
         })
     }
 }
@@ -199,6 +208,7 @@ fn rows(block: Block) -> (BlockRow, Vec<TxRow>) {
         .map(|tx| TxRow {
             payload: tx.payload,
             op: Default::default(),
+            asked: Default::default(),
             hash: tx.hash,
             height: block.height,
             time: block.time,
@@ -706,6 +716,33 @@ impl Explorer {
         }
     }
 
+    /// Asks the host what `tx` does, once, the first time it is drawn; a
+    /// program that says nothing, or a refusal, leaves its bytes.
+    pub fn describe(&self, tx: &TxRow, cx: &mut Context<Self>) {
+        if tx.op.get().is_some() || tx.asked.replace(true) {
+            return;
+        }
+        let ask = cx
+            .host()
+            .ask::<ProgramDescribe>((tx.target.clone(), tx.payload.clone()));
+        let hash = tx.hash;
+        cx.spawn(async move |this, cx| {
+            let described = ask.await;
+            let _ = this.update(cx, |view, cx| {
+                let Some(tx) = view.tx(&hash) else {
+                    return;
+                };
+                let op = match described {
+                    Ok(Some(op)) => op,
+                    Ok(None) | Err(_) => decode::bytes(&tx.target, &tx.payload),
+                };
+                let _ = tx.op.set(op);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     /// A transaction by hash, in the window or the block opened outside it.
     pub fn tx(&self, hash: &[u8; 32]) -> Option<&TxRow> {
         self.chain
@@ -854,7 +891,7 @@ export_view!(
     Explorer,
     "Explorer",
     "The chain as this node keeps it: blocks, transactions, accounts and programs.",
-    ["rpc", "host", "clock", "clipboard"]
+    ["rpc", "host", "clock", "clipboard", "program"]
 );
 
 #[cfg(test)]

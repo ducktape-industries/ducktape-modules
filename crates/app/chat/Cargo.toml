@@ -13,10 +13,14 @@ crate-type = ["cdylib", "rlib"]
 program = ["dep:guest", "dep:identity", "store/program"]
 # `view` adds the marker a view names this program by.
 view = ["dep:ducktape-view-guest"]
+# `describe` makes this crate's wasm build the `ducktape.describe` module:
+# the `describe` export alone, no program, no imports.
+describe = []
 
 [dependencies]
 ducktape-view-guest = { workspace = true, optional = true }
 abi = { workspace = true }
+describe = { workspace = true }
 borsh = { workspace = true }
 guest = { workspace = true, optional = true }
 identity = { workspace = true, optional = true }

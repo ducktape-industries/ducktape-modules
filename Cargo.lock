@@ -659,6 +659,7 @@ version = "0.1.0"
 dependencies = [
  "abi",
  "borsh",
+ "describe",
  "guest",
  "identity",
  "serde",
@@ -2210,6 +2211,7 @@ dependencies = [
  "abi",
  "borsh",
  "chat",
+ "describe",
  "gitcore",
  "guest",
  "serde_json",
@@ -3089,6 +3091,7 @@ version = "0.1.0"
 dependencies = [
  "abi",
  "borsh",
+ "describe",
  "guest",
  "module-registry",
  "store",
@@ -3683,6 +3686,7 @@ dependencies = [
  "borsh",
  "commonware-cryptography",
  "commonware-runtime",
+ "describe",
  "fixture-probe",
  "guest",
  "host",
@@ -6340,6 +6344,7 @@ version = "0.1.0"
 dependencies = [
  "abi",
  "borsh",
+ "describe",
  "guest",
  "module-registry",
  "store",

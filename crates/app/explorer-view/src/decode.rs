@@ -1,61 +1,60 @@
 //! A transaction's payload as the operation it names, and the few formats
 //! a chain reads in: short hashes, grouped numbers, dates and ages.
 //!
-//! A payload is decoded with the op type of the program it targets, for the
-//! programs a view may link, and read as the title and fields that program's
-//! `describe` gives it. A program the view does not link reads as its size
-//! and a short hex preview.
+//! A payload is described by the program it targets, through the host
+//! (`program.describe`: the describe module the program's own code
+//! carries). A program with none, or bytes it cannot read, reads as its
+//! size and a short hex preview: [`bytes`].
+use ducktape_view_guest::doors::{Description, Field, Value};
 
 /// The longest a field's value runs before it is clipped.
 const MAX_VALUE: usize = 160;
 
-/// Bounded (every value clipped), so a view snapshot keeps it in place of
-/// the payload.
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct Op {
-    /// what the operation does, in words: `Post in #design`
-    pub title: String,
-    pub fields: Vec<(String, String)>,
-}
-
-/// What a program's `describe` gives: a title and its fields.
-type Described = (String, Vec<(&'static str, String)>);
-
-fn described<T: borsh::BorshDeserialize>(
-    payload: &[u8],
-    describe: fn(&T) -> Described,
-) -> Option<Described> {
-    borsh::from_slice::<T>(payload).ok().map(|op| describe(&op))
-}
-
-pub fn decode(program: &str, payload: &[u8]) -> Op {
-    let described = match program {
-        chat::PROGRAM => described(payload, chat::describe),
-        forge::PROGRAM => described(payload, forge::describe),
-        identity::PROGRAM => described(payload, identity::describe),
-        valset::PROGRAM => described(payload, valset::describe),
-        module_registry::PROGRAM => described(payload, module_registry::describe),
-        _ => None,
-    };
-    match described {
-        Some((title, fields)) => Op {
-            title: clip(&title),
-            fields: fields
-                .into_iter()
-                .map(|(name, value)| (name.to_owned(), clip(&value)))
-                .collect(),
-        },
-        None => Op {
-            title: format!(
-                "{program} · {}",
-                plural(payload.len() as u64, "byte", "bytes")
-            ),
-            fields: vec![("bytes".into(), abi::preview(payload))],
-        },
+/// An op no describe module read: its program, its size, its first bytes.
+pub fn bytes(program: &str, payload: &[u8]) -> Description {
+    Description {
+        title: format!(
+            "{program} · {}",
+            plural(payload.len() as u64, "byte", "bytes")
+        ),
+        fields: vec![Field {
+            label: "bytes".into(),
+            value: Value::bytes(payload),
+        }],
     }
 }
 
-fn clip(text: &str) -> String {
+/// [`Value::Bytes`] as `abi::preview` reads bytes: all of a short run, the
+/// length and the ends of a long one.
+pub fn preview(len: u64, preview: &[u8]) -> String {
+    match len {
+        0 => "0 bytes".into(),
+        1..=32 => short_hex(&abi::hex(preview)),
+        _ => format!("{len} bytes · {}", short_hex(&abi::hex(preview))),
+    }
+}
+
+/// `value / 10^decimals`, the whole part grouped.
+pub fn amount(value: u128, decimals: u8) -> String {
+    let Some(scale) = 10u128.checked_pow(u32::from(decimals)) else {
+        return value.to_string();
+    };
+    let whole = value / scale;
+    let whole = match u64::try_from(whole) {
+        Ok(whole) => grouped(whole),
+        Err(_) => whole.to_string(),
+    };
+    match decimals {
+        0 => whole,
+        _ => format!(
+            "{whole}.{:0width$}",
+            value % scale,
+            width = decimals as usize
+        ),
+    }
+}
+
+pub fn clip(text: &str) -> String {
     match text.char_indices().nth(MAX_VALUE) {
         Some((at, _)) => format!("{}…", &text[..at]),
         None => text.to_string(),

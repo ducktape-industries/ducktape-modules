@@ -99,26 +99,51 @@ pub enum Reply {
     Views(Vec<View>),
 }
 
-/// An op as a person reads it: a title and its fields.
-#[cfg(feature = "view")]
-pub fn describe(op: &Op) -> (String, Vec<(&'static str, String)>) {
-    match op {
-        Op::Publish { body } => ("Publish".into(), vec![("body", abi::preview(body))]),
-        Op::Schedule(Scheduled { height, change }) => {
+/// An op as a person reads it: a title and its fields. The source of the
+/// `ducktape.describe` module this program ships (`make wasm-describes`).
+pub fn describe(op: &Op) -> describe::Description {
+    use describe::{Value, field};
+    let height = |height: &u64| field("height", Value::Text(height.to_string()));
+    let (title, fields) = match op {
+        Op::Publish { body } => ("Publish".into(), vec![field("body", Value::bytes(body))]),
+        Op::Schedule(Scheduled { height: at, change }) => {
             let mut fields = vec![
-                ("change", change.verb().to_string()),
-                ("program", change.program().to_string()),
-                ("height", height.to_string()),
+                field("change", Value::text(change.verb())),
+                field("program", Value::Program(change.program().into())),
+                height(at),
             ];
-            fields.extend(change.code().map(|code| ("code", abi::hex(code.digest()))));
+            fields.extend(
+                change
+                    .code()
+                    .map(|code| field("code", Value::Hash(code.digest().to_vec()))),
+            );
             if let Change::Set(entry) = change {
-                fields.push(("params", abi::preview(&entry.params)));
+                fields.push(field("params", Value::bytes(&entry.params)));
             }
             (format!("Schedule · {}", change.program()), fields)
         }
-        Op::Cancel { height, program } => (
+        Op::Cancel {
+            height: at,
+            program,
+        } => (
             format!("Cancel · {program}"),
-            vec![("program", program.clone()), ("height", height.to_string())],
+            vec![
+                field("program", Value::Program(program.clone())),
+                height(at),
+            ],
         ),
-    }
+    };
+    describe::Description { title, fields }
+}
+
+describe::export!(Op, describe);
+
+/// Old op bytes are described with the current code (`describe`): the op
+/// enum only grows at its end. Append a new variant here; never reorder.
+#[test]
+fn op_variants_only_append() {
+    assert_eq!(
+        describe::variants::<Op>(),
+        ["Publish", "Schedule", "Cancel",]
+    );
 }

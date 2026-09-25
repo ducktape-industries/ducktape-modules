@@ -71,25 +71,35 @@ pub fn standing(ctx: &impl store::Reads, key: &[u8]) -> Result<Option<Standing>,
     }
 }
 
-/// An op as a person reads it: a title and its fields.
-#[cfg(feature = "view")]
-pub fn describe(op: &Op) -> (String, Vec<(&'static str, String)>) {
-    match op {
+/// An op as a person reads it: a title and its fields. The source of the
+/// `ducktape.describe` module this program ships (`make wasm-describes`).
+pub fn describe(op: &Op) -> describe::Description {
+    use describe::{Value, field};
+    let (title, fields) = match op {
         Op::Set(membership) => (
             format!("Set · {}", membership.address),
             vec![
-                ("key", abi::preview(&membership.key)),
-                ("address", membership.address.clone()),
-                (
+                field("key", Value::Key(membership.key.clone())),
+                field("address", Value::text(&membership.address)),
+                field(
                     "standing",
-                    match membership.standing {
+                    Value::text(match membership.standing {
                         Standing::Validator => "validator",
                         Standing::Resident => "resident",
-                    }
-                    .into(),
+                    }),
                 ),
             ],
         ),
-        Op::Remove { key } => ("Remove".into(), vec![("key", abi::preview(key))]),
-    }
+        Op::Remove { key } => ("Remove".into(), vec![field("key", Value::Key(key.clone()))]),
+    };
+    describe::Description { title, fields }
+}
+
+describe::export!(Op, describe);
+
+/// Old op bytes are described with the current code (`describe`): the op
+/// enum only grows at its end. Append a new variant here; never reorder.
+#[test]
+fn op_variants_only_append() {
+    assert_eq!(describe::variants::<Op>(), ["Set", "Remove",]);
 }

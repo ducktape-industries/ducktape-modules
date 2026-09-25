@@ -21,57 +21,59 @@ pub use contract::*;
 pub use ops::{PROGRAM, execute, init};
 pub use queries::query;
 
-/// An op as a person reads it: a title and its fields.
-#[cfg(feature = "view")]
-pub fn describe(op: &Op) -> (String, Vec<(&'static str, String)>) {
-    let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
+/// An op as a person reads it: a title and its fields. The source of the
+/// `ducktape.describe` module this program ships (`make wasm-describes`).
+pub fn describe(op: &Op) -> describe::Description {
+    use describe::{Value, field};
+    let text = |bytes: &[u8]| Value::Text(String::from_utf8_lossy(bytes).into_owned());
     let revision = |revision: &Revision| match revision {
         Revision::Ref(name) => text(name),
-        Revision::Oid(oid) => oid.clone(),
+        Revision::Oid(oid) => Value::text(oid),
     };
+    let change = |n: &u64| field("change", Value::Text(format!("#{n}")));
     let (verb, repo, fields) = match op {
         Op::Create { repo, hash } => (
             "Create",
             repo,
-            vec![(
+            vec![field(
                 "hash",
-                match hash {
+                Value::text(match hash {
                     abi::HashKind::Sha256 => "SHA-256",
                     abi::HashKind::Sha1 => "SHA-1",
-                }
-                .into(),
+                }),
             )],
         ),
         Op::Configure { repo, settings } => (
             "Configure",
             repo,
             vec![
-                ("head", text(&settings.head)),
-                ("allow force", settings.allow_force.to_string()),
-                ("allow delete", settings.allow_delete.to_string()),
+                field("head", text(&settings.head)),
+                field("allow force", Value::Text(settings.allow_force.to_string())),
+                field(
+                    "allow delete",
+                    Value::Text(settings.allow_delete.to_string()),
+                ),
             ],
         ),
-        Op::Grant { repo, key } => ("Grant", repo, vec![("key", abi::preview(key))]),
-        Op::Revoke { repo, key } => ("Revoke", repo, vec![("key", abi::preview(key))]),
-        Op::Push { repo, request } => ("Push", repo, vec![("request", abi::preview(request))]),
+        Op::Grant { repo, key } => ("Grant", repo, vec![field("key", Value::Key(key.clone()))]),
+        Op::Revoke { repo, key } => ("Revoke", repo, vec![field("key", Value::Key(key.clone()))]),
+        Op::Push { repo, request } => ("Push", repo, vec![field("request", Value::bytes(request))]),
         Op::Merge {
             repo,
             into,
             from,
             result,
-            change,
+            change: n,
             ..
         } => (
             "Merge",
             repo,
             vec![
-                ("from", revision(from)),
-                ("into", text(into)),
-                ("result", result.clone()),
-                (
-                    "change",
-                    change.map_or_else(|| "—".into(), |n| format!("#{n}")),
-                ),
+                field("from", revision(from)),
+                field("into", text(into)),
+                field("result", Value::text(result)),
+                n.as_ref()
+                    .map_or_else(|| field("change", Value::text("—")), change),
             ],
         ),
         Op::ChangeOpen {
@@ -85,41 +87,72 @@ pub fn describe(op: &Op) -> (String, Vec<(&'static str, String)>) {
             "Open change",
             repo,
             vec![
-                ("title", title.clone()),
-                ("from", revision(from)),
-                ("into", text(into)),
-                ("reviewers", reviewers.len().to_string()),
+                field("title", Value::text(title)),
+                field("from", revision(from)),
+                field("into", text(into)),
+                field(
+                    "reviewers",
+                    Value::List(reviewers.iter().cloned().map(Value::Key).collect()),
+                ),
             ],
         ),
         Op::ChangeEdit { repo, n, title, .. } => (
             "Edit change",
             repo,
             vec![
-                ("change", format!("#{n}")),
-                ("title", title.clone().unwrap_or_else(|| "—".into())),
+                change(n),
+                field(
+                    "title",
+                    Value::Text(title.clone().unwrap_or_else(|| "—".into())),
+                ),
             ],
         ),
-        Op::ChangeClose { repo, n } => ("Close change", repo, vec![("change", format!("#{n}"))]),
+        Op::ChangeClose { repo, n } => ("Close change", repo, vec![change(n)]),
         Op::ReviewSubmit { repo, n, review } => (
             "Review",
             repo,
             vec![
-                ("change", format!("#{n}")),
-                (
+                change(n),
+                field(
                     "verdict",
-                    match review.verdict {
+                    Value::text(match review.verdict {
                         Verdict::Approve => "approve",
                         Verdict::RequestChanges => "request changes",
                         Verdict::Comment => "comment",
-                    }
-                    .into(),
+                    }),
                 ),
-                ("commit", review.commit_oid.clone()),
-                ("comments", review.comments.len().to_string()),
+                field("commit", Value::text(&review.commit_oid)),
+                field("comments", Value::Text(review.comments.len().to_string())),
             ],
         ),
     };
-    let mut all = vec![("repo", repo.clone())];
+    let mut all = vec![field("repo", Value::text(repo))];
     all.extend(fields);
-    (format!("{verb} · {repo}"), all)
+    describe::Description {
+        title: format!("{verb} · {repo}"),
+        fields: all,
+    }
+}
+
+describe::export!(Op, describe);
+
+/// Old op bytes are described with the current code (`describe`): the op
+/// enum only grows at its end. Append a new variant here; never reorder.
+#[test]
+fn op_variants_only_append() {
+    assert_eq!(
+        describe::variants::<Op>(),
+        [
+            "Create",
+            "Configure",
+            "Grant",
+            "Revoke",
+            "Push",
+            "Merge",
+            "ChangeOpen",
+            "ChangeEdit",
+            "ChangeClose",
+            "ReviewSubmit",
+        ]
+    );
 }

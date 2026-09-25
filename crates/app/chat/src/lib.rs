@@ -302,15 +302,17 @@ pub use wire::*;
 #[cfg(test)]
 mod tests;
 
-/// An op as a person reads it: a title and its fields.
-#[cfg(feature = "view")]
-pub fn describe(op: &ChatMsg) -> (String, Vec<(&'static str, String)>) {
+/// An op as a person reads it: a title and its fields. The source of the
+/// `ducktape.describe` module this program ships (`make wasm-describes`).
+pub fn describe(op: &ChatMsg) -> describe::Description {
+    use describe::{Value, field};
     let party = |party: &Party| match party {
-        Party::Account(number) => format!("account {number}"),
-        Party::Key(key) => abi::preview(key),
-        Party::Module(module) => module.clone(),
-        Party::System => "system".into(),
+        Party::Account(number) => Value::Account(*number),
+        Party::Key(key) => Value::Key(key.clone()),
+        Party::Module(module) => Value::Program(module.clone()),
+        Party::System => Value::text("system"),
     };
+    let seq = |seq: &u64| field("seq", Value::text(seq.to_string()));
     let (title, channel, fields) = match op {
         ChatMsg::CreateChannel {
             channel_id,
@@ -320,34 +322,35 @@ pub fn describe(op: &ChatMsg) -> (String, Vec<(&'static str, String)>) {
             "Create channel",
             channel_id,
             vec![
-                ("name", name.clone()),
-                (
+                field("name", Value::text(name)),
+                field(
                     "posting",
-                    match post_policy {
+                    Value::text(match post_policy {
                         PostPolicy::Open => "open",
                         PostPolicy::MembersOnly => "members only",
-                    }
-                    .into(),
+                    }),
                 ),
             ],
         ),
         ChatMsg::CreateVoiceChannel { channel_id, name } => (
             "Create voice channel",
             channel_id,
-            vec![("name", name.clone())],
+            vec![field("name", Value::text(name))],
         ),
         ChatMsg::CreateDmChannel { counterpart, name } => {
-            return (
-                format!("Open a DM with account {counterpart}"),
-                vec![
-                    ("with", format!("account {counterpart}")),
-                    ("name", name.clone()),
+            return describe::Description {
+                title: format!("Open a DM with account {counterpart}"),
+                fields: vec![
+                    field("with", Value::Account(*counterpart)),
+                    field("name", Value::text(name)),
                 ],
-            );
+            };
         }
-        ChatMsg::RenameChannel { channel_id, name } => {
-            ("Rename channel", channel_id, vec![("name", name.clone())])
-        }
+        ChatMsg::RenameChannel { channel_id, name } => (
+            "Rename channel",
+            channel_id,
+            vec![field("name", Value::text(name))],
+        ),
         ChatMsg::SetChannelArchived {
             channel_id,
             archived,
@@ -366,52 +369,60 @@ pub fn describe(op: &ChatMsg) -> (String, Vec<(&'static str, String)>) {
             blocks,
             thread,
         } => {
-            return (
-                match dm_peers(channel_id) {
+            let mut fields = vec![field("channel", Value::Text(room(channel_id)))];
+            fields.extend(dm_peers(channel_id).map(|(a, b)| {
+                field(
+                    "between",
+                    Value::List(vec![Value::Account(a), Value::Account(b)]),
+                )
+            }));
+            fields.extend([
+                field("text", Value::Text(plain_text(blocks))),
+                field("message", Value::text(message_id)),
+                field(
+                    "thread",
+                    Value::Text(thread.map_or_else(|| "—".into(), |t| t.to_string())),
+                ),
+            ]);
+            return describe::Description {
+                title: match dm_peers(channel_id) {
                     Some(_) => "Direct message".into(),
                     None => format!("Post in #{channel_id}"),
                 },
-                vec![
-                    ("channel", room(channel_id)),
-                    ("text", plain_text(blocks)),
-                    ("message", message_id.clone()),
-                    (
-                        "thread",
-                        thread.map_or_else(|| "—".into(), |t| t.to_string()),
-                    ),
-                ],
-            );
+                fields,
+            };
         }
         ChatMsg::EditMessage {
             channel_id,
-            seq,
+            seq: at,
             blocks,
             ..
         } => (
             "Edit message",
             channel_id,
-            vec![("seq", seq.to_string()), ("text", plain_text(blocks))],
+            vec![seq(at), field("text", Value::Text(plain_text(blocks)))],
         ),
-        ChatMsg::DeleteMessage { channel_id, seq } => {
-            ("Delete message", channel_id, vec![("seq", seq.to_string())])
-        }
+        ChatMsg::DeleteMessage {
+            channel_id,
+            seq: at,
+        } => ("Delete message", channel_id, vec![seq(at)]),
         ChatMsg::AddReaction {
             channel_id,
-            seq,
+            seq: at,
             emoji,
         } => (
             "React",
             channel_id,
-            vec![("seq", seq.to_string()), ("emoji", emoji.clone())],
+            vec![seq(at), field("emoji", Value::text(emoji))],
         ),
         ChatMsg::RemoveReaction {
             channel_id,
-            seq,
+            seq: at,
             emoji,
         } => (
             "Remove reaction",
             channel_id,
-            vec![("seq", seq.to_string()), ("emoji", emoji.clone())],
+            vec![seq(at), field("emoji", Value::text(emoji))],
         ),
         ChatMsg::SetMembership {
             channel_id,
@@ -424,25 +435,53 @@ pub fn describe(op: &ChatMsg) -> (String, Vec<(&'static str, String)>) {
                 "Remove member"
             },
             channel_id,
-            vec![("party", party(who))],
+            vec![field("party", party(who))],
         ),
         ChatMsg::JoinHuddle {
             channel_id, node, ..
         } => (
             "Join huddle",
             channel_id,
-            vec![("node", abi::preview(node))],
+            vec![field("node", Value::Key(node.clone()))],
         ),
         ChatMsg::LeaveHuddle { channel_id } => ("Leave huddle", channel_id, vec![]),
     };
-    let mut all = vec![("channel", room(channel))];
+    let mut all = vec![field("channel", Value::Text(room(channel)))];
     all.extend(fields);
-    (format!("{title} · {}", room(channel)), all)
+    describe::Description {
+        title: format!("{title} · {}", room(channel)),
+        fields: all,
+    }
+}
+
+describe::export!(ChatMsg, describe);
+
+/// Old op bytes are described with the current code (`describe`): the op
+/// enum only grows at its end. Append a new variant here; never reorder.
+#[test]
+fn op_variants_only_append() {
+    assert_eq!(
+        describe::variants::<ChatMsg>(),
+        [
+            "CreateChannel",
+            "CreateVoiceChannel",
+            "CreateDmChannel",
+            "RenameChannel",
+            "SetChannelArchived",
+            "PostMessage",
+            "EditMessage",
+            "DeleteMessage",
+            "AddReaction",
+            "RemoveReaction",
+            "SetMembership",
+            "JoinHuddle",
+            "LeaveHuddle",
+        ]
+    );
 }
 
 /// A channel as `describe` names it: `#design`, or `DM · account 1 ↔ account 2`
 /// for a dm room, whose id is no name a person picked.
-#[cfg(feature = "view")]
 fn room(channel_id: &str) -> String {
     match dm_peers(channel_id) {
         Some((a, b)) => format!("DM · account {a} ↔ account {b}"),

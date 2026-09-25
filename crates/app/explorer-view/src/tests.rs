@@ -4,7 +4,7 @@ use std::rc::Rc;
 use super::*;
 use abi::BlobId;
 use ducktape_view_guest::doors::Session;
-use ducktape_view_guest::doors::{RpcStatus, Tx};
+use ducktape_view_guest::doors::{RpcStatus, Tx, Value};
 use ducktape_view_guest::testing::{Feed, TestAppContext};
 
 const ADA: [u8; 32] = [1; 32];
@@ -33,8 +33,8 @@ fn tx(seed: u8, signer: [u8; 32], target: &str, payload: Vec<u8>) -> Tx {
     }
 }
 
-/// Blocks 0..=`tip`: 11 carries Ada's post, 12 a stranger's op to a
-/// program this view does not link.
+/// Blocks 0..=`tip`: 11 carries Ada's post and her DM to account 7, 12 a
+/// stranger's op to a program that describes nothing.
 fn chain(tip: u64) -> Vec<Block> {
     (0..=tip)
         .map(|height| Block {
@@ -45,7 +45,10 @@ fn chain(tip: u64) -> Vec<Block> {
             epoch: height / 10,
             proposer: Some(VALIDATOR.to_vec()),
             txs: match height {
-                11 => vec![tx(0xa1, ADA, "chat", post("design", "hello there"))],
+                11 => vec![
+                    tx(0xa1, ADA, "chat", post("design", "hello there")),
+                    tx(0xc3, ADA, "chat", post(&chat::dm_channel_id(7, 3), "ping")),
+                ],
                 12 => vec![tx(0xb2, STRANGER, "mystery", vec![1, 2, 3, 4])],
                 _ => Vec::new(),
             },
@@ -120,6 +123,7 @@ fn node(cx: &mut TestAppContext, tip: Rc<RefCell<u64>>) -> (Feed<HostProps>, Fee
     });
     host.handle::<Query<Valset>>(|_| Ok(valset::Reply::Validators(vec![VALIDATOR.to_vec()])));
     respond(cx);
+    describes(cx);
     feeds
 }
 
@@ -168,75 +172,77 @@ fn ready() -> (TestAppContext, Rc<RefCell<u64>>) {
 
 // ---------- decoding ----------
 
-#[test]
-fn a_linked_program_s_op_reads_as_its_described_fields() {
-    let field = |op: &decode::Op, name: &str| {
-        op.fields
-            .iter()
-            .find(|(key, _)| *key == name)
-            .map(|(_, v)| v.clone())
-    };
-    let op = decode::decode("chat", &post("design", "hello there"));
-    assert_eq!(op.title, "Post in #design");
-    assert_eq!(field(&op, "channel").as_deref(), Some("#design"));
-    assert_eq!(field(&op, "text").as_deref(), Some("hello there"));
-    assert_eq!(field(&op, "thread").as_deref(), Some("—"));
-
-    // a dm room's id is not a channel name: it reads as the two accounts
-    let dm = decode::decode("chat", &post(&chat::dm_channel_id(2, 1), "ping"));
-    assert_eq!(dm.title, "Direct message");
-    assert_eq!(
-        field(&dm, "channel").as_deref(),
-        Some("DM · account 1 ↔ account 2")
-    );
-
-    let push = forge::Op::Push {
-        repo: "app".into(),
-        request: vec![7; 100],
-    };
-    let op = decode::decode("forge", &borsh::to_vec(&push).unwrap());
-    assert_eq!(op.title, "Push · app");
-    assert_eq!(
-        field(&op, "request").as_deref(),
-        Some("100 bytes · 07070707…0707")
-    );
-
-    // a big payload counts its real length, not what a formatter got through
-    let huge = forge::Op::Push {
-        repo: "app".into(),
-        request: vec![0x50; 1 << 20],
-    };
-    let op = decode::decode("forge", &borsh::to_vec(&huge).unwrap());
-    assert_eq!(
-        field(&op, "request").as_deref(),
-        Some("1048576 bytes · 50505050…5050")
-    );
-
-    let create = identity::Op::Create {
-        name: "Ada, \"the first\"".into(),
-        scheme: abi::Scheme::Ed25519,
-    };
-    let op = decode::decode("identity", &borsh::to_vec(&create).unwrap());
-    assert_eq!(op.title, "Create · Ada, \"the first\"");
-    assert_eq!(field(&op, "scheme").as_deref(), Some("Ed25519"));
-
-    let schedule = registry::Op::Schedule(registry::Scheduled {
-        height: 7,
-        change: registry::Change::Remove("forge".into()),
+/// The host's `program.describe`, as each program's describe module would
+/// answer: its own `describe` over the op, `None` for a program without one.
+fn describes(cx: &mut TestAppContext) {
+    fn with<T: borsh::BorshDeserialize>(
+        op: &[u8],
+        describe: fn(&T) -> Description,
+    ) -> Option<Description> {
+        borsh::from_slice(op).ok().map(|op| describe(&op))
+    }
+    cx.host().handle::<ProgramDescribe>(|(program, op)| {
+        Ok(match program.as_str() {
+            "chat" => with(&op, chat::describe),
+            "forge" => with(&op, forge::describe),
+            "identity" => with(&op, identity::describe),
+            "valset" => with(&op, valset::describe),
+            registry::PROGRAM => with(&op, registry::describe),
+            _ => None,
+        })
     });
-    let op = decode::decode(registry::PROGRAM, &borsh::to_vec(&schedule).unwrap());
-    assert_eq!(op.title, "Schedule · forge");
-    assert_eq!(field(&op, "height").as_deref(), Some("7"));
-    assert_eq!(field(&op, "change").as_deref(), Some("Remove"));
 }
 
 #[test]
-fn an_unknown_program_or_a_bad_payload_reads_as_bytes() {
-    let op = decode::decode("mystery", &[1, 2, 3, 4]);
-    assert_eq!(op.title, "mystery · 4 bytes");
-    assert_eq!(op.fields, vec![("bytes".into(), "01020304".into())]);
-    let op = decode::decode("chat", &[0xff; 3]);
-    assert_eq!(op.title, "chat · 3 bytes");
+fn an_op_reads_as_its_program_describes_it_through_the_host() {
+    let (mut cx, _) = ready();
+    // Ada's post, as chat described it
+    assert!(cx.has_text("Post in #design"), "{:?}", cx.texts());
+    // one the host could not describe reads as its bytes
+    assert!(cx.has_text("mystery · 4 bytes"), "{:?}", cx.texts());
+    let asked = cx.host().asked::<ProgramDescribe>();
+    assert!(asked.contains(&("mystery".to_owned(), vec![1, 2, 3, 4])));
+
+    // a dm post: its title, the two accounts by name and link
+    cx.simulate_click(&format!("explorer-tx-{}", abi::hex(&[0xc3; 32])));
+    cx.run_until_parked();
+    let texts = cx.texts();
+    assert!(cx.has_text("Direct message"), "{texts:?}");
+    assert!(cx.has_text("DM · account 3 ↔ account 7"), "{texts:?}");
+    assert!(cx.has_text("between") && cx.has_text("Ada") && cx.has_text("account 7"));
+    cx.simulate_click("explorer-value-1-0");
+    cx.run_until_parked();
+    assert!(
+        cx.has_text("laptop"),
+        "the account link opens Ada: {:?}",
+        cx.texts()
+    );
+    cx.assert_accessible();
+}
+
+#[test]
+fn an_undescribed_op_shows_its_size_and_bytes() {
+    let (mut cx, _) = ready();
+    cx.simulate_click(&format!("explorer-tx-{}", abi::hex(&[0xb2; 32])));
+    cx.run_until_parked();
+    assert!(cx.has_text("mystery · 4 bytes"), "{:?}", cx.texts());
+    assert!(cx.has_text("bytes") && cx.has_text("01020304"));
+    assert_eq!(decode::bytes("chat", &[0xff; 3]).title, "chat · 3 bytes");
+}
+
+#[test]
+fn values_read_as_a_person_reads_them() {
+    assert_eq!(decode::preview(0, &[]), "0 bytes");
+    let push = |len: usize| match Value::bytes(&vec![7; len]) {
+        Value::Bytes { len, preview } => decode::preview(len, &preview),
+        _ => unreachable!(),
+    };
+    assert_eq!(push(100), "100 bytes · 07070707…0707");
+    assert_eq!(push(1 << 20), "1048576 bytes · 07070707…0707");
+    assert_eq!(push(4), "07070707");
+    assert_eq!(decode::amount(123_456_789, 2), "1,234,567.89");
+    assert_eq!(decode::amount(5, 3), "0.005");
+    assert_eq!(decode::amount(42, 0), "42");
 }
 
 #[test]
@@ -278,8 +284,8 @@ fn the_window_follows_the_head_and_stops_where_the_archive_does() {
             .windows(2)
             .all(|pair| pair[0].height == pair[1].height + 1)
     );
-    assert_eq!(window.txs.len(), 2, "no transaction is folded in twice");
-    assert_eq!(window.block(11).map(|block| block.txs), Some(1));
+    assert_eq!(window.txs.len(), 3, "no transaction is folded in twice");
+    assert_eq!(window.block(11).map(|block| block.txs), Some(2));
     // a head that no longer joins the window starts it again
     let far = chain(400);
     window.land(None, page(&far, &ask(None)));
@@ -375,7 +381,7 @@ fn a_transaction_shows_its_block_signer_and_operation() {
     cx.simulate_click("explorer-from");
     cx.run_until_parked();
     assert!(
-        cx.has_text("1 transaction in the last 13 blocks"),
+        cx.has_text("2 transactions in the last 13 blocks"),
         "{:?}",
         cx.texts()
     );
@@ -393,7 +399,7 @@ fn an_account_shows_its_devices_and_what_it_used_in_the_window() {
         cx.has_text("laptop") && cx.has_text("last used 1s ago"),
         "{texts:?}"
     );
-    assert!(cx.has_text("Programs used") && cx.has_text("1 tx"));
+    assert!(cx.has_text("Programs used") && cx.has_text("2 tx"));
     assert!(!cx.has_text("mystery · 4 bytes"), "not Ada's");
     cx.assert_accessible();
 }
@@ -522,6 +528,7 @@ fn a_snapshot_restores_without_reading_the_window_again() {
     restored.host().never::<Query<Identity>>();
     restored.host().never::<Query<Valset>>();
     restored.host().never::<Query<Registry>>();
+    restored.host().never::<ProgramDescribe>();
     restored.restore::<Explorer>(&bytes).unwrap();
     restored.run_until_parked();
     assert!(restored.has_text("Post in #design"));
@@ -765,6 +772,7 @@ fn heavy(cx: &mut TestAppContext) {
     });
     host.handle::<Query<Valset>>(|_| Ok(valset::Reply::Validators(vec![VALIDATOR.to_vec()])));
     respond(cx);
+    describes(cx);
 }
 
 /// Every page over a full window stays inside the host's frame budgets, and

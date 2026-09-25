@@ -5,7 +5,7 @@ use ducktape_view_guest::prelude::*;
 use ducktape_view_guest::view::Loaded;
 use ducktape_view_guest::{Div, FontWeight, Stateful};
 
-use crate::decode::{ago, date, grouped, plural, short};
+use crate::decode::{ago, clip, date, grouped, plural, short};
 use crate::{Account, BlockRow, Explorer, Route, TxRow};
 use design::{empty_state, mono};
 
@@ -342,7 +342,9 @@ fn tx_row(
 ) -> impl IntoElement {
     let id = SharedString::from(format!("explorer-tx-{}", abi::hex(&tx.hash)));
     let now = view.chain.now();
-    let title = tx.op().title.clone();
+    view.describe(tx, cx);
+    // empty until the host answers: the program column already says whose
+    let title = tx.op().map(|op| clip(&op.title)).unwrap_or_default();
     row(
         ElementId::Name(id),
         title.clone(),
