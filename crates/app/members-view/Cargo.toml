@@ -13,6 +13,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 futures.workspace = true
 ducktape-view-guest.workspace = true
+store.workspace = true
 identity = { workspace = true, features = ["view"] }
 valset = { workspace = true, features = ["view"] }
 module-registry.workspace = true

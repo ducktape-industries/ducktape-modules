@@ -1,9 +1,9 @@
 //! Chat owns conversations: forge opens a change's channel, posts its
 //! system lines into it, and asks chat about the replies a review drew.
 
-use abi::{Refusal, reason};
 use chat::{Block, MsgRow, Op, PostPolicy, Query, Reply};
 use identity::Principal;
+use store::{Error, code};
 use store::{Reads, Writes};
 
 use crate::Change;
@@ -34,7 +34,7 @@ impl Event {
 
 /// Queues the change's channel. Chat creates it in the next block.
 pub fn create(store: &mut impl Writes, repo: &str, change: &Change) {
-    emit(
+    send(
         store,
         Op::CreateChannel {
             channel_id: change.channel.clone(),
@@ -47,13 +47,13 @@ pub fn create(store: &mut impl Writes, repo: &str, change: &Change) {
 /// Queues one system line into the change's channel: the event's code in
 /// a `forge` block, no name and no sentence.
 pub fn post(store: &mut impl Writes, change: &Change, message_id: String, event: Event) {
-    emit(
+    send(
         store,
         Op::PostMessage {
             channel_id: change.channel.clone(),
             message_id,
             blocks: vec![Block::Code {
-                lang: Some(crate::PROGRAM.into()),
+                lang: Some(crate::MODULE.into()),
                 text: event.code(),
             }],
             thread: None,
@@ -61,16 +61,16 @@ pub fn post(store: &mut impl Writes, change: &Change, message_id: String, event:
     );
 }
 
-fn emit(store: &mut impl Writes, message: Op) {
-    store.emit(chat::PROGRAM, abi::encode(&message));
+fn send(store: &mut impl Writes, message: Op) {
+    store.send(chat::MODULE, store::encode(&message));
 }
 
 /// The chat root a review posted, by its message id.
-pub fn message(store: &impl Reads, id: &str) -> Result<Option<MsgRow>, Refusal> {
+pub fn message(store: &impl Reads, id: &str) -> Result<Option<MsgRow>, Error> {
     let query = Query::MessageById {
         message_id: id.into(),
     };
-    match store.ask::<Query, Reply>(chat::PROGRAM, &query)? {
+    match store.ask::<Query, Reply>(chat::MODULE, &query)? {
         Reply::Message(row) => Ok(row),
         other => Err(unexpected("MessageById", &other)),
     }
@@ -81,20 +81,20 @@ pub fn attention(
     store: &impl Reads,
     channel: &str,
     principal: &Principal,
-) -> Result<Option<MsgRow>, Refusal> {
+) -> Result<Option<MsgRow>, Error> {
     let query = Query::ThreadAttention {
         channel_id: channel.into(),
         author: principal.clone(),
     };
-    match store.ask::<Query, Reply>(chat::PROGRAM, &query)? {
+    match store.ask::<Query, Reply>(chat::MODULE, &query)? {
         Reply::Attention(row) => Ok(row),
         other => Err(unexpected("ThreadAttention", &other)),
     }
 }
 
-fn unexpected(asked: &str, reply: &Reply) -> Refusal {
-    Refusal::new(
-        reason::UNEXPECTED_REPLY,
+fn unexpected(asked: &str, reply: &Reply) -> Error {
+    Error::new(
+        code::UNEXPECTED_REPLY,
         format!("chat answered {asked} with {reply:?}"),
     )
 }

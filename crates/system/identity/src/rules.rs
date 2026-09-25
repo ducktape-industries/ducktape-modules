@@ -1,24 +1,23 @@
 // The rules over any store: the signer resolved to its account, then the ops and queries.
 
-use abi::{Env, Origin, Refusal, Scheme};
-use module_registry::helpers;
+use store::{Env, Error, Origin, Scheme};
 use store::{
     Item, Map, Reads, Set, Writes, already_exists, invalid, not_found, unauthorized, wrong_state,
 };
 
 use crate::{
     Account, AccountNumber, Admission, CONSENT_NAMESPACE, Consent, Control, Key, Op, Query,
-    Reference, Reply, Standing,
+    Reference, Reply, Status,
 };
 
 const ACCOUNTS: Map<AccountNumber, Account> = Map::new("a/");
 const OF_KEY: Map<Vec<u8>, AccountNumber> = Map::new("k/");
 const GENERATION: Map<Vec<u8>, u64> = Map::new("g/");
-/// `(controller, controlled)`: the program accounts an account controls.
+/// `(controller, controlled)`: the module accounts an account controls.
 const CONTROLLED: Set<(AccountNumber, AccountNumber)> = Set::new("c/");
 const NEXT: Item<AccountNumber> = Item::new("next");
 
-pub fn execute(store: &mut impl Writes, env: &Env, op: Op) -> Result<(), Refusal> {
+pub fn execute(store: &mut impl Writes, env: &Env, op: Op) -> Result<(), Error> {
     match op {
         Op::Create { name, scheme } => create(store, env, name, scheme),
         Op::AddKey {
@@ -34,13 +33,13 @@ pub fn execute(store: &mut impl Writes, env: &Env, op: Op) -> Result<(), Refusal
             bio,
         } => set_profile(store, env, account, avatar, bio),
         Op::CreateProgram { name, controller } => create_program(store, env, name, controller),
-        Op::SetStanding { account, standing } => set_standing(store, env, account, standing),
+        Op::SetStatus { account, status } => set_status(store, env, account, status),
         Op::TransferControl { account, to } => transfer_control(store, env, account, to),
         Op::Revoke { account } => revoke(store, env, account),
     }
 }
 
-pub fn query(store: &impl Reads, env: &Env, query: Query) -> Result<Reply, Refusal> {
+pub fn query(store: &impl Reads, env: &Env, query: Query) -> Result<Reply, Error> {
     Ok(match query {
         Query::Get { number } => Reply::Account(ACCOUNTS.get(store, &number)?),
         Query::OfKey { key } => Reply::Number(OF_KEY.get(store, &key)?),
@@ -64,30 +63,30 @@ pub fn query(store: &impl Reads, env: &Env, query: Query) -> Result<Reply, Refus
     })
 }
 
-fn account(store: &impl Reads, number: AccountNumber) -> Result<Account, Refusal> {
+fn account(store: &impl Reads, number: AccountNumber) -> Result<Account, Error> {
     ACCOUNTS
         .get(store, &number)?
         .ok_or_else(|| not_found(format!("account {number}")))
 }
 
-fn resolve(store: &impl Reads, reference: &Reference) -> Result<Option<AccountNumber>, Refusal> {
+fn resolve(store: &impl Reads, reference: &Reference) -> Result<Option<AccountNumber>, Error> {
     match reference {
         Reference::Account(number) => Ok(ACCOUNTS.has(store, number).then_some(*number)),
         Reference::Key(key) => OF_KEY.get(store, key),
     }
 }
 
-fn generation(store: &impl Reads, key: &Vec<u8>) -> Result<u64, Refusal> {
+fn generation(store: &impl Reads, key: &Vec<u8>) -> Result<u64, Error> {
     Ok(GENERATION.get(store, key)?.unwrap_or(0))
 }
 
-fn next_number(store: &mut impl Writes) -> Result<AccountNumber, Refusal> {
+fn next_number(store: &mut impl Writes) -> Result<AccountNumber, Error> {
     let number = NEXT.get(store)?.unwrap_or(1);
     NEXT.put(store, &(number + 1));
     Ok(number)
 }
 
-fn admit_key(store: &mut impl Writes, key: &Vec<u8>, number: AccountNumber) -> Result<(), Refusal> {
+fn admit_key(store: &mut impl Writes, key: &Vec<u8>, number: AccountNumber) -> Result<(), Error> {
     if OF_KEY.has(store, key) {
         return Err(already_exists("this key already belongs to an account"));
     }
@@ -96,7 +95,7 @@ fn admit_key(store: &mut impl Writes, key: &Vec<u8>, number: AccountNumber) -> R
     Ok(())
 }
 
-fn named(name: String) -> Result<String, Refusal> {
+fn named(name: String) -> Result<String, Error> {
     let name = name.trim().to_owned();
     if name.is_empty() {
         return Err(invalid("a name is not empty"));
@@ -104,8 +103,8 @@ fn named(name: String) -> Result<String, Refusal> {
     Ok(name)
 }
 
-fn create(store: &mut impl Writes, env: &Env, name: String, scheme: Scheme) -> Result<(), Refusal> {
-    let signer = helpers::external(env)?;
+fn create(store: &mut impl Writes, env: &Env, name: String, scheme: Scheme) -> Result<(), Error> {
+    let signer = env.signer()?;
     let number = next_number(store)?;
     admit_key(store, &signer, number)?;
     ACCOUNTS.put(
@@ -125,7 +124,7 @@ fn create(store: &mut impl Writes, env: &Env, name: String, scheme: Scheme) -> R
             updated_at: env.time,
         },
     );
-    store.output(abi::encode(&number));
+    store.set_return_data(store::encode(&number));
     Ok(())
 }
 
@@ -135,8 +134,8 @@ fn add_key(
     scheme: Scheme,
     label: Option<String>,
     consent: Consent,
-) -> Result<(), Refusal> {
-    let signer = helpers::external(env)?;
+) -> Result<(), Error> {
+    let signer = env.signer()?;
     let mut account = account(store, consent.account)?;
     let Control::Keys(keys) = &mut account.control else {
         return Err(wrong_state("a program account holds no keys"));
@@ -150,7 +149,7 @@ fn add_key(
         return Err(unauthorized("the consent has expired"));
     }
     let admission = Admission {
-        network: env.network.clone(),
+        chain_id: env.chain_id.clone(),
         scheme,
         key: signer.clone(),
         generation: generation(store, &signer)?,
@@ -180,8 +179,8 @@ fn add_key(
     Ok(())
 }
 
-fn remove_key(store: &mut impl Writes, env: &Env, key: &Vec<u8>) -> Result<(), Refusal> {
-    let signer = helpers::external(env)?;
+fn remove_key(store: &mut impl Writes, env: &Env, key: &Vec<u8>) -> Result<(), Error> {
+    let signer = env.signer()?;
     let mut account = account_of_key(store, &signer)?;
     let Control::Keys(keys) = &mut account.control else {
         return Err(wrong_state("a program account holds no keys"));
@@ -210,17 +209,17 @@ fn remove_key(store: &mut impl Writes, env: &Env, key: &Vec<u8>) -> Result<(), R
     Ok(())
 }
 
-fn account_of_key(store: &impl Reads, key: &Vec<u8>) -> Result<Account, Refusal> {
+fn account_of_key(store: &impl Reads, key: &Vec<u8>) -> Result<Account, Error> {
     let number = OF_KEY
         .get(store, key)?
         .ok_or_else(|| unauthorized("this key holds no account"))?;
     account(store, number)
 }
 
-fn acts_for(env: &Env, account: &Account) -> Result<(), Refusal> {
+fn acts_for(env: &Env, account: &Account) -> Result<(), Error> {
     let acts = match (&env.origin, &account.control) {
-        (Origin::External(key), Control::Keys(_)) => account.holds(key),
-        (Origin::Program(program), Control::Program { executor, .. }) => program == executor,
+        (Origin::Signed(key), Control::Keys(_)) => account.holds(key),
+        (Origin::Module(program), Control::Program { executor, .. }) => program == executor,
         _ => false,
     };
     if !acts {
@@ -237,7 +236,7 @@ fn set_name(
     env: &Env,
     number: AccountNumber,
     name: String,
-) -> Result<(), Refusal> {
+) -> Result<(), Error> {
     let mut account = account(store, number)?;
     acts_for(env, &account)?;
     account.name = named(name)?;
@@ -250,9 +249,9 @@ fn set_profile(
     store: &mut impl Writes,
     env: &Env,
     number: AccountNumber,
-    avatar: Option<abi::BlobId>,
+    avatar: Option<store::BlobId>,
     bio: Option<String>,
-) -> Result<(), Refusal> {
+) -> Result<(), Error> {
     let mut account = account(store, number)?;
     acts_for(env, &account)?;
     account.avatar = avatar;
@@ -269,8 +268,8 @@ fn create_program(
     env: &Env,
     name: String,
     controller: AccountNumber,
-) -> Result<(), Refusal> {
-    let executor = helpers::program(env)?;
+) -> Result<(), Error> {
+    let executor = env.sender_module()?;
     let controlling = account(store, controller)?;
     if !controlling.live() {
         return Err(wrong_state(format!("account {controller} is not live")));
@@ -285,7 +284,7 @@ fn create_program(
             control: Control::Program {
                 executor,
                 controller,
-                standing: Standing::Active,
+                status: Status::Active,
             },
             avatar: None,
             bio: None,
@@ -293,21 +292,21 @@ fn create_program(
         },
     );
     CONTROLLED.insert(store, &(controller, number));
-    store.output(abi::encode(&number));
+    store.set_return_data(store::encode(&number));
     Ok(())
 }
 
-fn set_standing(
+fn set_status(
     store: &mut impl Writes,
     env: &Env,
     number: AccountNumber,
-    standing: Standing,
-) -> Result<(), Refusal> {
-    let program = helpers::program(env)?;
+    status: Status,
+) -> Result<(), Error> {
+    let program = env.sender_module()?;
     let mut account = account(store, number)?;
     let Control::Program {
         executor,
-        standing: current,
+        status: current,
         ..
     } = &mut account.control
     else {
@@ -321,13 +320,13 @@ fn set_standing(
             "{program} does not execute account {number}"
         )));
     }
-    *current = standing;
+    *current = status;
     account.updated_at = env.time;
     ACCOUNTS.put(store, &number, &account);
     Ok(())
 }
 
-fn controller_of(account: &Account) -> Result<AccountNumber, Refusal> {
+fn controller_of(account: &Account) -> Result<AccountNumber, Error> {
     match &account.control {
         Control::Program { controller, .. } => Ok(*controller),
         Control::Keys(_) | Control::Revoked { .. } => Err(wrong_state(format!(
@@ -337,7 +336,7 @@ fn controller_of(account: &Account) -> Result<AccountNumber, Refusal> {
     }
 }
 
-fn controls(store: &impl Reads, env: &Env, controlled: &Account) -> Result<AccountNumber, Refusal> {
+fn controls(store: &impl Reads, env: &Env, controlled: &Account) -> Result<AccountNumber, Error> {
     let controller = controller_of(controlled)?;
     acts_for(env, &account(store, controller)?)?;
     Ok(controller)
@@ -348,7 +347,7 @@ fn transfer_control(
     env: &Env,
     number: AccountNumber,
     to: AccountNumber,
-) -> Result<(), Refusal> {
+) -> Result<(), Error> {
     let mut account = account(store, number)?;
     let controller = controls(store, env, &account)?;
     let target = self::account(store, to)?;
@@ -378,7 +377,7 @@ fn transfer_control(
     Ok(())
 }
 
-fn ancestry(store: &impl Reads, mut number: AccountNumber) -> Result<Vec<AccountNumber>, Refusal> {
+fn ancestry(store: &impl Reads, mut number: AccountNumber) -> Result<Vec<AccountNumber>, Error> {
     let mut ancestors = Vec::new();
     loop {
         let Control::Program { controller, .. } = account(store, number)?.control else {
@@ -389,7 +388,7 @@ fn ancestry(store: &impl Reads, mut number: AccountNumber) -> Result<Vec<Account
     }
 }
 
-fn revoke(store: &mut impl Writes, env: &Env, number: AccountNumber) -> Result<(), Refusal> {
+fn revoke(store: &mut impl Writes, env: &Env, number: AccountNumber) -> Result<(), Error> {
     let mut account = account(store, number)?;
     let controller = controls(store, env, &account)?;
     account.control = Control::Revoked { controller };

@@ -7,7 +7,7 @@ use crate::{Op, Query, Reply};
 
 pub struct Identity;
 impl Program for Identity {
-    const NAME: &'static str = crate::PROGRAM;
+    const NAME: &'static str = crate::MODULE;
     type Op = Op;
     type Query = Query;
     type Reply = Reply;

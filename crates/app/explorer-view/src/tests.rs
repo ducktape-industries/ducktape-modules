@@ -114,7 +114,7 @@ fn node(cx: &mut TestAppContext, tip: Rc<RefCell<u64>>) -> (Feed<HostSession>, F
         })
     });
     host.handle::<Query<Identity>>(|query| match query {
-        identity::Query::List { .. } => Ok(identity::Reply::Accounts(module_registry::PageReply {
+        identity::Query::List { .. } => Ok(identity::Reply::Accounts(store::PageResponse {
             height: 1,
             items: vec![ada()],
             next: None,
@@ -139,22 +139,20 @@ fn respond(cx: &mut TestAppContext) {
     cx.host().handle::<Query<Registry>>(|query| {
         Ok(match query {
             registry::Query::At(0) => {
-                registry::Reply::Programs(vec![entry("chat", 0xab), entry("identity", 0xcd)])
+                registry::Reply::Modules(vec![entry("chat", 0xab), entry("identity", 0xcd)])
             }
             registry::Query::Views(0) => registry::Reply::Views(vec![registry::View {
                 name: "explorer".into(),
                 view: BlobId::Sha256([0xef; 32]),
             }]),
-            registry::Query::Scheduled { .. } => {
-                registry::Reply::Scheduled(module_registry::PageReply {
-                    height: 1,
-                    items: vec![registry::Scheduled {
-                        height: 120,
-                        change: registry::Change::Remove("forge".into()),
-                    }],
-                    next: None,
-                })
-            }
+            registry::Query::Scheduled { .. } => registry::Reply::Scheduled(store::PageResponse {
+                height: 1,
+                items: vec![registry::Scheduled {
+                    height: 120,
+                    change: registry::Change::Remove("forge".into()),
+                }],
+                next: None,
+            }),
             other => panic!("unexpected query: {other:?}"),
         })
     });
@@ -187,7 +185,7 @@ fn describes(cx: &mut TestAppContext) {
             "forge" => with(&op, forge::describe),
             "identity" => with(&op, identity::describe),
             "valset" => with(&op, valset::describe),
-            registry::PROGRAM => with(&op, registry::describe),
+            registry::MODULE => with(&op, registry::describe),
             _ => None,
         })
     });
@@ -733,10 +731,10 @@ fn heavy(cx: &mut TestAppContext) {
                     repo: "app".into(),
                     request: vec![0x50; 1 << 20],
                 };
-                tx(0xfe, ADA, forge::PROGRAM, borsh::to_vec(&push).unwrap())
+                tx(0xfe, ADA, forge::MODULE, borsh::to_vec(&push).unwrap())
             } else {
                 let text = format!("message {height}");
-                tx(seed, ADA, chat::PROGRAM, post("design", &text))
+                tx(seed, ADA, chat::MODULE, post("design", &text))
             };
             tx.hash[..8].copy_from_slice(&height.to_le_bytes());
             Block {
@@ -764,7 +762,7 @@ fn heavy(cx: &mut TestAppContext) {
         })
     });
     host.handle::<Query<Identity>>(|_| {
-        Ok(identity::Reply::Accounts(module_registry::PageReply {
+        Ok(identity::Reply::Accounts(store::PageResponse {
             height: 1,
             items: vec![ada()],
             next: None,

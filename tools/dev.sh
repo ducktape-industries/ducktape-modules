@@ -25,7 +25,7 @@ commas() {
 # A program builds in its own target dir (see the Makefile) and its
 # artifact is copied beside the views.
 for p in $programs; do
-    eval "$WASM_BUILD" --target-dir "$BUILD_TARGET/programs/$p" -p "$p" --features program --message-format=json-render-diagnostics > "$log"
+    eval "$WASM_BUILD" --target-dir "$BUILD_TARGET/programs/$p" -p "$p" --features module --message-format=json-render-diagnostics > "$log"
     built="$BUILD_TARGET/programs/$p/wasm32-unknown-unknown/release/$(echo "$p" | tr - _).wasm"
     cmp -s "$built" "$(artifact "$p")" || cp "$built" "$(artifact "$p")"
     if rebuilt "$p"; then

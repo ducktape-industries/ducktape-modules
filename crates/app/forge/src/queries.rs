@@ -1,12 +1,12 @@
 //! The query path: one height-bearing borsh `Reply` for the screens, or
 //! git's own bytes for a git client.
 
-use abi::Refusal;
 use gitcore::wire::receive::advertise_refs;
 use gitcore::wire::smart_http_service_header;
 use gitcore::wire::upload::{
     Command, capability_advertisement, fetch, ls_refs_response, parse_command,
 };
+use store::{Env, Error, Raw};
 use store::{Listing, Reads, stale};
 
 use crate::contract::*;
@@ -20,15 +20,16 @@ use crate::{change_queries, reads};
 const AGENT: &[u8] = b"ducktape-forge";
 
 /// A UI query's response bytes (one `Reply`), or a git protocol query's raw
-/// git bytes; a refusal is `Err` through the ABI like any program's.
-pub fn query(store: &impl Reads, height: u64, query: Query) -> Result<Vec<u8>, Refusal> {
+/// git bytes; a refusal is `Err` through the ABI like any module's.
+pub fn query(store: &impl Reads, env: &Env, query: Query) -> Result<Raw, Error> {
+    let height = env.height;
     let bounds = load_bounds(store)?;
     let scope = query.scope();
     let listing =
-        |page: &Page| listing(page.bounded(bounds.page_size as u64), scope.clone(), height);
+        |page: &PageRequest| listing(page.bounded(bounds.page_size as u64), scope.clone(), height);
     let reply = match &query {
-        Query::Advertise { repo, service } => return advertise(store, repo, *service),
-        Query::Upload { repo, request } => return upload(store, repo, request),
+        Query::Advertise { repo, service } => return advertise(store, repo, *service).map(Raw),
+        Query::Upload { repo, request } => return upload(store, repo, request).map(Raw),
         Query::Repos { page } => Reply::Repos {
             height,
             page: repos(store, &listing(page)?)?,
@@ -93,11 +94,11 @@ pub fn query(store: &impl Reads, height: u64, query: Query) -> Result<Vec<u8>, R
             page: change_queries::judgment(store, principal, &listing(page)?)?,
         },
     };
-    Ok(abi::encode(&reply))
+    Ok(Raw(store::encode(&reply)))
 }
 
 /// Repositories, the most recently active first.
-fn repos(store: &impl Reads, listing: &Listing) -> Result<PageReply<RepoInfo>, Refusal> {
+fn repos(store: &impl Reads, listing: &Listing) -> Result<PageResponse<RepoInfo>, Error> {
     ACTIVITY.page_of(store, &(), listing)?.try_map(|(_, name)| {
         Ok(RepoInfo {
             repo: load_repo(store, &name)?,
@@ -107,7 +108,7 @@ fn repos(store: &impl Reads, listing: &Listing) -> Result<PageReply<RepoInfo>, R
 }
 
 /// A repository's refs in byte-name order.
-fn refs(store: &impl Reads, name: &str, listing: &Listing) -> Result<PageReply<RefInfo>, Refusal> {
+fn refs(store: &impl Reads, name: &str, listing: &Listing) -> Result<PageResponse<RefInfo>, Error> {
     let hash = repo_hash(&load_repo(store, name)?);
     REFS.page_of(store, &name.to_owned(), listing)?
         .try_map(|((_, name), bytes)| {
@@ -121,7 +122,7 @@ fn refs(store: &impl Reads, name: &str, listing: &Listing) -> Result<PageReply<R
 
 /// A forge listing can be rewritten by a push, so a cursor is good for the
 /// height that answered it and no other.
-fn listing(page: Page, scope: Vec<u8>, height: u64) -> Result<Listing, Refusal> {
+fn listing(page: PageRequest, scope: Vec<u8>, height: u64) -> Result<Listing, Error> {
     let listing = page.listing(scope, height)?;
     if listing.cursor_height.is_some_and(|h| h != height) {
         return Err(stale("cursor height changed; restart the listing"));
@@ -129,7 +130,7 @@ fn listing(page: Page, scope: Vec<u8>, height: u64) -> Result<Listing, Refusal> 
     Ok(listing)
 }
 
-fn advertise(store: &impl Reads, name: &str, service: Service) -> Result<Vec<u8>, Refusal> {
+fn advertise(store: &impl Reads, name: &str, service: Service) -> Result<Vec<u8>, Error> {
     let repo = load_repo(store, name)?;
     let hash = repo_hash(&repo);
     let body = match service {
@@ -159,7 +160,7 @@ fn advertise(store: &impl Reads, name: &str, service: Service) -> Result<Vec<u8>
     Ok(body)
 }
 
-fn upload(store: &impl Reads, name: &str, request: &[u8]) -> Result<Vec<u8>, Refusal> {
+fn upload(store: &impl Reads, name: &str, request: &[u8]) -> Result<Vec<u8>, Error> {
     let repo = load_repo(store, name)?;
     let bounds = load_bounds(store)?;
     let hash = repo_hash(&repo);

@@ -11,7 +11,7 @@ use ducktape_view_guest::methods::HostId;
 use ducktape_view_guest::methods::{Query as ProgramQuery, Submit};
 use ducktape_view_guest::testing::TestAppContext;
 use ducktape_view_guest::{Entity, Theme, wire};
-use forge::{ChangeFilter, ChangeState, Op, Page, PageReply, Query, Reply};
+use forge::{ChangeFilter, ChangeState, Op, PageRequest, PageResponse, Query, Reply};
 
 use crate::api::{ChatApi, ForgeProgram};
 use ducktape_view_guest::methods::Changes;
@@ -55,17 +55,17 @@ fn answer(query: &Query, mode: &str) -> Reply {
         Query::Repos { .. } => reply("repos"),
         Query::Repo { .. } => reply("repo"),
         Query::Refs {
-            page: Page { after: None, .. },
+            page: PageRequest { after: None, .. },
             ..
         } if mode == "unborn" => reply("refs-empty"),
         Query::Refs {
-            page: Page { after: None, .. },
+            page: PageRequest { after: None, .. },
             ..
         } => reply("refs"),
         Query::Refs { .. } => reply("refs-empty"),
         Query::Activity { .. } => reply("activity"),
         Query::Tree {
-            page: Page { after: None, .. },
+            page: PageRequest { after: None, .. },
             path,
             ..
         } if path.is_empty() => reply("tree"),
@@ -77,7 +77,7 @@ fn answer(query: &Query, mode: &str) -> Reply {
             _ => reply("blob"),
         },
         Query::Log {
-            page: Page { after: None, .. },
+            page: PageRequest { after: None, .. },
             ..
         } => reply("log"),
         Query::Log { .. } => reply("log-next"),
@@ -96,7 +96,7 @@ fn answer(query: &Query, mode: &str) -> Reply {
         Query::Changes { .. } if mode == "empty" => reply("changes-empty"),
         Query::Changes { .. } => reply("changes"),
         Query::Change {
-            page: Page { after: None, .. },
+            page: PageRequest { after: None, .. },
             ..
         } => reply(change_fixture(mode)),
         Query::Change { .. } => reply("change-reviews-next"),
@@ -106,14 +106,14 @@ fn answer(query: &Query, mode: &str) -> Reply {
     }
 }
 
-fn accounts() -> chat::PageReply<chat::AccountRow> {
+fn accounts() -> chat::PageResponse<chat::AccountRow> {
     let row = |number, name: &str, keys: &[&[u8]]| chat::AccountRow {
         number,
         name: name.into(),
         program: false,
         keys: keys.iter().map(|key| abi::hex(key)).collect(),
     };
-    chat::PageReply {
+    chat::PageResponse {
         height: 1,
         next: None,
         items: vec![
@@ -150,7 +150,7 @@ fn forge_lines() -> Vec<chat::MsgRow> {
         message_id,
         ..message(
             seq,
-            identity::Principal::Module(forge::PROGRAM.into()),
+            identity::Principal::Module(forge::MODULE.into()),
             "raw forge text",
         )
     };
@@ -180,7 +180,7 @@ pub(crate) fn configure(cx: &mut TestAppContext, mode: &'static str) {
     cx.host().handle::<ProgramQuery<ChatApi>>(|query| {
         Ok(match query {
             chat::Query::Accounts { .. } => chat::Reply::Accounts(accounts()),
-            chat::Query::Roots { channel_id, .. } => chat::Reply::Roots(PageReply {
+            chat::Query::Roots { channel_id, .. } => chat::Reply::Roots(PageResponse {
                 height: 1,
                 items: match channel_id.as_str() {
                     "forge:project:1" => forge_lines(),
@@ -191,7 +191,7 @@ pub(crate) fn configure(cx: &mut TestAppContext, mode: &'static str) {
                             message_id: format!("forge:{seq:016x}"),
                             ..message(
                                 seq,
-                                identity::Principal::Module(forge::PROGRAM.into()),
+                                identity::Principal::Module(forge::MODULE.into()),
                                 "raw forge text",
                             )
                         })
@@ -770,7 +770,7 @@ fn commits_follows_the_cursor_and_opens_one_commit_with_its_diff() {
         asked.iter().any(|query| matches!(
             query,
             Query::Log {
-                page: Page { after: Some(_), .. },
+                page: PageRequest { after: Some(_), .. },
                 ..
             }
         )),

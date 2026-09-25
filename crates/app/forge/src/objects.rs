@@ -4,12 +4,12 @@
 use std::cell::Cell;
 use std::collections::BTreeMap;
 
-use abi::{BlobHeader, BlobId, HashKind, Refusal};
-use gitcore::{Error, Hash, Kind, Object, Objects, Oid};
+use gitcore::{Error as GitError, Hash, Kind, Object, Objects, Oid};
+use store::{BlobHeader, BlobId, Error, HashKind};
 use store::{Reads, Writes, not_found};
 
 /// A different serving node or object replication can satisfy this query.
-pub(crate) fn object_not_held(oid: impl std::fmt::Display) -> Refusal {
+pub(crate) fn object_not_held(oid: impl std::fmt::Display) -> Error {
     not_found(format!("object {oid} is not held by this node"))
 }
 
@@ -44,7 +44,7 @@ impl<'a, S: Reads> ObjectStore<'a, S> {
     pub fn header(&self, id: &Oid) -> gitcore::Result<BlobHeader> {
         self.sandbox
             .blob_stat(blob_id_of(id))
-            .ok_or(Error::MissingObject(*id))
+            .ok_or(GitError::MissingObject(*id))
     }
 }
 
@@ -57,7 +57,7 @@ impl<S: Reads> Objects for ObjectStore<'_, S> {
             };
             let (reads, bytes) = budget.get();
             if reads == 0 || header.len > bytes || header.len > self.max_object_size {
-                return Err(Error::CapReached);
+                return Err(GitError::CapReached);
             }
             budget.set((reads - 1, bytes - header.len));
         }
@@ -101,7 +101,7 @@ impl<'a, S: Writes> ObjectWriter<'a, S> {
     }
 
     /// Stores every object the accepted push brought.
-    pub fn flush(self) -> Result<(), Refusal> {
+    pub fn flush(self) -> Result<(), Error> {
         for (_, (kind, body)) in self.pending {
             self.sandbox
                 .blob_put(hash_kind_of(self.hash), kind.as_str(), body)?;

@@ -3,8 +3,8 @@
 use crate::contract::*;
 use crate::ops::cap;
 use crate::reads::{Reading, entry_kind};
-use abi::Refusal;
 use gitcore::{Mode, Oid, diff};
+use store::Error;
 use store::{Listing, Reads, invalid};
 
 pub fn query<S: Reads>(
@@ -14,7 +14,7 @@ pub fn query<S: Reads>(
     head: &str,
     path: Option<&[u8]>,
     paging: &Listing,
-) -> Result<Reply, Refusal> {
+) -> Result<Reply, Error> {
     if let Some(path) = path {
         crate::changes::check_path(path, false)?;
     }
@@ -41,7 +41,7 @@ pub fn query<S: Reads>(
 /// One side of a file change: its mode and blob.
 type Side = Option<(Mode, Oid)>;
 
-fn file<S: Reads>(r: &Reading<'_, S>, c: &diff::Change) -> Result<FileDiff, Refusal> {
+fn file<S: Reads>(r: &Reading<'_, S>, c: &diff::Change) -> Result<FileDiff, Error> {
     let (old, new, status) = sides(&c.kind);
     let old_size = size(r, old)?;
     let new_size = size(r, new)?;
@@ -126,7 +126,7 @@ fn sides(kind: &diff::ChangeKind) -> (Side, Side, FileStatus) {
 }
 
 /// A side's blob size; a gitlink or an absent side has none.
-fn size<S: Reads>(r: &Reading<'_, S>, side: Side) -> Result<u64, Refusal> {
+fn size<S: Reads>(r: &Reading<'_, S>, side: Side) -> Result<u64, Error> {
     match side {
         Some((Mode::Gitlink, _)) | None => Ok(0),
         Some((_, id)) => {

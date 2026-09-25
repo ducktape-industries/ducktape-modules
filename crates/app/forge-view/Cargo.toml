@@ -6,7 +6,7 @@ publish = false
 
 # A Rust-authored view, exported as a dynamically loaded wasm module by
 # `export_view!`. It links `forge` for its wire and `chat` for the
-# conversation wire, both with their `program` feature off: the types and
+# conversation wire, both with their `module` feature off: the types and
 # rules, no host import and no program export.
 [lib]
 crate-type = ["cdylib", "rlib"]

@@ -83,6 +83,13 @@ fn the_room_shows_its_rows_intro_and_actions() {
 }
 
 #[test]
+fn a_module_author_wears_no_agent_badge() {
+    let names = chat::view::Names::empty();
+    assert!(!names.is_agent(&chat::Principal::Module("forge".into())));
+    assert!(!names.is_agent(&chat::Principal::Root));
+}
+
+#[test]
 fn viewport_and_pane_dividers_keep_their_behavior_routes() {
     let (mut cx, view) = opened();
     let full = StyleRefinement::default().size_full();

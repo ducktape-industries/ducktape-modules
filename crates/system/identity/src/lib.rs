@@ -1,27 +1,30 @@
-//! The `identity` program: accounts, the keys and programs that control them,
+//! The `identity` module: accounts, the keys and modules that control them,
 //! and the consent by which a key joins an account. The types and rules are
-//! always built; a view links them with `program` off. The `program` feature
-//! adds the wasm32 program over the host (`program.rs`). The `view` feature
+//! always built; a view links them with `module` off. The `module` feature
+//! adds the wasm32 module over the host (`store::entrypoint!`). The `view` feature
 //! adds the ask a view makes of identity directly (`view.rs`).
 mod principal;
-#[cfg(feature = "program")]
-mod program;
 mod rules;
 #[cfg(test)]
 mod tests;
 #[cfg(feature = "view")]
 pub mod view;
 
-pub use principal::{Frame, NO_ACCOUNT, Principal, principal_of};
+pub use principal::{NO_ACCOUNT, Principal, principal_of};
 pub use rules::{execute, query};
 
-use abi::{BlobId, ProgramId, Scheme};
+store::entrypoint! {
+    execute: Op => execute,
+    query: Query => query,
+}
+
 use borsh::{BorshDeserialize, BorshSerialize};
-use module_registry::{Page, PageReply};
+use store::{BlobId, ModuleId, Scheme};
+use store::{PageRequest, PageResponse};
 
 pub type AccountNumber = u64;
 
-pub const PROGRAM: &str = "identity";
+pub const MODULE: &str = "identity";
 pub const CONSENT_NAMESPACE: &[u8] = b"ducktape:identity:consent";
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
@@ -33,7 +36,7 @@ pub struct Key {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
-pub enum Standing {
+pub enum Status {
     Active,
     Suspended,
 }
@@ -42,9 +45,9 @@ pub enum Standing {
 pub enum Control {
     Keys(Vec<Key>),
     Program {
-        executor: ProgramId,
+        executor: ModuleId,
         controller: AccountNumber,
-        standing: Standing,
+        status: Status,
     },
     Revoked {
         controller: AccountNumber,
@@ -76,7 +79,7 @@ impl Account {
     pub fn live(&self) -> bool {
         match &self.control {
             Control::Keys(_) => true,
-            Control::Program { standing, .. } => *standing == Standing::Active,
+            Control::Program { status, .. } => *status == Status::Active,
             Control::Revoked { .. } => false,
         }
     }
@@ -92,7 +95,7 @@ pub struct Consent {
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct Admission {
-    pub network: Vec<u8>,
+    pub chain_id: Vec<u8>,
     pub scheme: Scheme,
     pub key: Vec<u8>,
     pub generation: u64,
@@ -102,7 +105,7 @@ pub struct Admission {
 
 impl Admission {
     pub fn preimage(&self) -> Vec<u8> {
-        abi::encode(self)
+        store::encode(self)
     }
 }
 
@@ -133,9 +136,9 @@ pub enum Op {
         name: String,
         controller: AccountNumber,
     },
-    SetStanding {
+    SetStatus {
         account: AccountNumber,
-        standing: Standing,
+        status: Status,
     },
     TransferControl {
         account: AccountNumber,
@@ -154,12 +157,25 @@ pub enum Reference {
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Query {
-    Get { number: AccountNumber },
-    OfKey { key: Vec<u8> },
-    Generation { key: Vec<u8> },
-    Resolve { references: Vec<Reference> },
-    List { page: Page },
-    Controlled { by: AccountNumber, page: Page },
+    Get {
+        number: AccountNumber,
+    },
+    OfKey {
+        key: Vec<u8>,
+    },
+    Generation {
+        key: Vec<u8>,
+    },
+    Resolve {
+        references: Vec<Reference>,
+    },
+    List {
+        page: PageRequest,
+    },
+    Controlled {
+        by: AccountNumber,
+        page: PageRequest,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
@@ -168,18 +184,18 @@ pub enum Reply {
     Number(Option<AccountNumber>),
     Generation(u64),
     Resolved(Vec<Option<AccountNumber>>),
-    Accounts(PageReply<Account>),
+    Accounts(PageResponse<Account>),
 }
 
-/// The asks another program makes of identity.
+/// The asks another module makes of identity.
 pub fn account_of(
     ctx: &impl store::Reads,
     key: &[u8],
-) -> Result<Option<AccountNumber>, abi::Refusal> {
-    match ctx.ask::<Query, Reply>(PROGRAM, &Query::OfKey { key: key.to_vec() })? {
+) -> Result<Option<AccountNumber>, store::Error> {
+    match ctx.ask::<Query, Reply>(MODULE, &Query::OfKey { key: key.to_vec() })? {
         Reply::Number(number) => Ok(number),
-        other => Err(abi::Refusal::new(
-            abi::reason::UNEXPECTED_REPLY,
+        other => Err(store::Error::new(
+            store::code::UNEXPECTED_REPLY,
             format!("identity answered OfKey with {other:?}"),
         )),
     }
@@ -188,30 +204,30 @@ pub fn account_of(
 pub fn account(
     ctx: &impl store::Reads,
     number: AccountNumber,
-) -> Result<Option<Account>, abi::Refusal> {
-    match ctx.ask::<Query, Reply>(PROGRAM, &Query::Get { number })? {
+) -> Result<Option<Account>, store::Error> {
+    match ctx.ask::<Query, Reply>(MODULE, &Query::Get { number })? {
         Reply::Account(account) => Ok(account),
-        other => Err(abi::Refusal::new(
-            abi::reason::UNEXPECTED_REPLY,
+        other => Err(store::Error::new(
+            store::code::UNEXPECTED_REPLY,
             format!("identity answered Get with {other:?}"),
         )),
     }
 }
 
 /// An op as a person reads it: a title and its fields. The source of the
-/// `ducktape.describe` module this program ships (`make wasm-describes`).
+/// `ducktape.describe` module this module ships (`make wasm-describes`).
 pub fn describe(op: &Op) -> describe::Description {
     use describe::{Value, field};
     let account = |number: &AccountNumber| field("account", Value::Account(*number));
     let optional = |text: &Option<String>| Value::Text(text.clone().unwrap_or_else(|| "—".into()));
-    let scheme = |scheme: &abi::Scheme| {
+    let scheme = |scheme: &store::Scheme| {
         field(
             "scheme",
             Value::text(match scheme {
-                abi::Scheme::Ed25519 => "Ed25519",
-                abi::Scheme::Secp256k1 => "secp256k1",
-                abi::Scheme::Secp256r1 => "secp256r1",
-                abi::Scheme::Bls12381 => "BLS12-381",
+                store::Scheme::Ed25519 => "Ed25519",
+                store::Scheme::Secp256k1 => "secp256k1",
+                store::Scheme::Secp256r1 => "secp256r1",
+                store::Scheme::Bls12381 => "BLS12-381",
             }),
         )
     };
@@ -270,18 +286,18 @@ pub fn describe(op: &Op) -> describe::Description {
                 field("controller", Value::Account(*controller)),
             ],
         ),
-        Op::SetStanding {
+        Op::SetStatus {
             account: number,
-            standing,
+            status,
         } => (
-            "Set standing".into(),
+            "Set status".into(),
             vec![
                 account(number),
                 field(
-                    "standing",
-                    Value::text(match standing {
-                        Standing::Active => "active",
-                        Standing::Suspended => "suspended",
+                    "status",
+                    Value::text(match status {
+                        Status::Active => "active",
+                        Status::Suspended => "suspended",
                     }),
                 ),
             ],
@@ -313,7 +329,7 @@ fn op_variants_only_append() {
             "SetName",
             "SetProfile",
             "CreateProgram",
-            "SetStanding",
+            "SetStatus",
             "TransferControl",
             "Revoke",
         ]

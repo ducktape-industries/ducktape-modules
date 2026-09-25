@@ -3,8 +3,8 @@
 CARGO ?= cargo
 WASM_OPT ?= wasm-opt
 
-# What a program links: abi, guest and store build for wasm32 with nothing else.
-PROGRAM_LINKABLE := abi guest store
+# What a module links: abi and store build for wasm32 with nothing else.
+PROGRAM_LINKABLE := abi store
 
 # The ducktape checkout the probe fixture the founding suite seats is copied
 # from (crates/kernel/fixtures, `make kernel-fixtures` there). The probe is a
@@ -15,7 +15,7 @@ DUCKTAPE ?= ../core
 # glue, the `alloc`/`call` exports, the `ducktape.*` imports) sits behind their
 # `program` feature. Their views link the same crates with the feature off.
 # One cargo invocation per program: forge links chat and identity links
-# module-registry, and `-p a -p b --features program` in one call would unify
+# module-registry, and `-p a -p b --features module` in one call would unify
 # `program` into the other's link (two `alloc`/`call`).
 PROGRAMS := module-registry valset identity chat forge
 
@@ -57,10 +57,10 @@ WASM_BUILD := $(WASM_CARGO) --release
 # the program crates with `program` off, one unit).
 PROGRAM_TARGET = $(BUILD_TARGET)/programs/$1
 program_artifact = $(call PROGRAM_TARGET,$1)/wasm32-unknown-unknown/release/$(subst -,_,$1).wasm
-program_build = $(WASM_BUILD) --target-dir $(call PROGRAM_TARGET,$1) -p $1 --features program
+program_build = $(WASM_BUILD) --target-dir $(call PROGRAM_TARGET,$1) -p $1 --features module
 export CARGO BUILD_TARGET RELEASE WASM_BUILD WASM_OPT
 
-.PHONY: dev wasm-why new-program new-view
+.PHONY: dev wasm-why new-module new-program new-view kernel-abi-check
 .PHONY: program-wasm-check wasm-programs probe-fixture wasm-views view-wasm-check test
 
 # `make dev P=forge` / `V=forge-view` narrow the loop to one artifact.
@@ -85,9 +85,11 @@ wasm-why:
 
 ## scaffolds crates/app/NAME in chat's shape and registers it (PROGRAMS,
 ## workspace members and dependencies); `make dev P=NAME` must pass on it.
-new-program:
-	@test -n "$(NAME)" || { echo "usage: make new-program NAME=<program>"; exit 1; }
-	@tools/scaffold.sh program $(NAME)
+new-module:
+	@test -n "$(NAME)" || { echo "usage: make new-module NAME=<module>"; exit 1; }
+	@tools/scaffold.sh module $(NAME)
+
+new-program: new-module
 
 ## scaffolds crates/app/NAME (NAME ends in -view) over the program it names,
 ## in members-view's shape, and registers it (VIEWS, workspace members).
@@ -95,12 +97,12 @@ new-view:
 	@test -n "$(NAME)" || { echo "usage: make new-view NAME=<program>-view"; exit 1; }
 	@tools/scaffold.sh view $(NAME)
 
-## builds abi and guest for wasm32-unknown-unknown.
+## builds abi and store for wasm32-unknown-unknown.
 program-wasm-check:
 	@for crate in $(PROGRAM_LINKABLE); do \
 	  $(CARGO) build --target wasm32-unknown-unknown -p $$crate || exit 1; \
 	done; \
-	echo "abi, guest and store build for wasm32"
+	echo "abi and store build for wasm32"
 
 ## builds every program (with `program` on) into $(RELEASE)/<name>.wasm. The
 ## founding suite reads the boot set from there.
@@ -148,6 +150,17 @@ wasm-reproducible:
 	@for a in $(ARTIFACTS); do f=$(RELEASE)/$$a; \
 	  if strings $$f | grep -qE "$(CURDIR)|$(HOME)"; then echo "$$f embeds an absolute path"; strings $$f | grep -E "$(CURDIR)|$(HOME)" | head -3; exit 1; fi; \
 	done; echo "no program or view embeds a path of this checkout or home"
+
+# The kernel revision the founding suite's host is pinned to.
+KERNEL_REV := $(shell sed -n 's/^host = .*rev = "\([0-9a-f]*\)".*/\1/p' Cargo.toml)
+
+## fails unless crates/sdk/abi is the kernel's abi at the pinned revision
+## (read from the ducktape checkout at $(DUCKTAPE)), byte for byte: the module
+## SDK renames in store (`kernel.rs`), never in the copy.
+kernel-abi-check:
+	@for f in Cargo.toml src/lib.rs; do \
+	  git -C $(DUCKTAPE) show $(KERNEL_REV):crates/kernel/abi/$$f | diff - crates/sdk/abi/$$f || exit 1; \
+	done; echo "crates/sdk/abi is the kernel's abi at $(KERNEL_REV)"
 
 ## refreshes the probe fixture the founding suite seats as the authority,
 ## from the ducktape checkout at $(DUCKTAPE).

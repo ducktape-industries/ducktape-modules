@@ -13,7 +13,7 @@ fn posts_land_as_roots_newest_first_and_page_older() {
         let Reply::Roots(page) = chat.ask(Query::Roots {
             channel_id: "general".into(),
             viewer: vec![],
-            page: Page {
+            page: PageRequest {
                 after,
                 limit: Some(2),
             },
@@ -34,9 +34,9 @@ fn a_message_id_is_unique_and_a_colon_id_is_its_programs_alone() {
     let mut chat = Chat::with_channel(PostPolicy::Open);
     chat.post(&BO, "m1", "hi", None);
     let again = chat.refused(&CY, post("general", "m1", "hi", None));
-    assert_eq!(again, reason::ALREADY_EXISTS);
+    assert_eq!(again, code::ALREADY_EXISTS);
     let squat = chat.refused(&BO, post("general", "forge:0001", "hi", None));
-    assert_eq!(squat, reason::UNAUTHORIZED);
+    assert_eq!(squat, code::UNAUTHORIZED);
     chat.ok(
         &Principal::Module("forge".into()),
         post("general", "forge:0001", "opened", None),
@@ -48,7 +48,7 @@ fn a_message_id_is_unique_and_a_colon_id_is_its_programs_alone() {
     };
     assert_eq!(row.seq, 2);
     let nowhere = chat.refused(&BO, post("nowhere", "m9", "hi", None));
-    assert_eq!(nowhere, reason::NOT_FOUND);
+    assert_eq!(nowhere, code::NOT_FOUND);
 }
 
 #[test]
@@ -57,7 +57,7 @@ fn a_message_is_at_most_its_byte_cap() {
     let huge = "word ".repeat(MAX_MESSAGE_BYTES / 5 + 1);
     assert_eq!(
         chat.refused(&BO, post("general", "big", &huge, None)),
-        reason::CAPACITY
+        code::CAPACITY
     );
 }
 
@@ -73,7 +73,7 @@ fn a_reply_joins_its_root_and_the_authors_attention() {
         channel_id: "general".into(),
         root_seq: 1,
         viewer: vec![],
-        page: Page::default(),
+        page: PageRequest::default(),
     }) else {
         panic!("a thread answers a thread");
     };
@@ -81,9 +81,9 @@ fn a_reply_joins_its_root_and_the_authors_attention() {
     assert_eq!(attention(&chat, ADA).map(|row| row.seq), Some(1));
     assert_eq!(attention(&chat, BO), None);
     let nested = chat.refused(&CY, post("general", "m4", "deeper", Some(2)));
-    assert_eq!(nested, reason::INVALID_INPUT);
+    assert_eq!(nested, code::INVALID_INPUT);
     let orphan = chat.refused(&CY, post("general", "m4", "nowhere", Some(99)));
-    assert_eq!(orphan, reason::NOT_FOUND);
+    assert_eq!(orphan, code::NOT_FOUND);
 }
 
 #[test]
@@ -101,10 +101,10 @@ fn only_the_author_edits_and_search_follows_the_edit() {
         (vec![], vec![1])
     );
     assert!(tagged(&chat, "launch").is_empty());
-    assert_eq!(chat.refused(&CY, edit(1, "mine")), reason::UNAUTHORIZED);
-    assert_eq!(chat.refused(&ADA, edit(1, "owner")), reason::UNAUTHORIZED);
+    assert_eq!(chat.refused(&CY, edit(1, "mine")), code::UNAUTHORIZED);
+    assert_eq!(chat.refused(&ADA, edit(1, "owner")), code::UNAUTHORIZED);
     chat.ok(&BO, delete(1));
-    assert_eq!(chat.refused(&BO, edit(1, "undead")), reason::WRONG_STATE);
+    assert_eq!(chat.refused(&BO, edit(1, "undead")), code::WRONG_STATE);
 }
 
 #[test]
@@ -112,7 +112,7 @@ fn the_author_or_the_owner_deletes_and_a_tombstone_stays() {
     let mut chat = Chat::with_channel(PostPolicy::Open);
     chat.post(&BO, "m1", "hello #launch", None);
     chat.post(&BO, "m2", "hello again", Some(1));
-    assert_eq!(chat.refused(&CY, delete(1)), reason::UNAUTHORIZED);
+    assert_eq!(chat.refused(&CY, delete(1)), code::UNAUTHORIZED);
     chat.ok(&ADA, delete(1));
     let tombstone = chat.message(1);
     assert!(tombstone.deleted && tombstone.blocks.is_empty() && tombstone.text.is_empty());
@@ -136,15 +136,15 @@ fn search_needs_every_word_and_tags_page_newest_first() {
     assert_eq!(chat.search("hello there"), [2]);
     let empty = query(
         &chat.store,
-        1,
+        &chat.env(),
         Query::Search {
             text: "!".into(),
             viewer: vec![],
             channel_id: None,
-            page: Page::default(),
+            page: PageRequest::default(),
         },
     );
-    assert_eq!(empty.unwrap_err().reason, reason::INVALID_INPUT);
+    assert_eq!(empty.unwrap_err().code, code::INVALID_INPUT);
     assert_eq!(tagged(&chat, "#WORLD"), [2, 1]);
 }
 
@@ -169,7 +169,7 @@ fn tagged(chat: &Chat, tag: &str) -> Vec<u64> {
             tag: tag.into(),
             viewer: vec![],
             channel_id,
-            page: Page::default(),
+            page: PageRequest::default(),
         }) else {
             panic!("a tag search answers tag hits");
         };
@@ -186,15 +186,15 @@ fn a_read_names_a_bounded_number_of_viewers() {
     let roots = |viewer: Vec<Principal>| Query::Roots {
         channel_id: "general".into(),
         viewer,
-        page: Page::first(8),
+        page: PageRequest::first(8),
     };
     let most = (0..crate::MAX_VIEWERS as u64)
         .map(Principal::Account)
         .collect();
-    query(&chat.store, 1, roots(most)).unwrap();
+    query(&chat.store, &chat.env(), roots(most)).unwrap();
     let over = (0..=crate::MAX_VIEWERS as u64)
         .map(Principal::Account)
         .collect();
-    let refusal = query(&chat.store, 1, roots(over)).unwrap_err();
-    assert_eq!(refusal.reason, reason::CAPACITY);
+    let refusal = query(&chat.store, &chat.env(), roots(over)).unwrap_err();
+    assert_eq!(refusal.code, code::CAPACITY);
 }

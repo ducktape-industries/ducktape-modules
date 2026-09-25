@@ -7,7 +7,6 @@ name = "abi"
 version = "0.1.0"
 dependencies = [
  "borsh",
- "design",
 ]
 
 [[package]]
@@ -660,7 +659,6 @@ dependencies = [
  "abi",
  "borsh",
  "describe",
- "guest",
  "identity",
  "serde",
  "store",
@@ -1986,6 +1984,7 @@ dependencies = [
  "identity",
  "module-registry",
  "serde",
+ "store",
  "valset",
  "view-guest",
 ]
@@ -2212,7 +2211,6 @@ dependencies = [
  "chat",
  "describe",
  "gitcore",
- "guest",
  "identity",
  "sha2 0.10.9",
  "store",
@@ -2758,6 +2756,7 @@ dependencies = [
 [[package]]
 name = "guest"
 version = "0.1.0"
+source = "git+https://github.com/ducktape-industries/ducktape?rev=d1805fcbe47ce066af109bff2531506c903719f4#d1805fcbe47ce066af109bff2531506c903719f4"
 dependencies = [
  "abi",
  "borsh",
@@ -3091,8 +3090,6 @@ dependencies = [
  "abi",
  "borsh",
  "describe",
- "guest",
- "module-registry",
  "serde",
  "store",
  "view-guest",
@@ -3592,6 +3589,7 @@ dependencies = [
  "identity",
  "module-registry",
  "serde",
+ "store",
  "valset",
  "view-guest",
 ]
@@ -3688,7 +3686,6 @@ dependencies = [
  "commonware-runtime",
  "describe",
  "fixture-probe",
- "guest",
  "host",
  "identity",
  "keyscheme",
@@ -3758,6 +3755,7 @@ dependencies = [
  "futures",
  "module-registry",
  "serde",
+ "store",
  "valset",
  "view-guest",
 ]
@@ -5536,7 +5534,6 @@ version = "0.1.0"
 dependencies = [
  "abi",
  "borsh",
- "guest",
  "serde",
  "sha1",
  "sha2 0.10.9",
@@ -6345,7 +6342,6 @@ dependencies = [
  "abi",
  "borsh",
  "describe",
- "guest",
  "module-registry",
  "store",
  "view-guest",

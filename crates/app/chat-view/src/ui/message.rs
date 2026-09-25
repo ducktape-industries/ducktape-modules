@@ -284,7 +284,7 @@ fn blocks(
     theme: &Theme,
 ) -> Vec<AnyElement> {
     if let Some((program, code)) = &message.system {
-        return vec![program_post(chat, message, program, code, cx, theme)];
+        return vec![module_post(chat, message, program, code, cx, theme)];
     }
     if message.blocks.is_empty() {
         let text = div()
@@ -396,7 +396,7 @@ fn header(message: &ChatMessage, cx: &mut Context<Chat>, theme: &Theme) -> impl 
 
 /// A program's own post: its event code, quiet and mono, and (on the first
 /// of a run) a link to where the program itself shows the room.
-fn program_post(
+fn module_post(
     chat: &Chat,
     message: &ChatMessage,
     program: &str,

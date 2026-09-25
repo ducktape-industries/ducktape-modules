@@ -8,38 +8,38 @@ fn the_authority_seats_members_and_the_next_epoch_reads_them() {
         let stranger = net
             .refuse(
                 &public(1),
-                valset::PROGRAM,
-                &valset::Op::Set(membership(3, valset::Standing::Resident)),
+                valset::MODULE,
+                &valset::Op::Set(membership(3, valset::Role::Resident)),
             )
             .await;
         assert_eq!(stranger, reason::UNAUTHORIZED);
         let other_program = net
             .sent_by(
                 "probe",
-                valset::PROGRAM,
-                &valset::Op::Set(membership(3, valset::Standing::Resident)),
+                valset::MODULE,
+                &valset::Op::Set(membership(3, valset::Role::Resident)),
             )
             .await;
         assert_eq!(refusal_of(&other_program), reason::UNAUTHORIZED);
         let admitted = net
             .as_authority(
-                valset::PROGRAM,
-                &valset::Op::Set(membership(3, valset::Standing::Resident)),
+                valset::MODULE,
+                &valset::Op::Set(membership(3, valset::Role::Resident)),
             )
             .await;
         output_of(&admitted);
         assert_eq!(net.memberships().await.len(), 3);
         assert_eq!(net.validators().await.len(), 2);
         let valset::Reply::Members(members) =
-            net.ask(valset::PROGRAM, &valset::Query::Members).await
+            net.ask(valset::MODULE, &valset::Query::Members).await
         else {
             panic!()
         };
         assert_eq!(members.len(), 3);
         let promoted = net
             .as_authority(
-                valset::PROGRAM,
-                &valset::Op::Set(membership(3, valset::Standing::Validator)),
+                valset::MODULE,
+                &valset::Op::Set(membership(3, valset::Role::Validator)),
             )
             .await;
         output_of(&promoted);
@@ -51,32 +51,32 @@ fn the_authority_seats_members_and_the_next_epoch_reads_them() {
         assert_eq!(net.host.epoch_members(epoch).unwrap().unwrap().len(), 3);
         for seed in [1, 2] {
             let removed = net
-                .as_authority(valset::PROGRAM, &valset::Op::Remove { key: public(seed) })
+                .as_authority(valset::MODULE, &valset::Op::Remove { key: public(seed) })
                 .await;
             output_of(&removed);
         }
         assert_eq!(net.validators().await, vec![public(3)]);
         let last = net
-            .as_authority(valset::PROGRAM, &valset::Op::Remove { key: public(3) })
+            .as_authority(valset::MODULE, &valset::Op::Remove { key: public(3) })
             .await;
         assert_eq!(refusal_of(&last), reason::WRONG_STATE);
         let demoted = net
             .as_authority(
-                valset::PROGRAM,
-                &valset::Op::Set(membership(3, valset::Standing::Resident)),
+                valset::MODULE,
+                &valset::Op::Set(membership(3, valset::Role::Resident)),
             )
             .await;
         assert_eq!(refusal_of(&demoted), reason::WRONG_STATE);
-        let valset::Reply::Membership(Some(standing)) = net
+        let valset::Reply::Membership(Some(role)) = net
             .ask(
-                valset::PROGRAM,
+                valset::MODULE,
                 &valset::Query::Membership { key: public(3) },
             )
             .await
         else {
             panic!()
         };
-        assert_eq!(standing.standing, valset::Standing::Validator);
+        assert_eq!(role.role, valset::Role::Validator);
     });
 }
 
@@ -91,9 +91,9 @@ fn memberships_resume_in_key_order_at_the_answering_height() {
         loop {
             let valset::Reply::Memberships(reply) = net
                 .ask(
-                    valset::PROGRAM,
+                    valset::MODULE,
                     &valset::Query::Memberships {
-                        page: Page {
+                        page: PageRequest {
                             after,
                             limit: Some(1),
                         },

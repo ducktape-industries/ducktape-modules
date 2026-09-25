@@ -214,6 +214,6 @@ fn principal_id(principal: &identity::Principal) -> String {
     match principal {
         identity::Principal::Account(number) => format!("acct-{number}"),
         identity::Principal::Module(module) => module.clone(),
-        identity::Principal::System => "system".into(),
+        identity::Principal::Root => "system".into(),
     }
 }

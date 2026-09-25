@@ -1,15 +1,11 @@
-//! The `module-registry` program: the roster of programs a network runs, and
+//! The `module-registry` module: the roster of modules a network runs, and
 //! the scheduled changes to it. The root of the boot set: `valset` and
-//! `identity` link this crate for the origin ([`helpers`]) conventions every
-//! system program shares, and for the authority every system program takes
-//! its governance ops from.
+//! `identity` link this crate for the authority every system module takes its
+//! governance ops from.
 //!
-//! The types and rules are always built; a view links them with `program`
-//! off. The `program` feature adds the wasm32 program over the host
-//! (`program.rs`).
-pub mod helpers;
-#[cfg(feature = "program")]
-mod program;
+//! The types and rules are always built; a view links them with `module`
+//! off. The `module` feature adds the wasm32 module over the host
+//! (`store::entrypoint!`).
 mod rules;
 #[cfg(test)]
 mod tests;
@@ -17,25 +13,31 @@ mod tests;
 pub mod view;
 
 pub use rules::{execute, init, query};
-pub use store::{Page, PageReply};
 
-/// The program whose frames `valset` and this registry accept as governance.
+store::entrypoint! {
+    init: Genesis => init,
+    execute: Op => execute,
+    query: Query => query,
+}
+use store::{PageRequest, PageResponse};
+
+/// The module whose frames `valset` and this registry accept as governance.
 pub const AUTHORITY: &str = "governance";
 
-use abi::ProgramId;
 use borsh::{BorshDeserialize, BorshSerialize};
+use store::ModuleId;
 
-pub use abi::module_registry::{Entry, Genesis, PROGRAM, View};
+pub use abi::module_registry::{Entry, Genesis, PROGRAM as MODULE, View};
 
 pub const CODE_KIND: &str = "program";
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Change {
     Set(Entry),
-    Remove(ProgramId),
-    /// A view with no program behind it, listed under its name.
+    Remove(ModuleId),
+    /// A view with no module behind it, listed under its name.
     SetView(View),
-    RemoveView(ProgramId),
+    RemoveView(ModuleId),
 }
 
 impl Change {
@@ -50,7 +52,7 @@ impl Change {
     }
 
     /// The code a set lands; a removal has none.
-    pub fn code(&self) -> Option<abi::BlobId> {
+    pub fn code(&self) -> Option<store::BlobId> {
         match self {
             Change::Set(entry) => Some(entry.code),
             Change::SetView(view) => Some(view.view),
@@ -58,11 +60,11 @@ impl Change {
         }
     }
 
-    pub fn program(&self) -> &str {
+    pub fn module(&self) -> &str {
         match self {
             Change::Set(entry) => &entry.program,
             Change::SetView(view) => &view.name,
-            Change::Remove(program) | Change::RemoveView(program) => program,
+            Change::Remove(module) | Change::RemoveView(module) => module,
         }
     }
 }
@@ -77,30 +79,30 @@ pub struct Scheduled {
 pub enum Op {
     Publish { body: Vec<u8> },
     Schedule(Scheduled),
-    Cancel { height: u64, program: ProgramId },
+    Cancel { height: u64, module: ModuleId },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Query {
     At(u64),
     Scheduled {
-        page: Page,
+        page: PageRequest,
     },
-    Program(ProgramId),
+    Module(ModuleId),
     /// The view-only entries at a height, by name.
     Views(u64),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Reply {
-    Programs(Vec<Entry>),
-    Scheduled(PageReply<Scheduled>),
-    Program { height: u64, entry: Option<Entry> },
+    Modules(Vec<Entry>),
+    Scheduled(PageResponse<Scheduled>),
+    Module { height: u64, entry: Option<Entry> },
     Views(Vec<View>),
 }
 
 /// An op as a person reads it: a title and its fields. The source of the
-/// `ducktape.describe` module this program ships (`make wasm-describes`).
+/// `ducktape.describe` module this module ships (`make wasm-describes`).
 pub fn describe(op: &Op) -> describe::Description {
     use describe::{Value, field};
     let height = |height: &u64| field("height", Value::Text(height.to_string()));
@@ -109,7 +111,7 @@ pub fn describe(op: &Op) -> describe::Description {
         Op::Schedule(Scheduled { height: at, change }) => {
             let mut fields = vec![
                 field("change", Value::text(change.verb())),
-                field("program", Value::Program(change.program().into())),
+                field("program", Value::Program(change.module().into())),
                 height(at),
             ];
             fields.extend(
@@ -120,17 +122,11 @@ pub fn describe(op: &Op) -> describe::Description {
             if let Change::Set(entry) = change {
                 fields.push(field("params", Value::bytes(&entry.params)));
             }
-            (format!("Schedule · {}", change.program()), fields)
+            (format!("Schedule · {}", change.module()), fields)
         }
-        Op::Cancel {
-            height: at,
-            program,
-        } => (
-            format!("Cancel · {program}"),
-            vec![
-                field("program", Value::Program(program.clone())),
-                height(at),
-            ],
+        Op::Cancel { height: at, module } => (
+            format!("Cancel · {module}"),
+            vec![field("program", Value::Program(module.clone())), height(at)],
         ),
     };
     describe::Description { title, fields }

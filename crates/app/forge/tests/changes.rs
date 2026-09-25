@@ -18,7 +18,7 @@ fn story() -> (Rig, Story) {
 }
 
 /// The op signed by `who`; the rig signs as the owner again afterwards.
-fn signed(rig: &mut Rig, who: &[u8], op: &Op) -> Result<Vec<u8>, abi::Refusal> {
+fn signed(rig: &mut Rig, who: &[u8], op: &Op) -> Result<Vec<u8>, store::Error> {
     rig.actor = who.to_vec();
     let result = rig.execute(op);
     rig.actor = TESTER.to_vec();
@@ -31,11 +31,11 @@ fn refused_as(rig: &mut Rig, who: &[u8], op: &Op) -> String {
     rig.actor = who.to_vec();
     let refusal = rig.refused(op);
     rig.actor = TESTER.to_vec();
-    refusal.reason
+    refusal.code
 }
 
 fn reply(rig: &Rig, query: &Query) -> Reply {
-    abi::decode(&rig.query(query).unwrap()).unwrap()
+    store::decode(&rig.query(query).unwrap()).unwrap()
 }
 
 fn record(rig: &Rig, n: u64) -> forge::Change {
@@ -56,7 +56,7 @@ fn involving_principal(rig: &Rig, principal: Principal) -> Vec<u64> {
             involves: Some(principal),
             ..ChangeFilter::default()
         },
-        page: Page::first(128),
+        page: PageRequest::first(128),
     };
     let Reply::Changes { page, .. } = reply(rig, &query) else {
         panic!()
@@ -66,7 +66,7 @@ fn involving_principal(rig: &Rig, principal: Principal) -> Vec<u64> {
 
 fn opened(rig: &mut Rig, story: &Story) -> u64 {
     let output = rig.execute(&story.open("Feature")).unwrap();
-    let OpReply::Change { n, .. } = abi::decode(&output).unwrap() else {
+    let OpReply::Change { n, .. } = store::decode(&output).unwrap() else {
         panic!()
     };
     n
@@ -100,7 +100,7 @@ fn configure_is_the_owners_and_takes_a_ref_for_head() {
         &rig,
         &Query::Repo {
             repo: REPO.into(),
-            page: Page::first(8),
+            page: PageRequest::first(8),
         },
     ) else {
         panic!()
@@ -109,16 +109,10 @@ fn configure_is_the_owners_and_takes_a_ref_for_head() {
     assert!(repo.repo.settings.allow_force);
 
     let stranger = refused_as(&mut rig, STRANGER, &settings(b"refs/heads/main"));
-    assert_eq!(stranger, reason::UNAUTHORIZED);
-    assert_eq!(
-        rig.refused(&settings(b"main")).reason,
-        reason::INVALID_INPUT
-    );
+    assert_eq!(stranger, code::UNAUTHORIZED);
+    assert_eq!(rig.refused(&settings(b"main")).code, code::INVALID_INPUT);
     let endless = [b"refs/heads/".as_slice(), &[b'x'; 5000]].concat();
-    assert_eq!(
-        rig.refused(&settings(&endless)).reason,
-        reason::INVALID_INPUT
-    );
+    assert_eq!(rig.refused(&settings(&endless)).code, code::INVALID_INPUT);
 }
 
 #[test]
@@ -137,7 +131,7 @@ fn grant_and_revoke_are_the_owners_and_name_a_person() {
             rig,
             &Query::Repo {
                 repo: REPO.into(),
-                page: Page::first(8),
+                page: PageRequest::first(8),
             },
         ) else {
             panic!()
@@ -150,7 +144,7 @@ fn grant_and_revoke_are_the_owners_and_name_a_person() {
     assert_eq!(writers(&rig), [Principal::Account(9), person(WRITER)]);
     assert_eq!(
         refused_as(&mut rig, WRITER, &revoke(person(WRITER))),
-        reason::UNAUTHORIZED
+        code::UNAUTHORIZED
     );
     rig.execute(&revoke(person(WRITER))).unwrap();
     rig.execute(&revoke(Principal::Account(9))).unwrap();
@@ -161,10 +155,10 @@ fn grant_and_revoke_are_the_owners_and_name_a_person() {
 
     assert_eq!(
         refused_as(&mut rig, STRANGER, &grant(person(STRANGER))),
-        reason::UNAUTHORIZED
+        code::UNAUTHORIZED
     );
     let module = Principal::Module("chat".into());
-    assert_eq!(rig.refused(&grant(module)).reason, reason::INVALID_INPUT);
+    assert_eq!(rig.refused(&grant(module)).code, code::INVALID_INPUT);
 }
 
 // ---------------------------------------------------------------- changes
@@ -190,22 +184,22 @@ fn open_numbers_changes_and_refuses_what_cannot_merge() {
         };
     let main = b"refs/heads/main";
     let same = open(reference("main"), main, "Nothing", vec![]);
-    assert_eq!(rig.refused(&same).reason, reason::WRONG_STATE);
+    assert_eq!(rig.refused(&same).code, code::WRONG_STATE);
     let tag = open(reference("feature"), b"refs/tags/v1", "Into a tag", vec![]);
-    assert_eq!(rig.refused(&tag).reason, reason::INVALID_INPUT);
+    assert_eq!(rig.refused(&tag).code, code::INVALID_INPUT);
     let blank = open(reference("feature"), main, "  ", vec![]);
-    assert_eq!(rig.refused(&blank).reason, reason::INVALID_INPUT);
+    assert_eq!(rig.refused(&blank).code, code::INVALID_INPUT);
     let long = open(reference("feature"), main, &"t".repeat(257), vec![]);
-    assert_eq!(rig.refused(&long).reason, reason::INVALID_INPUT);
+    assert_eq!(rig.refused(&long).code, code::INVALID_INPUT);
     let twice = open(
         reference("feature"),
         main,
         "Twice",
         vec![Principal::Account(2), Principal::Account(2)],
     );
-    assert_eq!(rig.refused(&twice).reason, reason::INVALID_INPUT);
+    assert_eq!(rig.refused(&twice).code, code::INVALID_INPUT);
     let gone = open(reference("nowhere"), main, "Gone", vec![]);
-    assert_eq!(rig.refused(&gone).reason, reason::NOT_FOUND);
+    assert_eq!(rig.refused(&gone).code, code::NOT_FOUND);
 }
 
 #[test]
@@ -228,10 +222,7 @@ fn edit_is_the_authors_and_drops_the_reviewers_it_unasks() {
         "The author's body.",
         "None keeps a field"
     );
-    assert_eq!(
-        refused_as(&mut rig, REVIEWER, &retitle),
-        reason::UNAUTHORIZED
-    );
+    assert_eq!(refused_as(&mut rig, REVIEWER, &retitle), code::UNAUTHORIZED);
 
     // Asking a fleet of accounts and unasking them leaves nothing behind.
     for round in 0..3u8 {
@@ -246,12 +237,9 @@ fn edit_is_the_authors_and_drops_the_reviewers_it_unasks() {
     assert_eq!(involving(&rig, TESTER), [n], "the author stays involved");
 
     let fleet = (0..65).map(|i| Principal::Account(100 + i)).collect();
-    assert_eq!(
-        rig.refused(&edit_reviewers(n, fleet)).reason,
-        reason::CAPACITY
-    );
+    assert_eq!(rig.refused(&edit_reviewers(n, fleet)).code, code::CAPACITY);
     let missing = edit_reviewers(n + 1, vec![]);
-    assert_eq!(rig.refused(&missing).reason, reason::NOT_FOUND);
+    assert_eq!(rig.refused(&missing).code, code::NOT_FOUND);
 }
 
 #[test]
@@ -272,13 +260,13 @@ fn close_is_the_authors_or_a_writers_and_happens_once() {
         repo: REPO.into(),
         n,
     };
-    assert_eq!(refused_as(&mut rig, STRANGER, &close), reason::UNAUTHORIZED);
+    assert_eq!(refused_as(&mut rig, STRANGER, &close), code::UNAUTHORIZED);
     rig.execute(&close).unwrap();
     let closed = record(&rig, n);
     assert_eq!(closed.state, ChangeState::Closed);
     assert_eq!(closed.closed_by, Some(Principal::Account(1)));
     assert_eq!(closed.merged_by, None);
-    assert_eq!(rig.refused(&close).reason, reason::WRONG_STATE);
+    assert_eq!(rig.refused(&close).code, code::WRONG_STATE);
 
     let second = opened(&mut rig, &story);
     rig.execute(&Op::Grant {
@@ -307,7 +295,7 @@ fn a_review_counts_once_and_its_anchors_are_checked() {
     )
     .unwrap();
     assert!(matches!(
-        abi::decode(&output).unwrap(),
+        store::decode(&output).unwrap(),
         OpReply::Review { id: 1, .. }
     ));
     let change = record(&rig, n);
@@ -340,24 +328,24 @@ fn a_review_counts_once_and_its_anchors_are_checked() {
         Verdict::Comment,
         vec![(Side::New, 2, "a"), (Side::New, 2, "b")],
     );
-    assert_eq!(rig.refused(&twice).reason, reason::INVALID_INPUT);
+    assert_eq!(rig.refused(&twice).code, code::INVALID_INPUT);
     let baseless = draft(None, Verdict::Comment, vec![(Side::Old, 2, "old")]);
-    assert_eq!(rig.refused(&baseless).reason, reason::INVALID_INPUT);
+    assert_eq!(rig.refused(&baseless).code, code::INVALID_INPUT);
     let silent = draft(root, Verdict::Comment, vec![]);
-    assert_eq!(rig.refused(&silent).reason, reason::INVALID_INPUT);
+    assert_eq!(rig.refused(&silent).code, code::INVALID_INPUT);
     let line_zero = draft(root, Verdict::Approve, vec![(Side::New, 0, "zero")]);
-    assert_eq!(rig.refused(&line_zero).reason, reason::INVALID_INPUT);
+    assert_eq!(rig.refused(&line_zero).code, code::INVALID_INPUT);
     let mut escape = draft(root, Verdict::Comment, vec![(Side::New, 1, "up")]);
     if let Op::ReviewSubmit { review, .. } = &mut escape {
         review.comments[0].path = b"../etc/passwd".to_vec();
     }
-    assert_eq!(rig.refused(&escape).reason, reason::INVALID_INPUT);
+    assert_eq!(rig.refused(&escape).code, code::INVALID_INPUT);
     let flood = draft(
         root,
         Verdict::Comment,
         (1..=65).map(|line| (Side::New, line, "x")).collect(),
     );
-    assert_eq!(rig.refused(&flood).reason, reason::CAPACITY);
+    assert_eq!(rig.refused(&flood).code, code::CAPACITY);
     assert_eq!(
         record(&rig, n).review_count,
         1,
@@ -381,13 +369,13 @@ fn a_merge_lands_its_change_once_and_only_over_the_heads_it_read() {
     let merge = |expected_into: &str| merge_over(expected_into, &story.feature);
     assert_eq!(
         refused_as(&mut rig, STRANGER, &merge(&story.root)),
-        reason::UNAUTHORIZED
+        code::UNAUTHORIZED
     );
-    assert_eq!(rig.refused(&merge(&story.clean)).reason, reason::STALE);
+    assert_eq!(rig.refused(&merge(&story.clean)).code, code::STALE);
 
     let output = rig.execute(&merge(&story.root)).unwrap();
     assert!(matches!(
-        abi::decode(&output).unwrap(),
+        store::decode(&output).unwrap(),
         OpReply::Merged {
             change: Some(1),
             ..
@@ -407,5 +395,5 @@ fn a_merge_lands_its_change_once_and_only_over_the_heads_it_read() {
     let main = refs_of(&rig.sandbox, REPO)["refs/heads/main"].clone();
     let tip = story.push_follow_up(&mut rig, "later.txt", b"later\n");
     let again = merge_over(&main, &tip);
-    assert_eq!(rig.refused(&again).reason, reason::WRONG_STATE);
+    assert_eq!(rig.refused(&again).code, code::WRONG_STATE);
 }

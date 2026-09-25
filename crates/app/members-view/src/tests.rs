@@ -52,7 +52,7 @@ fn program(number: u64, name: &str) -> identity::Account {
         control: identity::Control::Program {
             executor: "chat".into(),
             controller: 1,
-            standing: identity::Standing::Active,
+            status: identity::Status::Active,
         },
         avatar: None,
         bio: None,
@@ -60,16 +60,16 @@ fn program(number: u64, name: &str) -> identity::Account {
     }
 }
 
-fn membership(key: &[u8], standing: valset::Standing) -> valset::Membership {
+fn membership(key: &[u8], role: valset::Role) -> valset::Membership {
     valset::Membership {
         key: key.to_vec(),
         address: "10.0.0.1:4000".into(),
-        standing,
+        role,
     }
 }
 
-fn page<T>(items: Vec<T>) -> module_registry::PageReply<T> {
-    module_registry::PageReply {
+fn page<T>(items: Vec<T>) -> store::PageResponse<T> {
+    store::PageResponse {
         height: 1,
         items,
         next: None,
@@ -88,7 +88,7 @@ fn respond(cx: &mut TestAppContext) {
         assert!(matches!(query, valset::Query::Memberships { .. }));
         Ok(valset::Reply::Memberships(page(vec![membership(
             b"\x01\x02",
-            valset::Standing::Validator,
+            valset::Role::Validator,
         )])))
     });
 }

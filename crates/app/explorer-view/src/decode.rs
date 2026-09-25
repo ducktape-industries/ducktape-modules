@@ -24,7 +24,7 @@ pub fn bytes(program: &str, payload: &[u8]) -> Description {
     }
 }
 
-/// [`Value::Bytes`] as `abi::preview` reads bytes: all of a short run, the
+/// [`Value::Bytes`] as a person reads bytes: all of a short run, the
 /// length and the ends of a long one.
 pub fn preview(len: u64, preview: &[u8]) -> String {
     match len {
