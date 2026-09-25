@@ -13,7 +13,7 @@ use ducktape_view_guest::design;
 pub(crate) use ducktape_view_guest::design::{badge, button, empty_state, quiet};
 use ducktape_view_guest::{
     Context, InteractiveElement, IntoElement, ParentElement, Pixels, Styled, Theme, div, hsla,
-    modal_overlay, px, resize_handle, sensor,
+    modal_overlay, sensor,
 };
 
 use crate::Chat;
@@ -112,36 +112,40 @@ fn connected(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEle
         .flex()
         .size_full()
         .child(sidebar::render(chat, cx, theme))
-        .child(divider("chat-sidebar-resize", theme, cx, |chat, dx| {
-            chat.layout.sidebar += dx;
-        }))
+        .child(design::divider(
+            "chat-sidebar-resize",
+            theme,
+            cx,
+            |chat, dx| {
+                chat.layout.sidebar += dx;
+                chat.layout.clamp();
+            },
+        ))
         .child(room::render(chat, cx, theme));
     if chat.details.is_some() && chat.room.is_some() {
         panes = panes
-            .child(divider("chat-details-resize", theme, cx, |chat, dx| {
-                chat.layout.details -= dx;
-            }))
+            .child(design::divider(
+                "chat-details-resize",
+                theme,
+                cx,
+                |chat, dx| {
+                    chat.layout.details -= dx;
+                    chat.layout.clamp();
+                },
+            ))
             .child(side::details(chat, cx, theme));
     } else if chat.room.as_ref().is_some_and(|room| room.thread.is_some()) {
         panes = panes
-            .child(divider("chat-thread-resize", theme, cx, |chat, dx| {
-                chat.layout.thread -= dx;
-            }))
+            .child(design::divider(
+                "chat-thread-resize",
+                theme,
+                cx,
+                |chat, dx| {
+                    chat.layout.thread -= dx;
+                    chat.layout.clamp();
+                },
+            ))
             .child(side::thread(chat, cx, theme));
     }
     panes
-}
-
-fn divider(
-    id: &'static str,
-    theme: &Theme,
-    cx: &mut Context<Chat>,
-    drag: impl Fn(&mut Chat, f32) + 'static,
-) -> impl IntoElement {
-    let dragged = cx.listener(move |chat, delta: &(Pixels, Pixels), _window, cx| {
-        drag(chat, delta.0.into());
-        chat.layout.clamp();
-        cx.notify();
-    });
-    resize_handle(id, div().w(px(1.)).h_full().bg(theme.border)).on_drag(dragged)
 }

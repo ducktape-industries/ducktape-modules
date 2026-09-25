@@ -10,9 +10,10 @@ use ducktape_view_guest::methods::{HostBadge, NotifyPost, NotifySeen, Post};
 
 use crate::api::{Ask, ChatApi};
 use crate::message::message_body;
-use crate::names::{NameDirectory, dm_peer_of};
+use crate::names::dm_peer_of;
 use crate::watch::log;
 use crate::{Chat, links};
+use chat::view::Names;
 
 /// The most new messages read out of one room per change.
 const MAX_NEW: u64 = 20;
@@ -101,10 +102,10 @@ impl Chat {
                 cx.notify();
                 let rows = match asked {
                     Ok(Reply::Messages(rows)) => rows,
-                    Ok(_) => return log(cx, "news", &crate::queries::wrong_reply()),
+                    Ok(_) => return log(cx, "news", &ducktape_view_guest::host::wrong_reply()),
                     Err(refusal) => return log(cx, "news", &refusal),
                 };
-                let empty = NameDirectory::default();
+                let empty = Names::default();
                 let names = chat.names.ready().unwrap_or(&empty);
                 let name = chat
                     .info(&channel)
@@ -137,7 +138,7 @@ impl Chat {
         let (Some(me), Some(info)) = (self.my_account(), self.info(room)) else {
             return;
         };
-        let empty = NameDirectory::default();
+        let empty = Names::default();
         let names = self.names.ready().unwrap_or(&empty);
         cx.host()
             .notify::<NotifySeen>(tag(me, room, &info.channel.name, names));
@@ -169,7 +170,7 @@ impl Chat {
 
 /// The notice `row` makes for account `me`, if it is meant for her: it
 /// mentions her, or it is in a direct room she is in. Her own never is.
-fn notice(row: &MsgRow, me: u64, name: &str, chain: &str, names: &NameDirectory) -> Option<Post> {
+fn notice(row: &MsgRow, me: u64, name: &str, chain: &str, names: &Names) -> Option<Post> {
     if row.deleted || row.author == Party::Account(me) {
         return None;
     }
@@ -192,7 +193,7 @@ fn notice(row: &MsgRow, me: u64, name: &str, chain: &str, names: &NameDirectory)
 
 /// The tag a room's notices go under: `@peer` for a direct room, the
 /// channel's `#name` otherwise.
-fn tag(me: u64, room: &str, name: &str, names: &NameDirectory) -> String {
+fn tag(me: u64, room: &str, name: &str, names: &Names) -> String {
     match dm_peer_of(me, room) {
         Some(peer) => format!("@{}", names.author(&Party::Account(peer))),
         None => format!("#{name}"),
@@ -235,7 +236,7 @@ mod tests {
     /// a channel: none.
     #[test]
     fn only_a_mention_or_a_direct_message_to_me_is_a_notice() {
-        let names = NameDirectory::default();
+        let names = Names::default();
         let chain = "testnet-0a1b2c3d";
         let me = Mark::Mention(Party::Account(3));
         let mention = row("design", 5, said("@me", vec![me.clone()]));

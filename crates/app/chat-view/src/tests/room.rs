@@ -197,7 +197,7 @@ fn a_full_room_renders_inside_the_frame_budget() {
         .collect();
     cx.host().handle::<Ask<ChatApi>>(move |query| {
         Ok(match query {
-            Query::Accounts { .. } => Reply::Accounts(Vec::new()),
+            Query::Accounts { .. } => Reply::Accounts(page(Vec::new())),
             Query::Channels { .. } => {
                 Reply::Channels(page(vec![channel("general", "General", WINDOW as u64)]))
             }

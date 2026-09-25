@@ -104,7 +104,7 @@ fn configure(cx: &mut TestAppContext) {
         });
     cx.host().handle::<Ask<ChatApi>>(|query| {
         Ok(match query {
-            Query::Accounts { .. } => Reply::Accounts(vec![
+            Query::Accounts { .. } => Reply::Accounts(page(vec![
                 chat::AccountRow {
                     number: 7,
                     name: "eddy".into(),
@@ -117,7 +117,7 @@ fn configure(cx: &mut TestAppContext) {
                     program: true,
                     keys: Vec::new(),
                 },
-            ]),
+            ])),
             Query::Channels { .. } => Reply::Channels(page(vec![
                 channel("general", "General", 3),
                 channel("dm-7-8", "dm", 1),

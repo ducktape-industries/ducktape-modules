@@ -103,7 +103,7 @@ fn a_peers_name_gained_later_replaces_its_numeric_fallback() {
                         keys: Vec::new(),
                     });
                 }
-                Reply::Accounts(accounts)
+                Reply::Accounts(page(accounts))
             }
             Query::Channels { .. } => Reply::Channels(page(vec![channel("general", "General", 2)])),
             Query::Roots { .. } => {
@@ -185,7 +185,7 @@ fn a_peers_mention_becomes_offerable_once_their_account_is_known() {
                         keys: Vec::new(),
                     });
                 }
-                Reply::Accounts(accounts)
+                Reply::Accounts(page(accounts))
             }
             Query::Channels { .. } => Reply::Channels(page(vec![channel("general", "General", 0)])),
             Query::Roots { .. } => Reply::Roots(page(Vec::new())),
@@ -234,5 +234,54 @@ fn a_peers_mention_becomes_offerable_once_their_account_is_known() {
                 .any(|choice| choice.label == "gary"),
             "the roster re-read makes the peer mentionable, same as it names their messages"
         );
+    });
+}
+
+/// A roster longer than one page (identity pages at 256) is read to its
+/// end: the view follows `next` rather than naming only the first page.
+#[test]
+fn the_roster_is_read_past_its_first_page() {
+    let mut cx = TestAppContext::new();
+    configure(&mut cx);
+    cx.host().handle::<Ask<ChatApi>>(|query| {
+        Ok(match query {
+            Query::Accounts { page } => {
+                let start = page.after.map_or(1, |after| after[0] as u64 * 256 + 1);
+                let end = (start + 255).min(600);
+                let next = (end < 600).then(|| vec![(end / 256) as u8]);
+                Reply::Accounts(::chat::PageReply {
+                    height: 1,
+                    items: (start..=end)
+                        .map(|number| chat::AccountRow {
+                            number,
+                            name: format!("user{number}"),
+                            program: false,
+                            keys: Vec::new(),
+                        })
+                        .collect(),
+                    next,
+                })
+            }
+            Query::Channels { .. } => Reply::Channels(page(Vec::new())),
+            query => panic!("unexpected chat query: {query:?}"),
+        })
+    });
+    let props = cx.host().stream::<HostSession>();
+    let visible = cx.host().stream::<HostVisible>();
+    let view = cx.open::<Chat>();
+    cx.run_until_parked();
+    props.push(Session {
+        key: "0102".into(),
+        account: Some(7),
+        connected: true,
+        chain: "testnet#0a1b2c3d".into(),
+        ..Session::default()
+    });
+    visible.push(true);
+    cx.run_until_parked();
+    view.read(|chat| {
+        let names = chat.names.ready().expect("the roster landed");
+        assert_eq!(names.numbers().count(), 600);
+        assert_eq!(names.name(&Party::Account(600)), Some("user600"));
     });
 }

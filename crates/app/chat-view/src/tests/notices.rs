@@ -108,7 +108,7 @@ fn kept_cursors_bring_the_badge_back_after_a_relaunch() {
     });
     cx.host().handle::<Ask<ChatApi>>(|query| {
         Ok(match query {
-            Query::Accounts { .. } => Reply::Accounts(Vec::new()),
+            Query::Accounts { .. } => Reply::Accounts(page(Vec::new())),
             Query::Channels { .. } => Reply::Channels(page(vec![
                 channel("general", "General", 3),
                 channel("dm-7-8", "dm", 1),
@@ -178,7 +178,7 @@ fn the_relaunch_recount_waits_for_the_readers_account() {
     });
     cx.host().handle::<Ask<ChatApi>>(|query| {
         Ok(match query {
-            Query::Accounts { .. } => Reply::Accounts(Vec::new()),
+            Query::Accounts { .. } => Reply::Accounts(page(Vec::new())),
             Query::Channels { .. } => Reply::Channels(page(vec![channel("dm-7-8", "dm", 1)])),
             Query::MessagesAround { channel_id, .. } => {
                 let mut hi = row(1, 8, "hi");
@@ -226,7 +226,7 @@ fn a_refused_store_read_still_keeps_cursors() {
     });
     cx.host().handle::<Ask<ChatApi>>(|query| {
         Ok(match query {
-            Query::Accounts { .. } => Reply::Accounts(Vec::new()),
+            Query::Accounts { .. } => Reply::Accounts(page(Vec::new())),
             Query::Channels { .. } => Reply::Channels(page(vec![channel("general", "General", 3)])),
             Query::Roots { .. } => Reply::Roots(page(Vec::new())),
             Query::Members { .. } => Reply::Members(page(Vec::new())),

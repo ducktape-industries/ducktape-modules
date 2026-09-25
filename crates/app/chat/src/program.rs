@@ -105,9 +105,7 @@ fn accounts(ctx: &impl Reads, page: Page) -> Result<Reply, Refusal> {
         keys: account.keys().iter().map(|k| crate::hex(&k.key)).collect(),
         name: account.name,
     };
-    Ok(Reply::Accounts(
-        accounts.items.into_iter().map(row).collect(),
-    ))
+    Ok(Reply::Accounts(accounts.map(row)))
 }
 
 /// A key may have posted before or after it gained an account: the newer

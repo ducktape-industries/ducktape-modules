@@ -29,6 +29,35 @@ pub fn malformed(error: String) -> Refusal {
     Refusal::new("malformed_reply", error)
 }
 
+/// A reply of another variant than the question asks for: the program
+/// answered something else. Every typed ask's fallback arm.
+pub fn wrong_reply() -> Refusal {
+    malformed("the program answered another question".into())
+}
+
+/// One page of a cursored listing: its rows and the cursor of the page after.
+pub type Rows<T> = (Vec<T>, Option<Vec<u8>>);
+
+/// Follows a cursored listing from `after`: asks page after page, feeding
+/// each `next` back, until the listing ends or `max_pages` pages are read.
+/// Returns every row read and the cursor still to follow (`None`: all of it).
+pub async fn pages<T, F: Future<Output = Result<Rows<T>, Refusal>>>(
+    mut after: Option<Vec<u8>>,
+    max_pages: usize,
+    mut ask: impl FnMut(Option<Vec<u8>>) -> F,
+) -> Result<Rows<T>, Refusal> {
+    let mut all = Vec::new();
+    for _ in 0..max_pages {
+        let (rows, next) = ask(after).await?;
+        all.extend(rows);
+        after = next;
+        if after.is_none() {
+            break;
+        }
+    }
+    Ok((all, after))
+}
+
 /// The sentence alone, for a view that only SHOWS a refusal.
 ///
 /// It is a named function and not a `From<Refusal> for String` ON PURPOSE:
@@ -299,5 +328,28 @@ impl Host {
                 waker.wake();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod pages_tests {
+    use super::{pages, Rows};
+
+    /// A listing of 0..10 served three rows a page.
+    fn listing(after: Option<Vec<u8>>) -> std::future::Ready<Result<Rows<u8>, super::Refusal>> {
+        let start = after.map_or(0, |cursor| cursor[0]);
+        let end = (start + 3).min(10);
+        let next = (end < 10).then(|| vec![end]);
+        std::future::ready(Ok(((start..end).collect(), next)))
+    }
+
+    #[test]
+    fn pages_follow_the_cursor_to_the_end_or_the_cap() {
+        let all = futures::executor::block_on(pages(None, 16, listing)).unwrap();
+        assert_eq!(all, ((0..10).collect(), None));
+        let capped = futures::executor::block_on(pages(None, 2, listing)).unwrap();
+        assert_eq!(capped, ((0..6).collect(), Some(vec![6])));
+        let resumed = futures::executor::block_on(pages(Some(vec![6]), 16, listing)).unwrap();
+        assert_eq!(resumed, ((6..10).collect(), None));
     }
 }

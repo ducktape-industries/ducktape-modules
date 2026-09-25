@@ -27,6 +27,9 @@ pub mod size {
 
     pub const ROW: Pixels = px(::design::height::ROW as f32);
     pub const CONTROL: Pixels = px(::design::height::CONTROL as f32);
+    pub const AVATAR_SM: Pixels = px(::design::height::AVATAR_SM as f32);
+    pub const AVATAR: Pixels = px(::design::height::AVATAR as f32);
+    pub const AVATAR_LG: Pixels = px(::design::height::AVATAR_LG as f32);
 }
 
 /// [`spacing`] as gaps and insets an element takes.
@@ -312,6 +315,21 @@ pub fn avatar(name: &str, size: Pixels, theme: &Theme) -> Div {
         .text_color(theme.muted)
         .text_size(size * 0.45)
         .child(initial(name))
+}
+
+/// The line between two panes, dragged to move it: `drag` takes the
+/// horizontal delta (and clamps the layout it moves).
+pub fn divider<V: crate::View>(
+    id: impl Into<ElementId>,
+    theme: &Theme,
+    cx: &mut crate::Context<V>,
+    drag: impl Fn(&mut V, f32) + 'static,
+) -> crate::ResizeHandle {
+    let dragged = cx.listener(move |view, delta: &(Pixels, Pixels), _window, cx| {
+        drag(view, delta.0.into());
+        cx.notify();
+    });
+    crate::resize_handle(id, div().w(crate::px(1.)).h_full().bg(theme.border)).on_drag(dragged)
 }
 
 /// A small tag: a state, a role, a count, in its own colours.

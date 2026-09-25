@@ -15,7 +15,7 @@ pub(super) fn plain_line(id: ElementId, text: &str, mono: bool) -> InteractiveTe
 pub(super) fn rich_line(
     id: ElementId,
     spans: &[Span],
-    names: &NameDirectory,
+    names: &Names,
     cx: &mut Context<Chat>,
     theme: &Theme,
 ) -> InteractiveText {

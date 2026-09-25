@@ -8,8 +8,8 @@ use ducktape_view_guest::wire;
 use crate::api::{ChatApi, ClipboardWrite, HostId, Submit};
 use crate::composer::Target;
 use crate::message::{ChatMessage, chat_message, mark_message_groups};
-use crate::names::NameDirectory;
 use crate::{Chat, Menu, Mode, Pane, links};
+use chat::view::Names;
 
 /// A refusal the archive gives every reaction, said before it is asked.
 const ARCHIVED_REACTIONS: &str = "This channel is archived — reactions are closed. Unarchive it from Channel details to react here again.";
@@ -150,7 +150,7 @@ impl Chat {
 
     /// Rows to messages, named by the directory the reader has.
     pub(crate) fn messages(&self, pane: Pane) -> Vec<ChatMessage> {
-        let empty = NameDirectory::empty();
+        let empty = Names::empty();
         let names = self.names.ready().unwrap_or(&empty);
         let mut messages: Vec<ChatMessage> = self
             .rows(pane)

@@ -104,6 +104,12 @@ pub mod height {
     pub const ROW: f64 = 26.;
     /// a control on one line: a toolbar button, a picker, an input beside one
     pub const CONTROL: f64 = 28.;
+    /// a person's initial inline with small text: a byline, a reply line
+    pub const AVATAR_SM: f64 = 18.;
+    /// a person's initial in a list row: a member, a dm
+    pub const AVATAR: f64 = 20.;
+    /// a person's initial heading a card or panel
+    pub const AVATAR_LG: f64 = 24.;
 }
 
 /// One sRGB color as the wire carries it: `[r, g, b, a]` in `0.0..=1.0`.

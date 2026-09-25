@@ -155,18 +155,28 @@ impl<V: View> Context<'_, V> {
         })
     }
 
+    /// Re-reads what is already on screen: the old value stays until
+    /// `land` takes the new one, and stays if the read is refused. A
+    /// refusal lands in the host's log (`host.log`, so the view declares
+    /// `host`), named by the view, so a failed re-read is never silent.
     pub fn refresh<T: 'static>(
         &mut self,
         work: impl Future<Output = Result<T, Refusal>> + 'static,
         land: impl FnOnce(&mut V, T, &mut Context<V>) + 'static,
     ) {
         self.spawn(async move |this, cx| {
-            if let Ok(value) = work.await {
-                let _ = this.update(cx, |view, cx| {
+            let result = work.await;
+            // the view is gone: nothing is waiting for the read
+            let _ = this.update(cx, |view, cx| match result {
+                Ok(value) => {
                     land(view, value, cx);
                     cx.notify();
-                });
-            }
+                }
+                Err(refusal) => cx.host().log(format!(
+                    "{}: a refresh was refused: {refusal}",
+                    std::any::type_name::<V>()
+                )),
+            });
         })
         .detach();
     }
@@ -203,7 +213,7 @@ mod follow_tests {
         }
     }
     impl crate::Declared for Heads {
-        const CAPABILITIES: &'static [&'static str] = &["program"];
+        const CAPABILITIES: &'static [&'static str] = &["program", "host"];
     }
     impl Render for Heads {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
@@ -227,5 +237,31 @@ mod follow_tests {
         feed.push(None);
         cx.run_until_parked();
         view.read(|heads| assert_eq!(heads.seen, 2));
+    }
+
+    #[test]
+    fn a_refused_refresh_keeps_the_value_and_logs_why() {
+        use crate::methods::Query;
+        let mut cx = TestAppContext::new();
+        cx.host()
+            .refuse::<Query<Probe>>("stale", "the probe moved on");
+        let _feed = cx.host().stream::<Changes<Probe>>();
+        let view = cx.open::<Heads>();
+        view.update(&mut cx, |heads, _, cx| {
+            heads.seen = 7;
+            cx.notify();
+            cx.refresh(cx.host().ask::<Query<Probe>>(()), |heads, (), _| {
+                heads.seen = 0
+            });
+        });
+        cx.run_until_parked();
+        view.read(|heads| assert_eq!(heads.seen, 7));
+        let logs = cx.host().logs();
+        assert!(
+            logs.iter()
+                .any(|line| line.contains("refresh was refused")
+                    && line.contains("the probe moved on")),
+            "{logs:?}"
+        );
     }
 }

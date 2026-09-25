@@ -16,8 +16,7 @@ impl Chat {
             return Vec::new();
         };
         let members: Vec<_> = self.roster().into_iter().map(|(party, _)| party).collect();
-        names
-            .mention_choices(&members)
+        crate::names::mention_choices(names, &members)
             .into_iter()
             .map(|choice| MentionChoice {
                 token: mention_token(&choice.party),

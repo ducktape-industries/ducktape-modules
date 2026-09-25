@@ -128,7 +128,7 @@ impl Chat {
 
     pub(crate) fn reread_channels(&mut self, cx: &mut Context<Self>) {
         let list = queries::channels(cx.host());
-        self.reread("the channel list", list, Chat::channels_landed, cx);
+        cx.refresh(list, Chat::channels_landed);
     }
 
     /// Re-read what the room shows, keeping the rows there until fresh land.
@@ -141,47 +141,31 @@ impl Chat {
                 .ready()
                 .map_or(WINDOW, |rows| rows.len().max(WINDOW));
             let rows = queries::roots(cx.host(), id.clone(), viewer.clone(), None, shown);
-            self.reread(
-                "the room",
-                rows,
-                |chat, (rows, has_older), _| {
-                    if let Some(room) = chat.room.as_mut() {
-                        room.has_older = has_older;
-                        room.messages = Loaded::Ready(rows);
-                        room.settle();
-                    }
-                },
-                cx,
-            );
+            cx.refresh(rows, |chat, (rows, has_older), _| {
+                if let Some(room) = chat.room.as_mut() {
+                    room.has_older = has_older;
+                    room.messages = Loaded::Ready(rows);
+                    room.settle();
+                }
+            });
         }
         let roster = queries::members(cx.host(), id.clone());
-        self.reread(
-            "the room's members",
-            roster,
-            |chat, members, _| {
-                room_of(chat).members = Loaded::Ready(members);
-            },
-            cx,
-        );
+        cx.refresh(roster, |chat, members, _| {
+            room_of(chat).members = Loaded::Ready(members);
+        });
         if let Some(root) = room.thread.as_ref().map(|thread| thread.root) {
             let replies = queries::thread(cx.host(), id, root, viewer, None);
-            self.reread(
-                "the thread",
-                replies,
-                move |chat, (replies, next), _| {
-                    let Some(thread) = chat.room.as_mut().and_then(|room| room.thread.as_mut())
-                    else {
-                        return;
-                    };
-                    if thread.root == root {
-                        thread.replies = Loaded::Ready(replies);
-                        thread.has_more = next.is_some();
-                        thread.next = next;
-                        room_of(chat).settle();
-                    }
-                },
-                cx,
-            );
+            cx.refresh(replies, move |chat, (replies, next), _| {
+                let Some(thread) = chat.room.as_mut().and_then(|room| room.thread.as_mut()) else {
+                    return;
+                };
+                if thread.root == root {
+                    thread.replies = Loaded::Ready(replies);
+                    thread.has_more = next.is_some();
+                    thread.next = next;
+                    room_of(chat).settle();
+                }
+            });
         }
     }
 
