@@ -1,9 +1,9 @@
 //! The wire's bytes, committed. One `Frame` holding every `Node` variant,
-//! one of every `Event`, and one request and reply through every door in
-//! `doors::ALL`, encoded into `tests/golden/{frame,doors}.bin` with a JSON
+//! one of every `Event`, and one request and reply through every method in
+//! `methods::ALL`, encoded into `tests/golden/{frame,methods}.bin` with a JSON
 //! twin beside each for readable diffs. Any byte of the frame that moves — a
 //! field, a variant, a `gpui::StyleRefinement` change from a fork bump —
-//! fails here. The doors are a map keyed by kind: an existing kind whose
+//! fails here. The methods are a map keyed by kind: an existing kind whose
 //! bytes moved, or a kind that went away, fails; a kind new since the
 //! fixture passes, since no view built before it can call it. A failure is
 //! fixed by bumping `WIRE_EPOCH` in the same commit and regenerating with
@@ -13,7 +13,6 @@ use std::ops::Range;
 use std::path::PathBuf;
 
 use gpui::{Bounds, Pixels, StyleRefinement, point, px, size};
-use view_wire::doors::{self, Door, Program};
 use view_wire::editor_document::{
     EditorDocumentMessage, EditorDocumentRef, EditorTransfer, EditorTransferError, EditorTransferId,
 };
@@ -22,6 +21,7 @@ use view_wire::list::{
     ListCommand, UniformListHorizontalSizing, UniformListScrollRequest, UniformListScrollStrategy,
     UniformListSizing,
 };
+use view_wire::methods::{self, Method, Program};
 use view_wire::{
     Anchor, AnchoredFitMode, AnchoredPositionMode, Axis, ButtonContent, CanvasCommand, CanvasShape,
     ContainerNode, ContentFit, DispatchPhase, EditorCursor, EditorDecision, EditorEditKind,
@@ -185,7 +185,7 @@ fn frame_and_events_are_the_committed_bytes() {
     );
 }
 
-/// The program a golden `rpc.query`/`op.submit`/`rpc.live` addresses.
+/// The program a golden `program.query`/`op.submit`/`program.changes` addresses.
 struct Golden;
 impl Program for Golden {
     const NAME: &'static str = "golden";
@@ -198,7 +198,7 @@ impl Program for Golden {
 type Exchange = (String, Vec<u8>, Vec<u8>);
 
 /// One exchange, plus the values as JSON for the readable twin.
-fn exchange<D: Door>(request: D::Request, reply: D::Reply) -> (Exchange, serde_json::Value)
+fn exchange<D: Method>(request: D::Request, reply: D::Reply) -> (Exchange, serde_json::Value)
 where
     D::Request: serde::Serialize,
     D::Reply: serde::Serialize,
@@ -214,12 +214,12 @@ where
     )
 }
 
-fn every_door() -> Vec<(Exchange, serde_json::Value)> {
-    use doors::*;
+fn every_method() -> Vec<(Exchange, serde_json::Value)> {
+    use methods::*;
     vec![
         exchange::<Query<Golden>>((7, "q".into()), vec![1, 2, 3]),
         exchange::<Submit<Golden>>("op".into(), b"receipt".to_vec()),
-        exchange::<RpcStatus>(
+        exchange::<ChainStatus>(
             (),
             NodeStatus {
                 network: "local#1".into(),
@@ -234,7 +234,7 @@ fn every_door() -> Vec<(Exchange, serde_json::Value)> {
                 contract: 1,
             },
         ),
-        exchange::<RpcInvite>(
+        exchange::<InviteMint>(
             Mint { ttl_days: 7 },
             Minted {
                 invite: "duck://invite/x".into(),
@@ -244,8 +244,8 @@ fn every_door() -> Vec<(Exchange, serde_json::Value)> {
                 }],
             },
         ),
-        exchange::<doors::Live<Golden>>((), Some(9)),
-        exchange::<RpcBlocks>(
+        exchange::<methods::Changes<Golden>>((), Some(9)),
+        exchange::<ChainBlocks>(
             BlockPage {
                 before: Some(10),
                 limit: 2,
@@ -266,9 +266,9 @@ fn every_door() -> Vec<(Exchange, serde_json::Value)> {
                 }],
             }],
         ),
-        exchange::<RpcBlock>(BlockRef::Id([4; 32]), None),
+        exchange::<ChainBlock>(BlockRef::Id([4; 32]), None),
         exchange::<BlobGet>("sha256:00".into(), Some(b"blob".to_vec())),
-        exchange::<HostProps>(
+        exchange::<HostSession>(
             (),
             Session {
                 connected: true,
@@ -281,7 +281,7 @@ fn every_door() -> Vec<(Exchange, serde_json::Value)> {
         ),
         exchange::<HostVisible>((), true),
         exchange::<HostBadge>(3, ()),
-        exchange::<HostOpenLink>("duck://chat/room".into(), ()),
+        exchange::<LinkOpen>("duck://chat/room".into(), ()),
         exchange::<HostRoute>((), "tx/00ff".into()),
         exchange::<HostId>("msg".into(), "msg-1".into()),
         exchange::<ClockTicks>(1000, ()),
@@ -310,8 +310,8 @@ fn every_door() -> Vec<(Exchange, serde_json::Value)> {
         ),
         exchange::<StoreGet>("reads/alice".into(), Some(vec![1, 2])),
         exchange::<StoreSet>(("reads/alice".into(), None), ()),
-        exchange::<NotifyRead>("#design".into(), ()),
-        exchange::<RpcHeads>(
+        exchange::<NotifySeen>("#design".into(), ()),
+        exchange::<ChainHeads>(
             (),
             Head {
                 height: 9,
@@ -332,30 +332,30 @@ fn every_door() -> Vec<(Exchange, serde_json::Value)> {
     ]
 }
 
-/// The request and reply bytes of each door, by kind.
-type Doors = BTreeMap<String, (Vec<u8>, Vec<u8>)>;
+/// The request and reply bytes of each method, by kind.
+type Methods = BTreeMap<String, (Vec<u8>, Vec<u8>)>;
 
 #[test]
-fn every_door_carries_the_committed_bytes() {
-    let (exchanges, json): (Vec<_>, Vec<_>) = every_door().into_iter().unzip();
-    let built: Doors = exchanges
+fn every_method_carries_the_committed_bytes() {
+    let (exchanges, json): (Vec<_>, Vec<_>) = every_method().into_iter().unzip();
+    let built: Methods = exchanges
         .into_iter()
         .map(|(kind, request, reply)| (kind, (request, reply)))
         .collect();
     let kinds: BTreeSet<&str> = built.keys().map(String::as_str).collect();
-    let all: BTreeSet<&str> = doors::ALL.iter().copied().collect();
-    assert_eq!(kinds, all, "one exchange per door in ALL");
-    let bin = golden("doors.bin");
+    let all: BTreeSet<&str> = methods::ALL.iter().copied().collect();
+    assert_eq!(kinds, all, "one exchange per method in ALL");
+    let bin = golden("methods.bin");
     if std::env::var_os("WIRE_GOLDEN_WRITE").is_some() {
-        std::fs::write(&bin, doors::encode(&built)).unwrap();
+        std::fs::write(&bin, methods::encode(&built)).unwrap();
         std::fs::write(
-            golden("doors.json"),
+            golden("methods.json"),
             serde_json::to_string_pretty(&json).unwrap(),
         )
         .unwrap();
         return;
     }
-    let committed: Doors = doors::decode(
+    let committed: Methods = methods::decode(
         &std::fs::read(&bin)
             .unwrap_or_else(|error| panic!("{}: {error}; {MESSAGE}", bin.display())),
     )
@@ -365,7 +365,7 @@ fn every_door_carries_the_committed_bytes() {
 
 /// The committed kinds whose bytes `built` changed or dropped. A kind only
 /// `built` has is new, and passes.
-fn moved(committed: &Doors, built: &Doors) -> Vec<String> {
+fn moved(committed: &Methods, built: &Methods) -> Vec<String> {
     committed
         .iter()
         .filter(|(kind, bytes)| built.get(*kind) != Some(bytes))
@@ -374,13 +374,13 @@ fn moved(committed: &Doors, built: &Doors) -> Vec<String> {
 }
 
 #[test]
-fn a_new_door_passes_and_a_moved_or_dropped_one_fails() {
-    let door = |kind: &str, byte: u8| (kind.to_string(), (vec![byte], vec![]));
-    let committed: Doors = [door("a.one", 1), door("a.two", 2)].into();
-    let grown: Doors = [door("a.one", 1), door("a.two", 2), door("a.new", 3)].into();
+fn a_new_method_passes_and_a_moved_or_dropped_one_fails() {
+    let method = |kind: &str, byte: u8| (kind.to_string(), (vec![byte], vec![]));
+    let committed: Methods = [method("a.one", 1), method("a.two", 2)].into();
+    let grown: Methods = [method("a.one", 1), method("a.two", 2), method("a.new", 3)].into();
     assert!(moved(&committed, &grown).is_empty());
-    let changed: Doors = [door("a.one", 9), door("a.two", 2)].into();
+    let changed: Methods = [method("a.one", 9), method("a.two", 2)].into();
     assert_eq!(moved(&committed, &changed), ["a.one"]);
-    let dropped: Doors = [door("a.one", 1)].into();
+    let dropped: Methods = [method("a.one", 1)].into();
     assert_eq!(moved(&committed, &dropped), ["a.two"]);
 }

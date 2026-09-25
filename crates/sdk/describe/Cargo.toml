@@ -9,7 +9,7 @@ version.workspace = true
 edition.workspace = true
 
 [features]
-# The door carries a `Description`; view-wire's golden writes it as JSON.
+# The method carries a `Description`; view-wire's golden writes it as JSON.
 serde = ["dep:serde"]
 host = ["dep:wasmtime"]
 

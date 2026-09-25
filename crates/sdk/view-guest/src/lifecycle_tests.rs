@@ -2,7 +2,7 @@ use crate::{wire, Context, Driver, InteractiveElement, ParentElement, Render, Ta
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 
-use crate::doors::Live;
+use crate::methods::Changes;
 use crate::testing::Probe;
 
 #[derive(Default, Serialize, Deserialize)]
@@ -14,7 +14,7 @@ struct Streams {
 }
 impl View for Streams {
     fn new(_: &mut Window, cx: &mut Context<Self>) -> Self {
-        let mut stream = cx.host().subscribe::<Live<Probe>>(());
+        let mut stream = cx.host().subscribe::<Changes<Probe>>(());
         let task = cx.spawn(async move |this, cx| {
             while let Some(value) = stream.next().await {
                 let pending = this
@@ -72,7 +72,7 @@ fn a_stream_task_awaiting_other_work_is_not_safe_to_snapshot() {
         });
     driver.tick(vec![wire::Event::Response {
         id: frame.requests[0].id,
-        result: Ok(crate::doors::encode(&Some(1u64))),
+        result: Ok(crate::methods::encode(&Some(1u64))),
         done: false,
     }]);
     driver.entity().read(|view| assert_eq!(view.values, [1]));
@@ -87,7 +87,7 @@ fn a_hot_stream_yields_to_the_tick_budget_and_preserves_item_order() {
     for value in 0..1000u64 {
         driver
             .host()
-            .fulfill(id, Ok(crate::doors::encode(&Some(value))), false);
+            .fulfill(id, Ok(crate::methods::encode(&Some(value))), false);
     }
     let first = driver.tick(vec![]);
     assert!(first.busy);

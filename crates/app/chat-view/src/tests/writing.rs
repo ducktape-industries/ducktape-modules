@@ -49,7 +49,7 @@ fn a_send_shows_pending_then_lands_and_a_refusal_is_a_banner() {
     let bytes = cx.snapshot().unwrap();
     let mut restored = TestAppContext::new();
     configure(&mut restored);
-    restored.host().never::<HostProps>();
+    restored.host().never::<HostSession>();
     restored.host().never::<HostVisible>();
     let view = restored.restore::<Chat>(&bytes).unwrap();
     restored.run_until_parked();

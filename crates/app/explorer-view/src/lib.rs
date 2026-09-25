@@ -1,6 +1,6 @@
 //! Explorer: the chain as this node keeps it. Finalized blocks and the
 //! transactions they carry come from the node's block archive
-//! (`rpc.blocks`, `rpc.block`); who signed them from `identity`; the
+//! (`chain.blocks`, `chain.block`); who signed them from `identity`; the
 //! validators from `valset`; the programs from `module-registry`.
 //!
 //! What the node does not keep is not shown: there are no receipts, so a
@@ -8,13 +8,13 @@
 //! per-block state root or write set; and nothing indexes an account's
 //! history, so an account's activity is what a scan of the recent window
 //! finds. The window is the last [`WINDOW`] blocks, read a page at a time
-//! and then followed at the head as `rpc.heads` pushes it.
-use ducktape_view_guest::doors::{
-    Block, BlockPage, BlockRef, ClipboardWrite, ClockTicks, Description, Head, HostProps,
-    HostRoute, NodeStatus, ProgramDescribe, Query, RpcBlock, RpcBlocks, RpcHeads,
-};
+//! and then followed at the head as `chain.heads` pushes it.
 use ducktape_view_guest::export_view;
 use ducktape_view_guest::host::{Refusal, malformed};
+use ducktape_view_guest::methods::{
+    Block, BlockPage, BlockRef, ChainBlock, ChainBlocks, ChainHeads, ClipboardWrite, ClockTicks,
+    Description, Head, HostRoute, HostSession, NodeStatus, ProgramDescribe, Query,
+};
 use ducktape_view_guest::view::Loaded;
 use ducktape_view_guest::{Context, Host, IntoElement, Render, Task, View, Window};
 use futures::StreamExt;
@@ -28,10 +28,10 @@ pub(crate) mod ui;
 /// The recent window the explorer reads: activity, search by transaction
 /// hash and the transaction list reach this far back and no further.
 pub const WINDOW: usize = 1_000;
-/// Blocks per `rpc.blocks` page (the node caps a page at 100). Small, so
+/// Blocks per `chain.blocks` page (the node caps a page at 100). Small, so
 /// one reply's decoding stays well inside a tick's fuel.
 const PAGE: u32 = 20;
-/// How often the head is re-read, in milliseconds, where `rpc.heads` is
+/// How often the head is re-read, in milliseconds, where `chain.heads` is
 /// refused or ends: the fallback, not the way the head is followed.
 const TICK: i64 = 2_000;
 
@@ -372,7 +372,7 @@ impl View for Explorer {
     }
 
     fn restored(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        let mut heads = cx.host().subscribe::<RpcHeads>(());
+        let mut heads = cx.host().subscribe::<ChainHeads>(());
         self.watches.push(cx.spawn(async move |this, cx| {
             while let Some(Ok(head)) = heads.next().await {
                 if this.update(cx, |view, cx| view.at_head(head, cx)).is_err() {
@@ -382,7 +382,7 @@ impl View for Explorer {
             // refused or ended: the head is polled instead
             let _ = this.update(cx, |view, cx| view.poll_head(cx));
         }));
-        let mut props = cx.host().subscribe::<HostProps>(());
+        let mut props = cx.host().subscribe::<HostSession>(());
         self.watches.push(cx.spawn(async move |this, cx| {
             while let Some(Ok(session)) = props.next().await {
                 let landed = this.update(cx, |view, cx| {
@@ -425,7 +425,7 @@ impl Explorer {
         self.pull(cx);
     }
 
-    /// A head `rpc.heads` pushed: the status moves to it without a read,
+    /// A head `chain.heads` pushed: the status moves to it without a read,
     /// and the window follows.
     fn at_head(&mut self, head: Head, cx: &mut Context<Self>) {
         match &mut self.status {
@@ -453,7 +453,9 @@ impl Explorer {
     }
 
     fn read_head(&mut self, cx: &mut Context<Self>) {
-        let ask = cx.host().ask::<ducktape_view_guest::doors::RpcStatus>(());
+        let ask = cx
+            .host()
+            .ask::<ducktape_view_guest::methods::ChainStatus>(());
         if self.status.ready().is_some() {
             cx.refresh(ask, |view, status, cx| {
                 view.status = Loaded::Ready(status);
@@ -513,7 +515,7 @@ impl Explorer {
             _ => return,
         };
         self.pulling = true;
-        let ask = cx.host().ask::<RpcBlocks>(BlockPage {
+        let ask = cx.host().ask::<ChainBlocks>(BlockPage {
             before,
             limit: PAGE,
         });
@@ -574,7 +576,7 @@ impl Explorer {
             let opened =
                 matches!(self.opened.ready(), Some(Some((row, _))) if row.height == height);
             if !held && !opened {
-                let ask = cx.host().ask::<RpcBlock>(BlockRef::Height(height));
+                let ask = cx.host().ask::<ChainBlock>(BlockRef::Height(height));
                 self.opened = cx.load(
                     async move { ask.await.map(|block| block.map(rows)) },
                     |view| &mut view.opened,
@@ -641,7 +643,7 @@ impl Explorer {
         if let Some(block) = self.chain.blocks.iter().find(|block| block.id == hash) {
             return self.go(Route::Block(block.height), cx);
         }
-        let ask = cx.host().ask::<RpcBlock>(BlockRef::Id(hash));
+        let ask = cx.host().ask::<ChainBlock>(BlockRef::Id(hash));
         let blocks = self.chain.blocks.len();
         cx.spawn(async move |this, cx| {
             let found = ask.await;
@@ -891,7 +893,7 @@ export_view!(
     Explorer,
     "Explorer",
     "The chain as this node keeps it: blocks, transactions, accounts and programs.",
-    ["rpc", "host", "clock", "clipboard", "program"]
+    ["chain", "program", "host", "clock", "clipboard"]
 );
 
 #[cfg(test)]

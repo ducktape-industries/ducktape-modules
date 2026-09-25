@@ -180,7 +180,7 @@ impl TestAppContext {
 mod tests {
     use super::*;
     use crate::{
-        doors::Live, testing::Probe, Context, InteractiveElement, ParentElement, Render, Task,
+        methods::Changes, testing::Probe, Context, InteractiveElement, ParentElement, Render, Task,
         Window,
     };
     use futures::StreamExt;
@@ -199,7 +199,7 @@ mod tests {
             view
         }
         fn restored(&mut self, _: &mut Window, cx: &mut Context<Self>) {
-            let mut stream = cx.host().subscribe::<Live<Probe>>(());
+            let mut stream = cx.host().subscribe::<Changes<Probe>>(());
             self.task = Some(cx.spawn(async move |this, cx| {
                 while let Some(item) = stream.next().await {
                     item.unwrap();
@@ -213,7 +213,7 @@ mod tests {
         }
     }
     impl Declared for LiveView {
-        const CAPABILITIES: &'static [&'static str] = &["rpc"];
+        const CAPABILITIES: &'static [&'static str] = &["program"];
     }
     impl Render for LiveView {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl crate::IntoElement {
@@ -224,7 +224,7 @@ mod tests {
     #[test]
     fn restoring_resubscribes_without_replaying_old_events_or_duplicate_ids() {
         let mut cx = TestAppContext::new();
-        let feed = cx.host().stream::<Live<Probe>>();
+        let feed = cx.host().stream::<Changes<Probe>>();
         cx.open::<LiveView>();
         feed.push(None);
         cx.run_until_parked();
@@ -236,7 +236,7 @@ mod tests {
         feed.push(None);
         cx.run_until_parked();
         restored.read(|view| assert_eq!(view.items, 2));
-        assert_eq!(cx.host().asked::<Live<Probe>>().len(), 2);
+        assert_eq!(cx.host().asked::<Changes<Probe>>().len(), 2);
     }
 
     /// Logs through `host`, which its manifest leaves out.
@@ -249,7 +249,7 @@ mod tests {
         }
     }
     impl Declared for Undeclared {
-        const CAPABILITIES: &'static [&'static str] = &["rpc"];
+        const CAPABILITIES: &'static [&'static str] = &["program"];
     }
     impl Render for Undeclared {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl crate::IntoElement {
@@ -259,7 +259,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "undeclared_capability")]
-    fn a_door_the_manifest_leaves_out_fails_the_test() {
+    fn a_method_the_manifest_leaves_out_fails_the_test() {
         TestAppContext::new().open::<Undeclared>();
     }
 }

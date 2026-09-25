@@ -81,7 +81,15 @@ export_view!(
     Chat,
     "Chat",
     "Channels, direct messages, threads, search and the live call of this workspace.",
-    ["rpc", "op", "host", "clipboard", "notify", "store"]
+    [
+        "program",
+        "op",
+        "host",
+        "link",
+        "clipboard",
+        "notify",
+        "store"
+    ]
 );
 
 #[cfg(test)]

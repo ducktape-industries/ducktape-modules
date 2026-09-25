@@ -25,9 +25,9 @@
 /// in the SAME commit as the shape change: a view built against the old shape is
 /// refused at load instead of faulting on its first frame.
 /// This is independent of the calling convention ([`abi`]) and the manifest text format.
-/// `tests/golden.rs` holds the bytes of every node, event and door: it fails on
+/// `tests/golden.rs` holds the bytes of every node, event and method: it fails on
 /// any change and says to bump this and regenerate with `WIRE_GOLDEN_WRITE=1`.
-/// Within an epoch the doors only grow; a moved or dropped door is a new epoch.
+/// Within an epoch the methods only grow; a moved or dropped method is a new epoch.
 pub const WIRE_EPOCH: u32 = 1;
 
 /// For `skip_serializing_if`: a value that says nothing is left out.
@@ -36,8 +36,8 @@ pub(crate) fn is_default<T: Default + PartialEq>(value: &T) -> bool {
 }
 
 pub mod abi;
-pub mod doors;
 pub mod manifest;
+pub mod methods;
 #[cfg(feature = "schema")]
 pub mod schema;
 

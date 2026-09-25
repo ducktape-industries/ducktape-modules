@@ -3,10 +3,10 @@
 use super::{accounts, booted, change_screen, opened, refusal};
 use crate::Forge;
 use crate::api::ForgeProgram;
-use crate::api::{Ask, ChatApi, HostProps};
+use crate::api::{Ask, ChatApi, HostSession};
 use crate::state::ChangeTab;
 use ducktape_view_guest::Theme;
-use ducktape_view_guest::doors::{HostVisible, Live, Query};
+use ducktape_view_guest::methods::{Changes, HostVisible, Query};
 use ducktape_view_guest::testing::TestAppContext;
 use identity::view::Identity;
 
@@ -76,11 +76,11 @@ fn screen(state: &str) -> TestAppContext {
                 .handle::<Ask>(|_| Err(refusal("refused-not-found")));
             cx.host()
                 .handle::<Query<ChatApi>>(|_| Ok(chat::Reply::Accounts(accounts())));
-            cx.host().never::<Live<ForgeProgram>>();
-            cx.host().never::<Live<ChatApi>>();
-            cx.host().never::<Live<Identity>>();
+            cx.host().never::<Changes<ForgeProgram>>();
+            cx.host().never::<Changes<ChatApi>>();
+            cx.host().never::<Changes<Identity>>();
             cx.host().never::<HostVisible>();
-            cx.host().never::<HostProps>();
+            cx.host().never::<HostSession>();
             cx.open::<Forge>();
             cx.run_until_parked();
             cx

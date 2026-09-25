@@ -1,4 +1,4 @@
-//! The view against a fake host: every door it asks is answered here, and
+//! The view against a fake host: every method it asks is answered here, and
 //! each test drives the frame the way a person would.
 use super::*;
 use chat::{ChannelInfo, MessageHits, MsgRow, Op, Party, PostPolicy, Query, Reply};
@@ -7,7 +7,7 @@ use ducktape_view_guest::view::Loaded;
 use ducktape_view_guest::wire;
 use ducktape_view_guest::{Entity, StyleRefinement, Styled};
 
-use crate::api::{Ask, ChatApi, HostId, HostProps, HostVisible, Live, Session, Submit};
+use crate::api::{Ask, Changes, ChatApi, HostId, HostSession, HostVisible, Session, Submit};
 use identity::view::Identity;
 
 mod menus;
@@ -82,21 +82,23 @@ fn row(seq: u64, author: u64, text: &str) -> MsgRow {
     }
 }
 
-/// The host doors chat only talks to, never hears back from here.
-fn quiet_doors(cx: &mut TestAppContext) {
+/// The host methods chat only talks to, never hears back from here.
+fn quiet_methods(cx: &mut TestAppContext) {
     cx.host().never::<api::HostRoute>();
-    cx.host().never::<ducktape_view_guest::doors::HostBadge>();
-    cx.host().never::<ducktape_view_guest::doors::NotifyPost>();
-    cx.host().never::<ducktape_view_guest::doors::NotifyRead>();
+    cx.host().never::<ducktape_view_guest::methods::HostBadge>();
     cx.host()
-        .handle::<ducktape_view_guest::doors::StoreGet>(|_| Ok(None));
-    cx.host().never::<ducktape_view_guest::doors::StoreSet>();
+        .never::<ducktape_view_guest::methods::NotifyPost>();
+    cx.host()
+        .never::<ducktape_view_guest::methods::NotifySeen>();
+    cx.host()
+        .handle::<ducktape_view_guest::methods::StoreGet>(|_| Ok(None));
+    cx.host().never::<ducktape_view_guest::methods::StoreSet>();
 }
 
 fn configure(cx: &mut TestAppContext) {
-    quiet_doors(cx);
+    quiet_methods(cx);
     cx.host()
-        .handle::<ducktape_view_guest::doors::HostWidget>(|command| {
+        .handle::<ducktape_view_guest::methods::HostWidget>(|command| {
             assert!(matches!(command, wire::WidgetCommand::Focus { .. }));
             Ok(())
         });
@@ -141,8 +143,8 @@ fn configure(cx: &mut TestAppContext) {
             query => panic!("unexpected chat query: {query:?}"),
         })
     });
-    cx.host().never::<Live<ChatApi>>();
-    cx.host().never::<Live<Identity>>();
+    cx.host().never::<Changes<ChatApi>>();
+    cx.host().never::<Changes<Identity>>();
     cx.host().handle::<Submit<ChatApi>>(|_| Ok(Vec::new()));
 }
 
@@ -150,7 +152,7 @@ fn configure(cx: &mut TestAppContext) {
 fn opened() -> (TestAppContext, Entity<Chat>) {
     let mut cx = TestAppContext::new();
     configure(&mut cx);
-    let props = cx.host().stream::<HostProps>();
+    let props = cx.host().stream::<HostSession>();
     let visible = cx.host().stream::<HostVisible>();
     let view = cx.open::<Chat>();
     cx.run_until_parked();

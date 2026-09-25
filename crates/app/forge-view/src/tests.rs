@@ -5,16 +5,16 @@
 //! hands it back, so an unhandled ask is a panic and a screen that reads a
 //! field the program does not send cannot compile.
 use super::*;
-use crate::api::{Ask, HostProps, Session, SubmitForge};
+use crate::api::{Ask, HostSession, Session, SubmitForge};
 use crate::state::{ChangeTab, Filter, RepoTab};
-use ducktape_view_guest::doors::HostId;
-use ducktape_view_guest::doors::{Query as Door, Submit};
+use ducktape_view_guest::methods::HostId;
+use ducktape_view_guest::methods::{Query as ProgramQuery, Submit};
 use ducktape_view_guest::testing::TestAppContext;
 use ducktape_view_guest::{Entity, Theme, wire};
 use forge::{ChangeFilter, ChangeState, Op, Page, PageReply, Query, Reply};
 
 use crate::api::{ChatApi, ForgeProgram};
-use ducktape_view_guest::doors::Live;
+use ducktape_view_guest::methods::Changes;
 use identity::view::Identity;
 
 #[path = "../../forge/fixtures/loader.rs"]
@@ -182,7 +182,7 @@ pub(crate) fn configure(cx: &mut TestAppContext, mode: &'static str) {
         }
         Ok(answer(&query, mode))
     });
-    cx.host().handle::<Door<ChatApi>>(|query| {
+    cx.host().handle::<ProgramQuery<ChatApi>>(|query| {
         Ok(match query {
             chat::Query::Accounts { .. } => chat::Reply::Accounts(accounts()),
             chat::Query::Roots { channel_id, .. } => chat::Reply::Roots(PageReply {
@@ -211,9 +211,9 @@ pub(crate) fn configure(cx: &mut TestAppContext, mode: &'static str) {
     cx.host().handle::<Submit<ChatApi>>(|_| Ok(Vec::new()));
     cx.host().handle::<SubmitForge>(|_| Ok(Vec::new()));
     cx.host().handle::<HostId>(|kind| Ok(format!("{kind}-1")));
-    cx.host().never::<Live<ForgeProgram>>();
-    cx.host().never::<Live<ChatApi>>();
-    cx.host().never::<Live<Identity>>();
+    cx.host().never::<Changes<ForgeProgram>>();
+    cx.host().never::<Changes<ChatApi>>();
+    cx.host().never::<Changes<Identity>>();
     cx.host().never::<HostVisible>();
 }
 
@@ -221,8 +221,9 @@ pub(crate) fn configure(cx: &mut TestAppContext, mode: &'static str) {
 pub(crate) fn booted(mode: &'static str) -> (TestAppContext, Entity<Forge>) {
     let mut cx = TestAppContext::new();
     configure(&mut cx, mode);
-    let props = cx.host().stream::<HostProps>();
-    cx.host().stream::<ducktape_view_guest::doors::HostRoute>();
+    let props = cx.host().stream::<HostSession>();
+    cx.host()
+        .stream::<ducktape_view_guest::methods::HostRoute>();
     let view = cx.open::<Forge>();
     cx.run_until_parked();
     props.push(Session {
@@ -267,8 +268,9 @@ fn session_key_resolves_to_its_account() {
 fn an_unregistered_key_stays_read_only() {
     let mut cx = TestAppContext::new();
     configure(&mut cx, "default");
-    let props = cx.host().stream::<HostProps>();
-    cx.host().stream::<ducktape_view_guest::doors::HostRoute>();
+    let props = cx.host().stream::<HostSession>();
+    cx.host()
+        .stream::<ducktape_view_guest::methods::HostRoute>();
     let view = cx.open::<Forge>();
     cx.run_until_parked();
     props.push(Session {
@@ -296,8 +298,9 @@ fn an_unregistered_key_stays_read_only() {
 fn an_account_gained_later_re_enables_writes() {
     let mut cx = TestAppContext::new();
     configure(&mut cx, "default");
-    let props = cx.host().stream::<HostProps>();
-    cx.host().stream::<ducktape_view_guest::doors::HostRoute>();
+    let props = cx.host().stream::<HostSession>();
+    cx.host()
+        .stream::<ducktape_view_guest::methods::HostRoute>();
     let view = cx.open::<Forge>();
     cx.run_until_parked();
     let unregistered = Session {
@@ -390,13 +393,13 @@ fn a_refused_read_keeps_its_reason_and_offers_one_retry() {
     cx.host()
         .handle::<Ask>(|_| Err(refusal("refused-object-not-held")));
     cx.host()
-        .handle::<Door<ChatApi>>(|_| Ok(chat::Reply::Accounts(accounts())));
-    cx.host().never::<Live<ForgeProgram>>();
-    cx.host().never::<Live<ChatApi>>();
-    cx.host().never::<Live<Identity>>();
+        .handle::<ProgramQuery<ChatApi>>(|_| Ok(chat::Reply::Accounts(accounts())));
+    cx.host().never::<Changes<ForgeProgram>>();
+    cx.host().never::<Changes<ChatApi>>();
+    cx.host().never::<Changes<Identity>>();
     cx.host().never::<HostVisible>();
-    cx.host().never::<HostProps>();
-    cx.host().never::<ducktape_view_guest::doors::HostRoute>();
+    cx.host().never::<HostSession>();
+    cx.host().never::<ducktape_view_guest::methods::HostRoute>();
     cx.open::<Forge>();
     cx.run_until_parked();
     let sentence = "object ffffffffffffffffffffffffffffffffffffffff is not held by this node";
@@ -810,10 +813,10 @@ fn a_snapshot_restores_the_same_screen_without_replaying_events() {
 
     let mut restored = TestAppContext::new();
     configure(&mut restored, "default");
-    restored.host().never::<HostProps>();
+    restored.host().never::<HostSession>();
     restored
         .host()
-        .never::<ducktape_view_guest::doors::HostRoute>();
+        .never::<ducktape_view_guest::methods::HostRoute>();
     let view = restored.restore::<Forge>(&snapshot).unwrap();
     restored.run_until_parked();
     view.read(|forge| {
@@ -880,7 +883,7 @@ fn copy_puts_the_address_on_the_clipboard_without_opening_the_repository() {
     let copied = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
     let seen = copied.clone();
     cx.host()
-        .handle::<ducktape_view_guest::doors::ClipboardWrite>(move |text| {
+        .handle::<ducktape_view_guest::methods::ClipboardWrite>(move |text| {
             *seen.borrow_mut() = text;
             Ok(())
         });
@@ -895,8 +898,10 @@ fn copy_puts_the_address_on_the_clipboard_without_opening_the_repository() {
 fn a_forge_link_opens_its_repository() {
     let mut cx = TestAppContext::new();
     configure(&mut cx, "default");
-    let props = cx.host().stream::<HostProps>();
-    let routes = cx.host().stream::<ducktape_view_guest::doors::HostRoute>();
+    let props = cx.host().stream::<HostSession>();
+    let routes = cx
+        .host()
+        .stream::<ducktape_view_guest::methods::HostRoute>();
     let view = cx.open::<Forge>();
     cx.run_until_parked();
     props.push(Session {

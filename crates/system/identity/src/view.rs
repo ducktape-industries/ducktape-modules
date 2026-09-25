@@ -1,7 +1,7 @@
-//! The marker a view names identity by in `rpc.query`/`op.submit`/`rpc.live`.
+//! The marker a view names identity by in `program.query`/`op.submit`/`program.changes`.
 //! Who the reader is comes with the session (`Session.account`); no view
 //! asks identity for it.
-use ducktape_view_guest::doors::Program;
+use ducktape_view_guest::methods::Program;
 
 use crate::{Op, Query, Reply};
 

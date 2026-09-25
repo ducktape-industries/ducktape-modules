@@ -6,7 +6,7 @@ use std::future::Future;
 use ducktape_view_guest::Context;
 use ducktape_view_guest::host::Refusal;
 
-use crate::api::{ChatApi, HostProps, HostRoute, HostVisible, Live};
+use crate::api::{Changes, ChatApi, HostRoute, HostSession, HostVisible};
 use crate::{Chat, links};
 use identity::view::Identity;
 
@@ -14,11 +14,11 @@ impl Chat {
     /// Subscribes every follower; the ones before are dropped with them.
     pub(crate) fn watch(&mut self, cx: &mut Context<Self>) {
         let host = cx.host();
-        let props = host.subscribe::<HostProps>(());
-        let changes = host.subscribe::<Live<ChatApi>>(());
+        let props = host.subscribe::<HostSession>(());
+        let changes = host.subscribe::<Changes<ChatApi>>(());
         let routes = host.subscribe::<HostRoute>(());
         let visible = host.subscribe::<HostVisible>(());
-        let identity = host.subscribe::<Live<Identity>>(());
+        let identity = host.subscribe::<Changes<Identity>>(());
         self.followers = vec![
             cx.follow(props, |chat, props, _, cx| match props {
                 Ok(next) => chat.session_changed(next, cx),

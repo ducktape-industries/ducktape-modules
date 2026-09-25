@@ -6,7 +6,7 @@ use super::*;
 /// the room; opening it reads the host's rows under the notice's tag.
 #[test]
 fn a_direct_message_elsewhere_is_a_notice_and_a_badge_until_read() {
-    use ducktape_view_guest::doors::{HostBadge, NotifyPost, NotifyRead};
+    use ducktape_view_guest::methods::{HostBadge, NotifyPost, NotifySeen};
     let (mut cx, view) = opened();
     cx.host().handle::<Ask<ChatApi>>(|query| {
         Ok(match query {
@@ -37,14 +37,14 @@ fn a_direct_message_elsewhere_is_a_notice_and_a_badge_until_read() {
     );
     assert_eq!(posts[0].link, "duck://testnet-0a1b2c3d/chat/dm-7-8/2");
     assert_eq!(cx.host().asked::<HostBadge>().last(), Some(&1));
-    assert!(cx.host().asked::<NotifyRead>().is_empty());
+    assert!(cx.host().asked::<NotifySeen>().is_empty());
     view.update(&mut cx, |chat, window, cx| {
         cx.notify();
         chat.choose("dm-7-8".into(), window, cx)
     });
     cx.run_until_parked();
     assert_eq!(cx.host().asked::<HostBadge>().last(), Some(&0));
-    assert_eq!(cx.host().asked::<NotifyRead>(), [posts[0].tag.clone()]);
+    assert_eq!(cx.host().asked::<NotifySeen>(), [posts[0].tag.clone()]);
 }
 
 /// A reload carries the read cursors but not the count: the first list after
@@ -52,7 +52,7 @@ fn a_direct_message_elsewhere_is_a_notice_and_a_badge_until_read() {
 /// posts nothing a second time.
 #[test]
 fn the_badge_is_counted_again_from_the_read_cursors() {
-    use ducktape_view_guest::doors::{HostBadge, NotifyPost};
+    use ducktape_view_guest::methods::{HostBadge, NotifyPost};
     let (mut cx, view) = opened();
     cx.host().handle::<Ask<ChatApi>>(|query| {
         Ok(match query {
@@ -93,13 +93,13 @@ fn the_badge_is_counted_again_from_the_read_cursors() {
 /// badge and dot their rooms, and reading a room keeps its new cursor.
 #[test]
 fn kept_cursors_bring_the_badge_back_after_a_relaunch() {
-    use ducktape_view_guest::doors::{self, HostBadge, StoreGet, StoreSet};
+    use ducktape_view_guest::methods::{self, HostBadge, StoreGet, StoreSet};
     use std::collections::BTreeMap;
     let mut cx = TestAppContext::new();
     configure(&mut cx);
     cx.host().handle::<StoreGet>(|key| {
         Ok((key == "reads/0102").then(|| {
-            doors::encode(&BTreeMap::from([
+            methods::encode(&BTreeMap::from([
                 ("general".to_owned(), 1u64),
                 ("dm-7-8".to_owned(), 0),
                 ("gone".to_owned(), 4),
@@ -130,7 +130,7 @@ fn kept_cursors_bring_the_badge_back_after_a_relaunch() {
             query => panic!("unexpected chat query: {query:?}"),
         })
     });
-    let props = cx.host().stream::<HostProps>();
+    let props = cx.host().stream::<HostSession>();
     let visible = cx.host().stream::<HostVisible>();
     let _view = cx.open::<Chat>();
     props.push(Session {
@@ -155,7 +155,7 @@ fn kept_cursors_bring_the_badge_back_after_a_relaunch() {
         .pop()
         .expect("the read is kept");
     assert_eq!(key, "reads/0102");
-    let kept: BTreeMap<String, u64> = doors::decode(&kept.unwrap()).unwrap();
+    let kept: BTreeMap<String, u64> = methods::decode(&kept.unwrap()).unwrap();
     assert_eq!(
         kept,
         BTreeMap::from([("general".into(), 3), ("dm-7-8".into(), 0)]),
@@ -168,13 +168,13 @@ fn kept_cursors_bring_the_badge_back_after_a_relaunch() {
 /// runs without another chat write to prompt it.
 #[test]
 fn the_relaunch_recount_waits_for_the_readers_account() {
-    use ducktape_view_guest::doors::{self, HostBadge, StoreGet};
+    use ducktape_view_guest::methods::{self, HostBadge, StoreGet};
     use std::collections::BTreeMap;
     let mut cx = TestAppContext::new();
     configure(&mut cx);
     cx.host().handle::<StoreGet>(|key| {
         Ok((key == "reads/0102")
-            .then(|| doors::encode(&BTreeMap::from([("dm-7-8".to_owned(), 0u64)]))))
+            .then(|| methods::encode(&BTreeMap::from([("dm-7-8".to_owned(), 0u64)]))))
     });
     cx.host().handle::<Ask<ChatApi>>(|query| {
         Ok(match query {
@@ -188,7 +188,7 @@ fn the_relaunch_recount_waits_for_the_readers_account() {
             query => panic!("unexpected chat query: {query:?}"),
         })
     });
-    let props = cx.host().stream::<HostProps>();
+    let props = cx.host().stream::<HostSession>();
     let visible = cx.host().stream::<HostVisible>();
     let _view = cx.open::<Chat>();
     let unresolved = Session {
@@ -215,8 +215,8 @@ fn the_relaunch_recount_waits_for_the_readers_account() {
 /// starts from what it sees: reading a room still keeps its cursor.
 #[test]
 fn a_refused_store_read_still_keeps_cursors() {
-    use ducktape_view_guest::doors::{self, StoreGet, StoreSet};
     use ducktape_view_guest::host::malformed;
+    use ducktape_view_guest::methods::{self, StoreGet, StoreSet};
     use std::collections::BTreeMap;
     let mut cx = TestAppContext::new();
     configure(&mut cx);
@@ -233,7 +233,7 @@ fn a_refused_store_read_still_keeps_cursors() {
             query => panic!("unexpected chat query: {query:?}"),
         })
     });
-    let props = cx.host().stream::<HostProps>();
+    let props = cx.host().stream::<HostSession>();
     let visible = cx.host().stream::<HostVisible>();
     let _view = cx.open::<Chat>();
     props.push(Session {
@@ -260,6 +260,6 @@ fn a_refused_store_read_still_keeps_cursors() {
         .rfind(|(key, _)| key == "reads/0102")
         .expect("the read is kept");
     assert_eq!(key, "reads/0102");
-    let kept: BTreeMap<String, u64> = doors::decode(&kept.unwrap()).unwrap();
+    let kept: BTreeMap<String, u64> = methods::decode(&kept.unwrap()).unwrap();
     assert_eq!(kept, BTreeMap::from([("general".into(), 3)]));
 }

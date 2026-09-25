@@ -2,7 +2,7 @@
 use super::*;
 use crate::decode::{amount, clip, preview};
 use ducktape_view_guest::design;
-use ducktape_view_guest::doors::Value;
+use ducktape_view_guest::methods::Value;
 
 pub(super) fn transactions(
     view: &Explorer,

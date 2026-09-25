@@ -23,9 +23,9 @@ impl PreferredSize {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Manifest {
     pub wire_epoch: u32,
-    /// the [`crate::doors::DOORS_REVISION`] the view was built against; 0
+    /// the [`crate::methods::METHODS_REVISION`] the view was built against; 0
     /// from a v1 manifest, which predates it
-    pub doors: u32,
+    pub methods: u32,
     pub name: String,
     pub description: String,
     pub capabilities: Vec<String>,
@@ -88,7 +88,7 @@ pub fn read_manifest(bytes: &[u8]) -> Option<Manifest> {
 
 impl Manifest {
     /// Parses the strict six-line `ducktape.view.manifest.v1` text, or the
-    /// seven-line `v2` that adds the doors revision, and its bounds.
+    /// seven-line `v2` that adds the methods revision, and its bounds.
     pub fn parse(text: &str) -> Option<Self> {
         if text.len() > 1024 || text.chars().any(|c| c.is_control() && c != '\n') {
             return None;
@@ -122,13 +122,13 @@ impl Manifest {
             }
         };
         let wire_epoch = canonical(lines.next()?)?;
-        let doors = if v2 { canonical(lines.next()?)? } else { 0 };
+        let methods = if v2 { canonical(lines.next()?)? } else { 0 };
         if lines.next().is_some() {
             return None;
         }
         let manifest = Self {
             wire_epoch,
-            doors,
+            methods,
             name,
             description,
             capabilities,
@@ -149,9 +149,9 @@ impl Manifest {
         }
     }
 
-    /// Whether the view was built against doors this host does not have.
-    pub fn needs_newer_doors(&self) -> bool {
-        self.doors > crate::doors::DOORS_REVISION
+    /// Whether the view was built against methods this host does not have.
+    pub fn needs_newer_methods(&self) -> bool {
+        self.methods > crate::methods::METHODS_REVISION
     }
 
     fn within_bounds(&self) -> bool {
@@ -328,12 +328,12 @@ mod tests {
     }
 
     #[test]
-    fn a_v2_manifest_names_its_doors_and_a_v1_one_none() {
+    fn a_v2_manifest_names_its_methods_and_a_v1_one_none() {
         let v2 = Manifest::parse("ducktape.view.manifest.v2\nApp\n\n\nnone\n2\n7").unwrap();
-        assert_eq!((v2.wire_epoch, v2.doors), (2, 7));
-        assert!(!v2.needs_newer_doors());
+        assert_eq!((v2.wire_epoch, v2.methods), (2, 7));
+        assert!(!v2.needs_newer_methods());
         let v1 = Manifest::parse("ducktape.view.manifest.v1\nApp\n\n\nnone\n2").unwrap();
-        assert_eq!(v1.doors, 0);
+        assert_eq!(v1.methods, 0);
         for invalid in [
             "ducktape.view.manifest.v2\nApp\n\n\nnone\n2",
             "ducktape.view.manifest.v2\nApp\n\n\nnone\n2\n0",
@@ -344,8 +344,8 @@ mod tests {
         }
         let ahead = format!(
             "ducktape.view.manifest.v2\nApp\n\n\nnone\n2\n{}",
-            crate::doors::DOORS_REVISION + 1
+            crate::methods::METHODS_REVISION + 1
         );
-        assert!(Manifest::parse(&ahead).unwrap().needs_newer_doors());
+        assert!(Manifest::parse(&ahead).unwrap().needs_newer_methods());
     }
 }

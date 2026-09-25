@@ -2,7 +2,7 @@
 
 A view is a wasm32 cdylib on `view-guest`. It builds a widget tree the host
 lays out and draws, hears meaning-level events back, and asks the host for
-data through a fixed table of doors. This page is the whole surface.
+data through a fixed table of methods. This page is the whole surface.
 
 ## What is gpui and what is ours
 
@@ -24,26 +24,26 @@ re-exported unchanged. `src/lib.rs:5-13` is the gpui list (`px`, `rems`,
 - `InteractiveElement`, `StatefulInteractiveElement`, `FocusHandle`
   (`src/interactivity.rs`): listeners and focus become wire routes.
 
-## The doors
+## The methods
 
-`view-wire/src/doors.rs` is the one list of what a view may ask for
-(`doors::ALL`): each kind a marker type naming its request and reply (borsh both ways;
+`view-wire/src/methods.rs` is the one list of what a view may ask for
+(`methods::ALL`): each kind a marker type naming its request and reply (borsh both ways;
 `host.widget` alone is MessagePack, because it names tree ids). The trait is
 sealed, so a view cannot invent a kind. Three verbs on `Host` (`src/host.rs`):
 
 ```rust
 let reply = cx.host().ask::<Query<Identity>>(identity::Query::List { page }).await?;
-let mut live = cx.host().subscribe::<Live<Valset>>(());
-cx.host().notify::<doors::HostBadge>(3);
+let mut live = cx.host().subscribe::<Changes<Valset>>(());
+cx.host().notify::<methods::HostBadge>(3);
 ```
 
-A node program is addressed by a `doors::Program` impl beside the view
+A node program is addressed by a `methods::Program` impl beside the view
 (`crates/app/forge-view/src/api.rs`), never by the program crate; `Query<P>`,
-`Submit<P>` and `Live<P>` are its three doors. Every refusal is `abi::Refusal`
+`Submit<P>` and `Changes<P>` are its three methods. Every refusal is `abi::Refusal`
 (`reason` token, `sentence`), one type end to end. `Loaded<T>` + `cx.load`
 (`src/view.rs`) hold an ask's four states and snapshot `Loading` as `Idle`.
 
-`Session` (`doors.rs`, `subscribe::<HostProps>`) is what every view is handed:
+`Session` (`methods.rs`, `subscribe::<HostSession>`) is what every view is handed:
 `connected`, `dark`, `chain`, `key` (the seated key, hex), `account` (its
 account number, `None` until the host resolves one), `endpoint`; an item per
 change. Read "who am I" from `account`; no view asks identity for it.
@@ -59,11 +59,11 @@ pending; a host holds it to `view_wire::MAX_SNAPSHOT_BYTES` (8 MiB,
 
 ## Exporting
 
-`export_view!(View, "Name", "description", ["rpc", "host"])` (`src/view.rs`)
+`export_view!(View, "Name", "description", ["program", "host"])` (`src/view.rs`)
 writes the five wasm exports and the manifest section `ducktape.view.manifest`
 (`view-wire/src/manifest.rs`: header, name, description, capabilities,
 preferred size, `WIRE_EPOCH`). Each capability must be one of
-`doors::CAPABILITIES`, the `<capability>` half of the kinds the view asks
+`methods::CAPABILITIES`, the `<capability>` half of the kinds the view asks
 through; another literal is a compile error.
 
 The ABI gate (`view-wire/src/abi.rs`, `tools/check-view-abi.py`): exactly one
@@ -77,9 +77,9 @@ pinned by `view-wire/tests/golden.rs`: a shape change is a new `WIRE_EPOCH`.
 ## Testing
 
 `testing::TestAppContext` (`src/testing/context.rs`) opens a view over a
-`FakeHost` (`src/testing/fake_host.rs`): `handle::<Door>`, `refuse`,
+`FakeHost` (`src/testing/fake_host.rs`): `handle::<Method>`, `refuse`,
 `stream`, `asked`; then `simulate_click`, `texts`, `assert_accessible`.
-It holds the view to its `export_view!` capabilities as the app does: a door
+It holds the view to its `export_view!` capabilities as the app does: a method
 whose capability the manifest leaves out panics with `undeclared_capability`.
 Screen export: a test gated on `*_SCREEN_EXPORT=1` (`FORGE_SCREEN_EXPORT`,
 `crates/app/forge-view/src/screen_tests.rs`; `CHAT_SCREEN_EXPORT`,

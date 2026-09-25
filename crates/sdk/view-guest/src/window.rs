@@ -13,6 +13,6 @@ impl Window {
         });
     }
     pub fn dispatch(&mut self, command: wire::WidgetCommand) {
-        slots::host(&self.slots).notify::<crate::doors::HostWidget>(command);
+        slots::host(&self.slots).notify::<crate::methods::HostWidget>(command);
     }
 }

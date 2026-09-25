@@ -6,10 +6,10 @@
 //! reply is folded to rows as it lands.
 use abi::hex;
 use ducktape_view_guest::design;
-use ducktape_view_guest::doors::Live;
-use ducktape_view_guest::doors::Query;
 use ducktape_view_guest::export_view;
 use ducktape_view_guest::host::{Refusal, malformed};
+use ducktape_view_guest::methods::Changes;
+use ducktape_view_guest::methods::Query;
 use ducktape_view_guest::view::Loaded;
 use ducktape_view_guest::{
     AnyElement, ClickEvent, Context, ElementId, Host, InteractiveElement, IntoElement,
@@ -57,7 +57,7 @@ impl View for Nodes {
     }
 
     fn restored(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        let mut stream = cx.host().subscribe::<Live<Valset>>(());
+        let mut stream = cx.host().subscribe::<Changes<Valset>>(());
         self.live = Some(cx.spawn(async move |this, cx| {
             while stream.next().await.is_some() {
                 if this.update(cx, |view, cx| view.read(cx)).is_err() {
@@ -300,7 +300,7 @@ export_view!(
     Nodes,
     "Nodes",
     "The validator set of this network and every membership behind it.",
-    ["rpc", "host"]
+    ["program"]
 );
 
 #[cfg(test)]

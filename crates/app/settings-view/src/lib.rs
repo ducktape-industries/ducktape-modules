@@ -4,8 +4,8 @@ mod api;
 use account::{Account, read_account};
 use api::*;
 use ducktape_view_guest::design;
-use ducktape_view_guest::doors::Live;
-use ducktape_view_guest::doors::{ClipboardWrite, ClockTicks};
+use ducktape_view_guest::methods::Changes;
+use ducktape_view_guest::methods::{ClipboardWrite, ClockTicks};
 use ducktape_view_guest::prelude::*;
 use ducktape_view_guest::view::Loaded;
 use ducktape_view_guest::{Context, Render, Task, View, Window, export_view};
@@ -44,7 +44,7 @@ impl View for Settings {
     }
     fn restored(&mut self, _: &mut Window, cx: &mut Context<Self>) {
         self.watches.clear();
-        let mut props = cx.host().subscribe::<HostProps>(());
+        let mut props = cx.host().subscribe::<HostSession>(());
         self.watches.push(cx.spawn(async move |this, cx| {
             while let Some(reply) = props.next().await {
                 if this
@@ -67,7 +67,7 @@ impl View for Settings {
                 }
             }
         }));
-        let mut live = cx.host().subscribe::<Live<Valset>>(());
+        let mut live = cx.host().subscribe::<Changes<Valset>>(());
         self.watches.push(cx.spawn(async move |this, cx| {
             while live.next().await.is_some() {
                 if this
@@ -95,11 +95,11 @@ impl View for Settings {
 impl Settings {
     fn read(&mut self, cx: &mut Context<Self>) {
         if self.status.ready().is_some() {
-            cx.refresh(cx.host().ask::<RpcStatus>(()), |view, status, _| {
+            cx.refresh(cx.host().ask::<ChainStatus>(()), |view, status, _| {
                 view.status = Loaded::Ready(status)
             });
         } else if !self.status.is_loading() {
-            self.status = cx.load(cx.host().ask::<RpcStatus>(()), |v| &mut v.status);
+            self.status = cx.load(cx.host().ask::<ChainStatus>(()), |v| &mut v.status);
         }
         cx.notify();
     }
@@ -336,7 +336,7 @@ impl Settings {
         let mint = cx.listener(|v: &mut Self, _: &ClickEvent, _, cx| {
             v.copied.clear();
             v.invite = cx.load(
-                cx.host().ask::<RpcInvite>(Mint {
+                cx.host().ask::<InviteMint>(Mint {
                     ttl_days: TTL[v.ttl],
                 }),
                 |v| &mut v.invite,
@@ -572,7 +572,15 @@ export_view!(
     Settings,
     "Settings",
     "Node, account, invites and app preferences.",
-    ["rpc", "op", "host", "clock", "clipboard"]
+    [
+        "chain",
+        "program",
+        "op",
+        "invite",
+        "host",
+        "clock",
+        "clipboard"
+    ]
 );
 #[cfg(test)]
 mod tests;

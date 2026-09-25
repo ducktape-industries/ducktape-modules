@@ -347,8 +347,8 @@ pub fn every_frame() -> Frame {
         ],
         requests: vec![Request {
             id: 1,
-            kind: doors::HostLog::KIND.into(),
-            payload: doors::HostLog::encode_request(&"hello".into()),
+            kind: methods::HostLog::KIND.into(),
+            payload: methods::HostLog::encode_request(&"hello".into()),
         }],
         cancels: vec![2],
         unchanged: false,

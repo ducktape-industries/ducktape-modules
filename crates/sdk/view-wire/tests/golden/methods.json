@@ -1,6 +1,6 @@
 [
   {
-    "kind": "rpc.query",
+    "kind": "program.query",
     "request": [
       7,
       "q"
@@ -25,7 +25,7 @@
     ]
   },
   {
-    "kind": "rpc.status",
+    "kind": "chain.status",
     "request": null,
     "reply": {
       "network": "local#1",
@@ -140,7 +140,7 @@
     }
   },
   {
-    "kind": "rpc.invite",
+    "kind": "invite.mint",
     "request": {
       "ttl_days": 7
     },
@@ -155,12 +155,12 @@
     }
   },
   {
-    "kind": "rpc.live",
+    "kind": "program.changes",
     "request": null,
     "reply": 9
   },
   {
-    "kind": "rpc.blocks",
+    "kind": "chain.blocks",
     "request": {
       "before": 10,
       "limit": 2
@@ -353,7 +353,7 @@
     ]
   },
   {
-    "kind": "rpc.block",
+    "kind": "chain.block",
     "request": {
       "Id": [
         4,
@@ -403,7 +403,7 @@
     ]
   },
   {
-    "kind": "host.props",
+    "kind": "host.session",
     "request": null,
     "reply": {
       "connected": true,
@@ -425,7 +425,7 @@
     "reply": null
   },
   {
-    "kind": "host.open_link",
+    "kind": "link.open",
     "request": "duck://chat/room",
     "reply": null
   },
@@ -501,12 +501,12 @@
     "reply": null
   },
   {
-    "kind": "notify.read",
+    "kind": "notify.seen",
     "request": "#design",
     "reply": null
   },
   {
-    "kind": "rpc.heads",
+    "kind": "chain.heads",
     "request": null,
     "reply": {
       "height": 9,

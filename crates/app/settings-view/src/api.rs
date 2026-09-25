@@ -1,7 +1,7 @@
-//! The programs this view reads, by the doors in `view_wire::doors`.
+//! The programs this view reads, by the methods in `view_wire::methods`.
 
-pub use ducktape_view_guest::doors::{
-    HostProps, Mint, Minted, NodeStatus, RpcInvite, RpcStatus, Session, Submit,
+pub use ducktape_view_guest::methods::{
+    ChainStatus, HostSession, InviteMint, Mint, Minted, NodeStatus, Session, Submit,
 };
 
 pub use identity::view::Identity;

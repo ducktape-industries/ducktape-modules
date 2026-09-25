@@ -3,8 +3,8 @@
 //! hands the screen a single reply. A typed refusal becomes a `Refusal`, so
 //! the four states of a `Loaded` slot stay honest.
 use ducktape_view_guest::Host;
-use ducktape_view_guest::doors::Query as Ask;
 use ducktape_view_guest::host::{Refusal, malformed};
+use ducktape_view_guest::methods::Query as Ask;
 
 use crate::api::{Ask as Forge, ChatApi};
 use crate::state::Names;
@@ -81,7 +81,7 @@ fn extend(into: &mut Reply, more: Reply) {
     }
 }
 
-/// The identity roster, through chat — the one door that already joins
+/// The identity roster, through chat — the one method that already joins
 /// accounts, their names and the keys they hold.
 pub(crate) async fn roster(host: Host) -> Result<Names, Refusal> {
     match host

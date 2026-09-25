@@ -1,5 +1,5 @@
 //! Every kind a view may ask its host for, with the request and reply each
-//! carries. This is the ONE list: a view names a door by its type, the host
+//! carries. This is the ONE list: a view names a method by its type, the host
 //! answers by the same type, and a kind that is not here is a compile error
 //! on one side and `unknown_request` on the other. [`ALL`] is what a host
 //! test checks its handlers against.
@@ -7,16 +7,16 @@
 //! THE CODEC RULE. Two layers cross the guest boundary and they want
 //! opposite things. The tree a view draws (`Frame`, [`WidgetCommand`]) must
 //! tolerate a hundred optional fields and is decoded under a budget — that
-//! is named MessagePack, in `codec`. Everything a door carries is DATA: the
+//! is named MessagePack, in `codec`. Everything a method carries is DATA: the
 //! bytes a program signs, stores or answers with, where the same value must
 //! be the same bytes and an unknown field is a fault. That is borsh, the
 //! codec the program abi is written in, so a program's own request rides a
-//! door with no second encoding around it. The rule is held by types, not
-//! by review: [`Door`] is sealed, so a view cannot declare a kind or pick a
+//! method with no second encoding around it. The rule is held by types, not
+//! by review: [`Method`] is sealed, so a view cannot declare a kind or pick a
 //! codec, and [`Program`]'s bounds are borsh, so a program that speaks
-//! anything else does not have a door.
+//! anything else does not have a method.
 //!
-//! ABSENT is `None`, never a refusal: a door whose thing may not exist replies `Option`, and a refusal means the ask itself failed.
+//! ABSENT is `None`, never a refusal: a method whose thing may not exist replies `Option`, and a refusal means the ask itself failed.
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
@@ -27,12 +27,12 @@ mod sealed {
     pub trait Sealed {}
 }
 
-/// One kind a view may ask for. Sealed: the doors are the ones in this
+/// One kind a view may ask for. Sealed: the methods are the ones in this
 /// module.
-pub trait Door: sealed::Sealed {
+pub trait Method: sealed::Sealed {
     const KIND: &'static str;
-    /// The program a node door is addressed to, so a test host can key on
-    /// it; `None` for the host's own doors.
+    /// The program a node method is addressed to, so a test host can key on
+    /// it; `None` for the host's own methods.
     const TARGET: Option<&'static str> = None;
     type Request: std::fmt::Debug;
     type Reply;
@@ -50,12 +50,12 @@ pub fn decode<T: BorshDeserialize>(bytes: &[u8]) -> Result<T, String> {
     borsh::from_slice(bytes).map_err(|error| error.to_string())
 }
 
-macro_rules! door {
+macro_rules! method {
     ($(#[$doc:meta])* $name:ident, $kind:literal, $request:ty, $reply:ty) => {
         $(#[$doc])*
         pub struct $name;
         impl sealed::Sealed for $name {}
-        impl Door for $name {
+        impl Method for $name {
             const KIND: &'static str = $kind;
             type Request = $request;
             type Reply = $reply;
@@ -75,24 +75,24 @@ macro_rules! door {
     };
 }
 
-/// Every [`door!`] below, and [`ALL`] from the same list, so a door is
+/// Every [`method!`] below, and [`ALL`] from the same list, so a method is
 /// never declared without being listed. `also` names the kinds written by
-/// hand: the three node doors generic over a [`Program`], and [`HostWidget`].
-macro_rules! doors {
+/// hand: the three node methods generic over a [`Program`], and [`HostWidget`].
+macro_rules! methods {
     (
         also: [$($also:expr),* $(,)?];
         $($(#[$doc:meta])* $name:ident, $kind:literal, $request:ty, $reply:ty;)*
     ) => {
-        $(door!($(#[$doc])* $name, $kind, $request, $reply);)*
+        $(method!($(#[$doc])* $name, $kind, $request, $reply);)*
 
         /// Every kind, so a host can assert it answers each one.
         pub const ALL: &[&str] = &[$($also,)* $($kind),*];
 
-        /// Which doors a view was built against, in its manifest, so a host
+        /// Which methods a view was built against, in its manifest, so a host
         /// with fewer refuses it at load rather than at the call. Within a
-        /// wire epoch the doors only grow (a moved or dropped one is a new
+        /// wire epoch the methods only grow (a moved or dropped one is a new
         /// epoch: `tests/golden.rs`), so their count names the set.
-        pub const DOORS_REVISION: u32 = ALL.len() as u32;
+        pub const METHODS_REVISION: u32 = ALL.len() as u32;
     };
 }
 
@@ -109,7 +109,7 @@ pub trait Program {
     type Reply: BorshSerialize + BorshDeserialize;
 }
 
-/// The envelope of a node door: the program addressed and the bytes it
+/// The envelope of a node method: the program addressed and the bytes it
 /// gets, which the host signs into a frame without reading.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub struct Call {
@@ -125,11 +125,11 @@ fn decode_call<T: BorshDeserialize>(bytes: &[u8], target: &str) -> Result<T, Str
     decode(&call.body)
 }
 
-/// `rpc.query`: one query to `P`, answered with the bytes it `Respond`ed.
+/// `program.query`: one query to `P`, answered with the bytes it `Respond`ed.
 pub struct Query<P>(std::marker::PhantomData<P>);
 impl<P: Program> sealed::Sealed for Query<P> {}
-impl<P: Program> Door for Query<P> {
-    const KIND: &'static str = "rpc.query";
+impl<P: Program> Method for Query<P> {
+    const KIND: &'static str = "program.query";
     const TARGET: Option<&'static str> = Some(P::NAME);
     type Request = P::Query;
     type Reply = P::Reply;
@@ -154,7 +154,7 @@ impl<P: Program> Door for Query<P> {
 /// reply is the receipt's output, the program's own bytes.
 pub struct Submit<P>(std::marker::PhantomData<P>);
 impl<P: Program> sealed::Sealed for Submit<P> {}
-impl<P: Program> Door for Submit<P> {
+impl<P: Program> Method for Submit<P> {
     const KIND: &'static str = "op.submit";
     const TARGET: Option<&'static str> = Some(P::NAME);
     type Request = P::Op;
@@ -176,13 +176,13 @@ impl<P: Program> Door for Submit<P> {
     }
 }
 
-/// `rpc.live`: a subscription to `P`, one item per block that wrote to it,
+/// `program.changes`: a subscription to `P`, one item per block that wrote to it,
 /// carrying its height; `None` when the node link was reopened and the view
 /// should re-read. The request is `P`'s name, as the host reads it.
-pub struct Live<P>(std::marker::PhantomData<P>);
-impl<P: Program> sealed::Sealed for Live<P> {}
-impl<P: Program> Door for Live<P> {
-    const KIND: &'static str = "rpc.live";
+pub struct Changes<P>(std::marker::PhantomData<P>);
+impl<P: Program> sealed::Sealed for Changes<P> {}
+impl<P: Program> Method for Changes<P> {
+    const KIND: &'static str = "program.changes";
     const TARGET: Option<&'static str> = Some(P::NAME);
     type Request = ();
     type Reply = Option<u64>;
@@ -275,7 +275,7 @@ pub struct Block {
     pub proposer: Option<Vec<u8>>,
     pub txs: Vec<Tx>,
 }
-/// One finalized head, as `rpc.heads` pushes it.
+/// One finalized head, as `chain.heads` pushes it.
 #[derive(
     Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
 )]
@@ -301,12 +301,12 @@ pub struct Session {
     pub account: Option<u64>,
     pub endpoint: String,
 }
-/// `host.widget`: a command on the mounted tree. The one door on the TREE
+/// `host.widget`: a command on the mounted tree. The one method on the TREE
 /// side of the codec rule — a [`WidgetCommand`] names typed element ids the
-/// tree is drawn with — so it is the one door in named MessagePack.
+/// tree is drawn with — so it is the one method in named MessagePack.
 pub struct HostWidget;
 impl sealed::Sealed for HostWidget {}
-impl Door for HostWidget {
+impl Method for HostWidget {
     const KIND: &'static str = "host.widget";
     type Request = WidgetCommand;
     type Reply = ();
@@ -359,30 +359,30 @@ pub enum Posted {
     /// The person blocked this view's notices: dropped, not logged.
     Blocked,
 }
-doors! {
-    also: ["rpc.query", "op.submit", "rpc.live", HostWidget::KIND];
-    /// `rpc.status`: the connected node's status.
-    RpcStatus, "rpc.status", (), NodeStatus;
-    /// `rpc.invite`: mint one invite, once (never retried).
-    RpcInvite, "rpc.invite", Mint, Minted;
-    /// `rpc.blocks`: a page of finalized blocks, newest first.
-    RpcBlocks, "rpc.blocks", BlockPage, Vec<Block>;
-    /// `rpc.block`: one finalized block; `None` where the node has none by
+methods! {
+    also: ["program.query", "op.submit", "program.changes", HostWidget::KIND];
+    /// `chain.status`: the connected node's status.
+    ChainStatus, "chain.status", (), NodeStatus;
+    /// `invite.mint`: mint one invite, once (never retried).
+    InviteMint, "invite.mint", Mint, Minted;
+    /// `chain.blocks`: a page of finalized blocks, newest first.
+    ChainBlocks, "chain.blocks", BlockPage, Vec<Block>;
+    /// `chain.block`: one finalized block; `None` where the node has none by
     /// that name.
-    RpcBlock, "rpc.block", BlockRef, Option<Block>;
+    ChainBlock, "chain.block", BlockRef, Option<Block>;
     /// `blob.get`: a blob by `sha256:<hex>` or `sha1:<hex>` id, unframed;
     /// `None` where the node holds no blob by that id.
     BlobGet, "blob.get", String, Option<Vec<u8>>;
-    /// `host.props`: a subscription to [`Session`], an item per change.
-    HostProps, "host.props", (), Session;
+    /// `host.session`: a subscription to [`Session`], an item per change.
+    HostSession, "host.session", (), Session;
     /// `host.visible`: whether the view is on screen, an item per change.
     HostVisible, "host.visible", (), bool;
     /// `host.badge`: the count on the view's tab.
     HostBadge, "host.badge", i64, ();
-    /// `host.open_link`: the one way out: a `duck://` link, opened in the
+    /// `link.open`: the one way out: a `duck://` link, opened in the
     /// app, or an `https://` one, handed to the system browser. Any other
     /// scheme is refused (`malformed_request`).
-    HostOpenLink, "host.open_link", String, ();
+    LinkOpen, "link.open", String, ();
     /// `host.route`: a subscription, one item per `duck://` link opened into
     /// this view: the path after the view's own segment (`tx/<hash>` of
     /// `duck://<chain>/explorer/tx/<hash>`). The route is delivered DECODED:
@@ -404,21 +404,21 @@ doors! {
     ClipboardWrite, "clipboard.write", String, ();
     /// `notify.post`: hand the host a notice; it says what it did.
     NotifyPost, "notify.post", Post, Posted;
-    /// `notify.read`: the reader has seen what this view posted under a
+    /// `notify.seen`: the reader has seen what this view posted under a
     /// tag; the host marks this view's rows under it read and takes down
     /// its standing banner. Another view's rows are never touched.
-    NotifyRead, "notify.read", String, ();
+    NotifySeen, "notify.seen", String, ();
     /// `store.get`: the value this view keeps under a key on this device,
     /// for the network in hand; `None` where it keeps none. A view sees
     /// only its own keys, and only on the network it runs on.
     StoreGet, "store.get", String, Option<Vec<u8>>;
     /// `store.set`: keep a value under a key, or drop it with `None`.
     StoreSet, "store.set", (String, Option<Vec<u8>>), ();
-    /// `rpc.heads`: a subscription, one item per finalized block, oldest
+    /// `chain.heads`: a subscription, one item per finalized block, oldest
     /// first, from the tip at subscribe on. Heights may skip where the host
     /// could not fill a gap (a reconnect, a node with no archive); a view
-    /// that must see every block reads the gap with `rpc.blocks`.
-    RpcHeads, "rpc.heads", (), Head;
+    /// that must see every block reads the gap with `chain.blocks`.
+    ChainHeads, "chain.heads", (), Head;
     /// `program.describe`: an op as its program says a person reads it,
     /// from the `ducktape.describe` module in the program's current code;
     /// `None` where the code carries none or it cannot read these bytes.
@@ -428,15 +428,17 @@ doors! {
 /// The `<capability>` half of every kind in [`ALL`]: the names a view's
 /// manifest may declare. `export_view!` refuses any other at compile time.
 pub const CAPABILITIES: &[&str] = &[
-    "rpc",
+    "chain",
+    "program",
     "op",
+    "invite",
+    "link",
     "blob",
     "host",
     "clock",
     "clipboard",
     "notify",
     "store",
-    "program",
 ];
 
 /// Whether `name` is in [`CAPABILITIES`]; `const` so a manifest literal is
@@ -475,8 +477,9 @@ mod tests {
         let mut known = CAPABILITIES.to_vec();
         known.sort_unstable();
         assert_eq!(prefixes, known);
-        assert!(is_capability("rpc") && is_capability("notify"));
-        assert!(!is_capability("chat") && !is_capability("rpc.query") && !is_capability(""));
+        assert!(is_capability("chain") && is_capability("link") && is_capability("notify"));
+        assert!(!is_capability("rpc"));
+        assert!(!is_capability("chat") && !is_capability("program.query") && !is_capability(""));
     }
 
     struct Binary;
@@ -488,7 +491,7 @@ mod tests {
     }
 
     #[test]
-    fn program_doors_address_their_program_and_carry_its_bytes() {
+    fn program_methods_address_their_program_and_carry_its_bytes() {
         let request = (42, "query".to_owned());
         let bytes = Query::<Binary>::encode_request(&request);
         let call: Call = decode(&bytes).unwrap();

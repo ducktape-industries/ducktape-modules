@@ -1,6 +1,6 @@
 use crate::{
-    doors::{self, Door},
     host::{malformed, Refusal},
+    methods::{self, Method},
     wire::{Event, Frame, Request},
 };
 use std::{cell::RefCell, collections::HashMap, marker::PhantomData, rc::Rc};
@@ -24,13 +24,13 @@ struct State {
 pub struct FakeHost(Rc<RefCell<State>>);
 
 impl FakeHost {
-    pub fn handle<C: Door>(
+    pub fn handle<C: Method>(
         &self,
         handler: impl FnMut(C::Request) -> Result<C::Reply, Refusal> + 'static,
     ) {
         self.register::<C>(handler, false);
     }
-    fn register<C: Door>(
+    fn register<C: Method>(
         &self,
         mut handler: impl FnMut(C::Request) -> Result<C::Reply, Refusal> + 'static,
         stream: bool,
@@ -51,7 +51,7 @@ impl FakeHost {
         );
     }
 
-    pub fn never<C: Door>(&self) {
+    pub fn never<C: Method>(&self) {
         for stream in [false, true] {
             self.0.borrow_mut().handlers.insert(
                 (C::KIND, C::TARGET, stream),
@@ -63,7 +63,7 @@ impl FakeHost {
         }
     }
 
-    pub fn refuse<C: Door>(&self, reason: &str, sentence: &str) {
+    pub fn refuse<C: Method>(&self, reason: &str, sentence: &str) {
         let refusal = Refusal::new(reason, sentence);
         self.handle::<C>({
             let refusal = refusal.clone();
@@ -72,7 +72,7 @@ impl FakeHost {
         self.register::<C>(move |_| Err(refusal.clone()), true);
     }
 
-    pub fn stream<C: Door>(&self) -> Feed<C> {
+    pub fn stream<C: Method>(&self) -> Feed<C> {
         let state = Rc::new(RefCell::new(StreamState::default()));
         let subscription = state.clone();
         self.0.borrow_mut().streams.push(state.clone());
@@ -99,7 +99,7 @@ impl FakeHost {
         }
     }
 
-    pub fn asked<C: Door>(&self) -> Vec<C::Request> {
+    pub fn asked<C: Method>(&self) -> Vec<C::Request> {
         self.0
             .borrow()
             .requests
@@ -142,7 +142,7 @@ impl FakeHost {
         }
         for request in &frame.requests {
             state.requests.push(request.clone());
-            // The app refuses a door the manifest leaves out
+            // The app refuses a method the manifest leaves out
             // (`undeclared_capability`); a test fails on it instead.
             let capability = request
                 .kind
@@ -150,23 +150,23 @@ impl FakeHost {
                 .map_or(&*request.kind, |(c, _)| c);
             if let Some(declared) = state.declared {
                 assert!(
-                    !doors::is_capability(capability) || declared.contains(&capability),
+                    !methods::is_capability(capability) || declared.contains(&capability),
                     "undeclared_capability: `{}` needs the `{capability}` capability, \
                      which this view's export_view! does not declare",
                     request.kind
                 );
             }
             match request.kind.as_str() {
-                doors::HostLog::KIND => {
-                    state
-                        .logs
-                        .push(doors::HostLog::decode_request(&request.payload).expect("log line"));
+                methods::HostLog::KIND => {
+                    state.logs.push(
+                        methods::HostLog::decode_request(&request.payload).expect("log line"),
+                    );
                     continue;
                 }
-                doors::HostOpenLink::KIND => {
+                methods::LinkOpen::KIND => {
                     state
                         .links
-                        .push(doors::HostOpenLink::decode_request(&request.payload).expect("link"));
+                        .push(methods::LinkOpen::decode_request(&request.payload).expect("link"));
                     continue;
                 }
                 _ => {}
@@ -202,18 +202,18 @@ impl FakeHost {
     }
 }
 
-/// The program a node door addresses: `rpc.live` names it outright, the
-/// others carry it on their [`doors::Call`] envelope.
+/// The program a node method addresses: `program.changes` names it outright, the
+/// others carry it on their [`methods::Call`] envelope.
 fn target_of(request: &Request) -> Option<String> {
     match request.kind.as_str() {
-        "rpc.live" => doors::decode::<String>(&request.payload).ok(),
-        _ => doors::decode::<doors::Call>(&request.payload)
+        "program.changes" => methods::decode::<String>(&request.payload).ok(),
+        _ => methods::decode::<methods::Call>(&request.payload)
             .ok()
             .map(|call| call.target),
     }
 }
 
-fn matches<C: Door>(request: &Request) -> bool {
+fn matches<C: Method>(request: &Request) -> bool {
     request.kind == C::KIND
         && C::TARGET.is_none_or(|target| target_of(request).as_deref() == Some(target))
 }
@@ -225,12 +225,12 @@ struct StreamState {
     host: Option<crate::host::Host>,
 }
 
-pub struct Feed<C: Door> {
+pub struct Feed<C: Method> {
     state: Rc<RefCell<StreamState>>,
     host: FakeHost,
     marker: PhantomData<C>,
 }
-impl<C: Door> Feed<C> {
+impl<C: Method> Feed<C> {
     pub fn push(&self, item: C::Reply) {
         let state = self.state.borrow();
         assert!(!state.closed, "cannot push to a closed stream");
@@ -258,7 +258,7 @@ impl<C: Door> Feed<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::doors::{Live, Program, Query};
+    use crate::methods::{Changes, Program, Query};
 
     struct First;
     struct Second;
@@ -275,7 +275,7 @@ mod tests {
     module!(First, "first");
     module!(Second, "second");
 
-    fn request<C: Door>(id: u64, value: C::Request) -> Request {
+    fn request<C: Method>(id: u64, value: C::Request) -> Request {
         Request {
             id,
             kind: C::KIND.into(),
@@ -312,9 +312,9 @@ mod tests {
     #[test]
     fn streams_stop_delivering_to_cancelled_subscriptions() {
         let host = FakeHost::default();
-        let feed = host.stream::<Live<First>>();
+        let feed = host.stream::<Changes<First>>();
         let channel = crate::host::Host::default();
-        let stream = channel.subscribe::<Live<First>>(());
+        let stream = channel.subscribe::<Changes<First>>(());
         host.accept(
             &Frame {
                 requests: channel.drain_outbox(),
@@ -375,9 +375,9 @@ mod tests {
     fn closing_a_feed_finishes_without_fabricating_an_item_or_refusal() {
         use futures::StreamExt;
         let host = FakeHost::default();
-        let feed = host.stream::<Live<First>>();
+        let feed = host.stream::<Changes<First>>();
         let channel = crate::host::Host::default();
-        let mut stream = channel.subscribe::<Live<First>>(());
+        let mut stream = channel.subscribe::<Changes<First>>(());
         host.accept(
             &Frame {
                 requests: channel.drain_outbox(),
@@ -390,7 +390,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "unhandled rpc.query request")]
+    #[should_panic(expected = "unhandled program.query request")]
     fn unexpected_requests_fail_at_the_host_boundary() {
         FakeHost::default().accept(
             &Frame {

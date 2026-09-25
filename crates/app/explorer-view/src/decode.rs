@@ -5,7 +5,7 @@
 //! (`program.describe`: the describe module the program's own code
 //! carries). A program with none, or bytes it cannot read, reads as its
 //! size and a short hex preview: [`bytes`].
-use ducktape_view_guest::doors::{Description, Field, Value};
+use ducktape_view_guest::methods::{Description, Field, Value};
 
 /// The longest a field's value runs before it is clipped.
 const MAX_VALUE: usize = 160;

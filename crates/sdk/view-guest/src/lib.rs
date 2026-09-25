@@ -77,7 +77,7 @@ pub mod window;
 mod snapshot;
 pub mod view;
 pub use view::{Declared, Loaded, Render, View};
-pub use wire::doors;
+pub use wire::methods;
 mod context;
 pub use context::{App, AsyncApp, Context, Entity, Released, WeakEntity};
 mod executor;
@@ -106,10 +106,10 @@ pub const fn manifest_len(text: &str, preferred_size: &str) -> usize {
         + 1
         + digits(wire::WIRE_EPOCH)
         + 1
-        + digits(wire::doors::DOORS_REVISION)
+        + digits(wire::methods::METHODS_REVISION)
 }
 
-/// Appends the preferred window size, the current wire epoch and the doors
+/// Appends the preferred window size, the current wire epoch and the methods
 /// revision at compile time.
 pub const fn manifest_bytes<const N: usize>(text: &str, preferred_size: &str) -> [u8; N] {
     let bytes = text.as_bytes();
@@ -126,7 +126,7 @@ pub const fn manifest_bytes<const N: usize>(text: &str, preferred_size: &str) ->
         i += 1;
     }
     let mut end = N;
-    let mut number = wire::doors::DOORS_REVISION;
+    let mut number = wire::methods::METHODS_REVISION;
     let mut last = digits(number);
     let mut line = 0;
     while line < 2 {
@@ -147,14 +147,14 @@ pub const fn manifest_bytes<const N: usize>(text: &str, preferred_size: &str) ->
 }
 
 /// The manifest section and the wasm32 exports ([`wire::abi`]) for a view. `export_view!` invokes this internally.
-/// Each capability must be one of [`wire::doors::CAPABILITIES`], the
-/// `<capability>` half of the door kinds the view asks through.
+/// Each capability must be one of [`wire::methods::CAPABILITIES`], the
+/// `<capability>` half of the method kinds the view asks through.
 #[macro_export]
 macro_rules! export_driver {
     ($app:ty, $name:expr, $description:expr, [$($capability:literal),* $(,)?]) => {
         $(const _: () = assert!(
-            $crate::wire::doors::is_capability($capability),
-            concat!("`", $capability, "` is not a door capability: see view_wire::doors::CAPABILITIES")
+            $crate::wire::methods::is_capability($capability),
+            concat!("`", $capability, "` is not a method capability: see view_wire::methods::CAPABILITIES")
         );)*
         impl $crate::Declared for $app {
             const CAPABILITIES: &'static [&'static str] = &[$($capability),*];

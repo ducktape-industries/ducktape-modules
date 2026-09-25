@@ -5,8 +5,8 @@ use std::future::Future;
 
 use borsh::{BorshDeserialize, BorshSerialize};
 
-use crate::doors::{self, StoreGet, StoreSet};
 use crate::host::{malformed, Host, Refusal};
+use crate::methods::{self, StoreGet, StoreSet};
 
 /// The value kept under `key`, or `None` where nothing is.
 pub fn get<T: BorshDeserialize>(
@@ -17,12 +17,12 @@ pub fn get<T: BorshDeserialize>(
     async move {
         asked
             .await?
-            .map(|bytes| doors::decode(&bytes).map_err(malformed))
+            .map(|bytes| methods::decode(&bytes).map_err(malformed))
             .transpose()
     }
 }
 
 /// Keep `value` under `key`; `None` drops it. Nobody waits for the answer.
 pub fn set<T: BorshSerialize>(host: &Host, key: &str, value: Option<&T>) {
-    host.notify::<StoreSet>((key.to_owned(), value.map(doors::encode)));
+    host.notify::<StoreSet>((key.to_owned(), value.map(methods::encode)));
 }

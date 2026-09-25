@@ -1,8 +1,8 @@
 use crate::api::{Identity, Valset};
 use ducktape_view_guest::{
     Host,
-    doors::Query,
     host::{Refusal, malformed},
+    methods::Query,
 };
 
 use serde::{Deserialize, Serialize};

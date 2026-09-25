@@ -11,7 +11,7 @@ pub(crate) const MAX_DECODED_NODES: usize = 16 * MAX_NODES;
 /// [`Node`] holds its children and serde builds them from the inside out, so
 /// a chain of containers is a chain of stack frames. The tree the host walks
 /// afterwards — [`sanitize`], the renderer, `Drop` — recurses the same way,
-/// which is why the limit is the door rather than each walk.
+/// which is why the limit is the method rather than each walk.
 ///
 /// [`MAX_FRAME_BYTES`-sized](Frame) input is no protection: a chain deep
 /// enough to overflow a host thread's stack is a few tens of kilobytes.

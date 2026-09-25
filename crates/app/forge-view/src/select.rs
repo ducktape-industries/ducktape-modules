@@ -208,7 +208,7 @@ impl Forge {
         })
     }
 
-    /// The reader's signing key, joined from the roster: `host.props` names
+    /// The reader's signing key, joined from the roster: `host.session` names
     /// an account and forge is keyed by keys.
     pub(crate) fn me_key(&self) -> Option<Vec<u8>> {
         self.names.ready()?.key_of(self.my_account()?)

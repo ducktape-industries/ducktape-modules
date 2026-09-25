@@ -27,7 +27,7 @@ fn the_room_shows_its_rows_intro_and_actions() {
     );
     assert!(
         cx.host()
-            .asked::<ducktape_view_guest::doors::HostWidget>()
+            .asked::<ducktape_view_guest::methods::HostWidget>()
             .iter()
             .any(|command| {
                 matches!(command, wire::WidgetCommand::Focus { target }
@@ -206,7 +206,7 @@ fn a_full_room_renders_inside_the_frame_budget() {
             query => panic!("unexpected chat query: {query:?}"),
         })
     });
-    let props = cx.host().stream::<HostProps>();
+    let props = cx.host().stream::<HostSession>();
     let visible = cx.host().stream::<HostVisible>();
     cx.open::<Chat>();
     props.push(Session {
@@ -274,7 +274,7 @@ fn an_empty_thread_says_so_and_its_field_takes_focus() {
     let field = wire::ElementIdWire::Name("draft-general-1/editor".into());
     assert!(
         cx.host()
-            .asked::<ducktape_view_guest::doors::HostWidget>()
+            .asked::<ducktape_view_guest::methods::HostWidget>()
             .iter()
             .any(|command| matches!(command, wire::WidgetCommand::Focus { target } if *target == vec![field.clone()]))
     );
@@ -287,7 +287,7 @@ fn a_link_to_a_forge_room_lands_in_it() {
     let mut cx = TestAppContext::new();
     configure(&mut cx);
     let routes = cx.host().stream::<api::HostRoute>();
-    let props = cx.host().stream::<HostProps>();
+    let props = cx.host().stream::<HostSession>();
     cx.host().stream::<HostVisible>();
     let view = cx.open::<Chat>();
     props.push(Session {

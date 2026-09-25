@@ -439,7 +439,7 @@ impl Names {
             chat::Party::Module(_) | chat::Party::System => unnamed(party),
         }
     }
-    /// The signing key of an account number: `host.props` names no key, and
+    /// The signing key of an account number: `host.session` names no key, and
     /// forge's filters and judgment are keyed by the exact key.
     pub fn key_of(&self, number: u64) -> Option<Vec<u8>> {
         let row = self.rows.iter().find(|row| row.number == number)?;

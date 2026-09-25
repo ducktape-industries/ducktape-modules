@@ -15,7 +15,7 @@ fn session_key_resolves_to_its_account() {
 fn an_unregistered_key_stays_read_only() {
     let mut cx = TestAppContext::new();
     configure(&mut cx);
-    let props = cx.host().stream::<HostProps>();
+    let props = cx.host().stream::<HostSession>();
     let visible = cx.host().stream::<HostVisible>();
     let view = cx.open::<Chat>();
     cx.run_until_parked();
@@ -44,7 +44,7 @@ fn an_unregistered_key_stays_read_only() {
 fn an_account_gained_later_re_enables_create_channel() {
     let mut cx = TestAppContext::new();
     configure(&mut cx);
-    let props = cx.host().stream::<HostProps>();
+    let props = cx.host().stream::<HostSession>();
     let visible = cx.host().stream::<HostVisible>();
     let view = cx.open::<Chat>();
     cx.run_until_parked();
@@ -80,9 +80,9 @@ fn a_peers_name_gained_later_replaces_its_numeric_fallback() {
     let known = std::rc::Rc::new(std::cell::Cell::new(false));
     let has_gary = known.clone();
     let mut cx = TestAppContext::new();
-    quiet_doors(&mut cx);
+    quiet_methods(&mut cx);
     cx.host()
-        .handle::<ducktape_view_guest::doors::HostWidget>(|command| {
+        .handle::<ducktape_view_guest::methods::HostWidget>(|command| {
             assert!(matches!(command, wire::WidgetCommand::Focus { .. }));
             Ok(())
         });
@@ -115,10 +115,10 @@ fn a_peers_name_gained_later_replaces_its_numeric_fallback() {
     });
     cx.host().handle::<Submit<ChatApi>>(|_| Ok(Vec::new()));
 
-    let props = cx.host().stream::<HostProps>();
+    let props = cx.host().stream::<HostSession>();
     let visible = cx.host().stream::<HostVisible>();
-    cx.host().never::<Live<ChatApi>>();
-    let live = cx.host().stream::<Live<Identity>>();
+    cx.host().never::<Changes<ChatApi>>();
+    let live = cx.host().stream::<Changes<Identity>>();
     let view = cx.open::<Chat>();
     cx.run_until_parked();
     props.push(Session {
@@ -162,9 +162,9 @@ fn a_peers_mention_becomes_offerable_once_their_account_is_known() {
     let known = std::rc::Rc::new(std::cell::Cell::new(false));
     let has_gary = known.clone();
     let mut cx = TestAppContext::new();
-    quiet_doors(&mut cx);
+    quiet_methods(&mut cx);
     cx.host()
-        .handle::<ducktape_view_guest::doors::HostWidget>(|command| {
+        .handle::<ducktape_view_guest::methods::HostWidget>(|command| {
             assert!(matches!(command, wire::WidgetCommand::Focus { .. }));
             Ok(())
         });
@@ -195,10 +195,10 @@ fn a_peers_mention_becomes_offerable_once_their_account_is_known() {
     });
     cx.host().handle::<Submit<ChatApi>>(|_| Ok(Vec::new()));
 
-    let props = cx.host().stream::<HostProps>();
+    let props = cx.host().stream::<HostSession>();
     let visible = cx.host().stream::<HostVisible>();
-    cx.host().never::<Live<ChatApi>>();
-    let live = cx.host().stream::<Live<Identity>>();
+    cx.host().never::<Changes<ChatApi>>();
+    let live = cx.host().stream::<Changes<Identity>>();
     let view = cx.open::<Chat>();
     cx.run_until_parked();
     props.push(Session {
