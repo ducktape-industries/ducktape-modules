@@ -160,6 +160,7 @@ fn set_membership(
     member: bool,
 ) -> Result<(), Refusal> {
     let channel = channel(store, id)?;
+    rules::not_dm(&channel)?;
     rules::owned(&channel, &frame.party)?;
     if member {
         seat(store, frame, id, party);

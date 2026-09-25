@@ -10,16 +10,19 @@
 //! - `state.rs`: every table and index the program keeps, declared once
 //! - `rules.rs`: the checks an op passes before it writes
 //! - `ops.rs`: [`execute`], one short function per op
+//! - `origin.rs`: [`execute_from`], an origin resolved to its party
+//!   through identity, and identity's roster
 //! - `queries.rs`: [`query`], one short function per question
 //! - `text.rs`: what search and tags read out of a message
 //! - `description.rs`: [`describe`], an op in a person's words
-//! - `program.rs` (`program` feature): the wasm32 program over the host
+//! - `program.rs` (`program` feature): the wasm32 glue over the host
 //!
 //! The rules run over any [`store::Reads`]/[`store::Writes`], so a native
 //! test runs them over [`store::Memory`] exactly as the host does.
 mod description;
 pub mod message;
 mod ops;
+mod origin;
 mod party;
 #[cfg(feature = "program")]
 mod program;
@@ -39,6 +42,7 @@ pub use abi::hex;
 pub use description::describe;
 pub use message::{Block, Mark, Span, parse_message};
 pub use ops::execute;
+pub use origin::execute_from;
 pub use party::{AccountNumber, Party};
 pub use queries::{query, roots_below};
 pub use store::{Cursor, Page, PageReply};
@@ -241,6 +245,13 @@ pub struct ChannelRow {
 impl ChannelRow {
     pub fn members_only(&self) -> bool {
         self.post_policy == PostPolicy::MembersOnly
+    }
+
+    /// Whether the room lets `party` post, `seated` saying whether it holds
+    /// a member seat: posting is open, or it owns the room or sits in it.
+    /// Archiving aside; the program and the view ask this one rule.
+    pub fn admits(&self, party: &Party, seated: bool) -> bool {
+        !self.members_only() || self.owner == *party || seated
     }
 }
 

@@ -4,9 +4,7 @@ use abi::Refusal;
 use store::{Reads, invalid, unauthorized, wrong_state};
 
 use crate::state::MEMBERS;
-use crate::{
-    ChannelRow, MAX_EMOJI_BYTES, MAX_ID_BYTES, MAX_NAME_BYTES, MsgRow, Party, PostPolicy, dm_peers,
-};
+use crate::{ChannelRow, MAX_EMOJI_BYTES, MAX_ID_BYTES, MAX_NAME_BYTES, MsgRow, Party, dm_peers};
 
 /// A channel or message id: 1..=64 bytes, no `/` (a room link's separator).
 pub(crate) fn id(what: &str, id: &str) -> Result<(), Refusal> {
@@ -71,10 +69,8 @@ pub(crate) fn writable(
     if channel.archived {
         return Err(wrong_state(format!("{} is archived", channel.id)));
     }
-    let allowed = channel.post_policy == PostPolicy::Open
-        || channel.owner == *party
-        || MEMBERS.has(store, &(channel.id.clone(), party.clone()));
-    if !allowed {
+    let seated = MEMBERS.has(store, &(channel.id.clone(), party.clone()));
+    if !channel.admits(party, seated) {
         return Err(unauthorized(format!(
             "{} is not a member of {}",
             handle(party),
@@ -88,6 +84,18 @@ pub(crate) fn owned(channel: &ChannelRow, party: &Party) -> Result<(), Refusal> 
     if channel.owner != *party {
         return Err(unauthorized(format!(
             "only the owner of {} may",
+            channel.id
+        )));
+    }
+    Ok(())
+}
+
+/// A dm seats exactly its two peers: no one adds a third or removes
+/// either, the peer who opened it included.
+pub(crate) fn not_dm(channel: &ChannelRow) -> Result<(), Refusal> {
+    if dm_peers(&channel.id).is_some() {
+        return Err(unauthorized(format!(
+            "{} is a dm; its two peers stay seated",
             channel.id
         )));
     }

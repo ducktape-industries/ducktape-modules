@@ -1,4 +1,5 @@
 //! Reactions: one per party and emoji, counted on the message.
+use super::channels::archive;
 use super::*;
 use crate::MAX_EMOJI_BYTES;
 
@@ -60,6 +61,36 @@ fn a_reaction_needs_an_emoji_a_standing_message_and_a_seat() {
     chat.ok(&ADA, delete(1));
     assert_eq!(
         chat.refused(&ADA, react(1, "👍", true)),
+        reason::WRONG_STATE
+    );
+}
+
+#[test]
+fn removing_a_reaction_needs_what_adding_one_does() {
+    let mut chat = Chat::with_channel(PostPolicy::MembersOnly);
+    chat.post(&ADA, "m1", "members only", None);
+    chat.ok(&ADA, react(1, "👍", true));
+    let long = "x".repeat(MAX_EMOJI_BYTES + 1);
+    for bad in ["", "a/b", long.as_str()] {
+        assert_eq!(
+            chat.refused(&ADA, react(1, bad, false)),
+            reason::INVALID_INPUT
+        );
+    }
+    assert_eq!(
+        chat.refused(&BO, react(1, "👍", false)),
+        reason::UNAUTHORIZED
+    );
+    assert_eq!(chat.refused(&ADA, react(9, "👍", false)), reason::NOT_FOUND);
+    chat.ok(&ADA, archive(true));
+    assert_eq!(
+        chat.refused(&ADA, react(1, "👍", false)),
+        reason::WRONG_STATE
+    );
+    chat.ok(&ADA, archive(false));
+    chat.ok(&ADA, delete(1));
+    assert_eq!(
+        chat.refused(&ADA, react(1, "👍", false)),
         reason::WRONG_STATE
     );
 }

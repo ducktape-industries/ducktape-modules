@@ -98,6 +98,35 @@ fn a_dm_seats_both_accounts_opens_once_and_keeps_others_out() {
     assert_eq!(chat.refused(&key, open_dm(1)), reason::UNAUTHORIZED);
 }
 
+/// The peer who opened a dm owns it, but owning it seats no one: neither
+/// peer adds a third account or removes the other.
+#[test]
+fn neither_dm_peer_reshapes_the_room() {
+    let mut chat = Chat::default();
+    chat.ok(&ADA, open_dm(2));
+    let dm = dm_channel_id(1, 2);
+    let seat = |party: Party, member: bool| Op::SetMembership {
+        channel_id: dm.clone(),
+        party,
+        member,
+    };
+    for (who, party, member) in [
+        (&ADA, CY, true),
+        (&ADA, BO, false),
+        (&ADA, ADA, false),
+        (&BO, CY, true),
+        (&BO, ADA, false),
+        (&CY, CY, true),
+    ] {
+        assert_eq!(chat.refused(who, seat(party, member)), reason::UNAUTHORIZED);
+    }
+    chat.ok(&BO, post(&dm, "m1", "still here", None));
+    assert_eq!(
+        chat.refused(&CY, post(&dm, "m2", "let me in", None)),
+        reason::UNAUTHORIZED
+    );
+}
+
 #[test]
 fn only_the_owner_renames() {
     let mut chat = Chat::with_channel(PostPolicy::Open);
@@ -171,7 +200,7 @@ fn rename(name: &str) -> Op {
     }
 }
 
-fn archive(archived: bool) -> Op {
+pub(super) fn archive(archived: bool) -> Op {
     Op::SetChannelArchived {
         channel_id: "general".into(),
         archived,

@@ -102,15 +102,13 @@ impl Chat {
         if info.channel.archived {
             return Some(Gate::Archived);
         }
+        let me = self.me()?;
         let seated = self
             .room
             .as_ref()
             .and_then(|room| room.members.ready())
-            .is_some_and(|members| members.iter().any(|m| Some(&m.party) == self.me().as_ref()));
-        if info.channel.members_only() && !seated {
-            return Some(Gate::NotMember);
-        }
-        None
+            .is_some_and(|members| members.iter().any(|m| m.party == me));
+        (!info.channel.admits(&me, seated)).then_some(Gate::NotMember)
     }
 
     pub(crate) fn may_write(&self) -> bool {

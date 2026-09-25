@@ -83,15 +83,71 @@ pub fn thread(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
     pane
 }
 
-/// The open channel's details: its name, archiving, and its members.
+/// The open channel's details: its name, archiving, and its members. A
+/// dm seats its two peers for good: it lists them, with no way to add or
+/// remove one.
 pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement {
     let (Some(details), Some(info)) = (chat.details.as_ref(), chat.room_info()) else {
         return div().into_any_element();
     };
+    let dm = chat::dm_peers(&info.channel.id).is_some();
+    let pane = div()
+        .id("chat-details-pane")
+        .w(px(chat.layout.details))
+        .h_full()
+        .overflow_y_scroll()
+        .flex()
+        .flex_col()
+        .gap_3()
+        .p_3()
+        .bg(theme.surface)
+        .child(details_header(cx, theme))
+        .child(rule(theme))
+        .children(name_section(
+            &details.name_draft,
+            info.channel.archived,
+            cx,
+            theme,
+        ))
+        .child(rule(theme))
+        .child(section("Members", theme));
+    let pane = match dm {
+        true => pane,
+        false => pane.children(member_adder(&details.member_draft, cx, theme)),
+    };
+    pane.children(members(chat, !dm, cx, theme))
+        .into_any_element()
+}
+
+fn details_header(cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement {
     let close = cx.listener(|chat, _: &ClickEvent, _window, cx| {
         chat.toggle_details();
         cx.notify();
     });
+    div()
+        .id("chat-details-header")
+        .flex()
+        .items_center()
+        .child(
+            div()
+                .id("chat-details-title")
+                .flex_1()
+                .text_size(design::text::SECTION)
+                .font_weight(ducktape_view_guest::FontWeight::SEMIBOLD)
+                .role(Role::Heading)
+                .aria_level(2)
+                .child("Channel details"),
+        )
+        .child(button("chat-details-close", "Close", theme, close))
+}
+
+/// The name field, Rename, and Archive or Unarchive.
+fn name_section(
+    draft: &str,
+    archived: bool,
+    cx: &mut Context<Chat>,
+    theme: &Theme,
+) -> Vec<AnyElement> {
     let typed_name = cx.listener(|chat, event: &String, _window, cx| {
         if let Some(details) = &mut chat.details {
             details.name_draft = event.clone();
@@ -102,11 +158,26 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
         cx.notify();
         chat.rename(cx)
     });
-    let archived = info.channel.archived;
     let archive = cx.listener(move |chat, _: &ClickEvent, _window, cx| {
         cx.notify();
         chat.set_archived(!archived, cx);
     });
+    let archive_label = match archived {
+        true => "Unarchive channel",
+        false => "Archive channel",
+    };
+    vec![
+        section("Name", theme).into_any_element(),
+        field("chat-details-name-input", draft, "Channel name", theme)
+            .on_input(typed_name)
+            .into_any_element(),
+        button("chat-details-rename-button", "Rename", theme, rename).into_any_element(),
+        button("chat-details-archive", archive_label, theme, archive).into_any_element(),
+    ]
+}
+
+/// The field and button that seat a member, and how one is removed.
+fn member_adder(draft: &str, cx: &mut Context<Chat>, theme: &Theme) -> Vec<AnyElement> {
     let typed_member = cx.listener(|chat, event: &String, _window, cx| {
         if let Some(details) = &mut chat.details {
             details.member_draft = event.clone();
@@ -117,85 +188,17 @@ pub fn details(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement
         cx.notify();
         chat.add_member(cx);
     });
-    let archive_label = match archived {
-        true => "Unarchive channel",
-        false => "Archive channel",
-    };
-    div()
-        .id("chat-details-pane")
-        .w(px(chat.layout.details))
-        .h_full()
-        .overflow_y_scroll()
-        .flex()
-        .flex_col()
-        .gap_3()
-        .p_3()
-        .bg(theme.surface)
-        .child(
-            div()
-                .id("chat-details-header")
-                .flex()
-                .items_center()
-                .child(
-                    div()
-                        .id("chat-details-title")
-                        .flex_1()
-                        .text_size(design::text::SECTION)
-                        .font_weight(ducktape_view_guest::FontWeight::SEMIBOLD)
-                        .role(Role::Heading)
-                        .aria_level(2)
-                        .child("Channel details"),
-                )
-                .child(button("chat-details-close", "Close", theme, close)),
-        )
-        .child(rule(theme))
-        .child(section("Name", theme))
-        .child(
-            field(
-                "chat-details-name-input",
-                &details.name_draft,
-                "Channel name",
-                theme,
-            )
-            .on_input(typed_name),
-        )
-        .child(button(
-            "chat-details-rename-button",
-            "Rename",
-            theme,
-            rename,
-        ))
-        .child(button(
-            "chat-details-archive",
-            archive_label,
-            theme,
-            archive,
-        ))
-        .child(rule(theme))
-        .child(section("Members", theme))
-        .child(
-            field(
-                "chat-details-member-input",
-                &details.member_draft,
-                "Add member",
-                theme,
-            )
-            .on_input(typed_member),
-        )
-        .child(button(
-            "chat-details-add-member",
-            "Add member",
-            theme,
-            add_member,
-        ))
-        .child(
-            div()
-                .text_size(design::text::CAPTION)
-                .text_color(theme.faint)
-                .child("Select a member below to remove it from this channel."),
-        )
-        .children(members(chat, cx, theme))
-        .into_any_element()
+    vec![
+        field("chat-details-member-input", draft, "Add member", theme)
+            .on_input(typed_member)
+            .into_any_element(),
+        button("chat-details-add-member", "Add member", theme, add_member).into_any_element(),
+        div()
+            .text_size(design::text::CAPTION)
+            .text_color(theme.faint)
+            .child("Select a member below to remove it from this channel.")
+            .into_any_element(),
+    ]
 }
 
 fn rule(theme: &Theme) -> impl IntoElement {
@@ -221,8 +224,9 @@ fn field(id: &'static str, value: &str, label: &'static str, theme: &Theme) -> I
         .label(label)
 }
 
-/// A row per member, each with its way out; a word when there are none.
-fn members(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Vec<AnyElement> {
+/// A row per member, each with its way out where the room has one; a word
+/// when there are none.
+fn members(chat: &Chat, removable: bool, cx: &mut Context<Chat>, theme: &Theme) -> Vec<AnyElement> {
     let roster = chat.roster();
     if roster.is_empty() {
         let none = div()
@@ -257,7 +261,7 @@ fn members(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Vec<AnyElement
                     .text_size(design::text::SECONDARY)
                     .child(label),
             )
-            .child(remove);
+            .when(removable, |row| row.child(remove));
         rows.push(row.into_any_element());
     }
     rows

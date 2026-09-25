@@ -12,8 +12,8 @@ mod timeline;
 use ducktape_view_guest::design;
 pub(crate) use ducktape_view_guest::design::{badge, button, empty_state, quiet};
 use ducktape_view_guest::{
-    Context, InteractiveElement, IntoElement, ParentElement, Pixels, Styled, Theme, div, hsla,
-    modal_overlay, sensor,
+    AnyElement, Context, InteractiveElement, IntoElement, ParentElement, Pixels, Styled, Theme,
+    div, hsla, modal_overlay, sensor,
 };
 
 use crate::Chat;
@@ -22,7 +22,7 @@ const MENU_OVERLAY: &str = "chat-menu-overlay";
 
 pub fn render(chat: &Chat, cx: &mut Context<Chat>) -> impl IntoElement {
     let theme = *cx.global::<Theme>();
-    let mut screen = div()
+    let screen = div()
         .id("chat-root")
         .relative()
         .flex()
@@ -42,55 +42,9 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>) -> impl IntoElement {
             .into_any_element()
         })
         .into_any_element();
-
-    // The room sits under the id "chat-menu-overlay" whether or not a menu
-    // is open: the host keeps a list's scroll (and a field's state) by the
-    // ids above it, so a menu opening over the room must not move it to a
-    // new path, or the timeline starts over at its latest message.
-    screen = match menu::floating(chat, cx, &theme) {
-        Some(menu) => {
-            let dismiss = cx.listener(|chat, _: &(), _window, cx| {
-                chat.close_menu();
-                cx.notify();
-            });
-            let mut overlay = modal_overlay(MENU_OVERLAY, screen, menu)
-                .label("Message menu")
-                .on_dismiss(dismiss);
-            // a confirm asks before anything else happens: it dims the room
-            if chat
-                .menu
-                .as_ref()
-                .is_some_and(|menu| menu.mode == crate::Mode::Delete)
-            {
-                overlay = overlay.backdrop(hsla(0., 0., 0., 0.35));
-            }
-            overlay.into_any_element()
-        }
-        None => div()
-            .id(MENU_OVERLAY)
-            .size_full()
-            .child(screen)
-            .into_any_element(),
-    };
-    if let Some(create) = dialogs::channel_create(chat, cx, &theme) {
-        let dismiss = cx.listener(|chat, _: &(), _window, cx| {
-            chat.create = None;
-            cx.notify();
-        });
-        let overlay = modal_overlay("chat-create-overlay", screen, create)
-            .label("Create channel")
-            .flex()
-            .items_center()
-            .justify_center()
-            .p_6()
-            .backdrop(hsla(0., 0., 0., 0.55));
-        screen = if chat.create.as_ref().is_some_and(|create| create.busy) {
-            overlay.into_any_element()
-        } else {
-            overlay.on_dismiss(dismiss).into_any_element()
-        };
-    }
-    let shown = cx.listener(|chat, size: &(Pixels, Pixels), _window, cx| {
+    let screen = with_menu(chat, screen, cx, &theme);
+    let screen = with_create(chat, screen, cx, &theme);
+    let measured = cx.listener(|chat, size: &(Pixels, Pixels), _window, cx| {
         chat.layout.viewport = (size.0.into(), size.1.into());
         chat.layout.clamp();
         cx.notify();
@@ -102,8 +56,68 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>) -> impl IntoElement {
     });
     sensor("chat-viewport", screen)
         .size_full()
-        .on_show(shown)
+        .on_show(measured)
         .on_resize(resized)
+}
+
+/// The screen under the open message menu, if any.
+///
+/// The room sits under the id "chat-menu-overlay" whether or not a menu
+/// is open: the host keeps a list's scroll (and a field's state) by the
+/// ids above it, so a menu opening over the room must not move it to a
+/// new path, or the timeline starts over at its latest message.
+fn with_menu(chat: &Chat, screen: AnyElement, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement {
+    let Some(menu) = menu::floating(chat, cx, theme) else {
+        return div()
+            .id(MENU_OVERLAY)
+            .size_full()
+            .child(screen)
+            .into_any_element();
+    };
+    let dismiss = cx.listener(|chat, _: &(), _window, cx| {
+        chat.close_menu();
+        cx.notify();
+    });
+    let overlay = modal_overlay(MENU_OVERLAY, screen, menu)
+        .label("Message menu")
+        .on_dismiss(dismiss);
+    // a confirm asks before anything else happens: it dims the room
+    let confirming = chat
+        .menu
+        .as_ref()
+        .is_some_and(|menu| menu.mode == crate::Mode::Delete);
+    match confirming {
+        true => overlay.backdrop(hsla(0., 0., 0., 0.35)).into_any_element(),
+        false => overlay.into_any_element(),
+    }
+}
+
+/// The screen under the create-channel dialog, if it is open; a busy
+/// dialog is not dismissed.
+fn with_create(
+    chat: &Chat,
+    screen: AnyElement,
+    cx: &mut Context<Chat>,
+    theme: &Theme,
+) -> AnyElement {
+    let Some(create) = dialogs::channel_create(chat, cx, theme) else {
+        return screen;
+    };
+    let dismiss = cx.listener(|chat, _: &(), _window, cx| {
+        chat.create = None;
+        cx.notify();
+    });
+    let overlay = modal_overlay("chat-create-overlay", screen, create)
+        .label("Create channel")
+        .flex()
+        .items_center()
+        .justify_center()
+        .p_6()
+        .backdrop(hsla(0., 0., 0., 0.55));
+    match chat.create.as_ref().is_some_and(|create| create.busy) {
+        true => overlay.into_any_element(),
+        false => overlay.on_dismiss(dismiss).into_any_element(),
+    }
 }
 
 fn connected(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement {
