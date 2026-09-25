@@ -170,18 +170,24 @@ fn forge_line(
     if reviews.next.is_some() {
         return None;
     }
+    let actor = |key: &Option<Vec<u8>>| key.as_ref().map(|key| forge.key_name(key));
     match (change.state, &change.merge_oid) {
         (ChangeState::Merged, Some(oid)) => Some(event(
             key,
-            None,
+            actor(&change.merged_by),
             format!(
-                "Merged into {} as {}",
+                "merged into {} as {}",
                 ref_label(&change.into),
                 short_hex(oid)
             ),
             theme,
         )),
-        (ChangeState::Closed, _) => Some(event(key, None, "This change was closed".into(), theme)),
+        (ChangeState::Closed, _) => Some(event(
+            key,
+            actor(&change.closed_by),
+            "closed this change".into(),
+            theme,
+        )),
         _ => None,
     }
 }

@@ -120,6 +120,8 @@ fn open(
         comment_count: 0,
         verdicts: ReviewCounts::default(),
         merge_oid: None,
+        closed_by: None,
+        merged_by: None,
         channel: format!("forge:{repo}:{n}"),
         system_seq: 1,
     };
@@ -194,6 +196,7 @@ fn close(
     }
     require_open(&change)?;
     change.state = ChangeState::Closed;
+    change.closed_by = Some(actor.to_vec());
     touched(&mut change, env);
     change.system_seq = next(change.system_seq)?;
     let message = next_message(store)?;
@@ -319,6 +322,7 @@ fn merge_heads(
         }
         change.state = ChangeState::Merged;
         change.merge_oid = Some(result.to_hex());
+        change.merged_by = Some(actor.to_vec());
         touched(&mut change, env);
         change.system_seq = next(change.system_seq)?;
         fits(store, &change)?;

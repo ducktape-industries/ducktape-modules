@@ -185,10 +185,17 @@ pub(crate) fn configure(cx: &mut TestAppContext, mode: &'static str) {
             chat::Query::Accounts { .. } => chat::Reply::Accounts(accounts()),
             chat::Query::Roots { channel_id, .. } => chat::Reply::Roots(PageReply {
                 height: 1,
-                items: if channel_id == "forge:project:1" {
-                    forge_lines()
-                } else {
-                    Vec::new()
+                items: match channel_id.as_str() {
+                    "forge:project:1" => forge_lines(),
+                    // change 2 was opened, then closed
+                    "forge:project:2" => (1..=2)
+                        .map(|seq| chat::MsgRow {
+                            channel_id: channel_id.clone(),
+                            message_id: format!("forge:{seq:016x}"),
+                            ..message(seq, "module:forge", "raw forge text")
+                        })
+                        .collect(),
+                    _ => Vec::new(),
                 },
                 next: None,
             }),

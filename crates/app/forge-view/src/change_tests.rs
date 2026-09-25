@@ -111,8 +111,15 @@ fn a_merged_change_wears_its_state_and_offers_nothing_more() {
     assert!(
         cx.texts()
             .iter()
-            .any(|text| text.starts_with("Merged into main as ")),
+            .any(|text| text.starts_with("merged into main as ")),
         "{:?}",
+        cx.texts()
+    );
+    assert!(
+        cx.texts()
+            .windows(2)
+            .any(|w| w[0] == "Ada" && w[1].starts_with("merged into main as ")),
+        "the merger is named from the record: {:?}",
         cx.texts()
     );
     assert!(
@@ -120,6 +127,22 @@ fn a_merged_change_wears_its_state_and_offers_nothing_more() {
         "{:?}",
         cx.texts()
     );
+    assert!(cx.find("forge-edit-change").is_none());
+    assert!(cx.find("forge-close-change").is_none());
+}
+
+#[test]
+fn a_closed_change_names_who_closed_it_and_offers_no_edit_or_close() {
+    let (cx, _view) = change_screen("closed", ChangeTab::Conversation);
+    assert!(
+        cx.texts()
+            .windows(2)
+            .any(|w| w[0] == "Ada" && w[1] == "closed this change"),
+        "the closer is named from the record: {:?}",
+        cx.texts()
+    );
+    assert!(cx.find("forge-edit-change").is_none());
+    assert!(cx.find("forge-close-change").is_none());
 }
 
 #[test]
@@ -146,7 +169,7 @@ fn the_conversation_is_the_hidden_chat_channel_and_the_forge_body() {
     assert!(
         !cx.texts()
             .iter()
-            .any(|text| text.starts_with("Merged into"))
+            .any(|text| text.starts_with("merged into"))
     );
     cx.simulate_input("forge-reply", "looks right to me");
     cx.simulate_click("forge-reply-send");
