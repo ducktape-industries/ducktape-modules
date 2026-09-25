@@ -394,8 +394,8 @@ fn header(message: &ChatMessage, cx: &mut Context<Chat>, theme: &Theme) -> impl 
     header
 }
 
-/// A program's own post: its event code, quiet and mono, and a link to the
-/// room where the program itself shows it.
+/// A program's own post: its event code, quiet and mono, and (on the first
+/// of a run) a link to where the program itself shows the room.
 fn program_post(
     chat: &Chat,
     message: &ChatMessage,
@@ -412,7 +412,12 @@ fn program_post(
         .text_size(design::text::SECONDARY)
         .text_color(theme.muted)
         .child(design::mono(code.to_owned()));
-    if let Some(link) = crate::links::program_link(&chat.session.chain, &chat.room_id()) {
+    // one link per run of the program's lines: the room is the same
+    let link = message
+        .show_author
+        .then(|| crate::links::program_link(&chat.session.chain, &chat.room_id()))
+        .flatten();
+    if let Some(link) = link {
         let open = cx.listener(move |chat, event: &ClickEvent, _window, cx| {
             chat.claim(event);
             chat.open_link(link.clone(), cx);
