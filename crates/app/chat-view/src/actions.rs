@@ -325,10 +325,7 @@ impl Chat {
         if lines.is_empty() {
             return;
         }
-        let label = match lines.len() {
-            1 => "1 message".to_owned(),
-            n => format!("{n} messages"),
-        };
+        let label = ducktape_view_guest::design::plural(lines.len() as u64, "message", "messages");
         self.copy_text(lines.join("\n"), &label, cx);
     }
 

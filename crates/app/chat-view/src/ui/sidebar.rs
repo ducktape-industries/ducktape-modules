@@ -349,7 +349,7 @@ fn with_seats(chat: &Chat, info: &ChannelInfo, row: impl IntoElement, theme: &Th
                 .pl_7()
                 .py_0p5()
                 .child(
-                    design::avatar(&label, px(20.), theme)
+                    design::avatar(&label, design::size::AVATAR, theme)
                         .bg(if speaking {
                             theme.success_soft
                         } else {
@@ -459,7 +459,7 @@ pub fn avatar(
     fill: ducktape_view_guest::Hsla,
     theme: &Theme,
 ) -> impl IntoElement {
-    design::avatar(name, px(24.), theme)
+    design::avatar(name, design::size::AVATAR_LG, theme)
         .id(id)
         .bg(if agent { theme.agent_soft } else { fill })
         .text_color(theme.foreground)

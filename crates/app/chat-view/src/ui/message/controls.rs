@@ -4,6 +4,14 @@ use ducktape_view_guest::design;
 use ducktape_view_guest::prelude::*;
 use ducktape_view_guest::{ClickEvent, ElementId, ParentElement, Styled, Theme, Window, div, px};
 
+/// An action strip button's height: the strip, borders and all, is 22 and
+/// sits inside the most compact row.
+const STRIP_BUTTON_HEIGHT: f32 = 20.;
+/// A reaction chip's height, a size under the thread button's.
+const REACTION_HEIGHT: f32 = 22.;
+/// The thread button's height under a root.
+const REPLIES_HEIGHT: f32 = 24.;
+
 pub(super) fn action_button(
     id: impl Into<ElementId>,
     label: impl Into<String>,
@@ -14,8 +22,8 @@ pub(super) fn action_button(
 ) -> impl IntoElement {
     let control = div()
         .id(id)
-        .w(px(26.))
-        .h(px(20.))
+        .w(design::size::ROW)
+        .h(px(STRIP_BUTTON_HEIGHT))
         .flex()
         .items_center()
         .justify_center()
@@ -61,7 +69,7 @@ pub(super) fn reaction_button(
     let add = matches!(face, Face::Add);
     let mut control = div()
         .id(id)
-        .h(px(22.))
+        .h(px(REACTION_HEIGHT))
         .px(design::space::XS)
         .flex()
         .items_center()
@@ -128,10 +136,10 @@ pub(super) fn replies_button(
     theme: &Theme,
     click: impl Fn(&ClickEvent, &mut Window, &mut ducktape_view_guest::App) + 'static,
 ) -> impl IntoElement {
-    let noun = if count == 1 { "reply" } else { "replies" };
+    let replies = design::plural(count, "reply", "replies");
     div()
         .id(id)
-        .h(px(24.))
+        .h(px(REPLIES_HEIGHT))
         .px_2()
         .flex()
         .items_center()
@@ -150,15 +158,9 @@ pub(super) fn replies_button(
         .active(|style| style.bg(theme.accent_soft))
         .focus_visible(|style| style.border_color(theme.accent))
         .role(ducktape_view_guest::Role::Button)
-        .aria_label(format!("Open thread, {count} {noun}"))
+        .aria_label(format!("Open thread, {replies}"))
         .focusable()
         .on_click(click)
-        .child(
-            div()
-                .font_family(design::fonts::FAMILY_MONO)
-                .text_size(design::text::CAPTION)
-                .child(count.to_string()),
-        )
-        .child(noun)
+        .child(replies)
         .child(div().text_color(theme.muted).child("Open thread →"))
 }

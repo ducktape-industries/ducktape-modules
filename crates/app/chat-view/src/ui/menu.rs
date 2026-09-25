@@ -196,91 +196,86 @@ fn more_items(chat: &Chat, menu: &Menu) -> Vec<Action> {
 }
 
 fn actions(chat: &Chat, menu: &Menu, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement {
-    let (pane, seq, rev) = (menu.pane, menu.seq, menu.rev);
-    let mut list = div()
+    let items: Vec<Item> = more_items(chat, menu)
+        .into_iter()
+        .map(|action| action_item(action, chat, menu, cx, theme))
+        .collect();
+    div()
         .id("chat-menu-actions")
         .flex()
         .flex_col()
         .gap(px(ROW_GAP))
-        .p(px(MENU_INSET));
-    for action in more_items(chat, menu) {
-        let item = match action {
-            Action::Reply => {
-                let press = cx.listener(move |chat, _: &ClickEvent, _, cx| {
-                    cx.notify();
-                    chat.open_thread(seq, cx)
-                });
-                Item::new(
-                    "chat-menu-reply",
-                    "↩",
-                    "Reply in thread",
-                    Some(Box::new(press)),
-                    *theme,
-                )
-            }
-            Action::React => {
-                let press = cx.listener(move |chat, _: &ClickEvent, window, cx| {
-                    cx.notify();
-                    chat.open_menu(pane, seq, rev, Mode::Reactions, window, cx)
-                });
-                Item::new(
-                    "chat-menu-add-reaction",
-                    "😀",
-                    "Add reaction",
-                    Some(Box::new(press)),
-                    *theme,
-                )
-            }
-            Action::CopyLink => {
-                let link = chat.message_link(seq);
-                let press = cx.listener(move |chat, _: &ClickEvent, _, cx| {
-                    cx.notify();
-                    chat.close_menu();
-                    match &link {
-                        Some(link) => chat.copy_text(link.clone(), "message link", cx),
-                        None => cx.host().log("no message link: the session names no chain"),
-                    }
-                });
-                Item::new(
-                    "chat-menu-copy-link",
-                    "🔗",
-                    "Copy link",
-                    Some(Box::new(press)),
-                    *theme,
-                )
-            }
-            Action::Edit => {
-                let press = cx.listener(move |chat, _: &ClickEvent, window, cx| {
-                    cx.notify();
-                    chat.open_menu(pane, seq, rev, Mode::Editing, window, cx)
-                });
-                Item::new(
-                    "chat-menu-edit",
-                    "✎",
-                    "Edit message",
-                    Some(Box::new(press)),
-                    *theme,
-                )
-            }
-            Action::Delete => {
-                let press = cx.listener(move |chat, _: &ClickEvent, window, cx| {
-                    cx.notify();
-                    chat.open_menu(pane, seq, rev, Mode::Delete, window, cx)
-                });
-                Item::toned(
-                    "chat-menu-delete",
-                    "Delete message",
-                    Some(Box::new(press)),
-                    *theme,
-                    theme.danger,
-                    theme.background,
-                )
-                .glyph("🗑")
-            }
-        };
-        list = list.child(item);
+        .p(px(MENU_INSET))
+        .children(items)
+        .into_any_element()
+}
+
+/// One row of the "More" menu, and what pressing it does.
+fn action_item(
+    action: Action,
+    chat: &Chat,
+    menu: &Menu,
+    cx: &mut Context<Chat>,
+    theme: &Theme,
+) -> Item {
+    let seq = menu.seq;
+    match action {
+        Action::Reply => {
+            let press = cx.listener(move |chat, _: &ClickEvent, _, cx| {
+                cx.notify();
+                chat.open_thread(seq, cx)
+            });
+            let press = Some(Box::new(press) as Press);
+            Item::new("chat-menu-reply", "↩", "Reply in thread", press, *theme)
+        }
+        Action::React => {
+            let press = reopens(menu, Mode::Reactions, cx);
+            Item::new(
+                "chat-menu-add-reaction",
+                "😀",
+                "Add reaction",
+                press,
+                *theme,
+            )
+        }
+        Action::CopyLink => {
+            let press = copies_link(chat.message_link(seq), cx);
+            Item::new("chat-menu-copy-link", "🔗", "Copy link", press, *theme)
+        }
+        Action::Edit => {
+            let press = reopens(menu, Mode::Editing, cx);
+            Item::new("chat-menu-edit", "✎", "Edit message", press, *theme)
+        }
+        Action::Delete => {
+            let press = reopens(menu, Mode::Delete, cx);
+            let (fg, bg) = (theme.danger, theme.background);
+            Item::toned("chat-menu-delete", "Delete message", press, *theme, fg, bg).glyph("🗑")
+        }
     }
-    list.into_any_element()
+}
+
+/// The same message's menu, opened again in `mode`.
+fn reopens(menu: &Menu, mode: Mode, cx: &mut Context<Chat>) -> Option<Press> {
+    let (pane, seq, rev) = (menu.pane, menu.seq, menu.rev);
+    let press = cx.listener(move |chat, _: &ClickEvent, window, cx| {
+        cx.notify();
+        chat.open_menu(pane, seq, rev, mode, window, cx)
+    });
+    Some(Box::new(press))
+}
+
+/// The message's link onto the clipboard; the host's log says why when
+/// the session names no chain to link into.
+fn copies_link(link: Option<String>, cx: &mut Context<Chat>) -> Option<Press> {
+    let press = cx.listener(move |chat, _: &ClickEvent, _, cx| {
+        cx.notify();
+        chat.close_menu();
+        match &link {
+            Some(link) => chat.copy_text(link.clone(), "message link", cx),
+            None => cx.host().log("no message link: the session names no chain"),
+        }
+    });
+    Some(Box::new(press))
 }
 
 fn delete(_chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement {

@@ -1,7 +1,7 @@
 //! [`query`]: one function per [`Query`], each a read of the tables in
 //! `state.rs`. Chat's listings only grow, so a page cursor from any height
 //! resumes where it left off.
-use abi::{Refusal, Scan, reason};
+use abi::{Refusal, Scan};
 use store::{Page, PageReply, Reads, invalid};
 
 use crate::state::{
@@ -67,12 +67,10 @@ pub fn query(store: &impl Reads, height: u64, query: Query) -> Result<Reply, Ref
             Reply::TagHits(tagged(store, &tag, channel_id, &page, height)?),
             viewer,
         ),
-        Query::Accounts { .. } => {
-            return Err(Refusal::new(
-                reason::UNSUPPORTED,
-                "accounts are identity's, asked by the program",
-            ));
-        }
+        Query::Accounts { page } => (
+            Reply::Accounts(crate::origin::accounts(store, page)?),
+            vec![],
+        ),
     };
     for row in rows_in(&mut reply) {
         mark_reacted(store, &viewer, row);
@@ -121,11 +119,38 @@ fn by_id(store: &impl Reads, message_id: &String) -> Result<Option<MsgRow>, Refu
 }
 
 /// The root of the author's most recently answered thread.
+/// The newest answered thread `author` started. A key may have posted
+/// before or after it gained an account: the newer of the two.
 fn attention(
     store: &impl Reads,
     channel_id: String,
     author: Party,
 ) -> Result<Option<MsgRow>, Refusal> {
+    let Party::Key(key) = &author else {
+        return answered(store, &channel_id, author);
+    };
+    let account = crate::origin::party_of(store, &abi::Origin::External(key.clone()))?;
+    let as_key = answered(store, &channel_id, author)?;
+    let as_account = match account {
+        Party::Key(_) => None,
+        account => answered(store, &channel_id, account)?,
+    };
+    Ok(match (as_key, as_account) {
+        (Some(a), Some(b)) => Some(if a.last_reply_seq < b.last_reply_seq {
+            b
+        } else {
+            a
+        }),
+        (a, b) => a.or(b),
+    })
+}
+
+fn answered(
+    store: &impl Reads,
+    channel_id: &str,
+    author: Party,
+) -> Result<Option<MsgRow>, Refusal> {
+    let channel_id = channel_id.to_owned();
     let newest = ANSWERED.prefix_of(&(channel_id.clone(), author)).limit(1);
     ANSWERED
         .scan(store, newest)?

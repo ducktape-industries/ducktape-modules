@@ -305,3 +305,34 @@ fn a_link_to_a_forge_room_lands_in_it() {
     cx.run_until_parked();
     view.read(|chat| assert_eq!(chat.room.as_ref().unwrap().id, "forge:web:3"));
 }
+
+/// A dm seats its two peers for good: its details list them with no way to
+/// add a third or remove either, as the program refuses both.
+#[test]
+fn a_dms_details_offer_no_add_and_no_remove() {
+    let (mut cx, view) = opened();
+    let seat = |number| chat::MemberRow {
+        party: Party::Account(number),
+        height: 1,
+        time: 1,
+    };
+    let seat_both = |cx: &mut TestAppContext| {
+        view.update(cx, |chat, _, cx| {
+            chat.room.as_mut().unwrap().members = Loaded::Ready(vec![seat(7), seat(8)]);
+            cx.notify();
+        });
+        cx.run_until_parked();
+    };
+    cx.simulate_click("chat-room-details");
+    seat_both(&mut cx);
+    assert!(cx.find("chat-details-add-member").is_some());
+    assert!(cx.has_text("Remove"));
+    cx.simulate_click("chat-sidebar-dm-8");
+    cx.run_until_parked();
+    cx.simulate_click("chat-room-details");
+    seat_both(&mut cx);
+    assert!(cx.has_text("reviewer") && cx.has_text("eddy"));
+    assert!(cx.find("chat-details-add-member").is_none());
+    assert!(cx.find("chat-details-member-input").is_none());
+    assert!(!cx.has_text("Remove"));
+}

@@ -119,3 +119,42 @@ fn channel_create_preserves_busy_account_and_voice_gates() {
     cx.run_until_parked();
     assert!(disabled(&cx, "chat-create-submit"));
 }
+
+/// The composer follows the program's rule for a members-only room: its
+/// owner writes without a seat, a seated member writes, a stranger reads.
+#[test]
+fn a_members_only_room_takes_its_owner_and_its_members() {
+    let (mut cx, view) = opened();
+    let gate = |cx: &mut TestAppContext, owner: u64, seated: bool| {
+        view.update(cx, |chat, _, cx| {
+            let general = chat
+                .channels
+                .ready_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|info| info.channel.id == "general")
+                .unwrap();
+            general.channel.post_policy = PostPolicy::MembersOnly;
+            general.channel.owner = Party::Account(owner);
+            let seats = if seated {
+                vec![chat::MemberRow {
+                    party: Party::Account(7),
+                    height: 1,
+                    time: 1,
+                }]
+            } else {
+                Vec::new()
+            };
+            chat.room.as_mut().unwrap().members = Loaded::Ready(seats);
+            cx.notify();
+        });
+        view.read(|chat| chat.write_gate())
+    };
+    assert_eq!(gate(&mut cx, 7, false), None, "the owner needs no seat");
+    assert_eq!(gate(&mut cx, 8, true), None, "a seated member writes");
+    assert_eq!(
+        gate(&mut cx, 8, false),
+        Some(crate::session::Gate::NotMember),
+        "a stranger reads"
+    );
+}

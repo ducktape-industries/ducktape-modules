@@ -2,19 +2,21 @@
 
 use ducktape_view_guest::design;
 use ducktape_view_guest::prelude::*;
-use ducktape_view_guest::{ClickEvent, Context, ElementId, ParentElement, Styled, Theme, div, px};
+use ducktape_view_guest::{
+    AnyElement, ClickEvent, Context, ElementId, ParentElement, Styled, Theme, div, px,
+};
 
-use chat::ChannelInfo;
+use chat::{ChannelInfo, MsgRow};
 use ducktape_view_guest::view::Loaded;
 
 use super::timeline;
 use crate::composer::Target;
 use crate::session::Gate;
 use crate::ui::{badge, button, empty_state, quiet};
-use crate::{Chat, Pane, Room};
+use crate::{Chat, Hits, Pane, Room};
 
 pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement {
-    let mut pane = div()
+    let pane = div()
         .id("chat-room")
         .flex_1()
         .min_w(px(0.))
@@ -23,111 +25,126 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
         .flex_col()
         .bg(theme.background)
         .text_color(theme.foreground);
-    if let Some(room) = &chat.room {
-        pane = pane.child(header(chat, room, cx, theme));
-        if !chat.notice.is_empty() {
-            let dismiss = cx.listener(|chat, _: &ClickEvent, _window, cx| {
-                chat.notice.clear();
-                cx.notify();
-            });
-            pane = pane.child(
-                div()
-                    .id("chat-room-notice")
-                    .mx_3()
-                    .my_2()
-                    .p_2()
-                    .bg(theme.danger_soft)
-                    .text_color(theme.danger)
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(div().flex_1().child(chat.notice.clone()))
-                    .child(button(
-                        "chat-room-notice-dismiss",
-                        "Dismiss",
-                        theme,
-                        dismiss,
-                    )),
-            );
-        }
-        if !chat.confirmation.is_empty() {
-            let dismiss = cx.listener(|chat, _: &ClickEvent, _window, cx| {
-                chat.confirmation.clear();
-                cx.notify();
-            });
-            pane = pane.child(
-                div()
-                    .id("chat-room-confirmation")
-                    .mx_3()
-                    .my_2()
-                    .px_2()
-                    .h(px(30.))
-                    .border_1()
-                    .border_color(theme.border)
-                    .bg(theme.surface)
-                    .text_size(design::text::SECONDARY)
-                    .text_color(theme.muted)
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(div().flex_1().child(chat.confirmation.clone()))
-                    .child(
-                        div()
-                            .id("chat-room-confirmation-dismiss")
-                            .px_1()
-                            .text_color(theme.muted)
-                            .cursor_pointer()
-                            .hover(|style| style.text_color(theme.foreground))
-                            .role(ducktape_view_guest::Role::Button)
-                            .aria_label("Dismiss")
-                            .focusable()
-                            .on_click(dismiss)
-                            .child("✕"),
-                    ),
-            );
-        }
-        if !chat.search.query.is_empty() {
-            pane = pane.child(search_results(chat, cx, theme));
-        } else {
-            pane = pane.child(timeline::list(chat, Pane::Timeline, cx, theme));
-        }
-        if let Some(info) = chat.room_info()
-            && !info.channel.huddle.is_empty()
-        {
-            pane = pane.child(huddle(info, theme));
-        }
-        if let Some(gate) = chat.write_gate() {
-            pane = pane.child(write_gate(gate, cx, theme));
-        } else {
-            let target = Target::Post {
-                channel: room.id.clone(),
-                thread: None,
-            };
-            let hint = match super::sidebar::dm_peer(chat) {
-                Some((peer, _)) => format!("Message {peer}"),
-                None => {
-                    let name = chat.info(&room.id).map_or_else(
-                        || ducktape_view_guest::design::short_hex(&room.id),
-                        |info| info.channel.name.clone(),
-                    );
-                    match chat::dm_peers(&room.id) {
-                        Some(_) => format!("Message {name}"),
-                        None => format!("Message #{name}"),
-                    }
-                }
-            };
-            let editable = chat.session.connected;
-            // inset from the pane's edges, so the field reads as a field
-            pane = pane.child(
-                div()
-                    .p_3()
-                    .child(composer(chat, target, &hint, editable, cx)),
-            );
-        }
-    } else {
-        pane = pane.child(no_room(chat, cx, theme));
+    let Some(room) = &chat.room else {
+        return pane.child(no_room(chat, cx, theme));
+    };
+    let body = match chat.search.query.is_empty() {
+        true => timeline::list(chat, Pane::Timeline, cx, theme).into_any_element(),
+        false => search_results(chat, cx, theme).into_any_element(),
+    };
+    let huddled = chat
+        .room_info()
+        .filter(|info| !info.channel.huddle.is_empty())
+        .map(|info| huddle(info, theme));
+    pane.child(header(chat, room, cx, theme))
+        .children(notice(chat, cx, theme))
+        .children(confirmation(chat, cx, theme))
+        .child(body)
+        .children(huddled)
+        .child(compose(chat, room, cx, theme))
+}
+
+/// A refused write, until dismissed.
+fn notice(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Option<impl IntoElement> {
+    if chat.notice.is_empty() {
+        return None;
     }
-    pane
+    let dismiss = cx.listener(|chat, _: &ClickEvent, _window, cx| {
+        chat.notice.clear();
+        cx.notify();
+    });
+    Some(
+        div()
+            .id("chat-room-notice")
+            .mx_3()
+            .my_2()
+            .p_2()
+            .bg(theme.danger_soft)
+            .text_color(theme.danger)
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(div().flex_1().child(chat.notice.clone()))
+            .child(button(
+                "chat-room-notice-dismiss",
+                "Dismiss",
+                theme,
+                dismiss,
+            )),
+    )
+}
+
+/// A write that landed, said once, until dismissed.
+fn confirmation(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Option<impl IntoElement> {
+    if chat.confirmation.is_empty() {
+        return None;
+    }
+    let dismiss = cx.listener(|chat, _: &ClickEvent, _window, cx| {
+        chat.confirmation.clear();
+        cx.notify();
+    });
+    Some(
+        div()
+            .id("chat-room-confirmation")
+            .mx_3()
+            .my_2()
+            .px_2()
+            .h(design::size::CONTROL)
+            .border_1()
+            .border_color(theme.border)
+            .bg(theme.surface)
+            .text_size(design::text::SECONDARY)
+            .text_color(theme.muted)
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(div().flex_1().child(chat.confirmation.clone()))
+            .child(
+                div()
+                    .id("chat-room-confirmation-dismiss")
+                    .px_1()
+                    .text_color(theme.muted)
+                    .cursor_pointer()
+                    .hover(|style| style.text_color(theme.foreground))
+                    .role(ducktape_view_guest::Role::Button)
+                    .aria_label("Dismiss")
+                    .focusable()
+                    .on_click(dismiss)
+                    .child("✕"),
+            ),
+    )
+}
+
+/// The composer, or why the reader may not write here.
+fn compose(chat: &Chat, room: &Room, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement {
+    if let Some(gate) = chat.write_gate() {
+        return write_gate(gate, cx, theme).into_any_element();
+    }
+    let target = Target::Post {
+        channel: room.id.clone(),
+        thread: None,
+    };
+    let editable = chat.session.connected;
+    // inset from the pane's edges, so the field reads as a field
+    div()
+        .p_3()
+        .child(composer(chat, target, &hint(chat, room), editable, cx))
+        .into_any_element()
+}
+
+/// The composer's placeholder: who or where a message goes.
+fn hint(chat: &Chat, room: &Room) -> String {
+    if let Some((peer, _)) = super::sidebar::dm_peer(chat) {
+        return format!("Message {peer}");
+    }
+    let name = chat.info(&room.id).map_or_else(
+        || ducktape_view_guest::design::short_hex(&room.id),
+        |info| info.channel.name.clone(),
+    );
+    match chat::dm_peers(&room.id) {
+        Some(_) => format!("Message {name}"),
+        None => format!("Message #{name}"),
+    }
 }
 
 fn header(chat: &Chat, room: &Room, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement {
@@ -279,92 +296,93 @@ fn huddle(info: &ChannelInfo, theme: &Theme) -> impl IntoElement {
 }
 
 fn search_results(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement {
-    let mut content = div()
+    let found = match &chat.search.hits {
+        Loaded::Idle | Loaded::Loading(_) => vec![quiet("Searching…", theme).into_any_element()],
+        Loaded::Failed(refusal) => vec![quiet(refusal.sentence.clone(), theme).into_any_element()],
+        Loaded::Ready(hits) if hits.rows.is_empty() => vec![
+            empty_state(
+                "chat-search-empty",
+                "No results",
+                "Nothing matched this message search.",
+                theme,
+            )
+            .into_any_element(),
+        ],
+        Loaded::Ready(hits) => hit_list(chat, hits, cx, theme),
+    };
+    let clear = cx.listener(|chat, _: &ClickEvent, _window, cx| {
+        chat.search_clear();
+        cx.notify();
+    });
+    div()
         .id("chat-search-results")
         .flex_1()
         .overflow_y_scroll()
         .flex()
         .flex_col()
         .gap_2()
-        .p_3();
-    match &chat.search.hits {
-        Loaded::Idle | Loaded::Loading(_) => {
-            content = content.child(quiet("Searching…", theme));
-        }
-        Loaded::Failed(refusal) => {
-            content = content.child(quiet(refusal.sentence.clone(), theme));
-        }
-        Loaded::Ready(hits) if hits.rows.is_empty() => {
-            content = content.child(empty_state(
-                "chat-search-empty",
-                "No results",
-                "Nothing matched this message search.",
-                theme,
-            ));
-        }
-        Loaded::Ready(hits) => {
-            content = content.child(
-                div()
-                    .text_size(design::text::SECONDARY)
-                    .text_color(theme.muted)
-                    .child(format!(
-                        "{} result{} for “{}”",
-                        hits.rows.len(),
-                        if hits.rows.len() == 1 { "" } else { "s" },
-                        chat.search.query
-                    )),
-            );
-            for row in &hits.rows {
-                let id = row.channel_id.clone();
-                let seq = row.seq;
-                let open = cx.listener(move |chat, _: &ClickEvent, window, cx| {
-                    cx.notify();
-                    chat.open_hit(id.clone(), seq, window, cx)
-                });
-                content = content.child(
-                    div()
-                        .id(ElementId::named_usize("chat-search-hit", seq as usize))
-                        .flex()
-                        .flex_col()
-                        .gap_1()
-                        .p_2()
-                        .bg(theme.surface)
-                        .hover(|s| s.bg(theme.surface_raised))
-                        .role(ducktape_view_guest::Role::Button)
-                        .focusable()
-                        .on_click(open)
-                        .child(
-                            div()
-                                .text_size(design::text::SECONDARY)
-                                .child(row.text.clone()),
-                        )
-                        .child(
-                            div()
-                                .text_size(design::text::CAPTION)
-                                .text_color(theme.muted)
-                                .child(format!("message {}", row.seq)),
-                        ),
-                );
-            }
-            if hits.has_more {
-                let more = cx.listener(|chat, _: &ClickEvent, _window, cx| {
-                    cx.notify();
-                    chat.search_more(cx)
-                });
-                content = content.child(button("chat-search-more", "More results", theme, more));
-            }
-        }
+        .p_3()
+        .children(found)
+        .child(button(
+            "chat-search-clear",
+            "Clear message search",
+            theme,
+            clear,
+        ))
+}
+
+/// How many hits, a row per hit, and the way to more.
+fn hit_list(chat: &Chat, hits: &Hits, cx: &mut Context<Chat>, theme: &Theme) -> Vec<AnyElement> {
+    let count = design::plural(hits.rows.len() as u64, "result", "results");
+    let mut list = vec![
+        div()
+            .text_size(design::text::SECONDARY)
+            .text_color(theme.muted)
+            .child(format!("{count} for “{}”", chat.search.query))
+            .into_any_element(),
+    ];
+    list.extend(hits.rows.iter().map(|row| hit(row, cx, theme)));
+    if hits.has_more {
+        let more = cx.listener(|chat, _: &ClickEvent, _window, cx| {
+            cx.notify();
+            chat.search_more(cx)
+        });
+        list.push(button("chat-search-more", "More results", theme, more).into_any_element());
     }
-    let clear = cx.listener(|chat, _: &ClickEvent, _window, cx| {
-        chat.search_clear();
+    list
+}
+
+/// One hit: its text and where it sits, opening the room at it.
+fn hit(row: &MsgRow, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement {
+    let id = row.channel_id.clone();
+    let seq = row.seq;
+    let open = cx.listener(move |chat, _: &ClickEvent, window, cx| {
         cx.notify();
+        chat.open_hit(id.clone(), seq, window, cx)
     });
-    content.child(button(
-        "chat-search-clear",
-        "Clear message search",
-        theme,
-        clear,
-    ))
+    div()
+        .id(ElementId::named_usize("chat-search-hit", seq as usize))
+        .flex()
+        .flex_col()
+        .gap_1()
+        .p_2()
+        .bg(theme.surface)
+        .hover(|s| s.bg(theme.surface_raised))
+        .role(ducktape_view_guest::Role::Button)
+        .focusable()
+        .on_click(open)
+        .child(
+            div()
+                .text_size(design::text::SECONDARY)
+                .child(row.text.clone()),
+        )
+        .child(
+            div()
+                .text_size(design::text::CAPTION)
+                .text_color(theme.muted)
+                .child(format!("message {}", row.seq)),
+        )
+        .into_any_element()
 }
 
 /// Where the composer would be, why the reader may not write here.
@@ -448,8 +466,8 @@ pub fn selection_bar(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl
         .p_2()
         .bg(theme.accent_soft)
         .child(div().flex_1().child(format!(
-            "{count} message{} selected",
-            if count == 1 { "" } else { "s" }
+            "{} selected",
+            design::plural(count as u64, "message", "messages")
         )))
         .child(button("chat-selection-copy", "Copy", theme, copy))
         .into_any_element()

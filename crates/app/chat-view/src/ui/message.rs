@@ -27,17 +27,7 @@ pub fn card(
 ) -> impl IntoElement {
     let id = message.id.clone();
     let seq = message.seq;
-    let press = cx.listener(move |chat, event: &ClickEvent, _window, cx| {
-        let position = event.position();
-        let at = (position.x.into(), position.y.into());
-        // a reaction, the replies link or the toolbar took this click first
-        if chat.was_claimed(at) {
-            return;
-        }
-        cx.notify();
-        chat.layout.press = at;
-        chat.press_message(pane, seq);
-    });
+    let press = press(pane, seq, cx);
     let chosen = !message.deleted
         && seq > 0
         && chat
@@ -55,9 +45,9 @@ pub fn card(
         .pt(if message.show_author {
             design::space::LG
         } else {
-            px(3.)
+            design::space::HAIR
         })
-        .pb(px(3.))
+        .pb(design::space::HAIR)
         .bg(if chosen {
             theme.accent_soft
         } else if ranged {
@@ -82,15 +72,7 @@ pub fn card(
     // row, the strips were most of each frame the view sends — over half
     // its bytes in a busy room — and every frame is paid for in fuel.
     let key = (pane, seq);
-    let row_hover = cx.listener(move |chat, over: &bool, _window, cx| {
-        if *over && chat.hovered != Some(key) {
-            chat.hovered = Some(key);
-            cx.notify();
-        } else if !*over && chat.hovered == Some(key) {
-            chat.hovered = None;
-            cx.notify();
-        }
-    });
+    let row_hover = hovers(key, cx);
     let mut outer = div()
         .id(format!("chat-message-{id}-row"))
         .relative()
@@ -104,6 +86,42 @@ pub fn card(
     outer
 }
 
+/// A press on the card selects the message, unless a control on it took
+/// the click first.
+fn press(
+    pane: Pane,
+    seq: u64,
+    cx: &mut Context<Chat>,
+) -> impl Fn(&ClickEvent, &mut Window, &mut ducktape_view_guest::App) + 'static {
+    cx.listener(move |chat, event: &ClickEvent, _window, cx| {
+        let position = event.position();
+        let at = (position.x.into(), position.y.into());
+        // a reaction, the replies link or the toolbar took this click first
+        if chat.was_claimed(at) {
+            return;
+        }
+        cx.notify();
+        chat.layout.press = at;
+        chat.press_message(pane, seq);
+    })
+}
+
+/// The row keeps `hovered` on itself while the pointer is over it.
+fn hovers(
+    key: (Pane, u64),
+    cx: &mut Context<Chat>,
+) -> impl Fn(&bool, &mut Window, &mut ducktape_view_guest::App) + 'static {
+    cx.listener(move |chat, over: &bool, _window, cx| {
+        if *over && chat.hovered != Some(key) {
+            chat.hovered = Some(key);
+            cx.notify();
+        } else if !*over && chat.hovered == Some(key) {
+            chat.hovered = None;
+            cx.notify();
+        }
+    })
+}
+
 /// A run's first message wears its author's initials; the rest keep
 /// the column.
 fn avatar(message: &ChatMessage, theme: &Theme) -> AnyElement {
@@ -114,7 +132,7 @@ fn avatar(message: &ChatMessage, theme: &Theme) -> AnyElement {
             .flex()
             .items_center()
             .justify_center()
-            .rounded(px(6.))
+            .rounded(design::space::XS)
             .bg(if message.agent {
                 theme.agent_soft
             } else {
@@ -126,7 +144,7 @@ fn avatar(message: &ChatMessage, theme: &Theme) -> AnyElement {
                 theme.muted
             })
             .font_weight(ducktape_view_guest::FontWeight::SEMIBOLD)
-            .text_size(px(11.5))
+            .text_size(design::text::CAPTION)
             .child(message.initial.clone())
             .into_any_element()
     } else {
@@ -152,11 +170,11 @@ fn action_strip(
     let (id, seq) = (&message.id, message.seq);
     let rev = message.rev;
     let writable = chat.may_write();
-    let mut actions = div()
+    let actions = div()
         .id(format!("chat-message-{id}-actions"))
         .absolute()
         .right_2()
-        // 22px tall at 2px: inside even a compact row (3 + 20 + 3), so
+        // 22px tall at 2px: inside even a compact row (2 + 20 + 2), so
         // the bar never hangs into the next row, which paints over it
         // and is outside this row's hover
         .top(design::space::HAIR)
@@ -169,69 +187,68 @@ fn action_strip(
         // clickable. GPUI hands a click here to the card beneath too;
         // each button claims it (`Chat::claim`) so the card stands down.
         .invisible()
-        .group_hover(group, |style| style.visible());
-    if chosen {
-        actions = actions.visible();
-    }
-    if pane == Pane::Timeline && message.reply_count == 0 {
+        .group_hover(group, |style| style.visible())
+        .when(chosen, |actions| actions.visible());
+    let thread = (pane == Pane::Timeline && message.reply_count == 0).then(|| {
         let open = cx.listener(move |chat, event: &ClickEvent, _, cx| {
             chat.claim(event);
             cx.notify();
             chat.open_thread(seq, cx);
         });
-        actions = actions.child(action_button(
-            format!("chat-message-{id}-thread"),
-            "💬",
-            "Open thread",
-            theme,
-            true,
-            open,
-        ));
-    }
+        let id = format!("chat-message-{id}-thread");
+        action_button(id, "💬", "Open thread", theme, true, open)
+    });
     let thumbs = cx.listener(move |chat, event: &ClickEvent, _, cx| {
         chat.claim(event);
         cx.notify();
         chat.react(seq, "👍".into(), true, cx);
     });
-    actions = actions.child(action_button(
-        format!("chat-message-{id}-thumbs-up"),
-        "👍",
-        "React with 👍",
-        theme,
-        writable,
-        thumbs,
-    ));
-    let react = cx.listener(move |chat, event: &ClickEvent, window, cx| {
-        chat.claim(event);
-        cx.notify();
-        let position = event.position();
-        chat.layout.press = (position.x.into(), position.y.into());
-        chat.open_menu(pane, seq, rev, Mode::Reactions, window, cx);
-    });
-    actions = actions.child(action_button(
-        format!("chat-message-{id}-react"),
-        "😀",
-        "Manage reactions",
-        theme,
-        writable,
-        react,
-    ));
-    let more = cx.listener(move |chat, event: &ClickEvent, window, cx| {
-        chat.claim(event);
-        cx.notify();
-        let position = event.position();
-        chat.layout.press = (position.x.into(), position.y.into());
-        chat.open_menu(pane, seq, rev, Mode::More, window, cx);
-    });
-    actions = actions.child(action_button(
-        format!("chat-message-{id}-more"),
-        "⋯",
-        "More message actions",
-        theme,
-        true,
-        more,
-    ));
+    let react = opens_menu(pane, seq, rev, Mode::Reactions, cx);
+    let more = opens_menu(pane, seq, rev, Mode::More, cx);
     actions
+        .children(thread)
+        .child(action_button(
+            format!("chat-message-{id}-thumbs-up"),
+            "👍",
+            "React with 👍",
+            theme,
+            writable,
+            thumbs,
+        ))
+        .child(action_button(
+            format!("chat-message-{id}-react"),
+            "😀",
+            "Manage reactions",
+            theme,
+            writable,
+            react,
+        ))
+        .child(action_button(
+            format!("chat-message-{id}-more"),
+            "⋯",
+            "More message actions",
+            theme,
+            true,
+            more,
+        ))
+}
+
+/// A strip button that opens the message's menu in `mode` where it was
+/// pressed.
+fn opens_menu(
+    pane: Pane,
+    seq: u64,
+    rev: u32,
+    mode: Mode,
+    cx: &mut Context<Chat>,
+) -> impl Fn(&ClickEvent, &mut Window, &mut ducktape_view_guest::App) + 'static {
+    cx.listener(move |chat, event: &ClickEvent, window, cx| {
+        chat.claim(event);
+        cx.notify();
+        let position = event.position();
+        chat.layout.press = (position.x.into(), position.y.into());
+        chat.open_menu(pane, seq, rev, mode, window, cx);
+    })
 }
 
 fn content(
@@ -241,79 +258,102 @@ fn content(
     cx: &mut Context<Chat>,
     theme: &Theme,
 ) -> impl IntoElement {
-    let mut body = div()
+    let reactions = (!message.reactions.is_empty())
+        .then(|| reactions(chat, &message, pane, cx, theme).into_any_element());
+    div()
         .id(format!("chat-message-{}-contents", message.id))
         .flex_1()
         .min_w(px(0.))
         .flex()
         .flex_col()
-        .gap_1();
-    if message.show_author {
-        body = body.child(header(&message, theme));
+        .gap_1()
+        .when(message.show_author, |body| {
+            body.child(header(&message, theme))
+        })
+        .children(blocks(chat, &message, cx, theme))
+        .children(marks(&message, theme))
+        .children(reactions)
+        .children(replies(&message, pane, cx, theme))
+}
+
+/// The message's blocks, or its plain body where it has none.
+fn blocks(
+    chat: &Chat,
+    message: &ChatMessage,
+    cx: &mut Context<Chat>,
+    theme: &Theme,
+) -> Vec<AnyElement> {
+    if message.blocks.is_empty() {
+        let text = div()
+            .id(format!("chat-message-{}-text", message.id))
+            .child(message.body.clone());
+        return vec![text.into_any_element()];
     }
     let empty = Names::empty();
     let names = chat.names.ready().unwrap_or(&empty);
-    for (index, block) in message.blocks.iter().enumerate() {
-        body = body.child(block_view(&message, index, block, names, cx, theme));
-    }
-    if message.blocks.is_empty() {
-        body = body.child(
-            div()
-                .id(format!("chat-message-{}-text", message.id))
-                .child(message.body.clone()),
-        );
-    }
+    let blocks = message.blocks.iter().enumerate();
+    blocks
+        .map(|(index, block)| {
+            block_view(message, index, block, names, cx, theme).into_any_element()
+        })
+        .collect()
+}
+
+/// "edited", and "sending…" while the message is on its way.
+fn marks(message: &ChatMessage, theme: &Theme) -> Vec<AnyElement> {
+    let mark = |text: &'static str| {
+        div()
+            .text_size(design::text::CAPTION)
+            .text_color(theme.muted)
+            .child(text)
+    };
+    let mut marks = Vec::new();
     if message.edited {
-        body = body.child(
-            div()
-                .text_size(design::text::CAPTION)
-                .text_color(theme.muted)
-                .child("edited"),
-        );
+        marks.push(mark("edited").into_any_element());
     }
     if message.pending {
-        body = body.child(
-            div()
-                .id(format!("chat-message-{}-pending", message.id))
-                .text_size(design::text::CAPTION)
-                .text_color(theme.muted)
-                .child("sending…"),
-        );
+        let id = format!("chat-message-{}-pending", message.id);
+        marks.push(mark("sending…").id(id).into_any_element());
     }
-    if !message.reactions.is_empty() {
-        body = body.child(reactions(chat, &message, pane, cx, theme));
+    marks
+}
+
+/// A root's replies: in the timeline, the button into its thread; atop
+/// the thread pane, the count over a rule.
+fn replies(
+    message: &ChatMessage,
+    pane: Pane,
+    cx: &mut Context<Chat>,
+    theme: &Theme,
+) -> Option<AnyElement> {
+    if message.reply_count == 0 {
+        return None;
     }
-    if message.reply_count > 0 && pane == Pane::Timeline {
+    if pane == Pane::Timeline {
         let root = message.seq;
         let open = cx.listener(move |chat, event: &ClickEvent, _window, cx| {
             chat.claim(event);
             cx.notify();
             chat.open_thread(root, cx)
         });
-        body = body.child(div().flex().pt_1().child(replies_button(
-            format!("chat-message-{}-replies", message.id),
-            message.reply_count,
-            theme,
-            open,
-        )));
-    } else if message.reply_count > 0 {
-        body = body.child(
-            div()
-                .id(format!("chat-message-{}-reply-separator", message.id))
-                .flex()
-                .items_center()
-                .gap_2()
-                .pt_1()
-                .child(
-                    div()
-                        .text_size(design::text::CAPTION)
-                        .text_color(theme.muted)
-                        .child(design::plural(message.reply_count, "reply", "replies")),
-                )
-                .child(div().h(px(1.)).flex_1().bg(theme.border)),
-        );
+        let id = format!("chat-message-{}-replies", message.id);
+        let button = replies_button(id, message.reply_count, theme, open);
+        return Some(div().flex().pt_1().child(button).into_any_element());
     }
-    body
+    let separator = div()
+        .id(format!("chat-message-{}-reply-separator", message.id))
+        .flex()
+        .items_center()
+        .gap_2()
+        .pt_1()
+        .child(
+            div()
+                .text_size(design::text::CAPTION)
+                .text_color(theme.muted)
+                .child(design::plural(message.reply_count, "reply", "replies")),
+        )
+        .child(div().h(px(1.)).flex_1().bg(theme.border));
+    Some(separator.into_any_element())
 }
 
 /// A run's first message names its author, their agent badge and block.
