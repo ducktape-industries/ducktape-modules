@@ -322,7 +322,7 @@ pub(crate) struct ChangeForm {
     pub into: Vec<u8>,
     pub title: String,
     pub body: String,
-    pub reviewers: Vec<Vec<u8>>,
+    pub reviewers: Vec<chat::Party>,
     pub error: String,
 }
 
@@ -448,17 +448,6 @@ impl Names {
             chat::Party::Module(_) | chat::Party::System => unnamed(party),
         }
     }
-    /// The signing key of an account number: `host.session` names no key, and
-    /// forge's filters and judgment are keyed by the exact key.
-    pub fn key_of(&self, number: u64) -> Option<Vec<u8>> {
-        let row = self.rows.iter().find(|row| row.number == number)?;
-        unhex(row.keys.first()?)
-    }
-}
-
-/// [`abi::unhex`], where the empty string is not a key either.
-pub(crate) fn unhex(text: &str) -> Option<Vec<u8>> {
-    abi::unhex(text).filter(|bytes| !bytes.is_empty())
 }
 
 /// The key a change's screens and drafts hang on.

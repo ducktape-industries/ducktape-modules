@@ -173,7 +173,7 @@ fn grant_field(
 /// One row per writer with its Revoke, or the owner-only empty state.
 fn writer_rows(
     forge: &Forge,
-    writers: &[Vec<u8>],
+    writers: &[chat::Party],
     cx: &mut Context<Forge>,
     theme: &Theme,
 ) -> Vec<AnyElement> {
@@ -191,18 +191,18 @@ fn writer_rows(
     writers
         .iter()
         .map(|key| {
-            let label = forge.key_name(key);
+            let label = forge.party_name(key);
             let revoke = cx.listener({
                 let key = key.clone();
                 move |forge, _: &ClickEvent, _, cx| forge.revoke(key.clone(), cx)
             });
             row::<fn(&ClickEvent, &mut Window, &mut App)>(
-                id(format!("forge-writer-{}", abi::hex(key))),
+                id(format!("forge-writer-{}", party_id(key))),
                 theme,
             )
             .cell(div().flex_1().truncate().child(label))
             .cell(button(
-                id(format!("forge-settings-revoke-{}", abi::hex(key))),
+                id(format!("forge-settings-revoke-{}", party_id(key))),
                 "Revoke",
                 theme,
                 revoke,
@@ -210,4 +210,14 @@ fn writer_rows(
             .into_any_element()
         })
         .collect()
+}
+
+/// A writer's element id: `acct-<n>` for an account, the hex of a key.
+fn party_id(party: &chat::Party) -> String {
+    match party {
+        chat::Party::Account(number) => format!("acct-{number}"),
+        chat::Party::Key(key) => abi::hex(key),
+        chat::Party::Module(module) => module.clone(),
+        chat::Party::System => "system".into(),
+    }
 }

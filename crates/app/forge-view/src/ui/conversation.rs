@@ -51,7 +51,7 @@ pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
 /// One review as a timeline event: who, what they concluded, where, and
 /// the line comments it carried.
 fn review_card(forge: &Forge, review: &forge::Review, theme: &Theme) -> AnyElement {
-    let author = forge.key_name(&review.author);
+    let author = forge.party_name(&review.author);
     let outdated = forge.outdated(&review.draft.commit_oid);
     let comments = review.draft.comments.len();
     let mut card = div()
@@ -167,14 +167,14 @@ fn forge_line(
     }
     let key = row.message_id.clone();
     if opened {
-        let author = forge.key_name(&change.author);
+        let author = forge.party_name(&change.author);
         return Some(event(key, Some(author), "opened this change".into(), theme));
     }
     // a line matching no review yet may be one still paging in
     if reviews.next.is_some() {
         return None;
     }
-    let actor = |key: &Option<Vec<u8>>| key.as_ref().map(|key| forge.key_name(key));
+    let actor = |party: &Option<chat::Party>| party.as_ref().map(|party| forge.party_name(party));
     match (change.state, &change.merge_oid) {
         (ChangeState::Merged, Some(oid)) => Some(event(
             key,

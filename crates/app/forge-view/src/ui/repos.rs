@@ -242,7 +242,7 @@ pub(crate) fn overview(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) ->
     // rows run edge to edge, a hairline between them
     let mut list = scroller("forge-repos-list").p_0().gap_0();
     for info in rows {
-        let owner = forge.key_name(&info.repo.owner);
+        let owner = forge.party_name(&info.repo.owner);
         list = list.child(repo_row(forge, info, owner, cx, theme));
     }
     column.child(list).into_any_element()

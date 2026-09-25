@@ -208,11 +208,13 @@ impl Forge {
     }
 
     pub(crate) fn changes_query(&self, repo: &str) -> Query {
-        let me = self.me_key().unwrap_or_default();
+        // With no key seated nobody is "me": the system party matches no
+        // change, and forge refuses to judge it.
+        let me = self.me_party().unwrap_or_default();
         let state = match self.filter {
             Filter::Judgment => {
                 return Query::Judgment {
-                    key: me,
+                    party: me,
                     page: PAGE,
                 };
             }

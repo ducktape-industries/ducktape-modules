@@ -274,6 +274,9 @@ pub struct RefInfo {
     pub target: String,
 }
 
+/// One read's answer. A reply is decoded once and read in place, so its
+/// widest variant (a whole change record) is not boxed.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Reply {
     Repos {

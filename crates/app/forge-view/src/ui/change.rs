@@ -106,9 +106,9 @@ fn title_line(
     let edit = cx.listener(|forge, _: &ClickEvent, _, cx| forge.start_edit(cx));
     let close = cx.listener(|forge, _: &ClickEvent, _, cx| forge.close_change(cx));
     let merge = cx.listener(|forge, _: &ClickEvent, _, cx| forge.merge(cx));
-    let author = forge.key_name(&change.author);
+    let author = forge.party_name(&change.author);
     let open = change.state == ChangeState::Open;
-    let mine = forge.me_key().is_some_and(|key| key == change.author);
+    let mine = forge.me_party().as_ref() == Some(&change.author);
     let mut top = div()
         .id(id("forge-change-head"))
         .flex()
@@ -332,7 +332,7 @@ fn idle_review_bar(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> Any
         .child(
             button(id("forge-start-review"), "Start review", theme, start)
                 .kind(design::Kind::Primary)
-                .enabled(forge.session.connected && forge.me_key().is_some()),
+                .enabled(forge.session.connected && forge.me_party().is_some()),
         )
         .into_any_element()
 }
