@@ -8,7 +8,7 @@ use abi::{Cause, Env, Origin, Refusal};
 use identity::{Account, Control, Key};
 
 use super::*;
-use crate::{AccountRow, HUDDLE_JOIN_NS, HUDDLE_NODE_KEY_BYTES, execute_from};
+use crate::{AccountRow, HUDDLE_JOIN_NS, HUDDLE_NODE_KEY_BYTES};
 
 /// Ada's key; she holds account 1.
 const ADA_KEY: [u8; 32] = [1; 32];
@@ -39,7 +39,7 @@ fn account(number: u64, keys: Vec<Vec<u8>>) -> Account {
 
 /// Identity over three accounts, Ada's first; `List` pages by number.
 /// Account 2 holds [`LONE_KEY`] once `claimed` is set.
-fn identity(claimed: Rc<Cell<bool>>) -> store::Sibling {
+fn identity(claimed: Rc<Cell<bool>>) -> guest::Sibling {
     Box::new(move |request| {
         let lone = if claimed.get() {
             vec![LONE_KEY.to_vec()]
@@ -75,12 +75,13 @@ fn identity(claimed: Rc<Cell<bool>>) -> store::Sibling {
 
 /// A store with identity beside it and a verifier that takes `b"signed"`
 /// over exactly the join message; `claimed` hands [`LONE_KEY`] account 2.
-fn store_claiming(claimed: Rc<Cell<bool>>) -> Memory {
-    let mut store = Memory::default();
+fn store_claiming(claimed: Rc<Cell<bool>>) -> MockHost {
+    let store = MockHost::default();
     store
+        .borrow_mut()
         .siblings
         .insert(identity::PROGRAM.into(), identity(claimed));
-    store.verifier = Some(Box::new(|_, _, namespace, message, signature| {
+    store.borrow_mut().verifier = Some(Box::new(|_, _, namespace, message, signature| {
         let expected = [b"general".as_slice(), &ADA_KEY].concat();
         namespace == HUDDLE_JOIN_NS && message == expected && signature == b"signed"
     }));
@@ -88,7 +89,7 @@ fn store_claiming(claimed: Rc<Cell<bool>>) -> Memory {
 }
 
 /// [`store_claiming`] where [`LONE_KEY`] stays unclaimed.
-fn store() -> Memory {
+fn store() -> MockHost {
     store_claiming(Rc::default())
 }
 
@@ -109,37 +110,40 @@ fn key(bytes: &[u8]) -> Origin {
 
 /// The refusal's reason; the store is untouched by it.
 #[track_caller]
-fn refused(store: &mut Memory, origin: Origin, op: Op) -> String {
-    let env = env(origin);
-    store.refused(|store| execute_from(store, &env, op)).reason
+fn refused(store: &MockHost, origin: Origin, op: Op) -> String {
+    let ctx = store.exec(env(origin));
+    store.refused(|| crate::Chat::execute(&ctx, op)).reason
 }
 
-fn owner(store: &Memory, id: &str) -> Principal {
-    crate::state::channel(store, id).unwrap().owner
+/// A read of `store`.
+fn reads(store: &MockHost) -> guest::QueryCtx {
+    store.query(env(Origin::System))
+}
+
+fn owner(store: &MockHost, id: &str) -> Principal {
+    crate::state::channel(&reads(store), id).unwrap().owner
 }
 
 #[test]
 fn an_origin_acts_as_the_principal_identity_names() {
-    let mut store = store();
-    execute_from(
-        &mut store,
-        &env(key(&ADA_KEY)),
+    let store = store();
+    crate::Chat::execute(
+        &store.exec(env(key(&ADA_KEY))),
         create("a", PostPolicy::Open),
     )
     .unwrap();
     assert_eq!(owner(&store, "a"), Principal::Account(1));
     let forge = Origin::Program("forge".into());
-    execute_from(&mut store, &env(forge), create("forge:c", PostPolicy::Open)).unwrap();
+    crate::Chat::execute(&store.exec(env(forge)), create("forge:c", PostPolicy::Open)).unwrap();
     assert_eq!(owner(&store, "forge:c"), Principal::Module("forge".into()));
-    execute_from(
-        &mut store,
-        &env(Origin::System),
+    crate::Chat::execute(
+        &store.exec(env(Origin::System)),
         create("d", PostPolicy::Open),
     )
     .unwrap();
     assert_eq!(owner(&store, "d"), Principal::System);
     assert_eq!(
-        refused(&mut store, key(&[]), create("e", PostPolicy::Open)),
+        refused(&store, key(&[]), create("e", PostPolicy::Open)),
         reason::INVALID_INPUT
     );
 }
@@ -212,64 +216,60 @@ fn every_op() -> Vec<Op> {
 #[test]
 fn a_key_writes_only_once_it_holds_an_account() {
     let claimed = Rc::new(Cell::new(false));
-    let mut store = store_claiming(claimed.clone());
-    execute_from(
-        &mut store,
-        &env(key(&ADA_KEY)),
+    let store = store_claiming(claimed.clone());
+    crate::Chat::execute(
+        &store.exec(env(key(&ADA_KEY))),
         create("general", PostPolicy::Open),
     )
     .unwrap();
-    execute_from(
-        &mut store,
-        &env(key(&ADA_KEY)),
+    crate::Chat::execute(
+        &store.exec(env(key(&ADA_KEY))),
         post("general", "m1", "hello", None),
     )
     .unwrap();
     for op in every_op() {
         let why = format!("{op:?}");
         assert_eq!(
-            refused(&mut store, key(&LONE_KEY), op),
+            refused(&store, key(&LONE_KEY), op),
             reason::UNAUTHORIZED,
             "{why}"
         );
     }
     claimed.set(true);
-    execute_from(
-        &mut store,
-        &env(key(&LONE_KEY)),
+    crate::Chat::execute(
+        &store.exec(env(key(&LONE_KEY))),
         create("bo", PostPolicy::Open),
     )
     .unwrap();
     assert_eq!(owner(&store, "bo"), Principal::Account(2));
-    execute_from(
-        &mut store,
-        &env(key(&LONE_KEY)),
+    crate::Chat::execute(
+        &store.exec(env(key(&LONE_KEY))),
         post("general", "m2", "now I can", None),
     )
     .unwrap();
-    let row = crate::state::message(&store, "general", 2).unwrap();
+    let row = crate::state::message(&reads(&store), "general", 2).unwrap();
     assert_eq!(row.author, Principal::Account(2));
 }
 
 /// With no identity deployed, no key holds an account, so none writes.
 #[test]
 fn no_key_writes_until_identity_is_deployed() {
-    let mut store = Memory::default();
+    let store = MockHost::default();
     assert_eq!(
-        refused(&mut store, key(&ADA_KEY), create("a", PostPolicy::Open)),
+        refused(&store, key(&ADA_KEY), create("a", PostPolicy::Open)),
         reason::UNAUTHORIZED
     );
 }
 
 #[test]
 fn identity_refusing_refuses_the_op() {
-    let mut store = Memory::default();
-    store.siblings.insert(
+    let store = MockHost::default();
+    store.borrow_mut().siblings.insert(
         identity::PROGRAM.into(),
         Box::new(|_| Err(Refusal::new(reason::WRONG_STATE, "identity is halted"))),
     );
     assert_eq!(
-        refused(&mut store, key(&ADA_KEY), create("a", PostPolicy::Open)),
+        refused(&store, key(&ADA_KEY), create("a", PostPolicy::Open)),
         reason::WRONG_STATE
     );
 }
@@ -281,42 +281,43 @@ fn a_huddle_join_needs_its_nodes_signature() {
         node: vec![7; HUDDLE_NODE_KEY_BYTES],
         node_proof: proof.to_vec(),
     };
-    let mut store = store();
-    execute_from(
-        &mut store,
-        &env(key(&ADA_KEY)),
+    let store = store();
+    crate::Chat::execute(
+        &store.exec(env(key(&ADA_KEY))),
         create("general", PostPolicy::Open),
     )
     .unwrap();
     assert_eq!(
-        refused(&mut store, key(&ADA_KEY), join(b"forged")),
+        refused(&store, key(&ADA_KEY), join(b"forged")),
         reason::INVALID_INPUT
     );
     // the proof binds the key: another account's key cannot reuse Ada's
     assert_eq!(
-        refused(&mut store, key(&CY_KEY), join(b"signed")),
+        refused(&store, key(&CY_KEY), join(b"signed")),
         reason::INVALID_INPUT
     );
     assert_eq!(
-        refused(&mut store, Origin::System, join(b"signed")),
+        refused(&store, Origin::System, join(b"signed")),
         reason::UNAUTHORIZED
     );
-    let mut unverified = Memory::default();
+    let unverified = MockHost::default();
     unverified
+        .borrow_mut()
         .siblings
         .insert(identity::PROGRAM.into(), identity(Rc::default()));
-    execute_from(
-        &mut unverified,
-        &env(Origin::System),
+    crate::Chat::execute(
+        &unverified.exec(env(Origin::System)),
         create("general", PostPolicy::Open),
     )
     .unwrap();
     assert_eq!(
-        refused(&mut unverified, key(&ADA_KEY), join(b"signed")),
+        refused(&unverified, key(&ADA_KEY), join(b"signed")),
         reason::UNSUPPORTED
     );
-    execute_from(&mut store, &env(key(&ADA_KEY)), join(b"signed")).unwrap();
-    let huddle = crate::state::channel(&store, "general").unwrap().huddle;
+    crate::Chat::execute(&store.exec(env(key(&ADA_KEY))), join(b"signed")).unwrap();
+    let huddle = crate::state::channel(&reads(&store), "general")
+        .unwrap()
+        .huddle;
     assert_eq!(huddle[0].principal, Principal::Account(1));
 }
 
@@ -330,7 +331,7 @@ fn the_roster_pages_through_identity() {
                 limit: Some(2),
             },
         };
-        let Reply::Accounts(page) = query(&store, 1, asked).unwrap() else {
+        let Reply::Accounts(page) = crate::Chat::query(&reads(&store), asked).unwrap() else {
             panic!("accounts answer accounts");
         };
         page

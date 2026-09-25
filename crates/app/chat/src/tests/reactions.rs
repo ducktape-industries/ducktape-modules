@@ -9,9 +9,13 @@ fn a_reaction_counts_once_per_principal_and_knows_its_reader() {
     chat.post(&BO, "m1", "ship it", None);
     chat.ok(&ADA, react(1, "👍", true));
     chat.ok(&BO, react(1, "👍", true));
-    let twice = chat.store.state.clone();
+    let twice = chat.store.borrow().state.clone();
     chat.ok(&BO, react(1, "👍", true));
-    assert_eq!(chat.store.state, twice, "choosing it again changes nothing");
+    assert_eq!(
+        chat.store.borrow().state,
+        twice,
+        "choosing it again changes nothing"
+    );
     let seen_by = |viewer: Vec<Principal>| {
         let Reply::Roots(page) = chat.ask(Query::Roots {
             channel_id: "general".into(),
@@ -35,9 +39,13 @@ fn removing_a_reaction_uncounts_it_and_the_last_one_leaves() {
     chat.ok(&BO, react(1, "👍", true));
     chat.ok(&ADA, react(1, "👍", false));
     assert_eq!(chat.message(1).reactions[0].count, 1);
-    let unchosen = chat.store.state.clone();
+    let unchosen = chat.store.borrow().state.clone();
     chat.ok(&CY, react(1, "👍", false));
-    assert_eq!(chat.store.state, unchosen, "dropping what was never chosen");
+    assert_eq!(
+        chat.store.borrow().state,
+        unchosen,
+        "dropping what was never chosen"
+    );
     chat.ok(&BO, react(1, "👍", false));
     assert!(chat.message(1).reactions.is_empty());
 }
@@ -110,7 +118,7 @@ fn deleting_a_message_drops_its_reactions() {
             }
         }
         chat.ok(&ADA, delete(1));
-        chat.store.state
+        chat.store.borrow().state.clone()
     };
     let reacted = reacted_then_deleted(true);
     assert_eq!(reacted, reacted_then_deleted(false));

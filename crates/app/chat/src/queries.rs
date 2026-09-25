@@ -1,78 +1,27 @@
-//! [`query`]: one function per [`Query`], each a read of the tables in
-//! `state.rs`. Chat's listings only grow, so a page cursor from any height
+//! One function per [`Query`](crate::Query), each named by [`Chat::query`](crate::Chat)'s
+//! match and each a read of the tables in `state.rs`. Chat's listings only grow, so a page cursor from any height
 //! resumes where it left off.
-use abi::{Refusal, Scan};
-use store::{Page, PageReply, Reads, capacity, invalid};
+use abi::Scan;
+use guest::{QueryCtx, Refusal, capacity, invalid};
+use store::{Page, PageReply};
 
 use crate::state::{
-    ANSWERED, CHANNEL_TAGS, CHANNELS, HEADS, MEMBERS, MESSAGE_IDS, MESSAGES, REACTIONS, REPLIES,
-    ROOTS, TAGS, WORDS, message, messages, newest_first,
+    ANSWERED, CHANNEL_TAGS, CHANNELS, HEADS, MESSAGE_IDS, MESSAGES, REACTIONS, REPLIES, ROOTS,
+    TAGS, WORDS, message, messages, newest_first,
 };
 use crate::text::tag_label;
 use crate::{
-    ChannelInfo, ChannelRow, MAX_VIEWERS, MessageHits, MsgRow, Principal, Query, Reply,
+    ChannelInfo, ChannelRow, MAX_VIEWERS, MessageHits, MsgRow, Principal, Reply,
     SEARCH_POSTING_CAP, tokens,
 };
 
-pub fn query(store: &impl Reads, height: u64, query: Query) -> Result<Reply, Refusal> {
-    let (mut reply, viewer) = match query {
-        Query::Channels { page } => (Reply::Channels(channels(store, &page, height)?), vec![]),
-        Query::Channel { channel_id } => (Reply::Channel(channel(store, &channel_id)?), vec![]),
-        Query::MessageById { message_id } => (Reply::Message(by_id(store, &message_id)?), vec![]),
-        Query::ThreadAttention { channel_id, author } => (
-            Reply::Attention(attention(store, &channel_id, author)?),
-            vec![],
-        ),
-        Query::Roots {
-            channel_id,
-            viewer,
-            page,
-        } => (
-            Reply::Roots(roots(store, channel_id, &page, height)?),
-            viewer,
-        ),
-        Query::MessagesAround {
-            channel_id,
-            seq,
-            viewer,
-            page,
-        } => (
-            Reply::Messages(around(store, channel_id, seq, &page)?),
-            viewer,
-        ),
-        Query::Thread {
-            channel_id,
-            root_seq,
-            viewer,
-            page,
-        } => (thread(store, channel_id, root_seq, &page, height)?, viewer),
-        Query::Members { channel_id, page } => {
-            let members = MEMBERS.range_of(store, &channel_id, &page, height)?;
-            (Reply::Members(members.map(|(_, member)| member)), vec![])
-        }
-        Query::Search {
-            text,
-            viewer,
-            channel_id,
-            page,
-        } => (
-            Reply::Hits(search(store, &text, channel_id, &page)?),
-            viewer,
-        ),
-        Query::TagSearch {
-            tag,
-            viewer,
-            channel_id,
-            page,
-        } => (
-            Reply::TagHits(tagged(store, &tag, channel_id, &page, height)?),
-            viewer,
-        ),
-        Query::Accounts { page } => (
-            Reply::Accounts(crate::origin::accounts(store, page)?),
-            vec![],
-        ),
-    };
+/// `reply` as `viewer` reads it: each reaction learns whether one of
+/// `viewer` chose it.
+pub(crate) fn seen_by(
+    ctx: &QueryCtx,
+    mut reply: Reply,
+    viewer: Vec<Principal>,
+) -> Result<Reply, Refusal> {
     if viewer.len() > MAX_VIEWERS {
         return Err(capacity(format!(
             "a read names at most {MAX_VIEWERS} viewers, not {}",
@@ -80,7 +29,7 @@ pub fn query(store: &impl Reads, height: u64, query: Query) -> Result<Reply, Ref
         )));
     }
     for row in rows_in(&mut reply) {
-        mark_reacted(store, &viewer, row);
+        mark_reacted(ctx, &viewer, row);
     }
     Ok(reply)
 }
@@ -96,83 +45,80 @@ pub fn roots_below(channel_id: &str, seq: u64) -> Vec<u8> {
     })
 }
 
-fn info(store: &impl Reads, channel: ChannelRow) -> Result<ChannelInfo, Refusal> {
-    let head_seq = HEADS.get(store, &channel.id)?.unwrap_or(0);
+fn info(ctx: &QueryCtx, channel: ChannelRow) -> Result<ChannelInfo, Refusal> {
+    let head_seq = HEADS.get(ctx, &channel.id)?.unwrap_or(0);
     Ok(ChannelInfo { channel, head_seq })
 }
 
-fn channels(
-    store: &impl Reads,
+pub(crate) fn channels(
+    ctx: &QueryCtx,
     page: &Page,
     height: u64,
 ) -> Result<PageReply<ChannelInfo>, Refusal> {
     CHANNELS
-        .range(store, page, height)?
-        .try_map(|(_, channel)| info(store, channel))
+        .range(ctx, page, height)?
+        .try_map(|(_, channel)| info(ctx, channel))
 }
 
-fn channel(store: &impl Reads, id: &String) -> Result<Option<ChannelInfo>, Refusal> {
+pub(crate) fn channel(ctx: &QueryCtx, id: &String) -> Result<Option<ChannelInfo>, Refusal> {
     CHANNELS
-        .get(store, id)?
-        .map(|channel| info(store, channel))
+        .get(ctx, id)?
+        .map(|channel| info(ctx, channel))
         .transpose()
 }
 
-fn by_id(store: &impl Reads, message_id: &String) -> Result<Option<MsgRow>, Refusal> {
+pub(crate) fn by_id(ctx: &QueryCtx, message_id: &String) -> Result<Option<MsgRow>, Refusal> {
     MESSAGE_IDS
-        .get(store, message_id)?
-        .map(|(channel_id, seq)| message(store, &channel_id, seq))
+        .get(ctx, message_id)?
+        .map(|(channel_id, seq)| message(ctx, &channel_id, seq))
         .transpose()
 }
 
 /// The root of the author's most recently answered thread.
-fn attention(
-    store: &impl Reads,
+pub(crate) fn attention(
+    ctx: &QueryCtx,
     channel_id: &str,
     author: Principal,
 ) -> Result<Option<MsgRow>, Refusal> {
     let channel_id = channel_id.to_owned();
     let newest = ANSWERED.prefix_of(&(channel_id.clone(), author)).limit(1);
     ANSWERED
-        .scan(store, newest)?
+        .scan(ctx, newest)?
         .first()
-        .map(|(_, root)| message(store, &channel_id, *root))
+        .map(|(_, root)| message(ctx, &channel_id, *root))
         .transpose()
 }
 
-fn roots(
-    store: &impl Reads,
+pub(crate) fn roots(
+    ctx: &QueryCtx,
     channel_id: String,
     page: &Page,
     height: u64,
 ) -> Result<PageReply<MsgRow>, Refusal> {
-    let keys = ROOTS.range_of(store, &channel_id, page, height)?;
+    let keys = ROOTS.range_of(ctx, &channel_id, page, height)?;
     rows_at(
-        store,
+        ctx,
         keys.map(|(channel_id, newest)| (channel_id, newest_first(newest))),
     )
 }
 
-fn thread(
-    store: &impl Reads,
+pub(crate) fn thread(
+    ctx: &QueryCtx,
     channel_id: String,
     root: u64,
     page: &Page,
     height: u64,
 ) -> Result<Reply, Refusal> {
-    let keys = REPLIES.range_of(store, &(channel_id.clone(), root), page, height)?;
+    let keys = REPLIES.range_of(ctx, &(channel_id.clone(), root), page, height)?;
     Ok(Reply::Thread {
-        root: MESSAGES.get(store, &(channel_id, root))?,
-        replies: rows_at(
-            store,
-            keys.map(|(channel_id, _, reply)| (channel_id, reply)),
-        )?,
+        root: MESSAGES.get(ctx, &(channel_id, root))?,
+        replies: rows_at(ctx, keys.map(|(channel_id, _, reply)| (channel_id, reply)))?,
     })
 }
 
 /// Up to `page.limit` messages, half before `seq` and half from it.
-fn around(
-    store: &impl Reads,
+pub(crate) fn around(
+    ctx: &QueryCtx,
     channel_id: String,
     seq: u64,
     page: &Page,
@@ -180,15 +126,15 @@ fn around(
     let half = page.limit() / 2;
     let lo = MESSAGES.key(&(channel_id.clone(), seq.saturating_sub(half)));
     let hi = MESSAGES.key(&(channel_id, seq.saturating_add(half + 1)));
-    let rows = MESSAGES.scan(store, Scan::range(lo, Some(hi)))?;
+    let rows = MESSAGES.scan(ctx, Scan::range(lo, Some(hi)))?;
     Ok(rows.into_iter().map(|(_, row)| row).collect())
 }
 
 /// The messages holding every word of `text`, newest first. The first
 /// word's postings are read (at most [`SEARCH_POSTING_CAP`]) and the rest
 /// checked on each row.
-fn search(
-    store: &impl Reads,
+pub(crate) fn search(
+    ctx: &QueryCtx,
     text: &str,
     channel_id: Option<String>,
     page: &Page,
@@ -203,12 +149,12 @@ fn search(
         Some(channel_id) => WORDS.prefix_of(&(first, channel_id)),
         None => WORDS.prefix_of(&first),
     };
-    let postings = WORDS.scan(store, postings.limit(SEARCH_POSTING_CAP as u64 + 1))?;
+    let postings = WORDS.scan(ctx, postings.limit(SEARCH_POSTING_CAP as u64 + 1))?;
     let capped = postings.len() > SEARCH_POSTING_CAP;
     let at = postings
         .into_iter()
         .map(|(_, channel_id, seq)| (channel_id, seq));
-    let mut hits: Vec<MsgRow> = messages(store, at)?
+    let mut hits: Vec<MsgRow> = messages(ctx, at)?
         .into_iter()
         .filter(|row| wanted.is_subset(&tokens(&row.text)))
         .collect();
@@ -220,8 +166,8 @@ fn search(
 }
 
 /// One page of the messages tagged `tag`, newest first.
-fn tagged(
-    store: &impl Reads,
+pub(crate) fn tagged(
+    ctx: &QueryCtx,
     tag: &str,
     channel_id: Option<String>,
     page: &Page,
@@ -230,23 +176,20 @@ fn tagged(
     let label = tag_label(tag);
     let keys = match channel_id {
         Some(channel_id) => CHANNEL_TAGS
-            .range_of(store, &(channel_id, label), page, height)?
+            .range_of(ctx, &(channel_id, label), page, height)?
             .map(|(channel_id, _, newest)| (channel_id, newest_first(newest))),
         None => TAGS
-            .range_of(store, &label, page, height)?
+            .range_of(ctx, &label, page, height)?
             .map(|(_, _, channel_id, seq)| (channel_id, seq)),
     };
-    rows_at(store, keys)
+    rows_at(ctx, keys)
 }
 
 /// A page of message addresses as the page of rows they name.
-fn rows_at(
-    store: &impl Reads,
-    keys: PageReply<(String, u64)>,
-) -> Result<PageReply<MsgRow>, Refusal> {
+fn rows_at(ctx: &QueryCtx, keys: PageReply<(String, u64)>) -> Result<PageReply<MsgRow>, Refusal> {
     Ok(PageReply {
         height: keys.height,
-        items: messages(store, keys.items)?,
+        items: messages(ctx, keys.items)?,
         next: keys.next,
     })
 }
@@ -265,7 +208,7 @@ fn rows_in(reply: &mut Reply) -> Vec<&mut MsgRow> {
 }
 
 /// Each reaction on `row` learns whether one of `viewer` chose it.
-fn mark_reacted(store: &impl Reads, viewer: &[Principal], row: &mut MsgRow) {
+fn mark_reacted(ctx: &QueryCtx, viewer: &[Principal], row: &mut MsgRow) {
     for reaction in &mut row.reactions {
         reaction.reacted_by_me = viewer.iter().any(|principal| {
             let key = (
@@ -274,7 +217,7 @@ fn mark_reacted(store: &impl Reads, viewer: &[Principal], row: &mut MsgRow) {
                 reaction.emoji.clone(),
                 principal.clone(),
             );
-            REACTIONS.has(store, &key)
+            REACTIONS.has(ctx, &key)
         });
     }
 }

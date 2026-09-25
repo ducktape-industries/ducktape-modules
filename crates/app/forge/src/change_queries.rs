@@ -2,7 +2,8 @@
 //! reviews, and the judgment a person owes across every repository.
 
 use abi::{Refusal, Scan};
-use store::{Listing, Reads, capacity};
+use guest::{QueryCtx, capacity};
+use store::Listing;
 
 use crate::contract::*;
 use crate::discussion;
@@ -14,16 +15,16 @@ use crate::state::{
 
 /// One change, its two heads, and a page of its reviews.
 pub fn change(
-    store: &impl Reads,
+    ctx: &QueryCtx,
     height: u64,
     repo: &str,
     n: u64,
     listing: &Listing,
 ) -> Result<Reply, Refusal> {
-    let change = load_change(store, repo, n)?;
-    let (source_head, target_head) = heads(store, repo, &change)?;
+    let change = load_change(ctx, repo, n)?;
+    let (source_head, target_head) = heads(ctx, repo, &change)?;
     let reviews = REVIEWS
-        .page_of(store, &(repo.to_owned(), n), listing)?
+        .page_of(ctx, &(repo.to_owned(), n), listing)?
         .map(|(_, review)| review);
     Ok(Reply::Change {
         height,
@@ -37,17 +38,17 @@ pub fn change(
 /// One page of a repository's changes, filtered. A filter can empty a page
 /// that still has a `next`.
 pub fn changes(
-    store: &impl Reads,
+    ctx: &QueryCtx,
     repo: &str,
     filter: &ChangeFilter,
     listing: &Listing,
 ) -> Result<PageReply<ChangeSummary>, Refusal> {
-    load_repo(store, repo)?;
+    load_repo(ctx, repo)?;
     let PageReply {
         height,
         items,
         next,
-    } = CHANGES.page_of(store, &repo.to_owned(), listing)?;
+    } = CHANGES.page_of(ctx, &repo.to_owned(), listing)?;
     let items = items
         .into_iter()
         .filter(|((repo, n), change)| {
@@ -57,7 +58,7 @@ pub fn changes(
                     .as_ref()
                     .is_none_or(|principal| &change.author == principal)
                 && filter.involves.as_ref().is_none_or(|principal| {
-                    INVOLVED.has(store, &(principal.clone(), repo.clone(), *n))
+                    INVOLVED.has(ctx, &(principal.clone(), repo.clone(), *n))
                 })
         })
         .map(|((repo, _), change)| summary(&repo, &change))
@@ -76,19 +77,19 @@ pub fn changes(
 // ponytail: pages every change of every repository and filters; an index of
 // open changes by waiting principal replaces the scan once forge holds many.
 pub fn judgment(
-    store: &impl Reads,
+    ctx: &QueryCtx,
     principal: &Principal,
     listing: &Listing,
 ) -> Result<PageReply<Judgment>, Refusal> {
     require_named(principal)?;
-    let mut budget = load_bounds(store)?.log_walk;
-    let page = CHANGES.page_of(store, &(), listing)?;
+    let mut budget = load_bounds(ctx)?.log_walk;
+    let page = CHANGES.page_of(ctx, &(), listing)?;
     let mut items = Vec::new();
     for ((repo, _), change) in &page.items {
         if change.state != ChangeState::Open {
             continue;
         }
-        if let Some(judgment) = judge(store, repo, change, principal, &mut budget)? {
+        if let Some(judgment) = judge(ctx, repo, change, principal, &mut budget)? {
             items.push(judgment);
         }
     }
@@ -101,23 +102,23 @@ pub fn judgment(
 
 /// What `principal` owes one open change, if anything.
 fn judge(
-    store: &impl Reads,
+    ctx: &QueryCtx,
     repo: &str,
     change: &Change,
     principal: &Principal,
     budget: &mut u64,
 ) -> Result<Option<Judgment>, Refusal> {
-    let (source, _) = heads(store, repo, change)?;
-    let authored = authored_newest_first(store, repo, change.n, principal, budget)?;
+    let (source, _) = heads(ctx, repo, change)?;
+    let authored = authored_newest_first(ctx, repo, change.n, principal, budget)?;
     let latest = authored
         .first()
-        .map(|id| load_review(store, repo, change.n, *id))
+        .map(|id| load_review(ctx, repo, change.n, *id))
         .transpose()?;
     let requested = change.reviewers.contains(principal)
         && latest
             .as_ref()
             .is_none_or(|review| source.as_ref() != Some(&review.draft.commit_oid));
-    let mut replies = discussion::attention(store, &change.channel, principal)?.and_then(|root| {
+    let mut replies = discussion::attention(ctx, &change.channel, principal)?.and_then(|root| {
         root.last_reply_seq.map(|last_reply_seq| ReplyAttention {
             review: None,
             root_seq: root.seq,
@@ -125,8 +126,8 @@ fn judge(
         })
     });
     for id in authored {
-        let review = load_review(store, repo, change.n, id)?;
-        if let Some(root) = discussion::message(store, &review.message_id)?
+        let review = load_review(ctx, repo, change.n, id)?;
+        if let Some(root) = discussion::message(ctx, &review.message_id)?
             && let Some(last_reply_seq) = root.last_reply_seq
             && replies
                 .as_ref()
@@ -149,7 +150,7 @@ fn judge(
 /// The ids of the reviews `principal` submitted on a change, newest first,
 /// each one spent from the query's `Bounds.log_walk` budget.
 fn authored_newest_first(
-    store: &impl Reads,
+    ctx: &QueryCtx,
     repo: &str,
     n: u64,
     principal: &Principal,
@@ -157,7 +158,7 @@ fn authored_newest_first(
 ) -> Result<Vec<u64>, Refusal> {
     let scan: Scan = AUTHORED.prefix_of(&(repo.to_owned(), n, principal.clone()));
     let ids: Vec<u64> = AUTHORED
-        .scan(store, scan.reverse().limit(budget.saturating_add(1)))?
+        .scan(ctx, scan.reverse().limit(budget.saturating_add(1)))?
         .into_iter()
         .map(|(_, _, _, id)| id)
         .collect();
@@ -170,16 +171,16 @@ fn authored_newest_first(
 
 /// The change's two current endpoints; either can be gone.
 fn heads(
-    store: &impl Reads,
+    ctx: &QueryCtx,
     repo: &str,
     change: &Change,
 ) -> Result<(Option<String>, Option<String>), Refusal> {
-    let hash = repo_hash(&load_repo(store, repo)?);
+    let hash = repo_hash(&load_repo(ctx, repo)?);
     let source = match &change.from {
-        Revision::Ref(name) => load_ref(store, repo, name, hash)?.map(|oid| oid.to_hex()),
+        Revision::Ref(name) => load_ref(ctx, repo, name, hash)?.map(|oid| oid.to_hex()),
         Revision::Oid(oid) => Some(oid.clone()),
     };
-    let target = load_ref(store, repo, &change.into, hash)?.map(|oid| oid.to_hex());
+    let target = load_ref(ctx, repo, &change.into, hash)?.map(|oid| oid.to_hex());
     Ok((source, target))
 }
 

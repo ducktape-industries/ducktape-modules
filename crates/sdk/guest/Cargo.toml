@@ -3,6 +3,21 @@ name = "guest"
 version.workspace = true
 edition.workspace = true
 
+# The minimal module SDK: a module can be written with this crate alone. On
+# wasm32 its contexts call the host through the `ducktape.*` imports; natively
+# they run over `MockHost`, so a module's native test is its real code.
 [dependencies]
 abi = { workspace = true }
 borsh = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+sha1 = "0.10"
+sha2 = { workspace = true }
+
+# A module written with `guest` alone: `cargo build --target
+# wasm32-unknown-unknown -p guest --example counter` builds it, and `cargo
+# test` runs its native test over `MockHost`.
+[[example]]
+name = "counter"
+crate-type = ["cdylib"]
+test = true

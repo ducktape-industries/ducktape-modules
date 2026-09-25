@@ -160,7 +160,11 @@ fn client_merge_fast_forwards_or_lands_the_merge_commit_the_client_built() {
         panic!();
     };
     let actual = Commit::parse(
-        &sandbox.blob_get(abi::BlobId::Sha1(digest)).unwrap().body,
+        &sandbox
+            .reads(1)
+            .blob_get(abi::BlobId::Sha1(digest))
+            .unwrap()
+            .body,
         Hash::Sha1,
     )
     .unwrap();

@@ -1,9 +1,10 @@
-// The rules natively over `store::Memory`: what the founding suite checks on the host, without the host.
+// The module natively over `guest::MockHost`: what the founding suite checks on the host, without the host.
 
 use abi::{BlobId, Cause, Env, Origin, reason};
-use store::{Memory, Page};
+use guest::{MockHost, Module};
+use store::Page;
 
-use crate::{AUTHORITY, Change, Entry, Genesis, Op, Query, Reply, Scheduled, View};
+use crate::{AUTHORITY, Change, Entry, Genesis, Modules, Op, Query, Reply, Scheduled, View};
 
 fn env(height: u64, origin: Origin) -> Env {
     Env {
@@ -28,10 +29,10 @@ fn entry(program: &str, code: BlobId) -> Entry {
     }
 }
 
-fn founded() -> (Memory, BlobId) {
-    let mut store = Memory::default();
-    crate::init(
-        &mut store,
+fn founded() -> (MockHost, BlobId) {
+    let store = MockHost::default();
+    crate::rules::init(
+        &store.exec(env(0, Origin::System)),
         Genesis {
             programs: vec![entry("boot", BlobId::Sha256([1; 32]))],
             views: vec![View {
@@ -40,9 +41,8 @@ fn founded() -> (Memory, BlobId) {
             }],
         },
     );
-    crate::execute(
-        &mut store,
-        &env(1, Origin::External(vec![9])),
+    Modules::execute(
+        &store.exec(env(1, Origin::External(vec![9]))),
         Op::Publish {
             body: b"wasm".to_vec(),
         },
@@ -52,17 +52,16 @@ fn founded() -> (Memory, BlobId) {
     (store, code)
 }
 
-fn programs(store: &Memory, height: u64) -> Vec<String> {
-    match crate::query(store, &env(height, Origin::System), Query::At(height)).unwrap() {
+fn programs(store: &MockHost, height: u64) -> Vec<String> {
+    match Modules::query(&store.query(env(height, Origin::System)), Query::At(height)).unwrap() {
         Reply::Programs(entries) => entries.into_iter().map(|e| e.program).collect(),
         other => panic!("{other:?}"),
     }
 }
 
-fn schedule(store: &mut Memory, height: u64, change: Change) -> Result<(), abi::Refusal> {
-    crate::execute(
-        store,
-        &authority(1),
+fn schedule(store: &MockHost, height: u64, change: Change) -> Result<(), abi::Refusal> {
+    Modules::execute(
+        &store.exec(authority(1)),
         Op::Schedule(Scheduled { height, change }),
     )
 }
@@ -70,17 +69,16 @@ fn schedule(store: &mut Memory, height: u64, change: Change) -> Result<(), abi::
 #[test]
 fn publishing_stores_the_code_under_its_blob_id() {
     let (store, code) = founded();
-    assert_eq!(store.blobs[&code].kind, crate::CODE_KIND);
-    assert_eq!(store.blobs[&code].body, b"wasm");
+    assert_eq!(store.borrow().blobs[&code].kind, crate::CODE_KIND);
+    assert_eq!(store.borrow().blobs[&code].body, b"wasm");
 }
 
 #[test]
 fn only_the_authority_schedules_and_only_published_code_in_the_future() {
-    let (mut store, code) = founded();
+    let (store, code) = founded();
     let set = Change::Set(entry("new", code));
-    let stranger = crate::execute(
-        &mut store,
-        &env(1, Origin::External(vec![9])),
+    let stranger = Modules::execute(
+        &store.exec(env(1, Origin::External(vec![9]))),
         Op::Schedule(Scheduled {
             height: 5,
             change: set.clone(),
@@ -88,39 +86,37 @@ fn only_the_authority_schedules_and_only_published_code_in_the_future() {
     );
     assert_eq!(stranger.unwrap_err().reason, reason::UNAUTHORIZED);
     assert_eq!(
-        schedule(&mut store, 1, set.clone()).unwrap_err().reason,
+        schedule(&store, 1, set.clone()).unwrap_err().reason,
         reason::INVALID_INPUT
     );
     let unpublished = Change::Set(entry("new", BlobId::Sha256([7; 32])));
     assert_eq!(
-        schedule(&mut store, 5, unpublished).unwrap_err().reason,
+        schedule(&store, 5, unpublished).unwrap_err().reason,
         reason::NOT_FOUND
     );
-    schedule(&mut store, 5, set.clone()).unwrap();
+    schedule(&store, 5, set.clone()).unwrap();
     assert_eq!(
-        schedule(&mut store, 5, set).unwrap_err().reason,
+        schedule(&store, 5, set).unwrap_err().reason,
         reason::ALREADY_EXISTS
     );
 }
 
 #[test]
 fn a_scheduled_change_is_seen_at_its_height_and_folded_by_the_next_op() {
-    let (mut store, code) = founded();
-    schedule(&mut store, 5, Change::Set(entry("new", code))).unwrap();
-    schedule(&mut store, 6, Change::Remove("boot".into())).unwrap();
+    let (store, code) = founded();
+    schedule(&store, 5, Change::Set(entry("new", code))).unwrap();
+    schedule(&store, 6, Change::Remove("boot".into())).unwrap();
     assert_eq!(programs(&store, 4), ["boot"]);
     assert_eq!(programs(&store, 5), ["boot", "new"]);
     assert_eq!(programs(&store, 6), ["new"]);
-    crate::execute(
-        &mut store,
-        &env(6, Origin::External(vec![9])),
+    Modules::execute(
+        &store.exec(env(6, Origin::External(vec![9]))),
         Op::Publish { body: vec![1] },
     )
     .unwrap();
     assert_eq!(programs(&store, 6), ["new"]);
-    let Reply::Scheduled(page) = crate::query(
-        &store,
-        &env(6, Origin::System),
+    let Reply::Scheduled(page) = Modules::query(
+        &store.query(env(6, Origin::System)),
         Query::Scheduled {
             page: Page::default(),
         },
@@ -129,9 +125,8 @@ fn a_scheduled_change_is_seen_at_its_height_and_folded_by_the_next_op() {
         panic!()
     };
     assert!(page.items.is_empty(), "folded changes leave the schedule");
-    let Reply::Program { height, entry } = crate::query(
-        &store,
-        &env(6, Origin::System),
+    let Reply::Program { height, entry } = Modules::query(
+        &store.query(env(6, Origin::System)),
         Query::Program("new".into()),
     )
     .unwrap() else {
@@ -142,13 +137,12 @@ fn a_scheduled_change_is_seen_at_its_height_and_folded_by_the_next_op() {
 
 #[test]
 fn the_schedule_pages_in_height_order_and_a_cancel_removes_one_change() {
-    let (mut store, code) = founded();
+    let (store, code) = founded();
     for height in [30u64, 4, 200] {
-        schedule(&mut store, height, Change::Set(entry("p", code))).unwrap();
+        schedule(&store, height, Change::Set(entry("p", code))).unwrap();
     }
-    let ask = |store: &Memory, page: Page| match crate::query(
-        store,
-        &env(2, Origin::System),
+    let ask = |store: &MockHost, page: Page| match Modules::query(
+        &store.query(env(2, Origin::System)),
         Query::Scheduled { page },
     )
     .unwrap()
@@ -172,18 +166,16 @@ fn the_schedule_pages_in_height_order_and_a_cancel_removes_one_change() {
     );
     assert_eq!(rest.items[0].height, 200);
     assert_eq!(rest.next, None);
-    crate::execute(
-        &mut store,
-        &authority(2),
+    Modules::execute(
+        &store.exec(authority(2)),
         Op::Cancel {
             height: 30,
             program: "p".into(),
         },
     )
     .unwrap();
-    let gone = crate::execute(
-        &mut store,
-        &authority(2),
+    let gone = Modules::execute(
+        &store.exec(authority(2)),
         Op::Cancel {
             height: 30,
             program: "p".into(),
@@ -193,8 +185,13 @@ fn the_schedule_pages_in_height_order_and_a_cancel_removes_one_change() {
     assert_eq!(ask(&store, Page::default()).items.len(), 2);
 }
 
-fn views(store: &Memory, height: u64) -> Vec<(String, BlobId)> {
-    match crate::query(store, &env(height, Origin::System), Query::Views(height)).unwrap() {
+fn views(store: &MockHost, height: u64) -> Vec<(String, BlobId)> {
+    match Modules::query(
+        &store.query(env(height, Origin::System)),
+        Query::Views(height),
+    )
+    .unwrap()
+    {
         Reply::Views(views) => views.into_iter().map(|v| (v.name, v.view)).collect(),
         other => panic!("{other:?}"),
     }
@@ -202,16 +199,15 @@ fn views(store: &Memory, height: u64) -> Vec<(String, BlobId)> {
 
 #[test]
 fn a_view_is_listed_apart_from_the_programs_and_scheduled_like_one() {
-    let (mut store, code) = founded();
+    let (store, code) = founded();
     assert_eq!(views(&store, 1), [("lens".into(), BlobId::Sha256([2; 32]))]);
     assert_eq!(programs(&store, 1), ["boot"], "a view is never a program");
     let explorer = Change::SetView(View {
         name: "explorer".into(),
         view: code,
     });
-    let stranger = crate::execute(
-        &mut store,
-        &env(1, Origin::External(vec![9])),
+    let stranger = Modules::execute(
+        &store.exec(env(1, Origin::External(vec![9]))),
         Op::Schedule(Scheduled {
             height: 5,
             change: explorer.clone(),
@@ -223,7 +219,7 @@ fn a_view_is_listed_apart_from_the_programs_and_scheduled_like_one() {
         view: BlobId::Sha256([7; 32]),
     });
     assert_eq!(
-        schedule(&mut store, 5, unpublished).unwrap_err().reason,
+        schedule(&store, 5, unpublished).unwrap_err().reason,
         reason::NOT_FOUND
     );
     let over_a_program = Change::SetView(View {
@@ -231,11 +227,11 @@ fn a_view_is_listed_apart_from_the_programs_and_scheduled_like_one() {
         view: code,
     });
     assert_eq!(
-        schedule(&mut store, 5, over_a_program).unwrap_err().reason,
+        schedule(&store, 5, over_a_program).unwrap_err().reason,
         reason::ALREADY_EXISTS
     );
-    schedule(&mut store, 5, explorer).unwrap();
-    schedule(&mut store, 6, Change::RemoveView("lens".into())).unwrap();
+    schedule(&store, 5, explorer).unwrap();
+    schedule(&store, 6, Change::RemoveView("lens".into())).unwrap();
     assert_eq!(views(&store, 4).len(), 1);
     assert_eq!(
         views(&store, 5),
@@ -244,9 +240,8 @@ fn a_view_is_listed_apart_from_the_programs_and_scheduled_like_one() {
             ("lens".into(), BlobId::Sha256([2; 32]))
         ]
     );
-    crate::execute(
-        &mut store,
-        &env(6, Origin::External(vec![9])),
+    Modules::execute(
+        &store.exec(env(6, Origin::External(vec![9]))),
         Op::Publish { body: vec![1] },
     )
     .unwrap();
@@ -254,10 +249,9 @@ fn a_view_is_listed_apart_from_the_programs_and_scheduled_like_one() {
     assert_eq!(programs(&store, 6), ["boot"]);
 }
 
-fn cancel(store: &mut Memory, height: u64, program: &str) -> Result<(), abi::Refusal> {
-    crate::execute(
-        store,
-        &authority(1),
+fn cancel(store: &MockHost, height: u64, program: &str) -> Result<(), abi::Refusal> {
+    Modules::execute(
+        &store.exec(authority(1)),
         Op::Cancel {
             height,
             program: program.into(),
@@ -267,38 +261,38 @@ fn cancel(store: &mut Memory, height: u64, program: &str) -> Result<(), abi::Ref
 
 #[test]
 fn a_name_is_one_kind_whatever_order_the_changes_are_scheduled_in() {
-    let (mut store, code) = founded();
+    let (store, code) = founded();
     let view = |name: &str| {
         Change::SetView(View {
             name: name.into(),
             view: code,
         })
     };
-    schedule(&mut store, 10, view("x")).unwrap();
+    schedule(&store, 10, view("x")).unwrap();
     assert_eq!(
-        schedule(&mut store, 5, Change::Set(entry("x", code)))
+        schedule(&store, 5, Change::Set(entry("x", code)))
             .unwrap_err()
             .reason,
         reason::ALREADY_EXISTS,
         "a program landing before a pending view of its name"
     );
-    schedule(&mut store, 5, Change::Set(entry("y", code))).unwrap();
+    schedule(&store, 5, Change::Set(entry("y", code))).unwrap();
     assert_eq!(
-        schedule(&mut store, 3, view("y")).unwrap_err().reason,
+        schedule(&store, 3, view("y")).unwrap_err().reason,
         reason::ALREADY_EXISTS,
         "a view landing before a pending program of its name"
     );
     assert_eq!(
-        schedule(&mut store, 20, Change::Set(entry("lens", code)))
+        schedule(&store, 20, Change::Set(entry("lens", code)))
             .unwrap_err()
             .reason,
         reason::ALREADY_EXISTS,
         "a listed view"
     );
-    schedule(&mut store, 6, Change::Remove("boot".into())).unwrap();
-    schedule(&mut store, 8, view("boot")).unwrap();
+    schedule(&store, 6, Change::Remove("boot".into())).unwrap();
+    schedule(&store, 8, view("boot")).unwrap();
     assert_eq!(
-        cancel(&mut store, 6, "boot").unwrap_err().reason,
+        cancel(&store, 6, "boot").unwrap_err().reason,
         reason::ALREADY_EXISTS,
         "cancelling the removal would leave boot both kinds from 8"
     );
@@ -308,7 +302,7 @@ fn a_name_is_one_kind_whatever_order_the_changes_are_scheduled_in() {
 
 #[test]
 fn a_removal_names_one_of_its_own_kind() {
-    let (mut store, code) = founded();
+    let (store, code) = founded();
     for (change, what) in [
         (Change::Remove("ghost".into()), "no such program"),
         (Change::RemoveView("ghost".into()), "no such view"),
@@ -316,15 +310,15 @@ fn a_removal_names_one_of_its_own_kind() {
         (Change::RemoveView("boot".into()), "a program is not a view"),
     ] {
         assert_eq!(
-            schedule(&mut store, 5, change).unwrap_err().reason,
+            schedule(&store, 5, change).unwrap_err().reason,
             reason::NOT_FOUND,
             "{what}"
         );
     }
-    schedule(&mut store, 5, Change::Set(entry("new", code))).unwrap();
-    schedule(&mut store, 6, Change::Remove("new".into())).unwrap();
+    schedule(&store, 5, Change::Set(entry("new", code))).unwrap();
+    schedule(&store, 6, Change::Remove("new".into())).unwrap();
     assert_eq!(
-        schedule(&mut store, 4, Change::Remove("new".into()))
+        schedule(&store, 4, Change::Remove("new".into()))
             .unwrap_err()
             .reason,
         reason::NOT_FOUND,

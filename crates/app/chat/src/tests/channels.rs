@@ -50,7 +50,7 @@ fn a_voice_channel_is_open_and_marked_voice() {
         name: "standup".into(),
     };
     chat.ok(&ADA, voice("standup"));
-    let channel = crate::state::channel(&chat.store, "standup").unwrap();
+    let channel = crate::state::channel(&chat.reads(), "standup").unwrap();
     assert!(channel.voice && channel.post_policy == PostPolicy::Open);
     assert_eq!(chat.refused(&ADA, voice("forge:x")), reason::UNAUTHORIZED);
 }
@@ -71,7 +71,7 @@ fn nobody_squats_a_dm_id_with_a_plain_create() {
         ] {
             assert_eq!(chat.refused(&who, op), reason::UNAUTHORIZED, "{who:?}");
         }
-        assert!(chat.store.state.is_empty());
+        assert!(chat.store.borrow().state.is_empty());
         // the real dm still opens with both peers seated
         chat.ok(&Principal::Account(3), open_dm(5));
         for peer in [3, 5] {
@@ -85,9 +85,13 @@ fn a_dm_seats_both_accounts_opens_once_and_keeps_others_out() {
     let mut chat = Chat::default();
     chat.ok(&ADA, open_dm(2));
     let dm = dm_channel_id(1, 2);
-    let first = chat.store.state.clone();
+    let first = chat.store.borrow().state.clone();
     chat.ok(&BO, open_dm(1));
-    assert_eq!(chat.store.state, first, "opening it again changes nothing");
+    assert_eq!(
+        chat.store.borrow().state,
+        first,
+        "opening it again changes nothing"
+    );
     chat.ok(&BO, post(&dm, "m1", "hi", None));
     assert_eq!(
         chat.refused(&CY, post(&dm, "m2", "me too", None)),
@@ -241,5 +245,5 @@ pub(super) fn edit(seq: u64, text: &str) -> Op {
 }
 
 fn is_member(chat: &Chat, channel: &str, principal: Principal) -> bool {
-    crate::state::MEMBERS.has(&chat.store, &(channel.to_owned(), principal))
+    crate::state::MEMBERS.has(&chat.reads(), &(channel.to_owned(), principal))
 }

@@ -6,15 +6,16 @@ use crate::ops::{cap, refusal_of};
 use crate::state::{load_repo, parse_oid, repo_hash, resolve};
 use abi::Refusal;
 use gitcore::{Commit, Hash, Kind, Mode, Objects, Oid, Signature, Tag, Tree};
+use guest::{QueryCtx, invalid, not_found};
 use std::collections::BTreeSet;
-use store::{Listing, Reads, invalid, not_found};
+use store::Listing;
 
-pub struct Reading<'a, S: Reads> {
-    pub store: ObjectStore<'a, S>,
+pub struct Reading<'a> {
+    pub store: ObjectStore<'a>,
     pub hash: Hash,
     pub bounds: &'a Bounds,
 }
-impl<S: Reads> Reading<'_, S> {
+impl Reading<'_> {
     pub fn result<T>(&self, r: gitcore::Result<T>) -> Result<T, Refusal> {
         r.map_err(refusal_of)
     }
@@ -125,23 +126,23 @@ pub fn entry_kind(mode: Mode) -> EntryKind {
     }
 }
 /// A repository's objects, read within `reads` object reads of `bounds`.
-fn reading<'a, S: Reads>(
-    store: &'a S,
+fn reading<'a>(
+    ctx: &'a QueryCtx,
     name: &str,
     bounds: &'a Bounds,
     reads: u64,
-) -> Result<Reading<'a, S>, Refusal> {
-    let hash = repo_hash(&load_repo(store, name)?);
+) -> Result<Reading<'a>, Refusal> {
+    let hash = repo_hash(&load_repo(ctx, name)?);
     Ok(Reading {
-        store: ObjectStore::querying(store, hash, bounds, reads),
+        store: ObjectStore::querying(ctx, hash, bounds, reads),
         hash,
         bounds,
     })
 }
 
 /// A page of the history below `from`.
-pub fn log<S: Reads>(
-    store: &S,
+pub fn log(
+    ctx: &QueryCtx,
     height: u64,
     bounds: &Bounds,
     name: &str,
@@ -149,8 +150,8 @@ pub fn log<S: Reads>(
     listing: &Listing,
 ) -> Result<Reply, Refusal> {
     let reads = bounds.log_walk.saturating_mul(2).saturating_add(1);
-    let r = reading(store, name, bounds, reads)?;
-    let tip = r.commit_id(resolve(store, name, from, r.hash)?)?;
+    let r = reading(ctx, name, bounds, reads)?;
+    let tip = r.commit_id(resolve(ctx, name, from, r.hash)?)?;
     // ponytail: repeat the complete walk up to log_walk; index history if larger repos need it.
     let ids = r.result(gitcore::walk::commits(
         &r.store,
@@ -177,8 +178,8 @@ pub fn log<S: Reads>(
 }
 
 /// A page of the directory at `path` under the commit or tree `at`.
-pub fn tree<S: Reads>(
-    store: &S,
+pub fn tree(
+    ctx: &QueryCtx,
     height: u64,
     bounds: &Bounds,
     name: &str,
@@ -187,7 +188,7 @@ pub fn tree<S: Reads>(
     listing: &Listing,
 ) -> Result<Reply, Refusal> {
     crate::changes::check_path(path, true)?;
-    let r = reading(store, name, bounds, bounds.tree_walk)?;
+    let r = reading(ctx, name, bounds, bounds.tree_walk)?;
     let root = r.tree_id(at)?;
     let tree = if path.is_empty() {
         root
@@ -213,15 +214,15 @@ pub fn tree<S: Reads>(
 }
 
 /// One blob, or the asked range of it.
-pub fn blob<S: Reads>(
-    store: &S,
+pub fn blob(
+    ctx: &QueryCtx,
     height: u64,
     bounds: &Bounds,
     name: &str,
     oid: &str,
     range: Option<ByteRange>,
 ) -> Result<Reply, Refusal> {
-    let r = reading(store, name, bounds, bounds.tree_walk)?;
+    let r = reading(ctx, name, bounds, bounds.tree_walk)?;
     Ok(Reply::Blob {
         height,
         blob: r.blob(&r.oid(oid)?, range)?,
@@ -231,8 +232,8 @@ pub fn blob<S: Reads>(
 /// A page of the files that differ from `base` (the empty tree if none)
 /// to `head`, under `path` if given.
 #[allow(clippy::too_many_arguments)]
-pub fn diff<S: Reads>(
-    store: &S,
+pub fn diff(
+    ctx: &QueryCtx,
     height: u64,
     bounds: &Bounds,
     name: &str,
@@ -241,13 +242,13 @@ pub fn diff<S: Reads>(
     path: Option<&[u8]>,
     listing: &Listing,
 ) -> Result<Reply, Refusal> {
-    let r = reading(store, name, bounds, bounds.tree_walk)?;
+    let r = reading(ctx, name, bounds, bounds.tree_walk)?;
     crate::diffs::query(&r, height, base, head, path, listing)
 }
 
 /// How `from` stands against `into`: ahead, behind, and their base.
-pub fn comparison<S: Reads>(
-    store: &S,
+pub fn comparison(
+    ctx: &QueryCtx,
     height: u64,
     bounds: &Bounds,
     name: &str,
@@ -258,18 +259,13 @@ pub fn comparison<S: Reads>(
         .log_walk
         .saturating_mul(8)
         .saturating_add(bounds.tree_walk);
-    let mut r = reading(store, name, bounds, reads)?;
-    let from = r.commit_id(resolve(store, name, from, r.hash)?)?;
-    let into = r.commit_id(resolve(store, name, into, r.hash)?)?;
+    let mut r = reading(ctx, name, bounds, reads)?;
+    let from = r.commit_id(resolve(ctx, name, from, r.hash)?)?;
+    let into = r.commit_id(resolve(ctx, name, into, r.hash)?)?;
     compare(&mut r, height, from, into)
 }
 
-fn compare<S: Reads>(
-    r: &mut Reading<'_, S>,
-    height: u64,
-    from: Oid,
-    into: Oid,
-) -> Result<Reply, Refusal> {
+fn compare(r: &mut Reading<'_>, height: u64, from: Oid, into: Oid) -> Result<Reply, Refusal> {
     let source: BTreeSet<_> = r
         .result(gitcore::walk::commits(
             &r.store,

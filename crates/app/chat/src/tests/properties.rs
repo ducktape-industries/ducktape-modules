@@ -30,7 +30,7 @@ fn any_walk_keeps_every_index_in_step_with_the_messages() {
         let mut rng = Rng(seed);
         let mut chat = Chat::with_channel(PostPolicy::Open);
         for step in 0..80 {
-            let head = HEADS.get(&chat.store, &"general".into()).unwrap();
+            let head = HEADS.get(&chat.reads(), &"general".into()).unwrap();
             let seq = 1 + rng.below(head.unwrap_or(0));
             let text = *rng.pick(&TEXTS);
             let op = match rng.below(6) {
@@ -41,9 +41,13 @@ fn any_walk_keeps_every_index_in_step_with_the_messages() {
                 n => react(seq, rng.pick(&EMOJI), n == 4),
             };
             let who = rng.pick(&[ADA, BO, CY]).clone();
-            let before = chat.store.state.clone();
+            let before = chat.store.borrow().state.clone();
             if chat.run(&who, op).is_err() {
-                assert_eq!(chat.store.state, before, "seed {seed}: a refused op wrote");
+                assert_eq!(
+                    chat.store.borrow().state,
+                    before,
+                    "seed {seed}: a refused op wrote"
+                );
             }
         }
         in_step(&chat, seed);
@@ -52,12 +56,12 @@ fn any_walk_keeps_every_index_in_step_with_the_messages() {
 
 fn in_step(chat: &Chat, seed: u64) {
     let rows: Vec<MsgRow> = MESSAGES
-        .all(&chat.store)
+        .all(&chat.reads())
         .unwrap()
         .into_iter()
         .map(|(_, row)| row)
         .collect();
-    let reactions = REACTIONS.all(&chat.store).unwrap();
+    let reactions = REACTIONS.all(&chat.reads()).unwrap();
     for row in &rows {
         let chosen = |emoji: &str| {
             reactions
@@ -83,14 +87,14 @@ fn in_step(chat: &Chat, seed: u64) {
         }
     }
     let row = |seq: u64| rows.iter().find(|row| row.seq == seq).unwrap();
-    let words = WORDS.all(&chat.store).unwrap();
+    let words = WORDS.all(&chat.reads()).unwrap();
     for (word, _, seq) in &words {
         assert!(
             tokens(&row(*seq).text).contains(word),
             "seed {seed}: a stale posting"
         );
     }
-    let tags = TAGS.all(&chat.store).unwrap();
+    let tags = TAGS.all(&chat.reads()).unwrap();
     for (tag, _, _, seq) in &tags {
         assert!(row(*seq).tags.contains(tag), "seed {seed}: a stale tag");
     }

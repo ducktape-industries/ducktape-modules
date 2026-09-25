@@ -5,7 +5,7 @@ use abi::Refusal;
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
-use crate::refuse::{invalid, stale};
+use guest::{invalid, stale};
 
 /// What `Page::after` and `PageReply::next` carry, opaque to clients: the
 /// listing the cursor belongs to (`scope`), the height that answered it, and

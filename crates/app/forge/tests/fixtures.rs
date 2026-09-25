@@ -111,12 +111,12 @@ fn check(tape: &Tape) {
 fn replay(tape: &mut Tape) {
     let bounds = fixture_bounds();
     let mut rig = Rig::start(bounds, HashKind::Sha1);
-    let mut empty = MemorySandbox::default();
-    forge::init(&mut empty, &abi::encode(&bounds)).unwrap();
+    let empty = MemorySandbox::default();
+    Forge::init(&empty.exec(0), &abi::encode(&bounds)).unwrap();
     let q = Query::Repos {
         page: Page::first(2),
     };
-    let bytes = forge::query(&empty, 0, q.clone()).unwrap();
+    let bytes = Forge::query(&empty.reads(0), q.clone()).unwrap().0;
     let _: Reply = abi::decode(&bytes).unwrap();
     tape.save("repos-empty", abi::encode(&q), bytes);
     tape.capture(
