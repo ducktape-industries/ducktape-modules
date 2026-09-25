@@ -193,8 +193,8 @@ pub enum Query {
         channel_id: Option<String>,
         page: Page,
     },
-    /// The identity roster, ascending by number: the program asks identity,
-    /// so a view links one program.
+    /// The identity roster, ascending by number, a page at a time: the
+    /// program asks identity, so a view links one program.
     Accounts {
         page: Page,
     },
@@ -215,7 +215,7 @@ pub enum Reply {
     Members(PageReply<MemberRow>),
     Hits(MessageHits),
     TagHits(PageReply<MsgRow>),
-    Accounts(Vec<AccountRow>),
+    Accounts(PageReply<AccountRow>),
 }
 
 #[derive(

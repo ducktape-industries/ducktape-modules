@@ -90,7 +90,7 @@ pub(crate) async fn roster(host: Host) -> Result<Names, Refusal> {
         })
         .await?
     {
-        chat::Reply::Accounts(rows) => Ok(Names::new(rows)),
+        chat::Reply::Accounts(page) => Ok(Names::new(page.items)),
         _ => Err(wrong_reply()),
     }
 }

@@ -106,27 +106,31 @@ fn answer(query: &Query, mode: &str) -> Reply {
     }
 }
 
-fn accounts() -> Vec<chat::AccountRow> {
-    vec![
-        chat::AccountRow {
-            number: 7,
-            name: "Ada".into(),
-            program: false,
-            keys: vec![abi::hex(b"tester")],
-        },
-        chat::AccountRow {
-            number: 8,
-            name: "Rae".into(),
-            program: false,
-            keys: vec![abi::hex(b"reviewer")],
-        },
-        chat::AccountRow {
-            number: 9,
-            name: "Wren".into(),
-            program: false,
-            keys: vec![abi::hex(b"writer")],
-        },
-    ]
+fn accounts() -> chat::PageReply<chat::AccountRow> {
+    chat::PageReply {
+        height: 1,
+        next: None,
+        items: vec![
+            chat::AccountRow {
+                number: 7,
+                name: "Ada".into(),
+                program: false,
+                keys: vec![abi::hex(b"tester")],
+            },
+            chat::AccountRow {
+                number: 8,
+                name: "Rae".into(),
+                program: false,
+                keys: vec![abi::hex(b"reviewer")],
+            },
+            chat::AccountRow {
+                number: 9,
+                name: "Wren".into(),
+                program: false,
+                keys: vec![abi::hex(b"writer")],
+            },
+        ],
+    }
 }
 
 fn message(seq: u64, author: chat::Party, text: &str) -> chat::MsgRow {

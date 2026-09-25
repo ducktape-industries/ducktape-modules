@@ -300,7 +300,7 @@ export_view!(
     Nodes,
     "Nodes",
     "The validator set of this network and every membership behind it.",
-    ["program"]
+    ["program", "host"]
 );
 
 #[cfg(test)]

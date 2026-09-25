@@ -4,7 +4,8 @@
 use chat::{Block, Mark, MsgRow, Party, Reaction, Span};
 use ducktape_view_guest::design;
 
-use crate::names::{NameDirectory, mention_token};
+use crate::names::mention_token;
+use chat::view::Names;
 
 /// One message as the frame draws it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -59,7 +60,7 @@ pub enum SpanStyle {
     Mention(String),
 }
 
-pub fn chat_message(row: MsgRow, names: &NameDirectory) -> ChatMessage {
+pub fn chat_message(row: MsgRow, names: &Names) -> ChatMessage {
     let edited = row.rev > 0;
     let meta = match (row.seq, edited) {
         (0, _) => "sending…".to_string(),
@@ -137,7 +138,7 @@ pub fn mark_message_groups(messages: &mut [ChatMessage], boundary: Option<u64>) 
 
 /// The message as one run of plain text — the copy range's lines and the
 /// search hit's preview. A mention reads as the NAME it addresses.
-pub fn message_body(blocks: &[Block], names: &NameDirectory) -> String {
+pub fn message_body(blocks: &[Block], names: &Names) -> String {
     blocks
         .iter()
         .map(|block| match block {
@@ -194,7 +195,7 @@ fn draft_spans(spans: &[Span]) -> String {
 
 /// A paragraph's or quote's spans as the runs the frame styles; empty when
 /// no span carries a mark, so the block draws as one plain text.
-pub fn styled_spans(spans: &[Span], names: &NameDirectory) -> Vec<ChatSpan> {
+pub fn styled_spans(spans: &[Span], names: &Names) -> Vec<ChatSpan> {
     if spans.iter().all(|span| span.marks.is_empty()) {
         return Vec::new();
     }
@@ -230,11 +231,11 @@ pub fn styled_spans(spans: &[Span], names: &NameDirectory) -> Vec<ChatSpan> {
 }
 
 /// Spans to text; a mention plate shows the account's current name.
-pub fn span_text(spans: &[Span], names: &NameDirectory) -> String {
+pub fn span_text(spans: &[Span], names: &Names) -> String {
     spans.iter().map(|span| span_display(span, names)).collect()
 }
 
-fn span_display(span: &Span, names: &NameDirectory) -> String {
+fn span_display(span: &Span, names: &Names) -> String {
     span.marks
         .iter()
         .find_map(|mark| match mark {
@@ -254,7 +255,7 @@ mod tests {
 
     #[test]
     fn a_run_breaks_at_the_unread_divider_and_after_a_long_quiet() {
-        let names = NameDirectory::empty();
+        let names = Names::empty();
         let at = |seq: u64, time: u64| {
             chat_message(
                 MsgRow {

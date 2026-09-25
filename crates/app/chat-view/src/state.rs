@@ -7,13 +7,13 @@ use std::collections::BTreeMap;
 
 use crate::api::Session;
 use crate::composer::Draft;
-use crate::names::NameDirectory;
+use chat::view::Names;
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct Chat {
     pub(crate) session: Session,
     #[serde(skip)]
-    pub(crate) names: Loaded<NameDirectory>,
+    pub(crate) names: Loaded<Names>,
     pub(crate) channels: Loaded<Vec<ChannelInfo>>,
     pub(crate) room: Option<Room>,
     pub(crate) drafts: BTreeMap<String, Draft>,

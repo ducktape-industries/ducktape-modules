@@ -8,9 +8,9 @@ use ducktape_view_guest::{
 };
 
 use crate::message::{ChatMessage, SpanStyle};
-use crate::names::NameDirectory;
 use crate::ui::badge;
 use crate::{Chat, Mode, Pane};
+use chat::view::Names;
 use chat::{Block, Span};
 mod controls;
 mod rich;
@@ -251,7 +251,7 @@ fn content(
     if message.show_author {
         body = body.child(header(&message, theme));
     }
-    let empty = NameDirectory::empty();
+    let empty = Names::empty();
     let names = chat.names.ready().unwrap_or(&empty);
     for (index, block) in message.blocks.iter().enumerate() {
         body = body.child(block_view(&message, index, block, names, cx, theme));
@@ -411,7 +411,7 @@ fn block_view(
     message: &ChatMessage,
     index: usize,
     block: &Block,
-    names: &NameDirectory,
+    names: &Names,
     cx: &mut Context<Chat>,
     theme: &Theme,
 ) -> AnyElement {

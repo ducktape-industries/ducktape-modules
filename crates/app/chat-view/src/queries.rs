@@ -2,15 +2,13 @@
 //! `PageReply`; `next` is the cursor of the page after it.
 use chat::{ChannelInfo, MemberRow, MessageHits, MsgRow, Page, PageReply, Party, Query, Reply};
 use ducktape_view_guest::Host;
-use ducktape_view_guest::host::{Refusal, malformed};
+use ducktape_view_guest::host::{Refusal, pages, wrong_reply};
 
 use crate::api::{Ask, ChatApi};
-use crate::names::NameDirectory;
 use crate::{PAGE, WINDOW};
 
-pub(crate) fn wrong_reply() -> Refusal {
-    malformed("the chat module answered another question".into())
-}
+/// How many channel pages one read follows: 64 pages of 64 channels.
+const CHANNEL_PAGES: usize = 64;
 
 fn page(after: Option<Vec<u8>>, limit: usize) -> Page {
     Page {
@@ -20,26 +18,22 @@ fn page(after: Option<Vec<u8>>, limit: usize) -> Page {
 }
 
 pub(crate) async fn channels(host: Host) -> Result<Vec<ChannelInfo>, Refusal> {
-    let mut all = Vec::new();
-    let mut after = None;
-    loop {
-        let Reply::Channels(reply) = host
-            .ask::<Ask<ChatApi>>(Query::Channels {
-                page: page(after, PAGE),
-            })
-            .await?
-        else {
-            return Err(wrong_reply());
-        };
-        all.extend(reply.items);
-        match reply.next {
-            Some(next) => after = Some(next),
-            None => return Ok(all),
+    let (all, _) = pages(None, CHANNEL_PAGES, |after| {
+        let ask = host.ask::<Ask<ChatApi>>(Query::Channels {
+            page: page(after, PAGE),
+        });
+        async move {
+            match ask.await? {
+                Reply::Channels(reply) => Ok((reply.items, reply.next)),
+                _ => Err(wrong_reply()),
+            }
         }
-    }
+    })
+    .await?;
+    Ok(all)
 }
 
-/// One page of roots below `below` (or the newest), oldest first, with
+/// The `limit` roots below `below` (or the newest), oldest first, with
 /// whether older ones remain.
 pub(crate) async fn roots(
     host: Host,
@@ -48,25 +42,21 @@ pub(crate) async fn roots(
     below: Option<Vec<u8>>,
     limit: usize,
 ) -> Result<(Vec<MsgRow>, bool), Refusal> {
-    let mut all = Vec::new();
-    let mut after = below;
-    loop {
-        let Reply::Roots(reply) = host
-            .ask::<Ask<ChatApi>>(Query::Roots {
-                channel_id: channel_id.clone(),
-                viewer: viewer.clone(),
-                page: page(after, PAGE),
-            })
-            .await?
-        else {
-            return Err(wrong_reply());
-        };
-        all.extend(reply.items);
-        match reply.next {
-            Some(next) if all.len() < limit => after = Some(next),
-            next => return Ok((sorted(all), next.is_some())),
+    let (all, next) = pages(below, limit.div_ceil(PAGE), |after| {
+        let ask = host.ask::<Ask<ChatApi>>(Query::Roots {
+            channel_id: channel_id.clone(),
+            viewer: viewer.clone(),
+            page: page(after, PAGE),
+        });
+        async move {
+            match ask.await? {
+                Reply::Roots(reply) => Ok((reply.items, reply.next)),
+                _ => Err(wrong_reply()),
+            }
         }
-    }
+    })
+    .await?;
+    Ok((sorted(all), next.is_some()))
 }
 
 /// The rows around a landing seq, oldest first.
@@ -160,19 +150,6 @@ pub(crate) async fn search_hits(
     match host.ask::<Ask<ChatApi>>(query).await? {
         Reply::Hits(MessageHits { hits, capped }) => Ok((hits, capped, None)),
         Reply::TagHits(PageReply { items, next, .. }) => Ok((items, false, next)),
-        _ => Err(wrong_reply()),
-    }
-}
-
-/// The identity roster, paged through chat, folded into the name directory.
-pub(crate) async fn roster(host: Host) -> Result<NameDirectory, Refusal> {
-    match host
-        .ask::<Ask<ChatApi>>(Query::Accounts {
-            page: page(None, 256),
-        })
-        .await?
-    {
-        Reply::Accounts(accounts) => Ok(NameDirectory::from_roster(accounts)),
         _ => Err(wrong_reply()),
     }
 }

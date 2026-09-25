@@ -1,8 +1,6 @@
 //! What chat follows while it is open: the session, routes opened into
 //! it, whether it is on screen, and the live heads of chat and identity.
 //! Every follower says what a refusal means to it; none ends on one.
-use std::future::Future;
-
 use ducktape_view_guest::Context;
 use ducktape_view_guest::host::Refusal;
 
@@ -53,29 +51,6 @@ impl Chat {
                 Err(refusal) => log(cx, "identity's live heads", &refusal),
             }),
         ];
-    }
-
-    /// Re-reads what is already on screen: the rows there stay until the
-    /// fresh ones land, and stay if the read is refused (the host's log
-    /// keeps why).
-    pub(crate) fn reread<T: 'static>(
-        &self,
-        what: &'static str,
-        work: impl Future<Output = Result<T, Refusal>> + 'static,
-        land: impl FnOnce(&mut Chat, T, &mut Context<Chat>) + 'static,
-        cx: &mut Context<Self>,
-    ) {
-        cx.spawn(async move |this, cx| {
-            let result = work.await;
-            let _ = this.update(cx, |chat, cx| {
-                match result {
-                    Ok(value) => land(chat, value, cx),
-                    Err(refusal) => log(cx, what, &refusal),
-                }
-                cx.notify();
-            });
-        })
-        .detach();
     }
 }
 
