@@ -386,7 +386,9 @@ pub mod explorer {
     }
 }
 
-/// `block 1,024`, quiet and mono, opening Explorer at that block.
+/// `block 1,024`, quiet and mono, opening Explorer at that block. A view
+/// that draws it on a clickable card replaces the click (`on_click`) with
+/// its own that claims it and opens the same [`explorer::link`].
 pub fn block_link(id: impl Into<ElementId>, height: u64, theme: &Theme) -> Stateful<Div> {
     let label = format!("block {}", grouped(height));
     explorer_link(id, label, explorer::block_path(height), theme)

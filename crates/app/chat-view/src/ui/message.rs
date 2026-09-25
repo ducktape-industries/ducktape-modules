@@ -268,7 +268,7 @@ fn content(
         .flex_col()
         .gap_1()
         .when(message.show_author, |body| {
-            body.child(header(&message, theme))
+            body.child(header(&message, cx, theme))
         })
         .children(blocks(chat, &message, cx, theme))
         .children(marks(&message, theme))
@@ -360,7 +360,7 @@ fn replies(
 }
 
 /// A run's first message names its author, their agent badge and block.
-fn header(message: &ChatMessage, theme: &Theme) -> impl IntoElement {
+fn header(message: &ChatMessage, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement {
     let mut header = div()
         .id(format!("chat-message-{}-header", message.id))
         .flex()
@@ -381,8 +381,15 @@ fn header(message: &ChatMessage, theme: &Theme) -> impl IntoElement {
         ));
     }
     if message.height > 0 {
+        // the link opens Explorer at its block, and the card under it
+        // stays unchosen
+        let link = design::explorer::link(&design::explorer::block_path(message.height));
+        let open = cx.listener(move |chat, event: &ClickEvent, _window, cx| {
+            chat.claim(event);
+            cx.host().open_link(&link);
+        });
         let id = format!("chat-message-{}-height", message.id);
-        header = header.child(design::block_link(id, message.height, theme));
+        header = header.child(design::block_link(id, message.height, theme).on_click(open));
     }
     header
 }
@@ -406,7 +413,8 @@ fn program_post(
         .text_color(theme.muted)
         .child(design::mono(code.to_owned()));
     if let Some(link) = crate::links::program_link(&chat.session.chain, &chat.room_id()) {
-        let open = cx.listener(move |chat, _: &ClickEvent, _window, cx| {
+        let open = cx.listener(move |chat, event: &ClickEvent, _window, cx| {
+            chat.claim(event);
             chat.open_link(link.clone(), cx);
         });
         let theme = *theme;
