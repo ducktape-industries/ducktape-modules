@@ -16,6 +16,7 @@ struct State {
     logs: Vec<String>,
     links: Vec<String>,
     streams: Vec<Rc<RefCell<StreamState>>>,
+    declared: Option<&'static [&'static str]>,
 }
 
 /// A typed host whose requests must be explicitly handled by a test.
@@ -125,6 +126,9 @@ impl FakeHost {
             }
         }
     }
+    pub(super) fn declare(&self, capabilities: &'static [&'static str]) {
+        self.0.borrow_mut().declared = Some(capabilities);
+    }
     pub(super) fn take_events(&self) -> Vec<Event> {
         std::mem::take(&mut self.0.borrow_mut().events)
     }
@@ -138,6 +142,20 @@ impl FakeHost {
         }
         for request in &frame.requests {
             state.requests.push(request.clone());
+            // The app refuses a door the manifest leaves out
+            // (`undeclared_capability`); a test fails on it instead.
+            let capability = request
+                .kind
+                .split_once('.')
+                .map_or(&*request.kind, |(c, _)| c);
+            if let Some(declared) = state.declared {
+                assert!(
+                    !doors::is_capability(capability) || declared.contains(&capability),
+                    "undeclared_capability: `{}` needs the `{capability}` capability, \
+                     which this view's export_view! does not declare",
+                    request.kind
+                );
+            }
             match request.kind.as_str() {
                 doors::HostLog::KIND => {
                     state

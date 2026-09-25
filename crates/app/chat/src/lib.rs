@@ -99,8 +99,11 @@ fn attention_key(ch: &str, author: &str, reply: u64) -> String {
 fn member_key(ch: &str, handle: &str) -> String {
     format!("member/{ch}/{handle}")
 }
+fn react_prefix(ch: &str, seq: u64) -> String {
+    format!("react/{ch}/{seq:016x}/")
+}
 fn react_key(ch: &str, seq: u64, emoji: &str, handle: &str) -> String {
-    format!("react/{ch}/{seq:016x}/{emoji}/{handle}")
+    format!("{}{emoji}/{handle}", react_prefix(ch, seq))
 }
 fn tok_key(token: &str, ch: &str, seq: u64) -> String {
     format!("tok/{token}/{ch}/{seq:016x}")

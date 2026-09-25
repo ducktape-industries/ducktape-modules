@@ -76,7 +76,7 @@ pub mod window;
 
 mod snapshot;
 pub mod view;
-pub use view::{Loaded, Render, View};
+pub use view::{Declared, Loaded, Render, View};
 pub use wire::doors;
 mod context;
 pub use context::{App, AsyncApp, Context, Entity, Released, WeakEntity};
@@ -156,6 +156,9 @@ macro_rules! export_driver {
             $crate::wire::doors::is_capability($capability),
             concat!("`", $capability, "` is not a door capability: see view_wire::doors::CAPABILITIES")
         );)*
+        impl $crate::Declared for $app {
+            const CAPABILITIES: &'static [&'static str] = &[$($capability),*];
+        }
         const MANIFEST: &str = concat!("ducktape.view.manifest.v2\n", $name, "\n", $description, "\n" $(, $capability, ",")*, "\n");
 
         #[cfg_attr(target_arch = "wasm32", unsafe(link_section = "ducktape.view.manifest"))]

@@ -9,6 +9,11 @@ use std::future::Future;
 pub trait Render: 'static + Sized {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement;
 }
+/// The capabilities a view's manifest declares. `export_view!` implements
+/// it from its list, so `TestAppContext` refuses what the app would refuse.
+pub trait Declared {
+    const CAPABILITIES: &'static [&'static str];
+}
 pub trait View: Render + Serialize + DeserializeOwned {
     const PREFERRED_WINDOW_SIZE: &'static str = "none";
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self;

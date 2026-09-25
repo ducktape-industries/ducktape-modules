@@ -9,10 +9,16 @@ pub fn execute(store: &mut impl Writes, frame: &Frame, msg: ChatMsg) -> Result<(
             channel_id,
             name,
             post_policy,
-        } => create_channel(store, frame, channel_id, name, post_policy, false),
-        ChatMsg::CreateVoiceChannel { channel_id, name } => {
-            create_channel(store, frame, channel_id, name, PostPolicy::Open, true)
-        }
+        } => create_channel(store, frame, channel_id, name, post_policy, false, false),
+        ChatMsg::CreateVoiceChannel { channel_id, name } => create_channel(
+            store,
+            frame,
+            channel_id,
+            name,
+            PostPolicy::Open,
+            true,
+            false,
+        ),
         ChatMsg::CreateDmChannel { counterpart, name } => {
             let Party::Account(me) = frame.party else {
                 return Err(unauthorized("only an account opens a dm"));
@@ -31,6 +37,7 @@ pub fn execute(store: &mut impl Writes, frame: &Frame, msg: ChatMsg) -> Result<(
                 name,
                 PostPolicy::MembersOnly,
                 false,
+                true,
             )?;
             for party in [Party::Account(me), Party::Account(counterpart)] {
                 set_member(store, frame, &id, &party, true);
@@ -154,7 +161,7 @@ pub fn execute(store: &mut impl Writes, frame: &Frame, msg: ChatMsg) -> Result<(
             if let Some(last) = row.last_reply_seq {
                 store.delete(attention_key(&channel_id, &row.author, last).as_bytes());
             }
-            for entry in store.scan(Scan::prefix(react_key(&channel_id, seq, "", ""))) {
+            for entry in store.scan(Scan::prefix(react_prefix(&channel_id, seq))) {
                 store.delete(entry.key);
             }
             row = MsgRow {
@@ -246,9 +253,15 @@ fn create_channel(
     name: String,
     post_policy: PostPolicy,
     voice: bool,
+    dm: bool,
 ) -> Result<(), Refusal> {
     checked_id("channel_id", &id)?;
     reserved_id(&id, &frame.party)?;
+    // A dm id opens only through CreateDmChannel, which seats both peers;
+    // a plain create would let anyone own the room first.
+    if !dm && dm_peers(&id).is_some() {
+        return Err(unauthorized("dm ids open only through CreateDmChannel"));
+    }
     checked_name(&name)?;
     if load::<ChannelRow>(store, &chan_key(&id))?.is_some() {
         return Err(already_exists(format!("channel {id} exists")));
