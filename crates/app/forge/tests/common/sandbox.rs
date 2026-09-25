@@ -29,11 +29,11 @@ impl Default for MemorySandbox {
 
 impl MemorySandbox {
     /// Runs one chat message directly, as a key or module would in its own block.
-    pub fn chat_execute(&self, frame: &chat::Frame, msg: chat::ChatMsg) -> Result<(), Refusal> {
+    pub fn chat_execute(&self, frame: &chat::Frame, msg: chat::Op) -> Result<(), Refusal> {
         chat::execute(&mut *self.chat.borrow_mut(), frame, msg)
     }
 
-    pub fn chat_query(&self, q: chat::ChatViewQuery) -> Result<chat::ChatViewReply, Refusal> {
+    pub fn chat_query(&self, q: chat::Query) -> Result<chat::Reply, Refusal> {
         chat::query(&*self.chat.borrow(), 0, q)
     }
 

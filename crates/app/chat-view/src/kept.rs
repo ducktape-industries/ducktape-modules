@@ -33,7 +33,11 @@ impl Chat {
             let emoji = emoji.await;
             let _ = this.update(cx, |chat, cx| {
                 cx.notify();
-                for kept in emoji.ok().flatten().unwrap_or_default().into_iter() {
+                let emoji = emoji.unwrap_or_else(|refusal| {
+                    crate::watch::log(cx, "the kept reactions", &refusal);
+                    None
+                });
+                for kept in emoji.unwrap_or_default() {
                     if !chat.recent_emoji.contains(&kept) {
                         chat.recent_emoji.push(kept);
                     }

@@ -486,9 +486,9 @@ fn replay(tape: &mut Tape) {
     ) else {
         panic!();
     };
-    let chat::ChatViewReply::Message(Some(root)) = rig
+    let chat::Reply::Message(Some(root)) = rig
         .sandbox
-        .chat_query(chat::ChatViewQuery::MessageById {
+        .chat_query(chat::Query::MessageById {
             message_id: reviews.items[0].message_id.clone(),
         })
         .unwrap()
@@ -497,7 +497,7 @@ fn replay(tape: &mut Tape) {
     };
     rig.chat_execute(
         chat::Party::Key(TESTER.to_vec()),
-        chat::ChatMsg::PostMessage {
+        chat::Op::PostMessage {
             channel_id: "forge:project:1".into(),
             message_id: "fixture-reply".into(),
             blocks: vec![chat::Block::paragraph("A reply about the anchored line")],
@@ -575,7 +575,7 @@ fn replay(tape: &mut Tape) {
     ] {
         rig.chat_execute(
             chat::Party::Key(key.to_vec()),
-            chat::ChatMsg::PostMessage {
+            chat::Op::PostMessage {
                 channel_id: "forge:project:3".into(),
                 message_id: id.into(),
                 blocks: vec![chat::Block::paragraph("Conversation")],

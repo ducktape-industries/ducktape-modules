@@ -187,7 +187,7 @@ fn forge_line(
 }
 
 fn is_forge(row: &chat::MsgRow) -> bool {
-    chat::party_of_handle(&row.author) == Some(chat::Party::Module(forge::PROGRAM.into()))
+    row.author == chat::Party::Module(forge::PROGRAM.into())
 }
 
 /// The hidden chat channel of this change, in chat's row shape.
@@ -229,7 +229,7 @@ fn messages(forge: &Forge, theme: &Theme) -> AnyElement {
                     }
                     continue;
                 }
-                let author = forge.handle_name(&message.author);
+                let author = forge.party_name(&message.author);
                 column = column.child(
                     div()
                         .id(id(format!("forge-message-{}", message.message_id)))

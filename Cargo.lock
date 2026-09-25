@@ -663,7 +663,6 @@ dependencies = [
  "guest",
  "identity",
  "serde",
- "serde_json",
  "store",
  "unicode-normalization",
  "view-guest",

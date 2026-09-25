@@ -45,7 +45,7 @@ impl View for Forge {
     fn restored(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         self.watches.clear();
         let props = cx.host().subscribe::<HostProps>(());
-        self.watches.push(cx.follow(props, |forge, item, cx| {
+        self.watches.push(cx.follow(props, |forge, item, _, cx| {
             match item {
                 Ok(session) => forge.session_changed(session, cx),
                 Err(refusal) => {
@@ -58,7 +58,7 @@ impl View for Forge {
         // the repository to open
         let routes = cx.host().subscribe::<HostRoute>(());
         self.watches
-            .push(cx.follow(routes, |forge, route, cx| match route {
+            .push(cx.follow(routes, |forge, route, _, cx| match route {
                 Ok(route) => forge.open_route(&route, cx),
                 Err(refusal) => {
                     forge.notice = format!("Couldn’t follow the link: {}", refusal.sentence);
@@ -72,10 +72,10 @@ impl View for Forge {
         for module in [forge::PROGRAM, chat::PROGRAM, identity::PROGRAM] {
             let live = cx.host().subscribe::<RpcLive>(module.into());
             self.watches
-                .push(cx.follow(live, |forge, _, cx| forge.reconcile(cx)));
+                .push(cx.follow(live, |forge, _, _, cx| forge.reconcile(cx)));
         }
         let visible = cx.host().subscribe::<HostVisible>(());
-        self.watches.push(cx.follow(visible, |forge, shown, cx| {
+        self.watches.push(cx.follow(visible, |forge, shown, _, cx| {
             if shown.unwrap_or(false) {
                 forge.refresh(cx);
             }

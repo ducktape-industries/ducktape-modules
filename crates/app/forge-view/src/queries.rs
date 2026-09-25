@@ -85,12 +85,12 @@ fn extend(into: &mut Reply, more: Reply) {
 /// accounts, their names and the keys they hold.
 pub(crate) async fn roster(host: Host) -> Result<Names, Refusal> {
     match host
-        .ask::<Ask<ChatApi>>(chat::ChatViewQuery::Accounts {
+        .ask::<Ask<ChatApi>>(chat::Query::Accounts {
             page: Page::first(256),
         })
         .await?
     {
-        chat::ChatViewReply::Accounts(rows) => Ok(Names::new(rows)),
+        chat::Reply::Accounts(rows) => Ok(Names::new(rows)),
         _ => Err(wrong_reply()),
     }
 }
@@ -99,15 +99,15 @@ pub(crate) async fn roster(host: Host) -> Result<Names, Refusal> {
 pub(crate) async fn conversation(
     host: Host,
     channel_id: String,
-    viewer: Vec<String>,
+    viewer: Vec<chat::Party>,
 ) -> Result<Vec<chat::MsgRow>, Refusal> {
     let mut all: Vec<chat::MsgRow> = Vec::new();
     let mut page = PAGE;
     for _ in 0..MAX_PAGES {
-        let chat::ChatViewReply::Roots(roots) = host
-            .ask::<Ask<ChatApi>>(chat::ChatViewQuery::Roots {
+        let chat::Reply::Roots(roots) = host
+            .ask::<Ask<ChatApi>>(chat::Query::Roots {
                 channel_id: channel_id.clone(),
-                viewer_handles: viewer.clone(),
+                viewer: viewer.clone(),
                 page: page.clone(),
             })
             .await?

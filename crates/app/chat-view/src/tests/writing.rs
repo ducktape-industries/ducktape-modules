@@ -1,0 +1,121 @@
+//! Sending, and creating channels.
+use super::*;
+
+#[test]
+fn a_send_shows_pending_then_lands_and_a_refusal_is_a_banner() {
+    let (mut cx, view) = opened();
+    let pending = MsgRow {
+        message_id: "p1".into(),
+        author: Party::Account(7),
+        blocks: vec![chat::Block::paragraph("on its way")],
+        ..MsgRow::default()
+    };
+    view.update(&mut cx, |chat, _, cx| {
+        chat.room.as_mut().unwrap().pending.push(pending.clone());
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(cx.has_text("on its way") && cx.has_text("sending…"));
+    view.update(&mut cx, |chat, _, cx| {
+        let room = chat.room.as_mut().unwrap();
+        room.messages
+            .ready_mut()
+            .unwrap()
+            .push(MsgRow { seq: 3, ..pending });
+        room.settle();
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(cx.has_text("on its way") && !cx.has_text("sending…"));
+    cx.simulate_input("chat-sidebar-search", "hello");
+    cx.simulate_submit("chat-sidebar-search");
+    cx.run_until_parked();
+    assert!(cx.has_text("1 result for “hello”"), "{:?}", cx.texts());
+    cx.simulate_click("chat-sidebar-clear-search");
+    view.read(|chat| assert!(chat.search.query.is_empty()));
+    cx.host().handle::<HostId>(|kind| {
+        assert_eq!(kind, "channel");
+        Ok("chan-1".into())
+    });
+    cx.host().refuse::<Submit<ChatApi>>("no", "no");
+    cx.simulate_click("chat-sidebar-new-channel");
+    assert!(cx.has_text("Create a channel"));
+    cx.simulate_input("chat-create-name", "random");
+    cx.simulate_click("chat-create-members");
+    cx.simulate_submit("chat-create-name");
+    cx.run_until_parked();
+    assert!(cx.host().asked::<Submit<ChatApi>>().iter().any(|op| matches!(op, Op::CreateChannel { name, post_policy: PostPolicy::MembersOnly, .. } if name == "random")));
+    assert!(cx.has_text("Couldn’t create this channel: no"));
+    let bytes = cx.snapshot().unwrap();
+    let mut restored = TestAppContext::new();
+    configure(&mut restored);
+    restored.host().never::<HostProps>();
+    restored.host().never::<HostVisible>();
+    let view = restored.restore::<Chat>(&bytes).unwrap();
+    restored.run_until_parked();
+    view.read(|chat| assert_eq!(chat.room.as_ref().unwrap().id, "general"));
+    assert!(restored.host().asked::<Ask<ChatApi>>().len() >= 2);
+}
+
+#[test]
+fn channel_create_preserves_busy_account_and_voice_gates() {
+    fn disabled(cx: &TestAppContext, id: &str) -> bool {
+        let Some(wire::Node::Container(ducktape_view_guest::wire::ContainerNode {
+            interactivity,
+            ..
+        })) = cx.find(id)
+        else {
+            panic!("{id} button")
+        };
+        interactivity.aria.disabled == Some(true) && interactivity.on_click.is_none()
+    }
+
+    let (mut cx, view) = opened();
+    cx.simulate_click("chat-sidebar-new-channel");
+    view.update(&mut cx, |chat, _, cx| {
+        chat.create.as_mut().unwrap().busy = true;
+        cx.notify();
+    });
+    cx.run_until_parked();
+    let Some(wire::Node::Input {
+        options, on_submit, ..
+    }) = cx.find("chat-create-name")
+    else {
+        panic!("channel name input")
+    };
+    assert!(options.disabled);
+    assert!(on_submit.is_none());
+    for id in [
+        "chat-create-voice",
+        "chat-create-members",
+        "chat-create-cancel",
+        "chat-create-submit",
+    ] {
+        assert!(disabled(&cx, id), "{id} must stay inert while busy");
+    }
+
+    view.update(&mut cx, |chat, _, cx| {
+        let create = chat.create.as_mut().unwrap();
+        create.busy = false;
+        create.voice = true;
+        chat.me = Loaded::Ready(None);
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(disabled(&cx, "chat-create-members"));
+    assert!(disabled(&cx, "chat-create-submit"));
+    assert!(cx.has_text("Create an account to create a channel"));
+    assert!(!disabled(&cx, "chat-create-cancel"));
+    let submitted = cx.host().asked::<Submit<ChatApi>>().len();
+    view.update(&mut cx, |chat, _, cx| chat.create_channel(cx));
+    cx.run_until_parked();
+    assert_eq!(cx.host().asked::<Submit<ChatApi>>().len(), submitted);
+
+    view.update(&mut cx, |chat, _, cx| {
+        chat.me = Loaded::Ready(Some(7));
+        chat.session.connected = false;
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(disabled(&cx, "chat-create-submit"));
+}

@@ -73,7 +73,7 @@ fn screen(state: &str) -> TestAppContext {
             cx.host()
                 .handle::<Ask>(|_| Err(refusal("refused-not-found")));
             cx.host()
-                .handle::<Query<ChatApi>>(|_| Ok(chat::ChatViewReply::Accounts(accounts())));
+                .handle::<Query<ChatApi>>(|_| Ok(chat::Reply::Accounts(accounts())));
             cx.host().never::<RpcLive>();
             cx.host().never::<HostVisible>();
             cx.host().never::<HostProps>();

@@ -19,9 +19,9 @@ pub(super) fn rich_line(
     cx: &mut Context<Chat>,
     theme: &Theme,
 ) -> InteractiveText {
-    let styled = crate::client::styled_spans(spans, names);
+    let styled = crate::message::styled_spans(spans, names);
     if styled.is_empty() {
-        return plain_line(id, &crate::client::span_text(spans, names), false);
+        return plain_line(id, &crate::message::span_text(spans, names), false);
     }
     let mut text = String::new();
     let mut highlights = Vec::new();

@@ -85,7 +85,7 @@ fn reaction_rows_keep_add_action_and_selected_accessibility() {
     view.update(&mut cx, |chat, _, cx| {
         chat.room.as_mut().unwrap().messages.ready_mut().unwrap()[0]
             .reactions
-            .push(chat::ReactionSummary {
+            .push(chat::Reaction {
                 emoji: "🔥".into(),
                 count: 2,
                 reacted_by_me: true,
@@ -226,7 +226,7 @@ fn the_picker_searches_and_enter_picks_the_first_match() {
         cx.host()
             .asked::<Submit<ChatApi>>()
             .iter()
-            .any(|op| matches!(op, ChatMsg::AddReaction { emoji, .. } if emoji == "🦆"))
+            .any(|op| matches!(op, Op::AddReaction { emoji, .. } if emoji == "🦆"))
     );
     view.read(|chat| {
         assert!(chat.menu.is_none());

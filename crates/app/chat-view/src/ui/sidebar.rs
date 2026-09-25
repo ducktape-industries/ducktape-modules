@@ -5,62 +5,13 @@ use ducktape_view_guest::design;
 use ducktape_view_guest::prelude::*;
 use ducktape_view_guest::{ClickEvent, Context, ElementId, ParentElement, Styled, Theme, div, px};
 
-use crate::chat::ChannelInfo;
+use chat::{ChannelInfo, Party};
+
+use crate::names::dm_peer_of;
 use crate::{ChannelCreate, Chat};
 
 pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement {
-    let typed = cx.listener(|chat, event: &String, _window, cx| {
-        chat.search.draft = event.clone();
-        cx.notify();
-    });
-    let submit = cx.listener(|chat, _: &(), _window, cx| {
-        cx.notify();
-        chat.search_submit(cx)
-    });
-    let search_input = Input::new("chat-sidebar-search")
-        .h(px(28.))
-        .flex_1()
-        .px_2()
-        .py_1()
-        .border_1()
-        .border_color(theme.sidebar_border)
-        .bg(theme.sidebar_raised)
-        .text_color(theme.sidebar_foreground)
-        .value(chat.search.draft.clone())
-        .placeholder("Search messages…")
-        .label("Search messages")
-        .on_input(typed)
-        .on_submit(submit);
-    let mut search = div()
-        .flex()
-        .items_center()
-        .gap_1()
-        .flex_1()
-        .child(search_input);
-    if !chat.search.query.is_empty() || !chat.search.draft.trim().is_empty() {
-        let clear = cx.listener(|chat, _: &ClickEvent, _window, cx| {
-            chat.search_clear();
-            cx.notify();
-        });
-        search = search.child(
-            div()
-                .id("chat-sidebar-clear-search")
-                .px_1()
-                .role(ducktape_view_guest::Role::Button)
-                .focusable()
-                .on_click(clear)
-                .child("✕"),
-        );
-    }
-
-    let toggle = cx.listener(|chat, _: &ClickEvent, _window, cx| {
-        chat.create = match chat.create.take() {
-            Some(_) => None,
-            None => Some(ChannelCreate::default()),
-        };
-        cx.notify();
-    });
-    let content = div()
+    div()
         .id("chat-sidebar")
         .flex()
         .flex_col()
@@ -75,25 +26,62 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
                 .items_center()
                 .gap_1()
                 .p_2()
-                .child(search),
-        );
+                .child(search(chat, cx, theme)),
+        )
+        .child(rooms(chat, cx, theme))
+}
 
-    let busy = false;
-    let door = div()
-        .id("chat-sidebar-new-channel")
-        .px_1()
-        .py_0p5()
-        .hover(|s| s.bg(theme.sidebar_raised))
-        .when(!busy || chat.create.is_some(), |el| {
-            el.role(ducktape_view_guest::Role::Button)
-                .focusable()
-                .on_click(toggle)
+/// The message search field, and its clear button once it holds a search.
+fn search(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement {
+    let typed = cx.listener(|chat, event: &String, _window, cx| {
+        chat.search.draft = event.clone();
+        cx.notify();
+    });
+    let submit = cx.listener(|chat, _: &(), _window, cx| {
+        cx.notify();
+        chat.search_submit(cx)
+    });
+    let input = Input::new("chat-sidebar-search")
+        .h(design::size::CONTROL)
+        .flex_1()
+        .px_2()
+        .py_1()
+        .border_1()
+        .border_color(theme.sidebar_border)
+        .bg(theme.sidebar_raised)
+        .text_color(theme.sidebar_foreground)
+        .value(chat.search.draft.clone())
+        .placeholder("Search messages…")
+        .label("Search messages")
+        .on_input(typed)
+        .on_submit(submit);
+    let searching = !chat.search.query.is_empty() || !chat.search.draft.trim().is_empty();
+    let clear = cx.listener(|chat, _: &ClickEvent, _window, cx| {
+        chat.search_clear();
+        cx.notify();
+    });
+    div()
+        .flex()
+        .items_center()
+        .gap_1()
+        .flex_1()
+        .child(input)
+        .when(searching, |el| {
+            el.child(
+                div()
+                    .id("chat-sidebar-clear-search")
+                    .px_1()
+                    .role(ducktape_view_guest::Role::Button)
+                    .focusable()
+                    .on_click(clear)
+                    .child("✕"),
+            )
         })
-        .child(if chat.create.is_some() {
-            "✕ Close"
-        } else {
-            "+ New channel"
-        });
+}
+
+/// The rooms in three sections: channels, voice rooms, direct messages.
+/// A program's own rooms (`forge:…` review threads) are its to show.
+fn rooms(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement {
     let mut list = div()
         .id("chat-sidebar-rooms")
         .flex_1()
@@ -101,14 +89,13 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
         .flex()
         .flex_col()
         .gap_1()
-        .p_2();
-    list = list.child(section_header(
-        "chat-sidebar-channels-header",
-        "Channels",
-        door,
-        theme,
-    ));
-
+        .p_2()
+        .child(section_header(
+            "chat-sidebar-channels-header",
+            "Channels",
+            new_channel(chat, cx, theme),
+            theme,
+        ));
     let channels: Vec<&ChannelInfo> = chat.channels.ready().into_iter().flatten().collect();
     if chat.channels.is_loading() && channels.is_empty() {
         list = list.child(quiet("chat-sidebar-loading", "Loading rooms…", theme));
@@ -125,22 +112,19 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
     let mut voice = Vec::new();
     let mut dms = Vec::new();
     for info in channels {
-        if crate::chat::dm_peers(&info.channel.id).is_some() {
-            if let Some(peer) =
-                mine.and_then(|mine| crate::client::dm_peer_of(mine, &info.channel.id))
-            {
-                dms.push((info, peer));
-            }
+        let id = info.channel.id.as_str();
+        if chat::program_of(id).is_some() {
+            continue;
+        }
+        if chat::dm_peers(id).is_some() {
+            dms.extend(
+                mine.and_then(|mine| dm_peer_of(mine, id))
+                    .map(|peer| (info, peer)),
+            );
         } else if info.channel.voice {
             voice.push(info);
         } else {
-            list = list.child(channel_button(
-                chat,
-                info,
-                open == Some(info.channel.id.as_str()),
-                cx,
-                theme,
-            ));
+            list = list.child(channel_button(chat, info, open == Some(id), cx, theme));
         }
     }
     if !voice.is_empty() {
@@ -162,17 +146,35 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
             theme,
         ));
         for (info, peer) in dms {
-            list = list.child(dm_button(
-                chat,
-                info,
-                peer,
-                open == Some(info.channel.id.as_str()),
-                cx,
-                theme,
-            ));
+            let selected = open == Some(info.channel.id.as_str());
+            list = list.child(dm_button(chat, info, peer, selected, cx, theme));
         }
     }
-    content.child(list)
+    list
+}
+
+/// "+ New channel", or "✕ Close" while the create dialog is open.
+fn new_channel(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement {
+    let toggle = cx.listener(|chat, _: &ClickEvent, _window, cx| {
+        chat.create = match chat.create.take() {
+            Some(_) => None,
+            None => Some(ChannelCreate::default()),
+        };
+        cx.notify();
+    });
+    div()
+        .id("chat-sidebar-new-channel")
+        .px_1()
+        .py_0p5()
+        .hover(|s| s.bg(theme.sidebar_raised))
+        .role(ducktape_view_guest::Role::Button)
+        .focusable()
+        .on_click(toggle)
+        .child(if chat.create.is_some() {
+            "✕ Close"
+        } else {
+            "+ New channel"
+        })
 }
 
 fn section_header(
@@ -223,7 +225,7 @@ fn channel_button(
         .w_full()
         .items_center()
         .gap_1()
-        .min_h(px(28.))
+        .min_h(design::size::CONTROL)
         .px_1()
         .bg(if selected {
             theme.sidebar_raised
@@ -255,7 +257,7 @@ fn channel_button(
                 .child(format!("🔊 {}", info.channel.huddle.len())),
         );
     }
-    if crate::chat::members_only(info) {
+    if info.channel.members_only() {
         row = row.child(
             div()
                 .text_size(design::text::CAPTION)
@@ -302,7 +304,7 @@ fn voice_button(
         .flex()
         .items_center()
         .gap_1()
-        .min_h(px(28.))
+        .min_h(design::size::CONTROL)
         .px_1()
         .bg(if selected {
             theme.sidebar_raised
@@ -332,10 +334,10 @@ fn with_seats(chat: &Chat, info: &ChannelInfo, row: impl IntoElement, theme: &Th
     let Some(names) = chat.names.ready() else {
         return content.into_any_element();
     };
-    let mine = chat.my_handle();
+    let me = chat.me();
     for (index, seat) in info.channel.huddle.iter().enumerate() {
-        let label = names.member_label(&seat.party);
-        let is_you = seat.party == mine;
+        let label = names.member(&seat.party);
+        let is_you = Some(&seat.party) == me.as_ref();
         let speaking = false;
         let note = if is_you { "you" } else { "" };
         content = content.child(
@@ -385,7 +387,7 @@ fn dm_button(
     let names = chat.names.ready();
     let name = names.map_or_else(
         || format!("account {peer}"),
-        |n| n.member_label(&format!("acct:{peer}")),
+        |n| n.member(&Party::Account(peer)),
     );
     let agent = names.is_some_and(|n| n.is_program(peer));
     let unread = chat.unread(info) && !selected;
@@ -399,7 +401,7 @@ fn dm_button(
         .flex()
         .items_center()
         .gap_1()
-        .min_h(px(28.))
+        .min_h(design::size::CONTROL)
         .px_1()
         .bg(if selected {
             theme.sidebar_raised
@@ -467,9 +469,6 @@ pub fn avatar(
 pub fn dm_peer(chat: &Chat) -> Option<(String, bool)> {
     let room = chat.room.as_ref()?;
     let names = chat.names.ready()?;
-    let peer = crate::client::dm_peer_of(chat.my_account()?, &room.id)?;
-    Some((
-        names.member_label(&format!("acct:{peer}")),
-        names.is_program(peer),
-    ))
+    let peer = dm_peer_of(chat.my_account()?, &room.id)?;
+    Some((names.member(&Party::Account(peer)), names.is_program(peer)))
 }

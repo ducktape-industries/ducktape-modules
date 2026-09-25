@@ -4,11 +4,14 @@ use ducktape_view_guest::design;
 use ducktape_view_guest::prelude::*;
 use ducktape_view_guest::{ClickEvent, Context, ElementId, ParentElement, Styled, Theme, div, px};
 
+use chat::ChannelInfo;
+use ducktape_view_guest::view::Loaded;
+
 use super::timeline;
-use crate::chat::ChannelInfo;
 use crate::composer::Target;
+use crate::session::Gate;
 use crate::ui::{badge, button, empty_state, quiet};
-use crate::{Chat, Loaded, Pane, Room};
+use crate::{Chat, Pane, Room};
 
 pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement {
     let mut pane = div()
@@ -93,8 +96,9 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
         {
             pane = pane.child(huddle(info, theme));
         }
-        let refusal = chat.write_refusal();
-        if refusal.is_empty() {
+        if let Some(gate) = chat.write_gate() {
+            pane = pane.child(write_gate(gate, cx, theme));
+        } else {
             let target = Target::Post {
                 channel: room.id.clone(),
                 thread: None,
@@ -106,7 +110,7 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
                         || ducktape_view_guest::design::short_hex(&room.id),
                         |info| info.channel.name.clone(),
                     );
-                    match crate::chat::dm_peers(&room.id) {
+                    match chat::dm_peers(&room.id) {
                         Some(_) => format!("Message {name}"),
                         None => format!("Message #{name}"),
                     }
@@ -119,8 +123,6 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
                     .p_3()
                     .child(composer(chat, target, &hint, editable, cx)),
             );
-        } else {
-            pane = pane.child(gate(chat, refusal, cx, theme));
         }
     } else {
         pane = pane.child(no_room(chat, cx, theme));
@@ -140,7 +142,7 @@ fn header(chat: &Chat, room: &Room, cx: &mut Context<Chat>, theme: &Theme) -> im
     });
     // a direct room is a person: their initials and name, no `#`, and no
     // "Members only" (a direct room always is)
-    let direct = crate::chat::dm_peers(&room.id).is_some();
+    let direct = chat::dm_peers(&room.id).is_some();
     let peer = super::sidebar::dm_peer(chat);
     let mut title = div().flex().items_center().gap_2();
     if direct {
@@ -174,7 +176,7 @@ fn header(chat: &Chat, room: &Room, cx: &mut Context<Chat>, theme: &Theme) -> im
             theme.warning_soft,
         ));
     }
-    if !direct && info.is_some_and(crate::chat::members_only) {
+    if !direct && info.is_some_and(|info| info.channel.members_only()) {
         title = title.child(badge(
             "chat-room-members-only",
             "Members only",
@@ -365,31 +367,34 @@ fn search_results(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl In
     ))
 }
 
-fn gate(_chat: &Chat, refusal: &str, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement {
+/// Where the composer would be, why the reader may not write here.
+fn write_gate(gate: Gate, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement {
+    let why = match gate {
+        Gate::Archived => {
+            "This channel is archived. It keeps its history and takes no new messages."
+        }
+        Gate::NotMember => {
+            "This channel is members-only and your key is not on its roster. Ask a member to add your key from Channel details."
+        }
+        Gate::NoAccount => {
+            "To send messages, create or join an account in Settings → Account. You can read this channel without an account."
+        }
+    };
     let mut notice = div()
         .id("chat-room-write-refusal")
         .mx_3()
         .my_2()
         .p_3()
-        .bg(if refusal == "channel_archived" {
-            theme.surface
-        } else {
-            theme.warning_soft
+        .bg(match gate {
+            Gate::Archived => theme.surface,
+            Gate::NotMember | Gate::NoAccount => theme.warning_soft,
         })
         .text_color(theme.muted)
         .flex()
         .items_center()
         .gap_2()
-        .child(div().flex_1().child(match refusal {
-            "channel_archived" => {
-                "This channel is archived. It keeps its history and takes no new messages."
-            }
-            "members_only" => {
-                "This channel is members-only and your key is not on its roster. Ask a member to add your key from Channel details."
-            }
-            _ => "To send messages, create or join an account in Settings → Account. You can read this channel without an account.",
-        }));
-    if refusal == "channel_archived" {
+        .child(div().flex_1().child(why));
+    if gate == Gate::Archived {
         let reopen = cx.listener(|chat, _: &ClickEvent, _window, cx| {
             cx.notify();
             chat.set_archived(false, cx);
@@ -406,7 +411,7 @@ pub fn composer(
     editable: bool,
     cx: &mut Context<Chat>,
 ) -> impl IntoElement {
-    let key = crate::draft_key(&target);
+    let key = target.key();
     let empty = crate::composer::Draft::default();
     let draft = chat.drafts.get(&key).unwrap_or(&empty);
     let choices = chat.mention_choices();

@@ -5,7 +5,7 @@ use ducktape_view_guest::host::Refusal;
 use ducktape_view_guest::view::Loaded;
 
 use crate::queries::PAGE;
-use crate::state::{self, ChangeTab, Forge, Nav, change_key, unhex};
+use crate::state::{self, ChangeTab, Forge, Nav, change_key};
 use chat::Party;
 use forge::{
     Bounds, Change, Comparison, PageReply, Query, RefInfo, Reply, RepoInfo, Review, Revision,
@@ -37,10 +37,7 @@ impl Forge {
     /// holds one, the key itself while it holds none, nobody with no key
     /// seated at all.
     pub(crate) fn me_party(&self) -> Option<Party> {
-        match self.my_account() {
-            Some(number) => Some(Party::Account(number)),
-            None => unhex(&self.session.account).map(Party::Key),
-        }
+        Party::reader(self.my_account(), &self.session.account)
     }
 
     pub(crate) fn stage(&self, query: &Query) -> Stage<'_> {
@@ -217,9 +214,9 @@ impl Forge {
         self.names.ready()?.key_of(self.my_account()?)
     }
 
-    /// The handles chat marks as the reader's own: at most one.
-    pub(crate) fn viewer(&self) -> Vec<String> {
-        self.me_party().iter().map(chat::party_handle).collect()
+    /// The parties chat marks as the reader's own: at most one.
+    pub(crate) fn viewer(&self) -> Vec<Party> {
+        self.me_party().into_iter().collect()
     }
 
     /// What a raw forge key is called: its account name once the roster
@@ -231,11 +228,11 @@ impl Forge {
         }
     }
 
-    /// What a chat handle (`acct:7`, `user:<hex>`, `system`) is called.
-    pub(crate) fn handle_name(&self, handle: &str) -> String {
+    /// What a chat author is called.
+    pub(crate) fn party_name(&self, party: &Party) -> String {
         match self.names.ready() {
-            Some(names) => names.handle(handle),
-            None => handle.to_owned(),
+            Some(names) => names.party(party),
+            None => crate::state::unnamed(party),
         }
     }
 

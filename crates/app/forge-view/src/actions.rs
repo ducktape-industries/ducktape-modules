@@ -280,10 +280,7 @@ impl Forge {
             .unwrap_or_default();
         let key = unhex(&typed).or_else(|| {
             let names = self.names.ready()?;
-            let number = match chat::party_of_handle(&typed) {
-                Some(chat::Party::Account(number)) => number,
-                _ => typed.parse().ok()?,
-            };
+            let number = chat::Party::parse(&typed)?.account()?;
             names.key_of(number)
         });
         let Some(key) = key else {
@@ -331,7 +328,7 @@ impl Forge {
             let host = cx.host();
             let result = async {
                 let message_id = host.ask::<HostId>("message".into()).await?;
-                host.ask::<Submit<ChatApi>>(chat::ChatMsg::PostMessage {
+                host.ask::<Submit<ChatApi>>(chat::Op::PostMessage {
                     channel_id: channel,
                     message_id,
                     blocks: chat::parse_message(&text),

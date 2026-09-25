@@ -1,12 +1,14 @@
 //! The open room: opening, landing, paging history, the thread beside it and
 //! what the reader has read.
+use chat::{ChannelInfo, MsgRow, Party};
 use ducktape_view_guest::Context;
 use ducktape_view_guest::host::Refusal;
 use ducktape_view_guest::view::Loaded;
 use ducktape_view_guest::wire;
 
-use crate::chat::{ChannelInfo, MsgRow};
-use crate::{Chat, Room, Thread, WINDOW};
+use crate::composer::Target;
+use crate::queries;
+use crate::{Chat, PAGE, Pane, Room, Thread, WINDOW, links};
 
 pub(crate) const STREAM_KEY: &str = "chat/room/stream";
 
@@ -21,7 +23,7 @@ impl Chat {
     ) {
         self.create = None;
         self.search_clear();
-        match crate::chat::channel_link(&self.session.chain, &id, None) {
+        match links::channel_link(&self.session.chain, &id, None) {
             Some(link) => cx.host().open_link(&link),
             None => cx.host().log("no room link: the session names no chain"),
         }
@@ -76,7 +78,7 @@ impl Chat {
             let host = cx.host();
             cx.load(
                 async move {
-                    let rows = crate::around(host, id, land, viewer).await?;
+                    let rows = queries::around(host, id, land, viewer).await?;
                     Ok(rows)
                 },
                 |chat| &mut room_of(chat).messages,
@@ -85,7 +87,7 @@ impl Chat {
             let (has_older_id, viewer2) = (id.clone(), viewer.clone());
             let handle = cx.spawn(async move |this, cx| {
                 let host = cx.host();
-                let result = crate::roots(host, has_older_id, viewer2, None, WINDOW).await;
+                let result = queries::roots(host, has_older_id, viewer2, None, WINDOW).await;
                 let _ = this.update(cx, |chat, cx| {
                     cx.notify();
                     chat.rows_arrived(result)
@@ -95,7 +97,7 @@ impl Chat {
         };
         let members_id = self.room.as_ref().map(|r| r.id.clone()).unwrap_or_default();
         let room = room_of(self);
-        room.members = cx.load(crate::members(cx.host(), members_id), |chat| {
+        room.members = cx.load(queries::members(cx.host(), members_id), |chat| {
             &mut room_of(chat).members
         });
         if land > 0 {
@@ -117,8 +119,20 @@ impl Chat {
         }
     }
 
+    /// Every change of the chat program: re-read the channel list and
+    /// what the open room shows.
+    pub(crate) fn refresh(&mut self, cx: &mut Context<Self>) {
+        self.reread_channels(cx);
+        self.refresh_room(cx);
+    }
+
+    pub(crate) fn reread_channels(&mut self, cx: &mut Context<Self>) {
+        let list = queries::channels(cx.host());
+        self.reread("the channel list", list, Chat::channels_landed, cx);
+    }
+
     /// Re-read what the room shows, keeping the rows there until fresh land.
-    pub(crate) fn refresh_room(&mut self, cx: &mut Context<Self>) {
+    fn refresh_room(&mut self, cx: &mut Context<Self>) {
         let Some(room) = &self.room else { return };
         let (id, viewer) = (room.id.clone(), self.viewer());
         if !room.landed {
@@ -126,42 +140,47 @@ impl Chat {
                 .messages
                 .ready()
                 .map_or(WINDOW, |rows| rows.len().max(WINDOW));
-            cx.spawn({
-                let (id, viewer) = (id.clone(), viewer.clone());
-                async move |this, cx| {
-                    let host = cx.host();
-                    let result = crate::roots(host, id, viewer, None, shown).await;
-                    let _ = this.update(cx, |chat, cx| {
-                        cx.notify();
-                        if let (Ok((rows, has_older)), Some(room)) = (result, chat.room.as_mut()) {
-                            room.has_older = has_older;
-                            room.messages = Loaded::Ready(rows);
-                            room.settle();
-                        }
-                    });
-                }
-            })
-            .detach();
+            let rows = queries::roots(cx.host(), id.clone(), viewer.clone(), None, shown);
+            self.reread(
+                "the room",
+                rows,
+                |chat, (rows, has_older), _| {
+                    if let Some(room) = chat.room.as_mut() {
+                        room.has_older = has_older;
+                        room.messages = Loaded::Ready(rows);
+                        room.settle();
+                    }
+                },
+                cx,
+            );
         }
-        cx.refresh(crate::members(cx.host(), id.clone()), |chat, members, _| {
-            room_of(chat).members = Loaded::Ready(members);
-        });
-        if let Some(thread) = &room.thread {
-            let root = thread.root;
-            cx.refresh(
-                crate::thread(cx.host(), id, root, viewer, None),
-                move |chat, page, _| {
+        let roster = queries::members(cx.host(), id.clone());
+        self.reread(
+            "the room's members",
+            roster,
+            |chat, members, _| {
+                room_of(chat).members = Loaded::Ready(members);
+            },
+            cx,
+        );
+        if let Some(root) = room.thread.as_ref().map(|thread| thread.root) {
+            let replies = queries::thread(cx.host(), id, root, viewer, None);
+            self.reread(
+                "the thread",
+                replies,
+                move |chat, (replies, next), _| {
                     let Some(thread) = chat.room.as_mut().and_then(|room| room.thread.as_mut())
                     else {
                         return;
                     };
                     if thread.root == root {
-                        thread.replies = Loaded::Ready(page.0);
-                        thread.has_more = page.1.is_some();
-                        thread.next = page.1;
+                        thread.replies = Loaded::Ready(replies);
+                        thread.has_more = next.is_some();
+                        thread.next = next;
                         room_of(chat).settle();
                     }
                 },
+                cx,
             );
         }
     }
@@ -186,7 +205,7 @@ impl Chat {
         cx.spawn(async move |this, cx| {
             let host = cx.host();
             let below = chat::roots_below(&id, oldest);
-            let result = crate::roots(host, id, viewer, Some(below), crate::PAGE).await;
+            let result = queries::roots(host, id, viewer, Some(below), PAGE).await;
             let _ = this.update(cx, |chat, cx| {
                 cx.notify();
                 let Some(room) = &mut chat.room else { return };
@@ -214,19 +233,19 @@ impl Chat {
     /// can move the viewport without one.
     pub(crate) fn list_scrolled(
         &mut self,
-        pane: crate::Pane,
+        pane: Pane,
         event: &ducktape_view_guest::ListScrollEvent,
         cx: &mut Context<Self>,
     ) {
         match pane {
-            crate::Pane::Timeline => {
+            Pane::Timeline => {
                 let Some(room) = &mut self.room else { return };
                 room.at_tail = event.is_following_tail || event.visible_range.end >= event.count;
                 if event.visible_range.start <= 4 {
                     self.load_older(cx);
                 }
             }
-            crate::Pane::Thread => {
+            Pane::Thread => {
                 if event.visible_range.end.saturating_add(4) >= event.count {
                     self.load_more_replies(cx);
                 }
@@ -248,7 +267,7 @@ impl Chat {
         };
         let handle = cx.spawn(async move |this, cx| {
             let host = cx.host();
-            let result = crate::thread(host, id.clone(), root, viewer, None).await;
+            let result = queries::thread(host, id.clone(), root, viewer, None).await;
             let _ = this.update_in(cx, |chat, window, cx| {
                 cx.notify();
                 let Some(thread) = chat.room.as_mut().and_then(|r| r.thread.as_mut()) else {
@@ -264,10 +283,11 @@ impl Chat {
                         thread.next = next;
                         room_of(chat).settle();
                         // the reply field takes the keys once it can be typed in
-                        let key = crate::draft_key(&crate::composer::Target::Post {
+                        let key = Target::Post {
                             channel: id,
                             thread: Some(root),
-                        });
+                        }
+                        .key();
                         window.focus(ducktape_view_guest::ElementId::Name(
                             format!("{key}/editor").into(),
                         ));
@@ -296,20 +316,24 @@ impl Chat {
         let (root, after) = (thread.root, thread.next.clone());
         cx.spawn(async move |this, cx| {
             let host = cx.host();
-            let result = crate::thread(host, id, root, viewer, after).await;
+            let result = queries::thread(host, id, root, viewer, after).await;
             let _ = this.update(cx, |chat, cx| {
                 cx.notify();
                 let Some(thread) = chat.room.as_mut().and_then(|r| r.thread.as_mut()) else {
                     return;
                 };
                 thread.more_loading = false;
-                if let Ok((more, next)) = result
-                    && thread.root == root
-                {
-                    thread.has_more = next.is_some();
-                    thread.next = next;
-                    if let Some(rows) = thread.replies.ready_mut() {
-                        rows.extend(more);
+                match result {
+                    Ok(_) if thread.root != root => {}
+                    Ok((more, next)) => {
+                        thread.has_more = next.is_some();
+                        thread.next = next;
+                        if let Some(rows) = thread.replies.ready_mut() {
+                            rows.extend(more);
+                        }
+                    }
+                    Err(refusal) => {
+                        chat.notice = format!("Couldn’t read this thread: {}", refusal.sentence)
                     }
                 }
             });
@@ -324,14 +348,11 @@ impl Chat {
         if self
             .menu
             .as_ref()
-            .is_some_and(|menu| menu.pane == crate::Pane::Thread)
+            .is_some_and(|menu| menu.pane == Pane::Thread)
         {
             self.menu = None;
         }
-        if self
-            .copy
-            .is_some_and(|copy| copy.pane == crate::Pane::Thread)
-        {
+        if self.copy.is_some_and(|copy| copy.pane == Pane::Thread) {
             self.copy = None;
         }
     }
@@ -383,6 +404,38 @@ impl Chat {
             .cursors
             .get(&info.channel.id)
             .is_some_and(|cursor| info.head_seq > *cursor)
+    }
+
+    pub(crate) fn room_id(&self) -> String {
+        self.room
+            .as_ref()
+            .map(|room| room.id.clone())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn info(&self, id: &str) -> Option<&ChannelInfo> {
+        self.channels
+            .ready()?
+            .iter()
+            .find(|info| info.channel.id == id)
+    }
+
+    pub(crate) fn room_info(&self) -> Option<&ChannelInfo> {
+        self.info(&self.room.as_ref()?.id)
+    }
+
+    /// The open room's members, as the roster names them.
+    pub(crate) fn roster(&self) -> Vec<(Party, String)> {
+        let (Some(names), Some(members)) = (
+            self.names.ready(),
+            self.room.as_ref().and_then(|room| room.members.ready()),
+        ) else {
+            return Vec::new();
+        };
+        members
+            .iter()
+            .map(|row| (row.party.clone(), names.member(&row.party)))
+            .collect()
     }
 
     /// Scroll a stream to the row with `seq`.

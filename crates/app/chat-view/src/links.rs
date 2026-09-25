@@ -1,34 +1,5 @@
-//! The module's own types, linked: what the view sends (`ChatMsg`), what
-//! it asks (`ChatViewQuery`) and the rows it draws. One definition site,
-//! in `crates/app/chat`.
-pub use chat::{
-    AccountRow, Block, ChannelInfo, ChatMsg, ChatViewQuery, ChatViewReply, Mark, MemberRow,
-    MessageHits, MsgRow, Party, PostPolicy, ReactionSummary, Span, dm_peers, hex, parse_message,
-};
-
-pub fn members_only(info: &ChannelInfo) -> bool {
-    info.channel.post_policy == PostPolicy::MembersOnly
-}
-
-/// A handle or a bare key hex back to the party a membership write names.
-pub fn party_of(text: &str) -> Option<Party> {
-    let text = text.trim();
-    if let Some(number) = text.strip_prefix("acct:") {
-        return number.parse().ok().map(Party::Account);
-    }
-    if let Ok(number) = text.parse::<u64>() {
-        return Some(Party::Account(number));
-    }
-    let key = text.strip_prefix("user:").unwrap_or(text);
-    unhex(key).map(Party::Key)
-}
-
-/// [`abi::unhex`], where the empty string is not a key either.
-pub fn unhex(text: &str) -> Option<Vec<u8>> {
-    abi::unhex(text).filter(|bytes| !bytes.is_empty())
-}
-
-// ---------- duck links ----------
+//! Chat's `duck://` links: a room or a message to open, and the route
+//! the app hands back when one is opened.
 
 /// `duck://<chain>/chat/<channel>[/<seq>]`: chat's own tail, the channel
 /// percent-encoded by `ducklink` like any segment (`forge:web:3` →

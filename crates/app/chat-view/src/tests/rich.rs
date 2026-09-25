@@ -32,7 +32,7 @@ fn rich_message_keeps_styles_and_dispatches_each_link_by_value() {
                 channel_id: "general".into(),
                 seq: 3,
                 message_id: "rich".into(),
-                author: "acct:7".into(),
+                author: Party::Account(7),
                 height: 2,
                 blocks: vec![
                     chat::Block::Paragraph(spans),
@@ -103,7 +103,7 @@ fn a_header_keeps_its_grouped_block_number() {
     let (mut cx, view) = opened();
     view.update(&mut cx, |chat, _, cx| {
         // Start a new author run so the header shows its block number.
-        let mut late = row(3, "acct:7", "late");
+        let mut late = row(3, 7, "late");
         late.message_id = "late".into();
         late.height = 12_345;
         chat.room
