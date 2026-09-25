@@ -158,7 +158,7 @@ fn respond(cx: &mut TestAppContext) {
 
 fn ready() -> (TestAppContext, Rc<RefCell<u64>>) {
     let mut cx = TestAppContext::new();
-    cx.host().stream::<ClockTicks>();
+    cx.host().stream::<RpcHeads>();
     let tip = Rc::new(RefCell::new(12));
     node(&mut cx, tip.clone());
     cx.open::<Explorer>();
@@ -433,26 +433,52 @@ fn search_finds_heights_hashes_accounts_and_programs() {
 }
 
 #[test]
-fn a_tick_past_the_head_reads_only_the_new_blocks() {
+fn a_pushed_head_reads_only_the_new_blocks() {
     let mut cx = TestAppContext::new();
-    let ticks = cx.host().stream::<ClockTicks>();
+    let heads = cx.host().stream::<RpcHeads>();
     let tip = Rc::new(RefCell::new(12));
     node(&mut cx, tip.clone());
     cx.open::<Explorer>();
     cx.run_until_parked();
     *tip.borrow_mut() = 14;
-    ticks.push(());
+    heads.push(Head {
+        height: 14,
+        time: T0 + 14_000,
+        id: [14; 32],
+    });
     cx.run_until_parked();
     assert!(cx.has_text("13–14 · 2 empty blocks"), "{:?}", cx.texts());
     let explorer_asked = cx.host().asked::<RpcBlocks>();
     assert_eq!(explorer_asked.len(), 2, "{explorer_asked:?}");
     assert!(explorer_asked.iter().all(|ask| ask.before.is_none()));
+    assert_eq!(
+        cx.host().asked::<RpcStatus>().len(),
+        1,
+        "a head moves the status without a read"
+    );
+}
+
+#[test]
+fn a_refused_head_subscription_falls_back_to_polling() {
+    let mut cx = TestAppContext::new();
+    cx.host()
+        .refuse::<RpcHeads>("unknown_request", "this host has no rpc.heads");
+    let ticks = cx.host().stream::<ClockTicks>();
+    let tip = Rc::new(RefCell::new(12));
+    node(&mut cx, tip.clone());
+    cx.open::<Explorer>();
+    cx.run_until_parked();
+    assert_eq!(cx.host().asked::<ClockTicks>(), [TICK]);
+    *tip.borrow_mut() = 14;
+    ticks.push(());
+    cx.run_until_parked();
+    assert!(cx.has_text("13–14 · 2 empty blocks"), "{:?}", cx.texts());
 }
 
 #[test]
 fn a_refused_window_says_why_and_retry_reads_again() {
     let mut cx = TestAppContext::new();
-    cx.host().stream::<ClockTicks>();
+    cx.host().stream::<RpcHeads>();
     let tip = Rc::new(RefCell::new(12));
     node(&mut cx, tip);
     cx.host()
@@ -488,7 +514,7 @@ fn a_snapshot_restores_without_reading_the_window_again() {
     let (cx, _) = ready();
     let bytes = cx.snapshot().unwrap();
     let mut restored = TestAppContext::new();
-    restored.host().stream::<ClockTicks>();
+    restored.host().stream::<RpcHeads>();
     restored.host().never::<RpcStatus>();
     restored.host().never::<HostProps>();
     restored.host().never::<HostRoute>();
@@ -551,7 +577,7 @@ fn runs_of_empty_blocks_fold_into_one_line_and_the_list_reaches_back() {
 #[test]
 fn the_search_field_holds_only_what_is_being_typed() {
     let mut cx = TestAppContext::new();
-    cx.host().stream::<ClockTicks>();
+    cx.host().stream::<RpcHeads>();
     node(&mut cx, Rc::new(RefCell::new(12)));
     let explorer = cx.open::<Explorer>();
     cx.run_until_parked();
@@ -578,7 +604,7 @@ fn the_search_field_holds_only_what_is_being_typed() {
 #[test]
 fn a_link_opens_the_page_it_names() {
     let mut cx = TestAppContext::new();
-    cx.host().stream::<ClockTicks>();
+    cx.host().stream::<RpcHeads>();
     let (_, routes) = node(&mut cx, Rc::new(RefCell::new(12)));
     cx.open::<Explorer>();
     cx.run_until_parked();
@@ -607,7 +633,7 @@ fn a_link_opens_the_page_it_names() {
 #[test]
 fn a_page_copies_its_link_once_the_session_names_a_chain() {
     let mut cx = TestAppContext::new();
-    cx.host().stream::<ClockTicks>();
+    cx.host().stream::<RpcHeads>();
     let (props, _routes) = node(&mut cx, Rc::new(RefCell::new(12)));
     let copied = Rc::new(RefCell::new(String::new()));
     let seen = copied.clone();
@@ -674,7 +700,7 @@ fn the_scheduled_changes_survive_a_snapshot() {
     cx.run_until_parked();
     let bytes = cx.snapshot().unwrap();
     let mut restored = TestAppContext::new();
-    restored.host().stream::<ClockTicks>();
+    restored.host().stream::<RpcHeads>();
     restored.host().never::<RpcStatus>();
     restored.host().never::<HostProps>();
     restored.host().never::<HostRoute>();
@@ -718,7 +744,7 @@ fn heavy(cx: &mut TestAppContext) {
         })
         .collect();
     let host = cx.host();
-    host.stream::<ClockTicks>();
+    host.stream::<RpcHeads>();
     host.stream::<HostProps>();
     host.stream::<HostRoute>();
     host.handle::<RpcStatus>(move |()| Ok(status(tip)));

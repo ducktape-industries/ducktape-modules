@@ -1351,3 +1351,28 @@ fn a_run_breaks_at_the_unread_divider_and_after_a_long_quiet() {
     let heads: Vec<bool> = messages.iter().map(|m| m.show_author).collect();
     assert_eq!(heads, [true, false, false, true]);
 }
+
+/// A forge room's link spells its `:` as `%3A`; the app hands the view the
+/// route decoded, and the view lands in that room.
+#[test]
+fn a_link_to_a_forge_room_lands_in_it() {
+    let mut cx = TestAppContext::new();
+    configure(&mut cx);
+    let routes = cx.host().stream::<api::HostRoute>();
+    let props = cx.host().stream::<HostProps>();
+    cx.host().stream::<HostVisible>();
+    let view = cx.open::<Chat>();
+    props.push(Session {
+        account: "0102".into(),
+        connected: true,
+        chain: "testnet#0a1b2c3d".into(),
+        ..Session::default()
+    });
+    cx.run_until_parked();
+    let link = chat::channel_link("testnet#0a1b2c3d", "forge:web:3", None).unwrap();
+    assert!(link.ends_with("/chat/forge%3Aweb%3A3"), "{link}");
+    // what the app does with a chain link: the tail, decoded, joined
+    routes.push(ducklink::Link::parse(&link).unwrap().tail.join("/"));
+    cx.run_until_parked();
+    view.read(|chat| assert_eq!(chat.room.as_ref().unwrap().id, "forge:web:3"));
+}
