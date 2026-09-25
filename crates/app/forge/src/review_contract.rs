@@ -67,6 +67,10 @@ pub struct Change {
     pub comment_count: u64,
     pub verdicts: ReviewCounts,
     pub merge_oid: Option<String>,
+    /// Who closed the change; set once, by the close op.
+    pub closed_by: Option<Vec<u8>>,
+    /// Who merged the change; set once, by a merge linked to it.
+    pub merged_by: Option<Vec<u8>>,
     pub channel: String,
     pub system_seq: u64,
 }

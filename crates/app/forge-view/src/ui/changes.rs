@@ -42,7 +42,7 @@ pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
             .collect(),
         _ => Vec::new(),
     };
-    let needle = forge.search.trim().to_lowercase();
+    let needle = forge.change_search.trim().to_lowercase();
     let shown: Vec<&(ChangeSummary, Option<&Judgment>)> = rows
         .iter()
         .filter(|(summary, _)| needle.is_empty() || summary.title.to_lowercase().contains(&needle))
@@ -159,7 +159,7 @@ fn verdicts(counts: &ReviewCounts, n: u64, theme: &Theme) -> AnyElement {
 
 fn filters(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
     let typed = cx.listener(|forge, text: &String, _, cx| {
-        forge.search = text.clone();
+        forge.change_search = text.clone();
         cx.notify();
     });
     let mut bar = div()
@@ -198,7 +198,7 @@ fn filters(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement 
                 .border_color(theme.border_strong)
                 .bg(theme.surface)
                 .text_color(theme.foreground)
-                .value(forge.search.clone())
+                .value(forge.change_search.clone())
                 .placeholder("Search titles")
                 .label("Search changes")
                 .on_input(typed),

@@ -265,7 +265,10 @@ fn close_is_the_authors_or_a_writers_and_happens_once() {
         reason::UNAUTHORIZED
     );
     rig.execute(&close).unwrap();
-    assert_eq!(record(&rig, n).state, ChangeState::Closed);
+    let closed = record(&rig, n);
+    assert_eq!(closed.state, ChangeState::Closed);
+    assert_eq!(closed.closed_by.as_ref(), Some(&rig.actor));
+    assert_eq!(closed.merged_by, None);
     assert_eq!(refused(rig.execute(&close)), reason::WRONG_STATE);
 
     let second = opened(&mut rig, &story);
@@ -279,7 +282,9 @@ fn close_is_the_authors_or_a_writers_and_happens_once() {
         n: second,
     };
     signed(&mut rig, WRITER, &by_writer).unwrap();
-    assert_eq!(record(&rig, second).state, ChangeState::Closed);
+    let closed = record(&rig, second);
+    assert_eq!(closed.state, ChangeState::Closed);
+    assert_eq!(closed.closed_by.as_deref(), Some(WRITER));
 }
 
 #[test]
@@ -382,6 +387,8 @@ fn a_merge_lands_its_change_once_and_only_over_the_heads_it_read() {
     let change = record(&rig, n);
     assert_eq!(change.state, ChangeState::Merged);
     assert_eq!(change.merge_oid.as_deref(), Some(story.feature.as_str()));
+    assert_eq!(change.merged_by.as_ref(), Some(&rig.actor));
+    assert_eq!(change.closed_by, None);
     assert_eq!(
         refs_of(&rig.sandbox, REPO)["refs/heads/main"],
         story.feature

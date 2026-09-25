@@ -1,6 +1,6 @@
 //! The Change screens: the list, the detail header, the conversation, the
 //! reviewer's Files tab, and the one operation a review becomes.
-use super::{change_screen, opened};
+use super::{booted, change_screen, opened};
 use crate::api::{ChatApi, SubmitForge};
 use crate::state::ChangeTab;
 use ducktape_view_guest::view::Submit;
@@ -105,14 +105,33 @@ fn an_operation_shows_its_submission_then_a_refusal_reverts_it_with_the_reason()
 }
 
 #[test]
+fn a_repository_filter_does_not_carry_into_its_change_search() {
+    let (mut cx, _view) = booted("default");
+    cx.simulate_input("forge-repos-search", "proj");
+    cx.run_until_parked();
+    cx.simulate_click("forge-repo-project");
+    cx.run_until_parked();
+    cx.simulate_click("forge-tab-changes");
+    cx.run_until_parked();
+    assert!(cx.has_text("Review this change"), "{:?}", cx.texts());
+}
+
+#[test]
 fn a_merged_change_wears_its_state_and_offers_nothing_more() {
     let (cx, _view) = change_screen("merged", ChangeTab::Conversation);
     assert!(cx.has_text("merged"), "{:?}", cx.texts());
     assert!(
         cx.texts()
             .iter()
-            .any(|text| text.starts_with("Merged into main as ")),
+            .any(|text| text.starts_with("merged into main as ")),
         "{:?}",
+        cx.texts()
+    );
+    assert!(
+        cx.texts()
+            .windows(2)
+            .any(|w| w[0] == "Ada" && w[1].starts_with("merged into main as ")),
+        "the merger is named from the record: {:?}",
         cx.texts()
     );
     assert!(
@@ -120,6 +139,24 @@ fn a_merged_change_wears_its_state_and_offers_nothing_more() {
         "{:?}",
         cx.texts()
     );
+    for button in ["forge-edit-change", "forge-close-change", "forge-merge"] {
+        assert!(cx.find(button).is_none(), "{button} on an ended change");
+    }
+}
+
+#[test]
+fn a_closed_change_names_who_closed_it_and_offers_no_edit_or_close() {
+    let (cx, _view) = change_screen("closed", ChangeTab::Conversation);
+    assert!(
+        cx.texts()
+            .windows(2)
+            .any(|w| w[0] == "Ada" && w[1] == "closed this change"),
+        "the closer is named from the record: {:?}",
+        cx.texts()
+    );
+    for button in ["forge-edit-change", "forge-close-change", "forge-merge"] {
+        assert!(cx.find(button).is_none(), "{button} on an ended change");
+    }
 }
 
 #[test]
@@ -146,7 +183,7 @@ fn the_conversation_is_the_hidden_chat_channel_and_the_forge_body() {
     assert!(
         !cx.texts()
             .iter()
-            .any(|text| text.starts_with("Merged into"))
+            .any(|text| text.starts_with("merged into"))
     );
     cx.simulate_input("forge-reply", "looks right to me");
     cx.simulate_click("forge-reply-send");

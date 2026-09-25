@@ -311,6 +311,8 @@ mod tests {
             comment_count: 0,
             verdicts: ReviewCounts::default(),
             merge_oid: None,
+            closed_by: None,
+            merged_by: None,
             channel: String::new(),
             system_seq: 1,
         }
