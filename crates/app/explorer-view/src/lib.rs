@@ -8,10 +8,10 @@
 //! per-block state root or write set; and nothing indexes an account's
 //! history, so an account's activity is what a scan of the recent window
 //! finds. The window is the last [`WINDOW`] blocks, read a page at a time
-//! and then followed at the head as `rpc.status` moves.
+//! and then followed at the head as `rpc.heads` pushes it.
 use ducktape_view_guest::doors::{
-    Block, BlockPage, BlockRef, ClipboardWrite, ClockTicks, HostProps, HostRoute, NodeStatus,
-    Query, RpcBlock, RpcBlocks,
+    Block, BlockPage, BlockRef, ClipboardWrite, ClockTicks, Head, HostProps, HostRoute, NodeStatus,
+    Query, RpcBlock, RpcBlocks, RpcHeads,
 };
 use ducktape_view_guest::export_view;
 use ducktape_view_guest::host::{Refusal, malformed};
@@ -33,9 +33,8 @@ pub const WINDOW: usize = 1_000;
 /// Blocks per `rpc.blocks` page (the node caps a page at 100). Small, so
 /// one reply's decoding stays well inside a tick's fuel.
 const PAGE: u32 = 20;
-/// How often the head is re-read, in milliseconds. Polled, not `rpc.live`:
-/// that door signals only blocks that wrote to one named program, and the
-/// head also moves on empty blocks and on programs the view does not know.
+/// How often the head is re-read, in milliseconds, where `rpc.heads` is
+/// refused or ends: the fallback, not the way the head is followed.
 const TICK: i64 = 2_000;
 
 use module_registry::view::Registry;
@@ -363,13 +362,15 @@ impl View for Explorer {
     }
 
     fn restored(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        let mut ticks = cx.host().subscribe::<ClockTicks>(TICK);
+        let mut heads = cx.host().subscribe::<RpcHeads>(());
         self.watches.push(cx.spawn(async move |this, cx| {
-            while ticks.next().await.is_some() {
-                if this.update(cx, |view, cx| view.read_head(cx)).is_err() {
-                    break;
+            while let Some(Ok(head)) = heads.next().await {
+                if this.update(cx, |view, cx| view.at_head(head, cx)).is_err() {
+                    return;
                 }
             }
+            // refused or ended: the head is polled instead
+            let _ = this.update(cx, |view, cx| view.poll_head(cx));
         }));
         let mut props = cx.host().subscribe::<HostProps>(());
         self.watches.push(cx.spawn(async move |this, cx| {
@@ -412,6 +413,33 @@ impl Explorer {
         self.read_validators(cx);
         self.read_network(cx);
         self.pull(cx);
+    }
+
+    /// A head `rpc.heads` pushed: the status moves to it without a read,
+    /// and the window follows.
+    fn at_head(&mut self, head: Head, cx: &mut Context<Self>) {
+        match &mut self.status {
+            Loaded::Ready(status) => {
+                if head.height > status.height {
+                    status.height = head.height;
+                    status.tip = head.id;
+                }
+                self.pull(cx);
+                cx.notify();
+            }
+            _ => self.read_head(cx),
+        }
+    }
+
+    fn poll_head(&mut self, cx: &mut Context<Self>) {
+        let mut ticks = cx.host().subscribe::<ClockTicks>(TICK);
+        self.watches.push(cx.spawn(async move |this, cx| {
+            while ticks.next().await.is_some() {
+                if this.update(cx, |view, cx| view.read_head(cx)).is_err() {
+                    break;
+                }
+            }
+        }));
     }
 
     fn read_head(&mut self, cx: &mut Context<Self>) {
