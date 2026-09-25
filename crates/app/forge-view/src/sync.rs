@@ -4,7 +4,7 @@
 use std::collections::BTreeSet;
 
 use ducktape_view_guest::Context;
-use ducktape_view_guest::view::Loaded;
+use ducktape_view_guest::view::Loadable;
 
 use crate::api::Session;
 use crate::queries::{self, PAGE};
@@ -18,7 +18,7 @@ const COMPARED_REFS: usize = 20;
 
 impl Forge {
     pub(crate) fn session_changed(&mut self, next: Session, cx: &mut Context<Self>) {
-        let reader_changed = next.key != self.session.key;
+        let reader_changed = next.signer != self.session.signer;
         self.session = next;
         if reader_changed {
             self.names = cx.load(chat::view::roster(cx.host()), |forge| &mut forge.names);
@@ -38,12 +38,12 @@ impl Forge {
             let result = queries::fetch(cx.host(), asked).await;
             // the view is gone: nothing is waiting for this read
             let _ = this.update(cx, |forge, cx| {
-                forge.data.insert(landing, Loaded::from(result));
+                forge.data.insert(landing, Loadable::from(result));
                 cx.notify();
                 forge.sync(cx);
             });
         });
-        self.data.insert(query, Loaded::Loading(task));
+        self.data.insert(query, Loadable::Loading(task));
     }
 
     /// Ask again for everything on screen, keeping the rows already there
@@ -52,7 +52,7 @@ impl Forge {
         for query in self.data.keys().cloned().collect::<Vec<_>>() {
             let landing = query.clone();
             cx.refresh(queries::fetch(cx.host(), query), move |forge, reply, _| {
-                forge.data.insert(landing.clone(), Loaded::Ready(reply));
+                forge.data.insert(landing.clone(), Loadable::Ready(reply));
             });
         }
         for channel in self.messages.keys().cloned().collect::<Vec<_>>() {
@@ -60,7 +60,9 @@ impl Forge {
             cx.refresh(
                 queries::conversation(cx.host(), channel.clone(), viewer),
                 move |forge, rows, _| {
-                    forge.messages.insert(channel.clone(), Loaded::Ready(rows));
+                    forge
+                        .messages
+                        .insert(channel.clone(), Loadable::Ready(rows));
                 },
             );
         }

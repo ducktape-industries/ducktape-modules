@@ -1,8 +1,8 @@
-//! The marker a view names this program by in `program.query`/`op.submit`.
-use ducktape_view_guest::methods::Program;
+//! The marker a view names this program by in `module.query`/`op.submit`.
+use ducktape_view_guest::methods::Module;
 
 pub struct Valset;
-impl Program for Valset {
+impl Module for Valset {
     const NAME: &'static str = crate::MODULE;
     type Op = crate::Op;
     type Query = crate::Query;

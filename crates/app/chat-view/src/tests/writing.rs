@@ -43,7 +43,7 @@ fn a_send_shows_pending_then_lands_and_a_refusal_is_a_banner() {
     cx.simulate_click("chat-create-members");
     cx.simulate_submit("chat-create-name");
     cx.run_until_parked();
-    assert!(cx.host().asked::<Submit<ChatApi>>().iter().any(|op| matches!(op, Op::CreateChannel { name, post_policy: PostPolicy::MembersOnly, .. } if name == "random")));
+    assert!(cx.host().requests::<Submit<ChatApi>>().iter().any(|op| matches!(op, Op::CreateChannel { name, post_policy: PostPolicy::MembersOnly, .. } if name == "random")));
     assert!(cx.has_text("Couldn’t create this channel: no"));
     let bytes = cx.snapshot().unwrap();
     let mut restored = TestAppContext::new();
@@ -53,7 +53,7 @@ fn a_send_shows_pending_then_lands_and_a_refusal_is_a_banner() {
     let view = restored.restore::<Chat>(&bytes).unwrap();
     restored.run_until_parked();
     view.read(|chat| assert_eq!(chat.room.as_ref().unwrap().id, "general"));
-    assert!(restored.host().asked::<Ask<ChatApi>>().len() >= 2);
+    assert!(restored.host().requests::<Ask<ChatApi>>().len() >= 2);
 }
 
 #[test]
@@ -105,10 +105,10 @@ fn channel_create_preserves_busy_account_and_voice_gates() {
     assert!(disabled(&cx, "chat-create-submit"));
     assert!(cx.has_text("Create an account to create a channel"));
     assert!(!disabled(&cx, "chat-create-cancel"));
-    let submitted = cx.host().asked::<Submit<ChatApi>>().len();
+    let submitted = cx.host().requests::<Submit<ChatApi>>().len();
     view.update(&mut cx, |chat, _, cx| chat.create_channel(cx));
     cx.run_until_parked();
-    assert_eq!(cx.host().asked::<Submit<ChatApi>>().len(), submitted);
+    assert_eq!(cx.host().requests::<Submit<ChatApi>>().len(), submitted);
 
     view.update(&mut cx, |chat, _, cx| {
         chat.session.account = Some(7);
@@ -144,7 +144,7 @@ fn a_members_only_room_takes_its_owner_and_its_members() {
             } else {
                 Vec::new()
             };
-            chat.room.as_mut().unwrap().members = Loaded::Ready(seats);
+            chat.room.as_mut().unwrap().members = Loadable::Ready(seats);
             cx.notify();
         });
         view.read(|chat| chat.write_gate())

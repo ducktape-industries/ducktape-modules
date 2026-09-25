@@ -4,8 +4,8 @@ use ducktape_view_guest::design;
 
 pub(super) fn programs(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
     let network = match &view.network {
-        Loaded::Ready(network) => network,
-        Loaded::Failed(refusal) => return failed(&refusal.sentence, cx, theme),
+        Loadable::Ready(network) => network,
+        Loadable::Failed(refusal) => return failed(&refusal.message, cx, theme),
         _ => return quiet("explorer-programs-loading", "Reading the registry…", theme),
     };
     if network.programs.is_empty() && network.views.is_empty() && network.changes.is_empty() {

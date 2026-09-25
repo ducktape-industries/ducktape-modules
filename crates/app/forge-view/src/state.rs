@@ -3,7 +3,7 @@
 //! navigation and drafts, never wire records.
 use std::collections::{BTreeMap, BTreeSet};
 
-use ducktape_view_guest::view::Loaded;
+use ducktape_view_guest::view::Loadable;
 use ducktape_view_guest::{Task, UniformListScrollHandle};
 use serde::{Deserialize, Serialize};
 
@@ -37,12 +37,12 @@ pub struct Forge {
     pub(crate) layout: Layout,
     #[serde(skip)]
     /// every read on screen, keyed by the query that asked it
-    pub(crate) data: BTreeMap<Query, Loaded<Reply>>,
+    pub(crate) data: BTreeMap<Query, Loadable<Reply>>,
     #[serde(skip)]
-    pub(crate) names: Loaded<chat::view::Names>,
+    pub(crate) names: Loadable<chat::view::Names>,
     #[serde(skip)]
     /// each change channel's rows, and whether more follow past the budget
-    pub(crate) messages: BTreeMap<String, Loaded<(Vec<chat::MsgRow>, bool)>>,
+    pub(crate) messages: BTreeMap<String, Loadable<(Vec<chat::MsgRow>, bool)>>,
     #[serde(skip)]
     pub(crate) pending: Vec<Pending>,
     #[serde(skip)]

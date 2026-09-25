@@ -7,10 +7,10 @@
 //! kept across a snapshot, only what the screen shows.
 use ducktape_view_guest::design;
 use ducktape_view_guest::export_view;
-use ducktape_view_guest::host::{Refusal, malformed};
+use ducktape_view_guest::host::{Error, malformed};
 use ducktape_view_guest::methods::Changes;
 use ducktape_view_guest::methods::Query;
-use ducktape_view_guest::view::Loaded;
+use ducktape_view_guest::view::Loadable;
 use ducktape_view_guest::{
     App, ClickEvent, Context, ElementId, Host, Input, InteractiveElement, IntoElement,
     ParentElement, Render, RenderOnce, StatefulInteractiveElement, Styled, Task, Theme, View,
@@ -26,7 +26,7 @@ use valset::view::Valset;
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct Members {
-    rows: Loaded<Vec<Row>>,
+    rows: Loadable<Vec<Row>>,
     /// what the reader typed into the filter; the rows are never refetched
     /// for it, since the program has no search
     filter: String,
@@ -136,7 +136,7 @@ impl Members {
     fn read(&mut self, cx: &mut Context<Self>) {
         match self.rows.ready() {
             Some(_) => cx.refresh(roster(cx.host()), |view, rows, _| {
-                view.rows = Loaded::Ready(rows)
+                view.rows = Loadable::Ready(rows)
             }),
             None => self.rows = cx.load(roster(cx.host()), |view| &mut view.rows),
         }
@@ -153,25 +153,24 @@ impl Members {
     /// The four states of the roster: loading, refused, empty, ready.
     fn body(&self, cx: &mut Context<Self>, theme: &Theme) -> impl IntoElement {
         match &self.rows {
-            Loaded::Idle | Loaded::Loading(_) => div()
+            Loadable::Idle | Loadable::Loading(_) => div()
                 .id("members-loading")
                 .text_size(design::text::SECONDARY)
                 .text_color(theme.muted)
                 .child("Reading the roster…")
                 .into_any_element(),
-            Loaded::Failed(refusal) => {
+            Loadable::Failed(refusal) => {
                 let retry = cx.listener(|view, _: &ClickEvent, _, cx| view.read(cx));
-                design::refused("members", refusal.sentence.clone(), theme, retry)
-                    .into_any_element()
+                design::refused("members", refusal.message.clone(), theme, retry).into_any_element()
             }
-            Loaded::Ready(rows) if rows.is_empty() => design::empty_state(
+            Loadable::Ready(rows) if rows.is_empty() => design::empty_state(
                 "members-empty",
                 "No accounts",
                 "The identity program of this network holds no accounts yet.",
                 theme,
             )
             .into_any_element(),
-            Loaded::Ready(rows) => {
+            Loadable::Ready(rows) => {
                 let shown: Vec<&Row> = rows.iter().filter(|row| self.matches(row)).collect();
                 if shown.is_empty() {
                     return design::empty_state(
@@ -289,7 +288,7 @@ impl RenderOnce for Badge {
 ///
 /// Both programs answer in pages; the roster follows every `next` cursor to
 /// the end, since the screen shows the whole network.
-async fn roster(host: Host) -> Result<Vec<Row>, Refusal> {
+async fn roster(host: Host) -> Result<Vec<Row>, Error> {
     let mut accounts = Vec::new();
     let mut after = None;
     loop {
@@ -354,7 +353,7 @@ fn row(account: &identity::Account, members: &[valset::Membership]) -> Row {
     }
 }
 
-fn unexpected(program: &str, reply: &impl std::fmt::Debug) -> Refusal {
+fn unexpected(program: &str, reply: &impl std::fmt::Debug) -> Error {
     malformed(format!("{program} answered {reply:?}"))
 }
 
@@ -362,7 +361,7 @@ export_view!(
     Members,
     "Members",
     "Every account of this network, with the standing of the keys it holds.",
-    ["program", "host"]
+    ["module", "host"]
 );
 
 #[cfg(test)]

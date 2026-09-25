@@ -247,7 +247,7 @@ pub enum Event {
     Response {
         id: u64,
         #[serde(with = "response")]
-        result: Result<Vec<u8>, Refusal>,
+        result: Result<Vec<u8>, Error>,
         done: bool,
     },
     /// The host no longer holds the tree the guest is patching — a patch it
@@ -255,51 +255,77 @@ pub enum Event {
     Resync,
 }
 
-/// Why a request failed, as the guest gets it: the program abi's own
-/// [`Refusal`] — a stable snake_case `reason` to branch on and the refusing
-/// module's `sentence`, verbatim — so a refusal a program wrote and one the
+/// Why a request failed, as the guest gets it: the module SDK's own
+/// [`Error`] — a stable snake_case [`code`] to branch on and the refusing
+/// module's `message`, verbatim — so an error a module wrote and one the
 /// host wrote are the same type end to end. `Display` writes
-/// `reason: sentence`; a screen that wants the sentence alone reads it.
-pub use ::abi::Refusal;
+/// `code: message`; a screen that wants the message alone reads it.
+pub use ::guest::{Error, code};
 
-/// `Refusal` derives borsh only (it is the program abi's type, a copy of the
-/// kernel's), so the one place it crosses the MessagePack layer,
-/// [`Event::Response`], spells its serde shape here: the same
-/// `{"Ok": bytes} | {"Err": {"reason", "sentence"}}` a derived `Result` writes.
+/// `Error` derives borsh only (it is the module SDK's type), so the places it
+/// crosses the MessagePack layer, [`Event::Response`] and a method's
+/// `Vec<Error>`, spell its serde shape here: the same
+/// `{"Ok": bytes} | {"Err": {"code", "message"}}` a derived `Result` writes.
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "::guest::Error")]
+struct ErrorDef {
+    code: String,
+    message: String,
+}
+
 mod response {
+    use super::ErrorDef;
     use serde::{Deserialize, Serialize};
-
-    #[derive(Serialize, Deserialize)]
-    #[serde(remote = "::abi::Refusal")]
-    struct RefusalDef {
-        reason: String,
-        sentence: String,
-    }
 
     #[derive(Serialize, Deserialize)]
     enum ResultDef {
         Ok(Vec<u8>),
-        Err(#[serde(with = "RefusalDef")] ::abi::Refusal),
+        Err(#[serde(with = "ErrorDef")] ::guest::Error),
     }
 
     pub fn serialize<S: serde::Serializer>(
-        result: &Result<Vec<u8>, ::abi::Refusal>,
+        result: &Result<Vec<u8>, ::guest::Error>,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
         match result {
             Ok(bytes) => ResultDef::Ok(bytes.clone()),
-            Err(refusal) => ResultDef::Err(refusal.clone()),
+            Err(error) => ResultDef::Err(error.clone()),
         }
         .serialize(serializer)
     }
 
     pub fn deserialize<'de, D: serde::Deserializer<'de>>(
         deserializer: D,
-    ) -> Result<Result<Vec<u8>, ::abi::Refusal>, D::Error> {
+    ) -> Result<Result<Vec<u8>, ::guest::Error>, D::Error> {
         Ok(match ResultDef::deserialize(deserializer)? {
             ResultDef::Ok(bytes) => Ok(bytes),
-            ResultDef::Err(refusal) => Err(refusal),
+            ResultDef::Err(error) => Err(error),
         })
+    }
+}
+
+/// `#[serde(with = "errors")]` for a `Vec<Error>`: each one as [`ErrorDef`].
+pub(crate) mod errors {
+    use super::ErrorDef;
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Serialize, Deserialize)]
+    struct Each(#[serde(with = "ErrorDef")] ::guest::Error);
+
+    pub fn serialize<S: serde::Serializer>(
+        errors: &[::guest::Error],
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq(errors.iter().cloned().map(Each))
+    }
+
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Vec<::guest::Error>, D::Error> {
+        Ok(Vec::<Each>::deserialize(deserializer)?
+            .into_iter()
+            .map(|each| each.0)
+            .collect())
     }
 }
 

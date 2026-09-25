@@ -9,7 +9,7 @@ use ducktape_view_guest::{
 };
 
 use ducktape_view_guest::AnyElement;
-use ducktape_view_guest::view::Loaded;
+use ducktape_view_guest::view::Loadable;
 
 use crate::message::{ChatMessage, unread_seq};
 use crate::ui::room::selection_bar;
@@ -68,12 +68,12 @@ fn nothing_yet(chat: &Chat, pane: Pane, theme: &Theme) -> Option<AnyElement> {
         Pane::Timeline => Some(&room.messages),
         Pane::Thread => room.thread.as_ref().map(|thread| &thread.replies),
     };
-    if rows.is_some_and(|rows| matches!(rows, Loaded::Loading(_))) {
+    if rows.is_some_and(|rows| matches!(rows, Loadable::Loading(_))) {
         return Some(quiet("Loading messages…", theme).p_4().into_any_element());
     }
-    if let Some(refusal) = rows.and_then(Loaded::failed) {
+    if let Some(refusal) = rows.and_then(Loadable::failed) {
         return Some(
-            quiet(refusal.sentence.clone(), theme)
+            quiet(refusal.message.clone(), theme)
                 .p_4()
                 .into_any_element(),
         );

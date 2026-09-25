@@ -2,7 +2,7 @@
 //! a chain reads in: short hashes, grouped numbers, dates and ages.
 //!
 //! A payload is described by the program it targets, through the host
-//! (`program.describe`: the describe module the program's own code
+//! (`module.describe`: the describe module the program's own code
 //! carries). A program with none, or bytes it cannot read, reads as its
 //! size and a short hex preview: [`bytes`].
 use ducktape_view_guest::methods::{Description, Field, Value};

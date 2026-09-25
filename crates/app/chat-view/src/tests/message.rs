@@ -120,7 +120,7 @@ fn thread_root_uses_reply_count_as_a_separator() {
         room.messages.ready_mut().unwrap()[0].reply_count = 2;
         room.thread = Some(Thread {
             root: 1,
-            replies: Loaded::Ready(Vec::new()),
+            replies: Loadable::Ready(Vec::new()),
             ..Thread::default()
         });
         cx.notify();
@@ -171,7 +171,7 @@ fn a_control_on_a_card_keeps_its_click_from_the_card_beneath() {
 fn replies_read_as_a_button() {
     let (mut cx, view) = opened();
     view.update(&mut cx, |chat, _, cx| {
-        if let Some(Loaded::Ready(rows)) = chat.room.as_mut().map(|room| &mut room.messages) {
+        if let Some(Loadable::Ready(rows)) = chat.room.as_mut().map(|room| &mut room.messages) {
             rows[0].reply_count = 3;
         }
         cx.notify();
@@ -224,7 +224,7 @@ fn the_picker_searches_and_enter_picks_the_first_match() {
     cx.run_until_parked();
     assert!(
         cx.host()
-            .asked::<Submit<ChatApi>>()
+            .requests::<Submit<ChatApi>>()
             .iter()
             .any(|op| matches!(op, Op::AddReaction { emoji, .. } if emoji == "🦆"))
     );

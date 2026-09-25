@@ -3,7 +3,7 @@
 //! committed draft becomes. Everything else about editing is the SDK's.
 use chat::{MsgRow, Op, Principal, parse_message};
 pub use ducktape_view_guest::composer::*;
-use ducktape_view_guest::host::Refusal;
+use ducktape_view_guest::host::Error;
 use serde::{Deserialize, Serialize};
 
 /// The most a composer sends, well under the program's message cap.
@@ -46,10 +46,10 @@ impl Target {
 }
 
 /// The op a committed draft becomes, `id` naming a new message.
-pub fn op(id: String, send: &Send, target: &Target) -> Result<Op, Refusal> {
+pub fn op(id: String, send: &Send, target: &Target) -> Result<Op, Error> {
     let body = &send.body;
     if body.is_empty() || body.len() > MAX_BODY_BYTES {
-        return Err(Refusal::new(
+        return Err(Error::new(
             "invalid_body",
             "Message must contain between 1 byte and 16 KiB",
         ));

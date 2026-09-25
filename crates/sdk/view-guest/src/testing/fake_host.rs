@@ -1,5 +1,5 @@
 use crate::{
-    host::{malformed, Refusal},
+    host::{malformed, Error},
     methods::{self, Method},
     wire::{Event, Frame, Request},
 };
@@ -26,13 +26,13 @@ pub struct FakeHost(Rc<RefCell<State>>);
 impl FakeHost {
     pub fn handle<C: Method>(
         &self,
-        handler: impl FnMut(C::Request) -> Result<C::Reply, Refusal> + 'static,
+        handler: impl FnMut(C::Request) -> Result<C::Reply, Error> + 'static,
     ) {
         self.register::<C>(handler, false);
     }
     fn register<C: Method>(
         &self,
-        mut handler: impl FnMut(C::Request) -> Result<C::Reply, Refusal> + 'static,
+        mut handler: impl FnMut(C::Request) -> Result<C::Reply, Error> + 'static,
         stream: bool,
     ) {
         self.0.borrow_mut().handlers.insert(
@@ -63,8 +63,8 @@ impl FakeHost {
         }
     }
 
-    pub fn refuse<C: Method>(&self, reason: &str, sentence: &str) {
-        let refusal = Refusal::new(reason, sentence);
+    pub fn refuse<C: Method>(&self, code: &str, message: &str) {
+        let refusal = Error::new(code, message);
         self.handle::<C>({
             let refusal = refusal.clone();
             move |_| Err(refusal.clone())
@@ -72,7 +72,7 @@ impl FakeHost {
         self.register::<C>(move |_| Err(refusal.clone()), true);
     }
 
-    pub fn stream<C: Method>(&self) -> Feed<C> {
+    pub fn stream<C: Method>(&self) -> StreamSender<C> {
         let state = Rc::new(RefCell::new(StreamState::default()));
         let subscription = state.clone();
         self.0.borrow_mut().streams.push(state.clone());
@@ -92,14 +92,14 @@ impl FakeHost {
                 None
             }),
         );
-        Feed {
+        StreamSender {
             state,
             host: self.clone(),
             marker: PhantomData,
         }
     }
 
-    pub fn asked<C: Method>(&self) -> Vec<C::Request> {
+    pub fn requests<C: Method>(&self) -> Vec<C::Request> {
         self.0
             .borrow()
             .requests
@@ -202,11 +202,11 @@ impl FakeHost {
     }
 }
 
-/// The program a node method addresses: `program.changes` names it outright, the
+/// The program a node method addresses: `module.changes` names it outright, the
 /// others carry it on their [`methods::Call`] envelope.
 fn target_of(request: &Request) -> Option<String> {
     match request.kind.as_str() {
-        "program.changes" => methods::decode::<String>(&request.payload).ok(),
+        "module.changes" => methods::decode::<String>(&request.payload).ok(),
         _ => methods::decode::<methods::Call>(&request.payload)
             .ok()
             .map(|call| call.target),
@@ -225,15 +225,15 @@ struct StreamState {
     host: Option<crate::host::Host>,
 }
 
-pub struct Feed<C: Method> {
+pub struct StreamSender<C: Method> {
     state: Rc<RefCell<StreamState>>,
     host: FakeHost,
     marker: PhantomData<C>,
 }
-impl<C: Method> Feed<C> {
-    pub fn push(&self, item: C::Reply) {
+impl<C: Method> StreamSender<C> {
+    pub fn send(&self, item: C::Reply) {
         let state = self.state.borrow();
-        assert!(!state.closed, "cannot push to a closed stream");
+        assert!(!state.closed, "cannot send to a closed stream");
         let payload = C::encode_reply(&item);
         self.host
             .0
@@ -258,13 +258,13 @@ impl<C: Method> Feed<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::methods::{Changes, Program, Query};
+    use crate::methods::{Changes, Module, Query};
 
     struct First;
     struct Second;
     macro_rules! module {
         ($name:ident, $target:literal) => {
-            impl Program for $name {
+            impl Module for $name {
                 const NAME: &'static str = $target;
                 type Op = ();
                 type Query = String;
@@ -298,8 +298,8 @@ mod tests {
             },
             &crate::host::Host::default(),
         );
-        assert_eq!(host.asked::<Query<First>>(), ["one"]);
-        assert_eq!(host.asked::<Query<Second>>(), ["two"]);
+        assert_eq!(host.requests::<Query<First>>(), ["one"]);
+        assert_eq!(host.requests::<Query<Second>>(), ["two"]);
         let events = host.take_events();
         assert!(
             matches!(&events[0], Event::Response { id: 1, result: Ok(bytes), done: true } if Query::<First>::decode_reply(bytes).unwrap() == "first:one")
@@ -322,7 +322,7 @@ mod tests {
             },
             &channel,
         );
-        feed.push(None);
+        feed.send(None);
         assert_eq!(host.take_events().len(), 1);
         drop(stream);
         host.accept(
@@ -332,7 +332,7 @@ mod tests {
             },
             &channel,
         );
-        feed.push(None);
+        feed.send(None);
         assert!(host.take_events().is_empty());
     }
 
@@ -360,7 +360,7 @@ mod tests {
                 ..
             }]
         ));
-        feed.push("item".into());
+        feed.send("item".into());
         assert!(matches!(
             &host.take_events()[..],
             [Event::Response {
@@ -390,7 +390,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "unhandled program.query request")]
+    #[should_panic(expected = "unhandled module.query request")]
     fn unexpected_requests_fail_at_the_host_boundary() {
         FakeHost::default().accept(
             &Frame {

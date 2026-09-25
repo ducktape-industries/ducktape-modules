@@ -19,13 +19,13 @@ fn an_unregistered_key_stays_read_only() {
     let visible = cx.host().stream::<HostVisible>();
     let view = cx.open::<Chat>();
     cx.run_until_parked();
-    props.push(Session {
-        key: "ffff".into(),
+    props.send(Session {
+        signer: "ffff".into(),
         connected: true,
-        chain: "testnet#0a1b2c3d".into(),
+        chain_id: "testnet#0a1b2c3d".into(),
         ..Session::default()
     });
-    visible.push(true);
+    visible.send(true);
     cx.run_until_parked();
     view.read(|chat| {
         assert_eq!(chat.my_account(), None);
@@ -49,19 +49,19 @@ fn an_account_gained_later_re_enables_create_channel() {
     let view = cx.open::<Chat>();
     cx.run_until_parked();
     let unregistered = Session {
-        key: "0102".into(),
+        signer: "0102".into(),
         connected: true,
-        chain: "testnet#0a1b2c3d".into(),
+        chain_id: "testnet#0a1b2c3d".into(),
         ..Session::default()
     };
-    props.push(unregistered.clone());
-    visible.push(true);
+    props.send(unregistered.clone());
+    visible.send(true);
     cx.run_until_parked();
     cx.simulate_click("chat-sidebar-new-channel");
     cx.run_until_parked();
     assert!(cx.has_text("Create an account to create a channel"));
 
-    props.push(Session {
+    props.send(Session {
         account: Some(7),
         ..unregistered
     });
@@ -121,14 +121,14 @@ fn a_peers_name_gained_later_replaces_its_numeric_fallback() {
     let live = cx.host().stream::<Changes<Identity>>();
     let view = cx.open::<Chat>();
     cx.run_until_parked();
-    props.push(Session {
-        key: "0102".into(),
+    props.send(Session {
+        signer: "0102".into(),
         account: Some(7),
         connected: true,
-        chain: "testnet#0a1b2c3d".into(),
+        chain_id: "testnet#0a1b2c3d".into(),
         ..Session::default()
     });
-    visible.push(true);
+    visible.send(true);
     cx.run_until_parked();
     cx.simulate_click("chat-sidebar-channel-general");
     cx.run_until_parked();
@@ -140,7 +140,7 @@ fn a_peers_name_gained_later_replaces_its_numeric_fallback() {
     assert!(!cx.has_text("gary"));
 
     known.set(true);
-    live.push(Some(1));
+    live.send(Some(1));
     cx.run_until_parked();
 
     assert!(
@@ -201,14 +201,14 @@ fn a_peers_mention_becomes_offerable_once_their_account_is_known() {
     let live = cx.host().stream::<Changes<Identity>>();
     let view = cx.open::<Chat>();
     cx.run_until_parked();
-    props.push(Session {
-        key: "0102".into(),
+    props.send(Session {
+        signer: "0102".into(),
         account: Some(7),
         connected: true,
-        chain: "testnet#0a1b2c3d".into(),
+        chain_id: "testnet#0a1b2c3d".into(),
         ..Session::default()
     });
-    visible.push(true);
+    visible.send(true);
     cx.run_until_parked();
     cx.simulate_click("chat-sidebar-channel-general");
     cx.run_until_parked();
@@ -224,7 +224,7 @@ fn a_peers_mention_becomes_offerable_once_their_account_is_known() {
     });
 
     known.set(true);
-    live.push(Some(1));
+    live.send(Some(1));
     cx.run_until_parked();
 
     view.read(|chat| {
@@ -270,14 +270,14 @@ fn the_roster_is_read_past_its_first_page() {
     let visible = cx.host().stream::<HostVisible>();
     let view = cx.open::<Chat>();
     cx.run_until_parked();
-    props.push(Session {
-        key: "0102".into(),
+    props.send(Session {
+        signer: "0102".into(),
         account: Some(7),
         connected: true,
-        chain: "testnet#0a1b2c3d".into(),
+        chain_id: "testnet#0a1b2c3d".into(),
         ..Session::default()
     });
-    visible.push(true);
+    visible.send(true);
     cx.run_until_parked();
     view.read(|chat| {
         let names = chat.names.ready().expect("the roster landed");
@@ -312,14 +312,14 @@ fn a_channel_list_cut_at_its_budget_says_so() {
     let visible = cx.host().stream::<HostVisible>();
     let view = cx.open::<Chat>();
     cx.run_until_parked();
-    props.push(Session {
-        key: "0102".into(),
+    props.send(Session {
+        signer: "0102".into(),
         account: Some(7),
         connected: true,
-        chain: "testnet#0a1b2c3d".into(),
+        chain_id: "testnet#0a1b2c3d".into(),
         ..Session::default()
     });
-    visible.push(true);
+    visible.send(true);
     cx.run_until_parked();
     view.read(|chat| assert!(chat.channels_more));
     assert!(cx.find("chat-sidebar-more").is_some());

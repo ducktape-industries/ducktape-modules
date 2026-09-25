@@ -1,17 +1,17 @@
 //! What a view needs of chat: the marker it names this module by in
-//! `program.query`/`op.submit`, and the roster folded into what a principal is
+//! `module.query`/`op.submit`, and the roster folded into what a principal is
 //! called. Names are display text, not identity: "the same person" is the
 //! account number.
 use std::collections::{BTreeMap, BTreeSet};
 
 use ducktape_view_guest::Host;
-use ducktape_view_guest::host::{Refusal, pages, wrong_reply};
-use ducktape_view_guest::methods::{Program, Query as Ask};
+use ducktape_view_guest::host::{Error, pages, wrong_reply};
+use ducktape_view_guest::methods::{Module, Query as Ask};
 
 use crate::{AccountRow, PageRequest, Principal, Query, Reply};
 
 pub struct Chat;
-impl Program for Chat {
+impl Module for Chat {
     const NAME: &'static str = crate::MODULE;
     type Op = crate::Op;
     type Query = crate::Query;
@@ -22,7 +22,7 @@ impl Program for Chat {
 const ROSTER_PAGES: usize = 64;
 
 /// The identity roster, every page of it, folded into [`Names`].
-pub async fn roster(host: Host) -> Result<Names, Refusal> {
+pub async fn roster(host: Host) -> Result<Names, Error> {
     let (rows, next) = pages(None, ROSTER_PAGES, |after| {
         let ask = host.ask::<Ask<Chat>>(Query::Accounts {
             page: PageRequest {

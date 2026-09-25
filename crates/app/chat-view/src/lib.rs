@@ -82,7 +82,7 @@ export_view!(
     "Chat",
     "Channels, direct messages, threads, search and the live call of this workspace.",
     [
-        "program",
+        "module",
         "op",
         "host",
         "link",

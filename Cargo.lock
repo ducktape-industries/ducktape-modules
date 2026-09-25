@@ -6436,13 +6436,13 @@ dependencies = [
 name = "view-wire"
 version = "0.1.0"
 dependencies = [
- "abi",
  "accesskit",
  "borsh",
  "describe",
  "design",
  "futures",
  "gpui-pre",
+ "guest 0.1.0",
  "memchr",
  "rmp-serde",
  "serde",

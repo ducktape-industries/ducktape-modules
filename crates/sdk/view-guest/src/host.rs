@@ -14,38 +14,38 @@ use crate::wire::Request;
 
 /// What one answer carries; the host's refusal is the `Err`.
 ///
-/// A refusal arrives already split into a stable `reason` token and the
-/// refusing module's own `sentence` ([`Refusal`]), so no view parses a
-/// transport envelope to find out what happened. `Display` writes the
-/// sentence, which is what a screen shows.
-pub type Answer = Result<Vec<u8>, Refusal>;
+/// A refusal arrives already split into a stable `code` token and the
+/// refusing module's own `message` ([`Error`]), so no view parses a
+/// transport envelope to find out what happened. A screen shows the
+/// `message`.
+pub type Answer = Result<Vec<u8>, Error>;
 
-pub use crate::wire::Refusal;
+pub use crate::wire::Error;
 
 /// The host answered and the bytes are not what this view expected — a decode
 /// failure on OUR side, not a refusal anyone authored. One token in one place,
 /// so `.map_err(host::malformed)` reads the same in every view.
-pub fn malformed(error: String) -> Refusal {
-    Refusal::new("malformed_reply", error)
+pub fn malformed(error: String) -> Error {
+    Error::new(crate::wire::code::UNEXPECTED_REPLY, error)
 }
 
 /// A reply of another variant than the question asks for: the program
 /// answered something else. Every typed ask's fallback arm.
-pub fn wrong_reply() -> Refusal {
+pub fn wrong_reply() -> Error {
     malformed("the program answered another question".into())
 }
 
 /// One page of a cursored listing: its rows and the cursor of the page after.
-pub type Rows<T> = (Vec<T>, Option<Vec<u8>>);
+pub type Page<T> = (Vec<T>, Option<Vec<u8>>);
 
 /// Follows a cursored listing from `after`: asks page after page, feeding
 /// each `next` back, until the listing ends or `max_pages` pages are read.
 /// Returns every row read and the cursor still to follow (`None`: all of it).
-pub async fn pages<T, F: Future<Output = Result<Rows<T>, Refusal>>>(
+pub async fn pages<T, F: Future<Output = Result<Page<T>, Error>>>(
     mut after: Option<Vec<u8>>,
     max_pages: usize,
     mut ask: impl FnMut(Option<Vec<u8>>) -> F,
-) -> Result<Rows<T>, Refusal> {
+) -> Result<Page<T>, Error> {
     let mut all = Vec::new();
     for _ in 0..max_pages {
         let (rows, next) = ask(after).await?;
@@ -56,17 +56,6 @@ pub async fn pages<T, F: Future<Output = Result<Rows<T>, Refusal>>>(
         }
     }
     Ok((all, after))
-}
-
-/// The sentence alone, for a view that only SHOWS a refusal.
-///
-/// It is a named function and not a `From<Refusal> for String` ON PURPOSE:
-/// with a `From`, a plain `?` would flatten a refusal to prose silently, and
-/// the next screen that needs to tell "never" from "not yet" would be back to
-/// reading the words. `.map_err(host::said)` says out loud that this path shows
-/// the refusal and branches on nothing.
-pub fn said(refused: Refusal) -> String {
-    refused.sentence
 }
 
 #[derive(Default)]
@@ -141,7 +130,7 @@ impl Host {
     pub fn ask<D: Method>(
         &self,
         request: D::Request,
-    ) -> impl Future<Output = Result<D::Reply, Refusal>> + 'static {
+    ) -> impl Future<Output = Result<D::Reply, Error>> + 'static {
         let response = self.request(D::KIND, &D::encode_request(&request));
         self.remember(response.id, &request);
         async move { D::decode_reply(&response.await?).map_err(malformed) }
@@ -150,7 +139,7 @@ impl Host {
     pub fn subscribe<D: Method>(
         &self,
         request: D::Request,
-    ) -> impl Stream<Item = Result<D::Reply, Refusal>> + Unpin + 'static {
+    ) -> impl Stream<Item = Result<D::Reply, Error>> + Unpin + 'static {
         let subscription = self.raw_subscribe(D::KIND, &D::encode_request(&request));
         self.remember(subscription.id, &request);
         subscription
@@ -231,7 +220,7 @@ impl Future for Response {
         let mut slot = self.slot.lock().expect("response slot");
         match slot.answers.pop_front() {
             Some(answer) => Poll::Ready(answer),
-            None if slot.closed => Poll::Ready(Err(Refusal::new(
+            None if slot.closed => Poll::Ready(Err(Error::new(
                 "request_closed",
                 "the host closed the request",
             ))),
@@ -333,10 +322,10 @@ impl Host {
 
 #[cfg(test)]
 mod pages_tests {
-    use super::{pages, Rows};
+    use super::{pages, Page};
 
     /// A listing of 0..10 served three rows a page.
-    fn listing(after: Option<Vec<u8>>) -> std::future::Ready<Result<Rows<u8>, super::Refusal>> {
+    fn listing(after: Option<Vec<u8>>) -> std::future::Ready<Result<Page<u8>, super::Error>> {
         let start = after.map_or(0, |cursor| cursor[0]);
         let end = (start + 3).min(10);
         let next = (end < 10).then(|| vec![end]);

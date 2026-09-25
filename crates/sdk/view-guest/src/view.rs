@@ -1,6 +1,6 @@
 //! A serializable root view and small loading conveniences.
-use crate::host::Refusal;
-pub use crate::methods::{Method, Program, Query, Submit};
+use crate::host::Error;
+pub use crate::methods::{Method, Module, Query, Submit};
 use crate::{Context, IntoElement, Task, Window};
 use futures::{Stream, StreamExt};
 use serde::de::DeserializeOwned;
@@ -12,7 +12,7 @@ pub trait Render: 'static + Sized {
 }
 /// The capabilities a view's manifest declares. `export_view!` implements
 /// it from its list, so `TestAppContext` refuses what the app would refuse.
-pub trait Declared {
+pub trait Capabilities {
     const CAPABILITIES: &'static [&'static str];
 }
 pub trait View: Render + Serialize + DeserializeOwned {
@@ -24,15 +24,15 @@ pub trait View: Render + Serialize + DeserializeOwned {
 /// carries the abort handle: dropping the slot cancels the load.
 /// Serialises `Loading` as `Idle`, so a restored view reloads it.
 #[derive(Default)]
-pub enum Loaded<T> {
+pub enum Loadable<T> {
     #[default]
     Idle,
     Loading(Task<()>),
     Ready(T),
-    Failed(Refusal),
+    Failed(Error),
 }
 
-impl<T> Loaded<T> {
+impl<T> Loadable<T> {
     pub fn ready(&self) -> Option<&T> {
         match self {
             Self::Ready(value) => Some(value),
@@ -51,7 +51,7 @@ impl<T> Loaded<T> {
     pub fn is_idle(&self) -> bool {
         matches!(self, Self::Idle)
     }
-    pub fn failed(&self) -> Option<&Refusal> {
+    pub fn failed(&self) -> Option<&Error> {
         match self {
             Self::Failed(refusal) => Some(refusal),
             _ => None,
@@ -64,15 +64,15 @@ impl<T> Loaded<T> {
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum LoadedSnapshot<T> {
+enum LoadableSnapshot<T> {
     Idle,
     Ready(T),
-    Failed { reason: String, sentence: String },
+    Failed { code: String, message: String },
 }
 
 /// A finished load: its value, or the refusal in its place.
-impl<T> From<Result<T, Refusal>> for Loaded<T> {
-    fn from(result: Result<T, Refusal>) -> Self {
+impl<T> From<Result<T, Error>> for Loadable<T> {
+    fn from(result: Result<T, Error>) -> Self {
         match result {
             Ok(value) => Self::Ready(value),
             Err(refusal) => Self::Failed(refusal),
@@ -80,33 +80,31 @@ impl<T> From<Result<T, Refusal>> for Loaded<T> {
     }
 }
 
-impl<T: Serialize> Serialize for Loaded<T> {
+impl<T: Serialize> Serialize for Loadable<T> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
-            Self::Idle | Self::Loading(_) => LoadedSnapshot::<&T>::Idle,
-            Self::Ready(value) => LoadedSnapshot::Ready(value),
-            Self::Failed(refusal) => LoadedSnapshot::Failed {
-                reason: refusal.reason.clone(),
-                sentence: refusal.sentence.clone(),
+            Self::Idle | Self::Loading(_) => LoadableSnapshot::<&T>::Idle,
+            Self::Ready(value) => LoadableSnapshot::Ready(value),
+            Self::Failed(refusal) => LoadableSnapshot::Failed {
+                code: refusal.code.clone(),
+                message: refusal.message.clone(),
             },
         }
         .serialize(serializer)
     }
 }
 
-impl<'de, T: Deserialize<'de>> Deserialize<'de> for Loaded<T> {
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for Loadable<T> {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Ok(match LoadedSnapshot::deserialize(deserializer)? {
-            LoadedSnapshot::Idle => Self::Idle,
-            LoadedSnapshot::Ready(value) => Self::Ready(value),
-            LoadedSnapshot::Failed { reason, sentence } => {
-                Self::Failed(Refusal::new(reason, sentence))
-            }
+        Ok(match LoadableSnapshot::deserialize(deserializer)? {
+            LoadableSnapshot::Idle => Self::Idle,
+            LoadableSnapshot::Ready(value) => Self::Ready(value),
+            LoadableSnapshot::Failed { code, message } => Self::Failed(Error::new(code, message)),
         })
     }
 }
 
-impl<T: std::fmt::Debug> std::fmt::Debug for Loaded<T> {
+impl<T: std::fmt::Debug> std::fmt::Debug for Loadable<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Idle => f.write_str("Idle"),
@@ -120,24 +118,24 @@ impl<T: std::fmt::Debug> std::fmt::Debug for Loaded<T> {
 impl<V: View> Context<'_, V> {
     pub fn load<T: 'static>(
         &mut self,
-        work: impl Future<Output = Result<T, Refusal>> + 'static,
-        at: impl Fn(&mut V) -> &mut Loaded<T> + 'static,
-    ) -> Loaded<T> {
+        work: impl Future<Output = Result<T, Error>> + 'static,
+        at: impl Fn(&mut V) -> &mut Loadable<T> + 'static,
+    ) -> Loadable<T> {
         let task = self.spawn(async move |this, cx| {
             let result = work.await;
             let _ = this.update(cx, |view, cx| {
-                *at(view) = Loaded::from(result);
+                *at(view) = Loadable::from(result);
                 cx.notify();
             });
         });
-        Loaded::Loading(task)
+        Loadable::Loading(task)
     }
     /// Runs `each` on every item `stream` yields, in order, until the
     /// stream ends or the view is gone; the view is re-rendered after each.
     /// Keep the task: dropping it unsubscribes. A refused item is handed to
     /// `each` like any other and does not end the stream, so each follower
     /// says what a refusal means to it.
-    pub fn follow<T: 'static>(
+    pub fn for_each<T: 'static>(
         &mut self,
         mut stream: impl Stream<Item = T> + Unpin + 'static,
         mut each: impl FnMut(&mut V, T, &mut Window, &mut Context<V>) + 'static,
@@ -161,7 +159,7 @@ impl<V: View> Context<'_, V> {
     /// `host`), named by the view, so a failed re-read is never silent.
     pub fn refresh<T: 'static>(
         &mut self,
-        work: impl Future<Output = Result<T, Refusal>> + 'static,
+        work: impl Future<Output = Result<T, Error>> + 'static,
         land: impl FnOnce(&mut V, T, &mut Context<V>) + 'static,
     ) {
         self.spawn(async move |this, cx| {
@@ -208,12 +206,12 @@ mod follow_tests {
             let live = cx.host().subscribe::<Changes<Probe>>(());
             Self {
                 seen: 0,
-                live: Some(cx.follow(live, |view: &mut Heads, _, _, _| view.seen += 1)),
+                live: Some(cx.for_each(live, |view: &mut Heads, _, _, _| view.seen += 1)),
             }
         }
     }
-    impl crate::Declared for Heads {
-        const CAPABILITIES: &'static [&'static str] = &["program", "host"];
+    impl crate::Capabilities for Heads {
+        const CAPABILITIES: &'static [&'static str] = &["module", "host"];
     }
     impl Render for Heads {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
@@ -227,14 +225,14 @@ mod follow_tests {
         let feed = cx.host().stream::<Changes<Probe>>();
         let view = cx.open::<Heads>();
         cx.run_until_parked();
-        feed.push(None);
-        feed.push(None);
+        feed.send(None);
+        feed.send(None);
         cx.run_until_parked();
         view.read(|heads| assert_eq!(heads.seen, 2));
         assert!(cx.has_text("2"), "each item re-renders the view");
         view.update(&mut cx, |heads, _, _| heads.live = None);
         cx.run_until_parked();
-        feed.push(None);
+        feed.send(None);
         cx.run_until_parked();
         view.read(|heads| assert_eq!(heads.seen, 2));
     }

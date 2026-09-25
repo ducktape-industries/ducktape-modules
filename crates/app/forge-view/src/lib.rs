@@ -2,7 +2,7 @@
 //! lives in, on the view-guest `View` shape.
 //!
 //! The forge program answers everything this screen shows, in borsh, through
-//! one method (`program.query`); conversation is chat's, through the method
+//! one method (`module.query`); conversation is chat's, through the method
 //! chat-view uses. Reads are a cache keyed by the query itself: `sync` asks
 //! what the current screen needs, issues what is missing, and drops what the
 //! reader has navigated away from. `render` never mutates — what an event
@@ -24,7 +24,7 @@ mod navigate;
 mod review;
 mod ui;
 
-use ducktape_view_guest::host::Refusal;
+use ducktape_view_guest::host::Error;
 use ducktape_view_guest::methods::{Changes, HostRoute, HostVisible};
 use ducktape_view_guest::{Context, IntoElement, Render, View, Window, export_view};
 
@@ -47,11 +47,11 @@ impl View for Forge {
     fn restored(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         self.watches.clear();
         let props = cx.host().subscribe::<HostSession>(());
-        self.watches.push(cx.follow(props, |forge, item, _, cx| {
+        self.watches.push(cx.for_each(props, |forge, item, _, cx| {
             match item {
                 Ok(session) => forge.session_changed(session, cx),
                 Err(refusal) => {
-                    forge.notice = format!("Couldn’t read the session: {}", refusal.sentence)
+                    forge.notice = format!("Couldn’t read the session: {}", refusal.message)
                 }
             }
             cx.notify();
@@ -60,10 +60,10 @@ impl View for Forge {
         // the repository to open
         let routes = cx.host().subscribe::<HostRoute>(());
         self.watches
-            .push(cx.follow(routes, |forge, route, _, cx| match route {
+            .push(cx.for_each(routes, |forge, route, _, cx| match route {
                 Ok(route) => forge.open_route(&route, cx),
                 Err(refusal) => {
-                    forge.notice = format!("Couldn’t follow the link: {}", refusal.sentence);
+                    forge.notice = format!("Couldn’t follow the link: {}", refusal.message);
                     cx.notify();
                 }
             }));
@@ -74,22 +74,22 @@ impl View for Forge {
         let chat = cx.host().subscribe::<Changes<ChatApi>>(());
         let identity = cx.host().subscribe::<Changes<Identity>>(());
         self.watches.extend([
-            cx.follow(forge, |forge, head, _, cx| match head {
+            cx.for_each(forge, |forge, head, _, cx| match head {
                 Ok(_) => forge.reconcile(cx),
                 Err(refusal) => log(cx, "forge's live heads", &refusal),
             }),
-            cx.follow(chat, |forge, head, _, cx| match head {
+            cx.for_each(chat, |forge, head, _, cx| match head {
                 Ok(_) => forge.reconcile(cx),
                 Err(refusal) => log(cx, "chat's live heads", &refusal),
             }),
-            cx.follow(identity, |forge, head, _, cx| match head {
+            cx.for_each(identity, |forge, head, _, cx| match head {
                 Ok(_) => forge.reconcile(cx),
                 Err(refusal) => log(cx, "identity's live heads", &refusal),
             }),
         ]);
         let visible = cx.host().subscribe::<HostVisible>(());
         self.watches
-            .push(cx.follow(visible, |forge, shown, _, cx| match shown {
+            .push(cx.for_each(visible, |forge, shown, _, cx| match shown {
                 Ok(true) => forge.refresh(cx),
                 Ok(false) => {}
                 Err(refusal) => log(cx, "visibility", &refusal),
@@ -102,7 +102,7 @@ impl View for Forge {
 }
 
 /// A refusal nothing on screen waits for, kept in the host's log.
-fn log(cx: &mut Context<Forge>, what: &str, refusal: &Refusal) {
+fn log(cx: &mut Context<Forge>, what: &str, refusal: &Error) {
     cx.host().log(format!("forge: {what} refused: {refusal}"));
 }
 
@@ -116,7 +116,7 @@ export_view!(
     Forge,
     "Forge",
     "Repositories, code, commits and the changes waiting on your judgment.",
-    ["program", "op", "host", "link", "clipboard"]
+    ["module", "op", "host", "link", "clipboard"]
 );
 
 #[cfg(test)]

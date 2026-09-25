@@ -1,7 +1,7 @@
 use crate::api::{Identity, Valset};
 use ducktape_view_guest::{
     Host,
-    host::{Refusal, malformed},
+    host::{Error, malformed},
     methods::Query,
 };
 
@@ -24,7 +24,7 @@ pub async fn read_account(
     host: Host,
     key: String,
     number: Option<u64>,
-) -> Result<Option<Account>, Refusal> {
+) -> Result<Option<Account>, Error> {
     if key.is_empty() {
         return Ok(None);
     }
@@ -70,7 +70,7 @@ pub async fn read_account(
     }))
 }
 
-async fn read_key(host: &Host, key: &[u8], label: String) -> Result<Key, Refusal> {
+async fn read_key(host: &Host, key: &[u8], label: String) -> Result<Key, Error> {
     let membership = match host
         .ask::<Query<Valset>>(valset::Query::Membership { key: key.to_vec() })
         .await?

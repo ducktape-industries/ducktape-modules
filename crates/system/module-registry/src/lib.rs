@@ -107,7 +107,7 @@ pub fn describe(op: &Op) -> describe::Description {
         Op::Schedule(Scheduled { height: at, change }) => {
             let mut fields = vec![
                 field("change", Value::text(change.verb())),
-                field("program", Value::Program(change.program().into())),
+                field("program", Value::Module(change.program().into())),
                 height(at),
             ];
             fields.extend(
@@ -125,10 +125,7 @@ pub fn describe(op: &Op) -> describe::Description {
             program,
         } => (
             format!("Cancel · {program}"),
-            vec![
-                field("program", Value::Program(program.clone())),
-                height(at),
-            ],
+            vec![field("program", Value::Module(program.clone())), height(at)],
         ),
     };
     describe::Description { title, fields }

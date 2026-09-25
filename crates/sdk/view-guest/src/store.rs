@@ -5,14 +5,14 @@ use std::future::Future;
 
 use borsh::{BorshDeserialize, BorshSerialize};
 
-use crate::host::{malformed, Host, Refusal};
+use crate::host::{malformed, Error, Host};
 use crate::methods::{self, StoreGet, StoreSet};
 
 /// The value kept under `key`, or `None` where nothing is.
 pub fn get<T: BorshDeserialize>(
     host: &Host,
     key: &str,
-) -> impl Future<Output = Result<Option<T>, Refusal>> + 'static {
+) -> impl Future<Output = Result<Option<T>, Error>> + 'static {
     let asked = host.ask::<StoreGet>(key.to_owned());
     async move {
         asked

@@ -9,7 +9,7 @@ mod tests {
         vec![wire::ElementIdWire::Name(name.into())]
     }
 
-    async fn perform(host: Host, command: wire::WidgetCommand) -> Result<Vec<u8>, host::Refusal> {
+    async fn perform(host: Host, command: wire::WidgetCommand) -> Result<Vec<u8>, host::Error> {
         host.request(HostWidget::KIND, &wire::encode(&command))
             .await
     }

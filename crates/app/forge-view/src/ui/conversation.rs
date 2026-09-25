@@ -9,7 +9,7 @@ use crate::ui::components::{
     badge, button, empty_state, id, path_text, quiet, ref_label, short_hex,
 };
 use crate::ui::scroller;
-use ducktape_view_guest::view::Loaded;
+use ducktape_view_guest::view::Loadable;
 use forge::{ChangeState, Verdict};
 
 /// A review's body and comments start under its author's name, past the
@@ -38,7 +38,7 @@ pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
     // Until chat answers, the reviews stand on their own; once it has, each
     // sits in the timeline where forge posted its line.
     let placed = |review: &forge::Review| match forge.messages.get(&change.channel) {
-        Some(Loaded::Ready((rows, _))) => {
+        Some(Loadable::Ready((rows, _))) => {
             rows.iter().any(|row| row.message_id == review.message_id)
         }
         _ => false,
@@ -212,24 +212,24 @@ fn messages(forge: &Forge, theme: &Theme) -> AnyElement {
         return div().into_any_element();
     };
     match forge.messages.get(&change.channel) {
-        None | Some(Loaded::Idle) | Some(Loaded::Loading(_)) => {
+        None | Some(Loadable::Idle) | Some(Loadable::Loading(_)) => {
             quiet("Reading the conversation…", theme)
         }
-        Some(Loaded::Failed(refusal)) => div()
+        Some(Loadable::Failed(refusal)) => div()
             .id(id("forge-conversation-refused"))
             .p_2()
             .bg(theme.danger_soft)
             .text_size(design::text::SECONDARY)
-            .child(refusal.sentence.clone())
+            .child(refusal.message.clone())
             .into_any_element(),
-        Some(Loaded::Ready((rows, _))) if rows.is_empty() => empty_state(
+        Some(Loadable::Ready((rows, _))) if rows.is_empty() => empty_state(
             id("forge-conversation-empty"),
             "No replies yet",
             "This change's channel is quiet.",
             theme,
         )
         .into_any_element(),
-        Some(Loaded::Ready((rows, _))) => {
+        Some(Loadable::Ready((rows, _))) => {
             let opened = rows.iter().find(|row| is_forge(row)).map(|row| row.seq);
             let mut column = div()
                 .id(id("forge-conversation-messages"))

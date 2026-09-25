@@ -2,7 +2,7 @@
 //! the channel's details, new channels), copying and links.
 use chat::{MsgRow, Op, PostPolicy, Principal};
 use ducktape_view_guest::Context;
-use ducktape_view_guest::host::Refusal;
+use ducktape_view_guest::host::Error;
 use ducktape_view_guest::wire;
 
 use crate::api::{ChatApi, ClipboardWrite, HostId, Submit};
@@ -344,12 +344,12 @@ impl Chat {
 
     /// None before the session names a chain: Copy link is not offered.
     pub(crate) fn message_link(&self, seq: u64) -> Option<String> {
-        links::channel_link(&self.session.chain, &self.room_id(), Some(seq))
+        links::channel_link(&self.session.chain_id, &self.room_id(), Some(seq))
     }
 
     pub(crate) fn open_link(&mut self, link: String, cx: &mut Context<Self>) {
         self.create = None;
-        match links::pressed_link(link, &self.session.chain) {
+        match links::pressed_link(link, &self.session.chain_id) {
             Some(url) => cx.host().open_link(&url),
             None => cx.host().log("no link to open: the session names no chain"),
         }
@@ -368,7 +368,7 @@ impl Chat {
                 match result {
                     Ok(_) => chat.refresh(cx),
                     Err(refusal) => {
-                        chat.notice = format!("That didn’t go through: {}", refusal.sentence)
+                        chat.notice = format!("That didn’t go through: {}", refusal.message)
                     }
                 }
             });
@@ -399,7 +399,7 @@ impl Chat {
                 let channel_id = host.ask::<HostId>("channel".into()).await?;
                 let op = new_channel(channel_id.clone(), name, voice, members_only);
                 host.ask::<Submit<ChatApi>>(op).await?;
-                Ok::<_, Refusal>(channel_id)
+                Ok::<_, Error>(channel_id)
             };
             let result = created.await;
             let _ = this.update_in(cx, |chat, window, cx| {
@@ -416,7 +416,7 @@ impl Chat {
                         if let Some(create) = &mut chat.create {
                             create.busy = false;
                             create.error =
-                                format!("Couldn’t create this channel: {}", refusal.sentence);
+                                format!("Couldn’t create this channel: {}", refusal.message);
                         }
                     }
                 }

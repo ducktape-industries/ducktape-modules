@@ -54,8 +54,8 @@ pub enum Value {
     Account(u64),
     /// a public key, which may belong to an account
     Key(Vec<u8>),
-    /// a program by name
-    Program(String),
+    /// a module by name
+    Module(String),
     /// a digest: a blob id, a commit
     Hash(Vec<u8>),
     /// `value / 10^decimals`

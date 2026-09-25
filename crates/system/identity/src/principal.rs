@@ -47,7 +47,7 @@ impl Principal {
         use describe::Value;
         match self {
             Principal::Account(number) => Value::Account(*number),
-            Principal::Module(module) => Value::Program(module.clone()),
+            Principal::Module(module) => Value::Module(module.clone()),
             Principal::Root => Value::text("system"),
         }
     }

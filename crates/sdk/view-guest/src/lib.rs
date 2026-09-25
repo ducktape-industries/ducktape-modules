@@ -76,7 +76,7 @@ pub mod window;
 
 mod snapshot;
 pub mod view;
-pub use view::{Declared, Loaded, Render, View};
+pub use view::{Capabilities, Loadable, Render, View};
 pub use wire::methods;
 mod context;
 pub use context::{App, AsyncApp, Context, Entity, Released, WeakEntity};
@@ -156,7 +156,7 @@ macro_rules! export_driver {
             $crate::wire::methods::is_capability($capability),
             concat!("`", $capability, "` is not a method capability: see view_wire::methods::CAPABILITIES")
         );)*
-        impl $crate::Declared for $app {
+        impl $crate::Capabilities for $app {
             const CAPABILITIES: &'static [&'static str] = &[$($capability),*];
         }
         const MANIFEST: &str = concat!("ducktape.view.manifest.v2\n", $name, "\n", $description, "\n" $(, $capability, ",")*, "\n");

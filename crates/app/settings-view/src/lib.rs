@@ -7,7 +7,7 @@ use ducktape_view_guest::design;
 use ducktape_view_guest::methods::Changes;
 use ducktape_view_guest::methods::{ClipboardWrite, ClockTicks};
 use ducktape_view_guest::prelude::*;
-use ducktape_view_guest::view::Loaded;
+use ducktape_view_guest::view::Loadable;
 use ducktape_view_guest::{Context, Render, Task, View, Window, export_view};
 use ducktape_view_guest::{Div, FontWeight, Stateful};
 use futures::StreamExt;
@@ -16,9 +16,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Default, Serialize, Deserialize)]
 pub struct Settings {
     session: Session,
-    status: Loaded<NodeStatus>,
-    account: Loaded<Option<Account>>,
-    invite: Loaded<Minted>,
+    status: Loadable<NodeStatus>,
+    account: Loadable<Option<Account>>,
+    invite: Loadable<Invite>,
     ttl: usize,
     copied: String,
     create_account: CreateAccount,
@@ -57,7 +57,7 @@ impl View for Settings {
                                 view.session = session;
                                 view.read_account(cx);
                             }
-                            Err(refusal) => view.account = Loaded::Failed(refusal),
+                            Err(refusal) => view.account = Loadable::Failed(refusal),
                         }
                         cx.notify();
                     })
@@ -96,7 +96,7 @@ impl Settings {
     fn read(&mut self, cx: &mut Context<Self>) {
         if self.status.ready().is_some() {
             cx.refresh(cx.host().ask::<ChainStatus>(()), |view, status, _| {
-                view.status = Loaded::Ready(status)
+                view.status = Loadable::Ready(status)
             });
         } else if !self.status.is_loading() {
             self.status = cx.load(cx.host().ask::<ChainStatus>(()), |v| &mut v.status);
@@ -104,20 +104,20 @@ impl Settings {
         cx.notify();
     }
     fn read_account(&mut self, cx: &mut Context<Self>) {
-        let (key, number) = (self.session.key.clone(), self.session.account);
+        let (key, number) = (self.session.signer.clone(), self.session.account);
         self.account = cx.load(read_account(cx.host(), key, number), |v| &mut v.account);
         cx.notify();
     }
     fn node(&self, cx: &mut Context<Self>, theme: &Theme) -> AnyElement {
         match &self.status {
-            Loaded::Ready(s) => div()
+            Loadable::Ready(s) => div()
                 .id("settings/node/data")
                 .flex()
                 .flex_col()
                 .gap_2()
                 .w_full()
                 .children([
-                    line("network", "Network", &s.network),
+                    line("network", "Network", &s.chain_id),
                     line(
                         "height",
                         "Height / epoch",
@@ -133,13 +133,13 @@ impl Settings {
                     line("contract", "Contract version", &s.contract.to_string()),
                 ])
                 .into_any_element(),
-            Loaded::Failed(e) => div()
+            Loadable::Failed(e) => div()
                 .id("settings/node/error")
                 .flex()
                 .flex_col()
                 .gap_2()
                 .w_full()
-                .child(refusal("node", &e.sentence, theme))
+                .child(refusal("node", &e.message, theme))
                 .child(
                     button("settings/node/retry", "Retry node", theme)
                         .on_click(cx.listener(|v, _: &ClickEvent, _, cx| v.read(cx))),
@@ -152,7 +152,7 @@ impl Settings {
     }
     fn account(&self, cx: &mut Context<Self>, theme: &Theme) -> AnyElement {
         match &self.account {
-            Loaded::Ready(Some(a)) => {
+            Loadable::Ready(Some(a)) => {
                 let mut body = div()
                     .id("settings/account/data")
                     .flex()
@@ -186,7 +186,7 @@ impl Settings {
                 }
                 body.into_any_element()
             }
-            Loaded::Ready(None) => div()
+            Loadable::Ready(None) => div()
                 .id("settings/account/empty")
                 .flex()
                 .flex_col()
@@ -210,13 +210,13 @@ impl Settings {
                     .w_full(),
                 )
                 .into_any_element(),
-            Loaded::Failed(e) => div()
+            Loadable::Failed(e) => div()
                 .id("settings/account/error")
                 .flex()
                 .flex_col()
                 .gap_2()
                 .w_full()
-                .child(refusal("account", &e.sentence, theme))
+                .child(refusal("account", &e.message, theme))
                 .child(
                     button("settings/account/retry", "Retry account", theme)
                         .on_click(cx.listener(|v, _: &ClickEvent, _, cx| v.read_account(cx))),
@@ -308,7 +308,7 @@ impl Settings {
                 if let Err(refusal) = result {
                     view.create_account.busy = false;
                     view.create_account.error =
-                        format!("Couldn’t create this account: {}", refusal.sentence);
+                        format!("Couldn’t create this account: {}", refusal.message);
                 }
                 cx.notify();
             });
@@ -336,7 +336,7 @@ impl Settings {
         let mint = cx.listener(|v: &mut Self, _: &ClickEvent, _, cx| {
             v.copied.clear();
             v.invite = cx.load(
-                cx.host().ask::<InviteMint>(Mint {
+                cx.host().ask::<InviteCreate>(CreateInvite {
                     ttl_days: TTL[v.ttl],
                 }),
                 |v| &mut v.invite,
@@ -364,7 +364,7 @@ impl Settings {
                     .when(!self.invite.is_loading(), |button| button.on_click(mint)),
             );
         match &self.invite {
-            Loaded::Ready(invite) => {
+            Loadable::Ready(invite) => {
                 body = body
                     .child(
                         div()
@@ -375,7 +375,7 @@ impl Settings {
                             .child(invite.invite.clone()),
                     )
                     .children(invite.notes.iter().enumerate().map(|(i, n)| {
-                        secondary(format!("settings/invite/note/{i}"), &n.sentence, theme)
+                        secondary(format!("settings/invite/note/{i}"), &n.message, theme)
                     }));
                 let blob = invite.invite.clone();
                 body = body.child(
@@ -387,7 +387,7 @@ impl Settings {
                                 let _ = this.update(cx, |v, cx| {
                                     v.copied = match result {
                                         Ok(()) => "Copied".into(),
-                                        Err(e) => e.sentence,
+                                        Err(e) => e.message,
                                     };
                                     cx.notify();
                                 });
@@ -398,15 +398,15 @@ impl Settings {
                     )),
                 );
             }
-            Loaded::Failed(e) => body = body.child(refusal("invite", &e.sentence, theme)),
-            Loaded::Loading(_) => {
+            Loadable::Failed(e) => body = body.child(refusal("invite", &e.message, theme)),
+            Loadable::Loading(_) => {
                 body = body.child(secondary(
                     "settings/invite/loading",
                     "Minting invite…",
                     theme,
                 ))
             }
-            Loaded::Idle => {
+            Loadable::Idle => {
                 body = body.child(secondary(
                     "settings/invite/empty",
                     "No invite minted yet.",
@@ -574,7 +574,7 @@ export_view!(
     "Node, account, invites and app preferences.",
     [
         "chain",
-        "program",
+        "module",
         "op",
         "invite",
         "host",
