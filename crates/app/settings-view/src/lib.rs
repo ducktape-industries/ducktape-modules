@@ -574,7 +574,7 @@ export_view!(
     Settings,
     "Settings",
     "Node, account, invites and app preferences.",
-    ["rpc", "host", "clock", "clipboard"]
+    ["rpc", "op", "host", "clock", "clipboard"]
 );
 #[cfg(test)]
 mod tests;
