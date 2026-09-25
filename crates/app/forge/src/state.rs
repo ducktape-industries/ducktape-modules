@@ -272,7 +272,7 @@ mod tests {
             into: b"refs/heads/main".to_vec(),
             title: "t".into(),
             body: String::new(),
-            author: Party::Key(b"ada".to_vec()),
+            author: Party::Account(1),
             state: ChangeState::Open,
             reviewers: Vec::new(),
             created_height: 1,

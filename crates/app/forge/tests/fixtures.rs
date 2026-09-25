@@ -155,7 +155,7 @@ fn replay(tape: &mut Tape) {
     );
     rig.execute(&Op::Grant {
         repo: REPO.into(),
-        party: Party::Key(b"writer".to_vec()),
+        party: Party::Account(9),
     })
     .unwrap();
     tape.capture(
@@ -492,7 +492,7 @@ fn replay(tape: &mut Tape) {
         panic!();
     };
     rig.chat_execute(
-        chat::Party::Account(1),
+        Party::Account(1),
         chat::Op::PostMessage {
             channel_id: "forge:project:1".into(),
             message_id: "fixture-reply".into(),
@@ -570,7 +570,7 @@ fn replay(tape: &mut Tape) {
         (1, "conversation-reply", Some(2)),
     ] {
         rig.chat_execute(
-            chat::Party::Account(account),
+            Party::Account(account),
             chat::Op::PostMessage {
                 channel_id: "forge:project:3".into(),
                 message_id: id.into(),

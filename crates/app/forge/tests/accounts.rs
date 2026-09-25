@@ -1,6 +1,6 @@
 //! Forge names people by account: one person with two device keys is one
-//! owner, author, reviewer and writer; a key that holds no account is its
-//! own party. The system lines forge posts into chat name no one.
+//! owner, author, reviewer and writer; a key that holds no account writes
+//! nothing. The system lines forge posts into chat name no one.
 
 mod common;
 use common::story::*;
@@ -126,7 +126,7 @@ fn one_person_with_two_keys_is_one_owner_author_and_reviewer() {
 }
 
 #[test]
-fn a_granted_account_writes_from_every_key_and_a_bare_key_only_from_itself() {
+fn a_granted_account_writes_from_every_key() {
     let (mut rig, story) = story();
     rig.sandbox.hold(b"k1", 3);
     rig.sandbox.hold(b"k2", 3);
@@ -145,22 +145,79 @@ fn a_granted_account_writes_from_every_key_and_a_bare_key_only_from_itself() {
         },
     );
     assert_eq!(record(&rig, n).0.closed_by, Some(Party::Account(3)));
+}
 
-    rig.execute(&Op::Grant {
-        repo: REPO.into(),
-        party: key(b"loose"),
-    })
-    .unwrap();
+/// A key that holds no account writes nothing, whatever the op, and leaves
+/// forge as it was; once identity seats it in an account, the same key
+/// writes as that account.
+#[test]
+fn a_key_writes_only_once_it_holds_an_account() {
+    let (mut rig, story) = story();
     let n = opened(&mut rig, &story);
+    let ops = [
+        Op::Create {
+            repo: "other".into(),
+            hash: HashKind::Sha1,
+        },
+        Op::Push {
+            repo: REPO.into(),
+            request: push_request(&[], &[]),
+        },
+        Op::Configure {
+            repo: REPO.into(),
+            settings: Settings::default(),
+        },
+        Op::Grant {
+            repo: REPO.into(),
+            party: Party::Account(3),
+        },
+        Op::Revoke {
+            repo: REPO.into(),
+            party: Party::Account(3),
+        },
+        story.open("From a bare key"),
+        Op::ChangeEdit {
+            repo: REPO.into(),
+            n,
+            title: Some("Renamed".into()),
+            body: None,
+            reviewers: None,
+        },
+        review(&story.feature, &story.root, Verdict::Approve),
+        Op::Merge {
+            repo: REPO.into(),
+            into: b"refs/heads/main".to_vec(),
+            from: reference("feature"),
+            expected_into: story.root.clone(),
+            expected_from: story.feature.clone(),
+            result: story.feature.clone(),
+            change: Some(n),
+        },
+        Op::ChangeClose {
+            repo: REPO.into(),
+            n,
+        },
+    ];
+    rig.actor = b"loose".to_vec();
+    for op in &ops {
+        let refusal = rig.refused(op);
+        assert_eq!(refusal.reason, reason::UNAUTHORIZED, "{op:?}");
+    }
+    rig.sandbox.hold(b"loose", 5);
     let close = Op::ChangeClose {
         repo: REPO.into(),
         n,
     };
-    rig.actor = b"stray".to_vec();
-    assert_eq!(rig.refused(&close).reason, reason::UNAUTHORIZED);
+    assert_eq!(rig.refused(&close).reason, reason::UNAUTHORIZED, "not a writer yet");
+    rig.actor = TESTER.to_vec();
+    rig.execute(&Op::Grant {
+        repo: REPO.into(),
+        party: Party::Account(5),
+    })
+    .unwrap();
     rig.actor = b"loose".to_vec();
     rig.execute(&close).unwrap();
-    assert_eq!(record(&rig, n).0.closed_by, Some(key(b"loose")));
+    assert_eq!(record(&rig, n).0.closed_by, Some(Party::Account(5)));
 }
 
 #[test]

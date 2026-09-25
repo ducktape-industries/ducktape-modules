@@ -79,9 +79,10 @@ impl Chat {
         self.session.account
     }
 
-    /// The party chat writes the reader as; none with no key seated.
+    /// The party chat writes the reader as: her account; none while her
+    /// key holds none, since only an account writes.
     pub(crate) fn me(&self) -> Option<Party> {
-        Party::reader(self.my_account(), &self.session.key)
+        Party::writer(self.my_account())
     }
 
     /// The reader, as a query's `viewer`.
@@ -90,7 +91,7 @@ impl Chat {
     }
 
     pub(crate) fn holds_account(&self) -> bool {
-        self.my_account().is_some()
+        self.me().is_some()
     }
 
     /// Why the reader may not write in the open room; none when she may.

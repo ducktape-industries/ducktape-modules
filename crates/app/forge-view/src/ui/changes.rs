@@ -22,7 +22,16 @@ pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
     if let Some(form) = &forge.form {
         column = column.child(self::form(form, forge, cx, theme));
     }
-    let query = forge.changes_query(&forge.repo_name());
+    let Some(query) = forge.changes_query(&forge.repo_name()) else {
+        return column
+            .child(empty_state(
+                id("forge-changes-nobody"),
+                "No account",
+                "Create an account to see the changes that involve you.",
+                theme,
+            ))
+            .into_any_element();
+    };
     let reply = match staged(
         forge,
         &query,
@@ -281,7 +290,7 @@ pub(crate) fn form(
                     submit,
                 )
                 .kind(design::Kind::Primary)
-                .enabled(forge.session.connected),
+                .enabled(forge.may_write()),
             ),
     )
     .into_any_element()
@@ -354,7 +363,7 @@ fn reviewers(
         .gap_1()
         .child(quiet("Reviewers", theme));
     for number in names.numbers().take(24) {
-        let key = chat::Party::Account(number);
+        let key = identity::Party::Account(number);
         let picked = form.reviewers.contains(&key);
         let toggle = cx.listener({
             let key = key.clone();

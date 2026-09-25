@@ -6,9 +6,8 @@ fn a_send_shows_pending_then_lands_and_a_refusal_is_a_banner() {
     let (mut cx, view) = opened();
     let pending = MsgRow {
         message_id: "p1".into(),
-        author: Party::Account(7),
         blocks: vec![chat::Block::paragraph("on its way")],
-        ..MsgRow::default()
+        ..MsgRow::by(Party::Account(7))
     };
     view.update(&mut cx, |chat, _, cx| {
         chat.room.as_mut().unwrap().pending.push(pending.clone());

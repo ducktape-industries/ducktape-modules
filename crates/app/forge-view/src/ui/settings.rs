@@ -127,7 +127,7 @@ fn flags(
         .child(
             button(id("forge-settings-save"), "Save", theme, save)
                 .kind(design::Kind::Primary)
-                .enabled(forge.session.connected),
+                .enabled(forge.may_write()),
         )
 }
 
@@ -160,20 +160,20 @@ fn grant_field(
                 .bg(theme.surface)
                 .text_color(theme.foreground)
                 .value(form.grant.clone())
-                .placeholder("account number or key in hex")
+                .placeholder("account number")
                 .label("Grant write access")
                 .on_input(typed),
         )
         .child(
             button(id("forge-settings-grant"), "Grant", theme, grant)
-                .enabled(forge.session.connected),
+                .enabled(forge.may_write()),
         )
 }
 
 /// One row per writer with its Revoke, or the owner-only empty state.
 fn writer_rows(
     forge: &Forge,
-    writers: &[chat::Party],
+    writers: &[identity::Party],
     cx: &mut Context<Forge>,
     theme: &Theme,
 ) -> Vec<AnyElement> {
@@ -212,12 +212,11 @@ fn writer_rows(
         .collect()
 }
 
-/// A writer's element id: `acct-<n>` for an account, the hex of a key.
-fn party_id(party: &chat::Party) -> String {
+/// A writer's element id: `acct-<n>` for an account.
+fn party_id(party: &identity::Party) -> String {
     match party {
-        chat::Party::Account(number) => format!("acct-{number}"),
-        chat::Party::Key(key) => abi::hex(key),
-        chat::Party::Module(module) => module.clone(),
-        chat::Party::System => "system".into(),
+        identity::Party::Account(number) => format!("acct-{number}"),
+        identity::Party::Module(module) => module.clone(),
+        identity::Party::System => "system".into(),
     }
 }

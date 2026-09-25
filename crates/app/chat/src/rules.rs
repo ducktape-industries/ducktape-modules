@@ -25,7 +25,7 @@ pub(crate) fn namespace(id: &str, party: &Party) -> Result<(), Refusal> {
     let allowed = match party {
         Party::Module(program) => prefix == program,
         Party::System => true,
-        Party::Account(_) | Party::Key(_) => false,
+        Party::Account(_) => false,
     };
     if !allowed {
         return Err(unauthorized("colon ids belong to their program namespace"));
@@ -117,7 +117,6 @@ pub(crate) fn editable(row: &MsgRow, party: &Party) -> Result<(), Refusal> {
 fn handle(party: &Party) -> String {
     match party {
         Party::Account(account) => format!("acct:{account}"),
-        Party::Key(key) => format!("user:{}", abi::hex(key)),
         Party::Module(module) => format!("module:{module}"),
         Party::System => "system".to_string(),
     }

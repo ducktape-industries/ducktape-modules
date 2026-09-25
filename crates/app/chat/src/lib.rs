@@ -23,7 +23,6 @@ mod description;
 pub mod message;
 mod ops;
 mod origin;
-mod party;
 #[cfg(feature = "program")]
 mod program;
 mod queries;
@@ -42,8 +41,8 @@ pub use abi::hex;
 pub use description::describe;
 pub use message::{Block, Mark, Span, parse_message};
 pub use ops::execute;
-pub use origin::{execute_from, party_of};
-pub use party::{AccountNumber, Party};
+pub use identity::{AccountNumber, Frame, Party};
+pub use origin::execute_from;
 pub use queries::{query, roots_below};
 pub use store::{Cursor, Page, PageReply};
 pub use text::{plain_text, tags, tokens};
@@ -277,9 +276,7 @@ pub struct MemberRow {
     pub time: u64,
 }
 
-#[derive(
-    BorshSerialize, BorshDeserialize, Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq,
-)]
+#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct MsgRow {
     pub channel_id: String,
     pub seq: u64,
@@ -302,6 +299,33 @@ pub struct MsgRow {
     pub last_reply_seq: Option<u64>,
     pub reactions: Vec<Reaction>,
     pub tags: Vec<String>,
+}
+
+impl MsgRow {
+    /// A row with nothing yet but its author: a view's pending post before
+    /// the program serves it, a test's base row.
+    pub fn by(author: Party) -> MsgRow {
+        MsgRow {
+            channel_id: String::new(),
+            seq: 0,
+            message_id: String::new(),
+            author,
+            height: 0,
+            time: 0,
+            blocks: Vec::new(),
+            text: String::new(),
+            deleted: false,
+            edited: false,
+            rev: 0,
+            edited_at: None,
+            base_rev: None,
+            thread: None,
+            reply_count: 0,
+            last_reply_seq: None,
+            reactions: Vec::new(),
+            tags: Vec::new(),
+        }
+    }
 }
 
 /// One emoji on a message: how many parties chose it.
@@ -327,14 +351,6 @@ pub struct AccountRow {
     pub program: bool,
     /// the account's keys, hex
     pub keys: Vec<String>,
-}
-
-/// The frame a write runs in: who acts, and when.
-#[derive(Clone, Debug)]
-pub struct Frame {
-    pub party: Party,
-    pub height: u64,
-    pub time: u64,
 }
 
 /// The room two accounts share: `dm-<lower>-<higher>`.

@@ -156,7 +156,7 @@ impl Forge {
                 });
                 std::iter::once(log).chain(diff).collect()
             }
-            RepoTab::Changes => vec![self.changes_query(&repo)],
+            RepoTab::Changes => self.changes_query(&repo).into_iter().collect(),
             RepoTab::Refs => {
                 let head = self.head_name();
                 self.branches()
@@ -207,30 +207,34 @@ impl Forge {
         wanted
     }
 
-    pub(crate) fn changes_query(&self, repo: &str) -> Query {
-        // With no key seated nobody is "me": the system party matches no
-        // change, and forge refuses to judge it.
-        let me = self.me_party().unwrap_or_default();
+    /// The Changes tab's question. A filter about "me" asks nothing while
+    /// the reader is nobody (no account): there is no one to judge.
+    pub(crate) fn changes_query(&self, repo: &str) -> Option<Query> {
+        let me = self.me_party();
         let state = match self.filter {
             Filter::Judgment => {
-                return Query::Judgment {
-                    party: me,
+                return Some(Query::Judgment {
+                    party: me?,
                     page: PAGE,
-                };
+                });
             }
             Filter::Merged => Some(ChangeState::Merged),
             Filter::Closed => Some(ChangeState::Closed),
             Filter::Open => Some(ChangeState::Open),
             Filter::Authored | Filter::Involves => None,
         };
-        Query::Changes {
+        let personal = matches!(self.filter, Filter::Authored | Filter::Involves);
+        if personal && me.is_none() {
+            return None;
+        }
+        Some(Query::Changes {
             repo: repo.to_owned(),
             filter: ChangeFilter {
                 state,
-                author: (self.filter == Filter::Authored).then(|| me.clone()),
-                involves: (self.filter == Filter::Involves).then_some(me),
+                author: me.clone().filter(|_| self.filter == Filter::Authored),
+                involves: me.filter(|_| self.filter == Filter::Involves),
             },
             page: PAGE,
-        }
+        })
     }
 }

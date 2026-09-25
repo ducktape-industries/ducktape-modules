@@ -279,8 +279,8 @@ impl Forge {
             .as_ref()
             .map(|form| form.grant.trim().to_owned())
             .unwrap_or_default();
-        let Some(party) = chat::Party::parse(&typed) else {
-            self.notice = "Grant takes an account number or a key in hex".into();
+        let Some(party) = identity::Party::parse(&typed) else {
+            self.notice = "Grant takes an account number".into();
             cx.notify();
             return;
         };
@@ -295,7 +295,7 @@ impl Forge {
         );
     }
 
-    pub(crate) fn revoke(&mut self, party: chat::Party, cx: &mut Context<Self>) {
+    pub(crate) fn revoke(&mut self, party: identity::Party, cx: &mut Context<Self>) {
         let repo = self.repo_name();
         self.submit(
             Op::Revoke { repo, party },

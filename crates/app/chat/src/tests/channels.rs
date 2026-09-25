@@ -25,7 +25,7 @@ fn a_channel_id_is_bounded_and_a_colon_id_is_its_programs_alone() {
             reason::INVALID_INPUT
         );
     }
-    for who in [ADA, Party::Key(vec![1]), Party::Module("for".into())] {
+    for who in [ADA, Party::Module("for".into())] {
         let squat = chat.refused(&who, create("forge:repo:1", PostPolicy::Open));
         assert_eq!(squat, reason::UNAUTHORIZED);
     }
@@ -94,8 +94,8 @@ fn a_dm_seats_both_accounts_opens_once_and_keeps_others_out() {
         reason::UNAUTHORIZED
     );
     assert_eq!(chat.refused(&ADA, open_dm(1)), reason::INVALID_INPUT);
-    let key = Party::Key(vec![9]);
-    assert_eq!(chat.refused(&key, open_dm(1)), reason::UNAUTHORIZED);
+    let module = Party::Module("bot".into());
+    assert_eq!(chat.refused(&module, open_dm(1)), reason::UNAUTHORIZED);
 }
 
 /// The peer who opened a dm owns it, but owning it gives nothing: neither

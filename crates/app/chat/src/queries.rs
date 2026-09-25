@@ -19,7 +19,7 @@ pub fn query(store: &impl Reads, height: u64, query: Query) -> Result<Reply, Ref
         Query::Channel { channel_id } => (Reply::Channel(channel(store, &channel_id)?), vec![]),
         Query::MessageById { message_id } => (Reply::Message(by_id(store, &message_id)?), vec![]),
         Query::ThreadAttention { channel_id, author } => (
-            Reply::Attention(attention(store, channel_id, author)?),
+            Reply::Attention(attention(store, &channel_id, author)?),
             vec![],
         ),
         Query::Roots {
@@ -119,33 +119,7 @@ fn by_id(store: &impl Reads, message_id: &String) -> Result<Option<MsgRow>, Refu
 }
 
 /// The root of the author's most recently answered thread.
-/// The newest answered thread `author` started. A key may have posted
-/// before or after it gained an account: the newer of the two.
 fn attention(
-    store: &impl Reads,
-    channel_id: String,
-    author: Party,
-) -> Result<Option<MsgRow>, Refusal> {
-    let Party::Key(key) = &author else {
-        return answered(store, &channel_id, author);
-    };
-    let account = crate::origin::party_of(store, &abi::Origin::External(key.clone()))?;
-    let as_key = answered(store, &channel_id, author)?;
-    let as_account = match account {
-        Party::Key(_) => None,
-        account => answered(store, &channel_id, account)?,
-    };
-    Ok(match (as_key, as_account) {
-        (Some(a), Some(b)) => Some(if a.last_reply_seq < b.last_reply_seq {
-            b
-        } else {
-            a
-        }),
-        (a, b) => a.or(b),
-    })
-}
-
-fn answered(
     store: &impl Reads,
     channel_id: &str,
     author: Party,

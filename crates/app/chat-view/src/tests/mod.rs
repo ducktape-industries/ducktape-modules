@@ -74,11 +74,10 @@ fn row(seq: u64, author: u64, text: &str) -> MsgRow {
         channel_id: "general".into(),
         seq,
         message_id: format!("m{seq}"),
-        author: Party::Account(author),
         height: 1,
         blocks: vec![chat::Block::paragraph(text)],
         text: text.into(),
-        ..MsgRow::default()
+        ..MsgRow::by(Party::Account(author))
     }
 }
 

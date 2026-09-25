@@ -385,7 +385,7 @@ fn header(
         .child(
             button(id("forge-new-repo"), "+ New", theme, new)
                 .kind(design::Kind::Primary)
-                .enabled(forge.session.connected),
+                .enabled(forge.may_write()),
         )
         .into_any_element()
 }

@@ -1,7 +1,7 @@
 //! Immutable batched reviews, mutable changes, and the shared per-repo item counter.
 use crate::read_contract::Revision;
 use borsh::{BorshDeserialize, BorshSerialize};
-use chat::Party;
+use identity::Party;
 
 pub const MAX_REVIEW_COMMENTS: usize = 64;
 pub const MAX_REVIEWERS: usize = 64;

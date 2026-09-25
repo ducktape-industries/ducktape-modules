@@ -4,7 +4,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 
 pub use crate::read_contract::*;
 pub use crate::review_contract::*;
-pub use chat::{Frame, Party};
+pub use identity::{Frame, Party};
 pub use store::{Page, PageReply};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
@@ -358,8 +358,6 @@ pub enum OpReply {
 }
 
 pub const MAX_REPO_NAME: usize = 37; // forge:<repo>:<u64> fits chat's 64-byte id.
-/// The longest key a bare-key party is named by (a BLS key is 96).
-pub const MAX_KEY_BYTES: usize = 128;
 
 pub fn valid_repo_name(name: &str) -> bool {
     !name.is_empty()

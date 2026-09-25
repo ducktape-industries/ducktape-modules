@@ -6,7 +6,7 @@ mod common;
 use common::story::*;
 use common::*;
 use forge::{
-    ChangeFilter, ChangeState, LineComment, MAX_KEY_BYTES, OpReply, ReviewDraft, Revision, Side,
+    ChangeFilter, ChangeState, LineComment, OpReply, ReviewDraft, Revision, Side,
     Verdict,
 };
 
@@ -47,10 +47,14 @@ fn record(rig: &Rig, n: u64) -> forge::Change {
 }
 
 fn involving(rig: &Rig, who: &[u8]) -> Vec<u64> {
+    involving_party(rig, rig.party(who))
+}
+
+fn involving_party(rig: &Rig, party: Party) -> Vec<u64> {
     let query = Query::Changes {
         repo: REPO.into(),
         filter: ChangeFilter {
-            involves: Some(rig.party(who)),
+            involves: Some(party),
             ..ChangeFilter::default()
         },
         page: Page::first(128),
@@ -142,14 +146,14 @@ fn grant_and_revoke_are_the_owners_and_name_a_person() {
         writers.items
     };
 
-    rig.execute(&grant(key(WRITER))).unwrap();
+    rig.execute(&grant(person(WRITER))).unwrap();
     rig.execute(&grant(Party::Account(9))).unwrap();
-    assert_eq!(writers(&rig), [Party::Account(9), key(WRITER)]);
+    assert_eq!(writers(&rig), [Party::Account(9), person(WRITER)]);
     assert_eq!(
-        refused_as(&mut rig, WRITER, &revoke(key(WRITER))),
+        refused_as(&mut rig, WRITER, &revoke(person(WRITER))),
         reason::UNAUTHORIZED
     );
-    rig.execute(&revoke(key(WRITER))).unwrap();
+    rig.execute(&revoke(person(WRITER))).unwrap();
     rig.execute(&revoke(Party::Account(9))).unwrap();
     assert!(
         writers(&rig).is_empty(),
@@ -157,13 +161,8 @@ fn grant_and_revoke_are_the_owners_and_name_a_person() {
     );
 
     assert_eq!(
-        refused_as(&mut rig, STRANGER, &grant(key(STRANGER))),
+        refused_as(&mut rig, STRANGER, &grant(person(STRANGER))),
         reason::UNAUTHORIZED
-    );
-    assert_eq!(rig.refused(&grant(key(b""))).reason, reason::INVALID_INPUT);
-    assert_eq!(
-        rig.refused(&grant(key(&[7; MAX_KEY_BYTES + 1]))).reason,
-        reason::CAPACITY
     );
     let module = Party::Module("chat".into());
     assert_eq!(rig.refused(&grant(module)).reason, reason::INVALID_INPUT);
@@ -234,17 +233,17 @@ fn edit_is_the_authors_and_drops_the_reviewers_it_unasks() {
         reason::UNAUTHORIZED
     );
 
-    // Asking a fleet of keys and unasking them leaves nothing behind.
+    // Asking a fleet of accounts and unasking them leaves nothing behind.
     for round in 0..3u8 {
-        let fleet = (0..64).map(|i| key(&[round, i])).collect();
+        let fleet = (0..64).map(|i| Party::Account(100 + 64 * round as u64 + i)).collect();
         rig.execute(&edit_reviewers(n, fleet)).unwrap();
     }
     rig.execute(&edit_reviewers(n, vec![])).unwrap();
     assert!(involving(&rig, REVIEWER).is_empty());
-    assert!(involving(&rig, &[0, 0]).is_empty());
+    assert!(involving_party(&rig, Party::Account(100)).is_empty());
     assert_eq!(involving(&rig, TESTER), [n], "the author stays involved");
 
-    let fleet = (0..65).map(|i| key(&[i])).collect();
+    let fleet = (0..65).map(|i| Party::Account(100 + i)).collect();
     assert_eq!(
         rig.refused(&edit_reviewers(n, fleet)).reason,
         reason::CAPACITY
@@ -282,7 +281,7 @@ fn close_is_the_authors_or_a_writers_and_happens_once() {
     let second = opened(&mut rig, &story);
     rig.execute(&Op::Grant {
         repo: REPO.into(),
-        party: key(WRITER),
+        party: person(WRITER),
     })
     .unwrap();
     let by_writer = Op::ChangeClose {
@@ -292,7 +291,7 @@ fn close_is_the_authors_or_a_writers_and_happens_once() {
     signed(&mut rig, WRITER, &by_writer).unwrap();
     let closed = record(&rig, second);
     assert_eq!(closed.state, ChangeState::Closed);
-    assert_eq!(closed.closed_by, Some(key(WRITER)));
+    assert_eq!(closed.closed_by, Some(person(WRITER)));
 }
 
 #[test]

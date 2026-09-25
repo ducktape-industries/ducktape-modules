@@ -125,15 +125,14 @@ fn accounts() -> chat::PageReply<chat::AccountRow> {
     }
 }
 
-fn message(seq: u64, author: chat::Party, text: &str) -> chat::MsgRow {
+fn message(seq: u64, author: identity::Party, text: &str) -> chat::MsgRow {
     chat::MsgRow {
         channel_id: "forge:project:1".into(),
         seq,
         message_id: format!("m{seq}"),
-        author,
         blocks: vec![chat::Block::paragraph(text)],
         text: text.into(),
-        ..chat::MsgRow::default()
+        ..chat::MsgRow::by(author)
     }
 }
 
@@ -151,7 +150,7 @@ fn forge_lines() -> Vec<chat::MsgRow> {
         message_id,
         ..message(
             seq,
-            chat::Party::Module(forge::PROGRAM.into()),
+            identity::Party::Module(forge::PROGRAM.into()),
             "raw forge text",
         )
     };
@@ -161,7 +160,7 @@ fn forge_lines() -> Vec<chat::MsgRow> {
     }
     rows.push(message(
         rows.len() as u64 + 1,
-        chat::Party::Account(2),
+        identity::Party::Account(2),
         "Reading it now",
     ));
     rows.push(forge_line(
@@ -192,7 +191,7 @@ pub(crate) fn configure(cx: &mut TestAppContext, mode: &'static str) {
                             message_id: format!("forge:{seq:016x}"),
                             ..message(
                                 seq,
-                                chat::Party::Module(forge::PROGRAM.into()),
+                                identity::Party::Module(forge::PROGRAM.into()),
                                 "raw forge text",
                             )
                         })
@@ -256,7 +255,7 @@ fn session_key_resolves_to_its_account() {
     let (_cx, view) = booted("default");
     view.read(|forge| {
         assert_eq!(forge.my_account(), Some(2));
-        assert_eq!(forge.me_party(), Some(chat::Party::Account(2)));
+        assert_eq!(forge.me_party(), Some(identity::Party::Account(2)));
     });
 }
 
@@ -286,7 +285,7 @@ fn seated(key: &[u8], account: Option<u64>) -> (TestAppContext, Entity<Forge>) {
 }
 
 /// The parties forge was asked to judge.
-fn judged(cx: &TestAppContext) -> Vec<chat::Party> {
+fn judged(cx: &TestAppContext) -> Vec<identity::Party> {
     cx.host()
         .asked::<Ask>()
         .into_iter()
@@ -306,19 +305,21 @@ fn no_seated_key_has_no_changes_of_its_own() {
     assert!(disabled(&cx, "forge-filter-authored"));
 }
 
-/// A key that holds no account is still a person to forge: its own
-/// changes and judgment are its key's.
+/// A key that holds no account reads everything and writes nothing: every
+/// write control is off, the filters about "me" ask nothing, and the
+/// screen says an account is needed.
 #[test]
-fn an_unregistered_key_is_its_own_party() {
-    let (mut cx, view) = seated(b"stranger", None);
-    let stranger = chat::Party::Key(b"stranger".to_vec());
+fn a_key_without_an_account_writes_nothing() {
+    let (cx, view) = seated(b"stranger", None);
     view.read(|forge| {
         assert_eq!(forge.my_account(), None);
-        assert_eq!(forge.me_party(), Some(stranger.clone()));
+        assert_eq!(forge.me_party(), None);
+        assert!(!forge.may_write());
     });
-    cx.simulate_click("forge-filter-judgment");
-    cx.run_until_parked();
-    assert_eq!(judged(&cx), [stranger]);
+    assert!(disabled(&cx, "forge-filter-judgment"));
+    assert!(disabled(&cx, "forge-filter-authored"));
+    assert!(cx.find("forge-no-account").is_some());
+    assert!(judged(&cx).is_empty());
 }
 
 /// A person's second device key is the same person: "mine" and judgment
@@ -330,18 +331,19 @@ fn a_second_device_key_reads_as_the_same_person() {
     cx.run_until_parked();
     let authored = cx.host().asked::<Ask>().into_iter().any(|query| {
         matches!(query, Query::Changes { filter, .. }
-            if filter.author == Some(chat::Party::Account(1)))
+            if filter.author == Some(identity::Party::Account(1)))
     });
     assert!(authored, "my changes are my account's");
-    view.read(|forge| assert_eq!(forge.me_party(), Some(chat::Party::Account(1))));
+    view.read(|forge| assert_eq!(forge.me_party(), Some(identity::Party::Account(1))));
     cx.simulate_click("forge-filter-judgment");
     cx.run_until_parked();
-    assert_eq!(judged(&cx), [chat::Party::Account(1)]);
+    assert_eq!(judged(&cx), [identity::Party::Account(1)]);
 }
 
 /// The reader creates the account in Settings, then switches to Forge: the
 /// seated key never changes; the host resolves its new account and hands it
-/// over as a session change, and forge judges the account from then on.
+/// over as a session change, and the same key writes and is judged as the
+/// account from then on.
 #[test]
 fn an_account_gained_later_is_who_forge_judges() {
     let mut cx = TestAppContext::new();
@@ -363,20 +365,17 @@ fn an_account_gained_later_is_who_forge_judges() {
     cx.run_until_parked();
     cx.simulate_click("forge-tab-changes");
     cx.run_until_parked();
-    cx.simulate_click("forge-filter-judgment");
-    cx.run_until_parked();
+    assert!(disabled(&cx, "forge-filter-judgment"));
     props.push(Session {
         account: Some(2),
         ..unregistered
     });
     cx.run_until_parked();
     view.read(|forge| assert_eq!(forge.my_account(), Some(2)));
-    let judged = judged(&cx);
-    assert_eq!(
-        judged.first(),
-        Some(&chat::Party::Key(b"reviewer".to_vec()))
-    );
-    assert_eq!(judged.last(), Some(&chat::Party::Account(2)));
+    assert!(!cx.find("forge-no-account").is_some());
+    cx.simulate_click("forge-filter-judgment");
+    cx.run_until_parked();
+    assert_eq!(judged(&cx), [identity::Party::Account(2)]);
 }
 
 #[test]
@@ -824,15 +823,15 @@ fn settings_shows_only_what_the_contract_exposes_and_grants_by_account() {
         cx.host()
             .asked::<SubmitForge>()
             .iter()
-            .any(|op| matches!(op, Op::Grant { party, .. } if *party == chat::Party::Account(1)))
+            .any(|op| matches!(op, Op::Grant { party, .. } if *party == identity::Party::Account(1)))
     );
-    cx.simulate_click(&format!("forge-settings-revoke-{}", abi::hex(b"writer")));
+    cx.simulate_click("forge-settings-revoke-acct-9");
     cx.run_until_parked();
     assert!(
         cx.host()
             .asked::<SubmitForge>()
             .iter()
-            .any(|op| matches!(op, Op::Revoke { party, .. } if *party == chat::Party::Key(b"writer".to_vec())))
+            .any(|op| matches!(op, Op::Revoke { party, .. } if *party == identity::Party::Account(9)))
     );
 }
 
@@ -895,7 +894,7 @@ fn judgment_is_its_own_query_keyed_by_the_readers_account() {
         cx.host()
             .asked::<Ask>()
             .iter()
-            .any(|query| matches!(query, Query::Judgment { party, .. } if *party == chat::Party::Account(2))),
+            .any(|query| matches!(query, Query::Judgment { party, .. } if *party == identity::Party::Account(2))),
         "the reader is their account, from the session"
     );
     assert!(cx.has_text("review requested"), "{:?}", cx.texts());

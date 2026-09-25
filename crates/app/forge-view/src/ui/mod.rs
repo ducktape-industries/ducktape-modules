@@ -99,12 +99,32 @@ fn main(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
                 .child(forge.notice.clone()),
         );
     }
+    if forge.session.connected && forge.me_party().is_none() {
+        column = column.child(no_account(theme));
+    }
     let body: AnyElement = match (forge.nav().repo.clone(), forge.nav().change) {
         (None, _) => repos::overview(forge, cx, theme),
         (Some(_), Some(_)) => change::render(forge, cx, theme),
         (Some(_), None) => repo(forge, cx, theme),
     };
     column.child(body).into_any_element()
+}
+
+/// Why every write control is off: the seated key holds no account. The
+/// same rule and wording pattern as chat's `NoAccount`.
+fn no_account(theme: &Theme) -> AnyElement {
+    div()
+        .id(id("forge-no-account"))
+        .m_2()
+        .p_3()
+        .bg(theme.warning_soft)
+        .text_color(theme.muted)
+        .text_size(design::text::SECONDARY)
+        .child(
+            "To create repositories, push, open changes or review, create or join an account in \
+             Settings → Account. You can read every repository without an account.",
+        )
+        .into_any_element()
 }
 
 /// The repository header: name, the ref picker, its clone address and tabs.

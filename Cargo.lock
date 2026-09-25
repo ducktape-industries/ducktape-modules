@@ -3093,6 +3093,7 @@ dependencies = [
  "describe",
  "guest",
  "module-registry",
+ "serde",
  "store",
  "view-guest",
 ]

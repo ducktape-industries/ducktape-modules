@@ -174,7 +174,7 @@ fn forge_line(
     if reviews.next.is_some() {
         return None;
     }
-    let actor = |party: &Option<chat::Party>| party.as_ref().map(|party| forge.party_name(party));
+    let actor = |party: &Option<identity::Party>| party.as_ref().map(|party| forge.party_name(party));
     match (change.state, &change.merge_oid) {
         (ChangeState::Merged, Some(oid)) => Some(event(
             key,
@@ -197,7 +197,7 @@ fn forge_line(
 }
 
 fn is_forge(row: &chat::MsgRow) -> bool {
-    row.author == chat::Party::Module(forge::PROGRAM.into())
+    row.author == identity::Party::Module(forge::PROGRAM.into())
 }
 
 /// The hidden chat channel of this change, in chat's row shape.
@@ -295,7 +295,7 @@ fn composer(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement
         .child(
             button(id("forge-reply-send"), "Send", theme, send)
                 .kind(design::Kind::Primary)
-                .enabled(forge.session.connected && !forge.reply.trim().is_empty()),
+                .enabled(forge.may_write() && !forge.reply.trim().is_empty()),
         )
         .into_any_element()
 }

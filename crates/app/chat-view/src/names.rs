@@ -2,18 +2,13 @@
 //! The roster itself is [`chat::view::Names`], shared with every view that
 //! names chat parties.
 use chat::view::Names;
-use chat::{Party, hex};
+use chat::Party;
 
 /// Autocomplete candidates: every named account, then the room's
-/// members (a key only while it holds no account), labelled without
-/// the `@`.
+/// account members, labelled without the `@`.
 pub fn mention_choices(names: &Names, members: &[Party]) -> Vec<MentionChoice> {
     let accounts = names.numbers().map(Party::Account);
-    let members = members.iter().filter(|party| match party {
-        Party::Account(_) => true,
-        Party::Key(key) => names.account_of(&hex(key)).is_none(),
-        Party::Module(_) | Party::System => false,
-    });
+    let members = members.iter().filter(|party| party.is_person());
     let mut choices: Vec<MentionChoice> = Vec::new();
     for party in accounts.chain(members.cloned()) {
         if !choices.iter().any(|choice| choice.party == party) {
@@ -33,11 +28,10 @@ pub struct MentionChoice {
     pub party: Party,
 }
 
-/// The canonical token the composer inserts: `<@account>` or `<@key:hex>`.
+/// The canonical token the composer inserts: `<@account>`.
 pub fn mention_token(party: &Party) -> String {
     match party {
         Party::Account(account) => format!("<@{account}>"),
-        Party::Key(key) => format!("<@key:{}>", hex(key)),
         Party::Module(_) | Party::System => String::new(),
     }
 }

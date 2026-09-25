@@ -8,7 +8,7 @@ use store::{Reads, Writes, already_exists, capacity, decoded, invalid, unauthori
 
 use crate::changes::{self, Draft, Edit, MergeRequest};
 use crate::contract::{
-    Bounds, Frame, MAX_KEY_BYTES, MAX_PATH_BYTES, Op, Party, Repo, Settings, valid_repo_name,
+    Bounds, Frame, MAX_PATH_BYTES, Op, Party, Repo, Settings, valid_repo_name,
 };
 use crate::objects::{ObjectWriter, object_not_held};
 use crate::state::{
@@ -36,7 +36,7 @@ pub fn init(store: &mut impl Writes, params: &[u8]) -> Result<(), Refusal> {
 }
 
 /// Runs one op as `frame.party`, whom the program resolved from the
-/// signer ([`chat::party_of`]). Every op names its repository; an accepted one
+/// signer ([`identity::party_of`]). Every op names its repository; an accepted one
 /// marks it active.
 pub fn execute(store: &mut impl Writes, frame: &Frame, op: Op) -> Result<(), Refusal> {
     let actor = person(&frame.party)?;
@@ -108,8 +108,9 @@ pub fn execute(store: &mut impl Writes, frame: &Frame, op: Op) -> Result<(), Ref
     touch(store, &repo, frame.height)
 }
 
-/// Forge is written by people (an account, or a key that holds none),
-/// never by a program or the system.
+/// Forge is written by people (an account), never by a program or the
+/// system. A key that holds no account never gets here: identity's
+/// [`party_of`](identity::party_of) refuses it.
 fn person(party: &Party) -> Result<&Party, Refusal> {
     if !party.is_person() {
         return Err(unauthorized("a repository op is signed by a person"));
@@ -240,19 +241,12 @@ pub(crate) fn require_writer(
     Ok(())
 }
 
-/// A person an op names (a writer, a reviewer): an account, or a
-/// non-empty key of at most [`MAX_KEY_BYTES`].
+/// A person an op names (a writer, a reviewer): an account.
 pub(crate) fn require_named(party: &Party) -> Result<(), Refusal> {
-    match party {
-        Party::Account(_) => Ok(()),
-        Party::Key(key) if key.is_empty() => Err(invalid("a key party names a key")),
-        Party::Key(key) if key.len() > MAX_KEY_BYTES => Err(capacity(format!(
-            "a key is at most {MAX_KEY_BYTES} bytes, not {}",
-            key.len()
-        ))),
-        Party::Key(_) => Ok(()),
-        Party::Module(_) | Party::System => Err(invalid("only a person is named here")),
+    if !party.is_person() {
+        return Err(invalid("only a person is named here"));
     }
+    Ok(())
 }
 
 pub fn limits_of(bounds: &Bounds) -> Limits {

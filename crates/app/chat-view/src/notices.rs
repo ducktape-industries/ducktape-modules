@@ -218,9 +218,8 @@ mod tests {
         MsgRow {
             channel_id: channel.into(),
             seq: 7,
-            author: Party::Account(author),
             blocks,
-            ..MsgRow::default()
+            ..MsgRow::by(Party::Account(author))
         }
     }
 

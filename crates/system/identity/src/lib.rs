@@ -5,12 +5,14 @@
 //! adds the ask a view makes of identity directly (`view.rs`).
 #[cfg(feature = "program")]
 mod program;
+mod party;
 mod rules;
 #[cfg(test)]
 mod tests;
 #[cfg(feature = "view")]
 pub mod view;
 
+pub use party::{Frame, NO_ACCOUNT, Party, party_of};
 pub use rules::{execute, query};
 
 use abi::{BlobId, ProgramId, Scheme};

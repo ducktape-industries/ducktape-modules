@@ -88,7 +88,7 @@ fn extend(into: &mut Reply, more: Reply) {
 pub(crate) async fn conversation(
     host: Host,
     channel_id: String,
-    viewer: Vec<chat::Party>,
+    viewer: Vec<identity::Party>,
 ) -> Result<Vec<chat::MsgRow>, Refusal> {
     let (mut all, _) = pages(None, MAX_PAGES, |after| {
         let ask = host.ask::<Ask<ChatApi>>(chat::Query::Roots {

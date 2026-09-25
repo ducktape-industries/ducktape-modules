@@ -115,7 +115,7 @@ fn ref_row(
                 theme,
                 start,
             )
-            .enabled(forge.session.connected),
+            .enabled(forge.may_write()),
         );
     }
     line.into_any_element()

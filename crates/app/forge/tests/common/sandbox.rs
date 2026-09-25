@@ -1,6 +1,7 @@
 //! forge's store with chat and identity beside it: the siblings forge
 //! queries, and where its emissions land when a block delivers them.
-//! `accounts` is identity's roster: each key the account it belongs to.
+//! `accounts` is identity's roster: each key the account it belongs to,
+//! the harness keys ([`HOLDERS`](super::HOLDERS)) from the start.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -27,7 +28,8 @@ impl Default for MemorySandbox {
                 Ok(abi::encode(&reply))
             }),
         );
-        let accounts = Rc::new(RefCell::new(BTreeMap::new()));
+        let held = super::HOLDERS.map(|(key, account)| (key.to_vec(), account));
+        let accounts = Rc::new(RefCell::new(BTreeMap::from(held)));
         let roster = accounts.clone();
         forge.siblings.insert(
             identity::PROGRAM.into(),
@@ -57,12 +59,12 @@ impl MemorySandbox {
     }
 
     /// Who `key` signs as: the party forge's program resolves.
-    pub fn party(&self, key: &[u8]) -> chat::Party {
-        chat::party_of(&self.forge, &abi::Origin::External(key.to_vec())).unwrap()
+    pub fn party(&self, key: &[u8]) -> Result<forge::Party, Refusal> {
+        identity::party_of(&self.forge, &abi::Origin::External(key.to_vec()))
     }
 
     /// Runs one chat message directly, as a key or module would in its own block.
-    pub fn chat_execute(&self, frame: &chat::Frame, msg: chat::Op) -> Result<(), Refusal> {
+    pub fn chat_execute(&self, frame: &forge::Frame, msg: chat::Op) -> Result<(), Refusal> {
         chat::execute(&mut *self.chat.borrow_mut(), frame, msg)
     }
 
@@ -73,8 +75,8 @@ impl MemorySandbox {
     /// Delivers what forge emitted so far to chat, the way the kernel delivers
     /// the previous block's queue: as forge, at the delivering height.
     pub fn deliver(&mut self, height: u64, time: u64) -> Vec<Result<(), Refusal>> {
-        let frame = chat::Frame {
-            party: chat::Party::Module("forge".into()),
+        let frame = forge::Frame {
+            party: forge::Party::Module("forge".into()),
             height,
             time,
         };

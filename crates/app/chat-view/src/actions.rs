@@ -264,7 +264,7 @@ impl Chat {
             .as_ref()
             .map(|details| details.member_draft.as_str());
         let Some(party) = typed.and_then(Party::parse) else {
-            self.notice = "A member is an account number or a key hex".into();
+            self.notice = "A member is an account number".into();
             return;
         };
         if let Some(details) = &mut self.details {

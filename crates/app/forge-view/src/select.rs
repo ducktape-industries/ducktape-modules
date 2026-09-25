@@ -5,7 +5,7 @@ use ducktape_view_guest::view::Loaded;
 
 use crate::queries::PAGE;
 use crate::state::{self, ChangeTab, Forge, Nav, change_key};
-use chat::Party;
+use identity::Party;
 use forge::{
     Bounds, Change, Comparison, PageReply, Query, RefInfo, Reply, RepoInfo, Review, Revision,
 };
@@ -32,11 +32,17 @@ impl Forge {
         self.session.account
     }
 
-    /// The reader as chat names a party: their account once the seated key
-    /// holds one, the key itself while it holds none, nobody with no key
-    /// seated at all.
+    /// The reader as a party: her account; nobody while her seated key
+    /// holds none. [`Party::writer`] is the one rule every view gates its
+    /// writes on, as identity's `party_of` refuses them.
     pub(crate) fn me_party(&self) -> Option<Party> {
-        Party::reader(self.my_account(), &self.session.key)
+        Party::writer(self.my_account())
+    }
+
+    /// Whether the reader writes at all: connected, and an account to write
+    /// as. A key that holds none reads everything and writes nothing.
+    pub(crate) fn may_write(&self) -> bool {
+        self.session.connected && self.me_party().is_some()
     }
 
     pub(crate) fn stage(&self, query: &Query) -> Stage<'_> {

@@ -2,7 +2,8 @@
 //! system lines into it, and asks chat about the replies a review drew.
 
 use abi::{Refusal, reason};
-use chat::{Block, MsgRow, Op, Party, PostPolicy, Query, Reply};
+use chat::{Block, MsgRow, Op, PostPolicy, Query, Reply};
+use identity::Party;
 use store::{Reads, Writes};
 
 use crate::Change;

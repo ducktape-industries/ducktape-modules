@@ -24,6 +24,7 @@ describe = []
 abi = { workspace = true }
 describe = { workspace = true }
 borsh = { workspace = true }
+serde = { workspace = true }
 guest = { workspace = true, optional = true }
 module-registry = { workspace = true }
 store = { workspace = true }

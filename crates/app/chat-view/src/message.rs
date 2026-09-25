@@ -8,7 +8,7 @@ use crate::names::mention_token;
 use chat::view::Names;
 
 /// One message as the frame draws it.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChatMessage {
     pub id: String,
     /// 0 for a pending row
@@ -261,9 +261,8 @@ mod tests {
                 MsgRow {
                     seq,
                     time,
-                    author: Party::Account(7),
                     blocks: vec![Block::paragraph("hi")],
-                    ..MsgRow::default()
+                    ..MsgRow::by(Party::Account(7))
                 },
                 &names,
             )

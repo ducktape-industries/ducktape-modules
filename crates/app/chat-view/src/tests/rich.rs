@@ -32,7 +32,6 @@ fn rich_message_keeps_styles_and_dispatches_each_link_by_value() {
                 channel_id: "general".into(),
                 seq: 3,
                 message_id: "rich".into(),
-                author: Party::Account(7),
                 height: 2,
                 blocks: vec![
                     chat::Block::Paragraph(spans),
@@ -46,7 +45,7 @@ fn rich_message_keeps_styles_and_dispatches_each_link_by_value() {
                     }]),
                 ],
                 text: "rich".into(),
-                ..MsgRow::default()
+                ..MsgRow::by(Party::Account(7))
             });
         cx.notify();
     });

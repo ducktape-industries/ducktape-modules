@@ -202,14 +202,13 @@ fn post(
         channel_id: channel_id.clone(),
         seq,
         message_id: message_id.clone(),
-        author: frame.party.clone(),
         height: frame.height,
         time: frame.time,
         text: plain_text(&blocks),
         tags: tags(&blocks),
         blocks,
         thread,
-        ..MsgRow::default()
+        ..MsgRow::by(frame.party.clone())
     };
     fits(&row)?;
     match thread {

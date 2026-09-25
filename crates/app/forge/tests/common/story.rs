@@ -41,19 +41,9 @@ impl Rig {
         rig
     }
 
-    /// The frame the actor's next op runs in, its key resolved through
-    /// identity as the program resolves it.
-    pub fn frame(&self) -> Frame {
-        Frame {
-            party: self.sandbox.party(&self.actor),
-            height: self.height,
-            time: TIME,
-        }
-    }
-
-    /// Who `key` signs as.
+    /// Who `key` signs as; it holds an account.
     pub fn party(&self, key: &[u8]) -> Party {
-        self.sandbox.party(key)
+        self.sandbox.party(key).expect("the key holds an account")
     }
 
     pub fn advance(&mut self) {
@@ -67,10 +57,10 @@ impl Rig {
     #[track_caller]
     pub fn execute(&mut self, op: &Op) -> Result<Vec<u8>, abi::Refusal> {
         self.advance();
-        let frame = self.frame();
+        let (actor, height) = (self.actor.clone(), self.height);
         self.sandbox
             .forge
-            .attempt(|store| forge::execute(store, &frame, op.clone()))?;
+            .attempt(|store| signed_op(store, &actor, height, op))?;
         Ok(self.sandbox.forge.take_output())
     }
 
@@ -78,19 +68,19 @@ impl Rig {
     #[track_caller]
     pub fn refused(&mut self, op: &Op) -> abi::Refusal {
         self.advance();
-        let frame = self.frame();
+        let (actor, height) = (self.actor.clone(), self.height);
         self.sandbox
             .forge
-            .refused(|store| forge::execute(store, &frame, op.clone()))
+            .refused(|store| signed_op(store, &actor, height, op))
     }
 
     pub fn query(&self, query: &Query) -> Result<Vec<u8>, abi::Refusal> {
         forge::query(&self.sandbox, self.height, query.clone())
     }
 
-    pub fn chat_execute(&mut self, party: chat::Party, msg: chat::Op) {
+    pub fn chat_execute(&mut self, party: Party, msg: chat::Op) {
         self.advance();
-        let frame = chat::Frame {
+        let frame = Frame {
             party,
             height: self.height,
             time: TIME,
