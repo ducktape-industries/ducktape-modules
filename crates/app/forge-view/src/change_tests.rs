@@ -109,6 +109,13 @@ fn a_merged_change_wears_its_state_and_offers_nothing_more() {
     let (cx, _view) = change_screen("merged", ChangeTab::Conversation);
     assert!(cx.has_text("merged"), "{:?}", cx.texts());
     assert!(
+        cx.texts()
+            .iter()
+            .any(|text| text.starts_with("Merged into main as ")),
+        "{:?}",
+        cx.texts()
+    );
+    assert!(
         cx.has_text("This change is no longer open"),
         "{:?}",
         cx.texts()
@@ -122,16 +129,25 @@ fn the_conversation_is_the_hidden_chat_channel_and_the_forge_body() {
         cx.find("forge-change-body-text").is_some(),
         "the body is markdown"
     );
-    assert!(cx.has_text("Ada opened this change"), "{:?}", cx.texts());
+    // forge's own lines read from its records, never from their text
+    assert!(cx.has_text("Ada") && cx.has_text("opened this change"));
+    assert!(!cx.has_text("raw forge text"), "{:?}", cx.texts());
+    assert!(!cx.texts().iter().any(|text| text.contains("module:")));
     assert!(cx.has_text("Reading it now"));
     assert!(cx.has_text("Rae"), "a chat handle resolves to a name");
-    assert!(cx.has_text("Forge"), "a system line is the module's own");
     // Three reviews across two pages of the Change reply.
     view.read(|forge| {
         let (_, _, _, reviews) = forge.change().expect("the change landed");
         assert_eq!(reviews.items.len(), 3, "the review cursor was followed");
     });
-    assert!(cx.has_text("Approve") && cx.has_text("Request changes"));
+    assert!(cx.has_text("approved") && cx.has_text("requested changes"));
+    assert!(cx.has_text("2 line comments"), "{:?}", cx.texts());
+    // the change is still open: forge's last line has no ending to name yet
+    assert!(
+        !cx.texts()
+            .iter()
+            .any(|text| text.starts_with("Merged into"))
+    );
     cx.simulate_input("forge-reply", "looks right to me");
     cx.simulate_click("forge-reply-send");
     cx.run_until_parked();

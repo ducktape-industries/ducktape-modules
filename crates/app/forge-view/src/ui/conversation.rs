@@ -4,10 +4,13 @@ use ducktape_view_guest::design;
 use ducktape_view_guest::prelude::*;
 
 use crate::Forge;
-use crate::state::verdict_label;
-use crate::ui::components::{badge, button, empty_state, id, path_text, quiet, short_hex};
+use crate::state::verdict_verb;
+use crate::ui::components::{
+    badge, button, empty_state, id, path_text, quiet, ref_label, short_hex,
+};
 use crate::ui::scroller;
-use forge::Verdict;
+use ducktape_view_guest::view::Loaded;
+use forge::{ChangeState, Verdict};
 
 pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
     let Some((change, _, _, reviews)) = forge.change() else {
@@ -28,68 +31,163 @@ pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
                 )),
         );
     }
-    for review in &reviews.items {
-        let author = forge.key_name(&review.author);
-        let outdated = forge.outdated(&review.draft.commit_oid);
-        let mut card = div()
-            .id(id(format!("forge-review-{}", review.id)))
-            .flex()
-            .flex_col()
-            .gap_1()
-            .p_2()
-            .border_1()
-            .border_color(theme.border)
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(crate::ui::bold(author))
-                    .child(badge(
-                        id(format!("forge-review-verdict-{}", review.id)),
-                        verdict_label(review.draft.verdict),
-                        match review.draft.verdict {
-                            Verdict::Approve => theme.success,
-                            Verdict::RequestChanges => theme.danger,
-                            Verdict::Comment => theme.muted,
-                        },
-                        match review.draft.verdict {
-                            Verdict::Approve => theme.success_soft,
-                            Verdict::RequestChanges => theme.danger_soft,
-                            Verdict::Comment => theme.surface_raised,
-                        },
-                    ))
-                    .child(quiet(
-                        format!("at {}", short_hex(&review.draft.commit_oid)),
-                        theme,
-                    ))
-                    .when(outdated, |element| {
-                        element.child(badge(
-                            id(format!("forge-review-outdated-{}", review.id)),
-                            "outdated",
-                            theme.warning,
-                            theme.warning_soft,
-                        ))
-                    }),
-            );
-        if !review.draft.body.trim().is_empty() {
-            card = card.child(quiet(review.draft.body.clone(), theme));
-        }
-        for comment in &review.draft.comments {
-            card = card.child(quiet(
-                format!(
-                    "{}:{} — {}",
-                    path_text(&comment.path),
-                    comment.line,
-                    comment.body
-                ),
-                theme,
-            ));
-        }
-        column = column.child(card);
+    // Until chat answers, the reviews stand on their own; once it has, each
+    // sits in the timeline where forge posted its line.
+    let placed = |review: &forge::Review| match forge.messages.get(&change.channel) {
+        Some(Loaded::Ready(rows)) => rows.iter().any(|row| row.message_id == review.message_id),
+        _ => false,
+    };
+    for review in reviews.items.iter().filter(|review| !placed(review)) {
+        column = column.child(review_card(forge, review, theme));
     }
     column = column.child(messages(forge, theme));
     column.child(composer(forge, cx, theme)).into_any_element()
+}
+
+/// One review as a timeline event: who, what they concluded, where, and
+/// the line comments it carried.
+fn review_card(forge: &Forge, review: &forge::Review, theme: &Theme) -> AnyElement {
+    let author = forge.key_name(&review.author);
+    let outdated = forge.outdated(&review.draft.commit_oid);
+    let comments = review.draft.comments.len();
+    let mut card = div()
+        .id(id(format!("forge-review-{}", review.id)))
+        .flex()
+        .flex_col()
+        .gap_1()
+        .p_2()
+        .border_1()
+        .border_color(theme.border)
+        .child(
+            div()
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .gap_2()
+                .child(design::avatar(&author, px(20.), theme))
+                .child(crate::ui::bold(author))
+                .child(badge(
+                    id(format!("forge-review-verdict-{}", review.id)),
+                    verdict_verb(review.draft.verdict),
+                    match review.draft.verdict {
+                        Verdict::Approve => theme.success,
+                        Verdict::RequestChanges => theme.danger,
+                        Verdict::Comment => theme.muted,
+                    },
+                    match review.draft.verdict {
+                        Verdict::Approve => theme.success_soft,
+                        Verdict::RequestChanges => theme.danger_soft,
+                        Verdict::Comment => theme.surface_raised,
+                    },
+                ))
+                .child(quiet(
+                    format!("at {}", short_hex(&review.draft.commit_oid)),
+                    theme,
+                ))
+                .when(comments > 0, |element| {
+                    element.child(quiet(line_comments(comments), theme))
+                })
+                .when(outdated, |element| {
+                    element.child(badge(
+                        id(format!("forge-review-outdated-{}", review.id)),
+                        "outdated",
+                        theme.warning,
+                        theme.warning_soft,
+                    ))
+                }),
+        );
+    if !review.draft.body.trim().is_empty() {
+        card = card.child(
+            div()
+                .pl(px(28.))
+                .child(quiet(review.draft.body.clone(), theme)),
+        );
+    }
+    for comment in &review.draft.comments {
+        card = card.child(div().pl(px(28.)).child(quiet(
+            format!(
+                "{}:{} — {}",
+                path_text(&comment.path),
+                comment.line,
+                comment.body
+            ),
+            theme,
+        )));
+    }
+    card.into_any_element()
+}
+
+fn line_comments(n: usize) -> String {
+    match n {
+        1 => "1 line comment".into(),
+        n => format!("{n} line comments"),
+    }
+}
+
+/// One line of the change's history: who did it, if forge recorded it, and
+/// what happened.
+fn event(key: String, who: Option<String>, what: String, theme: &Theme) -> AnyElement {
+    div()
+        .id(id(format!("forge-event-{key}")))
+        .flex()
+        .flex_wrap()
+        .items_center()
+        .gap_2()
+        .px_2()
+        .py_1()
+        .when_some(who, |element, name| {
+            element
+                .child(design::avatar(&name, px(20.), theme))
+                .child(crate::ui::bold(name))
+        })
+        .child(quiet(what, theme))
+        .into_any_element()
+}
+
+/// A line forge itself posted, read from forge's records rather than its
+/// text: the first opened the change, a review's names that review, and
+/// the one other is how the change ended.
+fn forge_line(
+    forge: &Forge,
+    row: &chat::MsgRow,
+    opened: bool,
+    theme: &Theme,
+) -> Option<AnyElement> {
+    let (change, _, _, reviews) = forge.change()?;
+    if let Some(review) = reviews
+        .items
+        .iter()
+        .find(|r| r.message_id == row.message_id)
+    {
+        return Some(review_card(forge, review, theme));
+    }
+    let key = row.message_id.clone();
+    if opened {
+        let author = forge.key_name(&change.author);
+        return Some(event(key, Some(author), "opened this change".into(), theme));
+    }
+    // a line matching no review yet may be one still paging in
+    if reviews.next.is_some() {
+        return None;
+    }
+    match (change.state, &change.merge_oid) {
+        (ChangeState::Merged, Some(oid)) => Some(event(
+            key,
+            None,
+            format!(
+                "Merged into {} as {}",
+                ref_label(&change.into),
+                short_hex(oid)
+            ),
+            theme,
+        )),
+        (ChangeState::Closed, _) => Some(event(key, None, "This change was closed".into(), theme)),
+        _ => None,
+    }
+}
+
+fn is_forge(row: &chat::MsgRow) -> bool {
+    chat::party_of_handle(&row.author) == Some(chat::Party::Module(forge::PROGRAM.into()))
 }
 
 /// The hidden chat channel of this change, in chat's row shape.
@@ -98,53 +196,59 @@ fn messages(forge: &Forge, theme: &Theme) -> AnyElement {
         return div().into_any_element();
     };
     match forge.messages.get(&change.channel) {
-        None
-        | Some(ducktape_view_guest::view::Loaded::Idle)
-        | Some(ducktape_view_guest::view::Loaded::Loading(_)) => {
+        None | Some(Loaded::Idle) | Some(Loaded::Loading(_)) => {
             quiet("Reading the conversation…", theme)
         }
-        Some(ducktape_view_guest::view::Loaded::Failed(refusal)) => div()
+        Some(Loaded::Failed(refusal)) => div()
             .id(id("forge-conversation-refused"))
             .p_2()
             .bg(theme.danger_soft)
             .text_size(design::text::SECONDARY)
             .child(refusal.sentence.clone())
             .into_any_element(),
-        Some(ducktape_view_guest::view::Loaded::Ready(rows)) if rows.is_empty() => empty_state(
+        Some(Loaded::Ready(rows)) if rows.is_empty() => empty_state(
             id("forge-conversation-empty"),
             "No replies yet",
             "This change's channel is quiet.",
             theme,
         )
         .into_any_element(),
-        Some(ducktape_view_guest::view::Loaded::Ready(rows)) => {
+        Some(Loaded::Ready(rows)) => {
+            let opened = rows.iter().find(|row| is_forge(row)).map(|row| row.seq);
             let mut column = div()
                 .id(id("forge-conversation-messages"))
                 .flex()
                 .flex_col()
                 .gap_2();
             for message in rows {
+                if is_forge(message) {
+                    if let Some(line) =
+                        forge_line(forge, message, opened == Some(message.seq), theme)
+                    {
+                        column = column.child(line);
+                    }
+                    continue;
+                }
                 let author = forge.handle_name(&message.author);
                 column = column.child(
                     div()
                         .id(id(format!("forge-message-{}", message.message_id)))
                         .flex()
-                        .flex_col()
-                        .gap_0p5()
+                        .gap_2()
                         .p_2()
                         .bg(theme.surface)
+                        .child(design::avatar(&author, px(20.), theme))
                         .child(
                             div()
                                 .flex()
-                                .gap_2()
-                                .items_center()
+                                .flex_col()
+                                .gap_0p5()
                                 .child(crate::ui::bold(author))
-                                .child(quiet(format!("#{}", message.seq), theme)),
-                        )
-                        .child(
-                            div()
-                                .text_size(design::text::BODY)
-                                .child(message.text.clone()),
+                                .child(
+                                    div()
+                                        .text_size(design::text::BODY)
+                                        .child(message.text.clone()),
+                                ),
                         ),
                 );
             }

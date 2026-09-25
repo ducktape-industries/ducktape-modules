@@ -139,6 +139,32 @@ fn message(seq: u64, author: &str, text: &str) -> chat::MsgRow {
     }
 }
 
+/// Change 1's channel as forge and chat would fill it: forge's own lines
+/// under forge's real message ids (the open, one per review, the merge),
+/// with a reader's reply among them.
+fn forge_lines() -> Vec<chat::MsgRow> {
+    let reviews = ["change-reviewed", "change-reviews-next"]
+        .into_iter()
+        .flat_map(|name| match reply(name) {
+            Reply::Change { reviews, .. } => reviews.items,
+            _ => panic!("{name} is a change"),
+        });
+    let forge_line = |seq: u64, message_id: String| chat::MsgRow {
+        message_id,
+        ..message(seq, "module:forge", "raw forge text")
+    };
+    let mut rows = vec![forge_line(1, "forge:0000000000000001".into())];
+    for review in reviews {
+        rows.push(forge_line(rows.len() as u64 + 1, review.message_id));
+    }
+    rows.push(message(rows.len() as u64 + 1, "acct:8", "Reading it now"));
+    rows.push(forge_line(
+        rows.len() as u64 + 1,
+        "forge:00000000000000ff".into(),
+    ));
+    rows
+}
+
 pub(crate) fn configure(cx: &mut TestAppContext, mode: &'static str) {
     cx.host().handle::<Ask>(move |query| {
         if mode == "refused" && !matches!(query, Query::Repos { .. }) {
@@ -153,10 +179,7 @@ pub(crate) fn configure(cx: &mut TestAppContext, mode: &'static str) {
                 chat::ChatViewReply::Roots(PageReply {
                     height: 1,
                     items: if channel_id == "forge:project:1" {
-                        vec![
-                            message(1, "system", "Ada opened this change"),
-                            message(2, "acct:8", "Reading it now"),
-                        ]
+                        forge_lines()
                     } else {
                         Vec::new()
                     },
