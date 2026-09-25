@@ -1,0 +1,259 @@
+// Every table forge keeps, declared once: the records, the indexes over them and the counters. Git objects are not here: an object's blob id is its oid (`objects`).
+
+use std::collections::BTreeMap;
+
+use abi::{Refusal, reason};
+use gitcore::{Hash, Oid};
+use store::{Item, KeyCodec, Map, Reads, Set, Writes, invalid, not_found};
+
+use crate::contract::{Bounds, Change, Repo, Review, Revision, valid_repo_name};
+use crate::objects::hash_of;
+
+/// The bounds forge was founded with.
+const BOUNDS: Item<Bounds> = Item::new("bounds");
+/// One record per repository, by name.
+const REPOS: Map<String, Repo> = Map::new("p/");
+/// Index: every repository by its last activity, newest first.
+pub const ACTIVITY: Set<(u64, String)> = Set::new("a/");
+/// The keys the owner granted writes to, by repository.
+pub const WRITERS: Set<(String, Vec<u8>)> = Set::new("w/");
+/// Each repository's refs and the oid bytes each points at.
+pub const REFS: Map<(String, RefName), Vec<u8>> = Map::new("r/");
+/// The last change number each repository gave out.
+const NUMBERS: Map<String, u64> = Map::new("n/");
+/// Changes by repository and number.
+pub const CHANGES: Map<(String, u64), Change> = Map::new("c/");
+/// Reviews by repository, change number and review id.
+pub const REVIEWS: Map<(String, u64, u64), Review> = Map::new("v/");
+/// Index: the reviews one key submitted on one change, oldest first.
+pub const AUTHORED: Set<(String, u64, Vec<u8>, u64)> = Set::new("u/");
+/// Index: the changes a key authored, is asked to review, or reviewed.
+pub const INVOLVED: Set<(Vec<u8>, String, u64)> = Set::new("i/");
+/// The last system message id forge posted into chat.
+const MESSAGES: Item<u64> = Item::new("system-message-seq");
+
+/// A ref's full name as the last element of a key: its bytes as they are,
+/// so a scan lists refs in git's byte order (a length-prefixed `Vec<u8>`
+/// would sort them by length first).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RefName(pub Vec<u8>);
+
+impl KeyCodec for RefName {
+    fn encode_key(&self, out: &mut Vec<u8>) {
+        out.extend_from_slice(&self.0);
+    }
+    fn decode_key(bytes: &mut &[u8]) -> Option<Self> {
+        Some(RefName(std::mem::take(bytes).to_vec()))
+    }
+}
+
+/// Stored state that is not what forge wrote: an operator's problem.
+pub(crate) fn storage(sentence: impl Into<String>) -> Refusal {
+    Refusal::new(reason::CORRUPT, sentence)
+}
+
+pub fn save_bounds(store: &mut impl Writes, bounds: &Bounds) {
+    BOUNDS.put(store, bounds);
+}
+
+pub fn load_bounds(store: &impl Reads) -> Result<Bounds, Refusal> {
+    BOUNDS
+        .get(store)?
+        .ok_or_else(|| Refusal::new(reason::PROTOCOL, "the program was founded without bounds"))
+}
+
+pub fn repo_exists(store: &impl Reads, name: &str) -> bool {
+    REPOS.has(store, &name.to_owned())
+}
+
+pub fn load_repo(store: &impl Reads, name: &str) -> Result<Repo, Refusal> {
+    if !valid_repo_name(name) {
+        return Err(invalid(format!("{name:?} is not a repository name")));
+    }
+    REPOS
+        .get(store, &name.to_owned())?
+        .ok_or_else(|| not_found(format!("no repository named {name}")))
+}
+
+/// Stores the record and moves it in the activity index, so the index
+/// holds exactly one row per repository.
+pub fn save_repo(store: &mut impl Writes, name: &str, repo: &Repo) -> Result<(), Refusal> {
+    let name = name.to_owned();
+    if let Some(old) = REPOS.get(store, &name)? {
+        ACTIVITY.remove(store, &(newest_first(old.last_activity), name.clone()));
+    }
+    ACTIVITY.insert(store, &(newest_first(repo.last_activity), name.clone()));
+    REPOS.put(store, &name, repo);
+    Ok(())
+}
+
+/// An activity key: a later height sorts first.
+fn newest_first(height: u64) -> u64 {
+    u64::MAX - height
+}
+
+pub fn repo_hash(repo: &Repo) -> Hash {
+    hash_of(repo.hash)
+}
+
+pub fn is_writer(store: &impl Reads, name: &str, key: &[u8]) -> bool {
+    WRITERS.has(store, &(name.to_owned(), key.to_vec()))
+}
+
+pub fn ref_key(name: &str, reference: &[u8]) -> (String, RefName) {
+    (name.to_owned(), RefName(reference.to_vec()))
+}
+
+/// Every ref of a repository: what a push is checked against and git is told.
+pub fn load_refs(
+    store: &impl Reads,
+    name: &str,
+    hash: Hash,
+) -> Result<BTreeMap<Vec<u8>, Oid>, Refusal> {
+    REFS.scan(store, REFS.prefix_of(&name.to_owned()))?
+        .into_iter()
+        .map(|((_, RefName(reference)), bytes)| {
+            let target = Oid::from_bytes(hash, &bytes).map_err(|error| {
+                Refusal::new(reason::PROTOCOL, format!("ref {reference:?} holds {error}"))
+            })?;
+            Ok((reference, target))
+        })
+        .collect()
+}
+
+pub fn load_ref(
+    store: &impl Reads,
+    name: &str,
+    reference: &[u8],
+    hash: Hash,
+) -> Result<Option<Oid>, Refusal> {
+    REFS.get(store, &ref_key(name, reference))?
+        .map(|bytes| Oid::from_bytes(hash, &bytes).map_err(|e| storage(e.to_string())))
+        .transpose()
+}
+
+pub fn set_ref(store: &mut impl Writes, name: &str, reference: &[u8], target: &Oid) {
+    REFS.put(
+        store,
+        &ref_key(name, reference),
+        &target.as_bytes().to_vec(),
+    );
+}
+
+pub fn delete_ref(store: &mut impl Writes, name: &str, reference: &[u8]) {
+    REFS.remove(store, &ref_key(name, reference));
+}
+
+/// Resolving an op's endpoint reads consensus refs only, never objects.
+pub fn resolve(
+    store: &impl Reads,
+    name: &str,
+    revision: &Revision,
+    hash: Hash,
+) -> Result<Oid, Refusal> {
+    match revision {
+        Revision::Oid(hex) => parse_oid(hash, hex),
+        Revision::Ref(reference) => {
+            if !gitcore::server::valid_ref_name(reference) {
+                return Err(invalid("revision must name a full ref"));
+            }
+            load_ref(store, name, reference, hash)?
+                .ok_or_else(|| not_found("the ref does not exist"))
+        }
+    }
+}
+
+pub fn parse_oid(hash: Hash, hex: &str) -> Result<Oid, Refusal> {
+    let oid = Oid::from_hex(hash, hex)
+        .map_err(|_| invalid("oid has the wrong length or hex for this repo"))?;
+    if oid.is_zero() {
+        return Err(invalid("an object id cannot be zero"));
+    }
+    Ok(oid)
+}
+
+/// The number a new change of this repository takes. Issues would share it.
+pub fn next_number(store: &impl Reads, name: &str) -> Result<u64, Refusal> {
+    next(NUMBERS.get(store, &name.to_owned())?.unwrap_or(0))
+}
+
+/// The next id of a system line forge posts into chat.
+pub fn next_message(store: &mut impl Writes) -> Result<String, Refusal> {
+    let n = MESSAGES
+        .get(store)?
+        .unwrap_or(0)
+        .checked_add(1)
+        .ok_or_else(|| Refusal::new(reason::EXHAUSTED, "system message counter exhausted"))?;
+    MESSAGES.put(store, &n);
+    Ok(format!("forge:{n:016x}"))
+}
+
+/// A counter one step on, refused rather than wrapped.
+pub fn next(n: u64) -> Result<u64, Refusal> {
+    n.checked_add(1)
+        .ok_or_else(|| Refusal::new(reason::EXHAUSTED, "counter exhausted"))
+}
+
+pub fn load_change(store: &impl Reads, repo: &str, n: u64) -> Result<Change, Refusal> {
+    CHANGES
+        .get(store, &(repo.to_owned(), n))?
+        .ok_or_else(|| not_found(format!("no change {repo}#{n}")))
+}
+
+/// Stores the change and keeps [`INVOLVED`] in step with it: its author and
+/// every requested reviewer are involved; a reviewer taken off the request
+/// stays involved only if they reviewed it. A new change claims its number.
+pub fn save_change(store: &mut impl Writes, repo: &str, change: &Change) -> Result<(), Refusal> {
+    let row = (repo.to_owned(), change.n);
+    match CHANGES.get(store, &row)? {
+        None => NUMBERS.put(store, &row.0, &change.n),
+        Some(old) => {
+            let dropped: Vec<Vec<u8>> = old
+                .reviewers
+                .into_iter()
+                .filter(|key| {
+                    !change.reviewers.contains(key)
+                        && *key != change.author
+                        && !has_reviewed(store, repo, change.n, key)
+                })
+                .collect();
+            for key in dropped {
+                INVOLVED.remove(store, &(key, row.0.clone(), row.1));
+            }
+        }
+    }
+    for key in std::iter::once(&change.author).chain(&change.reviewers) {
+        involve(store, key, repo, change.n);
+    }
+    CHANGES.put(store, &row, change);
+    Ok(())
+}
+
+pub fn involve(store: &mut impl Writes, key: &[u8], repo: &str, n: u64) {
+    INVOLVED.insert(store, &(key.to_vec(), repo.to_owned(), n));
+}
+
+fn has_reviewed(store: &impl Reads, repo: &str, n: u64, key: &[u8]) -> bool {
+    !store
+        .scan(
+            AUTHORED
+                .prefix_of(&(repo.to_owned(), n, key.to_vec()))
+                .limit(1),
+        )
+        .is_empty()
+}
+
+pub fn save_review(store: &mut impl Writes, repo: &str, n: u64, review: &Review) {
+    REVIEWS.put(store, &(repo.to_owned(), n, review.id), review);
+    AUTHORED.insert(
+        store,
+        &(repo.to_owned(), n, review.author.clone(), review.id),
+    );
+    involve(store, &review.author, repo, n);
+}
+
+pub fn load_review(store: &impl Reads, repo: &str, n: u64, id: u64) -> Result<Review, Refusal> {
+    REVIEWS
+        .get(store, &(repo.to_owned(), n, id))?
+        .ok_or_else(|| storage("authored review missing"))
+}

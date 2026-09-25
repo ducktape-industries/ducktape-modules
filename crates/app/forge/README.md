@@ -15,7 +15,12 @@ only. No legacy wire/layout conversion exists. Found this version with its new
   OIDs and atomically changes the target ref and optional change record. It does
   not inspect locally held objects or enforce review verdicts.
 - Changes keep their title, body, author key, and lifecycle on the forge record.
-  `item-number/<repo>` allocates the shared future issue/change number space.
+  A repository's number counter allocates the shared future issue/change number space.
+- Every table is declared once in `src/state.rs` as a typed `store::Map`/`Set`/`Item`:
+  records (repos, refs, changes, reviews), the indexes over them (activity,
+  involvement, authored reviews) and the counters. A remove path takes its index
+  rows with it. Git objects are the one exception: an object is the blob whose
+  id is its oid, with no table between them (`src/objects.rs`).
 - Forge queues chat creation for `forge:<repo>:<n>` and system lines for opening,
   closing, merging, and submitting a review. Chat owns all conversation replies.
   The host commits the record and emitted queue items atomically; delivery is in
@@ -84,8 +89,8 @@ page. Missing current change refs are `None` on the detail, so a deleted branch
 does not make the conversation or review history unreadable.
 
 `ChangeFilter` combines optional state, author key, and involvement key with AND.
-Involvement means author, requested reviewer, or submitted reviewer, including
-historical participation. Chat-only participation is represented by chat itself.
+Involvement means author, requested reviewer, or submitted reviewer. A reviewer
+taken off the request stays involved only if they submitted a review. Chat-only participation is represented by chat itself.
 Judgment additionally joins ordinary chat-authored threads and **all** reviews
 by the key, not just its latest review. The newest answered root is returned as
 `ReplyAttention { review: Option<u64>, root_seq, last_reply_seq }`; `None` identifies
@@ -170,10 +175,11 @@ have derived read budgets (`2 * log_walk + 1` and `8 * log_walk + tree_walk`).
 `diff_bytes` bounds aggregate object bytes read, including metadata; existing
 `merge_cost` bounds Myers edit distance per file. `record_bytes` bounds each
 encoded change/review; `MAX_REVIEW_COMMENTS`, `MAX_REVIEWERS`, `MAX_TITLE_BYTES`,
-`MAX_PATH_BYTES`, and `MAX_REPO_NAME` are exported contract constants. Repo names
+`MAX_PATH_BYTES`, `MAX_KEY_BYTES` (a granted or requested key) and `MAX_REPO_NAME`
+are exported contract constants; a configured head is at most `MAX_PATH_BYTES`. Repo names
 are at most 37 bytes so even `forge:<repo>:<u64::MAX>` fits chat's channel ID.
 
-A UI query failure is `Reply::Refused { height, reason, sentence }`. Stable reasons
+A UI query failure is an ABI `Refusal { reason, sentence }`. Stable reasons
 include `object_not_held`, `capacity`, `invalid_input`, `not_found`, `stale`, and
 `unexpected_reply`. Operation failures use ABI `Refusal`, including `unauthorized`
 and `wrong_state`; no record/emit survives a rejected operation. Malformed Borsh

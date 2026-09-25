@@ -65,15 +65,11 @@ pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
             ))
             .into_any_element();
     }
-    let names = forge.names.ready();
     let mut list = scroller("forge-changes-list");
     for (summary, judgment) in shown {
         let n = summary.n;
         let open = cx.listener(move |forge, _: &ClickEvent, _, cx| forge.open_change(Some(n), cx));
-        let author = names.map_or_else(
-            || crate::ui::components::short_hex(&abi::hex(&summary.author)),
-            |names| names.key(&summary.author),
-        );
+        let author = forge.key_name(&summary.author);
         let mut line = row(id(format!("forge-change-{n}")), theme)
             .on_click(open)
             .cell(
@@ -195,7 +191,7 @@ fn filters(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement 
     bar.child(div().flex_1())
         .child(
             Input::new(id("forge-changes-search"))
-                .h(px(26.))
+                .h(design::size::ROW)
                 .w(px(220.))
                 .px_2()
                 .border_1()
@@ -257,7 +253,7 @@ pub(crate) fn form(
         ))
         .child(
             Input::new(id("forge-change-title"))
-                .h(px(28.))
+                .h(design::size::CONTROL)
                 .w_full()
                 .px_2()
                 .border_1()
@@ -271,7 +267,7 @@ pub(crate) fn form(
         )
         .child(
             Input::new(id("forge-change-body"))
-                .h(px(28.))
+                .h(design::size::CONTROL)
                 .w_full()
                 .px_2()
                 .border_1()

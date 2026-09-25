@@ -4,21 +4,26 @@ use std::cell::Cell;
 
 use abi::{BlobHeader, BlobId, HashKind, Refusal};
 use gitcore::{Error, Hash, Kind, Object, Objects, Oid};
-use store::{Reads, Writes};
+use store::{Reads, Writes, not_found};
+
+/// A different serving node or object replication can satisfy this query.
+pub(crate) fn object_not_held(oid: impl std::fmt::Display) -> Refusal {
+    not_found(format!("object {oid} is not held by this node"))
+}
 
 /// Reads objects; a `put` computes the id and persists nothing (a compare
 /// may build a prospective tree off consensus). A push writes through
-/// [`Writing`].
-pub struct Store<'a, S: Reads> {
+/// [`ObjectWriter`].
+pub struct ObjectStore<'a, S: Reads> {
     sandbox: &'a S,
     hash: Hash,
     budget: Option<Cell<(u64, u64)>>,
     max_object_size: u64,
 }
 
-impl<'a, S: Reads> Store<'a, S> {
-    pub fn new(sandbox: &'a S, hash: Hash) -> Store<'a, S> {
-        Store {
+impl<'a, S: Reads> ObjectStore<'a, S> {
+    pub fn new(sandbox: &'a S, hash: Hash) -> ObjectStore<'a, S> {
+        ObjectStore {
             sandbox,
             hash,
             budget: None,
@@ -41,7 +46,7 @@ impl<'a, S: Reads> Store<'a, S> {
     }
 }
 
-impl<S: Reads> Objects for Store<'_, S> {
+impl<S: Reads> Objects for ObjectStore<'_, S> {
     fn get(&self, id: &Oid) -> gitcore::Result<Option<Object>> {
         if let Some(budget) = &self.budget {
             let header = match self.sandbox.blob_stat(blob_id_of(id)) {
@@ -76,15 +81,15 @@ fn get(sandbox: &impl Reads, id: &Oid) -> gitcore::Result<Option<Object>> {
 
 /// The object store a push writes into; a refused blob write is kept for
 /// the caller to hand back (`gitcore` sees only `Error::Storage`).
-pub struct Writing<'a, S: Writes> {
+pub struct ObjectWriter<'a, S: Writes> {
     sandbox: &'a mut S,
     hash: Hash,
     pub refused: Option<Refusal>,
 }
 
-impl<'a, S: Writes> Writing<'a, S> {
+impl<'a, S: Writes> ObjectWriter<'a, S> {
     pub fn new(sandbox: &'a mut S, hash: Hash) -> Self {
-        Writing {
+        ObjectWriter {
             sandbox,
             hash,
             refused: None,
@@ -92,7 +97,7 @@ impl<'a, S: Writes> Writing<'a, S> {
     }
 }
 
-impl<S: Writes> Objects for Writing<'_, S> {
+impl<S: Writes> Objects for ObjectWriter<'_, S> {
     fn get(&self, id: &Oid) -> gitcore::Result<Option<Object>> {
         get(&*self.sandbox, id)
     }

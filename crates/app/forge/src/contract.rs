@@ -110,6 +110,24 @@ pub enum Op {
     },
 }
 
+impl Op {
+    /// The repository every op acts on.
+    pub fn repo(&self) -> &str {
+        match self {
+            Op::Create { repo, .. }
+            | Op::Configure { repo, .. }
+            | Op::Grant { repo, .. }
+            | Op::Revoke { repo, .. }
+            | Op::Push { repo, .. }
+            | Op::Merge { repo, .. }
+            | Op::ChangeOpen { repo, .. }
+            | Op::ChangeEdit { repo, .. }
+            | Op::ChangeClose { repo, .. }
+            | Op::ReviewSubmit { repo, .. } => repo,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Ord, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Service {
     ReceivePack,
@@ -217,6 +235,7 @@ impl Query {
         }
     }
 
+    /// [`Query::page`], to continue a listing with its `next` cursor.
     pub fn page_mut(&mut self) -> Option<&mut Page> {
         match self {
             Query::Repos { page }
@@ -329,6 +348,9 @@ pub enum OpReply {
 }
 
 pub const MAX_REPO_NAME: usize = 37; // forge:<repo>:<u64> fits chat's 64-byte id.
+/// The longest signing key a writer or reviewer is named by (a BLS key is 96).
+pub const MAX_KEY_BYTES: usize = 128;
+
 pub fn valid_repo_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= MAX_REPO_NAME

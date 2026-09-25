@@ -1,15 +1,15 @@
 //! Object reads over the existing loose-object store; no pack parsing and no persistent writes.
 use crate::contract::*;
-use crate::ops::{cap, object_not_held, refusal_of};
-use crate::repo::{load_repo, parse_oid, repo_hash, resolve};
-use crate::store::Store;
+use crate::objects::{ObjectStore, object_not_held};
+use crate::ops::{cap, refusal_of};
+use crate::state::{load_repo, parse_oid, repo_hash, resolve};
 use abi::Refusal;
 use gitcore::{Commit, Hash, Kind, Mode, Objects, Oid, Signature, Tag, Tree};
 use std::collections::BTreeSet;
 use store::{Listing, Reads, invalid, not_found};
 
 pub struct Reading<'a, S: Reads> {
-    pub store: Store<'a, S>,
+    pub store: ObjectStore<'a, S>,
     pub hash: Hash,
     pub bounds: &'a Bounds,
 }
@@ -149,7 +149,7 @@ pub fn answer<S: Reads>(
         _ => bounds.tree_walk,
     };
     let mut r = Reading {
-        store: Store::querying(s, hash, bounds, reads),
+        store: ObjectStore::querying(s, hash, bounds, reads),
         hash,
         bounds,
     };
@@ -182,7 +182,7 @@ pub fn answer<S: Reads>(
             }
         }
         Query::Tree { at, path, .. } => {
-            crate::changes::path(path, true)?;
+            crate::changes::check_path(path, true)?;
             let root = r.tree_id(at)?;
             let tree = if path.is_empty() {
                 root
@@ -308,8 +308,7 @@ mod tests {
             refs_count: 0,
             last_activity: 0,
         };
-        s.state
-            .insert(crate::repo::repo_key("r"), abi::encode(&repo));
+        crate::state::save_repo(&mut s, "r", &repo).unwrap();
         let page = store::Page::default();
         let diff = Query::Diff {
             repo: "r".into(),

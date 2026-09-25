@@ -7,7 +7,7 @@ use abi::{Refusal, Scan};
 use borsh::{BorshDeserialize, BorshSerialize};
 
 use crate::key::KeyCodec;
-use crate::page::{Page, PageReply};
+use crate::page::{Listing, Page, PageReply};
 use crate::refuse::corrupt;
 use crate::{Reads, Writes};
 
@@ -100,10 +100,21 @@ impl<K: KeyCodec, V: BorshSerialize + BorshDeserialize> Map<K, V> {
         page: &Page,
         height: u64,
     ) -> Result<PageReply<(K, V)>, Refusal> {
-        let prefix = self.key(head);
-        let listing = page.listing(prefix.clone(), height)?;
+        let listing = page.listing(self.key(head), height)?;
+        self.page_of(store, head, &listing)
+    }
+
+    /// One page of the keys whose leading elements are `head`, over a
+    /// listing the program opened itself (one whose cursors are bound to
+    /// more than the prefix: the whole query, a height).
+    pub fn page_of<H: KeyCodec>(
+        &self,
+        store: &impl Reads,
+        head: &H,
+        listing: &Listing,
+    ) -> Result<PageReply<(K, V)>, Refusal> {
         let rows = store
-            .scan(listing.scan_ahead(&prefix))
+            .scan(listing.scan_ahead(&self.key(head)))
             .into_iter()
             .map(|entry| {
                 let key = decode_key(self.prefix, &entry.key)?;
@@ -183,6 +194,15 @@ impl<K: KeyCodec> Set<K> {
             .map
             .range_of(store, head, page, height)?
             .map(|(k, ())| k))
+    }
+
+    pub fn page_of<H: KeyCodec>(
+        &self,
+        store: &impl Reads,
+        head: &H,
+        listing: &Listing,
+    ) -> Result<PageReply<K>, Refusal> {
+        Ok(self.map.page_of(store, head, listing)?.map(|(k, ())| k))
     }
 
     pub fn prefix(&self) -> &'static str {

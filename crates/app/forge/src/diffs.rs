@@ -15,7 +15,7 @@ pub fn query<S: Reads>(
     paging: &Listing,
 ) -> Result<Reply, Refusal> {
     if let Some(path) = path {
-        crate::changes::path(path, false)?;
+        crate::changes::check_path(path, false)?;
     }
     let old = base.as_ref().map(|s| r.tree_id(s)).transpose()?;
     let new = r.tree_id(head)?;

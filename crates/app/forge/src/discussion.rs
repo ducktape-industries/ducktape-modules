@@ -1,13 +1,16 @@
-//! Chat owns conversations. Forge stores review anchors and queues deterministic system lines.
-use crate::Change;
-use crate::ops::storage;
-use abi::Refusal;
-use chat::{Block, ChatMsg, ChatViewQuery, ChatViewReply, PostPolicy};
+// Chat owns conversations: forge opens a change's channel, posts its system lines into it, and asks chat about the replies a review drew.
+
+use abi::{Refusal, reason};
+use chat::{Block, ChatMsg, ChatViewQuery, ChatViewReply, MsgRow, Party, PostPolicy};
 use store::{Reads, Writes};
 
-pub fn create<S: Writes>(s: &mut S, repo: &str, change: &Change) {
+use crate::Change;
+use crate::state::storage;
+
+/// Queues the change's channel. Chat creates it in the next block.
+pub fn create(store: &mut impl Writes, repo: &str, change: &Change) {
     emit(
-        s,
+        store,
         ChatMsg::CreateChannel {
             channel_id: change.channel.clone(),
             name: format!("{repo}#{}", change.n),
@@ -15,25 +18,11 @@ pub fn create<S: Writes>(s: &mut S, repo: &str, change: &Change) {
         },
     );
 }
-fn emit<S: Writes>(s: &mut S, message: ChatMsg) {
-    s.emit(chat::PROGRAM, abi::encode(&message));
-}
-pub fn message_id<S: Writes>(s: &mut S) -> Result<String, Refusal> {
-    let key = b"system-message-seq";
-    let n: u64 = s
-        .get(key)
-        .map(|b| abi::decode(&b))
-        .transpose()?
-        .unwrap_or(0);
-    let n = n
-        .checked_add(1)
-        .ok_or_else(|| Refusal::new(abi::reason::EXHAUSTED, "system message counter exhausted"))?;
-    s.set(key.to_vec(), abi::encode(&n));
-    Ok(format!("forge:{n:016x}"))
-}
-pub fn post<S: Writes>(s: &mut S, change: &Change, message_id: String, text: String) {
+
+/// Queues one system line into the change's channel.
+pub fn post(store: &mut impl Writes, change: &Change, message_id: String, text: String) {
     emit(
-        s,
+        store,
         ChatMsg::PostMessage {
             channel_id: change.channel.clone(),
             message_id,
@@ -42,35 +31,41 @@ pub fn post<S: Writes>(s: &mut S, change: &Change, message_id: String, text: Str
         },
     );
 }
-pub fn message<S: Reads>(s: &S, id: &str) -> Result<Option<chat::MsgRow>, Refusal> {
-    let request = abi::encode(&ChatViewQuery::MessageById {
+
+fn emit(store: &mut impl Writes, message: ChatMsg) {
+    store.emit(chat::PROGRAM, abi::encode(&message));
+}
+
+/// The chat root a review posted, by its message id.
+pub fn message(store: &impl Reads, id: &str) -> Result<Option<MsgRow>, Refusal> {
+    let query = ChatViewQuery::MessageById {
         message_id: id.into(),
-    });
-    let bytes = s.query(chat::PROGRAM, request)?;
-    match abi::decode::<ChatViewReply>(&bytes).map_err(|e| storage(e.sentence))? {
+    };
+    match ask(store, &query)? {
         ChatViewReply::Message(row) => Ok(row),
-        _ => Err(Refusal::new(
-            abi::reason::UNEXPECTED_REPLY,
-            "chat must answer MessageById with Message",
+        _ => Err(unexpected("chat must answer MessageById with Message")),
+    }
+}
+
+/// The newest thread in `channel` that `key` started and someone answered.
+pub fn attention(store: &impl Reads, channel: &str, key: &[u8]) -> Result<Option<MsgRow>, Refusal> {
+    let query = ChatViewQuery::ThreadAttention {
+        channel_id: channel.into(),
+        author: Party::Key(key.to_vec()),
+    };
+    match ask(store, &query)? {
+        ChatViewReply::Attention(row) => Ok(row),
+        _ => Err(unexpected(
+            "chat must answer ThreadAttention with Attention",
         )),
     }
 }
 
-pub fn attention<S: Reads>(
-    s: &S,
-    channel: &str,
-    key: &[u8],
-) -> Result<Option<chat::MsgRow>, Refusal> {
-    let request = abi::encode(&ChatViewQuery::ThreadAttention {
-        channel_id: channel.into(),
-        author: chat::Party::Key(key.to_vec()),
-    });
-    let bytes = s.query(chat::PROGRAM, request)?;
-    match abi::decode::<ChatViewReply>(&bytes).map_err(|e| storage(e.sentence))? {
-        ChatViewReply::Attention(row) => Ok(row),
-        _ => Err(Refusal::new(
-            abi::reason::UNEXPECTED_REPLY,
-            "chat must answer ThreadAttention with Attention",
-        )),
-    }
+fn ask(store: &impl Reads, query: &ChatViewQuery) -> Result<ChatViewReply, Refusal> {
+    let bytes = store.query(chat::PROGRAM, abi::encode(query))?;
+    abi::decode(&bytes).map_err(|e| storage(e.sentence))
+}
+
+fn unexpected(sentence: &str) -> Refusal {
+    Refusal::new(reason::UNEXPECTED_REPLY, sentence)
 }

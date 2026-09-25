@@ -341,9 +341,17 @@ pub(crate) struct Pending {
     /// the screen the row belongs to
     pub scope: String,
     pub label: String,
-    pub error: String,
+    pub progress: Progress,
+}
+
+/// Where an issued operation stands.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Progress {
+    Submitting,
     /// accepted by the node, waiting for the block that carries it
-    pub accepted: bool,
+    Accepted,
+    /// refused, with the program's sentence
+    Refused(String),
 }
 
 #[derive(Serialize, Deserialize)]

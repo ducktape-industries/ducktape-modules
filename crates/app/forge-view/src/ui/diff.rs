@@ -275,13 +275,9 @@ fn published_comments(forge: &Forge) -> Vec<Anchored> {
     let Some((_, _, _, reviews)) = forge.change() else {
         return Vec::new();
     };
-    let names = forge.names.ready();
     let mut all = Vec::new();
     for review in &reviews.items {
-        let author = names.map_or_else(
-            || crate::ui::components::short_hex(&abi::hex(&review.author)),
-            |names| names.key(&review.author),
-        );
+        let author = forge.key_name(&review.author);
         let outdated = forge.outdated(&review.draft.commit_oid);
         for comment in &review.draft.comments {
             all.push((
@@ -478,7 +474,7 @@ pub(crate) fn composer(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) ->
         .child(quiet(open.anchor(), theme))
         .child(
             Input::new(id("forge-comment-body"))
-                .h(px(28.))
+                .h(design::size::CONTROL)
                 .w_full()
                 .px_2()
                 .border_1()

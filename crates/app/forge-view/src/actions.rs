@@ -1,5 +1,4 @@
-//! Everything an event changes: where the reader is, what she has staged,
-//! and the operations she issues.
+//! The operations the reader issues, and the forms that stage them.
 //!
 //! An operation is optimistic: the row that issued it says "Submitting…"
 //! straight away, keeps saying so while the block that carries it is on its
@@ -9,220 +8,37 @@ use ducktape_view_guest::doors::HostId;
 use ducktape_view_guest::view::Submit;
 use ducktape_view_guest::{Context, Window};
 
-use crate::Stage;
 use crate::api::{ChatApi, SubmitForge};
-use crate::state::{
-    ChangeForm, ChangeTab, Dock, Filter, Forge, NewRepo, Pending, RepoTab, SettingsForm,
-    change_key, unhex,
-};
-use crate::ui::markdown::Target;
-use forge::{Mergeability, Op, Reply, Revision, Settings, valid_repo_name};
+use crate::state::{ChangeForm, Forge, NewRepo, Pending, Progress, change_key, unhex};
+use forge::{Mergeability, Op, Revision, Settings, valid_repo_name};
+
+/// Why a change cannot merge from this view.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MergeBlock {
+    Loading,
+    NotOpen,
+    EndpointGone,
+    Comparing,
+    UpToDate,
+    Unrelated,
+    Diverged,
+}
+
+impl MergeBlock {
+    pub fn sentence(self) -> &'static str {
+        match self {
+            Self::Loading => "This change has not loaded yet",
+            Self::NotOpen => "This change is no longer open",
+            Self::EndpointGone => "One of the endpoints of this change no longer exists",
+            Self::Comparing => "Comparing the endpoints…",
+            Self::UpToDate => "The target already contains this change",
+            Self::Unrelated => "The endpoints share no history",
+            Self::Diverged => "The endpoints diverged: merge with git and push the result",
+        }
+    }
+}
 
 impl Forge {
-    // --------------------------------------------------------- navigation
-
-    fn moved(&mut self, cx: &mut Context<Self>) {
-        self.notice.clear();
-        cx.notify();
-        self.sync(cx);
-    }
-
-    pub(crate) fn open_repos(&mut self, cx: &mut Context<Self>) {
-        self.nav = Default::default();
-        self.moved(cx);
-    }
-
-    /// A `host.route` item: `<name>` opens that repository; anything else
-    /// opens the list.
-    pub(crate) fn open_route(&mut self, route: &str, cx: &mut Context<Self>) {
-        match route.split('/').collect::<Vec<_>>().as_slice() {
-            [name] if !name.is_empty() => self.open_repo((*name).to_owned(), cx),
-            _ => self.open_repos(cx),
-        }
-    }
-
-    pub(crate) fn open_repo(&mut self, name: String, cx: &mut Context<Self>) {
-        self.nav = Default::default();
-        self.nav.repo = Some(name);
-        self.moved(cx);
-    }
-
-    pub(crate) fn open_tab(&mut self, tab: RepoTab, cx: &mut Context<Self>) {
-        // the tree keeps what it had open across tabs
-        let kept = std::mem::take(&mut self.nav);
-        self.nav.repo = kept.repo;
-        self.nav.rev = kept.rev;
-        self.nav.expanded = kept.expanded;
-        self.nav.cursor = kept.cursor;
-        self.nav.blob = kept.blob;
-        self.nav.goto = kept.goto;
-        self.nav.tab = tab;
-        if tab == RepoTab::Settings {
-            let head = self.default_head();
-            let (allow_force, allow_delete) = self
-                .repo()
-                .map(|(info, _, _)| {
-                    (
-                        info.repo.settings.allow_force,
-                        info.repo.settings.allow_delete,
-                    )
-                })
-                .unwrap_or((false, false));
-            self.repo_settings = Some(SettingsForm {
-                head,
-                allow_force,
-                allow_delete,
-                grant: String::new(),
-            });
-        }
-        self.moved(cx);
-    }
-
-    pub(crate) fn pick_ref(&mut self, name: Vec<u8>, cx: &mut Context<Self>) {
-        self.nav.rev = Some(name);
-        self.nav.expanded.clear();
-        self.nav.cursor = None;
-        self.nav.blob = None;
-        self.nav.commit = None;
-        self.moved(cx);
-    }
-
-    pub(crate) fn open_file(&mut self, path: Vec<u8>, oid: String, cx: &mut Context<Self>) {
-        self.nav.cursor = Some(path.clone());
-        self.nav.blob = Some((path, oid));
-        self.moved(cx);
-    }
-
-    /// A pressed link in a document whose folder is `dir`: the web through
-    /// the host, a file of this repository in the Code tab (the root README
-    /// in its own tab).
-    pub(crate) fn follow_link(&mut self, dir: &[u8], dest: &str, cx: &mut Context<Self>) {
-        match crate::ui::markdown::target(dir, dest) {
-            Some(Target::Web(url)) => cx.host().open_link(&url),
-            Some(Target::Path(path)) => self.open_path(path, cx),
-            None => {}
-        }
-    }
-
-    /// Opens a file by its path alone: its folders unfold, and the file
-    /// opens once the tree that holds it names its blob.
-    pub(crate) fn open_path(&mut self, path: Vec<u8>, cx: &mut Context<Self>) {
-        if self.readme().is_some_and(|(name, _)| name == path) {
-            return self.open_tab(RepoTab::Readme, cx);
-        }
-        let mut dir = &path[..];
-        while let Some(at) = dir.iter().rposition(|b| *b == b'/') {
-            dir = &dir[..at];
-            self.nav.expanded.insert(dir.to_vec());
-        }
-        self.nav.goto = Some(path);
-        self.open_tab(RepoTab::Code, cx);
-    }
-
-    /// Lands a pending [`Self::open_path`] once its folder's tree is read.
-    pub(crate) fn land_goto(&mut self) {
-        let Some(path) = self.nav.goto.clone() else {
-            return;
-        };
-        let split = path.iter().rposition(|b| *b == b'/');
-        let (dir, name) = match split {
-            Some(at) => (path[..at].to_vec(), &path[at + 1..]),
-            None => (Vec::new(), &path[..]),
-        };
-        let Some(query) = self.tree_query(dir) else {
-            return;
-        };
-        let entry = match self.stage(&query) {
-            Stage::Loading => return,
-            Stage::Failed(_) => None,
-            Stage::Ready(Reply::Tree { page, .. }) => page
-                .items
-                .iter()
-                .find(|entry| entry.name == name)
-                .map(|entry| (entry.kind, entry.oid.clone())),
-            Stage::Ready(_) => None,
-        };
-        self.nav.goto = None;
-        self.nav.cursor = Some(path.clone());
-        match entry {
-            Some((forge::EntryKind::Directory, _)) => {
-                self.nav.expanded.insert(path);
-            }
-            Some((_, oid)) => self.nav.blob = Some((path, oid)),
-            None => self.notice = format!("No {} on this ref.", String::from_utf8_lossy(&path)),
-        }
-    }
-
-    pub(crate) fn nav_close_blob(&mut self, cx: &mut Context<Self>) {
-        self.nav.blob = None;
-        self.moved(cx);
-    }
-
-    pub(crate) fn open_commit(&mut self, oid: Option<String>, cx: &mut Context<Self>) {
-        self.nav.commit = oid;
-        self.moved(cx);
-    }
-
-    pub(crate) fn open_change(&mut self, n: Option<u64>, cx: &mut Context<Self>) {
-        self.nav.change = n;
-        self.nav.change_tab = ChangeTab::default();
-        self.nav.diff_path = None;
-        self.nav.dock = None;
-        self.reply.clear();
-        self.moved(cx);
-    }
-
-    pub(crate) fn open_change_tab(&mut self, tab: ChangeTab, cx: &mut Context<Self>) {
-        self.nav.change_tab = tab;
-        self.nav.diff_path = None;
-        self.moved(cx);
-    }
-
-    pub(crate) fn set_filter(&mut self, filter: Filter, cx: &mut Context<Self>) {
-        self.filter = filter;
-        self.moved(cx);
-    }
-
-    pub(crate) fn toggle_dock(&mut self, dock: Dock, cx: &mut Context<Self>) {
-        self.nav.dock = (self.nav.dock != Some(dock)).then_some(dock);
-        self.layout.dock_open = self.nav.dock.is_some();
-        cx.notify();
-    }
-
-    pub(crate) fn single_file(&mut self, path: Option<Vec<u8>>, cx: &mut Context<Self>) {
-        self.nav.diff_path = path;
-        cx.notify();
-    }
-
-    pub(crate) fn toggle_viewed(&mut self, path: &[u8], cx: &mut Context<Self>) {
-        let Some(key) = self.file_key(path) else {
-            return;
-        };
-        if !self.viewed.remove(&key) {
-            self.viewed.insert(key);
-        }
-        cx.notify();
-    }
-
-    pub(crate) fn file_key(&self, path: &[u8]) -> Option<String> {
-        Some(format!(
-            "{}:{}",
-            change_key(self.nav().repo.as_deref()?, self.nav().change?),
-            String::from_utf8_lossy(path)
-        ))
-    }
-
-    pub(crate) fn measured(&mut self, width: f32, height: f32, cx: &mut Context<Self>) {
-        if (self.layout.width, self.layout.height) == (width, height) {
-            return;
-        }
-        self.layout.width = width;
-        self.layout.height = height;
-        cx.notify();
-    }
-
-    // ----------------------------------------------------------- the ops
-
     /// One operation, optimistic in `scope` until a query reconciles it.
     pub(crate) fn submit(&mut self, op: Op, scope: String, label: &str, cx: &mut Context<Self>) {
         self.next_pending += 1;
@@ -231,23 +47,23 @@ impl Forge {
             id,
             scope,
             label: label.to_owned(),
-            error: String::new(),
-            accepted: false,
+            progress: Progress::Submitting,
         });
         cx.notify();
         cx.spawn(async move |this, cx| {
             let result = cx.host().ask::<SubmitForge>(op).await;
+            // the view is gone: nobody is waiting on this row
             let _ = this.update(cx, |forge, cx| {
                 cx.notify();
                 let Some(op) = forge.pending.iter_mut().find(|op| op.id == id) else {
                     return;
                 };
                 match result {
-                    Ok(_) => op.accepted = true,
-                    Err(refusal) => op.error = refusal.sentence.clone(),
-                }
-                if forge.pending.iter().any(|op| op.id == id && op.accepted) {
-                    forge.refresh(cx);
+                    Ok(_) => {
+                        op.progress = Progress::Accepted;
+                        forge.refresh(cx);
+                    }
+                    Err(refusal) => op.progress = Progress::Refused(refusal.sentence),
                 }
             });
         })
@@ -380,34 +196,32 @@ impl Forge {
         );
     }
 
-    /// Why merging is not offered, as a sentence — empty when it is.
+    /// Why merging is not offered, or `None` when it is.
     ///
     /// The program CASes both heads over a result the client publishes, and
     /// a view holds no Git: it can name the source commit as the result of a
     /// fast-forward and nothing else.
-    pub(crate) fn merge_refusal(&self) -> String {
+    pub(crate) fn merge_block(&self) -> Option<MergeBlock> {
         let Some((change, source, target, _)) = self.change() else {
-            return "This change has not loaded yet".into();
+            return Some(MergeBlock::Loading);
         };
-        if !matches!(change.state, forge::ChangeState::Open) {
-            return "This change is no longer open".into();
+        if change.state != forge::ChangeState::Open {
+            return Some(MergeBlock::NotOpen);
         }
         if source.is_none() || target.is_none() {
-            return "One of the endpoints of this change no longer exists".into();
+            return Some(MergeBlock::EndpointGone);
         }
         match self.compare().map(|c| c.mergeability) {
-            None => "Comparing the endpoints…".into(),
-            Some(Mergeability::FastForward) => String::new(),
-            Some(Mergeability::UpToDate) => "The target already contains this change".into(),
-            Some(Mergeability::Unrelated) => "The endpoints share no history".into(),
-            Some(Mergeability::Diverged) => {
-                "The endpoints diverged: merge with git and push the result".into()
-            }
+            None => Some(MergeBlock::Comparing),
+            Some(Mergeability::FastForward) => None,
+            Some(Mergeability::UpToDate) => Some(MergeBlock::UpToDate),
+            Some(Mergeability::Unrelated) => Some(MergeBlock::Unrelated),
+            Some(Mergeability::Diverged) => Some(MergeBlock::Diverged),
         }
     }
 
     pub(crate) fn merge(&mut self, cx: &mut Context<Self>) {
-        if !self.merge_refusal().is_empty() {
+        if self.merge_block().is_some() {
             return;
         }
         let Some(repo) = self.nav().repo.clone() else {
