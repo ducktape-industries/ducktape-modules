@@ -283,6 +283,9 @@ fn blocks(
     cx: &mut Context<Chat>,
     theme: &Theme,
 ) -> Vec<AnyElement> {
+    if let Some((program, code)) = &message.system {
+        return vec![program_post(chat, message, program, code, cx, theme)];
+    }
     if message.blocks.is_empty() {
         let text = div()
             .id(format!("chat-message-{}-text", message.id))
@@ -378,10 +381,48 @@ fn header(message: &ChatMessage, theme: &Theme) -> impl IntoElement {
         ));
     }
     if message.height > 0 {
-        let id = format!("chat-message-{}-block", message.id);
+        let id = format!("chat-message-{}-height", message.id);
         header = header.child(design::block_link(id, message.height, theme));
     }
     header
+}
+
+/// A program's own post: its event code, quiet and mono, and a link to the
+/// room where the program itself shows it.
+fn program_post(
+    chat: &Chat,
+    message: &ChatMessage,
+    program: &str,
+    code: &str,
+    cx: &mut Context<Chat>,
+    theme: &Theme,
+) -> AnyElement {
+    let mut line = div()
+        .id(format!("chat-message-{}-program", message.id))
+        .flex()
+        .items_center()
+        .gap(design::space::SM)
+        .text_size(design::text::SECONDARY)
+        .text_color(theme.muted)
+        .child(design::mono(code.to_owned()));
+    if let Some(link) = crate::links::program_link(&chat.session.chain, &chat.room_id()) {
+        let open = cx.listener(move |chat, _: &ClickEvent, _window, cx| {
+            chat.open_link(link.clone(), cx);
+        });
+        let theme = *theme;
+        line = line.child(
+            div()
+                .id(format!("chat-message-{}-program-open", message.id))
+                .text_color(theme.accent)
+                .cursor_pointer()
+                .hover(move |style| style.text_decoration_1())
+                .role(ducktape_view_guest::Role::Link)
+                .focusable()
+                .on_click(open)
+                .child(format!("Open in {program}")),
+        );
+    }
+    line.into_any_element()
 }
 
 /// The reactions under a message, and the `+` that opens the picker.

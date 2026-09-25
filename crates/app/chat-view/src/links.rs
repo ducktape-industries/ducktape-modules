@@ -11,6 +11,15 @@ pub fn channel_link(chain: &str, channel: &str, seq: Option<u64>) -> Option<Stri
     ducklink::mint(chain, ::chat::PROGRAM, &tail)
 }
 
+/// Where a program's room (`forge:web:3`) is shown by its program:
+/// `duck://<chain>/forge/web/3`, the room id's own path
+/// ([`chat::program_of`]). None for a room people opened, or no chain yet.
+pub fn program_link(chain: &str, channel: &str) -> Option<String> {
+    let program = ::chat::program_of(channel)?;
+    let path: Vec<&str> = channel[program.len() + 1..].split(':').collect();
+    ducklink::mint(chain, program, &path)
+}
+
 /// The room and message a route handed to this view names:
 /// `<channel>[/<seq>]`, delivered decoded, the seq 0 when there is none.
 pub fn route_target(route: &str) -> Option<(String, u64)> {
@@ -46,6 +55,11 @@ mod tests {
             Some("duck://testnet-0a1b2c3d/identity/7")
         );
         assert_eq!(pressed_link("7".into(), ""), None);
+        assert_eq!(
+            program_link("testnet#0a1b2c3d", "forge:web:3").as_deref(),
+            Some("duck://testnet-0a1b2c3d/forge/web/3")
+        );
+        assert_eq!(program_link("testnet#0a1b2c3d", "general"), None);
     }
 
     /// Any room lands, a forge room's `:` included: the link spells the id

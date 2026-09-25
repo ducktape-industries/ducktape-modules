@@ -39,6 +39,10 @@ pub struct ChatMessage {
     /// block time in milliseconds; 0 for a pending row
     pub time: u64,
     pub reactions: Vec<Reaction>,
+    /// `(program, code)` when this is a program's own post
+    /// ([`chat::program_post`]): shown as that program's event, not as a
+    /// code block
+    pub system: Option<(String, String)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -61,6 +65,7 @@ pub enum SpanStyle {
 }
 
 pub fn chat_message(row: MsgRow, names: &Names) -> ChatMessage {
+    let system = chat::program_post(&row).map(|(program, code)| (program.into(), code.into()));
     let edited = row.rev > 0;
     let meta = match (row.seq, edited) {
         (0, _) => "sending…".to_string(),
@@ -101,6 +106,7 @@ pub fn chat_message(row: MsgRow, names: &Names) -> ChatMessage {
         height: row.height,
         time: row.time,
         reactions: row.reactions,
+        system,
     }
 }
 

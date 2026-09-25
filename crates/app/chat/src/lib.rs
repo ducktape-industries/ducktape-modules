@@ -367,8 +367,27 @@ pub fn dm_peers(channel_id: &str) -> Option<(AccountNumber, AccountNumber)> {
 /// The program a `<program>:<name>` channel id belongs to, or `None` for a
 /// channel people opened. Only that program creates one (a review thread,
 /// say); a reader reaches it through its program, not the channel list.
+/// The program's view opens the room at the id's own path: `forge:web:3`
+/// is `duck://<chain>/forge/web/3`.
 pub fn program_of(channel_id: &str) -> Option<&str> {
     channel_id.split_once(':').map(|(program, _)| program)
+}
+
+/// A program's own post in its own room: written by the module the
+/// `<program>:<name>` room belongs to, as one code block in that program's
+/// language (forge's `opened`, `review 7`). The code is the program's to
+/// word; a reader shows it as that program's event and points to where the
+/// program itself shows the room. `(program, code)`.
+pub fn program_post(row: &MsgRow) -> Option<(&str, &str)> {
+    let program = program_of(&row.channel_id)?;
+    let own = matches!(&row.author, Party::Module(module) if module == program);
+    match row.blocks.as_slice() {
+        [Block::Code {
+            lang: Some(lang),
+            text,
+        }] if own && lang == program => Some((program, text)),
+        _ => None,
+    }
 }
 
 /// Old op bytes are described with the current code (`describe`): the op
@@ -393,4 +412,29 @@ fn op_variants_only_append() {
             "LeaveHuddle",
         ]
     );
+}
+
+#[test]
+fn a_programs_own_code_block_in_its_room_is_its_post() {
+    let code = |lang: &str| Block::Code {
+        lang: Some(lang.into()),
+        text: "review 7".into(),
+    };
+    let row = |channel: &str, author: Party, blocks| MsgRow {
+        channel_id: channel.into(),
+        blocks,
+        ..MsgRow::by(author)
+    };
+    let forge = || Party::Module("forge".into());
+    let post = row("forge:web:3", forge(), vec![code("forge")]);
+    assert_eq!(program_post(&post), Some(("forge", "review 7")));
+    for other in [
+        row("forge:web:3", Party::Account(1), vec![code("forge")]),
+        row("forge:web:3", forge(), vec![code("rust")]),
+        row("forge:web:3", forge(), vec![code("forge"), Block::Divider]),
+        row("general", forge(), vec![code("forge")]),
+        row("chess:1", forge(), vec![code("forge")]),
+    ] {
+        assert_eq!(program_post(&other), None, "{other:?}");
+    }
 }

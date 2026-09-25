@@ -116,7 +116,7 @@ fn a_headers_block_number_opens_explorer_at_that_block() {
     });
     cx.run_until_parked();
     assert!(cx.has_text("block 12,345"));
-    cx.simulate_click("chat-message-late-block");
+    cx.simulate_click("chat-message-late-height");
     let opened = cx.host().opened_links();
     assert_eq!(opened.last().map(String::as_str), Some("duck://explorer/block/12345"));
 }

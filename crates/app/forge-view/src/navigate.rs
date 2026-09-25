@@ -19,11 +19,16 @@ impl Forge {
         self.moved(cx);
     }
 
-    /// A `host.route` item: `<name>` opens that repository; anything else
-    /// opens the list.
+    /// A `host.route` item: `<name>` opens that repository, `<name>/<n>`
+    /// its change `n` (the path chat links a change's room by, its id
+    /// `forge:<name>:<n>`); anything else opens the list.
     pub(crate) fn open_route(&mut self, route: &str, cx: &mut Context<Self>) {
         match route.split('/').collect::<Vec<_>>().as_slice() {
             [name] if !name.is_empty() => self.open_repo((*name).to_owned(), cx),
+            [name, n] if !name.is_empty() && n.parse::<u64>().is_ok() => {
+                self.open_repo((*name).to_owned(), cx);
+                self.open_change(n.parse().ok(), cx);
+            }
             _ => self.open_repos(cx),
         }
     }
