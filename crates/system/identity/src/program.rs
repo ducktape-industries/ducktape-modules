@@ -1,10 +1,10 @@
 //! The module: every op and every query, each handed to its rule.
 
-use guest::{ExecCtx, Module, QueryCtx, Refusal};
+use guest::{Error, ExecCtx, Module, QueryCtx};
 
 use crate::rules::{
     ACCOUNTS, CONTROLLED, OF_KEY, account, add_key, create, create_program, generation, remove_key,
-    resolve, revoke, set_name, set_profile, set_standing, transfer_control,
+    resolve, revoke, set_name, set_profile, set_status, transfer_control,
 };
 use crate::{Op, Query, Reply};
 
@@ -15,7 +15,7 @@ impl Module for Identity {
     type Query = Query;
     type Response = Reply;
 
-    fn execute(ctx: &ExecCtx, op: Op) -> Result<(), Refusal> {
+    fn execute(ctx: &ExecCtx, op: Op) -> Result<(), Error> {
         match op {
             Op::Create { name, scheme } => create(ctx, name, scheme),
             Op::AddKey {
@@ -31,13 +31,13 @@ impl Module for Identity {
                 bio,
             } => set_profile(ctx, account, avatar, bio),
             Op::CreateProgram { name, controller } => create_program(ctx, name, controller),
-            Op::SetStanding { account, standing } => set_standing(ctx, account, standing),
+            Op::SetStatus { account, status } => set_status(ctx, account, status),
             Op::TransferControl { account, to } => transfer_control(ctx, account, to),
             Op::Revoke { account } => revoke(ctx, account),
         }
     }
 
-    fn query(ctx: &QueryCtx, query: Query) -> Result<Reply, Refusal> {
+    fn query(ctx: &QueryCtx, query: Query) -> Result<Reply, Error> {
         let height = ctx.env().height;
         Ok(match query {
             Query::Get { number } => Reply::Account(ACCOUNTS.get(ctx, &number)?),
@@ -63,5 +63,5 @@ impl Module for Identity {
     }
 }
 
-#[cfg(feature = "program")]
+#[cfg(feature = "module")]
 guest::export!(Identity);

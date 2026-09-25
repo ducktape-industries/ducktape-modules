@@ -3,8 +3,8 @@
 
 use std::collections::BTreeSet;
 
-use abi::Env;
-use guest::{ExecCtx, QueryCtx, Refusal, capacity, invalid, stale, unauthorized, wrong_state};
+use guest::Env;
+use guest::{Error, ExecCtx, QueryCtx, capacity, invalid, stale, unauthorized, wrong_state};
 
 use crate::contract::*;
 use crate::discussion::{self, Event};
@@ -28,7 +28,7 @@ pub(crate) fn open(
     actor: &Principal,
     repo: &str,
     mut draft: Draft,
-) -> Result<OpReply, Refusal> {
+) -> Result<OpReply, Error> {
     let env = ctx.env();
     let record = load_repo(ctx, repo)?;
     check_title(&draft.title)?;
@@ -91,7 +91,7 @@ pub(crate) fn edit(
     repo: &str,
     n: u64,
     fields: Edit,
-) -> Result<OpReply, Refusal> {
+) -> Result<OpReply, Error> {
     let env = ctx.env();
     load_repo(ctx, repo)?;
     let mut change = load_change(ctx, repo, n)?;
@@ -125,7 +125,7 @@ pub(crate) fn close(
     actor: &Principal,
     repo: &str,
     n: u64,
-) -> Result<OpReply, Refusal> {
+) -> Result<OpReply, Error> {
     let env = ctx.env();
     let record = load_repo(ctx, repo)?;
     let mut change = load_change(ctx, repo, n)?;
@@ -154,7 +154,7 @@ pub(crate) fn submit_review(
     repo: &str,
     n: u64,
     mut draft: ReviewDraft,
-) -> Result<OpReply, Refusal> {
+) -> Result<OpReply, Error> {
     let env = ctx.env();
     let record = load_repo(ctx, repo)?;
     let mut change = load_change(ctx, repo, n)?;
@@ -212,7 +212,7 @@ pub(crate) fn merge_heads(
     actor: &Principal,
     repo: &str,
     merge: MergeRequest,
-) -> Result<OpReply, Refusal> {
+) -> Result<OpReply, Error> {
     let env = ctx.env();
     let record = load_repo(ctx, repo)?;
     require_writer(ctx, repo, &record, actor)?;
@@ -262,7 +262,7 @@ fn touched(change: &mut Change, env: &Env) {
     change.updated_time = env.time;
 }
 
-fn count_verdict(counts: &mut ReviewCounts, verdict: Verdict) -> Result<(), Refusal> {
+fn count_verdict(counts: &mut ReviewCounts, verdict: Verdict) -> Result<(), Error> {
     let count = match verdict {
         Verdict::Approve => &mut counts.approve,
         Verdict::RequestChanges => &mut counts.request_changes,
@@ -272,7 +272,7 @@ fn count_verdict(counts: &mut ReviewCounts, verdict: Verdict) -> Result<(), Refu
     Ok(())
 }
 
-fn require_open(change: &Change) -> Result<(), Refusal> {
+fn require_open(change: &Change) -> Result<(), Error> {
     if change.state != ChangeState::Open {
         return Err(wrong_state("change is not open"));
     }
@@ -280,7 +280,7 @@ fn require_open(change: &Change) -> Result<(), Refusal> {
 }
 
 /// A record over `Bounds.record_bytes` is refused whole.
-fn fits(ctx: &QueryCtx, record: &impl borsh::BorshSerialize) -> Result<(), Refusal> {
+fn fits(ctx: &QueryCtx, record: &impl borsh::BorshSerialize) -> Result<(), Error> {
     let bound = load_bounds(ctx)?.record_bytes;
     if abi::encode(record).len() as u64 > bound {
         return Err(capacity(format!(
@@ -290,7 +290,7 @@ fn fits(ctx: &QueryCtx, record: &impl borsh::BorshSerialize) -> Result<(), Refus
     Ok(())
 }
 
-fn check_title(title: &str) -> Result<(), Refusal> {
+fn check_title(title: &str) -> Result<(), Error> {
     if title.trim().is_empty() || title.len() > MAX_TITLE_BYTES {
         return Err(invalid(format!(
             "a title is nonblank and at most {MAX_TITLE_BYTES} bytes"
@@ -299,7 +299,7 @@ fn check_title(title: &str) -> Result<(), Refusal> {
     Ok(())
 }
 
-fn check_reviewers(reviewers: &[Principal]) -> Result<(), Refusal> {
+fn check_reviewers(reviewers: &[Principal]) -> Result<(), Error> {
     if reviewers.len() > MAX_REVIEWERS {
         return Err(capacity(format!(
             "a change asks at most {MAX_REVIEWERS} reviewers"
@@ -316,7 +316,7 @@ fn check_reviewers(reviewers: &[Principal]) -> Result<(), Refusal> {
 }
 
 /// Both ends of a change or a merge are branches under `refs/heads/`.
-fn check_endpoints(into: &[u8], from: &Revision) -> Result<(), Refusal> {
+fn check_endpoints(into: &[u8], from: &Revision) -> Result<(), Error> {
     check_branch(into)?;
     if let Revision::Ref(name) = from {
         check_branch(name)?;
@@ -324,7 +324,7 @@ fn check_endpoints(into: &[u8], from: &Revision) -> Result<(), Refusal> {
     Ok(())
 }
 
-fn check_branch(name: &[u8]) -> Result<(), Refusal> {
+fn check_branch(name: &[u8]) -> Result<(), Error> {
     if !name.starts_with(b"refs/heads/") || !gitcore::server::valid_ref_name(name) {
         return Err(invalid(
             "change endpoints must name branches under refs/heads/",
@@ -333,7 +333,7 @@ fn check_branch(name: &[u8]) -> Result<(), Refusal> {
     Ok(())
 }
 
-fn check_comments(draft: &ReviewDraft) -> Result<(), Refusal> {
+fn check_comments(draft: &ReviewDraft) -> Result<(), Error> {
     if draft.comments.len() > MAX_REVIEW_COMMENTS {
         return Err(capacity(format!(
             "a review carries at most {MAX_REVIEW_COMMENTS} line comments"
@@ -365,7 +365,7 @@ fn check_comments(draft: &ReviewDraft) -> Result<(), Refusal> {
 
 /// A relative git path with no empty, `.` or `..` component; `root` admits
 /// the empty path (a tree's root).
-pub fn check_path(path: &[u8], root: bool) -> Result<(), Refusal> {
+pub fn check_path(path: &[u8], root: bool) -> Result<(), Error> {
     if root && path.is_empty() {
         return Ok(());
     }

@@ -1,10 +1,10 @@
 //! The module: the schedule folded at each block, then every op and every
 //! query, each handed to its rule.
 
-use guest::{ExecCtx, Module, QueryCtx, Refusal, decoded};
+use guest::{Error, ExecCtx, Module, QueryCtx, decoded};
 
 use crate::rules::{SCHEDULE, at, cancel, fold, init, publish, schedule, views_at};
-use crate::{Genesis, Op, PROGRAM, Query, Reply, Scheduled};
+use crate::{Genesis, MODULE, Op, Query, Reply, Scheduled};
 
 pub struct Modules;
 
@@ -13,12 +13,12 @@ impl Module for Modules {
     type Query = Query;
     type Response = Reply;
 
-    fn init(ctx: &ExecCtx, params: &[u8]) -> Result<(), Refusal> {
-        init(ctx, decoded::<Genesis>(PROGRAM, "Genesis", params)?);
+    fn init(ctx: &ExecCtx, params: &[u8]) -> Result<(), Error> {
+        init(ctx, decoded::<Genesis>(MODULE, "Genesis", params)?);
         Ok(())
     }
 
-    fn execute(ctx: &ExecCtx, op: Op) -> Result<(), Refusal> {
+    fn execute(ctx: &ExecCtx, op: Op) -> Result<(), Error> {
         fold(ctx, ctx.env().height)?;
         match op {
             Op::Publish { body } => publish(ctx, body),
@@ -27,7 +27,7 @@ impl Module for Modules {
         }
     }
 
-    fn query(ctx: &QueryCtx, query: Query) -> Result<Reply, Refusal> {
+    fn query(ctx: &QueryCtx, query: Query) -> Result<Reply, Error> {
         let height = ctx.env().height;
         Ok(match query {
             Query::At(height) => Reply::Programs(at(ctx, height)?),
@@ -47,5 +47,5 @@ impl Module for Modules {
     }
 }
 
-#[cfg(feature = "program")]
+#[cfg(feature = "module")]
 guest::export!(Modules);

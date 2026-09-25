@@ -24,7 +24,7 @@ only. No legacy wire/layout conversion exists. Found this version with its new
 - Forge queues chat creation for `forge:<repo>:<n>` and system lines for opening,
   closing, merging, and submitting a review. Chat owns all conversation replies.
   The host commits the record and emitted queue items atomically; delivery is in
-  the **next block**, per the present ABI, not synchronous cross-program execution.
+  the **next block**, per the present ABI, not synchronous cross-module execution.
 - A review is one immutable operation: verdict, body, pinned head and base, and
   up to `MAX_REVIEW_COMMENTS` line comments. An anchor is `(path, side, line)`;
   `Old` addresses `base_oid`, `New` addresses `commit_oid`. Both are retained.
@@ -32,7 +32,7 @@ only. No legacy wire/layout conversion exists. Found this version with its new
   positions. A stale draft may be submitted against its original pin.
 - All UI lists take `cursor` and `limit`; all UI replies, including refusals,
   carry the answering `height`. No unbounded nested review history is returned.
-- Chat's colon namespace is reserved to its exact program prefix (or System).
+- Chat's colon namespace is reserved to its exact module prefix (or Root).
   External keys/accounts cannot create these channels or reserve system-message
   IDs. Hide colon channels in the view's rail/search; they are not private rooms.
 
@@ -43,7 +43,7 @@ only. No legacy wire/layout conversion exists. Found this version with its new
 replies normalize them to lowercase. Paths, Git names, messages and source lines
 are byte vectors, never lossy UTF-8 conversions. Tree root is `[]`, not `/`.
 
-`Page<T> = { items: Vec<T>, next: Option<Cursor> }`. Pass `next` back unchanged.
+`PageResponse<T> = { items: Vec<T>, next: Option<Cursor> }`. Pass `next` back unchanged.
 The cursor is bound to the original query arguments and height; changing only
 `limit` is allowed. A changed height returns `stale`, so restart the list.
 Filtered change/judgment pages can be empty **with a next cursor**: continue until
@@ -66,7 +66,7 @@ and decode a `forge::Reply` from the concatenated `Respond` bytes.
 | Query example | Reply data besides `height` |
 | --- | --- |
 | `Repos { cursor: None, limit: 20 }` | `page<RepoInfo>`: name, hash, owner, settings, ref count, last activity |
-| `Repo { repo: r, cursor: None, limit: 20 }` | repo record, founded bounds, `writers: Page<Vec<u8>>` (owner is separate) |
+| `Repo { repo: r, cursor: None, limit: 20 }` | repo record, founded bounds, `writers: PageResponse<Vec<u8>>` (owner is separate) |
 | `Refs { repo: r, cursor: None, limit: 20 }` | `page<RefInfo>`: full ref name and target OID |
 | `Log { repo: r, from: feature, cursor: None, limit: 20 }` | resolved tip, `page<CommitInfo>`: OID, tree, all parents, full message, author and committer with time/timezone |
 | `Tree { repo: r, at: b, path: b"src".to_vec(), cursor: None, limit: 20 }` | resolved tree OID and `page<TreeInfo>`: name, OID, kind/mode; `at` accepts commit or tree |
@@ -75,7 +75,7 @@ and decode a `forge::Reply` from the concatenated `Respond` bytes.
 | `Compare { repo: r, from: feature, into: main }` | resolved endpoints, merge base, ahead/behind, mergeability |
 | `Activity { repo: r }` | `last_height`: last successful forge operation in the repo |
 | `Changes { repo: r, filter: ChangeFilter { state: Some(ChangeState::Open), ..Default::default() }, cursor: None, limit: 20 }` | `page<ChangeSummary>` with author, endpoints, counts and historical verdict totals |
-| `Change { repo: r, n: 1, cursor: None, limit: 20 }` | full change record/body/channel, optional current source/target heads, `reviews: Page<Review>` |
+| `Change { repo: r, n: 1, cursor: None, limit: 20 }` | full change record/body/channel, optional current source/target heads, `reviews: PageResponse<Review>` |
 | `Judgment { key: reviewer_key, cursor: None, limit: 20 }` | `page<Judgment>`: open changes requesting this key at the current head or containing an answered thread it authored |
 | `Advertise { repo: r, service: Service::UploadPack }` | raw Git protocol v2 advertisement |
 | `Upload { repo: r, request: git_v2_request_bytes }` | streamed raw Git protocol response/pack |
@@ -195,10 +195,10 @@ Core/SDK must provide a query-local nonblocking blob read/stat, or convert
 `BlobUnavailable` at the query boundary. Do not change required reads in execution
 into refusals. This limitation is not proven away by the in-process smoke in qa.
 
-Likewise, `emit` commits an outbox item, not the receiver's execution. The guarded
+Likewise, `send` commits an outbox item, not the receiver's execution. The guarded
 chat namespace and validated payloads prevent ordinary delivery refusals, but
 chat must be seated as `chat` and forge as `forge`. Truly simultaneous record+
-channel creation would require a host transaction spanning both programs; this
+channel creation would require a host transaction spanning both modules; this
 version proves atomic record+queue and next-block delivery, including restart.
 
 ## View and SDK handoff
@@ -221,7 +221,7 @@ version proves atomic record+queue and next-block delivery, including restart.
   last-reviewed filtering in view state. Do not silently retarget draft anchors.
 - Deploy the matching chat adapter: it exposes `MessageById` and `ThreadAttention`
   and resolves key/account attention. Screenshots and live app walks are outside
-  this program task.
+  this module task.
 
-See [the fixture manifest](fixtures/FIXTURES.md) for the program's real
+See [the fixture manifest](fixtures/FIXTURES.md) for the module's real
 response bytes and the regeneration command.

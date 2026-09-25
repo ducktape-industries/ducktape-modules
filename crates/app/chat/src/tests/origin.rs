@@ -1,10 +1,10 @@
-//! The program's own path, run natively: an origin resolved through an
+//! The module's own path, run natively: an origin resolved through an
 //! identity sibling, a huddle join's node proof, identity's roster paged
 //! through chat. Each refusal leaves the store as it was.
 use std::cell::Cell;
 use std::rc::Rc;
 
-use abi::{Cause, Env, Origin, Refusal};
+use guest::{Cause, Env, Error, Origin};
 use identity::{Account, Control, Key};
 
 use super::*;
@@ -61,7 +61,7 @@ fn identity(claimed: Rc<Cell<bool>>) -> guest::Sibling {
             identity::Query::List { page } => {
                 let from = page.after.as_ref().map_or(0, |after| after[0] as usize);
                 let to = (from + page.limit() as usize).min(roster.len());
-                identity::Reply::Accounts(PageReply {
+                identity::Reply::Accounts(PageResponse {
                     height: 1,
                     items: roster[from..to].to_vec(),
                     next: (to < roster.len()).then(|| vec![to as u8]),
@@ -80,7 +80,7 @@ fn store_claiming(claimed: Rc<Cell<bool>>) -> MockHost {
     store
         .borrow_mut()
         .siblings
-        .insert(identity::PROGRAM.into(), identity(claimed));
+        .insert(identity::MODULE.into(), identity(claimed));
     store.borrow_mut().verifier = Some(Box::new(|_, _, namespace, message, signature| {
         let expected = [b"general".as_slice(), &ADA_KEY].concat();
         namespace == HUDDLE_JOIN_NS && message == expected && signature == b"signed"
@@ -95,29 +95,29 @@ fn store() -> MockHost {
 
 fn env(origin: Origin) -> Env {
     Env {
-        network: vec![],
+        chain_id: vec![],
         height: 1,
         time: 1000,
-        me: crate::PROGRAM.into(),
+        module: crate::MODULE.into(),
         origin,
         cause: Cause::Direct,
     }
 }
 
 fn key(bytes: &[u8]) -> Origin {
-    Origin::External(bytes.to_vec())
+    Origin::Signed(bytes.to_vec())
 }
 
 /// The refusal's reason; the store is untouched by it.
 #[track_caller]
 fn refused(store: &MockHost, origin: Origin, op: Op) -> String {
     let ctx = store.exec(env(origin));
-    store.refused(|| crate::Chat::execute(&ctx, op)).reason
+    store.refused(|| crate::Chat::execute(&ctx, op)).code
 }
 
 /// A read of `store`.
 fn reads(store: &MockHost) -> guest::QueryCtx {
-    store.query(env(Origin::System))
+    store.query(env(Origin::Root))
 }
 
 fn owner(store: &MockHost, id: &str) -> Principal {
@@ -133,18 +133,18 @@ fn an_origin_acts_as_the_principal_identity_names() {
     )
     .unwrap();
     assert_eq!(owner(&store, "a"), Principal::Account(1));
-    let forge = Origin::Program("forge".into());
+    let forge = Origin::Module("forge".into());
     crate::Chat::execute(&store.exec(env(forge)), create("forge:c", PostPolicy::Open)).unwrap();
     assert_eq!(owner(&store, "forge:c"), Principal::Module("forge".into()));
     crate::Chat::execute(
-        &store.exec(env(Origin::System)),
+        &store.exec(env(Origin::Root)),
         create("d", PostPolicy::Open),
     )
     .unwrap();
-    assert_eq!(owner(&store, "d"), Principal::System);
+    assert_eq!(owner(&store, "d"), Principal::Root);
     assert_eq!(
         refused(&store, key(&[]), create("e", PostPolicy::Open)),
-        reason::INVALID_INPUT
+        code::INVALID_INPUT
     );
 }
 
@@ -231,7 +231,7 @@ fn a_key_writes_only_once_it_holds_an_account() {
         let why = format!("{op:?}");
         assert_eq!(
             refused(&store, key(&LONE_KEY), op),
-            reason::UNAUTHORIZED,
+            code::UNAUTHORIZED,
             "{why}"
         );
     }
@@ -257,7 +257,7 @@ fn no_key_writes_until_identity_is_deployed() {
     let store = MockHost::default();
     assert_eq!(
         refused(&store, key(&ADA_KEY), create("a", PostPolicy::Open)),
-        reason::UNAUTHORIZED
+        code::UNAUTHORIZED
     );
 }
 
@@ -265,12 +265,12 @@ fn no_key_writes_until_identity_is_deployed() {
 fn identity_refusing_refuses_the_op() {
     let store = MockHost::default();
     store.borrow_mut().siblings.insert(
-        identity::PROGRAM.into(),
-        Box::new(|_| Err(Refusal::new(reason::WRONG_STATE, "identity is halted"))),
+        identity::MODULE.into(),
+        Box::new(|_| Err(Error::new(code::WRONG_STATE, "identity is halted"))),
     );
     assert_eq!(
         refused(&store, key(&ADA_KEY), create("a", PostPolicy::Open)),
-        reason::WRONG_STATE
+        code::WRONG_STATE
     );
 }
 
@@ -289,30 +289,30 @@ fn a_huddle_join_needs_its_nodes_signature() {
     .unwrap();
     assert_eq!(
         refused(&store, key(&ADA_KEY), join(b"forged")),
-        reason::INVALID_INPUT
+        code::INVALID_INPUT
     );
     // the proof binds the key: another account's key cannot reuse Ada's
     assert_eq!(
         refused(&store, key(&CY_KEY), join(b"signed")),
-        reason::INVALID_INPUT
+        code::INVALID_INPUT
     );
     assert_eq!(
-        refused(&store, Origin::System, join(b"signed")),
-        reason::UNAUTHORIZED
+        refused(&store, Origin::Root, join(b"signed")),
+        code::UNAUTHORIZED
     );
     let unverified = MockHost::default();
     unverified
         .borrow_mut()
         .siblings
-        .insert(identity::PROGRAM.into(), identity(Rc::default()));
+        .insert(identity::MODULE.into(), identity(Rc::default()));
     crate::Chat::execute(
-        &unverified.exec(env(Origin::System)),
+        &unverified.exec(env(Origin::Root)),
         create("general", PostPolicy::Open),
     )
     .unwrap();
     assert_eq!(
         refused(&unverified, key(&ADA_KEY), join(b"signed")),
-        reason::UNSUPPORTED
+        code::UNSUPPORTED
     );
     crate::Chat::execute(&store.exec(env(key(&ADA_KEY))), join(b"signed")).unwrap();
     let huddle = crate::state::channel(&reads(&store), "general")
@@ -326,7 +326,7 @@ fn the_roster_pages_through_identity() {
     let store = store();
     let page = |after: Option<Vec<u8>>| {
         let asked = Query::Accounts {
-            page: Page {
+            page: PageRequest {
                 after,
                 limit: Some(2),
             },

@@ -4,7 +4,7 @@
 
 use borsh::{BorshDeserialize, BorshSerialize};
 
-use crate::{ExecCtx, QueryCtx, Refusal, decoded};
+use crate::{Error, ExecCtx, QueryCtx, decoded};
 
 /// A module: its op, query and response types, and what it does with each.
 pub trait Module {
@@ -14,26 +14,26 @@ pub trait Module {
 
     /// Genesis, with the params the network was founded with. Nothing by
     /// default; override only where genesis needs it.
-    fn init(_ctx: &ExecCtx, _params: &[u8]) -> Result<(), Refusal> {
+    fn init(_ctx: &ExecCtx, _params: &[u8]) -> Result<(), Error> {
         Ok(())
     }
 
-    fn execute(ctx: &ExecCtx, op: Self::Op) -> Result<(), Refusal>;
+    fn execute(ctx: &ExecCtx, op: Self::Op) -> Result<(), Error>;
 
-    fn query(ctx: &QueryCtx, query: Self::Query) -> Result<Self::Response, Refusal>;
+    fn query(ctx: &QueryCtx, query: Self::Query) -> Result<Self::Response, Error>;
 }
 
 /// An execute's payload decoded as `M::Op` (refused as invalid input when it
 /// does not decode), then run.
-pub fn execute<M: Module>(ctx: &ExecCtx, payload: &[u8]) -> Result<(), Refusal> {
-    let op = decoded::<M::Op>(&ctx.env().me, "Op", payload)?;
+pub fn execute<M: Module>(ctx: &ExecCtx, payload: &[u8]) -> Result<(), Error> {
+    let op = decoded::<M::Op>(&ctx.env().module, "Op", payload)?;
     M::execute(ctx, op)
 }
 
 /// A query's request decoded as `M::Query`, answered, and the borsh of the
 /// response handed to the host.
-pub fn query<M: Module>(ctx: &QueryCtx, request: &[u8]) -> Result<(), Refusal> {
-    let query = decoded::<M::Query>(&ctx.env().me, "Query", request)?;
+pub fn query<M: Module>(ctx: &QueryCtx, request: &[u8]) -> Result<(), Error> {
+    let query = decoded::<M::Query>(&ctx.env().module, "Query", request)?;
     let response = M::query(ctx, query)?;
     ctx.respond(abi::encode(&response));
     Ok(())
@@ -66,11 +66,13 @@ pub mod exports {
     }
 
     fn dispatch<M: Module>(Invocation { env, call }: Invocation) -> GuestReply {
-        match call {
+        let env = env.into();
+        let reply = match call {
             GuestCall::Init(params) => M::init(&ExecCtx::new(env), &params),
             GuestCall::Execute(payload) => execute::<M>(&ExecCtx::new(env), &payload),
             GuestCall::Query(request) => query::<M>(&QueryCtx::new(env), &request),
-        }
+        };
+        reply.map_err(Refusal::from)
     }
 
     fn leak(bytes: Vec<u8>) -> u64 {

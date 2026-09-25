@@ -1,4 +1,4 @@
-//! The `chat` program: channels, messages, threads, reactions, members and
+//! The `chat` module: channels, messages, threads, reactions, members and
 //! huddles.
 //!
 //! A write is an [`Op`], a read a [`Query`] answered by a [`Reply`], all
@@ -9,7 +9,7 @@
 //! - `lib.rs` (here): the types on the wire and the rows they carry
 //! - `program.rs`: [`Chat`], the module: the signer resolved, then one match
 //!   over every op and one over every query
-//! - `state.rs`: every table and index the program keeps, declared once
+//! - `state.rs`: every table and index the module keeps, declared once
 //! - `rules.rs`: the checks an op passes before it writes
 //! - `ops.rs`: one short function per op
 //! - `origin.rs`: a huddle join's node proof, and identity's roster
@@ -18,7 +18,7 @@
 //! - `description.rs`: [`describe`], an op in a person's words
 //!
 //! The module runs over `guest`'s contexts, so a native test runs it over
-//! [`guest::MockHost`] exactly as the host does. The `program` feature adds
+//! [`guest::MockHost`] exactly as the host does. The `module` feature adds
 //! its wasm exports.
 mod description;
 pub mod message;
@@ -43,11 +43,11 @@ pub use identity::{AccountNumber, Principal};
 pub use message::{Block, Mark, Span, parse_message};
 pub use program::Chat;
 pub use queries::roots_below;
-pub use store::{Cursor, Page, PageReply};
+pub use store::{Cursor, PageRequest, PageResponse};
 pub use text::{plain_text, tags, tokens};
 
-/// The name this program runs under.
-pub const PROGRAM: &str = "chat";
+/// The name this module runs under.
+pub const MODULE: &str = "chat";
 
 pub const MAX_ID_BYTES: usize = 64;
 pub const MAX_NAME_BYTES: usize = 128;
@@ -129,7 +129,7 @@ pub enum Op {
         member: bool,
     },
     /// `node_proof` is `node`'s signature over [`HUDDLE_JOIN_NS`] + channel
-    /// id + the origin key (verified by the program, not the rules).
+    /// id + the origin key (verified by the module, not the rules).
     JoinHuddle {
         channel_id: String,
         node: Vec<u8>,
@@ -141,12 +141,12 @@ pub enum Op {
 }
 
 /// A read. `viewer` is the reader's principals: they decide
-/// [`Reaction::reacted_by_me`]. Every list takes a [`Page`] and answers a
-/// [`PageReply`] whose `next` resumes it.
+/// [`Reaction::reacted_by_me`]. Every list takes a [`PageRequest`] and answers a
+/// [`PageResponse`] whose `next` resumes it.
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
 pub enum Query {
     Channels {
-        page: Page,
+        page: PageRequest,
     },
     Channel {
         channel_id: String,
@@ -164,62 +164,62 @@ pub enum Query {
     Roots {
         channel_id: String,
         viewer: Vec<Principal>,
-        page: Page,
+        page: PageRequest,
     },
     /// `page.limit` messages centred on `seq`.
     MessagesAround {
         channel_id: String,
         seq: u64,
         viewer: Vec<Principal>,
-        page: Page,
+        page: PageRequest,
     },
     /// The root plus one page of replies, in post order.
     Thread {
         channel_id: String,
         root_seq: u64,
         viewer: Vec<Principal>,
-        page: Page,
+        page: PageRequest,
     },
     Members {
         channel_id: String,
-        page: Page,
+        page: PageRequest,
     },
     /// Every token of `text`, newest first, at most `page.limit` hits.
     Search {
         text: String,
         viewer: Vec<Principal>,
         channel_id: Option<String>,
-        page: Page,
+        page: PageRequest,
     },
     TagSearch {
         tag: String,
         viewer: Vec<Principal>,
         channel_id: Option<String>,
-        page: Page,
+        page: PageRequest,
     },
     /// The identity roster, ascending by number, a page at a time: the
-    /// program asks identity, so a view links one program.
+    /// module asks identity, so a view links one module.
     Accounts {
-        page: Page,
+        page: PageRequest,
     },
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, PartialEq, Eq)]
 pub enum Reply {
-    Channels(PageReply<ChannelInfo>),
+    Channels(PageResponse<ChannelInfo>),
     Channel(Option<ChannelInfo>),
     Message(Option<MsgRow>),
     Attention(Option<MsgRow>),
-    Roots(PageReply<MsgRow>),
+    Roots(PageResponse<MsgRow>),
     Messages(Vec<MsgRow>),
     Thread {
         root: Option<MsgRow>,
-        replies: PageReply<MsgRow>,
+        replies: PageResponse<MsgRow>,
     },
-    Members(PageReply<MemberRow>),
+    Members(PageResponse<MemberRow>),
     Hits(MessageHits),
-    TagHits(PageReply<MsgRow>),
-    Accounts(PageReply<AccountRow>),
+    TagHits(PageResponse<MsgRow>),
+    Accounts(PageResponse<AccountRow>),
 }
 
 #[derive(
@@ -249,7 +249,7 @@ impl ChannelRow {
 
     /// Whether the room lets `principal` post, `seated` saying whether it holds
     /// a member seat: posting is open, or it owns the room or sits in it.
-    /// Archiving aside; the program and the view ask this one rule.
+    /// Archiving aside; the module and the view ask this one rule.
     pub fn admits(&self, principal: &Principal, seated: bool) -> bool {
         !self.members_only() || self.owner == *principal || seated
     }
@@ -304,7 +304,7 @@ pub struct MsgRow {
 
 impl MsgRow {
     /// A row with nothing yet but its author: a view's pending post before
-    /// the program serves it, a test's base row.
+    /// the module serves it, a test's base row.
     pub fn by(author: Principal) -> MsgRow {
         MsgRow {
             channel_id: String::new(),

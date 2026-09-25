@@ -4,8 +4,8 @@ use crate::contract::*;
 use crate::objects::{ObjectStore, object_not_held};
 use crate::ops::{cap, refusal_of};
 use crate::state::{load_repo, parse_oid, repo_hash, resolve};
-use abi::Refusal;
 use gitcore::{Commit, Hash, Kind, Mode, Objects, Oid, Signature, Tag, Tree};
+use guest::Error;
 use guest::{QueryCtx, invalid, not_found};
 use std::collections::BTreeSet;
 use store::Listing;
@@ -16,13 +16,13 @@ pub struct Reading<'a> {
     pub bounds: &'a Bounds,
 }
 impl Reading<'_> {
-    pub fn result<T>(&self, r: gitcore::Result<T>) -> Result<T, Refusal> {
+    pub fn result<T>(&self, r: gitcore::Result<T>) -> Result<T, Error> {
         r.map_err(refusal_of)
     }
-    pub fn oid(&self, s: &str) -> Result<Oid, Refusal> {
+    pub fn oid(&self, s: &str) -> Result<Oid, Error> {
         parse_oid(self.hash, s)
     }
-    pub fn commit_id(&self, mut id: Oid) -> Result<Oid, Refusal> {
+    pub fn commit_id(&self, mut id: Oid) -> Result<Oid, Error> {
         loop {
             let object = self
                 .result(self.store.get(&id))?
@@ -34,7 +34,7 @@ impl Reading<'_> {
             }
         }
     }
-    pub fn commit(&self, id: &Oid) -> Result<Commit, Refusal> {
+    pub fn commit(&self, id: &Oid) -> Result<Commit, Error> {
         let object = self
             .result(self.store.get(id))?
             .ok_or_else(|| object_not_held(id))?;
@@ -43,7 +43,7 @@ impl Reading<'_> {
         }
         self.result(Commit::parse(&object.body, self.hash))
     }
-    pub fn tree(&self, id: &Oid) -> Result<Tree, Refusal> {
+    pub fn tree(&self, id: &Oid) -> Result<Tree, Error> {
         let object = self
             .result(self.store.get(id))?
             .ok_or_else(|| object_not_held(id))?;
@@ -52,7 +52,7 @@ impl Reading<'_> {
         }
         self.result(Tree::parse(&object.body, self.hash))
     }
-    pub fn tree_id(&self, at: &str) -> Result<Oid, Refusal> {
+    pub fn tree_id(&self, at: &str) -> Result<Oid, Error> {
         let id = self.oid(at)?;
         let object = self
             .result(self.store.get(&id))?
@@ -63,7 +63,7 @@ impl Reading<'_> {
             _ => Err(invalid("tree endpoint must be a commit or tree")),
         }
     }
-    pub fn blob(&self, id: &Oid, range: Option<ByteRange>) -> Result<BlobView, Refusal> {
+    pub fn blob(&self, id: &Oid, range: Option<ByteRange>) -> Result<BlobView, Error> {
         let header = self.result(self.store.header(id))?;
         if header.kind != "blob" {
             return Err(invalid("expected a blob object"));
@@ -131,7 +131,7 @@ fn reading<'a>(
     name: &str,
     bounds: &'a Bounds,
     reads: u64,
-) -> Result<Reading<'a>, Refusal> {
+) -> Result<Reading<'a>, Error> {
     let hash = repo_hash(&load_repo(ctx, name)?);
     Ok(Reading {
         store: ObjectStore::querying(ctx, hash, bounds, reads),
@@ -148,7 +148,7 @@ pub fn log(
     name: &str,
     from: &Revision,
     listing: &Listing,
-) -> Result<Reply, Refusal> {
+) -> Result<Reply, Error> {
     let reads = bounds.log_walk.saturating_mul(2).saturating_add(1);
     let r = reading(ctx, name, bounds, reads)?;
     let tip = r.commit_id(resolve(ctx, name, from, r.hash)?)?;
@@ -186,7 +186,7 @@ pub fn tree(
     at: &str,
     path: &[u8],
     listing: &Listing,
-) -> Result<Reply, Refusal> {
+) -> Result<Reply, Error> {
     crate::changes::check_path(path, true)?;
     let r = reading(ctx, name, bounds, bounds.tree_walk)?;
     let root = r.tree_id(at)?;
@@ -221,7 +221,7 @@ pub fn blob(
     name: &str,
     oid: &str,
     range: Option<ByteRange>,
-) -> Result<Reply, Refusal> {
+) -> Result<Reply, Error> {
     let r = reading(ctx, name, bounds, bounds.tree_walk)?;
     Ok(Reply::Blob {
         height,
@@ -241,7 +241,7 @@ pub fn diff(
     head: &str,
     path: Option<&[u8]>,
     listing: &Listing,
-) -> Result<Reply, Refusal> {
+) -> Result<Reply, Error> {
     let r = reading(ctx, name, bounds, bounds.tree_walk)?;
     crate::diffs::query(&r, height, base, head, path, listing)
 }
@@ -254,7 +254,7 @@ pub fn comparison(
     name: &str,
     from: &Revision,
     into: &Revision,
-) -> Result<Reply, Refusal> {
+) -> Result<Reply, Error> {
     let reads = bounds
         .log_walk
         .saturating_mul(8)
@@ -265,7 +265,7 @@ pub fn comparison(
     compare(&mut r, height, from, into)
 }
 
-fn compare(r: &mut Reading<'_>, height: u64, from: Oid, into: Oid) -> Result<Reply, Refusal> {
+fn compare(r: &mut Reading<'_>, height: u64, from: Oid, into: Oid) -> Result<Reply, Error> {
     let source: BTreeSet<_> = r
         .result(gitcore::walk::commits(
             &r.store,

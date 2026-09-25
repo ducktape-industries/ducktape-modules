@@ -12,7 +12,7 @@ pub const TESTER: &[u8] = b"tester";
 /// talker in chat is 4. Every other key holds no account.
 pub const HELD: [(&[u8], u64); 3] = [(TESTER, 1), (b"reviewer", 2), (b"talker", 4)];
 
-/// One program over `MemorySandbox` with the kernel's height discipline: an
+/// One module over `MemorySandbox` with the kernel's height discipline: an
 /// op lands in a new block, whose queue (forge's chat emissions) is delivered
 /// first; a chat write is a block of its own; a query moves nothing.
 pub struct Rig {
@@ -57,7 +57,7 @@ impl Rig {
 
     /// The actor's op in a new block; a refusal left forge's store as it was.
     #[track_caller]
-    pub fn execute(&mut self, op: &Op) -> Result<Vec<u8>, abi::Refusal> {
+    pub fn execute(&mut self, op: &Op) -> Result<Vec<u8>, guest::Error> {
         self.advance();
         let (actor, height) = (self.actor.clone(), self.height);
         self.sandbox
@@ -68,7 +68,7 @@ impl Rig {
 
     /// The refusal of the actor's op, which left forge's store as it was.
     #[track_caller]
-    pub fn refused(&mut self, op: &Op) -> abi::Refusal {
+    pub fn refused(&mut self, op: &Op) -> guest::Error {
         self.advance();
         let (actor, height) = (self.actor.clone(), self.height);
         self.sandbox
@@ -76,7 +76,7 @@ impl Rig {
             .refused(|| signed_op(&self.sandbox.forge, &actor, height, op))
     }
 
-    pub fn query(&self, query: &Query) -> Result<Vec<u8>, abi::Refusal> {
+    pub fn query(&self, query: &Query) -> Result<Vec<u8>, guest::Error> {
         Forge::query(&self.sandbox.reads(self.height), query.clone()).map(|reply| reply.0)
     }
 
@@ -91,10 +91,10 @@ impl Rig {
                     .iter()
                     .find(|(_, held)| **held == number)
                     .expect("a key holds the account");
-                Origin::External(key.clone())
+                Origin::Signed(key.clone())
             }
-            Principal::Module(module) => Origin::Program(module),
-            Principal::System => Origin::System,
+            Principal::Module(module) => Origin::Module(module),
+            Principal::Root => Origin::Root,
         };
         self.sandbox
             .chat_execute(origin, self.height, TIME, msg)
@@ -295,7 +295,7 @@ pub fn change(n: u64) -> Query {
     Query::Change {
         repo: REPO.into(),
         n,
-        page: Page::first(128),
+        page: PageRequest::first(128),
     }
 }
 
@@ -303,7 +303,7 @@ pub fn changes() -> Query {
     Query::Changes {
         repo: REPO.into(),
         filter: ChangeFilter::default(),
-        page: Page::first(128),
+        page: PageRequest::first(128),
     }
 }
 

@@ -1,7 +1,7 @@
 //! The `identity` program: accounts, the keys and programs that control them,
 //! and the consent by which a key joins an account. The types, rules and
-//! [`Identity`] module are always built; a view links them with `program`
-//! off. The `program` feature adds its wasm exports. The `view` feature
+//! [`Identity`] module are always built; a view links them with `module`
+//! off. The `module` feature adds its wasm exports. The `view` feature
 //! adds the ask a view makes of identity directly (`view.rs`).
 mod principal;
 mod program;
@@ -14,13 +14,13 @@ pub mod view;
 pub use principal::{NO_ACCOUNT, Principal, principal_of};
 pub use program::Identity;
 
-use abi::{BlobId, ProgramId, Scheme};
 use borsh::{BorshDeserialize, BorshSerialize};
-use module_registry::{Page, PageReply};
+use guest::{BlobId, ModuleId, Scheme};
+use module_registry::{PageRequest, PageResponse};
 
 pub type AccountNumber = u64;
 
-pub const PROGRAM: &str = "identity";
+pub const MODULE: &str = "identity";
 pub const CONSENT_NAMESPACE: &[u8] = b"ducktape:identity:consent";
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
@@ -32,7 +32,7 @@ pub struct Key {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
-pub enum Standing {
+pub enum Status {
     Active,
     Suspended,
 }
@@ -41,9 +41,9 @@ pub enum Standing {
 pub enum Control {
     Keys(Vec<Key>),
     Program {
-        executor: ProgramId,
+        executor: ModuleId,
         controller: AccountNumber,
-        standing: Standing,
+        status: Status,
     },
     Revoked {
         controller: AccountNumber,
@@ -75,7 +75,7 @@ impl Account {
     pub fn live(&self) -> bool {
         match &self.control {
             Control::Keys(_) => true,
-            Control::Program { standing, .. } => *standing == Standing::Active,
+            Control::Program { status, .. } => *status == Status::Active,
             Control::Revoked { .. } => false,
         }
     }
@@ -132,9 +132,9 @@ pub enum Op {
         name: String,
         controller: AccountNumber,
     },
-    SetStanding {
+    SetStatus {
         account: AccountNumber,
-        standing: Standing,
+        status: Status,
     },
     TransferControl {
         account: AccountNumber,
@@ -153,12 +153,25 @@ pub enum Reference {
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Query {
-    Get { number: AccountNumber },
-    OfKey { key: Vec<u8> },
-    Generation { key: Vec<u8> },
-    Resolve { references: Vec<Reference> },
-    List { page: Page },
-    Controlled { by: AccountNumber, page: Page },
+    Get {
+        number: AccountNumber,
+    },
+    OfKey {
+        key: Vec<u8>,
+    },
+    Generation {
+        key: Vec<u8>,
+    },
+    Resolve {
+        references: Vec<Reference>,
+    },
+    List {
+        page: PageRequest,
+    },
+    Controlled {
+        by: AccountNumber,
+        page: PageRequest,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
@@ -167,18 +180,18 @@ pub enum Reply {
     Number(Option<AccountNumber>),
     Generation(u64),
     Resolved(Vec<Option<AccountNumber>>),
-    Accounts(PageReply<Account>),
+    Accounts(PageResponse<Account>),
 }
 
-/// The asks another program makes of identity.
+/// The asks another module makes of identity.
 pub fn account_of(
     ctx: &guest::QueryCtx,
     key: &[u8],
-) -> Result<Option<AccountNumber>, abi::Refusal> {
-    match ctx.ask::<Query, Reply>(PROGRAM, &Query::OfKey { key: key.to_vec() })? {
+) -> Result<Option<AccountNumber>, guest::Error> {
+    match ctx.ask::<Query, Reply>(MODULE, &Query::OfKey { key: key.to_vec() })? {
         Reply::Number(number) => Ok(number),
-        other => Err(abi::Refusal::new(
-            abi::reason::UNEXPECTED_REPLY,
+        other => Err(guest::Error::new(
+            guest::code::UNEXPECTED_REPLY,
             format!("identity answered OfKey with {other:?}"),
         )),
     }
@@ -187,18 +200,18 @@ pub fn account_of(
 pub fn account(
     ctx: &guest::QueryCtx,
     number: AccountNumber,
-) -> Result<Option<Account>, abi::Refusal> {
-    match ctx.ask::<Query, Reply>(PROGRAM, &Query::Get { number })? {
+) -> Result<Option<Account>, guest::Error> {
+    match ctx.ask::<Query, Reply>(MODULE, &Query::Get { number })? {
         Reply::Account(account) => Ok(account),
-        other => Err(abi::Refusal::new(
-            abi::reason::UNEXPECTED_REPLY,
+        other => Err(guest::Error::new(
+            guest::code::UNEXPECTED_REPLY,
             format!("identity answered Get with {other:?}"),
         )),
     }
 }
 
 /// An op as a person reads it: a title and its fields. The source of the
-/// `ducktape.describe` module this program ships (`make wasm-describes`).
+/// `ducktape.describe` module this module ships (`make wasm-describes`).
 pub fn describe(op: &Op) -> describe::Description {
     use describe::{Value, field};
     let account = |number: &AccountNumber| field("account", Value::Account(*number));
@@ -269,18 +282,18 @@ pub fn describe(op: &Op) -> describe::Description {
                 field("controller", Value::Account(*controller)),
             ],
         ),
-        Op::SetStanding {
+        Op::SetStatus {
             account: number,
-            standing,
+            status,
         } => (
-            "Set standing".into(),
+            "Set status".into(),
             vec![
                 account(number),
                 field(
-                    "standing",
-                    Value::text(match standing {
-                        Standing::Active => "active",
-                        Standing::Suspended => "suspended",
+                    "status",
+                    Value::text(match status {
+                        Status::Active => "active",
+                        Status::Suspended => "suspended",
                     }),
                 ),
             ],
@@ -312,7 +325,7 @@ fn op_variants_only_append() {
             "SetName",
             "SetProfile",
             "CreateProgram",
-            "SetStanding",
+            "SetStatus",
             "TransferControl",
             "Revoke",
         ]

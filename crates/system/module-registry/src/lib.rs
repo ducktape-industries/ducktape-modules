@@ -1,11 +1,11 @@
-//! The `module-registry` program: the roster of programs a network runs, and
+//! The `module-registry` module: the roster of modules a network runs, and
 //! the scheduled changes to it. The root of the boot set: `valset` and
 //! `identity` link this crate for the origin ([`helpers`]) conventions every
-//! system program shares, and for the authority every system program takes
+//! system module shares, and for the authority every system module takes
 //! its governance ops from.
 //!
 //! The types, rules and [`Modules`] module are always built; a view links
-//! them with `program` off. The `program` feature adds its wasm exports.
+//! them with `module` off. The `module` feature adds its wasm exports.
 pub mod helpers;
 mod program;
 mod rules;
@@ -15,25 +15,25 @@ mod tests;
 pub mod view;
 
 pub use program::Modules;
-pub use store::{Page, PageReply};
+pub use store::{PageRequest, PageResponse};
 
-/// The program whose frames `valset` and this registry accept as governance.
+/// The module whose frames `valset` and this registry accept as governance.
 pub const AUTHORITY: &str = "governance";
 
-use abi::ProgramId;
 use borsh::{BorshDeserialize, BorshSerialize};
+use guest::ModuleId;
 
-pub use abi::module_registry::{Entry, Genesis, PROGRAM, View};
+pub use abi::module_registry::{Entry, Genesis, PROGRAM as MODULE, View};
 
 pub const CODE_KIND: &str = "program";
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Change {
     Set(Entry),
-    Remove(ProgramId),
-    /// A view with no program behind it, listed under its name.
+    Remove(ModuleId),
+    /// A view with no module behind it, listed under its name.
     SetView(View),
-    RemoveView(ProgramId),
+    RemoveView(ModuleId),
 }
 
 impl Change {
@@ -75,16 +75,16 @@ pub struct Scheduled {
 pub enum Op {
     Publish { body: Vec<u8> },
     Schedule(Scheduled),
-    Cancel { height: u64, program: ProgramId },
+    Cancel { height: u64, program: ModuleId },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Query {
     At(u64),
     Scheduled {
-        page: Page,
+        page: PageRequest,
     },
-    Program(ProgramId),
+    Program(ModuleId),
     /// The view-only entries at a height, by name.
     Views(u64),
 }
@@ -92,13 +92,13 @@ pub enum Query {
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Reply {
     Programs(Vec<Entry>),
-    Scheduled(PageReply<Scheduled>),
+    Scheduled(PageResponse<Scheduled>),
     Program { height: u64, entry: Option<Entry> },
     Views(Vec<View>),
 }
 
 /// An op as a person reads it: a title and its fields. The source of the
-/// `ducktape.describe` module this program ships (`make wasm-describes`).
+/// `ducktape.describe` module this module ships (`make wasm-describes`).
 pub fn describe(op: &Op) -> describe::Description {
     use describe::{Value, field};
     let height = |height: &u64| field("height", Value::Text(height.to_string()));

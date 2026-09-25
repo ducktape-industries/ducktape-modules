@@ -1,54 +1,47 @@
-//! The refusals a module hands back: abi's reason tokens, each with one sentence.
+//! The errors a module hands back: a [`code`] token, each with one message.
 
-use abi::{Refusal, reason};
+use crate::{Error, code};
 use borsh::BorshDeserialize;
 
-pub fn invalid(sentence: impl Into<String>) -> Refusal {
-    Refusal::new(reason::INVALID_INPUT, sentence)
+pub fn invalid(message: impl Into<String>) -> Error {
+    Error::new(code::INVALID_INPUT, message)
 }
 
-pub fn not_found(sentence: impl Into<String>) -> Refusal {
-    Refusal::new(reason::NOT_FOUND, sentence)
+pub fn not_found(message: impl Into<String>) -> Error {
+    Error::new(code::NOT_FOUND, message)
 }
 
-pub fn already_exists(sentence: impl Into<String>) -> Refusal {
-    Refusal::new(reason::ALREADY_EXISTS, sentence)
+pub fn already_exists(message: impl Into<String>) -> Error {
+    Error::new(code::ALREADY_EXISTS, message)
 }
 
-pub fn wrong_state(sentence: impl Into<String>) -> Refusal {
-    Refusal::new(reason::WRONG_STATE, sentence)
+pub fn wrong_state(message: impl Into<String>) -> Error {
+    Error::new(code::WRONG_STATE, message)
 }
 
-pub fn unauthorized(sentence: impl Into<String>) -> Refusal {
-    Refusal::new(reason::UNAUTHORIZED, sentence)
+pub fn unauthorized(message: impl Into<String>) -> Error {
+    Error::new(code::UNAUTHORIZED, message)
 }
 
-pub fn capacity(sentence: impl Into<String>) -> Refusal {
-    Refusal::new(reason::CAPACITY, sentence)
+pub fn capacity(message: impl Into<String>) -> Error {
+    Error::new(code::CAPACITY, message)
 }
 
-pub fn stale(sentence: impl Into<String>) -> Refusal {
-    Refusal::new(reason::STALE, sentence)
+pub fn stale(message: impl Into<String>) -> Error {
+    Error::new(code::STALE, message)
 }
 
 /// Stored state that does not decode: an operator's problem, never a panic.
-pub fn corrupt(table: &str, key: &[u8], what: impl std::fmt::Display) -> Refusal {
-    Refusal::new(
-        reason::CORRUPT,
-        format!("{table}[{}]: {what}", abi::hex(key)),
-    )
+pub fn corrupt(table: &str, key: &[u8], what: impl std::fmt::Display) -> Error {
+    Error::new(code::CORRUPT, format!("{table}[{}]: {what}", abi::hex(key)))
 }
 
-/// A program's `Op`/`Query` that does not decode, refused as invalid input
-/// naming the program and the shape.
-pub fn decoded<T: BorshDeserialize>(
-    program: &str,
-    shape: &str,
-    bytes: &[u8],
-) -> Result<T, Refusal> {
+/// A module's `Op`/`Query` that does not decode, refused as invalid input
+/// naming the module and the shape.
+pub fn decoded<T: BorshDeserialize>(module: &str, shape: &str, bytes: &[u8]) -> Result<T, Error> {
     abi::decode(bytes).map_err(|fault| {
         invalid(format!(
-            "{program}: {shape} did not decode: {}",
+            "{module}: {shape} did not decode: {}",
             fault.sentence
         ))
     })

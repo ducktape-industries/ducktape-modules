@@ -2,15 +2,15 @@
 
 use std::collections::BTreeMap;
 
-use abi::{HashKind, ProgramId};
-use guest::{ExecCtx, QueryCtx, Refusal, already_exists, invalid, not_found};
+use guest::{Error, ExecCtx, QueryCtx, already_exists, invalid, not_found};
+use guest::{HashKind, ModuleId};
 use store::{Item, Map};
 
 use crate::{AUTHORITY, CODE_KIND, Change, Entry, Genesis, Scheduled, View};
 
-const PROGRAMS: Map<ProgramId, Entry> = Map::new("p/");
-const VIEWS: Map<ProgramId, View> = Map::new("v/");
-type At = (u64, ProgramId);
+const PROGRAMS: Map<ModuleId, Entry> = Map::new("p/");
+const VIEWS: Map<ModuleId, View> = Map::new("v/");
+type At = (u64, ModuleId);
 pub(crate) const SCHEDULE: Map<At, Change> = Map::new("s/");
 const FOLDED: Item<u64> = Item::new("folded");
 
@@ -24,13 +24,13 @@ pub(crate) fn init(ctx: &ExecCtx, genesis: Genesis) {
     FOLDED.put(ctx, &0);
 }
 
-pub(crate) fn publish(ctx: &ExecCtx, body: Vec<u8>) -> Result<(), Refusal> {
+pub(crate) fn publish(ctx: &ExecCtx, body: Vec<u8>) -> Result<(), Error> {
     let id = ctx.blob_put(HashKind::Sha256, CODE_KIND, body)?;
-    ctx.output(abi::encode(&id));
+    ctx.set_return_data(abi::encode(&id));
     Ok(())
 }
 
-pub(crate) fn schedule(ctx: &ExecCtx, scheduled: Scheduled) -> Result<(), Refusal> {
+pub(crate) fn schedule(ctx: &ExecCtx, scheduled: Scheduled) -> Result<(), Error> {
     let env = ctx.env();
     crate::helpers::from(env, AUTHORITY)?;
     let in_the_future = scheduled.height > env.height;
@@ -80,7 +80,7 @@ pub(crate) fn schedule(ctx: &ExecCtx, scheduled: Scheduled) -> Result<(), Refusa
     Ok(())
 }
 
-pub(crate) fn cancel(ctx: &ExecCtx, height: u64, program: ProgramId) -> Result<(), Refusal> {
+pub(crate) fn cancel(ctx: &ExecCtx, height: u64, program: ModuleId) -> Result<(), Error> {
     let env = ctx.env();
     crate::helpers::from(env, AUTHORITY)?;
     let key = (height, program);
@@ -106,7 +106,7 @@ pub(crate) fn cancel(ctx: &ExecCtx, height: u64, program: ProgramId) -> Result<(
     Ok(())
 }
 
-pub(crate) fn fold(ctx: &ExecCtx, height: u64) -> Result<(), Refusal> {
+pub(crate) fn fold(ctx: &ExecCtx, height: u64) -> Result<(), Error> {
     let folded = FOLDED.get(ctx)?.unwrap_or(0);
     let nothing_new = folded >= height;
     if nothing_new {
@@ -125,22 +125,22 @@ pub(crate) fn fold(ctx: &ExecCtx, height: u64) -> Result<(), Refusal> {
     Ok(())
 }
 
-fn due(ctx: &QueryCtx, height: u64) -> Result<Vec<(At, Change)>, Refusal> {
+fn due(ctx: &QueryCtx, height: u64) -> Result<Vec<(At, Change)>, Error> {
     SCHEDULE.scan(ctx, SCHEDULE.below(&(height + 1)))
 }
 
-pub(crate) fn at(ctx: &QueryCtx, height: u64) -> Result<Vec<Entry>, Refusal> {
+pub(crate) fn at(ctx: &QueryCtx, height: u64) -> Result<Vec<Entry>, Error> {
     Ok(roster(ctx, height)?.0.into_values().collect())
 }
 
-pub(crate) fn views_at(ctx: &QueryCtx, height: u64) -> Result<Vec<View>, Refusal> {
+pub(crate) fn views_at(ctx: &QueryCtx, height: u64) -> Result<Vec<View>, Error> {
     Ok(roster(ctx, height)?.1.into_values().collect())
 }
 
-type Roster = (BTreeMap<ProgramId, Entry>, BTreeMap<ProgramId, View>);
+type Roster = (BTreeMap<ModuleId, Entry>, BTreeMap<ModuleId, View>);
 
 /// Both lists at a height, by name: what is folded, and every change due by then.
-fn roster(ctx: &QueryCtx, height: u64) -> Result<Roster, Refusal> {
+fn roster(ctx: &QueryCtx, height: u64) -> Result<Roster, Error> {
     let mut programs: BTreeMap<_, _> = PROGRAMS.all(ctx)?.into_iter().collect();
     let mut views: BTreeMap<_, _> = VIEWS.all(ctx)?.into_iter().collect();
     for (_, change) in due(ctx, height)? {
@@ -169,7 +169,7 @@ enum Kind {
 }
 
 /// Whether a set of `kind` under `name` waits anywhere in the schedule, at any height.
-fn pending(ctx: &QueryCtx, name: &str, kind: Kind) -> Result<bool, Refusal> {
+fn pending(ctx: &QueryCtx, name: &str, kind: Kind) -> Result<bool, Error> {
     Ok(SCHEDULE
         .all(ctx)?
         .into_iter()

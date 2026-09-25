@@ -84,8 +84,8 @@ fn client_merge_fast_forwards_or_lands_the_merge_commit_the_client_built() {
             feature
         )
         .unwrap_err()
-        .reason,
-        reason::WRONG_STATE
+        .code,
+        code::WRONG_STATE
     );
     let diverged = push(
         &mut sandbox,
@@ -237,5 +237,5 @@ fn a_sha1_pack_is_refused_by_a_sha256_repository() {
             request,
         },
     );
-    assert_eq!(refused.unwrap_err().reason, reason::INVALID_INPUT);
+    assert_eq!(refused.unwrap_err().code, code::INVALID_INPUT);
 }

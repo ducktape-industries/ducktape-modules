@@ -1,20 +1,20 @@
-//! Who acts on a program's state, as resolved: an [`abi::Origin`] is the
+//! Who acts on a module's state, as resolved: an [`guest::Origin`] is the
 //! raw caller, a [`Principal`] who is acting. The one shape every author,
 //! owner, member, reviewer and grantee takes, and the one rule that turns a
-//! signer into it. Every program that names people (chat, forge) resolves
+//! signer into it. Every module that names people (chat, forge) resolves
 //! its signer through [`principal_of`], so the rule is written once.
-use abi::{Origin, Refusal, reason};
 use borsh::{BorshDeserialize, BorshSerialize};
+use guest::{Error, Origin, code};
 use guest::{QueryCtx, invalid, unauthorized};
 use serde::{Deserialize, Serialize};
 use store::KeyCodec;
 
 use crate::AccountNumber;
 
-/// The program derives the acting principal from `Env.origin` at write time,
+/// The module derives the acting principal from `Env.origin` at write time,
 /// never from a payload. A person is an account, the identity her many keys
 /// share: a key that holds none writes nothing (it only reads), so no row
-/// ever names a bare key. A program that emitted the write is a module.
+/// ever names a bare key. A module that emitted the write is `Module`.
 ///
 /// There is no default principal: "nobody" is `Option<Principal>::None`,
 /// never the most trusted variant.
@@ -38,17 +38,17 @@ pub enum Principal {
     /// a module that emitted the write as a follow-up.
     Module(String),
     /// genesis and system-internal writes.
-    System,
+    Root,
 }
 
 impl Principal {
-    /// The principal as a describe field shows it: an account or a program.
+    /// The principal as a describe field shows it: an account or a module.
     pub fn value(&self) -> describe::Value {
         use describe::Value;
         match self {
             Principal::Account(number) => Value::Account(*number),
             Principal::Module(module) => Value::Program(module.clone()),
-            Principal::System => Value::text("system"),
+            Principal::Root => Value::text("system"),
         }
     }
 
@@ -56,7 +56,7 @@ impl Principal {
     pub fn account(&self) -> Option<AccountNumber> {
         match self {
             Principal::Account(account) => Some(*account),
-            Principal::Module(_) | Principal::System => None,
+            Principal::Module(_) | Principal::Root => None,
         }
     }
 
@@ -97,19 +97,19 @@ pub const NO_ACCOUNT: &str = "a person writes through an account, and this key h
 /// Who an origin is: a key is the account identity says holds it; a key
 /// that holds none (or any key while identity is not deployed) is refused,
 /// since only an account writes as a person.
-pub fn principal_of(ctx: &QueryCtx, origin: &Origin) -> Result<Principal, Refusal> {
+pub fn principal_of(ctx: &QueryCtx, origin: &Origin) -> Result<Principal, Error> {
     Ok(match origin {
-        Origin::External(key) if key.is_empty() => {
+        Origin::Signed(key) if key.is_empty() => {
             return Err(invalid("an external origin carries a key"));
         }
-        Origin::External(key) => match crate::account_of(ctx, key) {
+        Origin::Signed(key) => match crate::account_of(ctx, key) {
             Ok(Some(number)) => Principal::Account(number),
             Ok(None) => return Err(unauthorized(NO_ACCOUNT)),
-            Err(r) if r.reason == reason::UNKNOWN_PROGRAM => return Err(unauthorized(NO_ACCOUNT)),
+            Err(r) if r.code == code::UNKNOWN_PROGRAM => return Err(unauthorized(NO_ACCOUNT)),
             Err(r) => return Err(r),
         },
-        Origin::Program(id) => Principal::Module(id.clone()),
-        Origin::System => Principal::System,
+        Origin::Module(id) => Principal::Module(id.clone()),
+        Origin::Root => Principal::Root,
     })
 }
 
@@ -122,7 +122,7 @@ mod tests {
         for principal in [
             Principal::Account(7),
             Principal::Module("forge".into()),
-            Principal::System,
+            Principal::Root,
         ] {
             let bytes = principal.key_bytes();
             let mut rest = bytes.as_slice();

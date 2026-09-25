@@ -1,6 +1,6 @@
 //! A module written with `guest` alone: a counter anyone may add to.
 
-use guest::{ExecCtx, Module, QueryCtx, Refusal, invalid};
+use guest::{Error, ExecCtx, Module, QueryCtx, invalid};
 
 pub struct Counter;
 
@@ -11,21 +11,21 @@ impl Module for Counter {
     /// The count.
     type Response = u64;
 
-    fn execute(ctx: &ExecCtx, by: u64) -> Result<(), Refusal> {
+    fn execute(ctx: &ExecCtx, by: u64) -> Result<(), Error> {
         let n = count(ctx)?
             .checked_add(by)
             .ok_or_else(|| invalid("the count would overflow"))?;
         ctx.put("n", &n);
-        ctx.output(abi_bytes(n));
+        ctx.set_return_data(abi_bytes(n));
         Ok(())
     }
 
-    fn query(ctx: &QueryCtx, (): ()) -> Result<u64, Refusal> {
+    fn query(ctx: &QueryCtx, (): ()) -> Result<u64, Error> {
         count(ctx)
     }
 }
 
-fn count(ctx: &QueryCtx) -> Result<u64, Refusal> {
+fn count(ctx: &QueryCtx) -> Result<u64, Error> {
     Ok(ctx.record("n")?.unwrap_or(0))
 }
 
@@ -37,17 +37,17 @@ guest::export!(Counter);
 
 #[cfg(test)]
 mod tests {
-    use guest::{Cause, Env, MockHost, Origin, reason};
+    use guest::{Cause, Env, MockHost, Origin, code};
 
     use super::*;
 
     fn env() -> Env {
         Env {
-            network: vec![],
+            chain_id: vec![],
             height: 1,
             time: 0,
-            me: "counter".into(),
-            origin: Origin::External(vec![1; 32]),
+            module: "counter".into(),
+            origin: Origin::Signed(vec![1; 32]),
             cause: Cause::Direct,
         }
     }
@@ -61,14 +61,14 @@ mod tests {
         assert_eq!(host.take_output(), guest::abi::encode(&5u64));
 
         let overflow = host.refused(|| Counter::execute(&host.exec(env()), u64::MAX));
-        assert_eq!(overflow.reason, reason::INVALID_INPUT);
+        assert_eq!(overflow.code, code::INVALID_INPUT);
 
         // The bytes path `export!`'s `call` takes: decode, run, respond.
         guest::execute::<Counter>(&host.exec(env()), &guest::abi::encode(&1u64)).unwrap();
         guest::query::<Counter>(&host.query(env()), &guest::abi::encode(&())).unwrap();
         assert_eq!(host.borrow().response, guest::abi::encode(&6u64));
         let garbage = guest::execute::<Counter>(&host.exec(env()), &[1]).unwrap_err();
-        assert_eq!(garbage.reason, reason::INVALID_INPUT);
+        assert_eq!(garbage.code, code::INVALID_INPUT);
     }
 }
 

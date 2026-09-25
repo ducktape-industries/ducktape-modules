@@ -1,7 +1,7 @@
 //! One function per [`Op`](crate::Op), each named by [`Chat::execute`](crate::Chat)'s
 //! match. Each checks first (`rules`), then writes, so a refused op leaves
 //! the store as it found it.
-use guest::{ExecCtx, Refusal, already_exists, capacity, invalid, unauthorized, wrong_state};
+use guest::{Error, ExecCtx, already_exists, capacity, invalid, unauthorized, wrong_state};
 
 use crate::rules;
 use crate::state::{
@@ -23,7 +23,7 @@ pub(crate) fn create_channel(
     name: String,
     post_policy: PostPolicy,
     voice: bool,
-) -> Result<(), Refusal> {
+) -> Result<(), Error> {
     rules::channel_id(&id, sender)?;
     rules::name(&name)?;
     if CHANNELS.has(ctx, &id) {
@@ -61,7 +61,7 @@ pub(crate) fn open_dm(
     sender: &Principal,
     counterpart: AccountNumber,
     name: String,
-) -> Result<(), Refusal> {
+) -> Result<(), Error> {
     let Principal::Account(me) = *sender else {
         return Err(unauthorized("only an account opens a dm"));
     };
@@ -86,7 +86,7 @@ pub(crate) fn rename(
     sender: &Principal,
     id: &str,
     name: String,
-) -> Result<(), Refusal> {
+) -> Result<(), Error> {
     rules::name(&name)?;
     let mut channel = channel(ctx, id)?;
     rules::not_dm(&channel)?;
@@ -101,7 +101,7 @@ pub(crate) fn set_archived(
     sender: &Principal,
     id: &str,
     archived: bool,
-) -> Result<(), Refusal> {
+) -> Result<(), Error> {
     let mut channel = channel(ctx, id)?;
     rules::not_dm(&channel)?;
     rules::owned(&channel, sender)?;
@@ -116,7 +116,7 @@ pub(crate) fn set_membership(
     id: &str,
     principal: Principal,
     member: bool,
-) -> Result<(), Refusal> {
+) -> Result<(), Error> {
     let channel = channel(ctx, id)?;
     rules::not_dm(&channel)?;
     rules::owned(&channel, sender)?;
@@ -146,7 +146,7 @@ pub(crate) fn post(
     message_id: String,
     blocks: Vec<Block>,
     thread: Option<u64>,
-) -> Result<(), Refusal> {
+) -> Result<(), Error> {
     rules::id("message_id", &message_id)?;
     rules::namespace(&message_id, sender)?;
     rules::writable(ctx, &channel(ctx, &channel_id)?, sender)?;
@@ -179,7 +179,7 @@ pub(crate) fn post(
 
 /// Reply `seq` joins the thread under `root`: the root counts it, and its
 /// author's [`ANSWERED`] entry moves to this reply.
-fn answer(ctx: &ExecCtx, channel_id: &str, root: u64, seq: u64) -> Result<(), Refusal> {
+fn answer(ctx: &ExecCtx, channel_id: &str, root: u64, seq: u64) -> Result<(), Error> {
     let mut row = message(ctx, channel_id, root)?;
     if row.thread.is_some() {
         return Err(invalid("a reply cannot be a thread root"));
@@ -217,7 +217,7 @@ pub(crate) fn edit(
     seq: u64,
     blocks: Vec<Block>,
     base_rev: Option<u32>,
-) -> Result<(), Refusal> {
+) -> Result<(), Error> {
     rules::writable(ctx, &channel(ctx, channel_id)?, sender)?;
     let old = message(ctx, channel_id, seq)?;
     rules::editable(&old, sender)?;
@@ -247,7 +247,7 @@ pub(crate) fn delete(
     sender: &Principal,
     channel_id: &str,
     seq: u64,
-) -> Result<(), Refusal> {
+) -> Result<(), Error> {
     let channel = channel(ctx, channel_id)?;
     let old = message(ctx, channel_id, seq)?;
     if old.author != *sender && channel.owner != *sender {
@@ -284,7 +284,7 @@ pub(crate) fn react(
     seq: u64,
     emoji: &str,
     on: bool,
-) -> Result<(), Refusal> {
+) -> Result<(), Error> {
     rules::emoji(emoji)?;
     rules::writable(ctx, &channel(ctx, channel_id)?, sender)?;
     let mut row = message(ctx, channel_id, seq)?;
@@ -307,7 +307,7 @@ pub(crate) fn react(
 }
 
 /// One more `emoji`: its count grows, or it joins the list in emoji order.
-fn count_in(reactions: &mut Vec<Reaction>, emoji: &str) -> Result<(), Refusal> {
+fn count_in(reactions: &mut Vec<Reaction>, emoji: &str) -> Result<(), Error> {
     if let Some(reaction) = reactions.iter_mut().find(|r| r.emoji == emoji) {
         reaction.count += 1;
         return Ok(());
@@ -344,7 +344,7 @@ pub(crate) fn join_huddle(
     channel_id: &str,
     node: &[u8],
     node_proof: &[u8],
-) -> Result<(), Refusal> {
+) -> Result<(), Error> {
     crate::origin::node_consents(ctx, &ctx.env().origin, channel_id, node, node_proof)?;
     if !sender.is_person() {
         return Err(unauthorized("only people join a huddle"));
@@ -376,7 +376,7 @@ pub(crate) fn leave_huddle(
     ctx: &ExecCtx,
     sender: &Principal,
     channel_id: &str,
-) -> Result<(), Refusal> {
+) -> Result<(), Error> {
     let mut channel = channel(ctx, channel_id)?;
     channel.huddle.retain(|e| e.principal != *sender);
     CHANNELS.put(ctx, &channel.id, &channel);
