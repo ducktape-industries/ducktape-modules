@@ -25,6 +25,11 @@ use crate::state::{Dock, Progress, RepoTab};
 use components::{badge, button, heading, id, quiet};
 use forge::Reply;
 
+/// The dock beside a change.
+const DOCK_W: Pixels = px(300.);
+/// A fact's label column.
+const FACT_LABEL_W: Pixels = px(120.);
+
 pub(crate) fn render(forge: &mut Forge, cx: &mut Context<Forge>) -> impl IntoElement {
     let theme = *cx.global::<Theme>();
     let measured = |cx: &mut Context<Forge>| {
@@ -259,7 +264,7 @@ fn panel(forge: &Forge, dock: Dock, cx: &mut Context<Forge>, theme: &Theme) -> A
     };
     div()
         .id(id("forge-dock"))
-        .w(px(300.))
+        .w(DOCK_W)
         .flex()
         .flex_col()
         .min_h(px(0.))
@@ -337,7 +342,7 @@ pub(crate) fn fact(label: &str, value: impl Into<String>, theme: &Theme) -> AnyE
         .text_size(design::text::SECONDARY)
         .child(
             div()
-                .w(px(120.))
+                .w(FACT_LABEL_W)
                 .text_color(theme.muted)
                 .child(label.to_owned()),
         )

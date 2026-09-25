@@ -4,6 +4,7 @@ use ducktape_view_guest::design;
 use std::rc::Rc;
 
 use ducktape_view_guest::prelude::*;
+use ducktape_view_guest::{Div, Stateful};
 
 use crate::Forge;
 use crate::queries::PAGE;
@@ -84,7 +85,7 @@ pub(crate) fn log(
             })
             .cell(
                 div()
-                    .w(px(100.))
+                    .w(OID_W)
                     .whitespace_nowrap()
                     .font_family(design::fonts::FAMILY_MONO)
                     .text_size(design::text::SECONDARY)
@@ -105,6 +106,44 @@ pub(crate) fn log(
         row.into_any_element()
     })
 }
+
+/// A commit's ids, parents, author and message.
+fn facts(commit: &CommitInfo, theme: &Theme) -> Stateful<Div> {
+    let parents = if commit.parents.is_empty() {
+        "root commit".to_owned()
+    } else {
+        commit
+            .parents
+            .iter()
+            .map(|parent| short_hex(parent))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let author = format!(
+        "{} <{}> at {}",
+        String::from_utf8_lossy(&commit.author.name),
+        String::from_utf8_lossy(&commit.author.email),
+        commit.author.time
+    );
+    div()
+        .id(id("forge-commit-facts"))
+        .flex()
+        .flex_col()
+        .gap_1()
+        .px_3()
+        .py_2()
+        .child(fact("Commit", commit.oid.clone(), theme))
+        .child(fact("Tree", commit.tree.clone(), theme))
+        .child(fact("Parents", parents, theme))
+        .child(fact("Author", author, theme))
+        .child(quiet(
+            String::from_utf8_lossy(&commit.message).into_owned(),
+            theme,
+        ))
+}
+
+/// The short commit id column.
+const OID_W: Pixels = px(100.);
 
 fn summary(commit: &CommitInfo) -> String {
     String::from_utf8_lossy(&commit.message)
@@ -146,43 +185,7 @@ fn detail(forge: &Forge, oid: &str, cx: &mut Context<Forge>, theme: &Theme) -> A
                 .child(button(id("forge-commit-close"), "Back", theme, close)),
         );
     if let Some(commit) = commit {
-        let message = String::from_utf8_lossy(&commit.message).into_owned();
-        column = column.child(
-            div()
-                .id(id("forge-commit-facts"))
-                .flex()
-                .flex_col()
-                .gap_1()
-                .px_3()
-                .py_2()
-                .child(fact("Commit", commit.oid.clone(), theme))
-                .child(fact("Tree", commit.tree.clone(), theme))
-                .child(fact(
-                    "Parents",
-                    if commit.parents.is_empty() {
-                        "root commit".to_owned()
-                    } else {
-                        commit
-                            .parents
-                            .iter()
-                            .map(|parent| short_hex(parent))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    },
-                    theme,
-                ))
-                .child(fact(
-                    "Author",
-                    format!(
-                        "{} <{}> at {}",
-                        String::from_utf8_lossy(&commit.author.name),
-                        String::from_utf8_lossy(&commit.author.email),
-                        commit.author.time
-                    ),
-                    theme,
-                ))
-                .child(quiet(message, theme)),
-        );
+        column = column.child(facts(commit, theme));
     }
     let diff_query = Query::Diff {
         repo: forge.repo_name(),

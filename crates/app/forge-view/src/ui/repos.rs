@@ -2,6 +2,7 @@
 //! switches between them when something is.
 use ducktape_view_guest::design;
 use ducktape_view_guest::prelude::*;
+use ducktape_view_guest::{Div, Stateful};
 
 use crate::Forge;
 use crate::queries::PAGE;
@@ -24,6 +25,14 @@ fn listed<'a>(forge: &'a Forge, reply: &'a Reply) -> Vec<&'a RepoInfo> {
         .collect()
 }
 
+/// The facts column widths on a repository row: owner, head, refs, activity.
+const OWNER_W: Pixels = px(140.);
+const HEAD_W: Pixels = px(72.);
+const REFS_W: Pixels = px(52.);
+const ACTIVITY_W: Pixels = px(96.);
+/// The overview's filter field.
+const SEARCH_W: Pixels = px(320.);
+
 /// One repository: its name over the address it clones from, and what it
 /// is (owner, default branch, refs, last activity) on the right.
 fn repo_row(
@@ -34,14 +43,82 @@ fn repo_row(
     theme: &Theme,
 ) -> AnyElement {
     let name = info.name.clone();
-    let url = crate::ui::repo_link(forge, &name);
     let group = format!("forge-repo-{name}-row");
     let open = cx.listener({
         let name = name.clone();
         move |forge, _: &ClickEvent, _, cx| forge.open_repo(name.clone(), cx)
     });
+    div()
+        .id(id(format!("forge-repo-{name}")))
+        .group(group.clone())
+        .flex()
+        .items_center()
+        .gap_4()
+        .px_4()
+        .py(design::space::SM)
+        .border_b_1()
+        .border_color(theme.border)
+        .hover(|style| style.bg(theme.surface))
+        .role(Role::Button)
+        .aria_label(format!("Open {name}"))
+        .focusable()
+        .on_click(open)
+        .child(repo_title(forge, &name, &group, cx, theme))
+        .child(repo_facts(info, owner, theme))
+        .into_any_element()
+}
+
+/// A repository's name over its clone address and Copy.
+fn repo_title(
+    forge: &Forge,
+    name: &str,
+    group: &str,
+    cx: &mut Context<Forge>,
+    theme: &Theme,
+) -> Div {
+    let url = crate::ui::repo_link(forge, name);
+    div()
+        .flex_1()
+        .min_w(px(0.))
+        .flex()
+        .flex_col()
+        .gap(design::space::HAIR)
+        .child(
+            div()
+                .text_size(design::text::SECTION)
+                .font_weight(ducktape_view_guest::FontWeight::SEMIBOLD)
+                .truncate()
+                .child(name.to_owned()),
+        )
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(
+                    div()
+                        .min_w(px(0.))
+                        .truncate()
+                        .font_family(design::fonts::FAMILY_MONO)
+                        .text_size(design::text::CAPTION)
+                        .text_color(theme.faint)
+                        .child(url.clone()),
+                )
+                .child(copy_button(forge, name, url, group, cx, theme)),
+        )
+}
+
+/// Copies the clone address; shown on hover, and while it says Copied.
+fn copy_button(
+    forge: &Forge,
+    name: &str,
+    url: String,
+    group: &str,
+    cx: &mut Context<Forge>,
+    theme: &Theme,
+) -> Stateful<Div> {
     let copy = cx.listener({
-        let (name, url) = (name.clone(), url.clone());
+        let name = name.to_owned();
         move |forge, _: &ClickEvent, _, cx| {
             cx.host()
                 .notify::<ducktape_view_guest::methods::ClipboardWrite>(url.clone());
@@ -49,8 +126,8 @@ fn repo_row(
             cx.notify();
         }
     });
-    let copied = forge.copied.as_deref() == Some(name.as_str());
-    let copy = div()
+    let copied = forge.copied.as_deref() == Some(name);
+    let button = div()
         .id(id(format!("forge-repo-{name}-copy")))
         .role(Role::Button)
         .aria_label(format!("Copy the address of {name}"))
@@ -66,100 +143,55 @@ fn repo_row(
         .hover(|style| style.text_color(theme.foreground))
         .on_click(copy)
         .child(if copied { "Copied" } else { "Copy" });
-    let copy = match copied {
-        true => copy,
-        false => copy
+    match copied {
+        true => button,
+        false => button
             .invisible()
-            .group_hover(group.clone(), |style| style.visible()),
-    };
+            .group_hover(group.to_owned(), |style| style.visible()),
+    }
+}
+
+/// What a repository is: owner, default branch, refs, last activity.
+fn repo_facts(info: &RepoInfo, owner: String, theme: &Theme) -> Div {
     div()
-        .id(id(format!("forge-repo-{name}")))
-        .group(group)
         .flex()
         .items_center()
-        .gap_4()
-        .px_4()
-        .py(design::space::SM)
-        .border_b_1()
-        .border_color(theme.border)
-        .hover(|style| style.bg(theme.surface))
-        .role(Role::Button)
-        .aria_label(format!("Open {name}"))
-        .focusable()
-        .on_click(open)
+        .gap_5()
+        .flex_shrink_0()
+        .text_size(design::text::SECONDARY)
+        .text_color(theme.muted)
         .child(
             div()
-                .flex_1()
-                .min_w(px(0.))
-                .flex()
-                .flex_col()
-                .gap(px(3.))
-                .child(
-                    div()
-                        .text_size(design::text::SECTION)
-                        .font_weight(ducktape_view_guest::FontWeight::SEMIBOLD)
-                        .truncate()
-                        .child(name.clone()),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .child(
-                            div()
-                                .min_w(px(0.))
-                                .truncate()
-                                .font_family(design::fonts::FAMILY_MONO)
-                                .text_size(px(11.5))
-                                .text_color(theme.faint)
-                                .child(url),
-                        )
-                        .child(copy),
-                ),
-        )
-        .child(
-            div()
+                .w(OWNER_W)
                 .flex()
                 .items_center()
-                .gap_5()
-                .flex_shrink_0()
-                .text_size(design::text::SECONDARY)
-                .text_color(theme.muted)
+                .gap_1p5()
                 .child(
-                    div()
-                        .w(px(140.))
-                        .flex()
-                        .items_center()
-                        .gap_1p5()
-                        .child(
-                            design::avatar(&owner, px(18.), theme)
-                                .font_weight(ducktape_view_guest::FontWeight::SEMIBOLD),
-                        )
-                        .child(div().min_w(px(0.)).truncate().child(owner)),
+                    design::avatar(&owner, design::size::AVATAR_SM, theme)
+                        .font_weight(ducktape_view_guest::FontWeight::SEMIBOLD),
                 )
-                .child(
-                    div()
-                        .w(px(72.))
-                        .truncate()
-                        .font_family(design::fonts::FAMILY_MONO)
-                        .text_size(px(11.5))
-                        .child(ref_label(&info.repo.settings.head)),
-                )
-                .child(
-                    div()
-                        .w(px(52.))
-                        .child(design::plural(info.repo.refs_count, "ref", "refs")),
-                )
-                .child(
-                    div()
-                        .w(px(96.))
-                        .text_right()
-                        .whitespace_nowrap()
-                        .child(format!("block {}", info.repo.last_activity)),
-                ),
+                .child(div().min_w(px(0.)).truncate().child(owner)),
         )
-        .into_any_element()
+        .child(
+            div()
+                .w(HEAD_W)
+                .truncate()
+                .font_family(design::fonts::FAMILY_MONO)
+                .text_size(design::text::CAPTION)
+                .child(ref_label(&info.repo.settings.head)),
+        )
+        .child(
+            div()
+                .w(REFS_W)
+                .child(design::plural(info.repo.refs_count, "ref", "refs")),
+        )
+        .child(
+            div()
+                .w(ACTIVITY_W)
+                .text_right()
+                .whitespace_nowrap()
+                .child(format!("block {}", info.repo.last_activity)),
+        )
 }
 
 /// The screen: every repository of this network, newest activity first.
@@ -218,7 +250,6 @@ pub(crate) fn overview(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) ->
 
 /// The rail: the same repositories, compact, while one of them is open.
 pub(crate) fn rail(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
-    let home = cx.listener(|forge, _: &ClickEvent, _, cx| forge.open_repos(cx));
     let column = div()
         .id(id("forge-rail"))
         .w(px(forge.layout.tree))
@@ -228,57 +259,8 @@ pub(crate) fn rail(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> Any
         .min_h(px(0.))
         .bg(theme.sidebar)
         .text_color(theme.sidebar_foreground)
-        .child(
-            // The window's title bar already says Forge: the rail's head is
-            // the way back to every repository.
-            div()
-                .id(id("forge-rail-header"))
-                .flex()
-                .items_center()
-                .px_2()
-                .py_1()
-                .border_b_1()
-                .border_color(theme.sidebar_border)
-                .child(
-                    div()
-                        .id(id("forge-rail-home"))
-                        .flex_1()
-                        .px_1()
-                        .py_1()
-                        .text_size(design::text::SECONDARY)
-                        .text_color(theme.sidebar_muted)
-                        .hover(|style| {
-                            style
-                                .bg(theme.sidebar_raised)
-                                .text_color(theme.sidebar_foreground)
-                        })
-                        .role(Role::Button)
-                        .focusable()
-                        .on_click(home)
-                        .child("← All repositories"),
-                ),
-        )
-        .child(
-            // The row pads, not the field: a full-width field with its own
-            // margins ran past the rail's edge.
-            div().px_2().py_1().child(
-                Input::new(id("forge-rail-search"))
-                    .h(design::size::CONTROL)
-                    .px_2()
-                    .py_1()
-                    .border_1()
-                    .border_color(theme.sidebar_border)
-                    .bg(theme.sidebar_raised)
-                    .text_color(theme.sidebar_foreground)
-                    .value(forge.search.clone())
-                    .placeholder("Search repositories…")
-                    .label("Search repositories")
-                    .on_input(cx.listener(|forge, text: &String, _, cx| {
-                        forge.search = text.clone();
-                        cx.notify();
-                    })),
-            ),
-        );
+        .child(rail_home(cx, theme))
+        .child(rail_search(forge, cx, theme));
     let reply = match staged(
         forge,
         &query(),
@@ -308,6 +290,60 @@ pub(crate) fn rail(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> Any
     column.child(list).into_any_element()
 }
 
+/// The window's title bar already says Forge: the rail's head is the way
+/// back to every repository.
+fn rail_home(cx: &mut Context<Forge>, theme: &Theme) -> Stateful<Div> {
+    let home = cx.listener(|forge, _: &ClickEvent, _, cx| forge.open_repos(cx));
+    div()
+        .id(id("forge-rail-header"))
+        .flex()
+        .items_center()
+        .px_2()
+        .py_1()
+        .border_b_1()
+        .border_color(theme.sidebar_border)
+        .child(
+            div()
+                .id(id("forge-rail-home"))
+                .flex_1()
+                .px_1()
+                .py_1()
+                .text_size(design::text::SECONDARY)
+                .text_color(theme.sidebar_muted)
+                .hover(|style| {
+                    style
+                        .bg(theme.sidebar_raised)
+                        .text_color(theme.sidebar_foreground)
+                })
+                .role(Role::Button)
+                .focusable()
+                .on_click(home)
+                .child("← All repositories"),
+        )
+}
+
+/// The row pads, not the field: a full-width field with its own margins
+/// ran past the rail's edge.
+fn rail_search(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> Div {
+    div().px_2().py_1().child(
+        Input::new(id("forge-rail-search"))
+            .h(design::size::CONTROL)
+            .px_2()
+            .py_1()
+            .border_1()
+            .border_color(theme.sidebar_border)
+            .bg(theme.sidebar_raised)
+            .text_color(theme.sidebar_foreground)
+            .value(forge.search.clone())
+            .placeholder("Search repositories…")
+            .label("Search repositories")
+            .on_input(cx.listener(|forge, text: &String, _, cx| {
+                forge.search = text.clone();
+                cx.notify();
+            })),
+    )
+}
+
 fn header(
     forge: &Forge,
     count: Option<usize>,
@@ -334,7 +370,7 @@ fn header(
         .child(
             Input::new(id(search_id.to_owned()))
                 .h(design::size::CONTROL)
-                .w(px(320.))
+                .w(SEARCH_W)
                 .px_2()
                 .border_1()
                 .border_color(theme.border_strong)

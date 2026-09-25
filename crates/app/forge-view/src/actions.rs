@@ -76,9 +76,10 @@ impl Forge {
         };
         let name = form.name.trim().to_owned();
         if !valid_repo_name(&name) {
-            form.error =
-                "A repository name is 1–37 bytes of letters, digits, dot, dash or underscore"
-                    .into();
+            form.error = format!(
+                "A repository name is 1–{} bytes of letters, digits, dot, dash or underscore",
+                forge::MAX_REPO_NAME
+            );
             cx.notify();
             return;
         }

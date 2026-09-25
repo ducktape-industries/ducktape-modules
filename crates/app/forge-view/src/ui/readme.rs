@@ -2,12 +2,13 @@
 //! page. The Code tab is where the tree lives.
 use ducktape_view_guest::design;
 use ducktape_view_guest::prelude::*;
+use ducktape_view_guest::{Div, Stateful};
 
 use crate::Forge;
 use crate::ui::code::{links, no_commits};
 use crate::ui::components::{empty_state, id, path_text, quiet};
 use crate::ui::{markdown, staged};
-use forge::{Content, Query, Reply};
+use forge::{BlobView, Content, Query, Reply};
 
 pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
     let page = div()
@@ -64,38 +65,51 @@ pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
     let Reply::Blob { blob, .. } = reply else {
         return page.into_any_element();
     };
+    page.child(document(forge, &name, &oid, blob, cx, theme))
+        .into_any_element()
+}
+
+/// The widest a README runs, a comfortable reading measure.
+const MEASURE: Pixels = px(880.);
+
+/// The README's path over its rendered body.
+fn document(
+    forge: &Forge,
+    name: &[u8],
+    oid: &str,
+    blob: &BlobView,
+    cx: &mut Context<Forge>,
+    theme: &Theme,
+) -> Stateful<Div> {
     let body = if matches!(blob.content, Content::Text) {
         markdown::render_blocks(
             "forge-readme-body",
-            &forge.blob_cache.doc(&oid, &blob.bytes),
+            &forge.blob_cache.doc(oid, &blob.bytes),
             theme,
             &links(Vec::new(), cx),
         )
     } else {
         quiet("This README is not text.", theme)
     };
-    page.child(
-        div()
-            .id(id("forge-readme-page"))
-            .w_full()
-            .max_w(px(880.))
-            .px_6()
-            .py_5()
-            .flex()
-            .flex_col()
-            .gap_3()
-            .child(
-                div()
-                    .id(id("forge-readme-title"))
-                    .pb_2()
-                    .border_b_1()
-                    .border_color(theme.border)
-                    .font_family(design::fonts::FAMILY_MONO)
-                    .text_size(design::text::SECONDARY)
-                    .text_color(theme.muted)
-                    .child(path_text(&name)),
-            )
-            .child(body),
-    )
-    .into_any_element()
+    div()
+        .id(id("forge-readme-page"))
+        .w_full()
+        .max_w(MEASURE)
+        .px_6()
+        .py_5()
+        .flex()
+        .flex_col()
+        .gap_3()
+        .child(
+            div()
+                .id(id("forge-readme-title"))
+                .pb_2()
+                .border_b_1()
+                .border_color(theme.border)
+                .font_family(design::fonts::FAMILY_MONO)
+                .text_size(design::text::SECONDARY)
+                .text_color(theme.muted)
+                .child(path_text(name)),
+        )
+        .child(body)
 }

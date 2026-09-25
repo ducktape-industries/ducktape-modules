@@ -1,5 +1,6 @@
 //! Changes: the filter rail with "Needs my judgment" on top, the list, and
 //! the form that opens or edits one.
+use ducktape_view_guest::Div;
 use ducktape_view_guest::design;
 use ducktape_view_guest::prelude::*;
 
@@ -67,56 +68,73 @@ pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
     }
     let mut list = scroller("forge-changes-list");
     for (summary, judgment) in shown {
-        let n = summary.n;
-        let open = cx.listener(move |forge, _: &ClickEvent, _, cx| forge.open_change(Some(n), cx));
-        let author = forge.key_name(&summary.author);
-        let mut line = row(id(format!("forge-change-{n}")), theme)
-            .on_click(open)
-            .cell(
-                div()
-                    .w(px(44.))
-                    .text_color(theme.muted)
-                    .child(format!("#{n}")),
-            )
-            .cell(
-                div()
-                    .flex_1()
-                    .truncate()
-                    .child(crate::ui::bold(summary.title.clone())),
-            )
-            .cell(state_chip(summary.state, n, theme))
-            .cell(quiet(
-                format!(
-                    "{} → {}",
-                    ref_label(&revision_name(&summary.from)),
-                    ref_label(&summary.into)
-                ),
-                theme,
-            ))
-            .cell(quiet(author, theme))
-            .cell(quiet(format!("{} comments", summary.comment_count), theme))
-            .cell(verdicts(&summary.verdicts, n, theme));
-        if let Some(judgment) = judgment {
-            if judgment.requested {
-                line = line.cell(badge(
-                    id(format!("forge-change-requested-{n}")),
-                    "review requested",
-                    theme.accent_foreground,
-                    theme.accent_soft,
-                ));
-            }
-            if judgment.replies.is_some() {
-                line = line.cell(badge(
-                    id(format!("forge-change-unread-{n}")),
-                    "new reply",
-                    theme.warning,
-                    theme.warning_soft,
-                ));
-            }
-        }
-        list = list.child(line);
+        list = list.child(change_row(forge, summary, *judgment, cx, theme));
     }
     column.child(list).into_any_element()
+}
+
+/// The change number column.
+const NUMBER_W: Pixels = px(44.);
+/// The title search field.
+const SEARCH_W: Pixels = px(220.);
+
+/// One change: number, title, state, endpoints, author, counts, and what
+/// it asks of me when listed by judgment.
+fn change_row(
+    forge: &Forge,
+    summary: &ChangeSummary,
+    judgment: Option<&Judgment>,
+    cx: &mut Context<Forge>,
+    theme: &Theme,
+) -> AnyElement {
+    let n = summary.n;
+    let open = cx.listener(move |forge, _: &ClickEvent, _, cx| forge.open_change(Some(n), cx));
+    let author = forge.key_name(&summary.author);
+    let mut line = row(id(format!("forge-change-{n}")), theme)
+        .on_click(open)
+        .cell(
+            div()
+                .w(NUMBER_W)
+                .text_color(theme.muted)
+                .child(format!("#{n}")),
+        )
+        .cell(
+            div()
+                .flex_1()
+                .truncate()
+                .child(crate::ui::bold(summary.title.clone())),
+        )
+        .cell(state_chip(summary.state, n, theme))
+        .cell(quiet(
+            format!(
+                "{} → {}",
+                ref_label(&revision_name(&summary.from)),
+                ref_label(&summary.into)
+            ),
+            theme,
+        ))
+        .cell(quiet(author, theme))
+        .cell(quiet(format!("{} comments", summary.comment_count), theme))
+        .cell(verdicts(&summary.verdicts, n, theme));
+    if let Some(judgment) = judgment {
+        if judgment.requested {
+            line = line.cell(badge(
+                id(format!("forge-change-requested-{n}")),
+                "review requested",
+                theme.accent_foreground,
+                theme.accent_soft,
+            ));
+        }
+        if judgment.replies.is_some() {
+            line = line.cell(badge(
+                id(format!("forge-change-unread-{n}")),
+                "new reply",
+                theme.warning,
+                theme.warning_soft,
+            ));
+        }
+    }
+    line.into_any_element()
 }
 
 pub(crate) fn revision_name(revision: &forge::Revision) -> Vec<u8> {
@@ -192,7 +210,7 @@ fn filters(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement 
         .child(
             Input::new(id("forge-changes-search"))
                 .h(design::size::ROW)
-                .w(px(220.))
+                .w(SEARCH_W)
                 .px_2()
                 .border_1()
                 .border_color(theme.border_strong)
@@ -213,19 +231,6 @@ pub(crate) fn form(
     cx: &mut Context<Forge>,
     theme: &Theme,
 ) -> AnyElement {
-    let title = cx.listener(|forge, text: &String, _, cx| {
-        if let Some(form) = &mut forge.form {
-            form.title = text.clone();
-            form.error.clear();
-        }
-        cx.notify();
-    });
-    let body = cx.listener(|forge, text: &String, _, cx| {
-        if let Some(form) = &mut forge.form {
-            form.body = text.clone();
-        }
-        cx.notify();
-    });
     let submit = cx.listener(|forge, _: &ClickEvent, _, cx| forge.submit_change(cx));
     let cancel = cx.listener(|forge, _: &ClickEvent, _, cx| forge.cancel_change(cx));
     let mut card = div()
@@ -251,34 +256,7 @@ pub(crate) fn form(
             format!("{} → {}", ref_label(&form.from), ref_label(&form.into)),
             theme,
         ))
-        .child(
-            Input::new(id("forge-change-title"))
-                .h(design::size::CONTROL)
-                .w_full()
-                .px_2()
-                .border_1()
-                .border_color(theme.border_strong)
-                .bg(theme.background)
-                .text_color(theme.foreground)
-                .value(form.title.clone())
-                .placeholder("What this change does")
-                .label("Change title")
-                .on_input(title),
-        )
-        .child(
-            Input::new(id("forge-change-body"))
-                .h(design::size::CONTROL)
-                .w_full()
-                .px_2()
-                .border_1()
-                .border_color(theme.border_strong)
-                .bg(theme.background)
-                .text_color(theme.foreground)
-                .value(form.body.clone())
-                .placeholder("Why it changes")
-                .label("Change body")
-                .on_input(body),
-        )
+        .child(form_fields(form, cx, theme))
         .child(reviewers(form, forge, cx, theme));
     if !form.error.is_empty() {
         card = card.child(
@@ -307,6 +285,55 @@ pub(crate) fn form(
             ),
     )
     .into_any_element()
+}
+
+/// The draft's title and body fields.
+fn form_fields(form: &ChangeForm, cx: &mut Context<Forge>, theme: &Theme) -> Div {
+    let title = cx.listener(|forge, text: &String, _, cx| {
+        if let Some(form) = &mut forge.form {
+            form.title = text.clone();
+            form.error.clear();
+        }
+        cx.notify();
+    });
+    let body = cx.listener(|forge, text: &String, _, cx| {
+        if let Some(form) = &mut forge.form {
+            form.body = text.clone();
+        }
+        cx.notify();
+    });
+    div()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .child(
+            Input::new(id("forge-change-title"))
+                .h(design::size::CONTROL)
+                .w_full()
+                .px_2()
+                .border_1()
+                .border_color(theme.border_strong)
+                .bg(theme.background)
+                .text_color(theme.foreground)
+                .value(form.title.clone())
+                .placeholder("What this change does")
+                .label("Change title")
+                .on_input(title),
+        )
+        .child(
+            Input::new(id("forge-change-body"))
+                .h(design::size::CONTROL)
+                .w_full()
+                .px_2()
+                .border_1()
+                .border_color(theme.border_strong)
+                .bg(theme.background)
+                .text_color(theme.foreground)
+                .value(form.body.clone())
+                .placeholder("Why it changes")
+                .label("Change body")
+                .on_input(body),
+        )
 }
 
 /// The identity picker, the same roster chat picks from.

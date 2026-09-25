@@ -388,14 +388,23 @@ impl Default for Layout {
     }
 }
 
+/// The repositories rail and the Code tab's file tree, dragged, stay
+/// within these widths so the pane beside them stays usable.
+const TREE_MIN: f32 = 160.;
+const TREE_MAX: f32 = 480.;
+const FILES_MIN: f32 = 180.;
+const FILES_MAX: f32 = 640.;
+/// Under this window width the side panes fold away behind toggles.
+const NARROW_BELOW: f32 = 880.;
+
 impl Layout {
     /// A dragged pane keeps its neighbour usable.
     pub fn clamp(&mut self) {
-        self.tree = self.tree.clamp(160., 480.);
-        self.files = self.files.clamp(180., 640.);
+        self.tree = self.tree.clamp(TREE_MIN, TREE_MAX);
+        self.files = self.files.clamp(FILES_MIN, FILES_MAX);
     }
     pub fn narrow(&self) -> bool {
-        self.width < 880.
+        self.width < NARROW_BELOW
     }
     pub fn tree_visible(&self) -> bool {
         !self.narrow() || self.tree_open
