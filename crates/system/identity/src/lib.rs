@@ -171,14 +171,6 @@ pub enum Reply {
     Accounts(PageReply<Account>),
 }
 
-pub fn account_bytes(number: AccountNumber) -> Vec<u8> {
-    number.to_le_bytes().to_vec()
-}
-
-pub fn account_of_bytes(bytes: &[u8]) -> Option<AccountNumber> {
-    <[u8; 8]>::try_from(bytes).ok().map(u64::from_le_bytes)
-}
-
 /// The asks another program makes of identity.
 pub fn account_of(
     ctx: &impl store::Reads,
