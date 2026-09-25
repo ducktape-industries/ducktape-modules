@@ -12,8 +12,7 @@ use crate::contract::*;
 use crate::objects::ObjectStore;
 use crate::ops::{PROGRAM, cap, refusal_of};
 use crate::state::{
-    ACTIVITY, REFS, RefName, RepoKey, WRITERS, load_bounds, load_refs, load_repo, repo_hash,
-    storage,
+    ACTIVITY, REFS, WRITERS, load_bounds, load_refs, load_repo, repo_hash, storage,
 };
 
 const AGENT: &[u8] = b"ducktape-forge";
@@ -73,21 +72,19 @@ fn answer(store: &impl Reads, height: u64, query: &Query) -> Result<Reply, Refus
 
 /// Repositories, the most recently active first.
 fn repos(store: &impl Reads, listing: &Listing) -> Result<PageReply<RepoInfo>, Refusal> {
-    ACTIVITY
-        .page_of(store, &(), listing)?
-        .try_map(|(_, RepoKey(name))| {
-            Ok(RepoInfo {
-                repo: load_repo(store, &name)?,
-                name,
-            })
+    ACTIVITY.page_of(store, &(), listing)?.try_map(|(_, name)| {
+        Ok(RepoInfo {
+            repo: load_repo(store, &name)?,
+            name,
         })
+    })
 }
 
 /// A repository's refs in byte-name order.
 fn refs(store: &impl Reads, name: &str, listing: &Listing) -> Result<PageReply<RefInfo>, Refusal> {
     let hash = repo_hash(&load_repo(store, name)?);
     REFS.page_of(store, &name.to_owned(), listing)?
-        .try_map(|((_, RefName(name)), bytes)| {
+        .try_map(|((_, name), bytes)| {
             let oid = gitcore::Oid::from_bytes(hash, &bytes).map_err(|e| storage(e.to_string()))?;
             Ok(RefInfo {
                 name,

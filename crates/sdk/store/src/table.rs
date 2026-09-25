@@ -308,6 +308,42 @@ mod tests {
         assert!(refusal.sentence.starts_with("n/["), "{refusal}");
     }
 
+    /// String heads list by name, not by length, and a whole-element prefix
+    /// or `below` never reaches a longer name.
+    #[test]
+    fn string_keys_list_by_name_and_a_prefix_is_a_whole_element() {
+        const NAMED: Map<(String, u64), ()> = Map::new("x/");
+        let mut store = Memory::default();
+        for (name, n) in [
+            ("general", 1),
+            ("abc", 2),
+            ("ab", 1),
+            ("abc", 1),
+            ("docs", 1),
+            ("a\0b", 1),
+        ] {
+            NAMED.put(&mut store, &(name.into(), n), &());
+        }
+        let order = |scan| -> Vec<(String, u64)> {
+            NAMED
+                .scan(&store, scan)
+                .unwrap()
+                .into_iter()
+                .map(|(k, ())| k)
+                .collect()
+        };
+        let all = order(Scan::prefix(NAMED.prefix()));
+        let names: Vec<&str> = all.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(names, ["a\0b", "ab", "abc", "abc", "docs", "general"]);
+        assert_eq!(all[2..4], [("abc".into(), 1), ("abc".into(), 2)]);
+        assert_eq!(
+            order(NAMED.prefix_of(&"ab".to_string())),
+            [("ab".into(), 1)]
+        );
+        assert_eq!(order(NAMED.prefix_of(&"a".to_string())), []);
+        assert_eq!(order(NAMED.below(&"abc".to_string())).len(), 2);
+    }
+
     #[test]
     fn a_range_pages_with_lookahead() {
         let mut store = Memory::default();

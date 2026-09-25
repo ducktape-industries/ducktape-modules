@@ -82,7 +82,7 @@ impl Party {
     }
 }
 
-/// A party in a table key: its borsh, length-prefixed like any bytes.
+/// A party in a table key: its borsh, encoded like any bytes.
 impl KeyCodec for Party {
     fn encode_key(&self, out: &mut Vec<u8>) {
         abi::encode(self).encode_key(out);

@@ -1,7 +1,7 @@
 //! Everything chat keeps, declared once: each table's key and value types,
 //! and the writes that keep a message and its indexes in step. Keys are
 //! typed (`store::KeyCodec`: integers big-endian, strings and parties
-//! length-prefixed), values borsh. A tuple key scans by its leading
+//! NUL-terminated, so names list by name), values borsh. A tuple key scans by its leading
 //! elements, which is how every "in this channel" read works.
 use abi::Refusal;
 use store::{Map, Reads, Set, Writes, capacity, not_found};

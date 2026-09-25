@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use abi::{Refusal, reason};
 use gitcore::{Hash, Oid};
-use store::{Item, KeyCodec, Map, Reads, Set, Writes, invalid, not_found};
+use store::{Item, Map, Reads, Set, Writes, invalid, not_found};
 
 use crate::contract::{Bounds, Change, Repo, Review, Revision, valid_repo_name};
 use crate::objects::hash_of;
@@ -14,16 +14,16 @@ const BOUNDS: Item<Bounds> = Item::new("bounds");
 /// One record per repository, by name.
 const REPOS: Map<String, Repo> = Map::new("p/");
 /// Index: every repository by its last activity, newest first.
-pub const ACTIVITY: Set<(u64, RepoKey)> = Set::new("a/");
+pub const ACTIVITY: Set<(u64, String)> = Set::new("a/");
 /// The keys the owner granted writes to, by repository.
 pub const WRITERS: Set<(String, Vec<u8>)> = Set::new("w/");
 /// Each repository's refs and the oid bytes each points at.
-pub const REFS: Map<(String, RefName), Vec<u8>> = Map::new("r/");
+pub const REFS: Map<(String, Vec<u8>), Vec<u8>> = Map::new("r/");
 /// The last change number each repository gave out.
 const NUMBERS: Map<String, u64> = Map::new("n/");
 /// Changes by repository and number; a scan across repositories lists them
 /// by name (Judgment pages this table whole).
-pub const CHANGES: Map<(RepoKey, u64), Change> = Map::new("c/");
+pub const CHANGES: Map<(String, u64), Change> = Map::new("c/");
 /// Reviews by repository, change number and review id.
 pub const REVIEWS: Map<(String, u64, u64), Review> = Map::new("v/");
 /// Index: the reviews one key submitted on one change, oldest first.
@@ -32,47 +32,6 @@ pub const AUTHORED: Set<(String, u64, Vec<u8>, u64)> = Set::new("u/");
 pub const INVOLVED: Set<(Vec<u8>, String, u64)> = Set::new("i/");
 /// The last system message id forge posted into chat.
 const MESSAGES: Item<u64> = Item::new("system-message-seq");
-
-/// A ref's full name as the last element of a key: its bytes as they are,
-/// so a scan lists refs in git's byte order (a length-prefixed `Vec<u8>`
-/// would sort them by length first).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RefName(pub Vec<u8>);
-
-impl KeyCodec for RefName {
-    fn encode_key(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&self.0);
-    }
-    fn decode_key(bytes: &mut &[u8]) -> Option<Self> {
-        Some(RefName(std::mem::take(bytes).to_vec()))
-    }
-}
-
-/// A repository name as a key's leading element: its bytes, then a NUL no
-/// valid name holds, so a scan lists repositories by name (a length-prefixed
-/// `String` would sort them by length first) and a prefix never reaches a
-/// longer name.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RepoKey(pub String);
-
-impl RepoKey {
-    pub fn of(name: &str) -> Self {
-        Self(name.to_owned())
-    }
-}
-
-impl KeyCodec for RepoKey {
-    fn encode_key(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(self.0.as_bytes());
-        out.push(0);
-    }
-    fn decode_key(bytes: &mut &[u8]) -> Option<Self> {
-        let end = bytes.iter().position(|b| *b == 0)?;
-        let name = String::from_utf8(bytes[..end].to_vec()).ok()?;
-        *bytes = &bytes[end + 1..];
-        Some(Self(name))
-    }
-}
 
 /// Stored state that is not what forge wrote: an operator's problem.
 pub(crate) fn storage(sentence: impl Into<String>) -> Refusal {
@@ -106,12 +65,9 @@ pub fn load_repo(store: &impl Reads, name: &str) -> Result<Repo, Refusal> {
 /// holds exactly one row per repository.
 pub fn save_repo(store: &mut impl Writes, name: &str, repo: &Repo) -> Result<(), Refusal> {
     if let Some(old) = REPOS.get(store, &name.to_owned())? {
-        ACTIVITY.remove(store, &(newest_first(old.last_activity), RepoKey::of(name)));
+        ACTIVITY.remove(store, &(newest_first(old.last_activity), name.to_owned()));
     }
-    ACTIVITY.insert(
-        store,
-        &(newest_first(repo.last_activity), RepoKey::of(name)),
-    );
+    ACTIVITY.insert(store, &(newest_first(repo.last_activity), name.to_owned()));
     REPOS.put(store, &name.to_owned(), repo);
     Ok(())
 }
@@ -129,8 +85,8 @@ pub fn is_writer(store: &impl Reads, name: &str, key: &[u8]) -> bool {
     WRITERS.has(store, &(name.to_owned(), key.to_vec()))
 }
 
-pub fn ref_key(name: &str, reference: &[u8]) -> (String, RefName) {
-    (name.to_owned(), RefName(reference.to_vec()))
+pub fn ref_key(name: &str, reference: &[u8]) -> (String, Vec<u8>) {
+    (name.to_owned(), reference.to_vec())
 }
 
 /// Every ref of a repository: what a push is checked against and git is told.
@@ -141,7 +97,7 @@ pub fn load_refs(
 ) -> Result<BTreeMap<Vec<u8>, Oid>, Refusal> {
     REFS.scan(store, REFS.prefix_of(&name.to_owned()))?
         .into_iter()
-        .map(|((_, RefName(reference)), bytes)| {
+        .map(|((_, reference), bytes)| {
             let target = Oid::from_bytes(hash, &bytes).map_err(|error| {
                 Refusal::new(reason::PROTOCOL, format!("ref {reference:?} holds {error}"))
             })?;
@@ -225,7 +181,7 @@ pub fn next(n: u64) -> Result<u64, Refusal> {
 
 pub fn load_change(store: &impl Reads, repo: &str, n: u64) -> Result<Change, Refusal> {
     CHANGES
-        .get(store, &(RepoKey::of(repo), n))?
+        .get(store, &(repo.to_owned(), n))?
         .ok_or_else(|| not_found(format!("no change {repo}#{n}")))
 }
 
@@ -233,7 +189,7 @@ pub fn load_change(store: &impl Reads, repo: &str, n: u64) -> Result<Change, Ref
 /// every requested reviewer are involved; a reviewer taken off the request
 /// stays involved only if they reviewed it. A new change claims its number.
 pub fn save_change(store: &mut impl Writes, repo: &str, change: &Change) -> Result<(), Refusal> {
-    let row = (RepoKey::of(repo), change.n);
+    let row = (repo.to_owned(), change.n);
     match CHANGES.get(store, &row)? {
         None => NUMBERS.put(store, &repo.to_owned(), &change.n),
         Some(old) => {
@@ -330,12 +286,12 @@ mod tests {
             .all(&store)
             .unwrap()
             .into_iter()
-            .map(|((RepoKey(repo), n), _)| (repo, n))
+            .map(|((repo, n), _)| (repo, n))
             .collect();
         let expected = [("ab", 1), ("abc", 1), ("abc", 2), ("zz", 1)];
         assert_eq!(order, expected.map(|(r, n)| (r.to_owned(), n)));
         let ab = CHANGES
-            .scan(&store, CHANGES.prefix_of(&RepoKey::of("ab")))
+            .scan(&store, CHANGES.prefix_of(&"ab".to_string()))
             .unwrap();
         assert_eq!(ab.len(), 1);
     }

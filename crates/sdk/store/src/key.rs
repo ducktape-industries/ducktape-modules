@@ -1,7 +1,7 @@
-//! How a typed key becomes bytes: integers big-endian and fixed width (scan
-//! order is numeric order), bytes and strings length-prefixed, tuples
-//! concatenated (a prefix scan on the leading elements works), fixed arrays
-//! as they are.
+//! How a typed key becomes bytes, so byte order is value order: integers
+//! big-endian and fixed width, bytes and strings NUL-escaped and
+//! NUL-terminated, tuples concatenated (a prefix scan on the leading
+//! elements works), fixed arrays as they are.
 
 pub trait KeyCodec: Sized {
     fn encode_key(&self, out: &mut Vec<u8>);
@@ -35,35 +35,56 @@ macro_rules! integers {
 }
 integers!(u8, u16, u32, u64, u128);
 
-fn put_len(out: &mut Vec<u8>, len: usize) {
-    out.extend_from_slice(&(len as u32).to_le_bytes());
+/// Bytes that sort as they compare: each NUL escaped to `00 FF`, then an
+/// `00 00` terminator, so a shorter string sorts before its extensions and
+/// a prefix scan on a whole element never reaches a longer one.
+fn put_bytes(out: &mut Vec<u8>, bytes: &[u8]) {
+    for &b in bytes {
+        out.push(b);
+        if b == 0 {
+            out.push(0xFF);
+        }
+    }
+    out.extend_from_slice(&[0, 0]);
 }
 
-fn get_len(bytes: &mut &[u8]) -> Option<usize> {
-    u32::from_le_bytes(take(bytes, 4)?.try_into().ok()?)
-        .try_into()
-        .ok()
+fn get_bytes(bytes: &mut &[u8]) -> Option<Vec<u8>> {
+    let mut value = Vec::new();
+    let mut rest = *bytes;
+    loop {
+        match rest {
+            [0, 0, tail @ ..] => {
+                *bytes = tail;
+                return Some(value);
+            }
+            [0, 0xFF, tail @ ..] => {
+                value.push(0);
+                rest = tail;
+            }
+            [b, tail @ ..] if *b != 0 => {
+                value.push(*b);
+                rest = tail;
+            }
+            _ => return None,
+        }
+    }
 }
 
 impl KeyCodec for Vec<u8> {
     fn encode_key(&self, out: &mut Vec<u8>) {
-        put_len(out, self.len());
-        out.extend_from_slice(self);
+        put_bytes(out, self);
     }
     fn decode_key(bytes: &mut &[u8]) -> Option<Self> {
-        let len = get_len(bytes)?;
-        take(bytes, len).map(<[u8]>::to_vec)
+        get_bytes(bytes)
     }
 }
 
 impl KeyCodec for String {
     fn encode_key(&self, out: &mut Vec<u8>) {
-        put_len(out, self.len());
-        out.extend_from_slice(self.as_bytes());
+        put_bytes(out, self.as_bytes());
     }
     fn decode_key(bytes: &mut &[u8]) -> Option<Self> {
-        let len = get_len(bytes)?;
-        String::from_utf8(take(bytes, len)?.to_vec()).ok()
+        String::from_utf8(get_bytes(bytes)?).ok()
     }
 }
 
@@ -115,8 +136,70 @@ mod tests {
         let head = 7u64.key_bytes();
         assert!(round_trip((7u64, "b".to_string())).starts_with(&head));
         assert!(round_trip((7u64, vec![1u8, 2], [9u8; 3])).starts_with(&head));
-        assert!(round_trip((1u8, 2u16, 3u32, "s".to_string())).len() == 1 + 2 + 4 + 4 + 1);
+        assert!(round_trip((1u8, 2u16, 3u32, "s".to_string())).len() == 1 + 2 + 4 + 1 + 2);
         assert_eq!(u64::decode_key(&mut &[1u8, 2][..]), None);
-        assert_eq!(String::decode_key(&mut &[9u8, 0, 0, 0, b'a'][..]), None);
+        assert_eq!(String::decode_key(&mut &[b'a'][..]), None, "unterminated");
+        assert_eq!(Vec::<u8>::decode_key(&mut &[0, 1][..]), None, "bad escape");
+        assert_eq!(
+            String::decode_key(&mut &[0xFF, 0, 0][..]),
+            None,
+            "not utf-8"
+        );
+    }
+
+    /// Encoded order is value order for bytes and strings (no length first),
+    /// alone and as a tuple's head, NULs and prefixes included.
+    #[test]
+    fn bytes_and_strings_sort_as_they_compare() {
+        let mut values: Vec<Vec<u8>> = vec![
+            vec![],
+            vec![0],
+            vec![0, 0],
+            vec![0, 0xFF],
+            vec![0xFF],
+            b"a".to_vec(),
+            b"a\0".to_vec(),
+            b"a\0b".to_vec(),
+            b"a\x01".to_vec(),
+            b"ab".to_vec(),
+            b"abc".to_vec(),
+            b"b".to_vec(),
+            b"docs".to_vec(),
+            b"general".to_vec(),
+            b"zz".to_vec(),
+        ];
+        // Every pair, plus a deterministic sweep of short byte strings.
+        for a in 0..=3u8 {
+            for b in [0u8, 1, 0xFE, 0xFF] {
+                values.push(vec![a, b]);
+                values.push(vec![b, a, 0]);
+            }
+        }
+        for x in &values {
+            for y in &values {
+                assert_eq!(
+                    round_trip(x.clone()).cmp(&round_trip(y.clone())),
+                    x.cmp(y),
+                    "{x:?} {y:?}"
+                );
+                assert_eq!(
+                    (x.clone(), 1u8)
+                        .key_bytes()
+                        .cmp(&(y.clone(), 0u8).key_bytes()),
+                    (x, 1).cmp(&(y, 0)),
+                    "{x:?} {y:?}"
+                );
+            }
+        }
+        let mut names =
+            ["docs", "perf", "general", "random", "design", "forge-ci"].map(String::from);
+        let mut keys: Vec<Vec<u8>> = names.iter().map(|n| round_trip(n.clone())).collect();
+        keys.sort();
+        names.sort();
+        let decoded: Vec<String> = keys
+            .iter()
+            .map(|k| String::decode_key(&mut k.as_slice()).unwrap())
+            .collect();
+        assert_eq!(decoded, names);
     }
 }
