@@ -79,7 +79,7 @@ fn repo_row(
         .items_center()
         .gap_4()
         .px_4()
-        .py(px(8.))
+        .py(design::space::SM)
         .border_b_1()
         .border_color(theme.border)
         .hover(|style| style.bg(theme.surface))
@@ -146,7 +146,11 @@ fn repo_row(
                         .text_size(px(11.5))
                         .child(ref_label(&info.repo.settings.head)),
                 )
-                .child(div().w(px(52.)).child(refs(info.repo.refs_count)))
+                .child(
+                    div()
+                        .w(px(52.))
+                        .child(design::plural(info.repo.refs_count, "ref", "refs")),
+                )
                 .child(
                     div()
                         .w(px(96.))
@@ -156,14 +160,6 @@ fn repo_row(
                 ),
         )
         .into_any_element()
-}
-
-/// "1 ref", "3 refs".
-pub(crate) fn refs(count: u64) -> String {
-    match count == 1 {
-        true => "1 ref".to_owned(),
-        false => format!("{count} refs"),
-    }
 }
 
 /// The screen: every repository of this network, newest activity first.
@@ -211,14 +207,10 @@ pub(crate) fn overview(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) ->
             ))
             .into_any_element();
     }
-    let names = forge.names.ready();
     // rows run edge to edge, a hairline between them
     let mut list = scroller("forge-repos-list").p_0().gap_0();
     for info in rows {
-        let owner = names.map_or_else(
-            || crate::ui::components::short_hex(&abi::hex(&info.repo.owner)),
-            |names| names.key(&info.repo.owner),
-        );
+        let owner = forge.key_name(&info.repo.owner);
         list = list.child(repo_row(forge, info, owner, cx, theme));
     }
     column.child(list).into_any_element()
@@ -271,7 +263,7 @@ pub(crate) fn rail(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> Any
             // margins ran past the rail's edge.
             div().px_2().py_1().child(
                 Input::new(id("forge-rail-search"))
-                    .h(px(28.))
+                    .h(design::size::CONTROL)
                     .px_2()
                     .py_1()
                     .border_1()
@@ -341,7 +333,7 @@ fn header(
         .children(count.map(|count| quiet(count.to_string(), theme)))
         .child(
             Input::new(id(search_id.to_owned()))
-                .h(px(28.))
+                .h(design::size::CONTROL)
                 .w(px(320.))
                 .px_2()
                 .border_1()
@@ -396,7 +388,7 @@ fn dialog(form: &crate::state::NewRepo, cx: &mut Context<Forge>, theme: &Theme) 
         ))
         .child(
             Input::new(id("forge-new-repo-name"))
-                .h(px(28.))
+                .h(design::size::CONTROL)
                 .w_full()
                 .px_2()
                 .border_1()

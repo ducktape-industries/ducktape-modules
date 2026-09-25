@@ -6,10 +6,12 @@ pub(crate) mod changes;
 pub(crate) mod code;
 pub(crate) mod commits;
 pub(crate) mod components;
+pub(crate) mod conversation;
 pub(crate) mod diff;
 pub(crate) mod dock;
 pub(crate) mod highlight;
 pub(crate) mod markdown;
+pub(crate) mod readme;
 pub(crate) mod refs;
 pub(crate) mod repos;
 pub(crate) mod settings;
@@ -19,18 +21,17 @@ use ducktape_view_guest::prelude::*;
 use ducktape_view_guest::{Div, FontWeight, Stateful};
 
 use crate::Forge;
-use crate::state::{Dock, RepoTab};
+use crate::state::{Dock, Progress, RepoTab};
 use components::{badge, button, heading, id, quiet};
 use forge::Reply;
 
 pub(crate) fn render(forge: &mut Forge, cx: &mut Context<Forge>) -> impl IntoElement {
     let theme = *cx.global::<Theme>();
-    let resized = cx.listener(|forge, size: &(Pixels, Pixels), _, cx| {
-        forge.measured(f32::from(size.0), f32::from(size.1), cx)
-    });
-    let shown = cx.listener(|forge, size: &(Pixels, Pixels), _, cx| {
-        forge.measured(f32::from(size.0), f32::from(size.1), cx)
-    });
+    let measured = |cx: &mut Context<Forge>| {
+        cx.listener(|forge, size: &(Pixels, Pixels), _, cx| {
+            forge.measured(f32::from(size.0), f32::from(size.1), cx)
+        })
+    };
     let mut columns = div()
         .id(id("forge-columns"))
         .flex()
@@ -63,8 +64,8 @@ pub(crate) fn render(forge: &mut Forge, cx: &mut Context<Forge>) -> impl IntoEle
         .child(columns);
     ducktape_view_guest::sensor(id("forge-viewport"), root)
         .size_full()
-        .on_show(shown)
-        .on_resize(resized)
+        .on_show(measured(cx))
+        .on_resize(measured(cx))
 }
 
 fn main(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
@@ -118,11 +119,7 @@ fn repo(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
         .gap_2()
         .child(heading(id("forge-repo-name"), name.clone(), 1, theme));
     if let Some((info, _, _)) = forge.repo() {
-        let names = forge.names.ready();
-        let owner = names.map_or_else(
-            || crate::ui::components::short_hex(&abi::hex(&info.repo.owner)),
-            |names| names.key(&info.repo.owner),
-        );
+        let owner = forge.key_name(&info.repo.owner);
         title = title
             .child(badge(
                 id("forge-repo-owner"),
@@ -133,7 +130,7 @@ fn repo(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
             .child(quiet(
                 format!(
                     "{} · active at block {}",
-                    repos::refs(info.repo.refs_count),
+                    design::plural(info.repo.refs_count, "ref", "refs"),
                     info.repo.last_activity
                 ),
                 theme,
@@ -161,7 +158,7 @@ fn repo(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
             .kind(design::Kind::Quiet),
     );
     let body: AnyElement = match forge.nav().tab {
-        RepoTab::Readme => code::readme(forge, cx, theme),
+        RepoTab::Readme => readme::render(forge, cx, theme),
         RepoTab::Code => code::render(forge, cx, theme),
         RepoTab::Commits => commits::render(forge, cx, theme),
         RepoTab::Changes => changes::render(forge, cx, theme),
@@ -298,7 +295,6 @@ fn about(forge: &Forge, theme: &Theme) -> AnyElement {
     let Some((info, bounds, writers)) = forge.repo() else {
         return quiet("Reading this repository…", theme);
     };
-    let names = forge.names.ready();
     let mut column = div()
         .id(id("forge-about"))
         .flex()
@@ -317,14 +313,7 @@ fn about(forge: &Forge, theme: &Theme) -> AnyElement {
             },
             theme,
         ))
-        .child(fact(
-            "Owner",
-            names.map_or_else(
-                || crate::ui::components::short_hex(&abi::hex(&info.repo.owner)),
-                |names| names.key(&info.repo.owner),
-            ),
-            theme,
-        ))
+        .child(fact("Owner", forge.key_name(&info.repo.owner), theme))
         .child(fact("Page size", bounds.page_size.to_string(), theme))
         .child(fact(
             "Inline blob bound",
@@ -336,13 +325,7 @@ fn about(forge: &Forge, theme: &Theme) -> AnyElement {
         column = column.child(quiet("Only the owner writes here.", theme));
     }
     for key in &writers.items {
-        column = column.child(quiet(
-            names.map_or_else(
-                || crate::ui::components::short_hex(&abi::hex(key)),
-                |names| names.key(key),
-            ),
-            theme,
-        ));
+        column = column.child(quiet(forge.key_name(key), theme));
     }
     column.into_any_element()
 }
@@ -376,7 +359,14 @@ pub(crate) fn pending(forge: &Forge, scope: &str, theme: &Theme) -> AnyElement {
         .px_2()
         .py_1();
     for op in ops {
-        let failed = !op.error.is_empty();
+        let (tone, status) = match &op.progress {
+            Progress::Submitting => (theme.surface_raised, "Submitting…".to_owned()),
+            Progress::Accepted => (
+                theme.surface_raised,
+                "Waiting for the next block…".to_owned(),
+            ),
+            Progress::Refused(sentence) => (theme.danger_soft, format!("Refused: {sentence}")),
+        };
         column = column.child(
             div()
                 .id(id(format!("forge-pending-{}", op.id)))
@@ -384,23 +374,10 @@ pub(crate) fn pending(forge: &Forge, scope: &str, theme: &Theme) -> AnyElement {
                 .items_center()
                 .gap_2()
                 .p_1()
-                .bg(if failed {
-                    theme.danger_soft
-                } else {
-                    theme.surface_raised
-                })
+                .bg(tone)
                 .text_size(design::text::SECONDARY)
                 .child(op.label.clone())
-                .child(quiet(
-                    if failed {
-                        format!("Refused: {}", op.error)
-                    } else if op.accepted {
-                        "Waiting for the next block…".to_owned()
-                    } else {
-                        "Submitting…".to_owned()
-                    },
-                    theme,
-                )),
+                .child(quiet(status, theme)),
         );
     }
     column.into_any_element()

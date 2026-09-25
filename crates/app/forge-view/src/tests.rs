@@ -851,12 +851,6 @@ mod change_tests;
 mod screen_tests;
 
 #[test]
-fn one_ref_is_not_refs() {
-    assert_eq!(crate::ui::repos::refs(1), "1 ref");
-    assert_eq!(crate::ui::repos::refs(0), "0 refs");
-}
-
-#[test]
 fn copy_puts_the_address_on_the_clipboard_without_opening_the_repository() {
     let (mut cx, view) = booted("default");
     let copied = std::rc::Rc::new(std::cell::RefCell::new(String::new()));

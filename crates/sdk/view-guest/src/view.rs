@@ -69,6 +69,16 @@ enum LoadedSnapshot<T> {
     Failed { reason: String, sentence: String },
 }
 
+/// A finished load: its value, or the refusal in its place.
+impl<T> From<Result<T, Refusal>> for Loaded<T> {
+    fn from(result: Result<T, Refusal>) -> Self {
+        match result {
+            Ok(value) => Self::Ready(value),
+            Err(refusal) => Self::Failed(refusal),
+        }
+    }
+}
+
 impl<T: Serialize> Serialize for Loaded<T> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
@@ -115,10 +125,7 @@ impl<V: View> Context<'_, V> {
         let task = self.spawn(async move |this, cx| {
             let result = work.await;
             let _ = this.update(cx, |view, cx| {
-                *at(view) = match result {
-                    Ok(value) => Loaded::Ready(value),
-                    Err(error) => Loaded::Failed(error),
-                };
+                *at(view) = Loaded::from(result);
                 cx.notify();
             });
         });
@@ -138,6 +145,25 @@ impl<V: View> Context<'_, V> {
             }
         })
         .detach();
+    }
+
+    /// Follows a host stream for as long as the view lives: every item — a
+    /// refusal included, so the view decides what one means — lands through
+    /// `land`. It ends when the host ends the stream or the view is gone;
+    /// dropping the returned task stops it.
+    pub fn follow<T: 'static>(
+        &mut self,
+        mut stream: impl futures::Stream<Item = T> + Unpin + 'static,
+        mut land: impl FnMut(&mut V, T, &mut Context<V>) + 'static,
+    ) -> Task<()> {
+        use futures::StreamExt;
+        self.spawn(async move |this, cx| {
+            while let Some(item) = stream.next().await {
+                if this.update(cx, |view, cx| land(view, item, cx)).is_err() {
+                    break;
+                }
+            }
+        })
     }
 }
 #[macro_export]

@@ -1,332 +1,53 @@
-//! Consensus changes use refs and records only. No object possession influences acceptance.
+// The change ops: open, edit, close, review and merge. Acceptance reads refs and records only; no object a node holds or lacks decides an op.
+
+use std::collections::BTreeSet;
+
+use abi::{Env, Refusal};
+use store::{Writes, capacity, invalid, stale, unauthorized, wrong_state};
+
 use crate::contract::*;
 use crate::discussion;
 use crate::ops::require_writer;
-use crate::repo::{load_bounds, load_ref, load_repo, parse_oid, repo_hash, resolve, set_ref};
-use abi::{Env, Refusal};
-use std::collections::BTreeSet;
-use store::{Reads, Writes, capacity, invalid, not_found, stale, unauthorized, wrong_state};
+use crate::state::{
+    load_bounds, load_change, load_ref, load_repo, next, next_message, next_number, parse_oid,
+    repo_hash, resolve, save_change, save_review, set_ref,
+};
 
-pub fn prefix(repo: &str) -> Vec<u8> {
-    format!("c/{repo}/").into_bytes()
-}
-pub fn key(repo: &str, n: u64) -> Vec<u8> {
-    [prefix(repo), n.to_be_bytes().to_vec()].concat()
-}
-pub fn reviews_prefix(repo: &str, n: u64) -> Vec<u8> {
-    format!("v/{repo}/{n:016x}/").into_bytes()
-}
-pub fn review_key(repo: &str, n: u64, id: u64) -> Vec<u8> {
-    [reviews_prefix(repo, n), id.to_be_bytes().to_vec()].concat()
-}
-pub fn involved_prefix(actor: &[u8]) -> Vec<u8> {
-    format!("i/{}/", abi::hex(actor)).into_bytes()
-}
-pub fn involved_key(actor: &[u8], repo: &str, n: u64) -> Vec<u8> {
-    [
-        involved_prefix(actor),
-        format!("{repo}/{n:016x}").into_bytes(),
-    ]
-    .concat()
-}
-pub fn authored_prefix(repo: &str, n: u64, actor: &[u8]) -> Vec<u8> {
-    format!("review-author/{repo}/{n:016x}/{}/", abi::hex(actor)).into_bytes()
-}
-pub fn latest_key(repo: &str, n: u64, actor: &[u8]) -> Vec<u8> {
-    format!("l/{repo}/{n:016x}/{}", abi::hex(actor)).into_bytes()
-}
-pub fn load<S: Reads>(s: &S, repo: &str, n: u64) -> Result<Change, Refusal> {
-    let bytes = s
-        .get(key(repo, n))
-        .ok_or_else(|| not_found(format!("no change {repo}#{n}")))?;
-    abi::decode(&bytes)
-}
-pub fn save<S: Writes>(s: &mut S, repo: &str, change: &Change) {
-    s.set(key(repo, change.n), abi::encode(change));
-    for actor in std::iter::once(&change.author).chain(&change.reviewers) {
-        involve(s, actor, repo, change.n);
-    }
-}
-fn involve<S: Writes>(s: &mut S, actor: &[u8], repo: &str, n: u64) {
-    s.set(involved_key(actor, repo, n), abi::encode(&(repo, n)));
-}
-fn fits(value: &impl borsh::BorshSerialize, bound: u64) -> Result<(), Refusal> {
-    if abi::encode(value).len() as u64 > bound {
-        return Err(capacity("record exceeds Bounds.record_bytes"));
-    }
-    Ok(())
-}
-fn title(text: &str) -> Result<(), Refusal> {
-    if text.trim().is_empty() || text.len() > MAX_TITLE_BYTES {
-        return Err(invalid(
-            "title must be nonblank and at most MAX_TITLE_BYTES",
-        ));
-    }
-    Ok(())
-}
-fn reviewers(keys: &[Vec<u8>]) -> Result<(), Refusal> {
-    if keys.len() > MAX_REVIEWERS {
-        return Err(capacity("too many requested reviewers"));
-    }
-    let mut seen = BTreeSet::new();
-    if keys.iter().any(|k| k.is_empty() || !seen.insert(k)) {
-        return Err(invalid("reviewer keys must be nonempty and distinct"));
-    }
-    Ok(())
-}
-pub fn path(path: &[u8], root: bool) -> Result<(), Refusal> {
-    if root && path.is_empty() {
-        return Ok(());
-    }
-    if path.len() > MAX_PATH_BYTES
-        || path.contains(&0)
-        || path
-            .split(|b| *b == b'/')
-            .any(|c| c.is_empty() || c == b"." || c == b"..")
-    {
-        return Err(invalid(
-            "path must be a relative Git path without empty, dot or dot-dot components",
-        ));
-    }
-    Ok(())
-}
-fn branch(name: &[u8]) -> Result<(), Refusal> {
-    if !name.starts_with(b"refs/heads/") || !gitcore::server::valid_ref_name(name) {
-        return Err(invalid(
-            "change endpoints must name branches under refs/heads/",
-        ));
-    }
-    Ok(())
-}
-fn author(change: &Change, actor: &[u8]) -> Result<(), Refusal> {
-    if change.author != actor {
-        return Err(unauthorized("only the author edits a change"));
-    }
-    Ok(())
-}
-fn open(change: &Change) -> Result<(), Refusal> {
-    if change.state != ChangeState::Open {
-        return Err(wrong_state("change is not open"));
-    }
-    Ok(())
-}
-fn changed(change: &mut Change, env: &Env) {
-    change.updated_height = env.height;
-    change.updated_time = env.time;
-}
-fn next(n: u64) -> Result<u64, Refusal> {
-    n.checked_add(1)
-        .ok_or_else(|| Refusal::new(abi::reason::EXHAUSTED, "counter exhausted"))
-}
-
-pub fn execute<S: Writes>(s: &mut S, env: &Env, actor: &[u8], op: Op) -> Result<(), Refusal> {
-    let bounds = load_bounds(s)?;
+pub fn execute(store: &mut impl Writes, env: &Env, actor: &[u8], op: Op) -> Result<(), Refusal> {
     let reply = match op {
         Op::ChangeOpen {
             repo,
-            mut from,
+            from,
             into,
-            title: text,
+            title,
             body,
-            reviewers: requested,
+            reviewers,
         } => {
-            let record = load_repo(s, &repo)?;
-            title(&text)?;
-            reviewers(&requested)?;
-            branch(&into)?;
-            if let Revision::Ref(r) = &from {
-                branch(r)?;
-            }
-            let hash = repo_hash(&record);
-            let source = resolve(s, &repo, &from, hash)?;
-            let target = resolve(s, &repo, &Revision::Ref(into.clone()), hash)?;
-            if source == target {
-                return Err(wrong_state("source and target already agree"));
-            }
-            if matches!(from, Revision::Oid(_)) {
-                from = Revision::Oid(source.to_hex());
-            }
-            let counter = format!("item-number/{repo}").into_bytes();
-            let n = next(
-                s.get(&counter)
-                    .map(|b| abi::decode(&b))
-                    .transpose()?
-                    .unwrap_or(0),
-            )?;
-            let change = Change {
-                n,
+            let draft = Draft {
                 from,
                 into,
-                title: text,
+                title,
                 body,
-                author: actor.to_vec(),
-                state: ChangeState::Open,
-                reviewers: requested,
-                created_height: env.height,
-                updated_height: env.height,
-                created_time: env.time,
-                updated_time: env.time,
-                review_count: 0,
-                comment_count: 0,
-                verdicts: ReviewCounts::default(),
-                merge_oid: None,
-                channel: format!("forge:{repo}:{n}"),
-                system_seq: 1,
+                reviewers,
             };
-            fits(&change, bounds.record_bytes)?;
-            let message = discussion::message_id(s)?;
-            s.set(counter, abi::encode(&n));
-            save(s, &repo, &change);
-            discussion::create(s, &repo, &change);
-            discussion::post(
-                s,
-                &change,
-                message,
-                format!("Opened by {}", abi::hex(actor)),
-            );
-            OpReply::Change {
-                height: env.height,
-                n,
-            }
+            open(store, env, actor, &repo, draft)?
         }
         Op::ChangeEdit {
             repo,
             n,
-            title: text,
+            title,
             body,
-            reviewers: requested,
+            reviewers,
         } => {
-            load_repo(s, &repo)?;
-            let mut change = load(s, &repo, n)?;
-            author(&change, actor)?;
-            if let Some(text) = text {
-                title(&text)?;
-                change.title = text;
-            }
-            if let Some(body) = body {
-                change.body = body;
-            }
-            if let Some(keys) = requested {
-                reviewers(&keys)?;
-                change.reviewers = keys;
-            }
-            changed(&mut change, env);
-            fits(&change, bounds.record_bytes)?;
-            save(s, &repo, &change);
-            OpReply::Change {
-                height: env.height,
-                n,
-            }
-        }
-        Op::ChangeClose { repo, n } => {
-            let record = load_repo(s, &repo)?;
-            let mut change = load(s, &repo, n)?;
-            if change.author != actor {
-                require_writer(s, &repo, &record, actor)?;
-            }
-            open(&change)?;
-            change.state = ChangeState::Closed;
-            changed(&mut change, env);
-            change.system_seq = next(change.system_seq)?;
-            let message = discussion::message_id(s)?;
-            save(s, &repo, &change);
-            discussion::post(
-                s,
-                &change,
-                message,
-                format!("Closed by {}", abi::hex(actor)),
-            );
-            OpReply::Change {
-                height: env.height,
-                n,
-            }
-        }
-        Op::ReviewSubmit {
-            repo,
-            n,
-            mut review,
-        } => {
-            let record = load_repo(s, &repo)?;
-            let mut change = load(s, &repo, n)?;
-            let hash = repo_hash(&record);
-            review.commit_oid = parse_oid(hash, &review.commit_oid)?.to_hex();
-            review.base_oid = review
-                .base_oid
-                .map(|h| parse_oid(hash, &h).map(|o| o.to_hex()))
-                .transpose()?;
-            if review.comments.len() > MAX_REVIEW_COMMENTS {
-                return Err(capacity("too many comments; use MAX_REVIEW_COMMENTS"));
-            }
-            let mut anchors = BTreeSet::new();
-            for comment in &review.comments {
-                path(&comment.path, false)?;
-                if comment.line == 0
-                    || comment.body.trim().is_empty()
-                    || (comment.side == Side::Old && review.base_oid.is_none())
-                {
-                    return Err(invalid(
-                        "comments need a positive line, nonblank body, and an old-side base",
-                    ));
-                }
-                if !anchors.insert((&comment.path, comment.side, comment.line)) {
-                    return Err(invalid("duplicate line anchor in one review"));
-                }
-            }
-            if review.verdict == Verdict::Comment
-                && review.body.trim().is_empty()
-                && review.comments.is_empty()
-            {
-                return Err(invalid("a comment review needs text or line comments"));
-            }
-            let id = next(change.review_count)?;
-            let mut row = Review {
-                id,
-                author: actor.to_vec(),
-                height: env.height,
-                time: env.time,
-                draft: review,
-                message_id: "forge:0000000000000000".into(),
+            let fields = Edit {
+                title,
+                body,
+                reviewers,
             };
-            fits(&row, bounds.record_bytes)?;
-            change.review_count = id;
-            change.comment_count = change
-                .comment_count
-                .checked_add(row.draft.comments.len() as u64)
-                .ok_or_else(|| capacity("comment counter exhausted"))?;
-            match row.draft.verdict {
-                Verdict::Approve => change.verdicts.approve = next(change.verdicts.approve)?,
-                Verdict::RequestChanges => {
-                    change.verdicts.request_changes = next(change.verdicts.request_changes)?
-                }
-                Verdict::Comment => change.verdicts.comment = next(change.verdicts.comment)?,
-            }
-            changed(&mut change, env);
-            change.system_seq = next(change.system_seq)?;
-            row.message_id = discussion::message_id(s)?;
-            s.set(review_key(&repo, n, id), abi::encode(&row));
-            let author_index =
-                [authored_prefix(&repo, n, actor), id.to_be_bytes().to_vec()].concat();
-            s.set(author_index, abi::encode(&id));
-            s.set(latest_key(&repo, n, actor), abi::encode(&id));
-            involve(s, actor, &repo, n);
-            save(s, &repo, &change);
-            discussion::post(
-                s,
-                &change,
-                row.message_id.clone(),
-                format!(
-                    "Review {id} submitted by {}: {:?}; {} line comments",
-                    abi::hex(actor),
-                    row.draft.verdict,
-                    row.draft.comments.len()
-                ),
-            );
-            OpReply::Review {
-                height: env.height,
-                n,
-                id,
-            }
+            edit(store, env, actor, &repo, n, fields)?
         }
+        Op::ChangeClose { repo, n } => close(store, env, actor, &repo, n)?,
+        Op::ReviewSubmit { repo, n, review } => submit_review(store, env, actor, &repo, n, review)?,
         Op::Merge {
             repo,
             into,
@@ -336,59 +57,398 @@ pub fn execute<S: Writes>(s: &mut S, env: &Env, actor: &[u8], op: Op) -> Result<
             result,
             change,
         } => {
-            let record = load_repo(s, &repo)?;
-            require_writer(s, &repo, &record, actor)?;
-            branch(&into)?;
-            if let Revision::Ref(r) = &from {
-                branch(r)?;
-            }
-            let hash = repo_hash(&record);
-            let expected_into = parse_oid(hash, &expected_into)?;
-            let expected_from = parse_oid(hash, &expected_from)?;
-            let result = parse_oid(hash, &result)?;
-            if load_ref(s, &repo, &into, hash)? != Some(expected_into)
-                || resolve(s, &repo, &from, hash)? != expected_from
-            {
-                return Err(stale("source or target head moved; recompute the merge"));
-            }
-            if result == expected_into || expected_from == expected_into {
-                return Err(wrong_state("merge does not advance the target"));
-            }
-            let mut item = change.map(|n| load(s, &repo, n)).transpose()?;
-            if let Some(item) = &mut item {
-                open(item)?;
-                let same_source = match (&item.from, &from) {
-                    (Revision::Oid(a), Revision::Oid(b)) => {
-                        parse_oid(hash, a)? == parse_oid(hash, b)?
-                    }
-                    (a, b) => a == b,
-                };
-                if item.into != into || !same_source {
-                    return Err(invalid("merge endpoints differ from the change"));
-                }
-                item.state = ChangeState::Merged;
-                item.merge_oid = Some(result.to_hex());
-                changed(item, env);
-                item.system_seq = next(item.system_seq)?;
-                fits(item, bounds.record_bytes)?;
-                let message = discussion::message_id(s)?;
-                save(s, &repo, item);
-                discussion::post(
-                    s,
-                    item,
-                    message,
-                    format!("Merged by {} as {result}", abi::hex(actor)),
-                );
-            }
-            set_ref(s, &repo, &into, &result);
-            OpReply::Merged {
-                height: env.height,
-                oid: result.to_hex(),
+            let merge = MergeRequest {
+                into,
+                from,
+                expected_into,
+                expected_from,
+                result,
                 change,
-            }
+            };
+            merge_heads(store, env, actor, &repo, merge)?
         }
         _ => return Err(invalid("not a change operation")),
     };
-    s.output(abi::encode(&reply));
+    store.output(abi::encode(&reply));
+    Ok(())
+}
+
+/// What `ChangeOpen` carries besides its repository.
+struct Draft {
+    from: Revision,
+    into: Vec<u8>,
+    title: String,
+    body: String,
+    reviewers: Vec<Vec<u8>>,
+}
+
+fn open(
+    store: &mut impl Writes,
+    env: &Env,
+    actor: &[u8],
+    repo: &str,
+    mut draft: Draft,
+) -> Result<OpReply, Refusal> {
+    let record = load_repo(store, repo)?;
+    check_title(&draft.title)?;
+    check_reviewers(&draft.reviewers)?;
+    check_endpoints(&draft.into, &draft.from)?;
+    let hash = repo_hash(&record);
+    let source = resolve(store, repo, &draft.from, hash)?;
+    let target = resolve(store, repo, &Revision::Ref(draft.into.clone()), hash)?;
+    if source == target {
+        return Err(wrong_state("source and target already agree"));
+    }
+    if matches!(draft.from, Revision::Oid(_)) {
+        draft.from = Revision::Oid(source.to_hex());
+    }
+    let n = next_number(store, repo)?;
+    let change = Change {
+        n,
+        from: draft.from,
+        into: draft.into,
+        title: draft.title,
+        body: draft.body,
+        author: actor.to_vec(),
+        state: ChangeState::Open,
+        reviewers: draft.reviewers,
+        created_height: env.height,
+        updated_height: env.height,
+        created_time: env.time,
+        updated_time: env.time,
+        review_count: 0,
+        comment_count: 0,
+        verdicts: ReviewCounts::default(),
+        merge_oid: None,
+        channel: format!("forge:{repo}:{n}"),
+        system_seq: 1,
+    };
+    fits(store, &change)?;
+    let message = next_message(store)?;
+    save_change(store, repo, &change)?;
+    discussion::create(store, repo, &change);
+    discussion::post(
+        store,
+        &change,
+        message,
+        format!("Opened by {}", abi::hex(actor)),
+    );
+    Ok(OpReply::Change {
+        height: env.height,
+        n,
+    })
+}
+
+/// What `ChangeEdit` changes; `None` leaves a field as it is.
+struct Edit {
+    title: Option<String>,
+    body: Option<String>,
+    reviewers: Option<Vec<Vec<u8>>>,
+}
+
+fn edit(
+    store: &mut impl Writes,
+    env: &Env,
+    actor: &[u8],
+    repo: &str,
+    n: u64,
+    fields: Edit,
+) -> Result<OpReply, Refusal> {
+    load_repo(store, repo)?;
+    let mut change = load_change(store, repo, n)?;
+    if change.author != actor {
+        return Err(unauthorized("only the author edits a change"));
+    }
+    if let Some(title) = fields.title {
+        check_title(&title)?;
+        change.title = title;
+    }
+    if let Some(body) = fields.body {
+        change.body = body;
+    }
+    if let Some(reviewers) = fields.reviewers {
+        check_reviewers(&reviewers)?;
+        change.reviewers = reviewers;
+    }
+    touched(&mut change, env);
+    fits(store, &change)?;
+    save_change(store, repo, &change)?;
+    Ok(OpReply::Change {
+        height: env.height,
+        n,
+    })
+}
+
+/// Closing is terminal: the author or a writer ends an open change.
+fn close(
+    store: &mut impl Writes,
+    env: &Env,
+    actor: &[u8],
+    repo: &str,
+    n: u64,
+) -> Result<OpReply, Refusal> {
+    let record = load_repo(store, repo)?;
+    let mut change = load_change(store, repo, n)?;
+    if change.author != actor {
+        require_writer(store, repo, &record, actor)?;
+    }
+    require_open(&change)?;
+    change.state = ChangeState::Closed;
+    touched(&mut change, env);
+    change.system_seq = next(change.system_seq)?;
+    let message = next_message(store)?;
+    save_change(store, repo, &change)?;
+    discussion::post(
+        store,
+        &change,
+        message,
+        format!("Closed by {}", abi::hex(actor)),
+    );
+    Ok(OpReply::Change {
+        height: env.height,
+        n,
+    })
+}
+
+/// One immutable review: a verdict, a body and its line comments, pinned
+/// at the commits it read. Reviews stay appendable after a change ends.
+fn submit_review(
+    store: &mut impl Writes,
+    env: &Env,
+    actor: &[u8],
+    repo: &str,
+    n: u64,
+    mut draft: ReviewDraft,
+) -> Result<OpReply, Refusal> {
+    let record = load_repo(store, repo)?;
+    let mut change = load_change(store, repo, n)?;
+    let hash = repo_hash(&record);
+    draft.commit_oid = parse_oid(hash, &draft.commit_oid)?.to_hex();
+    draft.base_oid = draft
+        .base_oid
+        .map(|hex| parse_oid(hash, &hex).map(|oid| oid.to_hex()))
+        .transpose()?;
+    check_comments(&draft)?;
+    let id = next(change.review_count)?;
+    let mut review = Review {
+        id,
+        author: actor.to_vec(),
+        height: env.height,
+        time: env.time,
+        draft,
+        message_id: "forge:0000000000000000".into(),
+    };
+    fits(store, &review)?;
+    change.review_count = id;
+    change.comment_count = change
+        .comment_count
+        .checked_add(review.draft.comments.len() as u64)
+        .ok_or_else(|| capacity("comment counter exhausted"))?;
+    count_verdict(&mut change.verdicts, review.draft.verdict)?;
+    touched(&mut change, env);
+    change.system_seq = next(change.system_seq)?;
+    review.message_id = next_message(store)?;
+    save_review(store, repo, n, &review);
+    save_change(store, repo, &change)?;
+    discussion::post(
+        store,
+        &change,
+        review.message_id.clone(),
+        format!(
+            "Review {id} submitted by {}: {:?}; {} line comments",
+            abi::hex(actor),
+            review.draft.verdict,
+            review.draft.comments.len()
+        ),
+    );
+    Ok(OpReply::Review {
+        height: env.height,
+        n,
+        id,
+    })
+}
+
+/// What `Merge` carries besides its repository.
+struct MergeRequest {
+    into: Vec<u8>,
+    from: Revision,
+    expected_into: String,
+    expected_from: String,
+    result: String,
+    change: Option<u64>,
+}
+
+/// A compare-and-swap of both heads: the client built and published the
+/// result; forge only checks that neither endpoint moved since.
+fn merge_heads(
+    store: &mut impl Writes,
+    env: &Env,
+    actor: &[u8],
+    repo: &str,
+    merge: MergeRequest,
+) -> Result<OpReply, Refusal> {
+    let record = load_repo(store, repo)?;
+    require_writer(store, repo, &record, actor)?;
+    check_endpoints(&merge.into, &merge.from)?;
+    let hash = repo_hash(&record);
+    let expected_into = parse_oid(hash, &merge.expected_into)?;
+    let expected_from = parse_oid(hash, &merge.expected_from)?;
+    let result = parse_oid(hash, &merge.result)?;
+    let heads_moved = load_ref(store, repo, &merge.into, hash)? != Some(expected_into)
+        || resolve(store, repo, &merge.from, hash)? != expected_from;
+    if heads_moved {
+        return Err(stale("source or target head moved; recompute the merge"));
+    }
+    if result == expected_into || expected_from == expected_into {
+        return Err(wrong_state("merge does not advance the target"));
+    }
+    if let Some(n) = merge.change {
+        let mut change = load_change(store, repo, n)?;
+        require_open(&change)?;
+        let same_source = match (&change.from, &merge.from) {
+            (Revision::Oid(a), Revision::Oid(b)) => parse_oid(hash, a)? == parse_oid(hash, b)?,
+            (a, b) => a == b,
+        };
+        if change.into != merge.into || !same_source {
+            return Err(invalid("merge endpoints differ from the change"));
+        }
+        change.state = ChangeState::Merged;
+        change.merge_oid = Some(result.to_hex());
+        touched(&mut change, env);
+        change.system_seq = next(change.system_seq)?;
+        fits(store, &change)?;
+        let message = next_message(store)?;
+        save_change(store, repo, &change)?;
+        discussion::post(
+            store,
+            &change,
+            message,
+            format!("Merged by {} as {result}", abi::hex(actor)),
+        );
+    }
+    set_ref(store, repo, &merge.into, &result);
+    Ok(OpReply::Merged {
+        height: env.height,
+        oid: result.to_hex(),
+        change: merge.change,
+    })
+}
+
+fn touched(change: &mut Change, env: &Env) {
+    change.updated_height = env.height;
+    change.updated_time = env.time;
+}
+
+fn count_verdict(counts: &mut ReviewCounts, verdict: Verdict) -> Result<(), Refusal> {
+    let count = match verdict {
+        Verdict::Approve => &mut counts.approve,
+        Verdict::RequestChanges => &mut counts.request_changes,
+        Verdict::Comment => &mut counts.comment,
+    };
+    *count = next(*count)?;
+    Ok(())
+}
+
+fn require_open(change: &Change) -> Result<(), Refusal> {
+    if change.state != ChangeState::Open {
+        return Err(wrong_state("change is not open"));
+    }
+    Ok(())
+}
+
+/// A record over `Bounds.record_bytes` is refused whole.
+fn fits(store: &impl store::Reads, record: &impl borsh::BorshSerialize) -> Result<(), Refusal> {
+    let bound = load_bounds(store)?.record_bytes;
+    if abi::encode(record).len() as u64 > bound {
+        return Err(capacity("record exceeds Bounds.record_bytes"));
+    }
+    Ok(())
+}
+
+fn check_title(title: &str) -> Result<(), Refusal> {
+    if title.trim().is_empty() || title.len() > MAX_TITLE_BYTES {
+        return Err(invalid(
+            "title must be nonblank and at most MAX_TITLE_BYTES",
+        ));
+    }
+    Ok(())
+}
+
+fn check_reviewers(keys: &[Vec<u8>]) -> Result<(), Refusal> {
+    if keys.len() > MAX_REVIEWERS {
+        return Err(capacity("too many requested reviewers"));
+    }
+    let mut seen = BTreeSet::new();
+    let well_named = keys
+        .iter()
+        .all(|key| !key.is_empty() && key.len() <= MAX_KEY_BYTES && seen.insert(key));
+    if !well_named {
+        return Err(invalid("reviewer keys must be nonempty and distinct"));
+    }
+    Ok(())
+}
+
+/// Both ends of a change or a merge are branches under `refs/heads/`.
+fn check_endpoints(into: &[u8], from: &Revision) -> Result<(), Refusal> {
+    check_branch(into)?;
+    if let Revision::Ref(name) = from {
+        check_branch(name)?;
+    }
+    Ok(())
+}
+
+fn check_branch(name: &[u8]) -> Result<(), Refusal> {
+    if !name.starts_with(b"refs/heads/") || !gitcore::server::valid_ref_name(name) {
+        return Err(invalid(
+            "change endpoints must name branches under refs/heads/",
+        ));
+    }
+    Ok(())
+}
+
+fn check_comments(draft: &ReviewDraft) -> Result<(), Refusal> {
+    if draft.comments.len() > MAX_REVIEW_COMMENTS {
+        return Err(capacity("too many comments; use MAX_REVIEW_COMMENTS"));
+    }
+    let mut anchors = BTreeSet::new();
+    for comment in &draft.comments {
+        check_path(&comment.path, false)?;
+        let anchored = comment.line > 0
+            && !comment.body.trim().is_empty()
+            && (comment.side == Side::New || draft.base_oid.is_some());
+        if !anchored {
+            return Err(invalid(
+                "comments need a positive line, nonblank body, and an old-side base",
+            ));
+        }
+        if !anchors.insert((&comment.path, comment.side, comment.line)) {
+            return Err(invalid("duplicate line anchor in one review"));
+        }
+    }
+    let says_nothing = draft.verdict == Verdict::Comment
+        && draft.body.trim().is_empty()
+        && draft.comments.is_empty();
+    if says_nothing {
+        return Err(invalid("a comment review needs text or line comments"));
+    }
+    Ok(())
+}
+
+/// A relative git path with no empty, `.` or `..` component; `root` admits
+/// the empty path (a tree's root).
+pub fn check_path(path: &[u8], root: bool) -> Result<(), Refusal> {
+    if root && path.is_empty() {
+        return Ok(());
+    }
+    let well_formed = path.len() <= MAX_PATH_BYTES
+        && !path.contains(&0)
+        && path
+            .split(|b| *b == b'/')
+            .all(|part| !part.is_empty() && part != b"." && part != b"..");
+    if !well_formed {
+        return Err(invalid(
+            "path must be a relative Git path without empty, dot or dot-dot components",
+        ));
+    }
     Ok(())
 }

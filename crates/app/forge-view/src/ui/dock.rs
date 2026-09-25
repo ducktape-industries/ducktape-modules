@@ -48,7 +48,6 @@ pub(crate) fn comments(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) ->
     let Some((_, _, _, reviews)) = forge.change() else {
         return quiet("Reading this change…", theme);
     };
-    let names = forge.names.ready();
     let mut column = div().id(id("forge-comments")).flex().flex_col().gap_2();
     let mut any = false;
     if let Some(review) = forge.review() {
@@ -65,10 +64,7 @@ pub(crate) fn comments(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) ->
         }
     }
     for review in &reviews.items {
-        let author = names.map_or_else(
-            || crate::ui::components::short_hex(&abi::hex(&review.author)),
-            |names| names.key(&review.author),
-        );
+        let author = forge.key_name(&review.author);
         for comment in &review.draft.comments {
             any = true;
             let path = comment.path.clone();
@@ -114,7 +110,6 @@ pub(crate) fn merge_status(forge: &Forge, theme: &Theme) -> AnyElement {
     let Some((change, _, _, _)) = forge.change() else {
         return quiet("Reading this change…", theme);
     };
-    let names = forge.names.ready();
     let mut column = div()
         .id(id("forge-merge-status"))
         .flex()
@@ -159,13 +154,7 @@ pub(crate) fn merge_status(forge: &Forge, theme: &Theme) -> AnyElement {
         column = column.child(quiet("Nobody was asked by name.", theme));
     }
     for key in &change.reviewers {
-        column = column.child(quiet(
-            names.map_or_else(
-                || crate::ui::components::short_hex(&abi::hex(key)),
-                |names| names.key(key),
-            ),
-            theme,
-        ));
+        column = column.child(quiet(forge.key_name(key), theme));
     }
     column
         .child(quiet(

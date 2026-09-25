@@ -7,7 +7,7 @@ use crate::Forge;
 use crate::state::{ChangeTab, Dock, verdict_label};
 use crate::ui::changes::{revision_name, state_chip};
 use crate::ui::components::{
-    badge, button, empty_state, heading, id, path_text, quiet, ref_label, row, short_hex,
+    badge, button, heading, id, path_text, quiet, ref_label, row, short_hex,
 };
 use crate::ui::{commits, diff, pending, scroller, staged};
 use forge::{ChangeState, Query, Reply, Verdict};
@@ -43,7 +43,7 @@ pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
         column = column.child(crate::ui::changes::form(form, forge, cx, theme));
     }
     let body: AnyElement = match forge.nav().change_tab {
-        ChangeTab::Conversation => conversation(forge, cx, theme),
+        ChangeTab::Conversation => crate::ui::conversation::render(forge, cx, theme),
         ChangeTab::Commits => commits::log(
             forge,
             &commits::query(forge, change.from.clone()),
@@ -64,12 +64,8 @@ fn header(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
     let edit = cx.listener(|forge, _: &ClickEvent, _, cx| forge.start_edit(cx));
     let close = cx.listener(|forge, _: &ClickEvent, _, cx| forge.close_change(cx));
     let merge = cx.listener(|forge, _: &ClickEvent, _, cx| forge.merge(cx));
-    let names = forge.names.ready();
-    let author = names.map_or_else(
-        || crate::ui::components::short_hex(&abi::hex(&change.author)),
-        |names| names.key(&change.author),
-    );
-    let refusal = forge.merge_refusal();
+    let author = forge.key_name(&change.author);
+    let blocked = forge.merge_block();
     let open = change.state == ChangeState::Open;
     let mine = forge.me_key().is_some_and(|key| key == change.author);
     let mut top = div()
@@ -103,7 +99,7 @@ fn header(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
         .child(
             button(id("forge-merge"), "Merge", theme, merge)
                 .kind(design::Kind::Primary)
-                .enabled(refusal.is_empty() && forge.session.connected),
+                .enabled(blocked.is_none() && forge.session.connected),
         );
     let mut bar = div().id(id("forge-change-tabs")).flex().gap_1();
     for tab in ChangeTab::ALL {
@@ -140,204 +136,16 @@ fn header(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
         .border_b_1()
         .border_color(theme.border)
         .child(top);
-    if !refusal.is_empty() {
+    if let Some(blocked) = blocked {
         column = column.child(
             div()
                 .id(id("forge-merge-refusal"))
                 .text_size(design::text::SECONDARY)
                 .text_color(theme.muted)
-                .child(refusal),
+                .child(blocked.sentence()),
         );
     }
     column.child(bar).into_any_element()
-}
-
-// ------------------------------------------------------------ conversation
-
-fn conversation(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
-    let Some((change, _, _, reviews)) = forge.change() else {
-        return div().into_any_element();
-    };
-    let mut column = scroller("forge-conversation");
-    if !change.body.trim().is_empty() {
-        column = column.child(
-            div()
-                .id(id("forge-change-body"))
-                .p_2()
-                .bg(theme.surface)
-                .child(crate::ui::markdown::render(
-                    "forge-change-body-text",
-                    &change.body,
-                    theme,
-                    &crate::ui::code::links(Vec::new(), cx),
-                )),
-        );
-    }
-    let names = forge.names.ready();
-    for review in &reviews.items {
-        let author = names.map_or_else(
-            || crate::ui::components::short_hex(&abi::hex(&review.author)),
-            |names| names.key(&review.author),
-        );
-        let outdated = forge.outdated(&review.draft.commit_oid);
-        let mut card = div()
-            .id(id(format!("forge-review-{}", review.id)))
-            .flex()
-            .flex_col()
-            .gap_1()
-            .p_2()
-            .border_1()
-            .border_color(theme.border)
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(crate::ui::bold(author))
-                    .child(badge(
-                        id(format!("forge-review-verdict-{}", review.id)),
-                        verdict_label(review.draft.verdict),
-                        match review.draft.verdict {
-                            Verdict::Approve => theme.success,
-                            Verdict::RequestChanges => theme.danger,
-                            Verdict::Comment => theme.muted,
-                        },
-                        match review.draft.verdict {
-                            Verdict::Approve => theme.success_soft,
-                            Verdict::RequestChanges => theme.danger_soft,
-                            Verdict::Comment => theme.surface_raised,
-                        },
-                    ))
-                    .child(quiet(
-                        format!("at {}", short_hex(&review.draft.commit_oid)),
-                        theme,
-                    ))
-                    .when(outdated, |element| {
-                        element.child(badge(
-                            id(format!("forge-review-outdated-{}", review.id)),
-                            "outdated",
-                            theme.warning,
-                            theme.warning_soft,
-                        ))
-                    }),
-            );
-        if !review.draft.body.trim().is_empty() {
-            card = card.child(quiet(review.draft.body.clone(), theme));
-        }
-        for (at, comment) in review.draft.comments.iter().enumerate() {
-            card = card.child(quiet(
-                format!(
-                    "{}:{} — {}",
-                    path_text(&comment.path),
-                    comment.line,
-                    comment.body
-                ),
-                theme,
-            ));
-            let _ = at;
-        }
-        column = column.child(card);
-    }
-    column = column.child(messages(forge, theme));
-    column.child(composer(forge, cx, theme)).into_any_element()
-}
-
-/// The hidden chat channel of this change, in chat's row shape.
-fn messages(forge: &Forge, theme: &Theme) -> AnyElement {
-    let Some((change, _, _, _)) = forge.change() else {
-        return div().into_any_element();
-    };
-    let names = forge.names.ready();
-    match forge.messages.get(&change.channel) {
-        None
-        | Some(ducktape_view_guest::view::Loaded::Idle)
-        | Some(ducktape_view_guest::view::Loaded::Loading(_)) => {
-            quiet("Reading the conversation…", theme)
-        }
-        Some(ducktape_view_guest::view::Loaded::Failed(refusal)) => div()
-            .id(id("forge-conversation-refused"))
-            .p_2()
-            .bg(theme.danger_soft)
-            .text_size(design::text::SECONDARY)
-            .child(refusal.sentence.clone())
-            .into_any_element(),
-        Some(ducktape_view_guest::view::Loaded::Ready(rows)) if rows.is_empty() => empty_state(
-            id("forge-conversation-empty"),
-            "No replies yet",
-            "This change's channel is quiet.",
-            theme,
-        )
-        .into_any_element(),
-        Some(ducktape_view_guest::view::Loaded::Ready(rows)) => {
-            let mut column = div()
-                .id(id("forge-conversation-messages"))
-                .flex()
-                .flex_col()
-                .gap_2();
-            for message in rows {
-                let author = names.map_or_else(
-                    || message.author.clone(),
-                    |names| names.handle(&message.author),
-                );
-                column = column.child(
-                    div()
-                        .id(id(format!("forge-message-{}", message.message_id)))
-                        .flex()
-                        .flex_col()
-                        .gap_0p5()
-                        .p_2()
-                        .bg(theme.surface)
-                        .child(
-                            div()
-                                .flex()
-                                .gap_2()
-                                .items_center()
-                                .child(crate::ui::bold(author))
-                                .child(quiet(format!("#{}", message.seq), theme)),
-                        )
-                        .child(
-                            div()
-                                .text_size(design::text::BODY)
-                                .child(message.text.clone()),
-                        ),
-                );
-            }
-            column.into_any_element()
-        }
-    }
-}
-
-fn composer(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
-    let typed = cx.listener(|forge, text: &String, _, cx| {
-        forge.reply = text.clone();
-        cx.notify();
-    });
-    let send = cx.listener(|forge, _: &ClickEvent, window, cx| forge.post_reply(window, cx));
-    div()
-        .id(id("forge-composer"))
-        .flex()
-        .gap_2()
-        .items_center()
-        .child(
-            Input::new(id("forge-reply"))
-                .h(px(30.))
-                .flex_1()
-                .px_2()
-                .border_1()
-                .border_color(theme.border_strong)
-                .bg(theme.surface)
-                .text_color(theme.foreground)
-                .value(forge.reply.clone())
-                .placeholder("Reply in this change")
-                .label("Reply")
-                .on_input(typed),
-        )
-        .child(
-            button(id("forge-reply-send"), "Send", theme, send)
-                .kind(design::Kind::Primary)
-                .enabled(forge.session.connected && !forge.reply.trim().is_empty()),
-        )
-        .into_any_element()
 }
 
 // ------------------------------------------------------------------ files
@@ -555,7 +363,7 @@ fn review_bar(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyEleme
     }
     bar.child(
         Input::new(id("forge-review-body"))
-            .h(px(28.))
+            .h(design::size::CONTROL)
             .w_full()
             .px_2()
             .border_1()

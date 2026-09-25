@@ -74,7 +74,7 @@ where
             .flex()
             .items_center()
             .gap_2()
-            .min_h(px(28.))
+            .min_h(design::size::CONTROL)
             .px_2()
             .children(self.children);
         let (chosen, hovered) = if self.sidebar {

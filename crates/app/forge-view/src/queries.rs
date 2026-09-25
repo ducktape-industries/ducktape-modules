@@ -55,23 +55,7 @@ fn next_cursor(reply: &Reply) -> Option<&Vec<u8>> {
 /// The same question, continued. An unpaged query has no continuation.
 fn with_cursor(query: &Query, after: Vec<u8>) -> Option<Query> {
     let mut query = query.clone();
-    let slot = match &mut query {
-        Query::Repos { page, .. }
-        | Query::Repo { page, .. }
-        | Query::Refs { page, .. }
-        | Query::Log { page, .. }
-        | Query::Tree { page, .. }
-        | Query::Diff { page, .. }
-        | Query::Changes { page, .. }
-        | Query::Change { page, .. }
-        | Query::Judgment { page, .. } => page,
-        Query::Compare { .. }
-        | Query::Blob { .. }
-        | Query::Activity { .. }
-        | Query::Advertise { .. }
-        | Query::Upload { .. } => return None,
-    };
-    slot.after = Some(after);
+    query.page_mut()?.after = Some(after);
     Some(query)
 }
 

@@ -1,5 +1,6 @@
 //! Repository settings: the default head, the force/delete flags and who
 //! may write. Nothing the contract does not expose appears here.
+use ducktape_view_guest::design;
 use ducktape_view_guest::prelude::*;
 
 use crate::Forge;
@@ -120,7 +121,7 @@ pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
             .items_center()
             .child(
                 Input::new(id("forge-settings-grant-input"))
-                    .h(px(28.))
+                    .h(design::size::CONTROL)
                     .flex_1()
                     .px_2()
                     .border_1()
@@ -147,12 +148,8 @@ pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
             ))
             .into_any_element();
     }
-    let names = forge.names.ready();
     for key in &writers.items {
-        let label = names.map_or_else(
-            || crate::ui::components::short_hex(&abi::hex(key)),
-            |names| names.key(key),
-        );
+        let label = forge.key_name(key);
         let revoke = cx.listener({
             let key = key.clone();
             move |forge, _: &ClickEvent, _, cx| forge.revoke(key.clone(), cx)

@@ -1,5 +1,6 @@
 //! The shapes every view repeats, in one visual language: the design tokens
-//! (re-exported whole), the type scale as [`Pixels`], and the empty state,
+//! (re-exported whole), the type scale, heights and spacing as [`Pixels`]
+//! (`text`, `size`, `space`), and the empty state,
 //! button, refused-with-retry screen, quiet line, heading and mono run views
 //! used to copy between them. The number formatters sit here for the same
 //! reason.
@@ -18,6 +19,28 @@ pub mod text {
     pub const SECONDARY: Pixels = px(::design::type_scale::SECONDARY as f32);
     pub const CAPTION: Pixels = px(::design::type_scale::CAPTION as f32);
     pub const MONO: Pixels = px(::design::type_scale::MONO as f32);
+}
+
+/// [`height`] as sizes an element takes.
+pub mod size {
+    use crate::{px, Pixels};
+
+    pub const ROW: Pixels = px(::design::height::ROW as f32);
+    pub const CONTROL: Pixels = px(::design::height::CONTROL as f32);
+}
+
+/// [`spacing`] as gaps and insets an element takes.
+pub mod space {
+    use crate::{px, Pixels};
+
+    pub const HAIR: Pixels = px(::design::spacing::HAIR as f32);
+    pub const XXS: Pixels = px(::design::spacing::XXS as f32);
+    pub const XS: Pixels = px(::design::spacing::XS as f32);
+    pub const SM: Pixels = px(::design::spacing::SM as f32);
+    pub const MD: Pixels = px(::design::spacing::MD as f32);
+    pub const LG: Pixels = px(::design::spacing::LG as f32);
+    pub const BLOCK: Pixels = px(::design::spacing::BLOCK as f32);
+    pub const XL: Pixels = px(::design::spacing::XL as f32);
 }
 
 /// Nothing to show yet: what is missing, then what would fill it.
