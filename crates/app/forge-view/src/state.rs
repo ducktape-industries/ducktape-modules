@@ -41,7 +41,8 @@ pub struct Forge {
     #[serde(skip)]
     pub(crate) names: Loaded<chat::view::Names>,
     #[serde(skip)]
-    pub(crate) messages: BTreeMap<String, Loaded<Vec<chat::MsgRow>>>,
+    /// each change channel's rows, and whether more follow past the budget
+    pub(crate) messages: BTreeMap<String, Loaded<(Vec<chat::MsgRow>, bool)>>,
     #[serde(skip)]
     pub(crate) pending: Vec<Pending>,
     #[serde(skip)]
@@ -322,7 +323,7 @@ pub(crate) struct ChangeForm {
     pub into: Vec<u8>,
     pub title: String,
     pub body: String,
-    pub reviewers: Vec<chat::Party>,
+    pub reviewers: Vec<identity::Principal>,
     pub error: String,
 }
 

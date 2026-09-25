@@ -1,7 +1,7 @@
 //! The boundary to the SDK's rich composer: what a draft is for (a
 //! [`Target`]), the key it is kept and focused under, and the chat op a
 //! committed draft becomes. Everything else about editing is the SDK's.
-use chat::{MsgRow, Op, parse_message};
+use chat::{MsgRow, Op, Principal, parse_message};
 pub use ducktape_view_guest::composer::*;
 use ducktape_view_guest::host::Refusal;
 use serde::{Deserialize, Serialize};
@@ -75,9 +75,9 @@ pub fn op(id: String, send: &Send, target: &Target) -> Result<Op, Refusal> {
     })
 }
 
-/// The row a just-accepted post shows as until the program serves it:
-/// seq 0, no author yet. An edit shows nothing early.
-pub fn pending_row(op: &Op) -> Option<MsgRow> {
+/// The row a just-accepted post by `author` shows as until the program
+/// serves it: seq 0. An edit shows nothing early.
+pub fn pending_row(op: &Op, author: Principal) -> Option<MsgRow> {
     let Op::PostMessage {
         message_id,
         blocks,
@@ -91,6 +91,6 @@ pub fn pending_row(op: &Op) -> Option<MsgRow> {
         message_id: message_id.clone(),
         blocks: blocks.clone(),
         thread: *thread,
-        ..MsgRow::default()
+        ..MsgRow::by(author)
     })
 }

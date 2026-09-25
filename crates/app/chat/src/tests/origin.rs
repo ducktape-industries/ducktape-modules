@@ -1,6 +1,9 @@
 //! The program's own path, run natively: an origin resolved through an
 //! identity sibling, a huddle join's node proof, identity's roster paged
 //! through chat. Each refusal leaves the store as it was.
+use std::cell::Cell;
+use std::rc::Rc;
+
 use abi::{Cause, Env, Origin, Refusal};
 use identity::{Account, Control, Key};
 
@@ -9,8 +12,10 @@ use crate::{AccountRow, HUDDLE_JOIN_NS, HUDDLE_NODE_KEY_BYTES, execute_from};
 
 /// Ada's key; she holds account 1.
 const ADA_KEY: [u8; 32] = [1; 32];
-/// A key no account holds.
+/// Bo's key: no account holds it until `claimed` says account 2 does.
 const LONE_KEY: [u8; 32] = [2; 32];
+/// Cy's key; she holds account 3.
+const CY_KEY: [u8; 32] = [3; 32];
 
 fn account(number: u64, keys: Vec<Vec<u8>>) -> Account {
     Account {
@@ -33,45 +38,58 @@ fn account(number: u64, keys: Vec<Vec<u8>>) -> Account {
 }
 
 /// Identity over three accounts, Ada's first; `List` pages by number.
-fn identity(request: &[u8]) -> Result<Vec<u8>, Refusal> {
-    let roster = [
-        account(1, vec![ADA_KEY.to_vec()]),
-        account(2, vec![]),
-        account(3, vec![]),
-    ];
-    let reply = match abi::decode::<identity::Query>(request)? {
-        identity::Query::OfKey { key } => identity::Reply::Number(
-            roster
-                .iter()
-                .find(|account| account.holds(&key))
-                .map(|account| account.number),
-        ),
-        identity::Query::List { page } => {
-            let from = page.after.as_ref().map_or(0, |after| after[0] as usize);
-            let to = (from + page.limit() as usize).min(roster.len());
-            identity::Reply::Accounts(PageReply {
-                height: 1,
-                items: roster[from..to].to_vec(),
-                next: (to < roster.len()).then(|| vec![to as u8]),
-            })
-        }
-        other => panic!("chat never asks identity {other:?}"),
-    };
-    Ok(abi::encode(&reply))
+/// Account 2 holds [`LONE_KEY`] once `claimed` is set.
+fn identity(claimed: Rc<Cell<bool>>) -> store::Sibling {
+    Box::new(move |request| {
+        let lone = if claimed.get() {
+            vec![LONE_KEY.to_vec()]
+        } else {
+            vec![]
+        };
+        let roster = [
+            account(1, vec![ADA_KEY.to_vec()]),
+            account(2, lone),
+            account(3, vec![CY_KEY.to_vec()]),
+        ];
+        let reply = match abi::decode::<identity::Query>(request)? {
+            identity::Query::OfKey { key } => identity::Reply::Number(
+                roster
+                    .iter()
+                    .find(|account| account.holds(&key))
+                    .map(|account| account.number),
+            ),
+            identity::Query::List { page } => {
+                let from = page.after.as_ref().map_or(0, |after| after[0] as usize);
+                let to = (from + page.limit() as usize).min(roster.len());
+                identity::Reply::Accounts(PageReply {
+                    height: 1,
+                    items: roster[from..to].to_vec(),
+                    next: (to < roster.len()).then(|| vec![to as u8]),
+                })
+            }
+            other => panic!("chat never asks identity {other:?}"),
+        };
+        Ok(abi::encode(&reply))
+    })
 }
 
 /// A store with identity beside it and a verifier that takes `b"signed"`
-/// over exactly the join message.
-fn store() -> Memory {
+/// over exactly the join message; `claimed` hands [`LONE_KEY`] account 2.
+fn store_claiming(claimed: Rc<Cell<bool>>) -> Memory {
     let mut store = Memory::default();
     store
         .siblings
-        .insert(identity::PROGRAM.into(), Box::new(identity));
+        .insert(identity::PROGRAM.into(), identity(claimed));
     store.verifier = Some(Box::new(|_, _, namespace, message, signature| {
         let expected = [b"general".as_slice(), &ADA_KEY].concat();
         namespace == HUDDLE_JOIN_NS && message == expected && signature == b"signed"
     }));
     store
+}
+
+/// [`store_claiming`] where [`LONE_KEY`] stays unclaimed.
+fn store() -> Memory {
+    store_claiming(Rc::default())
 }
 
 fn env(origin: Origin) -> Env {
@@ -96,12 +114,12 @@ fn refused(store: &mut Memory, origin: Origin, op: Op) -> String {
     store.refused(|store| execute_from(store, &env, op)).reason
 }
 
-fn owner(store: &Memory, id: &str) -> Party {
+fn owner(store: &Memory, id: &str) -> Principal {
     crate::state::channel(store, id).unwrap().owner
 }
 
 #[test]
-fn an_origin_acts_as_the_party_identity_names() {
+fn an_origin_acts_as_the_principal_identity_names() {
     let mut store = store();
     execute_from(
         &mut store,
@@ -109,40 +127,138 @@ fn an_origin_acts_as_the_party_identity_names() {
         create("a", PostPolicy::Open),
     )
     .unwrap();
-    assert_eq!(owner(&store, "a"), Party::Account(1));
-    execute_from(
-        &mut store,
-        &env(key(&LONE_KEY)),
-        create("b", PostPolicy::Open),
-    )
-    .unwrap();
-    assert_eq!(owner(&store, "b"), Party::Key(LONE_KEY.to_vec()));
+    assert_eq!(owner(&store, "a"), Principal::Account(1));
     let forge = Origin::Program("forge".into());
     execute_from(&mut store, &env(forge), create("forge:c", PostPolicy::Open)).unwrap();
-    assert_eq!(owner(&store, "forge:c"), Party::Module("forge".into()));
+    assert_eq!(owner(&store, "forge:c"), Principal::Module("forge".into()));
     execute_from(
         &mut store,
         &env(Origin::System),
         create("d", PostPolicy::Open),
     )
     .unwrap();
-    assert_eq!(owner(&store, "d"), Party::System);
+    assert_eq!(owner(&store, "d"), Principal::System);
     assert_eq!(
         refused(&mut store, key(&[]), create("e", PostPolicy::Open)),
         reason::INVALID_INPUT
     );
 }
 
+/// Every op, one each, as a key would send it into `#general`.
+fn every_op() -> Vec<Op> {
+    let general = || "general".to_string();
+    vec![
+        create("room", PostPolicy::Open),
+        Op::CreateVoiceChannel {
+            channel_id: "voice".into(),
+            name: "voice".into(),
+        },
+        Op::CreateDmChannel {
+            counterpart: 1,
+            name: "ada".into(),
+        },
+        Op::RenameChannel {
+            channel_id: general(),
+            name: "renamed".into(),
+        },
+        Op::SetChannelArchived {
+            channel_id: general(),
+            archived: true,
+        },
+        Op::PostMessage {
+            channel_id: general(),
+            message_id: "m2".into(),
+            blocks: parse_message("hi"),
+            thread: None,
+        },
+        Op::EditMessage {
+            channel_id: general(),
+            seq: 1,
+            blocks: parse_message("edited"),
+            base_rev: None,
+        },
+        Op::DeleteMessage {
+            channel_id: general(),
+            seq: 1,
+        },
+        Op::AddReaction {
+            channel_id: general(),
+            seq: 1,
+            emoji: "👍".into(),
+        },
+        Op::RemoveReaction {
+            channel_id: general(),
+            seq: 1,
+            emoji: "👍".into(),
+        },
+        Op::SetMembership {
+            channel_id: general(),
+            principal: Principal::Account(3),
+            member: true,
+        },
+        Op::JoinHuddle {
+            channel_id: general(),
+            node: vec![7; HUDDLE_NODE_KEY_BYTES],
+            node_proof: b"signed".to_vec(),
+        },
+        Op::LeaveHuddle {
+            channel_id: general(),
+        },
+    ]
+}
+
+/// A key that holds no account writes nothing, whatever the op; once
+/// identity hands it an account, the same key writes as that account.
 #[test]
-fn a_key_acts_as_itself_until_identity_is_deployed() {
-    let mut store = Memory::default();
+fn a_key_writes_only_once_it_holds_an_account() {
+    let claimed = Rc::new(Cell::new(false));
+    let mut store = store_claiming(claimed.clone());
     execute_from(
         &mut store,
         &env(key(&ADA_KEY)),
-        create("a", PostPolicy::Open),
+        create("general", PostPolicy::Open),
     )
     .unwrap();
-    assert_eq!(owner(&store, "a"), Party::Key(ADA_KEY.to_vec()));
+    execute_from(
+        &mut store,
+        &env(key(&ADA_KEY)),
+        post("general", "m1", "hello", None),
+    )
+    .unwrap();
+    for op in every_op() {
+        let why = format!("{op:?}");
+        assert_eq!(
+            refused(&mut store, key(&LONE_KEY), op),
+            reason::UNAUTHORIZED,
+            "{why}"
+        );
+    }
+    claimed.set(true);
+    execute_from(
+        &mut store,
+        &env(key(&LONE_KEY)),
+        create("bo", PostPolicy::Open),
+    )
+    .unwrap();
+    assert_eq!(owner(&store, "bo"), Principal::Account(2));
+    execute_from(
+        &mut store,
+        &env(key(&LONE_KEY)),
+        post("general", "m2", "now I can", None),
+    )
+    .unwrap();
+    let row = crate::state::message(&store, "general", 2).unwrap();
+    assert_eq!(row.author, Principal::Account(2));
+}
+
+/// With no identity deployed, no key holds an account, so none writes.
+#[test]
+fn no_key_writes_until_identity_is_deployed() {
+    let mut store = Memory::default();
+    assert_eq!(
+        refused(&mut store, key(&ADA_KEY), create("a", PostPolicy::Open)),
+        reason::UNAUTHORIZED
+    );
 }
 
 #[test]
@@ -176,9 +292,9 @@ fn a_huddle_join_needs_its_nodes_signature() {
         refused(&mut store, key(&ADA_KEY), join(b"forged")),
         reason::INVALID_INPUT
     );
-    // the proof binds the key: another key cannot reuse Ada's
+    // the proof binds the key: another account's key cannot reuse Ada's
     assert_eq!(
-        refused(&mut store, key(&LONE_KEY), join(b"signed")),
+        refused(&mut store, key(&CY_KEY), join(b"signed")),
         reason::INVALID_INPUT
     );
     assert_eq!(
@@ -186,6 +302,9 @@ fn a_huddle_join_needs_its_nodes_signature() {
         reason::UNAUTHORIZED
     );
     let mut unverified = Memory::default();
+    unverified
+        .siblings
+        .insert(identity::PROGRAM.into(), identity(Rc::default()));
     execute_from(
         &mut unverified,
         &env(Origin::System),
@@ -198,7 +317,7 @@ fn a_huddle_join_needs_its_nodes_signature() {
     );
     execute_from(&mut store, &env(key(&ADA_KEY)), join(b"signed")).unwrap();
     let huddle = crate::state::channel(&store, "general").unwrap().huddle;
-    assert_eq!(huddle[0].party, Party::Account(1));
+    assert_eq!(huddle[0].principal, Principal::Account(1));
 }
 
 #[test]
@@ -223,34 +342,4 @@ fn the_roster_pages_through_identity() {
     let rest = page(first.next);
     assert_eq!(numbers(&rest.items), [3]);
     assert_eq!(rest.next, None);
-}
-
-/// A key asks after the threads it started as a key and as its account:
-/// the one answered last.
-#[test]
-fn a_keys_attention_counts_the_threads_its_account_started() {
-    let mut chat = Chat {
-        store: store(),
-        height: 0,
-    };
-    chat.ok(&ADA, create("general", PostPolicy::Open));
-    let ada_key = Party::Key(ADA_KEY.to_vec());
-    let ada = Party::Account(1);
-    chat.post(&ada_key, "as-key", "before the account", None);
-    chat.post(&ada, "as-account", "after it", None);
-    chat.post(&BO, "r1", "re: key", Some(1));
-    chat.post(&BO, "r2", "re: account", Some(2));
-    let newest = |chat: &Chat, author: Party| {
-        let Reply::Attention(row) = chat.ask(Query::ThreadAttention {
-            channel_id: "general".into(),
-            author,
-        }) else {
-            panic!("attention answers attention");
-        };
-        row.map(|row| row.seq)
-    };
-    assert_eq!(newest(&chat, ada_key), Some(2));
-    assert_eq!(newest(&chat, Party::Key(LONE_KEY.to_vec())), None);
-    chat.post(&BO, "r3", "re: key again", Some(1));
-    assert_eq!(newest(&chat, Party::Key(ADA_KEY.to_vec())), Some(1));
 }

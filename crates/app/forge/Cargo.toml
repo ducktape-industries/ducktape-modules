@@ -26,8 +26,8 @@ guest = { workspace = true, optional = true }
 borsh = { workspace = true }
 chat = { workspace = true }
 gitcore = { workspace = true }
+identity = { workspace = true }
 store = { workspace = true }
 
 [dev-dependencies]
-identity = { workspace = true }
 sha2 = { version = "0.10", default-features = false }

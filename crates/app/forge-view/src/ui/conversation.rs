@@ -38,7 +38,9 @@ pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
     // Until chat answers, the reviews stand on their own; once it has, each
     // sits in the timeline where forge posted its line.
     let placed = |review: &forge::Review| match forge.messages.get(&change.channel) {
-        Some(Loaded::Ready(rows)) => rows.iter().any(|row| row.message_id == review.message_id),
+        Some(Loaded::Ready((rows, _))) => {
+            rows.iter().any(|row| row.message_id == review.message_id)
+        }
         _ => false,
     };
     for review in reviews.items.iter().filter(|review| !placed(review)) {
@@ -51,7 +53,7 @@ pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
 /// One review as a timeline event: who, what they concluded, where, and
 /// the line comments it carried.
 fn review_card(forge: &Forge, review: &forge::Review, theme: &Theme) -> AnyElement {
-    let author = forge.party_name(&review.author);
+    let author = forge.principal_name(&review.author);
     let outdated = forge.outdated(&review.draft.commit_oid);
     let comments = review.draft.comments.len();
     let mut card = div()
@@ -167,14 +169,18 @@ fn forge_line(
     }
     let key = row.message_id.clone();
     if opened {
-        let author = forge.party_name(&change.author);
+        let author = forge.principal_name(&change.author);
         return Some(event(key, Some(author), "opened this change".into(), theme));
     }
     // a line matching no review yet may be one still paging in
     if reviews.next.is_some() {
         return None;
     }
-    let actor = |party: &Option<chat::Party>| party.as_ref().map(|party| forge.party_name(party));
+    let actor = |principal: &Option<identity::Principal>| {
+        principal
+            .as_ref()
+            .map(|principal| forge.principal_name(principal))
+    };
     match (change.state, &change.merge_oid) {
         (ChangeState::Merged, Some(oid)) => Some(event(
             key,
@@ -197,7 +203,7 @@ fn forge_line(
 }
 
 fn is_forge(row: &chat::MsgRow) -> bool {
-    row.author == chat::Party::Module(forge::PROGRAM.into())
+    row.author == identity::Principal::Module(forge::PROGRAM.into())
 }
 
 /// The hidden chat channel of this change, in chat's row shape.
@@ -216,14 +222,14 @@ fn messages(forge: &Forge, theme: &Theme) -> AnyElement {
             .text_size(design::text::SECONDARY)
             .child(refusal.sentence.clone())
             .into_any_element(),
-        Some(Loaded::Ready(rows)) if rows.is_empty() => empty_state(
+        Some(Loaded::Ready((rows, _))) if rows.is_empty() => empty_state(
             id("forge-conversation-empty"),
             "No replies yet",
             "This change's channel is quiet.",
             theme,
         )
         .into_any_element(),
-        Some(Loaded::Ready(rows)) => {
+        Some(Loaded::Ready((rows, _))) => {
             let opened = rows.iter().find(|row| is_forge(row)).map(|row| row.seq);
             let mut column = div()
                 .id(id("forge-conversation-messages"))
@@ -239,7 +245,7 @@ fn messages(forge: &Forge, theme: &Theme) -> AnyElement {
                     }
                     continue;
                 }
-                let author = forge.party_name(&message.author);
+                let author = forge.principal_name(&message.author);
                 column = column.child(
                     div()
                         .id(id(format!("forge-message-{}", message.message_id)))
@@ -295,7 +301,7 @@ fn composer(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement
         .child(
             button(id("forge-reply-send"), "Send", theme, send)
                 .kind(design::Kind::Primary)
-                .enabled(forge.session.connected && !forge.reply.trim().is_empty()),
+                .enabled(forge.may_write() && !forge.reply.trim().is_empty()),
         )
         .into_any_element()
 }

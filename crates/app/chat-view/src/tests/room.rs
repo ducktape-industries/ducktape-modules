@@ -304,6 +304,33 @@ fn a_link_to_a_forge_room_lands_in_it() {
     routes.push(ducklink::Link::parse(&link).unwrap().tail.join("/"));
     cx.run_until_parked();
     view.read(|chat| assert_eq!(chat.room.as_ref().unwrap().id, "forge:web:3"));
+    // forge's own line reads as its event with a way to where forge shows
+    // the change, not as a code block
+    view.update(&mut cx, |chat, _, cx| {
+        let line = chat::MsgRow {
+            channel_id: "forge:web:3".into(),
+            seq: 1,
+            message_id: "forge-line".into(),
+            height: 2,
+            blocks: vec![chat::Block::Code {
+                lang: Some("forge".into()),
+                text: "review 7".into(),
+            }],
+            ..chat::MsgRow::by(Principal::Module("forge".into()))
+        };
+        let room = chat.room.as_mut().unwrap();
+        room.messages = Loaded::Ready(vec![line]);
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(cx.has_text("review 7"), "{:?}", cx.texts());
+    assert!(cx.find("chat-message-forge-line-block-0-code").is_none());
+    cx.simulate_click("chat-message-forge-line-program-open");
+    let opened = cx.host().opened_links();
+    assert_eq!(
+        opened.last().map(String::as_str),
+        Some("duck://testnet-0a1b2c3d/forge/web/3")
+    );
 }
 
 /// A dm belongs to its two peers alike: its details list them, with no way
@@ -313,7 +340,7 @@ fn a_link_to_a_forge_room_lands_in_it() {
 fn a_dms_details_show_its_two_people_and_nothing_to_reshape() {
     let (mut cx, view) = opened();
     let seat = |number| chat::MemberRow {
-        party: Party::Account(number),
+        principal: Principal::Account(number),
         height: 1,
         time: 1,
     };

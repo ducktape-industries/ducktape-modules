@@ -127,7 +127,7 @@ fn flags(
         .child(
             button(id("forge-settings-save"), "Save", theme, save)
                 .kind(design::Kind::Primary)
-                .enabled(forge.session.connected),
+                .enabled(forge.may_write()),
         )
 }
 
@@ -160,20 +160,17 @@ fn grant_field(
                 .bg(theme.surface)
                 .text_color(theme.foreground)
                 .value(form.grant.clone())
-                .placeholder("account number or key in hex")
+                .placeholder("account number")
                 .label("Grant write access")
                 .on_input(typed),
         )
-        .child(
-            button(id("forge-settings-grant"), "Grant", theme, grant)
-                .enabled(forge.session.connected),
-        )
+        .child(button(id("forge-settings-grant"), "Grant", theme, grant).enabled(forge.may_write()))
 }
 
 /// One row per writer with its Revoke, or the owner-only empty state.
 fn writer_rows(
     forge: &Forge,
-    writers: &[chat::Party],
+    writers: &[identity::Principal],
     cx: &mut Context<Forge>,
     theme: &Theme,
 ) -> Vec<AnyElement> {
@@ -191,18 +188,18 @@ fn writer_rows(
     writers
         .iter()
         .map(|key| {
-            let label = forge.party_name(key);
+            let label = forge.principal_name(key);
             let revoke = cx.listener({
                 let key = key.clone();
                 move |forge, _: &ClickEvent, _, cx| forge.revoke(key.clone(), cx)
             });
             row::<fn(&ClickEvent, &mut Window, &mut App)>(
-                id(format!("forge-writer-{}", party_id(key))),
+                id(format!("forge-writer-{}", principal_id(key))),
                 theme,
             )
             .cell(div().flex_1().truncate().child(label))
             .cell(button(
-                id(format!("forge-settings-revoke-{}", party_id(key))),
+                id(format!("forge-settings-revoke-{}", principal_id(key))),
                 "Revoke",
                 theme,
                 revoke,
@@ -212,12 +209,11 @@ fn writer_rows(
         .collect()
 }
 
-/// A writer's element id: `acct-<n>` for an account, the hex of a key.
-fn party_id(party: &chat::Party) -> String {
-    match party {
-        chat::Party::Account(number) => format!("acct-{number}"),
-        chat::Party::Key(key) => abi::hex(key),
-        chat::Party::Module(module) => module.clone(),
-        chat::Party::System => "system".into(),
+/// A writer's element id: `acct-<n>` for an account.
+fn principal_id(principal: &identity::Principal) -> String {
+    match principal {
+        identity::Principal::Account(number) => format!("acct-{number}"),
+        identity::Principal::Module(module) => module.clone(),
+        identity::Principal::System => "system".into(),
     }
 }

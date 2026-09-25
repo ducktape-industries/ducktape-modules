@@ -4,7 +4,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 
 pub use crate::read_contract::*;
 pub use crate::review_contract::*;
-pub use chat::{Frame, Party};
+pub use identity::{Frame, Principal};
 pub use store::{Page, PageReply};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
@@ -47,9 +47,8 @@ impl Default for Settings {
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct Repo {
     pub hash: HashKind,
-    /// The person who created the repository: an account, or a key that
-    /// holds none.
-    pub owner: Party,
+    /// The person who created the repository: an account.
+    pub owner: Principal,
     pub settings: Settings,
     pub refs_count: u64,
     pub last_activity: u64,
@@ -69,11 +68,11 @@ pub enum Op {
     /// a key that holds no account.
     Grant {
         repo: String,
-        party: Party,
+        principal: Principal,
     },
     Revoke {
         repo: String,
-        party: Party,
+        principal: Principal,
     },
     Push {
         repo: String,
@@ -95,14 +94,14 @@ pub enum Op {
         into: Vec<u8>,
         title: String,
         body: String,
-        reviewers: Vec<Party>,
+        reviewers: Vec<Principal>,
     },
     ChangeEdit {
         repo: String,
         n: u64,
         title: Option<String>,
         body: Option<String>,
-        reviewers: Option<Vec<Party>>,
+        reviewers: Option<Vec<Principal>>,
     },
     ChangeClose {
         repo: String,
@@ -206,7 +205,7 @@ pub enum Query {
     },
     /// What one person owes across every repository.
     Judgment {
-        party: Party,
+        principal: Principal,
         page: Page,
     },
 }
@@ -287,7 +286,7 @@ pub enum Reply {
         height: u64,
         repo: RepoInfo,
         bounds: Bounds,
-        writers: PageReply<Party>,
+        writers: PageReply<Principal>,
     },
     Refs {
         height: u64,
@@ -358,8 +357,6 @@ pub enum OpReply {
 }
 
 pub const MAX_REPO_NAME: usize = 37; // forge:<repo>:<u64> fits chat's 64-byte id.
-/// The longest key a bare-key party is named by (a BLS key is 96).
-pub const MAX_KEY_BYTES: usize = 128;
 
 pub fn valid_repo_name(name: &str) -> bool {
     !name.is_empty()

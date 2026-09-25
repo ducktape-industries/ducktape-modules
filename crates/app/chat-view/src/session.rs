@@ -1,7 +1,8 @@
 //! Who reads: the session the host hands over (the seated key and the
 //! account it holds), and what that lets her do in the open room.
-use chat::Party;
+use chat::Principal;
 use ducktape_view_guest::Context;
+use ducktape_view_guest::view::Loaded;
 
 use crate::Chat;
 use crate::api::Session;
@@ -71,7 +72,18 @@ impl Chat {
     }
 
     pub(crate) fn load_channels(&mut self, cx: &mut Context<Self>) {
-        self.channels = cx.load(channels(cx.host()), |chat| &mut chat.channels);
+        let list = channels(cx.host());
+        let task = cx.spawn(async move |this, cx| {
+            let result = list.await;
+            let _ = this.update(cx, |chat, cx| {
+                chat.channels = Loaded::from(result.map(|(rooms, more)| {
+                    chat.channels_more = more;
+                    rooms
+                }));
+                cx.notify();
+            });
+        });
+        self.channels = Loaded::Loading(task);
     }
 
     /// The reader's account number, as the host resolved it.
@@ -79,18 +91,19 @@ impl Chat {
         self.session.account
     }
 
-    /// The party chat writes the reader as; none with no key seated.
-    pub(crate) fn me(&self) -> Option<Party> {
-        Party::reader(self.my_account(), &self.session.key)
+    /// The principal chat writes the reader as: her account; none while her
+    /// key holds none, since only an account writes.
+    pub(crate) fn me(&self) -> Option<Principal> {
+        Principal::writer(self.my_account())
     }
 
     /// The reader, as a query's `viewer`.
-    pub(crate) fn viewer(&self) -> Vec<Party> {
+    pub(crate) fn viewer(&self) -> Vec<Principal> {
         self.me().into_iter().collect()
     }
 
     pub(crate) fn holds_account(&self) -> bool {
-        self.my_account().is_some()
+        self.me().is_some()
     }
 
     /// Why the reader may not write in the open room; none when she may.
@@ -107,7 +120,7 @@ impl Chat {
             .room
             .as_ref()
             .and_then(|room| room.members.ready())
-            .is_some_and(|members| members.iter().any(|m| m.party == me));
+            .is_some_and(|members| members.iter().any(|m| m.principal == me));
         (!info.channel.admits(&me, seated)).then_some(Gate::NotMember)
     }
 

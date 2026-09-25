@@ -6,8 +6,7 @@ mod common;
 use common::story::*;
 use common::*;
 use forge::{
-    ChangeFilter, ChangeState, LineComment, MAX_KEY_BYTES, OpReply, ReviewDraft, Revision, Side,
-    Verdict,
+    ChangeFilter, ChangeState, LineComment, OpReply, ReviewDraft, Revision, Side, Verdict,
 };
 
 const REVIEWER: &[u8] = b"reviewer";
@@ -47,10 +46,14 @@ fn record(rig: &Rig, n: u64) -> forge::Change {
 }
 
 fn involving(rig: &Rig, who: &[u8]) -> Vec<u64> {
+    involving_principal(rig, rig.principal(who))
+}
+
+fn involving_principal(rig: &Rig, principal: Principal) -> Vec<u64> {
     let query = Query::Changes {
         repo: REPO.into(),
         filter: ChangeFilter {
-            involves: Some(rig.party(who)),
+            involves: Some(principal),
             ..ChangeFilter::default()
         },
         page: Page::first(128),
@@ -69,7 +72,7 @@ fn opened(rig: &mut Rig, story: &Story) -> u64 {
     n
 }
 
-fn edit_reviewers(n: u64, reviewers: Vec<Party>) -> Op {
+fn edit_reviewers(n: u64, reviewers: Vec<Principal>) -> Op {
     Op::ChangeEdit {
         repo: REPO.into(),
         n,
@@ -121,13 +124,13 @@ fn configure_is_the_owners_and_takes_a_ref_for_head() {
 #[test]
 fn grant_and_revoke_are_the_owners_and_name_a_person() {
     let (mut rig, _) = story();
-    let grant = |party: Party| Op::Grant {
+    let grant = |principal: Principal| Op::Grant {
         repo: REPO.into(),
-        party,
+        principal,
     };
-    let revoke = |party: Party| Op::Revoke {
+    let revoke = |principal: Principal| Op::Revoke {
         repo: REPO.into(),
-        party,
+        principal,
     };
     let writers = |rig: &Rig| {
         let Reply::Repo { writers, .. } = reply(
@@ -142,30 +145,25 @@ fn grant_and_revoke_are_the_owners_and_name_a_person() {
         writers.items
     };
 
-    rig.execute(&grant(key(WRITER))).unwrap();
-    rig.execute(&grant(Party::Account(9))).unwrap();
-    assert_eq!(writers(&rig), [Party::Account(9), key(WRITER)]);
+    rig.execute(&grant(person(WRITER))).unwrap();
+    rig.execute(&grant(Principal::Account(9))).unwrap();
+    assert_eq!(writers(&rig), [Principal::Account(9), person(WRITER)]);
     assert_eq!(
-        refused_as(&mut rig, WRITER, &revoke(key(WRITER))),
+        refused_as(&mut rig, WRITER, &revoke(person(WRITER))),
         reason::UNAUTHORIZED
     );
-    rig.execute(&revoke(key(WRITER))).unwrap();
-    rig.execute(&revoke(Party::Account(9))).unwrap();
+    rig.execute(&revoke(person(WRITER))).unwrap();
+    rig.execute(&revoke(Principal::Account(9))).unwrap();
     assert!(
         writers(&rig).is_empty(),
         "a revoked key leaves no row behind"
     );
 
     assert_eq!(
-        refused_as(&mut rig, STRANGER, &grant(key(STRANGER))),
+        refused_as(&mut rig, STRANGER, &grant(person(STRANGER))),
         reason::UNAUTHORIZED
     );
-    assert_eq!(rig.refused(&grant(key(b""))).reason, reason::INVALID_INPUT);
-    assert_eq!(
-        rig.refused(&grant(key(&[7; MAX_KEY_BYTES + 1]))).reason,
-        reason::CAPACITY
-    );
-    let module = Party::Module("chat".into());
+    let module = Principal::Module("chat".into());
     assert_eq!(rig.refused(&grant(module)).reason, reason::INVALID_INPUT);
 }
 
@@ -178,17 +176,18 @@ fn open_numbers_changes_and_refuses_what_cannot_merge() {
     assert_eq!(opened(&mut rig, &story), 2, "numbers are never reused");
     let feature = record(&rig, 1);
     assert_eq!(feature.state, ChangeState::Open);
-    assert_eq!(feature.author, Party::Account(1));
+    assert_eq!(feature.author, Principal::Account(1));
     assert_eq!(feature.channel, "forge:project:1");
 
-    let open = |from: Revision, into: &[u8], title: &str, reviewers: Vec<Party>| Op::ChangeOpen {
-        repo: REPO.into(),
-        from,
-        into: into.to_vec(),
-        title: title.into(),
-        body: String::new(),
-        reviewers,
-    };
+    let open =
+        |from: Revision, into: &[u8], title: &str, reviewers: Vec<Principal>| Op::ChangeOpen {
+            repo: REPO.into(),
+            from,
+            into: into.to_vec(),
+            title: title.into(),
+            body: String::new(),
+            reviewers,
+        };
     let main = b"refs/heads/main";
     let same = open(reference("main"), main, "Nothing", vec![]);
     assert_eq!(rig.refused(&same).reason, reason::WRONG_STATE);
@@ -202,7 +201,7 @@ fn open_numbers_changes_and_refuses_what_cannot_merge() {
         reference("feature"),
         main,
         "Twice",
-        vec![Party::Account(2), Party::Account(2)],
+        vec![Principal::Account(2), Principal::Account(2)],
     );
     assert_eq!(rig.refused(&twice).reason, reason::INVALID_INPUT);
     let gone = open(reference("nowhere"), main, "Gone", vec![]);
@@ -234,17 +233,19 @@ fn edit_is_the_authors_and_drops_the_reviewers_it_unasks() {
         reason::UNAUTHORIZED
     );
 
-    // Asking a fleet of keys and unasking them leaves nothing behind.
+    // Asking a fleet of accounts and unasking them leaves nothing behind.
     for round in 0..3u8 {
-        let fleet = (0..64).map(|i| key(&[round, i])).collect();
+        let fleet = (0..64)
+            .map(|i| Principal::Account(100 + 64 * round as u64 + i))
+            .collect();
         rig.execute(&edit_reviewers(n, fleet)).unwrap();
     }
     rig.execute(&edit_reviewers(n, vec![])).unwrap();
     assert!(involving(&rig, REVIEWER).is_empty());
-    assert!(involving(&rig, &[0, 0]).is_empty());
+    assert!(involving_principal(&rig, Principal::Account(100)).is_empty());
     assert_eq!(involving(&rig, TESTER), [n], "the author stays involved");
 
-    let fleet = (0..65).map(|i| key(&[i])).collect();
+    let fleet = (0..65).map(|i| Principal::Account(100 + i)).collect();
     assert_eq!(
         rig.refused(&edit_reviewers(n, fleet)).reason,
         reason::CAPACITY
@@ -275,14 +276,14 @@ fn close_is_the_authors_or_a_writers_and_happens_once() {
     rig.execute(&close).unwrap();
     let closed = record(&rig, n);
     assert_eq!(closed.state, ChangeState::Closed);
-    assert_eq!(closed.closed_by, Some(Party::Account(1)));
+    assert_eq!(closed.closed_by, Some(Principal::Account(1)));
     assert_eq!(closed.merged_by, None);
     assert_eq!(rig.refused(&close).reason, reason::WRONG_STATE);
 
     let second = opened(&mut rig, &story);
     rig.execute(&Op::Grant {
         repo: REPO.into(),
-        party: key(WRITER),
+        principal: person(WRITER),
     })
     .unwrap();
     let by_writer = Op::ChangeClose {
@@ -292,7 +293,7 @@ fn close_is_the_authors_or_a_writers_and_happens_once() {
     signed(&mut rig, WRITER, &by_writer).unwrap();
     let closed = record(&rig, second);
     assert_eq!(closed.state, ChangeState::Closed);
-    assert_eq!(closed.closed_by, Some(key(WRITER)));
+    assert_eq!(closed.closed_by, Some(person(WRITER)));
 }
 
 #[test]
@@ -395,7 +396,7 @@ fn a_merge_lands_its_change_once_and_only_over_the_heads_it_read() {
     let change = record(&rig, n);
     assert_eq!(change.state, ChangeState::Merged);
     assert_eq!(change.merge_oid.as_deref(), Some(story.feature.as_str()));
-    assert_eq!(change.merged_by, Some(Party::Account(1)));
+    assert_eq!(change.merged_by, Some(Principal::Account(1)));
     assert_eq!(change.closed_by, None);
     assert_eq!(
         refs_of(&rig.sandbox, REPO)["refs/heads/main"],

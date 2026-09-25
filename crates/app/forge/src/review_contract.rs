@@ -1,7 +1,7 @@
 //! Immutable batched reviews, mutable changes, and the shared per-repo item counter.
 use crate::read_contract::Revision;
 use borsh::{BorshDeserialize, BorshSerialize};
-use chat::Party;
+use identity::Principal;
 
 pub const MAX_REVIEW_COMMENTS: usize = 64;
 pub const MAX_REVIEWERS: usize = 64;
@@ -43,7 +43,7 @@ pub struct ReviewDraft {
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct Review {
     pub id: u64,
-    pub author: Party,
+    pub author: Principal,
     pub height: u64,
     pub time: u64,
     pub draft: ReviewDraft,
@@ -57,9 +57,9 @@ pub struct Change {
     pub into: Vec<u8>,
     pub title: String,
     pub body: String,
-    pub author: Party,
+    pub author: Principal,
     pub state: ChangeState,
-    pub reviewers: Vec<Party>,
+    pub reviewers: Vec<Principal>,
     pub created_height: u64,
     pub updated_height: u64,
     pub created_time: u64,
@@ -69,9 +69,9 @@ pub struct Change {
     pub verdicts: ReviewCounts,
     pub merge_oid: Option<String>,
     /// Who closed the change; set once, by the close op.
-    pub closed_by: Option<Party>,
+    pub closed_by: Option<Principal>,
     /// Who merged the change; set once, by a merge linked to it.
-    pub merged_by: Option<Party>,
+    pub merged_by: Option<Principal>,
     pub channel: String,
     pub system_seq: u64,
 }
@@ -86,8 +86,8 @@ pub struct ReviewCounts {
 )]
 pub struct ChangeFilter {
     pub state: Option<ChangeState>,
-    pub author: Option<Party>,
-    pub involves: Option<Party>,
+    pub author: Option<Principal>,
+    pub involves: Option<Principal>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct ChangeSummary {
@@ -96,7 +96,7 @@ pub struct ChangeSummary {
     pub from: Revision,
     pub into: Vec<u8>,
     pub title: String,
-    pub author: Party,
+    pub author: Principal,
     pub state: ChangeState,
     pub updated_height: u64,
     pub review_count: u64,

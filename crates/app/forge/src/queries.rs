@@ -42,7 +42,7 @@ pub fn query(store: &impl Reads, height: u64, query: Query) -> Result<Vec<u8>, R
             bounds,
             writers: WRITERS
                 .page_of(store, repo, &listing(page)?)?
-                .map(|(_, party)| party),
+                .map(|(_, principal)| principal),
         },
         Query::Refs { repo, page } => Reply::Refs {
             height,
@@ -88,9 +88,9 @@ pub fn query(store: &impl Reads, height: u64, query: Query) -> Result<Vec<u8>, R
         Query::Change { repo, n, page } => {
             change_queries::change(store, height, repo, *n, &listing(page)?)?
         }
-        Query::Judgment { party, page } => Reply::Judgment {
+        Query::Judgment { principal, page } => Reply::Judgment {
             height,
-            page: change_queries::judgment(store, party, &listing(page)?)?,
+            page: change_queries::judgment(store, principal, &listing(page)?)?,
         },
     };
     Ok(abi::encode(&reply))

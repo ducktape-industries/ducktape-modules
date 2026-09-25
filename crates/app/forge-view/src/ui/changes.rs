@@ -22,7 +22,16 @@ pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
     if let Some(form) = &forge.form {
         column = column.child(self::form(form, forge, cx, theme));
     }
-    let query = forge.changes_query(&forge.repo_name());
+    let Some(query) = forge.changes_query(&forge.repo_name()) else {
+        return column
+            .child(empty_state(
+                id("forge-changes-nobody"),
+                "No account",
+                "Create an account to see the changes that involve you.",
+                theme,
+            ))
+            .into_any_element();
+    };
     let reply = match staged(
         forge,
         &query,
@@ -89,7 +98,7 @@ fn change_row(
 ) -> AnyElement {
     let n = summary.n;
     let open = cx.listener(move |forge, _: &ClickEvent, _, cx| forge.open_change(Some(n), cx));
-    let author = forge.party_name(&summary.author);
+    let author = forge.principal_name(&summary.author);
     let mut line = row(id(format!("forge-change-{n}")), theme)
         .on_click(open)
         .cell(
@@ -202,7 +211,7 @@ fn filters(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement 
                 filter == Filter::Open
                     || filter == Filter::Merged
                     || filter == Filter::Closed
-                    || forge.me_party().is_some(),
+                    || forge.me_principal().is_some(),
             ),
         );
     }
@@ -281,7 +290,7 @@ pub(crate) fn form(
                     submit,
                 )
                 .kind(design::Kind::Primary)
-                .enabled(forge.session.connected),
+                .enabled(forge.may_write()),
             ),
     )
     .into_any_element()
@@ -354,7 +363,7 @@ fn reviewers(
         .gap_1()
         .child(quiet("Reviewers", theme));
     for number in names.numbers().take(24) {
-        let key = chat::Party::Account(number);
+        let key = identity::Principal::Account(number);
         let picked = form.reviewers.contains(&key);
         let toggle = cx.listener({
             let key = key.clone();

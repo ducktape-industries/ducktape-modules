@@ -18,9 +18,9 @@ fn founding_requires_bounds_and_ops_require_a_signer() {
         repo: "r".into(),
         hash: HashKind::Sha1,
     };
-    for party in [Party::System, Party::Module("chat".into())] {
+    for principal in [Principal::System, Principal::Module("chat".into())] {
         let frame = Frame {
-            party,
+            principal,
             height: 1,
             time: TIME,
         };
@@ -75,7 +75,7 @@ fn create_names_an_owner_and_refuses_bad_or_taken_names() {
     let repos = page.items;
     assert_eq!(repos.len(), 1);
     assert_eq!(repos[0].name, "project");
-    assert_eq!(repos[0].repo.owner, key(OWNER));
+    assert_eq!(repos[0].repo.owner, person(OWNER));
     assert_eq!(repos[0].repo.settings, Settings::default());
 }
 
@@ -122,7 +122,7 @@ fn only_the_owner_and_granted_writers_push() {
         STRANGER,
         &Op::Grant {
             repo: "project".into(),
-            party: key(WRITER),
+            principal: person(WRITER),
         },
     );
     assert_eq!(grant_by_stranger.unwrap_err().reason, reason::UNAUTHORIZED);
@@ -132,7 +132,7 @@ fn only_the_owner_and_granted_writers_push() {
         OWNER,
         &Op::Grant {
             repo: "project".into(),
-            party: key(WRITER),
+            principal: person(WRITER),
         },
     )
     .unwrap();
@@ -144,7 +144,7 @@ fn only_the_owner_and_granted_writers_push() {
         OWNER,
         &Op::Revoke {
             repo: "project".into(),
-            party: key(WRITER),
+            principal: person(WRITER),
         },
     )
     .unwrap();

@@ -15,6 +15,8 @@ pub struct Chat {
     #[serde(skip)]
     pub(crate) names: Loaded<Names>,
     pub(crate) channels: Loaded<Vec<ChannelInfo>>,
+    /// the channel read stopped at its page budget: more rooms exist
+    pub(crate) channels_more: bool,
     pub(crate) room: Option<Room>,
     pub(crate) drafts: BTreeMap<String, Draft>,
     /// the banner over the room: the last refusal, until the reader moves on
@@ -153,13 +155,25 @@ impl Default for Layout {
     }
 }
 
+/// The sidebar's width bounds; it never takes more than half the window.
+const SIDEBAR_W: (f32, f32) = (180., 420.);
+/// The details pane's width bounds.
+const DETAILS_W: (f32, f32) = (260., 520.);
+/// The thread pane's width bounds.
+const THREAD_W: (f32, f32) = (280., 640.);
+/// What a side pane leaves the room: its narrowest column and the dividers.
+const ROOM_KEEPS_W: f32 = 320. + 20.;
+
 impl Layout {
     pub(crate) fn clamp(&mut self) {
         let (w, _) = self.viewport;
-        self.sidebar = self.sidebar.clamp(180., (w * 0.5).clamp(180., 420.));
-        let side = w - self.sidebar - 20. - 320.;
-        self.details = self.details.clamp(260., side.clamp(260., 520.));
-        self.thread = self.thread.clamp(280., side.clamp(280., 640.));
+        let (lo, hi) = SIDEBAR_W;
+        self.sidebar = self.sidebar.clamp(lo, (w * 0.5).clamp(lo, hi));
+        let side = w - self.sidebar - ROOM_KEEPS_W;
+        let (lo, hi) = DETAILS_W;
+        self.details = self.details.clamp(lo, side.clamp(lo, hi));
+        let (lo, hi) = THREAD_W;
+        self.thread = self.thread.clamp(lo, side.clamp(lo, hi));
     }
 }
 

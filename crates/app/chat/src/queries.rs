@@ -2,7 +2,7 @@
 //! `state.rs`. Chat's listings only grow, so a page cursor from any height
 //! resumes where it left off.
 use abi::{Refusal, Scan};
-use store::{Page, PageReply, Reads, invalid};
+use store::{Page, PageReply, Reads, capacity, invalid};
 
 use crate::state::{
     ANSWERED, CHANNEL_TAGS, CHANNELS, HEADS, MEMBERS, MESSAGE_IDS, MESSAGES, REACTIONS, REPLIES,
@@ -10,7 +10,8 @@ use crate::state::{
 };
 use crate::text::tag_label;
 use crate::{
-    ChannelInfo, ChannelRow, MessageHits, MsgRow, Party, Query, Reply, SEARCH_POSTING_CAP, tokens,
+    ChannelInfo, ChannelRow, MAX_VIEWERS, MessageHits, MsgRow, Principal, Query, Reply,
+    SEARCH_POSTING_CAP, tokens,
 };
 
 pub fn query(store: &impl Reads, height: u64, query: Query) -> Result<Reply, Refusal> {
@@ -19,7 +20,7 @@ pub fn query(store: &impl Reads, height: u64, query: Query) -> Result<Reply, Ref
         Query::Channel { channel_id } => (Reply::Channel(channel(store, &channel_id)?), vec![]),
         Query::MessageById { message_id } => (Reply::Message(by_id(store, &message_id)?), vec![]),
         Query::ThreadAttention { channel_id, author } => (
-            Reply::Attention(attention(store, channel_id, author)?),
+            Reply::Attention(attention(store, &channel_id, author)?),
             vec![],
         ),
         Query::Roots {
@@ -72,6 +73,12 @@ pub fn query(store: &impl Reads, height: u64, query: Query) -> Result<Reply, Ref
             vec![],
         ),
     };
+    if viewer.len() > MAX_VIEWERS {
+        return Err(capacity(format!(
+            "a read names at most {MAX_VIEWERS} viewers, not {}",
+            viewer.len()
+        )));
+    }
     for row in rows_in(&mut reply) {
         mark_reacted(store, &viewer, row);
     }
@@ -119,36 +126,10 @@ fn by_id(store: &impl Reads, message_id: &String) -> Result<Option<MsgRow>, Refu
 }
 
 /// The root of the author's most recently answered thread.
-/// The newest answered thread `author` started. A key may have posted
-/// before or after it gained an account: the newer of the two.
 fn attention(
     store: &impl Reads,
-    channel_id: String,
-    author: Party,
-) -> Result<Option<MsgRow>, Refusal> {
-    let Party::Key(key) = &author else {
-        return answered(store, &channel_id, author);
-    };
-    let account = crate::origin::party_of(store, &abi::Origin::External(key.clone()))?;
-    let as_key = answered(store, &channel_id, author)?;
-    let as_account = match account {
-        Party::Key(_) => None,
-        account => answered(store, &channel_id, account)?,
-    };
-    Ok(match (as_key, as_account) {
-        (Some(a), Some(b)) => Some(if a.last_reply_seq < b.last_reply_seq {
-            b
-        } else {
-            a
-        }),
-        (a, b) => a.or(b),
-    })
-}
-
-fn answered(
-    store: &impl Reads,
     channel_id: &str,
-    author: Party,
+    author: Principal,
 ) -> Result<Option<MsgRow>, Refusal> {
     let channel_id = channel_id.to_owned();
     let newest = ANSWERED.prefix_of(&(channel_id.clone(), author)).limit(1);
@@ -284,14 +265,14 @@ fn rows_in(reply: &mut Reply) -> Vec<&mut MsgRow> {
 }
 
 /// Each reaction on `row` learns whether one of `viewer` chose it.
-fn mark_reacted(store: &impl Reads, viewer: &[Party], row: &mut MsgRow) {
+fn mark_reacted(store: &impl Reads, viewer: &[Principal], row: &mut MsgRow) {
     for reaction in &mut row.reactions {
-        reaction.reacted_by_me = viewer.iter().any(|party| {
+        reaction.reacted_by_me = viewer.iter().any(|principal| {
             let key = (
                 row.channel_id.clone(),
                 row.seq,
                 reaction.emoji.clone(),
-                party.clone(),
+                principal.clone(),
             );
             REACTIONS.has(store, &key)
         });

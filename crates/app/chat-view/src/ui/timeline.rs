@@ -16,6 +16,10 @@ use crate::ui::room::selection_bar;
 use crate::ui::{message, quiet};
 use crate::{Chat, Pane};
 
+/// A row's height before the list has measured it: an overdraw budget, not
+/// a layout size.
+const UNMEASURED_ROW: f32 = 160.;
+
 /// A pane's messages: the room's timeline or the open thread. Around the
 /// list: paging older, the copy range's bar, the way back to the latest
 /// message, and the edit field.
@@ -245,7 +249,7 @@ fn list_state(chat: &Chat, pane: Pane, keys: &[String]) -> ListState {
     let mut slot = slot.borrow_mut();
     let mut old = remembered.borrow_mut();
     if slot.is_none() {
-        let state = ListState::new(keys.len(), alignment, px(160.));
+        let state = ListState::new(keys.len(), alignment, px(UNMEASURED_ROW));
         *slot = Some(state.clone());
         *old = keys.to_vec();
         return state;

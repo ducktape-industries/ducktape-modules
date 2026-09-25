@@ -1,16 +1,22 @@
 //! Who is asking, and what identity says about them: an origin resolved to
-//! a [`Party`], a huddle join's node proof checked, and identity's roster
-//! as chat's views read it. The wasm32 program is glue over
+//! a [`Principal`](crate::Principal) by identity's one rule, a huddle join's node
+//! proof checked, and identity's roster as chat's views read it. The wasm32 program is glue over
 //! [`execute_from`] and [`query`](crate::query); both run natively over
 //! [`store::Memory`] with an identity sibling and a verifier.
 use abi::{Env, Origin, Refusal, Scheme, reason};
 use store::{Page, PageReply, Reads, Writes, invalid, unauthorized};
 
-use crate::{AccountRow, Frame, HUDDLE_JOIN_NS, Op, Party};
+use crate::{AccountRow, Frame, HUDDLE_JOIN_NS, Op};
 
-/// An op as it arrives: from an origin at a height. A huddle join's node
-/// proof is checked first, then the origin acts as its party.
+/// An op as it arrives: from an origin at a height. The origin is resolved
+/// to its principal first (a key that holds no account is refused here), then a
+/// huddle join's node proof is checked.
 pub fn execute_from(store: &mut impl Writes, env: &Env, op: Op) -> Result<(), Refusal> {
+    let frame = Frame {
+        principal: identity::principal_of(store, &env.origin)?,
+        height: env.height,
+        time: env.time,
+    };
     if let Op::JoinHuddle {
         channel_id,
         node,
@@ -19,31 +25,7 @@ pub fn execute_from(store: &mut impl Writes, env: &Env, op: Op) -> Result<(), Re
     {
         node_consents(store, &env.origin, channel_id, node, node_proof)?;
     }
-    let frame = Frame {
-        party: party_of(store, &env.origin)?,
-        height: env.height,
-        time: env.time,
-    };
     crate::execute(store, &frame, op)
-}
-
-/// Who an origin is: a key is the account identity says holds it, or
-/// itself while it holds none (or identity is not deployed). Every program
-/// that names people by [`Party`] (chat, forge) resolves its signer here.
-pub fn party_of(store: &impl Reads, origin: &Origin) -> Result<Party, Refusal> {
-    Ok(match origin {
-        Origin::External(key) if key.is_empty() => {
-            return Err(invalid("an external origin carries a key"));
-        }
-        Origin::External(key) => match identity::account_of(store, key) {
-            Ok(Some(number)) => Party::Account(number),
-            Ok(None) => Party::Key(key.clone()),
-            Err(r) if r.reason == reason::UNKNOWN_PROGRAM => Party::Key(key.clone()),
-            Err(r) => return Err(r),
-        },
-        Origin::Program(id) => Party::Module(id.clone()),
-        Origin::System => Party::System,
-    })
 }
 
 /// A huddle seat names a node, and the node signed its consent to seat

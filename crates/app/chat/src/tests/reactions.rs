@@ -1,10 +1,10 @@
-//! Reactions: one per party and emoji, counted on the message.
+//! Reactions: one per principal and emoji, counted on the message.
 use super::channels::archive;
 use super::*;
 use crate::MAX_EMOJI_BYTES;
 
 #[test]
-fn a_reaction_counts_once_per_party_and_knows_its_reader() {
+fn a_reaction_counts_once_per_principal_and_knows_its_reader() {
     let mut chat = Chat::with_channel(PostPolicy::Open);
     chat.post(&BO, "m1", "ship it", None);
     chat.ok(&ADA, react(1, "👍", true));
@@ -12,7 +12,7 @@ fn a_reaction_counts_once_per_party_and_knows_its_reader() {
     let twice = chat.store.state.clone();
     chat.ok(&BO, react(1, "👍", true));
     assert_eq!(chat.store.state, twice, "choosing it again changes nothing");
-    let seen_by = |viewer: Vec<Party>| {
+    let seen_by = |viewer: Vec<Principal>| {
         let Reply::Roots(page) = chat.ask(Query::Roots {
             channel_id: "general".into(),
             viewer,

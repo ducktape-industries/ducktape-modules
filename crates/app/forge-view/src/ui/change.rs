@@ -106,9 +106,9 @@ fn title_line(
     let edit = cx.listener(|forge, _: &ClickEvent, _, cx| forge.start_edit(cx));
     let close = cx.listener(|forge, _: &ClickEvent, _, cx| forge.close_change(cx));
     let merge = cx.listener(|forge, _: &ClickEvent, _, cx| forge.merge(cx));
-    let author = forge.party_name(&change.author);
+    let author = forge.principal_name(&change.author);
     let open = change.state == ChangeState::Open;
-    let mine = forge.me_party().as_ref() == Some(&change.author);
+    let mine = forge.me_principal().as_ref() == Some(&change.author);
     let mut top = div()
         .id(id("forge-change-head"))
         .flex()
@@ -138,11 +138,13 @@ fn title_line(
     if open {
         top = top
             .child(button(id("forge-edit-change"), "Edit", theme, edit).enabled(mine))
-            .child(button(id("forge-close-change"), "Close", theme, close))
+            .child(
+                button(id("forge-close-change"), "Close", theme, close).enabled(forge.may_write()),
+            )
             .child(
                 button(id("forge-merge"), "Merge", theme, merge)
                     .kind(design::Kind::Primary)
-                    .enabled(mergeable && forge.session.connected),
+                    .enabled(mergeable && forge.may_write()),
             );
     }
     top
@@ -332,7 +334,7 @@ fn idle_review_bar(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> Any
         .child(
             button(id("forge-start-review"), "Start review", theme, start)
                 .kind(design::Kind::Primary)
-                .enabled(forge.session.connected && forge.me_party().is_some()),
+                .enabled(forge.may_write()),
         )
         .into_any_element()
 }
@@ -428,7 +430,7 @@ fn verdict_buttons(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> Sta
                 theme,
                 submit,
             )
-            .enabled(forge.session.connected),
+            .enabled(forge.may_write()),
         );
     }
     verdicts

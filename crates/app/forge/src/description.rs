@@ -3,7 +3,7 @@
 //! (`make wasm-describes`); people show as their accounts.
 use describe::{Description, Value, field};
 
-use crate::{Op, Party, Revision, Verdict};
+use crate::{Op, Principal, Revision, Verdict};
 
 /// An op as a person reads it: a title and its fields. The source of the
 /// `ducktape.describe` module this program ships (`make wasm-describes`).
@@ -38,8 +38,16 @@ pub fn describe(op: &Op) -> Description {
                 ),
             ],
         ),
-        Op::Grant { repo, party } => ("Grant writer", repo, vec![field("writer", party.value())]),
-        Op::Revoke { repo, party } => ("Revoke writer", repo, vec![field("writer", party.value())]),
+        Op::Grant { repo, principal } => (
+            "Grant writer",
+            repo,
+            vec![field("writer", principal.value())],
+        ),
+        Op::Revoke { repo, principal } => (
+            "Revoke writer",
+            repo,
+            vec![field("writer", principal.value())],
+        ),
         Op::Push { repo, request } => ("Push", repo, vec![field("request", Value::bytes(request))]),
         Op::Merge {
             repo,
@@ -75,7 +83,7 @@ pub fn describe(op: &Op) -> Description {
                 field("into", text(into)),
                 field(
                     "reviewers",
-                    Value::List(reviewers.iter().map(Party::value).collect()),
+                    Value::List(reviewers.iter().map(Principal::value).collect()),
                 ),
             ],
         ),
@@ -94,7 +102,7 @@ pub fn describe(op: &Op) -> Description {
                 ),
             ];
             if let Some(reviewers) = reviewers {
-                let reviewers = reviewers.iter().map(Party::value).collect();
+                let reviewers = reviewers.iter().map(Principal::value).collect();
                 fields.push(field("reviewers", Value::List(reviewers)));
             }
             ("Edit change", repo, fields)

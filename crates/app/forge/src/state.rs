@@ -1,7 +1,6 @@
 //! Every table forge keeps, declared once: the records, the indexes over
 //! them and the counters. Git objects are not here: an object's blob id is
-//! its oid (`objects`). People are [`Party`]s: an account, or a key that
-//! holds none.
+//! its oid (`objects`). People are [`Principal`]s: accounts.
 
 use std::collections::BTreeMap;
 
@@ -9,7 +8,7 @@ use abi::{Refusal, reason};
 use gitcore::{Hash, Oid};
 use store::{Item, Map, Reads, Set, Writes, invalid, not_found};
 
-use crate::contract::{Bounds, Change, Party, Repo, Review, Revision, valid_repo_name};
+use crate::contract::{Bounds, Change, Principal, Repo, Review, Revision, valid_repo_name};
 use crate::objects::hash_of;
 
 /// The bounds forge was founded with.
@@ -18,8 +17,8 @@ const BOUNDS: Item<Bounds> = Item::new("bounds");
 const REPOS: Map<String, Repo> = Map::new("p/");
 /// Index: every repository by its last activity, newest first.
 pub(crate) const ACTIVITY: Set<(u64, String)> = Set::new("a/");
-/// The parties the owner granted writes to, by repository.
-pub(crate) const WRITERS: Set<(String, Party)> = Set::new("w/");
+/// The principals the owner granted writes to, by repository.
+pub(crate) const WRITERS: Set<(String, Principal)> = Set::new("w/");
 /// Each repository's refs and the oid bytes each points at.
 pub(crate) const REFS: Map<(String, Vec<u8>), Vec<u8>> = Map::new("r/");
 /// The last change number each repository gave out.
@@ -29,10 +28,10 @@ const NUMBERS: Map<String, u64> = Map::new("n/");
 pub(crate) const CHANGES: Map<(String, u64), Change> = Map::new("c/");
 /// Reviews by repository, change number and review id.
 pub(crate) const REVIEWS: Map<(String, u64, u64), Review> = Map::new("v/");
-/// Index: the reviews one party submitted on one change, oldest first.
-pub(crate) const AUTHORED: Set<(String, u64, Party, u64)> = Set::new("u/");
-/// Index: the changes a party authored, is asked to review, or reviewed.
-pub(crate) const INVOLVED: Set<(Party, String, u64)> = Set::new("i/");
+/// Index: the reviews one principal submitted on one change, oldest first.
+pub(crate) const AUTHORED: Set<(String, u64, Principal, u64)> = Set::new("u/");
+/// Index: the changes a principal authored, is asked to review, or reviewed.
+pub(crate) const INVOLVED: Set<(Principal, String, u64)> = Set::new("i/");
 /// The last system message id forge posted into chat.
 const MESSAGES: Item<u64> = Item::new("system-message-seq");
 
@@ -84,8 +83,8 @@ pub fn repo_hash(repo: &Repo) -> Hash {
     hash_of(repo.hash)
 }
 
-pub fn is_writer(store: &impl Reads, name: &str, party: &Party) -> bool {
-    WRITERS.has(store, &(name.to_owned(), party.clone()))
+pub fn is_writer(store: &impl Reads, name: &str, principal: &Principal) -> bool {
+    WRITERS.has(store, &(name.to_owned(), principal.clone()))
 }
 
 pub fn ref_key(name: &str, reference: &[u8]) -> (String, Vec<u8>) {
@@ -209,36 +208,36 @@ pub fn save_change(store: &mut impl Writes, repo: &str, change: &Change) -> Resu
     match CHANGES.get(store, &row)? {
         None => NUMBERS.put(store, &repo.to_owned(), &change.n),
         Some(old) => {
-            let dropped: Vec<Party> = old
+            let dropped: Vec<Principal> = old
                 .reviewers
                 .into_iter()
-                .filter(|party| {
-                    !change.reviewers.contains(party)
-                        && *party != change.author
-                        && !has_reviewed(store, repo, change.n, party)
+                .filter(|principal| {
+                    !change.reviewers.contains(principal)
+                        && *principal != change.author
+                        && !has_reviewed(store, repo, change.n, principal)
                 })
                 .collect();
-            for party in dropped {
-                INVOLVED.remove(store, &(party, repo.to_owned(), change.n));
+            for principal in dropped {
+                INVOLVED.remove(store, &(principal, repo.to_owned(), change.n));
             }
         }
     }
-    for party in std::iter::once(&change.author).chain(&change.reviewers) {
-        involve(store, party, repo, change.n);
+    for principal in std::iter::once(&change.author).chain(&change.reviewers) {
+        involve(store, principal, repo, change.n);
     }
     CHANGES.put(store, &row, change);
     Ok(())
 }
 
-pub fn involve(store: &mut impl Writes, party: &Party, repo: &str, n: u64) {
-    INVOLVED.insert(store, &(party.clone(), repo.to_owned(), n));
+pub fn involve(store: &mut impl Writes, principal: &Principal, repo: &str, n: u64) {
+    INVOLVED.insert(store, &(principal.clone(), repo.to_owned(), n));
 }
 
-fn has_reviewed(store: &impl Reads, repo: &str, n: u64, party: &Party) -> bool {
+fn has_reviewed(store: &impl Reads, repo: &str, n: u64, principal: &Principal) -> bool {
     !store
         .scan(
             AUTHORED
-                .prefix_of(&(repo.to_owned(), n, party.clone()))
+                .prefix_of(&(repo.to_owned(), n, principal.clone()))
                 .limit(1),
         )
         .is_empty()
@@ -272,7 +271,7 @@ mod tests {
             into: b"refs/heads/main".to_vec(),
             title: "t".into(),
             body: String::new(),
-            author: Party::Key(b"ada".to_vec()),
+            author: Principal::Account(1),
             state: ChangeState::Open,
             reviewers: Vec::new(),
             created_height: 1,

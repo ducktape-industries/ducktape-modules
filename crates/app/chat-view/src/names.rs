@@ -1,25 +1,20 @@
-//! What the network calls a party, as the composer offers and inserts it.
+//! What the network calls a principal, as the composer offers and inserts it.
 //! The roster itself is [`chat::view::Names`], shared with every view that
-//! names chat parties.
+//! names chat principals.
+use chat::Principal;
 use chat::view::Names;
-use chat::{Party, hex};
 
 /// Autocomplete candidates: every named account, then the room's
-/// members (a key only while it holds no account), labelled without
-/// the `@`.
-pub fn mention_choices(names: &Names, members: &[Party]) -> Vec<MentionChoice> {
-    let accounts = names.numbers().map(Party::Account);
-    let members = members.iter().filter(|party| match party {
-        Party::Account(_) => true,
-        Party::Key(key) => names.account_of(&hex(key)).is_none(),
-        Party::Module(_) | Party::System => false,
-    });
+/// account members, labelled without the `@`.
+pub fn mention_choices(names: &Names, members: &[Principal]) -> Vec<MentionChoice> {
+    let accounts = names.numbers().map(Principal::Account);
+    let members = members.iter().filter(|principal| principal.is_person());
     let mut choices: Vec<MentionChoice> = Vec::new();
-    for party in accounts.chain(members.cloned()) {
-        if !choices.iter().any(|choice| choice.party == party) {
+    for principal in accounts.chain(members.cloned()) {
+        if !choices.iter().any(|choice| choice.principal == principal) {
             choices.push(MentionChoice {
-                label: names.mention(&party)[1..].to_string(),
-                party,
+                label: names.mention(&principal)[1..].to_string(),
+                principal,
             });
         }
     }
@@ -30,15 +25,14 @@ pub fn mention_choices(names: &Names, members: &[Party]) -> Vec<MentionChoice> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MentionChoice {
     pub label: String,
-    pub party: Party,
+    pub principal: Principal,
 }
 
-/// The canonical token the composer inserts: `<@account>` or `<@key:hex>`.
-pub fn mention_token(party: &Party) -> String {
-    match party {
-        Party::Account(account) => format!("<@{account}>"),
-        Party::Key(key) => format!("<@key:{}>", hex(key)),
-        Party::Module(_) | Party::System => String::new(),
+/// The canonical token the composer inserts: `<@account>`.
+pub fn mention_token(principal: &Principal) -> String {
+    match principal {
+        Principal::Account(account) => format!("<@{account}>"),
+        Principal::Module(_) | Principal::System => String::new(),
     }
 }
 

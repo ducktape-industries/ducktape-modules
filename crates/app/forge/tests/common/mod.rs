@@ -5,7 +5,7 @@
 pub use std::collections::{BTreeMap, BTreeSet};
 
 pub use abi::{Cause, Env, HashKind, Origin, reason};
-pub use forge::{Bounds, Frame, Op, Page, Party, Query, Reply, Service, Settings};
+pub use forge::{Bounds, Frame, Op, Page, Principal, Query, Reply, Service, Settings};
 pub use gitcore::wire::pktline::{self, Pkt, Reader};
 pub use gitcore::{
     Commit, Hash, Kind, Limits, MemoryObjects, Mode, Object, Objects, Oid, Signature, Tree,
@@ -56,38 +56,50 @@ pub fn founded() -> MemorySandbox {
     sandbox
 }
 
-/// A key as the party it signs as while it holds no account.
-pub fn key(key: &[u8]) -> Party {
-    Party::Key(key.to_vec())
+/// The accounts the harness keys hold, as identity would seat them: every
+/// writer is a person, and a key that holds none writes nothing.
+pub const HOLDERS: [(&[u8], u64); 3] = [(OWNER, 11), (WRITER, 12), (STRANGER, 13)];
+
+/// The person a harness key signs as: the account it holds.
+pub fn person(key: &[u8]) -> Principal {
+    let (_, account) = HOLDERS
+        .iter()
+        .find(|(held, _)| *held == key)
+        .expect("a harness key");
+    Principal::Account(*account)
 }
 
-/// The frame the program runs `actor`'s op in: the key resolved through
-/// identity, as the wasm program resolves it.
-pub fn frame(sandbox: &MemorySandbox, actor: &[u8]) -> Frame {
-    Frame {
-        party: sandbox.party(actor),
-        height: 1,
+/// `actor`'s op at `height`, run as the wasm program runs it: the signer
+/// resolved through identity, then the typed execute.
+pub fn signed_op(
+    store: &mut Memory,
+    actor: &[u8],
+    height: u64,
+    op: &Op,
+) -> Result<(), abi::Refusal> {
+    let frame = Frame {
+        principal: identity::principal_of(store, &Origin::External(actor.to_vec()))?,
+        height,
         time: TIME,
-    }
+    };
+    forge::execute(store, &frame, op.clone())
 }
 
 /// `actor`'s op; a refusal left forge's store as it was.
 #[track_caller]
 pub fn act(sandbox: &mut MemorySandbox, actor: &[u8], op: &Op) -> Result<Vec<u8>, abi::Refusal> {
-    let frame = frame(sandbox, actor);
     sandbox
         .forge
-        .attempt(|store| forge::execute(store, &frame, op.clone()))?;
+        .attempt(|store| signed_op(store, actor, 1, op))?;
     Ok(sandbox.forge.take_output())
 }
 
 /// The refusal of `actor`'s op, which left forge's store as it was.
 #[track_caller]
 pub fn refused(sandbox: &mut MemorySandbox, actor: &[u8], op: &Op) -> abi::Refusal {
-    let frame = frame(sandbox, actor);
     sandbox
         .forge
-        .refused(|store| forge::execute(store, &frame, op.clone()))
+        .refused(|store| signed_op(store, actor, 1, op))
 }
 
 pub fn ask(sandbox: &MemorySandbox, query: &Query) -> Result<Vec<u8>, abi::Refusal> {

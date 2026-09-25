@@ -1,7 +1,7 @@
 //! The view against a fake host: every method it asks is answered here, and
 //! each test drives the frame the way a person would.
 use super::*;
-use chat::{ChannelInfo, MessageHits, MsgRow, Op, Party, PostPolicy, Query, Reply};
+use chat::{ChannelInfo, MessageHits, MsgRow, Op, PostPolicy, Principal, Query, Reply};
 use ducktape_view_guest::testing::TestAppContext;
 use ducktape_view_guest::view::Loaded;
 use ducktape_view_guest::wire;
@@ -33,7 +33,7 @@ fn channel(id: &str, name: &str, head_seq: u64) -> ChannelInfo {
             name: name.into(),
             created_at: 0,
             post_policy: PostPolicy::Open,
-            owner: Party::Account(7),
+            owner: Principal::Account(7),
             archived: false,
             huddle: Vec::new(),
             voice: false,
@@ -74,11 +74,10 @@ fn row(seq: u64, author: u64, text: &str) -> MsgRow {
         channel_id: "general".into(),
         seq,
         message_id: format!("m{seq}"),
-        author: Party::Account(author),
         height: 1,
         blocks: vec![chat::Block::paragraph(text)],
         text: text.into(),
-        ..MsgRow::default()
+        ..MsgRow::by(Principal::Account(author))
     }
 }
 

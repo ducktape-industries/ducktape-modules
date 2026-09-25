@@ -99,12 +99,40 @@ fn main(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
                 .child(forge.notice.clone()),
         );
     }
+    if forge.session.connected && forge.me_principal().is_none() {
+        column = column.child(no_account(theme));
+    }
     let body: AnyElement = match (forge.nav().repo.clone(), forge.nav().change) {
         (None, _) => repos::overview(forge, cx, theme),
         (Some(_), Some(_)) => change::render(forge, cx, theme),
         (Some(_), None) => repo(forge, cx, theme),
     };
-    column.child(body).into_any_element()
+    column = column.child(body);
+    if forge.cut_short() {
+        column = column.child(
+            design::more_not_shown(id("forge-more"), theme)
+                .px_4()
+                .py_2(),
+        );
+    }
+    column.into_any_element()
+}
+
+/// Why every write control is off: the seated key holds no account. The
+/// same rule and wording pattern as chat's `NoAccount`.
+fn no_account(theme: &Theme) -> AnyElement {
+    div()
+        .id(id("forge-no-account"))
+        .m_2()
+        .p_3()
+        .bg(theme.warning_soft)
+        .text_color(theme.muted)
+        .text_size(design::text::SECONDARY)
+        .child(
+            "To create repositories, push, open changes or review, create or join an account in \
+             Settings → Account. You can read every repository without an account.",
+        )
+        .into_any_element()
 }
 
 /// The repository header: name, the ref picker, its clone address and tabs.
@@ -127,7 +155,7 @@ fn repo(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
         .gap_2()
         .child(heading(id("forge-repo-name"), name.clone(), 1, theme));
     if let Some((info, _, _)) = forge.repo() {
-        let owner = forge.party_name(&info.repo.owner);
+        let owner = forge.principal_name(&info.repo.owner);
         title = title
             .child(badge(
                 id("forge-repo-owner"),
@@ -137,10 +165,14 @@ fn repo(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
             ))
             .child(quiet(
                 format!(
-                    "{} · active at block {}",
+                    "{} · active at",
                     design::plural(info.repo.refs_count, "ref", "refs"),
-                    info.repo.last_activity
                 ),
+                theme,
+            ))
+            .child(design::block_link(
+                id("forge-repo-activity"),
+                info.repo.last_activity,
                 theme,
             ));
     }
@@ -321,7 +353,7 @@ fn about(forge: &Forge, theme: &Theme) -> AnyElement {
             },
             theme,
         ))
-        .child(fact("Owner", forge.party_name(&info.repo.owner), theme))
+        .child(fact("Owner", forge.principal_name(&info.repo.owner), theme))
         .child(fact("Page size", bounds.page_size.to_string(), theme))
         .child(fact(
             "Inline blob bound",
@@ -333,7 +365,7 @@ fn about(forge: &Forge, theme: &Theme) -> AnyElement {
         column = column.child(quiet("Only the owner writes here.", theme));
     }
     for key in &writers.items {
-        column = column.child(quiet(forge.party_name(key), theme));
+        column = column.child(quiet(forge.principal_name(key), theme));
     }
     column.into_any_element()
 }

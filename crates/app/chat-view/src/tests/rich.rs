@@ -18,7 +18,7 @@ fn rich_message_keeps_styles_and_dispatches_each_link_by_value() {
         },
         chat::Span {
             text: "reviewer".into(),
-            marks: vec![chat::Mark::Mention(chat::Party::Account(8))],
+            marks: vec![chat::Mark::Mention(chat::Principal::Account(8))],
         },
     ];
     view.update(&mut cx, |chat, _, cx| {
@@ -32,7 +32,6 @@ fn rich_message_keeps_styles_and_dispatches_each_link_by_value() {
                 channel_id: "general".into(),
                 seq: 3,
                 message_id: "rich".into(),
-                author: Party::Account(7),
                 height: 2,
                 blocks: vec![
                     chat::Block::Paragraph(spans),
@@ -46,7 +45,7 @@ fn rich_message_keeps_styles_and_dispatches_each_link_by_value() {
                     }]),
                 ],
                 text: "rich".into(),
-                ..MsgRow::default()
+                ..MsgRow::by(Principal::Account(7))
             });
         cx.notify();
     });
@@ -99,7 +98,7 @@ fn rich_message_keeps_styles_and_dispatches_each_link_by_value() {
 }
 
 #[test]
-fn a_header_keeps_its_grouped_block_number() {
+fn a_headers_block_number_opens_explorer_at_that_block() {
     let (mut cx, view) = opened();
     view.update(&mut cx, |chat, _, cx| {
         // Start a new author run so the header shows its block number.
@@ -117,4 +116,10 @@ fn a_header_keeps_its_grouped_block_number() {
     });
     cx.run_until_parked();
     assert!(cx.has_text("block 12,345"));
+    cx.simulate_click("chat-message-late-height");
+    let opened = cx.host().opened_links();
+    assert_eq!(
+        opened.last().map(String::as_str),
+        Some("duck://explorer/block/12345")
+    );
 }

@@ -117,6 +117,17 @@ pub fn quiet(text: impl Into<SharedString>, theme: &Theme) -> Div {
         .child(text.into())
 }
 
+/// Under a list whose read stopped at its page budget with more still to
+/// read: says the list goes on past what is shown, rather than letting a
+/// cut list pass for the whole of it.
+pub fn more_not_shown(id: impl Into<ElementId>, theme: &Theme) -> Stateful<Div> {
+    div()
+        .id(id)
+        .text_size(text::CAPTION)
+        .text_color(theme.muted)
+        .child("This list goes on past what is shown here.")
+}
+
 /// A heading: the title size at level 1, the section size under it.
 pub fn heading(
     id: impl Into<ElementId>,
@@ -349,6 +360,78 @@ pub fn badge(
         .child(label.into())
 }
 
+/// Explorer's pages as short `duck://explorer/<path>` links: the one
+/// spelling every view opens a block, a transaction or an account by.
+/// Explorer's own `Route::path` writes the same paths through these.
+pub mod explorer {
+    /// `block/<height>`
+    pub fn block_path(height: u64) -> String {
+        format!("block/{height}")
+    }
+
+    /// `tx/<hash hex>`
+    pub fn tx_path(hash: &[u8]) -> String {
+        let hex: String = hash.iter().map(|byte| format!("{byte:02x}")).collect();
+        format!("tx/{hex}")
+    }
+
+    /// `account/<number>`
+    pub fn account_path(number: u64) -> String {
+        format!("account/{number}")
+    }
+
+    /// `duck://explorer/<path>`: the host opens Explorer at `path`.
+    pub fn link(path: &str) -> String {
+        format!("duck://explorer/{path}")
+    }
+}
+
+/// `block 1,024`, quiet and mono, opening Explorer at that block. A view
+/// that draws it on a clickable card replaces the click (`on_click`) with
+/// its own that claims it and opens the same [`explorer::link`].
+pub fn block_link(id: impl Into<ElementId>, height: u64, theme: &Theme) -> Stateful<Div> {
+    let label = format!("block {}", grouped(height));
+    explorer_link(id, label, explorer::block_path(height), theme)
+}
+
+/// A transaction's short hash, opening Explorer at that transaction.
+pub fn tx_link(id: impl Into<ElementId>, hash: &[u8], theme: &Theme) -> Stateful<Div> {
+    let path = explorer::tx_path(hash);
+    let label = short_hex(&path["tx/".len()..]);
+    explorer_link(id, label, path, theme)
+}
+
+/// `account 7`, opening Explorer at that account.
+pub fn account_link(id: impl Into<ElementId>, number: u64, theme: &Theme) -> Stateful<Div> {
+    let label = format!("account {number}");
+    explorer_link(id, label, explorer::account_path(number), theme)
+}
+
+/// Subdued mono text that underlines under the pointer and opens
+/// Explorer at `path` through `link.open`.
+fn explorer_link(
+    id: impl Into<ElementId>,
+    label: String,
+    path: String,
+    theme: &Theme,
+) -> Stateful<Div> {
+    let theme = *theme;
+    let link = explorer::link(&path);
+    div()
+        .id(id)
+        .text_size(text::CAPTION)
+        .text_color(theme.muted)
+        .font_family(fonts::FAMILY_MONO)
+        .whitespace_nowrap()
+        .cursor_pointer()
+        .hover(move |style| style.text_color(theme.foreground).text_decoration_1())
+        .role(Role::Link)
+        .aria_label(format!("Open {label} in Explorer"))
+        .focusable()
+        .on_click(move |_: &ClickEvent, _: &mut Window, cx: &mut App| cx.host().open_link(&link))
+        .child(label)
+}
+
 /// `6230` → `6,230`.
 pub fn grouped(number: u64) -> String {
     let digits = number.to_string();
@@ -385,6 +468,14 @@ mod tests {
         assert_eq!(super::grouped(1_048_576), "1,048,576");
         assert_eq!(super::plural(1, "block", "blocks"), "1 block");
         assert_eq!(super::plural(1200, "block", "blocks"), "1,200 blocks");
+    }
+
+    #[test]
+    fn explorer_links_spell_explorers_paths() {
+        use super::explorer::*;
+        assert_eq!(link(&block_path(30)), "duck://explorer/block/30");
+        assert_eq!(link(&tx_path(&[0xab, 0x01])), "duck://explorer/tx/ab01");
+        assert_eq!(link(&account_path(7)), "duck://explorer/account/7");
     }
 
     #[test]

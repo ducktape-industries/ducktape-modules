@@ -1,5 +1,5 @@
-//! The wasm32 glue: the signer resolved to a [`Party`] the way chat
-//! resolves it, then the typed [`execute`](crate::execute) and
+//! The wasm32 glue: the signer resolved to a [`Principal`](crate::Principal) by
+//! identity's one rule, then the typed [`execute`](crate::execute) and
 //! [`query`](crate::query).
 
 use abi::{Env, Refusal};
@@ -18,7 +18,7 @@ impl Program for Forge {
     fn execute(ctx: &mut Execute, env: &Env, payload: &[u8]) -> Result<(), Refusal> {
         let op = decoded::<Op>(PROGRAM, "Op", payload)?;
         let frame = Frame {
-            party: chat::party_of(ctx, &env.origin)?,
+            principal: identity::principal_of(ctx, &env.origin)?,
             height: env.height,
             time: env.time,
         };

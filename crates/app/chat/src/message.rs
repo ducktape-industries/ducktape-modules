@@ -2,7 +2,7 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
-use crate::Party;
+use crate::Principal;
 
 /// inline formatting applied to a [`Span`]. mentions are structured so
 /// hook parsing stays deterministic.
@@ -12,9 +12,9 @@ pub enum Mark {
     Bold,
     Italic,
     Link(String),
-    /// a mention names a party: `<@7>` an account, `<@key:hex>` a key.
+    /// a mention names a principal: `<@7>` an account.
     /// chat keeps it as typed; a view names it at render time.
-    Mention(Party),
+    Mention(Principal),
 }
 
 /// a run of text with uniform marks.
@@ -65,8 +65,6 @@ impl Block {
 /// A rendered break has to be a block boundary rather than a `\n` inside one:
 /// a marked-up line renders as a single rich-text paragraph (`run_spans`),
 /// one paragraph widget per typed line.
-/// Parse canonical `<@account>` and `<@key:hex>` tokens into mention marks.
-/// Display names are never interpreted as recipient identities.
 pub fn parse_message(input: &str) -> Vec<Block> {
     let lines: Vec<&str> = input.lines().collect();
     let mut blocks = Vec::new();
@@ -279,24 +277,20 @@ fn reference_at(chars: &[char], at: usize) -> Option<(String, String, usize)> {
     linkable.then(|| (label, target, url_end + 1 - at))
 }
 
-pub fn mention_at(chars: &[char], at: usize) -> Option<(Party, usize)> {
+/// A canonical `<@account>` token at `at` as a mention mark, and its length.
+/// Display names are never interpreted as recipient identities.
+pub fn mention_at(chars: &[char], at: usize) -> Option<(Principal, usize)> {
     let opens = chars.get(at) == Some(&'<') && chars.get(at + 1) == Some(&'@');
     if !opens {
         return None;
     }
     let end = chars[at + 2..].iter().position(|c| *c == '>')? + at + 2;
     let id: String = chars[at + 2..end].iter().collect();
-    let party = match id.strip_prefix("key:") {
-        Some(key) => Party::Key(hex_bytes(key)?),
-        None => {
-            let decimal = !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit());
-            if !decimal {
-                return None;
-            }
-            Party::Account(id.parse().ok()?)
-        }
-    };
-    Some((party, end + 1 - at))
+    let decimal = !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit());
+    if !decimal {
+        return None;
+    }
+    Some((Principal::Account(id.parse().ok()?), end + 1 - at))
 }
 
 /// If `chars[at..]` opens with `marker` and has a later closing `marker`, the
@@ -347,11 +341,6 @@ fn fenced(chars: &[char], at: usize, marker: &str) -> Option<(String, usize)> {
         cursor += 1;
     }
     None
-}
-
-/// [`abi::unhex`], where the empty string is not a key either.
-fn hex_bytes(hex: &str) -> Option<Vec<u8>> {
-    abi::unhex(hex).filter(|bytes| !bytes.is_empty())
 }
 
 const LINK_SCHEMES: [&str; 3] = ["http://", "https://", "duck://"];

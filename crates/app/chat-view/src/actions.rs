@@ -1,6 +1,6 @@
 //! What a press does: the message menus, the writes (reactions, deletes,
 //! the channel's details, new channels), copying and links.
-use chat::{MsgRow, Op, Party, PostPolicy};
+use chat::{MsgRow, Op, PostPolicy, Principal};
 use ducktape_view_guest::Context;
 use ducktape_view_guest::host::Refusal;
 use ducktape_view_guest::wire;
@@ -17,7 +17,6 @@ const ARCHIVED_REACTIONS: &str = "This channel is archived — reactions are clo
 impl Chat {
     // ---------- menus ----------
 
-    /// A press on a message's body: chosen, its actions stay open.
     /// A control on a message card took `event`: the card's own select
     /// handler, handed the same click after it, stands down.
     /// A key press reaches only the focused control, so only a pointer's
@@ -38,6 +37,7 @@ impl Chat {
         self.claimed.take() == Some(at)
     }
 
+    /// A press on a message's body: chosen, its actions stay open.
     pub(crate) fn press_message(&mut self, pane: Pane, seq: u64) {
         if seq == 0 {
             return;
@@ -263,17 +263,22 @@ impl Chat {
             .details
             .as_ref()
             .map(|details| details.member_draft.as_str());
-        let Some(party) = typed.and_then(Party::parse) else {
-            self.notice = "A member is an account number or a key hex".into();
+        let Some(principal) = typed.and_then(Principal::parse) else {
+            self.notice = "A member is an account number".into();
             return;
         };
         if let Some(details) = &mut self.details {
             details.member_draft.clear();
         }
-        self.set_member(party, true, cx);
+        self.set_member(principal, true, cx);
     }
 
-    pub(crate) fn set_member(&mut self, party: Party, member: bool, cx: &mut Context<Self>) {
+    pub(crate) fn set_member(
+        &mut self,
+        principal: Principal,
+        member: bool,
+        cx: &mut Context<Self>,
+    ) {
         let channel_id = self.room_id();
         if channel_id.is_empty() {
             return;
@@ -281,7 +286,7 @@ impl Chat {
         self.submit(
             Op::SetMembership {
                 channel_id,
-                party,
+                principal,
                 member,
             },
             cx,
@@ -379,7 +384,10 @@ impl Chat {
         };
         let name = create.name.trim().to_string();
         if name.is_empty() || name.len() > chat::MAX_NAME_BYTES || name.contains('\0') {
-            create.error = "Enter a channel name of at most 128 bytes".into();
+            create.error = format!(
+                "Enter a channel name of at most {} bytes",
+                chat::MAX_NAME_BYTES
+            );
             return;
         }
         create.error.clear();

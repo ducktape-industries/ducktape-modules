@@ -188,9 +188,13 @@ fn repo_facts(info: &RepoInfo, owner: String, theme: &Theme) -> Div {
         .child(
             div()
                 .w(ACTIVITY_W)
-                .text_right()
-                .whitespace_nowrap()
-                .child(format!("block {}", info.repo.last_activity)),
+                .flex()
+                .justify_end()
+                .child(design::block_link(
+                    id(format!("forge-repo-{}-activity", info.name)),
+                    info.repo.last_activity,
+                    theme,
+                )),
         )
 }
 
@@ -242,7 +246,7 @@ pub(crate) fn overview(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) ->
     // rows run edge to edge, a hairline between them
     let mut list = scroller("forge-repos-list").p_0().gap_0();
     for info in rows {
-        let owner = forge.party_name(&info.repo.owner);
+        let owner = forge.principal_name(&info.repo.owner);
         list = list.child(repo_row(forge, info, owner, cx, theme));
     }
     column.child(list).into_any_element()
@@ -385,7 +389,7 @@ fn header(
         .child(
             button(id("forge-new-repo"), "+ New", theme, new)
                 .kind(design::Kind::Primary)
-                .enabled(forge.session.connected),
+                .enabled(forge.may_write()),
         )
         .into_any_element()
 }

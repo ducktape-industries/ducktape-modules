@@ -1,6 +1,6 @@
 //! Forge names people by account: one person with two device keys is one
-//! owner, author, reviewer and writer; a key that holds no account is its
-//! own party. The system lines forge posts into chat name no one.
+//! owner, author, reviewer and writer; a key that holds no account writes
+//! nothing. The system lines forge posts into chat name no one.
 
 mod common;
 use common::story::*;
@@ -39,11 +39,11 @@ fn record(rig: &Rig, n: u64) -> (forge::Change, Vec<forge::Review>) {
     (change, reviews.items)
 }
 
-fn owed(rig: &Rig, party: Party) -> Vec<(u64, bool)> {
+fn owed(rig: &Rig, principal: Principal) -> Vec<(u64, bool)> {
     let Reply::Judgment { page, .. } = reply(
         rig,
         Query::Judgment {
-            party,
+            principal,
             page: Page::first(8),
         },
     ) else {
@@ -55,13 +55,13 @@ fn owed(rig: &Rig, party: Party) -> Vec<(u64, bool)> {
         .collect()
 }
 
-fn involving(rig: &Rig, party: Party) -> Vec<u64> {
+fn involving(rig: &Rig, principal: Principal) -> Vec<u64> {
     let Reply::Changes { page, .. } = reply(
         rig,
         Query::Changes {
             repo: REPO.into(),
             filter: ChangeFilter {
-                involves: Some(party),
+                involves: Some(principal),
                 ..ChangeFilter::default()
             },
             page: Page::first(8),
@@ -83,7 +83,7 @@ fn one_person_with_two_keys_is_one_owner_author_and_reviewer() {
     ) else {
         panic!()
     };
-    assert_eq!(page.items[0].repo.owner, Party::Account(1));
+    assert_eq!(page.items[0].repo.owner, Principal::Account(1));
     as_key(
         &mut rig,
         LAPTOP,
@@ -105,34 +105,38 @@ fn one_person_with_two_keys_is_one_owner_author_and_reviewer() {
         reviewers: None,
     };
     rig.execute(&retitle).unwrap();
-    assert_eq!(record(&rig, n).0.author, Party::Account(1));
-    assert_eq!(involving(&rig, Party::Account(1)), [n]);
+    assert_eq!(record(&rig, n).0.author, Principal::Account(1));
+    assert_eq!(involving(&rig, Principal::Account(1)), [n]);
 
-    assert_eq!(owed(&rig, Party::Account(2)), [(n, true)]);
+    assert_eq!(owed(&rig, Principal::Account(2)), [(n, true)]);
     let approve = review(&story.feature, &story.root, Verdict::Approve);
     as_key(&mut rig, PHONE, &approve);
     as_key(&mut rig, b"reviewer", &approve);
     let (_, reviews) = record(&rig, n);
-    assert!(reviews.iter().all(|r| r.author == Party::Account(2)));
-    assert_eq!(owed(&rig, Party::Account(2)), [], "reviewed at the head");
-    assert_eq!(involving(&rig, Party::Account(2)), [n]);
+    assert!(reviews.iter().all(|r| r.author == Principal::Account(2)));
+    assert_eq!(
+        owed(&rig, Principal::Account(2)),
+        [],
+        "reviewed at the head"
+    );
+    assert_eq!(involving(&rig, Principal::Account(2)), [n]);
 
     let close = Op::ChangeClose {
         repo: REPO.into(),
         n,
     };
     as_key(&mut rig, LAPTOP, &close);
-    assert_eq!(record(&rig, n).0.closed_by, Some(Party::Account(1)));
+    assert_eq!(record(&rig, n).0.closed_by, Some(Principal::Account(1)));
 }
 
 #[test]
-fn a_granted_account_writes_from_every_key_and_a_bare_key_only_from_itself() {
+fn a_granted_account_writes_from_every_key() {
     let (mut rig, story) = story();
     rig.sandbox.hold(b"k1", 3);
     rig.sandbox.hold(b"k2", 3);
     rig.execute(&Op::Grant {
         repo: REPO.into(),
-        party: Party::Account(3),
+        principal: Principal::Account(3),
     })
     .unwrap();
     let n = opened(&mut rig, &story);
@@ -144,23 +148,84 @@ fn a_granted_account_writes_from_every_key_and_a_bare_key_only_from_itself() {
             n,
         },
     );
-    assert_eq!(record(&rig, n).0.closed_by, Some(Party::Account(3)));
+    assert_eq!(record(&rig, n).0.closed_by, Some(Principal::Account(3)));
+}
 
-    rig.execute(&Op::Grant {
-        repo: REPO.into(),
-        party: key(b"loose"),
-    })
-    .unwrap();
+/// A key that holds no account writes nothing, whatever the op, and leaves
+/// forge as it was; once identity seats it in an account, the same key
+/// writes as that account.
+#[test]
+fn a_key_writes_only_once_it_holds_an_account() {
+    let (mut rig, story) = story();
     let n = opened(&mut rig, &story);
+    let ops = [
+        Op::Create {
+            repo: "other".into(),
+            hash: HashKind::Sha1,
+        },
+        Op::Push {
+            repo: REPO.into(),
+            request: push_request(&[], &[]),
+        },
+        Op::Configure {
+            repo: REPO.into(),
+            settings: Settings::default(),
+        },
+        Op::Grant {
+            repo: REPO.into(),
+            principal: Principal::Account(3),
+        },
+        Op::Revoke {
+            repo: REPO.into(),
+            principal: Principal::Account(3),
+        },
+        story.open("From a key with no account"),
+        Op::ChangeEdit {
+            repo: REPO.into(),
+            n,
+            title: Some("Renamed".into()),
+            body: None,
+            reviewers: None,
+        },
+        review(&story.feature, &story.root, Verdict::Approve),
+        Op::Merge {
+            repo: REPO.into(),
+            into: b"refs/heads/main".to_vec(),
+            from: reference("feature"),
+            expected_into: story.root.clone(),
+            expected_from: story.feature.clone(),
+            result: story.feature.clone(),
+            change: Some(n),
+        },
+        Op::ChangeClose {
+            repo: REPO.into(),
+            n,
+        },
+    ];
+    rig.actor = b"loose".to_vec();
+    for op in &ops {
+        let refusal = rig.refused(op);
+        assert_eq!(refusal.reason, reason::UNAUTHORIZED, "{op:?}");
+    }
+    rig.sandbox.hold(b"loose", 5);
     let close = Op::ChangeClose {
         repo: REPO.into(),
         n,
     };
-    rig.actor = b"stray".to_vec();
-    assert_eq!(rig.refused(&close).reason, reason::UNAUTHORIZED);
+    assert_eq!(
+        rig.refused(&close).reason,
+        reason::UNAUTHORIZED,
+        "not a writer yet"
+    );
+    rig.actor = TESTER.to_vec();
+    rig.execute(&Op::Grant {
+        repo: REPO.into(),
+        principal: Principal::Account(5),
+    })
+    .unwrap();
     rig.actor = b"loose".to_vec();
     rig.execute(&close).unwrap();
-    assert_eq!(record(&rig, n).0.closed_by, Some(key(b"loose")));
+    assert_eq!(record(&rig, n).0.closed_by, Some(Principal::Account(5)));
 }
 
 #[test]

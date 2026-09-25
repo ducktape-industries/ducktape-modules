@@ -268,7 +268,7 @@ fn content(
         .flex_col()
         .gap_1()
         .when(message.show_author, |body| {
-            body.child(header(&message, theme))
+            body.child(header(&message, cx, theme))
         })
         .children(blocks(chat, &message, cx, theme))
         .children(marks(&message, theme))
@@ -283,6 +283,9 @@ fn blocks(
     cx: &mut Context<Chat>,
     theme: &Theme,
 ) -> Vec<AnyElement> {
+    if let Some((program, code)) = &message.system {
+        return vec![program_post(chat, message, program, code, cx, theme)];
+    }
     if message.blocks.is_empty() {
         let text = div()
             .id(format!("chat-message-{}-text", message.id))
@@ -357,7 +360,7 @@ fn replies(
 }
 
 /// A run's first message names its author, their agent badge and block.
-fn header(message: &ChatMessage, theme: &Theme) -> impl IntoElement {
+fn header(message: &ChatMessage, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement {
     let mut header = div()
         .id(format!("chat-message-{}-header", message.id))
         .flex()
@@ -378,15 +381,61 @@ fn header(message: &ChatMessage, theme: &Theme) -> impl IntoElement {
         ));
     }
     if message.height > 0 {
-        header = header.child(
-            div()
-                .text_size(design::text::CAPTION)
-                .text_color(theme.muted)
-                .font_family(design::fonts::FAMILY_MONO)
-                .child(crate::message::height_label(message.height)),
-        );
+        // the link opens Explorer at its block, and the card under it
+        // stays unchosen
+        let link = design::explorer::link(&design::explorer::block_path(message.height));
+        let open = cx.listener(move |chat, event: &ClickEvent, _window, cx| {
+            chat.claim(event);
+            cx.host().open_link(&link);
+        });
+        let id = format!("chat-message-{}-height", message.id);
+        header = header.child(design::block_link(id, message.height, theme).on_click(open));
     }
     header
+}
+
+/// A program's own post: its event code, quiet and mono, and (on the first
+/// of a run) a link to where the program itself shows the room.
+fn program_post(
+    chat: &Chat,
+    message: &ChatMessage,
+    program: &str,
+    code: &str,
+    cx: &mut Context<Chat>,
+    theme: &Theme,
+) -> AnyElement {
+    let mut line = div()
+        .id(format!("chat-message-{}-program", message.id))
+        .flex()
+        .items_center()
+        .gap(design::space::SM)
+        .text_size(design::text::SECONDARY)
+        .text_color(theme.muted)
+        .child(design::mono(code.to_owned()));
+    // one link per run of the program's lines: the room is the same
+    let link = message
+        .show_author
+        .then(|| crate::links::program_link(&chat.session.chain, &chat.room_id()))
+        .flatten();
+    if let Some(link) = link {
+        let open = cx.listener(move |chat, event: &ClickEvent, _window, cx| {
+            chat.claim(event);
+            chat.open_link(link.clone(), cx);
+        });
+        let theme = *theme;
+        line = line.child(
+            div()
+                .id(format!("chat-message-{}-program-open", message.id))
+                .text_color(theme.accent)
+                .cursor_pointer()
+                .hover(move |style| style.text_decoration_1())
+                .role(ducktape_view_guest::Role::Link)
+                .focusable()
+                .on_click(open)
+                .child(format!("Open in {program}")),
+        );
+    }
+    line.into_any_element()
 }
 
 /// The reactions under a message, and the `+` that opens the picker.

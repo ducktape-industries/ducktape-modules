@@ -55,11 +55,10 @@ pub fn changes(
                 && filter
                     .author
                     .as_ref()
-                    .is_none_or(|party| &change.author == party)
-                && filter
-                    .involves
-                    .as_ref()
-                    .is_none_or(|party| INVOLVED.has(store, &(party.clone(), repo.clone(), *n)))
+                    .is_none_or(|principal| &change.author == principal)
+                && filter.involves.as_ref().is_none_or(|principal| {
+                    INVOLVED.has(store, &(principal.clone(), repo.clone(), *n))
+                })
         })
         .map(|((repo, _), change)| summary(&repo, &change))
         .collect();
@@ -71,17 +70,17 @@ pub fn changes(
 }
 
 /// One page of every open change, across repositories, that waits on
-/// `party`: its review is requested at the current head, or a thread it
+/// `principal`: its review is requested at the current head, or a thread it
 /// started was answered. Chat participants need not have submitted a forge
 /// op, so every change is paged.
 // ponytail: pages every change of every repository and filters; an index of
-// open changes by waiting party replaces the scan once forge holds many.
+// open changes by waiting principal replaces the scan once forge holds many.
 pub fn judgment(
     store: &impl Reads,
-    party: &Party,
+    principal: &Principal,
     listing: &Listing,
 ) -> Result<PageReply<Judgment>, Refusal> {
-    require_named(party)?;
+    require_named(principal)?;
     let mut budget = load_bounds(store)?.log_walk;
     let page = CHANGES.page_of(store, &(), listing)?;
     let mut items = Vec::new();
@@ -89,7 +88,7 @@ pub fn judgment(
         if change.state != ChangeState::Open {
             continue;
         }
-        if let Some(judgment) = judge(store, repo, change, party, &mut budget)? {
+        if let Some(judgment) = judge(store, repo, change, principal, &mut budget)? {
             items.push(judgment);
         }
     }
@@ -100,25 +99,25 @@ pub fn judgment(
     })
 }
 
-/// What `party` owes one open change, if anything.
+/// What `principal` owes one open change, if anything.
 fn judge(
     store: &impl Reads,
     repo: &str,
     change: &Change,
-    party: &Party,
+    principal: &Principal,
     budget: &mut u64,
 ) -> Result<Option<Judgment>, Refusal> {
     let (source, _) = heads(store, repo, change)?;
-    let authored = authored_newest_first(store, repo, change.n, party, budget)?;
+    let authored = authored_newest_first(store, repo, change.n, principal, budget)?;
     let latest = authored
         .first()
         .map(|id| load_review(store, repo, change.n, *id))
         .transpose()?;
-    let requested = change.reviewers.contains(party)
+    let requested = change.reviewers.contains(principal)
         && latest
             .as_ref()
             .is_none_or(|review| source.as_ref() != Some(&review.draft.commit_oid));
-    let mut replies = discussion::attention(store, &change.channel, party)?.and_then(|root| {
+    let mut replies = discussion::attention(store, &change.channel, principal)?.and_then(|root| {
         root.last_reply_seq.map(|last_reply_seq| ReplyAttention {
             review: None,
             root_seq: root.seq,
@@ -147,16 +146,16 @@ fn judge(
     }))
 }
 
-/// The ids of the reviews `party` submitted on a change, newest first,
+/// The ids of the reviews `principal` submitted on a change, newest first,
 /// each one spent from the query's `Bounds.log_walk` budget.
 fn authored_newest_first(
     store: &impl Reads,
     repo: &str,
     n: u64,
-    party: &Party,
+    principal: &Principal,
     budget: &mut u64,
 ) -> Result<Vec<u64>, Refusal> {
-    let scan: Scan = AUTHORED.prefix_of(&(repo.to_owned(), n, party.clone()));
+    let scan: Scan = AUTHORED.prefix_of(&(repo.to_owned(), n, principal.clone()));
     let ids: Vec<u64> = AUTHORED
         .scan(store, scan.reverse().limit(budget.saturating_add(1)))?
         .into_iter()

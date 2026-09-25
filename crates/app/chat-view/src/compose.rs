@@ -15,11 +15,15 @@ impl Chat {
         let Some(names) = self.names.ready() else {
             return Vec::new();
         };
-        let members: Vec<_> = self.roster().into_iter().map(|(party, _)| party).collect();
+        let members: Vec<_> = self
+            .roster()
+            .into_iter()
+            .map(|(principal, _)| principal)
+            .collect();
         crate::names::mention_choices(names, &members)
             .into_iter()
             .map(|choice| MentionChoice {
-                token: mention_token(&choice.party),
+                token: mention_token(&choice.principal),
                 label: choice.label,
             })
             .collect()
@@ -117,12 +121,13 @@ impl Chat {
     }
 
     fn send(&mut self, key: String, send: Send, target: Target, cx: &mut Context<Self>) {
+        let me = self.me();
         cx.spawn(async move |this, cx| {
             let host = cx.host();
             let result = async {
                 let id = host.ask::<HostId>("message".into()).await?;
                 let op = crate::composer::op(id, &send, &target)?;
-                let pending = pending_row(&op);
+                let pending = me.and_then(|me| pending_row(&op, me));
                 host.ask::<Submit<ChatApi>>(op).await.map(|_| pending)
             }
             .await;
@@ -132,11 +137,9 @@ impl Chat {
                 draft.complete_send(&send);
                 match result {
                     Ok(pending) => {
-                        let me = chat.me().unwrap_or_default();
-                        if let (Some(mut row), Some(room)) = (pending, chat.room.as_mut())
+                        if let (Some(row), Some(room)) = (pending, chat.room.as_mut())
                             && room.id == target.channel()
                         {
-                            row.author = me;
                             room.pending.push(row);
                         }
                         if let Target::Edit { seq, .. } = target

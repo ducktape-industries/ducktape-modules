@@ -22,6 +22,10 @@ const COLUMNS: u16 = 8;
 const GRID_ROWS: f32 = emoji::PER_TAB.div_ceil(COLUMNS as usize) as f32;
 const SEARCH: f32 = design::height::CONTROL as f32;
 const CAPTION: f32 = 14.;
+/// The edit menu's Cancel column: wide enough for its label.
+const CANCEL_W: f32 = 96.;
+/// A menu row's glyph column: one glyph, centred.
+const GLYPH_W: f32 = 20.;
 const TABS: f32 = design::height::CONTROL as f32;
 const STACK_GAP: f32 = design::spacing::XS as f32;
 type Press = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
@@ -142,7 +146,7 @@ pub fn editing(
                         div()
                             .flex()
                             .justify_end()
-                            .child(div().w(px(96.)).child(Item::text(
+                            .child(div().w(px(CANCEL_W)).child(Item::text(
                                 "chat-message-edit-cancel",
                                 "Cancel edit",
                                 Some(Box::new(close)),
@@ -405,7 +409,7 @@ impl RenderOnce for Item {
         if let Some(glyph) = self.glyph {
             row = row.child(
                 div()
-                    .w(px(20.))
+                    .w(px(GLYPH_W))
                     .h(px(ROW))
                     .flex()
                     .items_center()

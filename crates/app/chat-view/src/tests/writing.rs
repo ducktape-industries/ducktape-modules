@@ -6,9 +6,8 @@ fn a_send_shows_pending_then_lands_and_a_refusal_is_a_banner() {
     let (mut cx, view) = opened();
     let pending = MsgRow {
         message_id: "p1".into(),
-        author: Party::Account(7),
         blocks: vec![chat::Block::paragraph("on its way")],
-        ..MsgRow::default()
+        ..MsgRow::by(Principal::Account(7))
     };
     view.update(&mut cx, |chat, _, cx| {
         chat.room.as_mut().unwrap().pending.push(pending.clone());
@@ -135,10 +134,10 @@ fn a_members_only_room_takes_its_owner_and_its_members() {
                 .find(|info| info.channel.id == "general")
                 .unwrap();
             general.channel.post_policy = PostPolicy::MembersOnly;
-            general.channel.owner = Party::Account(owner);
+            general.channel.owner = Principal::Account(owner);
             let seats = if seated {
                 vec![chat::MemberRow {
-                    party: Party::Account(7),
+                    principal: Principal::Account(7),
                     height: 1,
                     time: 1,
                 }]

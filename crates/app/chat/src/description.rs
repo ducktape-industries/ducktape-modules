@@ -3,10 +3,10 @@
 //! (`make wasm-describes`); the explorer shows it for every chat op.
 use describe::{Description, Field, Value, field};
 
-use crate::{Op, Party, PostPolicy, dm_peers, plain_text};
+use crate::{Op, PostPolicy, Principal, dm_peers, plain_text};
 
 pub fn describe(op: &Op) -> Description {
-    let party = Party::value;
+    let principal = Principal::value;
     let seq = |seq: &u64| field("seq", Value::text(seq.to_string()));
     let (title, channel, fields) = match op {
         Op::CreateChannel {
@@ -115,7 +115,7 @@ pub fn describe(op: &Op) -> Description {
         ),
         Op::SetMembership {
             channel_id,
-            party: who,
+            principal: who,
             member,
         } => (
             if *member {
@@ -124,7 +124,7 @@ pub fn describe(op: &Op) -> Description {
                 "Remove member"
             },
             channel_id,
-            vec![field("party", party(who))],
+            vec![field("member", principal(who))],
         ),
         Op::JoinHuddle {
             channel_id, node, ..

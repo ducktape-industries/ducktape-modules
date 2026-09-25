@@ -1,20 +1,20 @@
 //! One message as the frame draws it: a row the program served, folded
 //! with the name directory into author lines, bodies and styled runs, and
 //! grouped into runs the way Slack groups them.
-use chat::{Block, Mark, MsgRow, Party, Reaction, Span};
+use chat::{Block, Mark, MsgRow, Principal, Reaction, Span};
 use ducktape_view_guest::design;
 
 use crate::names::mention_token;
 use chat::view::Names;
 
 /// One message as the frame draws it.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChatMessage {
     pub id: String,
     /// 0 for a pending row
     pub seq: u64,
-    /// who wrote it; a run of messages is one party's
-    pub from: Party,
+    /// who wrote it; a run of messages is one principal's
+    pub from: Principal,
     pub author: String,
     pub meta: String,
     /// the message as one run of plain text: the copy range's line
@@ -39,6 +39,10 @@ pub struct ChatMessage {
     /// block time in milliseconds; 0 for a pending row
     pub time: u64,
     pub reactions: Vec<Reaction>,
+    /// `(program, code)` when this is a program's own post
+    /// ([`chat::program_post`]): shown as that program's event, not as a
+    /// code block
+    pub system: Option<(String, String)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -56,11 +60,12 @@ pub enum SpanStyle {
     Italic,
     BoldItalic,
     Link(String),
-    /// the account the mention names, in decimal ("" for a bare key)
+    /// the account the mention names, in decimal ("" for a module)
     Mention(String),
 }
 
 pub fn chat_message(row: MsgRow, names: &Names) -> ChatMessage {
+    let system = chat::program_post(&row).map(|(program, code)| (program.into(), code.into()));
     let edited = row.rev > 0;
     let meta = match (row.seq, edited) {
         (0, _) => "sending…".to_string(),
@@ -101,6 +106,7 @@ pub fn chat_message(row: MsgRow, names: &Names) -> ChatMessage {
         height: row.height,
         time: row.time,
         reactions: row.reactions,
+        system,
     }
 }
 
@@ -176,7 +182,7 @@ fn draft_spans(spans: &[Span]) -> String {
         .iter()
         .map(|span| {
             let mention = span.marks.iter().find_map(|mark| match mark {
-                Mark::Mention(party) => Some(mention_token(party)),
+                Mark::Mention(principal) => Some(mention_token(principal)),
                 _ => None,
             });
             let mut text = mention.unwrap_or_else(|| span.text.clone());
@@ -211,7 +217,7 @@ pub fn styled_spans(spans: &[Span], names: &Names) -> Vec<ChatSpan> {
                 _ => None,
             });
             let mention = span.marks.iter().find_map(|mark| match mark {
-                Mark::Mention(Party::Account(account)) => Some(account.to_string()),
+                Mark::Mention(Principal::Account(account)) => Some(account.to_string()),
                 Mark::Mention(_) => Some(String::new()),
                 _ => None,
             });
@@ -239,14 +245,10 @@ fn span_display(span: &Span, names: &Names) -> String {
     span.marks
         .iter()
         .find_map(|mark| match mark {
-            Mark::Mention(party) => Some(names.mention(party)),
+            Mark::Mention(principal) => Some(names.mention(principal)),
             _ => None,
         })
         .unwrap_or_else(|| span.text.clone())
-}
-
-pub fn height_label(height: u64) -> String {
-    format!("block {}", design::grouped(height))
 }
 
 #[cfg(test)]
@@ -261,9 +263,8 @@ mod tests {
                 MsgRow {
                     seq,
                     time,
-                    author: Party::Account(7),
                     blocks: vec![Block::paragraph("hi")],
-                    ..MsgRow::default()
+                    ..MsgRow::by(Principal::Account(7))
                 },
                 &names,
             )

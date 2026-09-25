@@ -38,7 +38,7 @@ fn a_message_id_is_unique_and_a_colon_id_is_its_programs_alone() {
     let squat = chat.refused(&BO, post("general", "forge:0001", "hi", None));
     assert_eq!(squat, reason::UNAUTHORIZED);
     chat.ok(
-        &Party::Module("forge".into()),
+        &Principal::Module("forge".into()),
         post("general", "forge:0001", "opened", None),
     );
     let Reply::Message(Some(row)) = chat.ask(Query::MessageById {
@@ -152,7 +152,7 @@ fn seqs(rows: &[crate::MsgRow]) -> Vec<u64> {
     rows.iter().map(|row| row.seq).collect()
 }
 
-fn attention(chat: &Chat, author: Party) -> Option<crate::MsgRow> {
+fn attention(chat: &Chat, author: Principal) -> Option<crate::MsgRow> {
     let Reply::Attention(row) = chat.ask(Query::ThreadAttention {
         channel_id: "general".into(),
         author,
@@ -178,4 +178,23 @@ fn tagged(chat: &Chat, tag: &str) -> Vec<u64> {
     let everywhere = ask(None);
     assert_eq!(ask(Some("general".into())), everywhere);
     everywhere
+}
+
+#[test]
+fn a_read_names_a_bounded_number_of_viewers() {
+    let chat = Chat::with_channel(PostPolicy::Open);
+    let roots = |viewer: Vec<Principal>| Query::Roots {
+        channel_id: "general".into(),
+        viewer,
+        page: Page::first(8),
+    };
+    let most = (0..crate::MAX_VIEWERS as u64)
+        .map(Principal::Account)
+        .collect();
+    query(&chat.store, 1, roots(most)).unwrap();
+    let over = (0..=crate::MAX_VIEWERS as u64)
+        .map(Principal::Account)
+        .collect();
+    let refusal = query(&chat.store, 1, roots(over)).unwrap_err();
+    assert_eq!(refusal.reason, reason::CAPACITY);
 }
