@@ -244,6 +244,7 @@ impl Forge {
 
     /// Issue what this screen needs and drop what it does not.
     pub(crate) fn sync(&mut self, cx: &mut Context<Self>) {
+        self.land_goto();
         let needed = self.needed();
         let keys: BTreeSet<&Query> = needed.iter().collect();
         self.data.retain(|query, _| keys.contains(query));
