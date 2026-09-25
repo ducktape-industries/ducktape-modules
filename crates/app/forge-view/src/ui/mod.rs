@@ -157,10 +157,14 @@ fn repo(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
             ))
             .child(quiet(
                 format!(
-                    "{} · active at block {}",
+                    "{} · active at",
                     design::plural(info.repo.refs_count, "ref", "refs"),
-                    info.repo.last_activity
                 ),
+                theme,
+            ))
+            .child(design::block_link(
+                id("forge-repo-activity"),
+                info.repo.last_activity,
                 theme,
             ));
     }

@@ -372,7 +372,7 @@ fn an_account_gained_later_is_who_forge_judges() {
     });
     cx.run_until_parked();
     view.read(|forge| assert_eq!(forge.my_account(), Some(2)));
-    assert!(!cx.find("forge-no-account").is_some());
+    assert!(cx.find("forge-no-account").is_none());
     cx.simulate_click("forge-filter-judgment");
     cx.run_until_parked();
     assert_eq!(judged(&cx), [identity::Party::Account(2)]);
@@ -407,7 +407,7 @@ fn the_root_wears_the_shared_theme_and_is_accessible() {
 
 #[test]
 fn the_repositories_list_shows_every_column_of_the_plan() {
-    let (cx, _) = booted("default");
+    let (mut cx, _) = booted("default");
     assert!(cx.has_text("Repositories"));
     assert!(cx.has_text("project"), "{:?}", cx.texts());
     assert!(cx.has_text("main"), "the default head is a badge");
@@ -418,6 +418,8 @@ fn the_repositories_list_shows_every_column_of_the_plan() {
         cx.has_text("duck://testnet-0a1b2c3d/forge/project"),
         "the row shows where it clones from"
     );
+    cx.simulate_click("forge-repo-project-activity");
+    assert_eq!(cx.host().opened_links(), ["duck://explorer/block/2"]);
 }
 
 #[test]

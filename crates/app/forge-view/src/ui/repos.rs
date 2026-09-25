@@ -188,9 +188,13 @@ fn repo_facts(info: &RepoInfo, owner: String, theme: &Theme) -> Div {
         .child(
             div()
                 .w(ACTIVITY_W)
-                .text_right()
-                .whitespace_nowrap()
-                .child(format!("block {}", info.repo.last_activity)),
+                .flex()
+                .justify_end()
+                .child(design::block_link(
+                    id(format!("forge-repo-{}-activity", info.name)),
+                    info.repo.last_activity,
+                    theme,
+                )),
         )
 }
 

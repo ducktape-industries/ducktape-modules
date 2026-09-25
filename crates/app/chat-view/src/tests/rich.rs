@@ -98,7 +98,7 @@ fn rich_message_keeps_styles_and_dispatches_each_link_by_value() {
 }
 
 #[test]
-fn a_header_keeps_its_grouped_block_number() {
+fn a_headers_block_number_opens_explorer_at_that_block() {
     let (mut cx, view) = opened();
     view.update(&mut cx, |chat, _, cx| {
         // Start a new author run so the header shows its block number.
@@ -116,4 +116,7 @@ fn a_header_keeps_its_grouped_block_number() {
     });
     cx.run_until_parked();
     assert!(cx.has_text("block 12,345"));
+    cx.simulate_click("chat-message-late-block");
+    let opened = cx.host().opened_links();
+    assert_eq!(opened.last().map(String::as_str), Some("duck://explorer/block/12345"));
 }

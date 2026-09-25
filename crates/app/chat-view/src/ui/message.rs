@@ -378,13 +378,8 @@ fn header(message: &ChatMessage, theme: &Theme) -> impl IntoElement {
         ));
     }
     if message.height > 0 {
-        header = header.child(
-            div()
-                .text_size(design::text::CAPTION)
-                .text_color(theme.muted)
-                .font_family(design::fonts::FAMILY_MONO)
-                .child(crate::message::height_label(message.height)),
-        );
+        let id = format!("chat-message-{}-block", message.id);
+        header = header.child(design::block_link(id, message.height, theme));
     }
     header
 }

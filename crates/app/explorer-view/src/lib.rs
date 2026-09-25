@@ -63,12 +63,12 @@ impl Route {
         match self {
             Route::Overview => String::new(),
             Route::Blocks => "blocks".into(),
-            Route::Block(height) => format!("block/{height}"),
+            Route::Block(height) => ducktape_view_guest::design::explorer::block_path(*height),
             Route::Transactions(None) => "txs".into(),
             Route::Transactions(Some(program)) => format!("program/{program}"),
-            Route::Tx(hash) => format!("tx/{}", abi::hex(hash)),
+            Route::Tx(hash) => ducktape_view_guest::design::explorer::tx_path(hash),
             Route::Accounts => "accounts".into(),
-            Route::Account(number) => format!("account/{number}"),
+            Route::Account(number) => ducktape_view_guest::design::explorer::account_path(*number),
             Route::Programs => "programs".into(),
         }
     }

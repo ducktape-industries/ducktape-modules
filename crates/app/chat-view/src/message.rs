@@ -245,10 +245,6 @@ fn span_display(span: &Span, names: &Names) -> String {
         .unwrap_or_else(|| span.text.clone())
 }
 
-pub fn height_label(height: u64) -> String {
-    format!("block {}", design::grouped(height))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
