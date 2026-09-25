@@ -123,9 +123,3 @@ pub(crate) async fn conversation(
     all.sort_by_key(|row| row.seq);
     Ok(all)
 }
-
-/// The account the seated key holds, straight from identity — chat-view and
-/// forge-view share this resolution (`identity::view::account_of_key`).
-pub(crate) async fn resolve_me(host: Host, key: String) -> Result<Option<u64>, Refusal> {
-    identity::view::account_of_key(&host, &key).await
-}

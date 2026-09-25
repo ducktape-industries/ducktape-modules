@@ -7,7 +7,8 @@ use ducktape_view_guest::view::Loaded;
 use ducktape_view_guest::wire;
 use ducktape_view_guest::{Entity, StyleRefinement, Styled};
 
-use crate::api::{Ask, ChatApi, HostId, HostProps, HostVisible, RpcLive, Session, Submit};
+use crate::api::{Ask, ChatApi, HostId, HostProps, HostVisible, Live, Session, Submit};
+use identity::view::Identity;
 
 mod menus;
 mod message;
@@ -140,20 +141,9 @@ fn configure(cx: &mut TestAppContext) {
             query => panic!("unexpected chat query: {query:?}"),
         })
     });
-    cx.host().never::<RpcLive>();
+    cx.host().never::<Live<ChatApi>>();
+    cx.host().never::<Live<Identity>>();
     cx.host().handle::<Submit<ChatApi>>(|_| Ok(Vec::new()));
-    // The host hands every view the seated key as raw hex, never a handle:
-    // resolve it the way identity itself would. "0102" is account 7's own
-    // key, matching the roster above; any other key holds no account.
-    cx.host().handle::<Ask<identity::view::Identity>>(|query| {
-        Ok(match query {
-            identity::Query::OfKey { key } if key == [0x01, 0x02] => {
-                identity::Reply::Number(Some(7))
-            }
-            identity::Query::OfKey { .. } => identity::Reply::Number(None),
-            query => panic!("unexpected identity query: {query:?}"),
-        })
-    });
 }
 
 /// Boots, seats a reader, lists rooms and opens `general` with two rows.
@@ -166,7 +156,8 @@ fn opened() -> (TestAppContext, Entity<Chat>) {
     cx.run_until_parked();
     assert!(cx.has_text("Not connected"));
     props.push(Session {
-        account: "0102".into(),
+        key: "0102".into(),
+        account: Some(7),
         connected: true,
         chain: "testnet#0a1b2c3d".into(),
         ..Session::default()

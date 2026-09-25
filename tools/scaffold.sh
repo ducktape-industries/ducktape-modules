@@ -225,7 +225,7 @@ impl View for $title {
     }
 
     fn restored(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        let mut stream = cx.host().subscribe::<Live>($program_snake::PROGRAM.into());
+        let mut stream = cx.host().subscribe::<Live<${title}Program>>(());
         self.live = Some(cx.spawn(async move |this, cx| {
             while stream.next().await.is_some() {
                 if this.update(cx, |view, cx| view.read(cx)).is_err() {

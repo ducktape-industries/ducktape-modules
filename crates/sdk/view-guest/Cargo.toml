@@ -22,7 +22,3 @@ unicode-segmentation = "1"
 [[example]]
 name = "exported_view"
 crate-type = ["cdylib"]
-
-[[example]]
-name = "media_probe"
-crate-type = ["cdylib"]

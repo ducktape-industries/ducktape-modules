@@ -156,7 +156,7 @@
   },
   {
     "kind": "rpc.live",
-    "request": "chat",
+    "request": null,
     "reply": 9
   },
   {
@@ -409,7 +409,8 @@
       "connected": true,
       "dark": false,
       "chain": "local#1",
-      "account": "alice",
+      "key": "ab01",
+      "account": 3,
       "endpoint": "http://127.0.0.1:1"
     }
   },
@@ -432,11 +433,6 @@
     "kind": "host.route",
     "request": null,
     "reply": "tx/00ff"
-  },
-  {
-    "kind": "host.chord",
-    "request": "cmd-k",
-    "reply": null
   },
   {
     "kind": "host.id",
@@ -467,132 +463,15 @@
     "reply": null
   },
   {
-    "kind": "fs.pick",
-    "request": null,
-    "reply": [
-      {
-        "token": "t1",
-        "name": "a.txt",
-        "bytes": 5
-      }
-    ]
-  },
-  {
-    "kind": "fs.drops",
-    "request": null,
-    "reply": [
-      {
-        "token": "t1",
-        "name": "a.txt",
-        "bytes": 5
-      }
-    ]
-  },
-  {
-    "kind": "fs.read",
-    "request": {
-      "token": "t1",
-      "offset": 0,
-      "len": 5
-    },
-    "reply": [
-      104,
-      101,
-      108,
-      108,
-      111
-    ]
-  },
-  {
-    "kind": "fs.release",
-    "request": "t1",
-    "reply": null
-  },
-  {
     "kind": "clipboard.read",
     "request": null,
     "reply": {
-      "text": "copied",
-      "files": [
-        {
-          "token": "t1",
-          "name": "a.txt",
-          "bytes": 5
-        }
-      ]
+      "text": "copied"
     }
   },
   {
     "kind": "clipboard.write",
     "request": "copied",
-    "reply": null
-  },
-  {
-    "kind": "media.devices",
-    "request": null,
-    "reply": [
-      {
-        "id": "mic0",
-        "kind": "microphone",
-        "name": "Built-in"
-      }
-    ]
-  },
-  {
-    "kind": "audio.capture",
-    "request": {
-      "device": "mic0",
-      "rate": 48000,
-      "channels": 1
-    },
-    "reply": {
-      "Samples": [
-        0,
-        1
-      ]
-    }
-  },
-  {
-    "kind": "video.capture",
-    "request": {
-      "device": null,
-      "width": 640,
-      "height": 480,
-      "fps": 30
-    },
-    "reply": {
-      "Opened": {
-        "width": 640,
-        "height": 480,
-        "fps": 30,
-        "format": "rgba8"
-      }
-    }
-  },
-  {
-    "kind": "audio.play",
-    "request": {
-      "rate": 48000,
-      "channels": 2
-    },
-    "reply": {
-      "rate": 48000,
-      "channels": 2
-    }
-  },
-  {
-    "kind": "audio.write",
-    "request": [
-      0,
-      1,
-      2,
-      3
-    ],
-    "reply": null
-  },
-  {
-    "kind": "audio.stop",
-    "request": null,
     "reply": null
   },
   {

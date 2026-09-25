@@ -44,7 +44,7 @@ fn message_menu_offers_only_what_the_reader_may_do_and_executes_it() {
     };
     view.update(&mut cx, |chat, _, cx| {
         chat.menu = Some(menu_on(1));
-        chat.me = Loaded::Ready(None);
+        chat.session.account = None;
         cx.notify();
     });
     cx.run_until_parked();
@@ -61,7 +61,7 @@ fn message_menu_offers_only_what_the_reader_may_do_and_executes_it() {
     // someone else's message in a channel the reader owns: delete, no edit
     view.update(&mut cx, |chat, _, cx| {
         chat.menu = Some(menu_on(2));
-        chat.me = Loaded::Ready(Some(7));
+        chat.session.account = Some(7);
         cx.notify();
     });
     cx.run_until_parked();
@@ -75,7 +75,7 @@ fn message_menu_offers_only_what_the_reader_may_do_and_executes_it() {
     cx.run_until_parked();
     assert!(cx.has_text("😀") && cx.has_text("✎") && cx.has_text("🗑"));
     view.update(&mut cx, |chat, _, cx| {
-        chat.me = Loaded::Ready(Some(7));
+        chat.session.account = Some(7);
         cx.notify();
     });
     cx.run_until_parked();

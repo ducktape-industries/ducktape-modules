@@ -4,7 +4,7 @@ mod api;
 use account::{Account, read_account};
 use api::*;
 use ducktape_view_guest::design;
-use ducktape_view_guest::doors::RpcLive;
+use ducktape_view_guest::doors::Live;
 use ducktape_view_guest::doors::{ClipboardWrite, ClockTicks};
 use ducktape_view_guest::prelude::*;
 use ducktape_view_guest::view::Loaded;
@@ -51,6 +51,9 @@ impl View for Settings {
                     .update(cx, |view, cx| {
                         match reply {
                             Ok(session) => {
+                                if session.account.is_some() {
+                                    view.create_account = CreateAccount::default();
+                                }
                                 view.session = session;
                                 view.read_account(cx);
                             }
@@ -64,7 +67,7 @@ impl View for Settings {
                 }
             }
         }));
-        let mut live = cx.host().subscribe::<RpcLive>(valset::PROGRAM.into());
+        let mut live = cx.host().subscribe::<Live<Valset>>(());
         self.watches.push(cx.spawn(async move |this, cx| {
             while live.next().await.is_some() {
                 if this
@@ -101,9 +104,8 @@ impl Settings {
         cx.notify();
     }
     fn read_account(&mut self, cx: &mut Context<Self>) {
-        self.account = cx.load(read_account(cx.host(), self.session.account.clone()), |v| {
-            &mut v.account
-        });
+        let (key, number) = (self.session.key.clone(), self.session.account);
+        self.account = cx.load(read_account(cx.host(), key, number), |v| &mut v.account);
         cx.notify();
     }
     fn node(&self, cx: &mut Context<Self>, theme: &Theme) -> AnyElement {
@@ -301,16 +303,12 @@ impl Settings {
                 })
                 .await;
             let _ = this.update(cx, |view, cx| {
-                view.create_account.busy = false;
-                match result {
-                    Ok(_) => {
-                        view.create_account = CreateAccount::default();
-                        view.read_account(cx);
-                    }
-                    Err(refusal) => {
-                        view.create_account.error =
-                            format!("Couldn’t create this account: {}", refusal.sentence);
-                    }
+                // created: the form stays busy until the host's session
+                // names the new account, which re-reads it
+                if let Err(refusal) = result {
+                    view.create_account.busy = false;
+                    view.create_account.error =
+                        format!("Couldn’t create this account: {}", refusal.sentence);
                 }
                 cx.notify();
             });

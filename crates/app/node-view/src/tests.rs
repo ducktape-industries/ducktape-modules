@@ -67,7 +67,7 @@ fn respond(cx: &mut TestAppContext) {
 
 fn ready() -> TestAppContext {
     let mut cx = TestAppContext::new();
-    cx.host().stream::<RpcLive>();
+    cx.host().stream::<Live<Valset>>();
     respond(&mut cx);
     cx.open::<Nodes>();
     cx.run_until_parked();
@@ -83,10 +83,7 @@ fn ready() -> TestAppContext {
             }
         ]
     );
-    assert_eq!(
-        cx.host().asked::<RpcLive>(),
-        vec![valset::PROGRAM.to_string()]
-    );
+    assert_eq!(cx.host().asked::<Live<Valset>>().len(), 1);
     cx
 }
 
@@ -123,7 +120,7 @@ fn the_set_shows_its_validators_memberships_and_counts() {
 #[test]
 fn loading_waits_for_the_host() {
     let mut cx = TestAppContext::new();
-    cx.host().stream::<RpcLive>();
+    cx.host().stream::<Live<Valset>>();
     cx.host().never::<Query<Valset>>();
     cx.open::<Nodes>();
     cx.run_until_parked();
@@ -133,7 +130,7 @@ fn loading_waits_for_the_host() {
 #[test]
 fn an_empty_set_says_so() {
     let mut cx = TestAppContext::new();
-    cx.host().stream::<RpcLive>();
+    cx.host().stream::<Live<Valset>>();
     cx.host().handle::<Query<Valset>>(|query| {
         Ok(match query {
             valset::Query::Validators => valset::Reply::Validators(vec![]),
@@ -149,7 +146,7 @@ fn an_empty_set_says_so() {
 #[test]
 fn a_refusal_shows_its_sentence_and_retry_asks_again() {
     let mut cx = TestAppContext::new();
-    cx.host().stream::<RpcLive>();
+    cx.host().stream::<Live<Valset>>();
     cx.host()
         .refuse::<Query<Valset>>("unavailable", "valset is not running here");
     cx.open::<Nodes>();
@@ -175,7 +172,7 @@ fn a_refusal_shows_its_sentence_and_retry_asks_again() {
 #[test]
 fn a_live_bump_re_reads_and_a_snapshot_restores_the_screen() {
     let mut cx = TestAppContext::new();
-    let feed = cx.host().stream::<RpcLive>();
+    let feed = cx.host().stream::<Live<Valset>>();
     respond(&mut cx);
     cx.open::<Nodes>();
     cx.run_until_parked();
@@ -204,16 +201,13 @@ fn a_live_bump_re_reads_and_a_snapshot_restores_the_screen() {
 
     let bytes = cx.snapshot().unwrap();
     let mut restored = TestAppContext::new();
-    restored.host().stream::<RpcLive>();
+    restored.host().stream::<Live<Valset>>();
     restored.host().never::<Query<Valset>>();
     restored.restore::<Nodes>(&bytes).unwrap();
     restored.run_until_parked();
     assert!(restored.has_text("10.9.9.9:4000"));
     assert_eq!(restored.host().asked::<Query<Valset>>().len(), 1);
-    assert_eq!(
-        restored.host().asked::<RpcLive>(),
-        vec![valset::PROGRAM.to_string()]
-    );
+    assert_eq!(restored.host().asked::<Live<Valset>>().len(), 1);
 }
 
 #[test]

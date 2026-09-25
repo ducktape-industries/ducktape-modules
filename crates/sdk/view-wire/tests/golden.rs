@@ -185,7 +185,7 @@ fn frame_and_events_are_the_committed_bytes() {
     );
 }
 
-/// The program a golden `rpc.query`/`op.submit` addresses.
+/// The program a golden `rpc.query`/`op.submit`/`rpc.live` addresses.
 struct Golden;
 impl Program for Golden {
     const NAME: &'static str = "golden";
@@ -216,11 +216,6 @@ where
 
 fn every_door() -> Vec<(Exchange, serde_json::Value)> {
     use doors::*;
-    let file = SelectedFile {
-        token: "t1".into(),
-        name: "a.txt".into(),
-        bytes: 5,
-    };
     vec![
         exchange::<Query<Golden>>((7, "q".into()), vec![1, 2, 3]),
         exchange::<Submit<Golden>>("op".into(), b"receipt".to_vec()),
@@ -249,7 +244,7 @@ fn every_door() -> Vec<(Exchange, serde_json::Value)> {
                 }],
             },
         ),
-        exchange::<RpcLive>("chat".into(), Some(9)),
+        exchange::<doors::Live<Golden>>((), Some(9)),
         exchange::<RpcBlocks>(
             BlockPage {
                 before: Some(10),
@@ -272,14 +267,15 @@ fn every_door() -> Vec<(Exchange, serde_json::Value)> {
             }],
         ),
         exchange::<RpcBlock>(BlockRef::Id([4; 32]), None),
-        exchange::<BlobGet>("sha256:00".into(), b"blob".to_vec()),
+        exchange::<BlobGet>("sha256:00".into(), Some(b"blob".to_vec())),
         exchange::<HostProps>(
             (),
             Session {
                 connected: true,
                 dark: false,
                 chain: "local#1".into(),
-                account: "alice".into(),
+                key: "ab01".into(),
+                account: Some(3),
                 endpoint: "http://127.0.0.1:1".into(),
             },
         ),
@@ -287,7 +283,6 @@ fn every_door() -> Vec<(Exchange, serde_json::Value)> {
         exchange::<HostBadge>(3, ()),
         exchange::<HostOpenLink>("duck://chat/room".into(), ()),
         exchange::<HostRoute>((), "tx/00ff".into()),
-        exchange::<HostChord>("cmd-k".into(), ()),
         exchange::<HostId>("msg".into(), "msg-1".into()),
         exchange::<ClockTicks>(1000, ()),
         exchange::<HostLog>("hello".into(), ()),
@@ -297,67 +292,13 @@ fn every_door() -> Vec<(Exchange, serde_json::Value)> {
             },
             (),
         ),
-        exchange::<FsPick>((), vec![file.clone()]),
-        exchange::<FsDrops>((), vec![file.clone()]),
-        exchange::<FsRead>(
-            ReadRequest {
-                token: "t1".into(),
-                offset: 0,
-                len: 5,
-            },
-            b"hello".to_vec(),
-        ),
-        exchange::<FsRelease>("t1".into(), ()),
         exchange::<ClipboardRead>(
             (),
             Clipboard {
                 text: "copied".into(),
-                files: vec![file],
             },
         ),
         exchange::<ClipboardWrite>("copied".into(), ()),
-        exchange::<MediaDevices>(
-            (),
-            vec![Device {
-                id: "mic0".into(),
-                kind: "microphone".into(),
-                name: "Built-in".into(),
-            }],
-        ),
-        exchange::<AudioCapture>(
-            Listen {
-                device: Some("mic0".into()),
-                rate: Some(48_000),
-                channels: Some(1),
-            },
-            AudioItem::Samples(vec![0, 1]),
-        ),
-        exchange::<VideoCapture>(
-            Watch {
-                device: None,
-                width: Some(640),
-                height: Some(480),
-                fps: Some(30),
-            },
-            VideoItem::Opened(Framing {
-                width: 640,
-                height: 480,
-                fps: 30,
-                format: "rgba8".into(),
-            }),
-        ),
-        exchange::<AudioPlay>(
-            AudioMode {
-                rate: 48_000,
-                channels: 2,
-            },
-            AudioMode {
-                rate: 48_000,
-                channels: 2,
-            },
-        ),
-        exchange::<AudioWrite>(vec![0, 1, 2, 3], ()),
-        exchange::<AudioStop>((), ()),
         exchange::<NotifyPost>(
             Post {
                 title: "alice mentioned you".into(),

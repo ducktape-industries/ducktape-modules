@@ -202,11 +202,15 @@ impl FakeHost {
     }
 }
 
-/// The program a node door addresses, read off its [`doors::Call`] envelope.
+/// The program a node door addresses: `rpc.live` names it outright, the
+/// others carry it on their [`doors::Call`] envelope.
 fn target_of(request: &Request) -> Option<String> {
-    doors::decode::<doors::Call>(&request.payload)
-        .ok()
-        .map(|call| call.target)
+    match request.kind.as_str() {
+        "rpc.live" => doors::decode::<String>(&request.payload).ok(),
+        _ => doors::decode::<doors::Call>(&request.payload)
+            .ok()
+            .map(|call| call.target),
+    }
 }
 
 fn matches<C: Door>(request: &Request) -> bool {
@@ -254,7 +258,7 @@ impl<C: Door> Feed<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::doors::{Program, Query, RpcLive};
+    use crate::doors::{Live, Program, Query};
 
     struct First;
     struct Second;
@@ -308,9 +312,9 @@ mod tests {
     #[test]
     fn streams_stop_delivering_to_cancelled_subscriptions() {
         let host = FakeHost::default();
-        let feed = host.stream::<RpcLive>();
+        let feed = host.stream::<Live<First>>();
         let channel = crate::host::Host::default();
-        let stream = channel.subscribe::<RpcLive>("first".into());
+        let stream = channel.subscribe::<Live<First>>(());
         host.accept(
             &Frame {
                 requests: channel.drain_outbox(),
@@ -371,9 +375,9 @@ mod tests {
     fn closing_a_feed_finishes_without_fabricating_an_item_or_refusal() {
         use futures::StreamExt;
         let host = FakeHost::default();
-        let feed = host.stream::<RpcLive>();
+        let feed = host.stream::<Live<First>>();
         let channel = crate::host::Host::default();
-        let mut stream = channel.subscribe::<RpcLive>("first".into());
+        let mut stream = channel.subscribe::<Live<First>>(());
         host.accept(
             &Frame {
                 requests: channel.drain_outbox(),

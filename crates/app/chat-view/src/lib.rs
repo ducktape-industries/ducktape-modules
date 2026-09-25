@@ -58,9 +58,6 @@ impl View for Chat {
         if self.channels.is_idle() {
             self.load_channels(cx);
         }
-        if self.me.is_idle() {
-            self.refresh_me(cx);
-        }
         if let Some(room) = &self.room {
             let (id, thread) = (room.id.clone(), room.thread.as_ref().map(|t| t.root));
             self.open(id, window, cx);

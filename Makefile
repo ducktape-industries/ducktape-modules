@@ -167,7 +167,7 @@ view-wasm-check:
 	@for crate in $(VIEW_LINKABLE); do \
 	  $(CARGO) build --target wasm32-unknown-unknown -p $$crate || exit 1; \
 	done; \
-	$(CARGO) build --target wasm32-unknown-unknown -p view-guest --example exported_view --example media_probe || exit 1; \
+	$(CARGO) build --target wasm32-unknown-unknown -p view-guest --example exported_view || exit 1; \
 	reached=""; \
 	for crate in $(VIEW_LINKABLE); do \
 	  tree=$$($(CARGO) tree --target wasm32-unknown-unknown -e normal -p $$crate --prefix none) || exit 1; \

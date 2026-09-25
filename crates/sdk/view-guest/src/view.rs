@@ -180,7 +180,8 @@ macro_rules! export_view {
 
 #[cfg(test)]
 mod follow_tests {
-    use crate::doors::RpcLive;
+    use crate::doors::Live;
+    use crate::testing::Probe;
     use crate::testing::TestAppContext;
     use crate::{Context, IntoElement, ParentElement, Render, Task, View, Window};
     use serde::{Deserialize, Serialize};
@@ -194,7 +195,7 @@ mod follow_tests {
     }
     impl View for Heads {
         fn new(_: &mut Window, cx: &mut Context<Self>) -> Self {
-            let live = cx.host().subscribe::<RpcLive>("chat".into());
+            let live = cx.host().subscribe::<Live<Probe>>(());
             Self {
                 seen: 0,
                 live: Some(cx.follow(live, |view: &mut Heads, _, _, _| view.seen += 1)),
@@ -213,7 +214,7 @@ mod follow_tests {
     #[test]
     fn a_follower_hears_every_item_until_its_task_is_dropped() {
         let mut cx = TestAppContext::new();
-        let feed = cx.host().stream::<RpcLive>();
+        let feed = cx.host().stream::<Live<Probe>>();
         let view = cx.open::<Heads>();
         cx.run_until_parked();
         feed.push(None);

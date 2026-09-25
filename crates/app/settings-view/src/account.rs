@@ -18,7 +18,13 @@ pub struct Key {
     pub key: String,
     pub validator: bool,
 }
-pub async fn read_account(host: Host, key: String) -> Result<Option<Account>, Refusal> {
+/// Who the seated `key` is: its account as the host resolved it (`number`),
+/// with every key on it, or the key alone while it holds none.
+pub async fn read_account(
+    host: Host,
+    key: String,
+    number: Option<u64>,
+) -> Result<Option<Account>, Refusal> {
     if key.is_empty() {
         return Ok(None);
     }
@@ -29,13 +35,6 @@ pub async fn read_account(host: Host, key: String) -> Result<Option<Account>, Re
         .step_by(2)
         .map(|i| u8::from_str_radix(&key[i..i + 2], 16).map_err(|e| malformed(e.to_string())))
         .collect::<Result<Vec<_>, _>>()?;
-    let number = match host
-        .ask::<Query<Identity>>(identity::Query::OfKey { key: key.clone() })
-        .await?
-    {
-        identity::Reply::Number(n) => n,
-        other => return Err(malformed(format!("identity answered OfKey with {other:?}"))),
-    };
     let Some(number) = number else {
         return Ok(Some(Account {
             number: None,

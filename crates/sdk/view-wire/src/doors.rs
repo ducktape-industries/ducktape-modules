@@ -77,7 +77,7 @@ macro_rules! door {
 
 /// Every [`door!`] below, and [`ALL`] from the same list, so a door is
 /// never declared without being listed. `also` names the kinds written by
-/// hand: the two node doors generic over a [`Program`], and [`HostWidget`].
+/// hand: the three node doors generic over a [`Program`], and [`HostWidget`].
 macro_rules! doors {
     (
         also: [$($also:expr),* $(,)?];
@@ -90,8 +90,8 @@ macro_rules! doors {
 
         /// Which doors a view was built against, in its manifest, so a host
         /// with fewer refuses it at load rather than at the call. Within a
-        /// wire epoch the doors only grow (a moved or dropped one is an epoch
-        /// bump: `tests/golden.rs`), so their count names the set.
+        /// wire epoch the doors only grow (a moved or dropped one is a new
+        /// epoch: `tests/golden.rs`), so their count names the set.
         pub const DOORS_REVISION: u32 = ALL.len() as u32;
     };
 }
@@ -173,6 +173,34 @@ impl<P: Program> Door for Submit<P> {
     }
     fn decode_reply(bytes: &[u8]) -> Result<Vec<u8>, String> {
         Ok(bytes.to_vec())
+    }
+}
+
+/// `rpc.live`: a subscription to `P`, one item per block that wrote to it,
+/// carrying its height; `None` when the node link was reopened and the view
+/// should re-read. The request is `P`'s name, as the host reads it.
+pub struct Live<P>(std::marker::PhantomData<P>);
+impl<P: Program> sealed::Sealed for Live<P> {}
+impl<P: Program> Door for Live<P> {
+    const KIND: &'static str = "rpc.live";
+    const TARGET: Option<&'static str> = Some(P::NAME);
+    type Request = ();
+    type Reply = Option<u64>;
+    fn encode_request(_: &()) -> Vec<u8> {
+        encode(&P::NAME.to_owned())
+    }
+    fn decode_request(bytes: &[u8]) -> Result<(), String> {
+        let name: String = decode(bytes)?;
+        match name == P::NAME {
+            true => Ok(()),
+            false => Err(format!("expected program {}, got {name}", P::NAME)),
+        }
+    }
+    fn encode_reply(reply: &Option<u64>) -> Vec<u8> {
+        encode(reply)
+    }
+    fn decode_reply(bytes: &[u8]) -> Result<Option<u64>, String> {
+        decode(bytes)
     }
 }
 
@@ -259,8 +287,9 @@ pub struct Head {
 // ---------- the host ----------
 
 /// The session facts every view is handed: the theme, the connection, the
-/// network (`<label>#<salt>`), the seated account handle and the read-only
-/// endpoint.
+/// network (`<label>#<salt>`), the seated key (hex), the account it belongs
+/// to (`None` while the host has not resolved one, or the key has none yet;
+/// an item follows when that changes) and the read-only endpoint.
 #[derive(
     Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
 )]
@@ -268,7 +297,8 @@ pub struct Session {
     pub connected: bool,
     pub dark: bool,
     pub chain: String,
-    pub account: String,
+    pub key: String,
+    pub account: Option<u64>,
     pub endpoint: String,
 }
 /// `host.widget`: a command on the mounted tree. The one door on the TREE
@@ -296,95 +326,11 @@ impl Door for HostWidget {
 
 // ---------- the device ----------
 
-/// A file the person granted, readable through [`FsRead`] by token until
-/// released ([`FsRelease`]).
-#[derive(
-    Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
-)]
-pub struct SelectedFile {
-    pub token: String,
-    pub name: String,
-    pub bytes: u64,
-}
-#[derive(
-    Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
-)]
-pub struct ReadRequest {
-    pub token: String,
-    pub offset: u64,
-    pub len: u64,
-}
 #[derive(
     Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
 )]
 pub struct Clipboard {
     pub text: String,
-    pub files: Vec<SelectedFile>,
-}
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
-pub struct Device {
-    pub id: String,
-    /// `"microphone"`, `"speaker"` or `"camera"`.
-    pub kind: String,
-    pub name: String,
-}
-/// What `audio.capture` may ask for; the device's own mode is used unless
-/// it offers exactly this, and the stream's first item says what opened.
-#[derive(
-    Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
-)]
-pub struct Listen {
-    pub device: Option<String>,
-    pub rate: Option<u32>,
-    pub channels: Option<u8>,
-}
-#[derive(
-    Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
-)]
-pub struct Watch {
-    pub device: Option<String>,
-    pub width: Option<u32>,
-    pub height: Option<u32>,
-    pub fps: Option<u8>,
-}
-/// An audio mode: what `audio.play` asks for, what a capture or a playout
-/// opened in.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    BorshSerialize,
-    BorshDeserialize,
-)]
-pub struct AudioMode {
-    pub rate: u32,
-    pub channels: u8,
-}
-#[derive(
-    Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
-)]
-pub struct Framing {
-    pub width: u32,
-    pub height: u32,
-    pub fps: u8,
-    /// The pixel format of every frame, e.g. `"rgba8"`.
-    pub format: String,
-}
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
-pub enum AudioItem {
-    Opened(AudioMode),
-    /// Interleaved i16 little-endian samples in the opened mode.
-    Samples(Vec<u8>),
-}
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
-pub enum VideoItem {
-    Opened(Framing),
-    Frame(Vec<u8>),
 }
 /// One notice for the host to decide on: `notify.post`. The view asks; the
 /// host logs it in its notification centre and decides whether a banner
@@ -414,29 +360,28 @@ pub enum Posted {
     Blocked,
 }
 doors! {
-    also: ["rpc.query", "op.submit", HostWidget::KIND];
+    also: ["rpc.query", "op.submit", "rpc.live", HostWidget::KIND];
     /// `rpc.status`: the connected node's status.
     RpcStatus, "rpc.status", (), NodeStatus;
     /// `rpc.invite`: mint one invite, once (never retried).
     RpcInvite, "rpc.invite", Mint, Minted;
-    /// `rpc.live <program>`: one item per block that wrote to the program,
-    /// carrying its height; `None` when the node link was reopened and the
-    /// view should re-read.
-    RpcLive, "rpc.live", String, Option<u64>;
     /// `rpc.blocks`: a page of finalized blocks, newest first.
     RpcBlocks, "rpc.blocks", BlockPage, Vec<Block>;
     /// `rpc.block`: one finalized block; `None` where the node has none by
     /// that name.
     RpcBlock, "rpc.block", BlockRef, Option<Block>;
-    /// `blob.get`: a blob by `sha256:<hex>` or `sha1:<hex>` id, unframed.
-    BlobGet, "blob.get", String, Vec<u8>;
+    /// `blob.get`: a blob by `sha256:<hex>` or `sha1:<hex>` id, unframed;
+    /// `None` where the node holds no blob by that id.
+    BlobGet, "blob.get", String, Option<Vec<u8>>;
     /// `host.props`: a subscription to [`Session`], an item per change.
     HostProps, "host.props", (), Session;
     /// `host.visible`: whether the view is on screen, an item per change.
     HostVisible, "host.visible", (), bool;
     /// `host.badge`: the count on the view's tab.
     HostBadge, "host.badge", i64, ();
-    /// `host.open_link`: the one way out, a `duck://` link.
+    /// `host.open_link`: the one way out: a `duck://` link, opened in the
+    /// app, or an `https://` one, handed to the system browser. Any other
+    /// scheme is refused (`malformed_request`).
     HostOpenLink, "host.open_link", String, ();
     /// `host.route`: a subscription, one item per `duck://` link opened into
     /// this view: the path after the view's own segment (`tx/<hash>` of
@@ -447,40 +392,16 @@ doors! {
     /// and holds no `/` and no control character; the whole route is at most
     /// 256 bytes. A link that mounted the view is its first item.
     HostRoute, "host.route", (), String;
-    /// `host.chord`: claim a command chord (`cmd[-shift][-alt]-<key>`); an
-    /// item per press while the subscription stands.
-    HostChord, "host.chord", String, ();
     /// `host.id`: a fresh id under the named prefix.
     HostId, "host.id", String, String;
     /// `clock.ticks`: an item per period, in milliseconds.
     ClockTicks, "clock.ticks", i64, ();
     /// `host.log`: one line to the host's log.
     HostLog, "host.log", String, ();
-    /// `fs.pick`: the file chooser, answered with what the person chose.
-    FsPick, "fs.pick", (), Vec<SelectedFile>;
-    /// `fs.drops`: an item per drop onto the view.
-    FsDrops, "fs.drops", (), Vec<SelectedFile>;
-    /// `fs.read`: one chunk of a granted file.
-    FsRead, "fs.read", ReadRequest, Vec<u8>;
-    /// `fs.release`: give a grant back.
-    FsRelease, "fs.release", String, ();
     /// `clipboard.read`: the clipboard's text and any files on it.
     ClipboardRead, "clipboard.read", (), Clipboard;
     /// `clipboard.write`: text onto the clipboard.
     ClipboardWrite, "clipboard.write", String, ();
-    /// `media.devices`: the capture and playout devices this machine has.
-    MediaDevices, "media.devices", (), Vec<Device>;
-    /// `audio.capture`: the microphone, first the mode then the samples.
-    AudioCapture, "audio.capture", Listen, AudioItem;
-    /// `video.capture`: the camera, first the framing then the frames.
-    VideoCapture, "video.capture", Watch, VideoItem;
-    /// `audio.play`: open this view's one output in a mode.
-    AudioPlay, "audio.play", AudioMode, AudioMode;
-    /// `audio.write`: interleaved i16 little-endian samples onto the output;
-    /// refused past the playout ceiling rather than queued.
-    AudioWrite, "audio.write", Vec<u8>, ();
-    /// `audio.stop`: close the output.
-    AudioStop, "audio.stop", (), ();
     /// `notify.post`: hand the host a notice; it says what it did.
     NotifyPost, "notify.post", Post, Posted;
     /// `notify.read`: the reader has seen what this view posted under a
@@ -512,11 +433,7 @@ pub const CAPABILITIES: &[&str] = &[
     "blob",
     "host",
     "clock",
-    "fs",
     "clipboard",
-    "media",
-    "audio",
-    "video",
     "notify",
     "store",
     "program",

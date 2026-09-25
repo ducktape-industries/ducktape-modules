@@ -33,18 +33,20 @@ sealed, so a view cannot invent a kind. Three verbs on `Host` (`src/host.rs`):
 
 ```rust
 let reply = cx.host().ask::<Query<Identity>>(identity::Query::List { page }).await?;
-let mut live = cx.host().subscribe::<RpcLive>(valset::PROGRAM.into());
+let mut live = cx.host().subscribe::<Live<Valset>>(());
 cx.host().notify::<doors::HostBadge>(3);
 ```
 
 A node program is addressed by a `doors::Program` impl beside the view
-(`crates/app/forge-view/src/api.rs`), never by the program crate; `Query<P>`
-and `Submit<P>` are its two doors. Every refusal is `abi::Refusal`
+(`crates/app/forge-view/src/api.rs`), never by the program crate; `Query<P>`,
+`Submit<P>` and `Live<P>` are its three doors. Every refusal is `abi::Refusal`
 (`reason` token, `sentence`), one type end to end. `Loaded<T>` + `cx.load`
 (`src/view.rs`) hold an ask's four states and snapshot `Loading` as `Idle`.
 
 `Session` (`doors.rs`, `subscribe::<HostProps>`) is what every view is handed:
-`connected`, `dark`, `chain`, `account`, `endpoint`; an item per change.
+`connected`, `dark`, `chain`, `key` (the seated key, hex), `account` (its
+account number, `None` until the host resolves one), `endpoint`; an item per
+change. Read "who am I" from `account`; no view asks identity for it.
 
 ## Lifecycle, snapshot
 
@@ -70,7 +72,7 @@ import, `ducktape_view.panicked`, and exactly five function exports,
 view in `VIEWS`, runs `wasm-opt`, checks the ABI and prints the size;
 `make view-wasm-check`
 proves nothing in `VIEW_LINKABLE` reaches `VIEW_FORBIDDEN`. Wire bytes are
-pinned by `view-wire/tests/golden.rs`: a shape change bumps `WIRE_EPOCH`.
+pinned by `view-wire/tests/golden.rs`: a shape change is a new `WIRE_EPOCH`.
 
 ## Testing
 

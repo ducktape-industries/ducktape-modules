@@ -6,8 +6,8 @@
 //! reply is folded to rows as it lands.
 use abi::hex;
 use ducktape_view_guest::design;
+use ducktape_view_guest::doors::Live;
 use ducktape_view_guest::doors::Query;
-use ducktape_view_guest::doors::RpcLive;
 use ducktape_view_guest::export_view;
 use ducktape_view_guest::host::{Refusal, malformed};
 use ducktape_view_guest::view::Loaded;
@@ -57,7 +57,7 @@ impl View for Nodes {
     }
 
     fn restored(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        let mut stream = cx.host().subscribe::<RpcLive>(valset::PROGRAM.into());
+        let mut stream = cx.host().subscribe::<Live<Valset>>(());
         self.live = Some(cx.spawn(async move |this, cx| {
             while stream.next().await.is_some() {
                 if this.update(cx, |view, cx| view.read(cx)).is_err() {

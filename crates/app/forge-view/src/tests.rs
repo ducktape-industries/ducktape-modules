@@ -13,7 +13,9 @@ use ducktape_view_guest::testing::TestAppContext;
 use ducktape_view_guest::{Entity, Theme, wire};
 use forge::{ChangeFilter, ChangeState, Op, Page, PageReply, Query, Reply};
 
-use crate::api::ChatApi;
+use crate::api::{ChatApi, ForgeProgram};
+use ducktape_view_guest::doors::Live;
+use identity::view::Identity;
 
 #[path = "../../forge/fixtures/loader.rs"]
 mod loader;
@@ -209,20 +211,10 @@ pub(crate) fn configure(cx: &mut TestAppContext, mode: &'static str) {
     cx.host().handle::<Submit<ChatApi>>(|_| Ok(Vec::new()));
     cx.host().handle::<SubmitForge>(|_| Ok(Vec::new()));
     cx.host().handle::<HostId>(|kind| Ok(format!("{kind}-1")));
-    cx.host().never::<RpcLive>();
+    cx.host().never::<Live<ForgeProgram>>();
+    cx.host().never::<Live<ChatApi>>();
+    cx.host().never::<Live<Identity>>();
     cx.host().never::<HostVisible>();
-    // The host hands every view the seated key as raw hex, never a handle:
-    // resolve it the way identity itself would. `reviewer`'s hex is account
-    // 8's own key, matching the roster above; any other key holds none.
-    cx.host().handle::<Door<identity::view::Identity>>(|query| {
-        Ok(match query {
-            identity::Query::OfKey { key } if key == b"reviewer" => {
-                identity::Reply::Number(Some(8))
-            }
-            identity::Query::OfKey { .. } => identity::Reply::Number(None),
-            query => panic!("unexpected identity query: {query:?}"),
-        })
-    });
 }
 
 /// Boots the view, seats a reader and waits for the first reads to land.
@@ -234,7 +226,8 @@ pub(crate) fn booted(mode: &'static str) -> (TestAppContext, Entity<Forge>) {
     let view = cx.open::<Forge>();
     cx.run_until_parked();
     props.push(Session {
-        account: abi::hex(b"reviewer"),
+        key: abi::hex(b"reviewer"),
+        account: Some(8),
         connected: true,
         chain: "testnet#0a1b2c3d".into(),
         ..Session::default()
@@ -279,7 +272,7 @@ fn an_unregistered_key_stays_read_only() {
     let view = cx.open::<Forge>();
     cx.run_until_parked();
     props.push(Session {
-        account: abi::hex(b"stranger"),
+        key: abi::hex(b"stranger"),
         connected: true,
         chain: "testnet#0a1b2c3d".into(),
         ..Session::default()
@@ -297,36 +290,23 @@ fn an_unregistered_key_stays_read_only() {
 }
 
 /// The reader creates the account in Settings, then switches to Forge: the
-/// seated key never changes, only identity's own state does, so this has to
-/// arrive over identity's live stream, folded into the same reconcile every
-/// forge/chat block already runs through.
+/// seated key never changes; the host resolves its new account and hands it
+/// over as a session change.
 #[test]
 fn an_account_gained_later_re_enables_writes() {
-    let registered = std::rc::Rc::new(std::cell::Cell::new(false));
     let mut cx = TestAppContext::new();
     configure(&mut cx, "default");
-    let reply = registered.clone();
-    cx.host()
-        .handle::<Door<identity::view::Identity>>(move |query| {
-            Ok(match query {
-                identity::Query::OfKey { key } if key == b"reviewer" => {
-                    identity::Reply::Number(reply.get().then_some(8))
-                }
-                identity::Query::OfKey { .. } => identity::Reply::Number(None),
-                query => panic!("unexpected identity query: {query:?}"),
-            })
-        });
     let props = cx.host().stream::<HostProps>();
     cx.host().stream::<ducktape_view_guest::doors::HostRoute>();
-    let live = cx.host().stream::<RpcLive>();
     let view = cx.open::<Forge>();
     cx.run_until_parked();
-    props.push(Session {
-        account: abi::hex(b"reviewer"),
+    let unregistered = Session {
+        key: abi::hex(b"reviewer"),
         connected: true,
         chain: "testnet#0a1b2c3d".into(),
         ..Session::default()
-    });
+    };
+    props.push(unregistered.clone());
     cx.run_until_parked();
     cx.simulate_click("forge-repo-project");
     cx.run_until_parked();
@@ -334,8 +314,10 @@ fn an_account_gained_later_re_enables_writes() {
     cx.run_until_parked();
     assert!(disabled(&cx, "forge-filter-judgment"));
 
-    registered.set(true);
-    live.push(Some(1));
+    props.push(Session {
+        account: Some(8),
+        ..unregistered
+    });
     cx.run_until_parked();
 
     assert!(!disabled(&cx, "forge-filter-judgment"));
@@ -409,7 +391,9 @@ fn a_refused_read_keeps_its_reason_and_offers_one_retry() {
         .handle::<Ask>(|_| Err(refusal("refused-object-not-held")));
     cx.host()
         .handle::<Door<ChatApi>>(|_| Ok(chat::Reply::Accounts(accounts())));
-    cx.host().never::<RpcLive>();
+    cx.host().never::<Live<ForgeProgram>>();
+    cx.host().never::<Live<ChatApi>>();
+    cx.host().never::<Live<Identity>>();
     cx.host().never::<HostVisible>();
     cx.host().never::<HostProps>();
     cx.host().never::<ducktape_view_guest::doors::HostRoute>();

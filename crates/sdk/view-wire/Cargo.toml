@@ -3,7 +3,7 @@
 # half is here (`view-guest` and the views under `crates/app/*-view`); the host
 # half is the app repo, which pins this crate by git rev. The format is ours,
 # and `tests/golden.rs` holds its bytes: a shape change trips the golden and
-# bumps `WIRE_EPOCH`, which is what a host checks a view's `.wasm` against
+# starts a new `WIRE_EPOCH`, which is what a host checks a view's `.wasm` against
 # before running it.
 [package]
 name = "view-wire"

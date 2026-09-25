@@ -210,7 +210,8 @@ fn a_full_room_renders_inside_the_frame_budget() {
     let visible = cx.host().stream::<HostVisible>();
     cx.open::<Chat>();
     props.push(Session {
-        account: "0102".into(),
+        key: "0102".into(),
+        account: Some(7),
         connected: true,
         chain: "testnet#0a1b2c3d".into(),
         ..Session::default()
@@ -290,7 +291,8 @@ fn a_link_to_a_forge_room_lands_in_it() {
     cx.host().stream::<HostVisible>();
     let view = cx.open::<Chat>();
     props.push(Session {
-        account: "0102".into(),
+        key: "0102".into(),
+        account: Some(7),
         connected: true,
         chain: "testnet#0a1b2c3d".into(),
         ..Session::default()

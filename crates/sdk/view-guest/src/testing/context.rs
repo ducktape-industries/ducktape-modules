@@ -179,7 +179,10 @@ impl TestAppContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{doors::RpcLive, Context, InteractiveElement, ParentElement, Render, Task, Window};
+    use crate::{
+        doors::Live, testing::Probe, Context, InteractiveElement, ParentElement, Render, Task,
+        Window,
+    };
     use futures::StreamExt;
     use serde::{Deserialize, Serialize};
 
@@ -196,7 +199,7 @@ mod tests {
             view
         }
         fn restored(&mut self, _: &mut Window, cx: &mut Context<Self>) {
-            let mut stream = cx.host().subscribe::<RpcLive>("live".into());
+            let mut stream = cx.host().subscribe::<Live<Probe>>(());
             self.task = Some(cx.spawn(async move |this, cx| {
                 while let Some(item) = stream.next().await {
                     item.unwrap();
@@ -221,7 +224,7 @@ mod tests {
     #[test]
     fn restoring_resubscribes_without_replaying_old_events_or_duplicate_ids() {
         let mut cx = TestAppContext::new();
-        let feed = cx.host().stream::<RpcLive>();
+        let feed = cx.host().stream::<Live<Probe>>();
         cx.open::<LiveView>();
         feed.push(None);
         cx.run_until_parked();
@@ -233,7 +236,7 @@ mod tests {
         feed.push(None);
         cx.run_until_parked();
         restored.read(|view| assert_eq!(view.items, 2));
-        assert_eq!(cx.host().asked::<RpcLive>().len(), 2);
+        assert_eq!(cx.host().asked::<Live<Probe>>().len(), 2);
     }
 
     /// Logs through `host`, which its manifest leaves out.

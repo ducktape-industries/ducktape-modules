@@ -1,5 +1,9 @@
 use super::*;
-use ducktape_view_guest::{doors::Query, testing::TestAppContext, wire};
+use ducktape_view_guest::{
+    doors::Query,
+    testing::{Feed, TestAppContext},
+    wire,
+};
 
 fn status() -> NodeStatus {
     NodeStatus {
@@ -19,10 +23,6 @@ fn respond(cx: &TestAppContext) {
     cx.host().handle::<RpcStatus>(|()| Ok(status()));
     cx.host().handle::<Query<Identity>>(|q| {
         Ok(match q {
-            identity::Query::OfKey { key } => {
-                assert_eq!(key, vec![0xab, 0xcd]);
-                identity::Reply::Number(Some(7))
-            }
             identity::Query::Get { number } => {
                 assert_eq!(number, 7);
                 identity::Reply::Account(Some(identity::Account {
@@ -56,15 +56,18 @@ fn respond(cx: &TestAppContext) {
     });
 }
 fn fixture(state: &str, dark: bool) -> TestAppContext {
+    seated(state, dark).0
+}
+/// The fixture, and the session feed the host speaks through.
+fn seated(state: &str, dark: bool) -> (TestAppContext, Feed<HostProps>) {
     let mut cx = TestAppContext::new();
     cx.host().stream::<ClockTicks>();
-    cx.host().stream::<RpcLive>();
+    cx.host().stream::<Live<Valset>>();
     let props = cx.host().stream::<HostProps>();
     respond(&cx);
     match state {
         "unregistered" => cx.host().handle::<Query<Identity>>(|q| {
-            assert!(matches!(q, identity::Query::OfKey { .. }));
-            Ok(identity::Reply::Number(None))
+            panic!("an unregistered key asks identity nothing: {q:?}")
         }),
         "loading" => {
             cx.host().never::<RpcStatus>();
@@ -81,11 +84,12 @@ fn fixture(state: &str, dark: bool) -> TestAppContext {
     cx.set_global(if dark { Theme::dark() } else { Theme::light() });
     cx.open::<Settings>();
     props.push(Session {
-        account: if state == "empty" {
+        key: if state == "empty" {
             String::new()
         } else {
             "abcd".into()
         },
+        account: (!matches!(state, "empty" | "unregistered")).then_some(7),
         dark,
         endpoint: "http://127.0.0.1:19001".into(),
         ..Session::default()
@@ -111,7 +115,7 @@ fn fixture(state: &str, dark: bool) -> TestAppContext {
         cx.simulate_click("settings/invite/mint");
         cx.run_until_parked();
     }
-    cx
+    (cx, props)
 }
 #[test]
 fn four_states_are_honest() {
@@ -158,7 +162,7 @@ fn invite_ttl_copy_and_refusal() {
 fn live_updates_retry_and_restore() {
     let mut cx = TestAppContext::new();
     let live = cx.host().stream::<ClockTicks>();
-    cx.host().stream::<RpcLive>();
+    cx.host().stream::<Live<Valset>>();
     cx.host().stream::<HostProps>();
     respond(&cx);
     cx.open::<Settings>();
@@ -238,7 +242,7 @@ fn no_key_offers_no_form() {
 
 #[test]
 fn unregistered_key_creates_an_account() {
-    let mut cx = fixture("unregistered", false);
+    let (mut cx, props) = seated("unregistered", false);
     assert!(cx.has_text(
         "Your key isn't linked to an account yet. An account gives you a name others see."
     ));
@@ -259,7 +263,8 @@ fn unregistered_key_creates_an_account() {
     cx.run_until_parked();
     assert!(cx.has_text("Couldn’t create this account: a name is not empty"));
 
-    // Success re-reads the account: "Who I am" now carries the name.
+    // Success holds the form busy until the host's session names the new
+    // account, which is read: "Who I am" now carries the name.
     cx.host().handle::<Submit<Identity>>(|op| {
         assert!(matches!(
             op,
@@ -269,10 +274,6 @@ fn unregistered_key_creates_an_account() {
     });
     cx.host().handle::<Query<Identity>>(|q| {
         Ok(match q {
-            identity::Query::OfKey { key } => {
-                assert_eq!(key, vec![0xab, 0xcd]);
-                identity::Reply::Number(Some(9))
-            }
             identity::Query::Get { number } => {
                 assert_eq!(number, 9);
                 identity::Reply::Account(Some(identity::Account {
@@ -293,6 +294,14 @@ fn unregistered_key_creates_an_account() {
         })
     });
     cx.simulate_click("settings/account/create/submit");
+    cx.run_until_parked();
+    assert!(cx.has_text("Creating…"), "{:?}", cx.texts());
+    props.push(Session {
+        key: "abcd".into(),
+        account: Some(9),
+        endpoint: "http://127.0.0.1:19001".into(),
+        ..Session::default()
+    });
     cx.run_until_parked();
     assert!(
         cx.has_text("Who I am: Maya · account 9"),
@@ -327,15 +336,11 @@ fn create_account_disables_controls_while_busy() {
 fn long_host_key_is_truncated_and_non_validator_standing_is_quiet() {
     let mut cx = TestAppContext::new();
     cx.host().stream::<ClockTicks>();
-    cx.host().stream::<RpcLive>();
+    cx.host().stream::<Live<Valset>>();
     let props = cx.host().stream::<HostProps>();
     cx.host().handle::<RpcStatus>(|()| Ok(status()));
     let long_key = vec![0x11; 32];
     let long_hex = abi::hex(&long_key);
-    cx.host().handle::<Query<Identity>>(|q| {
-        assert!(matches!(q, identity::Query::OfKey { .. }));
-        Ok(identity::Reply::Number(None))
-    });
     cx.host().handle::<Query<Valset>>(|q| {
         Ok(match q {
             valset::Query::Membership { .. } => valset::Reply::Membership(None),
@@ -345,7 +350,7 @@ fn long_host_key_is_truncated_and_non_validator_standing_is_quiet() {
     cx.set_global(Theme::light());
     cx.open::<Settings>();
     props.push(Session {
-        account: long_hex.clone(),
+        key: long_hex.clone(),
         dark: false,
         endpoint: "http://127.0.0.1:19001".into(),
         ..Session::default()
