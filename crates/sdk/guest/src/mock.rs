@@ -691,6 +691,52 @@ mod tests {
     }
 
     #[test]
+    fn the_default_reply_returns_the_targets_refusal() {
+        /// Wants a reply from `b`, which refuses; keeps [`Module::reply`]'s default.
+        struct Deaf;
+
+        impl crate::Module for Deaf {
+            type Op = ();
+            type Query = ();
+            type Response = ();
+
+            fn execute(ctx: &ExecCtx, (): ()) -> Result<(), Error> {
+                ctx.set("wrote", b"yes".to_vec());
+                ctx.emit("b", abi::encode(&Probe::Refuse), Reply::Wanted);
+                Ok(())
+            }
+
+            fn query(_: &QueryCtx, (): ()) -> Result<(), Error> {
+                Ok(())
+            }
+        }
+
+        let mut chain = chain();
+        chain.seat(
+            "deaf",
+            MockHost::default(),
+            Some(Principal::Account(5)),
+            crate::execute::<Deaf>,
+        );
+        let env = Env {
+            chain_id: b"n".to_vec(),
+            height: 1,
+            time: 2,
+            module: "deaf".into(),
+            origin: Origin::Root,
+            sender: Some(Principal::Root),
+            roles: MockHost::roles(),
+            cause: Cause::Direct,
+        };
+        let outcome = chain.execute(env, &abi::encode(&()));
+        assert_eq!(
+            outcome,
+            Outcome::Rejected(Error::new(code::WRONG_STATE, "refused"))
+        );
+        assert!(!wrote(&chain, "deaf") && !wrote(&chain, "b"));
+    }
+
+    #[test]
     fn messages_nest_eight_deep_and_no_deeper() {
         let chain = chain();
         let outcome = frame(&chain, "a", &Probe::Chain(MAX_DEPTH));
