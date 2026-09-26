@@ -160,7 +160,8 @@ impl Forge {
         self.nav.change_tab = ChangeTab::default();
         self.nav.diff_path = None;
         self.nav.dock = None;
-        self.reply.clear();
+        self.reply
+            .replace(Default::default(), self.reply.reset_revision());
         self.moved(cx);
     }
 

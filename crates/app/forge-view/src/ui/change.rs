@@ -2,7 +2,7 @@
 //! Conversation is chat's hidden channel; Files is the reviewer's home.
 use ducktape_view_guest::design;
 use ducktape_view_guest::prelude::*;
-use ducktape_view_guest::{Div, Stateful};
+use ducktape_view_guest::{Div, Editor, EditorElement, Stateful};
 
 use crate::Forge;
 use crate::state::{ChangeTab, Dock, verdict_label};
@@ -391,27 +391,28 @@ fn review_bar(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyEleme
     if !review.finishing {
         return bar.into_any_element();
     }
-    bar.child(review_body(&review.body, cx, theme))
+    bar.child(review_body(&review.body, theme))
         .child(verdict_buttons(forge, cx, theme))
         .into_any_element()
 }
 
 /// What the review says overall, typed while finishing.
-fn review_body(body: &str, cx: &mut Context<Forge>, theme: &Theme) -> Input {
-    let typed =
-        cx.listener(|forge, text: &String, _, cx| forge.typed_review_body(text.clone(), cx));
-    Input::new(id("forge-review-body"))
-        .h(design::size::CONTROL)
-        .w_full()
-        .px_2()
-        .border_1()
-        .border_color(theme.border_strong)
-        .bg(theme.background)
-        .text_color(theme.foreground)
-        .value(body.to_owned())
-        .placeholder("What this review says overall")
-        .label("Review body")
-        .on_input(typed)
+fn review_body(body: &Editor, theme: &Theme) -> impl IntoElement + use<> {
+    EditorElement::plain(
+        id("forge-review-body"),
+        body,
+        "forge-review-body",
+        |forge: &mut Forge| forge.review_mut().map(|review| &mut review.body),
+    )
+    .min_h(design::size::CONTROL * 3.)
+    .w_full()
+    .px_2()
+    .border_1()
+    .border_color(theme.border_strong)
+    .bg(theme.background)
+    .text_color(theme.foreground)
+    .placeholder("What this review says overall")
+    .label("Review body")
 }
 
 /// One button per verdict; pressing one submits the review.
