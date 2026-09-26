@@ -63,7 +63,7 @@ impl Forge {
                         op.progress = Progress::Accepted;
                         forge.refresh(cx);
                     }
-                    Err(refusal) => op.progress = Progress::Refused(refusal.sentence),
+                    Err(refusal) => op.progress = Progress::Refused(refusal.message),
                 }
             });
         })
@@ -338,7 +338,7 @@ impl Forge {
                 match result {
                     Ok(_) => forge.refresh(cx),
                     Err(refusal) => {
-                        forge.notice = format!("That didn’t go through: {}", refusal.sentence)
+                        forge.notice = format!("That didn’t go through: {}", refusal.message)
                     }
                 }
             });

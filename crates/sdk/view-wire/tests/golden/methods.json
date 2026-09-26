@@ -1,6 +1,6 @@
 [
   {
-    "kind": "program.query",
+    "kind": "module.query",
     "request": [
       7,
       "q"
@@ -28,7 +28,7 @@
     "kind": "chain.status",
     "request": null,
     "reply": {
-      "network": "local#1",
+      "chain_id": "local#1",
       "time": 1,
       "block_time_ms": 500,
       "epoch_length": 100,
@@ -140,7 +140,7 @@
     }
   },
   {
-    "kind": "invite.mint",
+    "kind": "invite.create",
     "request": {
       "ttl_days": 7
     },
@@ -148,14 +148,14 @@
       "invite": "duck://invite/x",
       "notes": [
         {
-          "reason": "not_yet",
-          "sentence": "the invite is not indexed yet"
+          "code": "not_yet",
+          "message": "the invite is not indexed yet"
         }
       ]
     }
   },
   {
-    "kind": "program.changes",
+    "kind": "module.changes",
     "request": null,
     "reply": 9
   },
@@ -408,8 +408,8 @@
     "reply": {
       "connected": true,
       "dark": false,
-      "chain": "local#1",
-      "key": "ab01",
+      "chain_id": "local#1",
+      "signer": "ab01",
       "account": 3,
       "endpoint": "http://127.0.0.1:1"
     }
@@ -548,7 +548,7 @@
     }
   },
   {
-    "kind": "program.describe",
+    "kind": "module.describe",
     "request": [
       "chat",
       [

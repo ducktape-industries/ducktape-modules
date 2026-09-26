@@ -34,10 +34,10 @@ uuid = "1.1.2"
 # `task` and `subscription` share the SDK futures runtime.
 futures = "0.3"
 design = { path = "../design" }
-# `Refusal` is the program abi's: one type for a refusal a program wrote and
-# one the host wrote.
-abi = { workspace = true }
-# `program.describe` answers what a program says its op means.
+# `Error` is the one error type: the same for an error a module wrote and one
+# the host wrote.
+error = { workspace = true, features = ["serde"] }
+# `module.describe` answers what a program says its op means.
 describe = { workspace = true, features = ["serde"] }
 memchr = "2"
 unicode-segmentation = "1"

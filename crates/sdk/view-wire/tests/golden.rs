@@ -21,17 +21,17 @@ use view_wire::list::{
     ListCommand, UniformListHorizontalSizing, UniformListScrollRequest, UniformListScrollStrategy,
     UniformListSizing,
 };
-use view_wire::methods::{self, Method, Program};
+use view_wire::methods::{self, Method, Module};
 use view_wire::{
     Anchor, AnchoredFitMode, AnchoredPositionMode, Axis, ButtonContent, CanvasCommand, CanvasShape,
     ContainerNode, ContentFit, DispatchPhase, EditorCursor, EditorDecision, EditorEditKind,
     EditorHistoryEffect, EditorPatch, EditorRequest, EditorRequestInput, EditorResponse,
-    EditorTransactionEvent, EditorTransactionId, ElementIdWire, Event, Frame, ImageData,
+    EditorTransactionEvent, EditorTransactionId, ElementIdWire, Error, Event, Frame, ImageData,
     ImageObjectFit, ImageStyle, Interactivity, ListAlignment, ListOffset, ListRequest, ListScroll,
-    ListSizingBehavior, Live, Node, Patch, Qr, Refusal, Request, RichTextHighlightStyle,
-    RichTextHover, RichTextRuns, Role, ScrollAnchor, ScrollDirection, SurfaceValue, SvgSource,
-    SvgTransformation, TextNode, ToggleKind, TooltipResponse, WidgetCommand, click, events,
-    interactivity, keyboard, mouse,
+    ListSizingBehavior, Live, Node, Patch, Qr, Request, RichTextHighlightStyle, RichTextHover,
+    RichTextRuns, Role, ScrollAnchor, ScrollDirection, SurfaceValue, SvgSource, SvgTransformation,
+    TextNode, ToggleKind, TooltipResponse, WidgetCommand, click, events, interactivity, keyboard,
+    mouse,
 };
 
 const MESSAGE: &str = "the wire changed: bump WIRE_EPOCH and regenerate with WIRE_GOLDEN_WRITE=1";
@@ -185,9 +185,9 @@ fn frame_and_events_are_the_committed_bytes() {
     );
 }
 
-/// The program a golden `program.query`/`op.submit`/`program.changes` addresses.
+/// The program a golden `module.query`/`op.submit`/`module.changes` addresses.
 struct Golden;
-impl Program for Golden {
+impl Module for Golden {
     const NAME: &'static str = "golden";
     type Op = String;
     type Query = (u64, String);
@@ -222,7 +222,7 @@ fn every_method() -> Vec<(Exchange, serde_json::Value)> {
         exchange::<ChainStatus>(
             (),
             NodeStatus {
-                network: "local#1".into(),
+                chain_id: "local#1".into(),
                 time: 1,
                 block_time_ms: 500,
                 epoch_length: 100,
@@ -234,13 +234,13 @@ fn every_method() -> Vec<(Exchange, serde_json::Value)> {
                 contract: 1,
             },
         ),
-        exchange::<InviteMint>(
-            Mint { ttl_days: 7 },
-            Minted {
+        exchange::<InviteCreate>(
+            CreateInvite { ttl_days: 7 },
+            Invite {
                 invite: "duck://invite/x".into(),
-                notes: vec![Note {
-                    reason: "not_yet".into(),
-                    sentence: "the invite is not indexed yet".into(),
+                notes: vec![Error {
+                    code: "not_yet".into(),
+                    message: "the invite is not indexed yet".into(),
                 }],
             },
         ),
@@ -273,8 +273,8 @@ fn every_method() -> Vec<(Exchange, serde_json::Value)> {
             Session {
                 connected: true,
                 dark: false,
-                chain: "local#1".into(),
-                key: "ab01".into(),
+                chain_id: "local#1".into(),
+                signer: "ab01".into(),
                 account: Some(3),
                 endpoint: "http://127.0.0.1:1".into(),
             },
@@ -300,13 +300,13 @@ fn every_method() -> Vec<(Exchange, serde_json::Value)> {
         ),
         exchange::<ClipboardWrite>("copied".into(), ()),
         exchange::<NotifyPost>(
-            Post {
+            Notification {
                 title: "alice mentioned you".into(),
                 body: "@bob hi".into(),
                 tag: "room".into(),
                 link: "duck://chat/room".into(),
             },
-            Posted::Banner,
+            Delivery::Banner,
         ),
         exchange::<StoreGet>("reads/alice".into(), Some(vec![1, 2])),
         exchange::<StoreSet>(("reads/alice".into(), None), ()),
@@ -319,7 +319,7 @@ fn every_method() -> Vec<(Exchange, serde_json::Value)> {
                 id: [4; 32],
             },
         ),
-        exchange::<ProgramDescribe>(
+        exchange::<ModuleDescribe>(
             ("chat".into(), vec![1, 2]),
             Some(Description {
                 title: "Post in #design".into(),

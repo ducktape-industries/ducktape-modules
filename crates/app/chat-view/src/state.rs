@@ -1,6 +1,6 @@
 //! State stored by the root view and its panes.
 use chat::{ChannelInfo, MemberRow, MsgRow};
-use ducktape_view_guest::view::Loaded;
+use ducktape_view_guest::view::Loadable;
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -13,8 +13,8 @@ use chat::view::Names;
 pub struct Chat {
     pub(crate) session: Session,
     #[serde(skip)]
-    pub(crate) names: Loaded<Names>,
-    pub(crate) channels: Loaded<Vec<ChannelInfo>>,
+    pub(crate) names: Loadable<Names>,
+    pub(crate) channels: Loadable<Vec<ChannelInfo>>,
     /// the channel read stopped at its page budget: more rooms exist
     pub(crate) channels_more: bool,
     pub(crate) room: Option<Room>,
@@ -73,8 +73,8 @@ pub struct Chat {
 #[derive(Serialize, Deserialize, Default)]
 pub struct Room {
     pub(crate) id: String,
-    pub(crate) messages: Loaded<Vec<MsgRow>>,
-    pub(crate) members: Loaded<Vec<MemberRow>>,
+    pub(crate) messages: Loadable<Vec<MsgRow>>,
+    pub(crate) members: Loadable<Vec<MemberRow>>,
     pub(crate) thread: Option<Thread>,
     /// sends the module accepted that the index has not shown yet; drawn
     /// after the fetched rows and dropped once a fetched row carries the id
@@ -92,7 +92,7 @@ pub struct Room {
 #[derive(Serialize, Deserialize, Default)]
 pub struct Thread {
     pub(crate) root: u64,
-    pub(crate) replies: Loaded<Vec<MsgRow>>,
+    pub(crate) replies: Loadable<Vec<MsgRow>>,
     pub(crate) has_more: bool,
     pub(crate) next: Option<Vec<u8>>,
     #[serde(skip)]
@@ -104,7 +104,7 @@ pub struct Search {
     pub(crate) draft: String,
     /// the query the hits answer; "" while no search stands
     pub(crate) query: String,
-    pub(crate) hits: Loaded<Hits>,
+    pub(crate) hits: Loadable<Hits>,
     #[serde(skip)]
     pub(crate) more_loading: bool,
 }

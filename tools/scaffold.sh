@@ -175,10 +175,10 @@ EOF
     cat > "$dir/src/lib.rs" <<EOF
 //! $title: the count the \`$program\` program keeps, re-read on every live
 //! bump of the program.
-use ducktape_view_guest::methods::{Changes, Program, Query};
+use ducktape_view_guest::methods::{Changes, Module, Query};
 use ducktape_view_guest::export_view;
-use ducktape_view_guest::host::Refusal;
-use ducktape_view_guest::view::Loaded;
+use ducktape_view_guest::host::Error;
+use ducktape_view_guest::view::Loadable;
 use ducktape_view_guest::{
     Context, Host, InteractiveElement, IntoElement, ParentElement, Render,
     StatefulInteractiveElement, Styled, Task, Theme, View, Window, div, px,
@@ -188,7 +188,7 @@ use serde::{Deserialize, Serialize};
 
 /// The program's query surface, as this view reads it.
 struct ${title}Program;
-impl Program for ${title}Program {
+impl Module for ${title}Program {
     const NAME: &'static str = $program_snake::MODULE;
     type Op = $program_snake::Op;
     type Query = $program_snake::Query;
@@ -197,7 +197,7 @@ impl Program for ${title}Program {
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct $title {
-    count: Loaded<u64>,
+    count: Loadable<u64>,
     #[serde(skip)]
     live: Option<Task<()>>,
 }
@@ -228,9 +228,9 @@ impl Render for $title {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = *cx.global::<Theme>();
         let body = match &self.count {
-            Loaded::Idle | Loaded::Loading(_) => "Reading…".to_owned(),
-            Loaded::Ready(count) => format!("Count: {count}"),
-            Loaded::Failed(refusal) => refusal.sentence.clone(),
+            Loadable::Idle | Loadable::Loading(_) => "Reading…".to_owned(),
+            Loadable::Ready(count) => format!("Count: {count}"),
+            Loadable::Failed(refusal) => refusal.message.clone(),
         };
         div()
             .id("$program")
@@ -261,7 +261,7 @@ impl $title {
     fn read(&mut self, cx: &mut Context<Self>) {
         match self.count.ready() {
             Some(_) => cx.refresh(count(cx.host()), |view, count, _| {
-                view.count = Loaded::Ready(count)
+                view.count = Loadable::Ready(count)
             }),
             None => self.count = cx.load(count(cx.host()), |view| &mut view.count),
         }
@@ -269,7 +269,7 @@ impl $title {
     }
 }
 
-async fn count(host: Host) -> Result<u64, Refusal> {
+async fn count(host: Host) -> Result<u64, Error> {
     let $program_snake::Reply::Count(count) = host
         .ask::<Query<${title}Program>>($program_snake::Query::Count)
         .await?;
@@ -280,7 +280,7 @@ export_view!(
     $title,
     "$title",
     "The count the $program program keeps.",
-    ["program"]
+    ["module"]
 );
 
 #[cfg(test)]

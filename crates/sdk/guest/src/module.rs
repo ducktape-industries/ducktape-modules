@@ -72,7 +72,7 @@ pub mod exports {
             GuestCall::Execute(payload) => execute::<M>(&ExecCtx::new(env), &payload),
             GuestCall::Query(request) => query::<M>(&QueryCtx::new(env), &request),
         };
-        reply.map_err(Refusal::from)
+        reply.map_err(crate::kernel::refusal_from)
     }
 
     fn leak(bytes: Vec<u8>) -> u64 {

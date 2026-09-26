@@ -1,13 +1,13 @@
 use super::*;
 use ducktape_view_guest::{
     methods::Query,
-    testing::{Feed, TestAppContext},
+    testing::{StreamSender, TestAppContext},
     wire,
 };
 
 fn status() -> NodeStatus {
     NodeStatus {
-        network: "Workshop".into(),
+        chain_id: "Workshop".into(),
         time: 100,
         block_time_ms: 1000,
         epoch_length: 100,
@@ -59,7 +59,7 @@ fn fixture(state: &str, dark: bool) -> TestAppContext {
     seated(state, dark).0
 }
 /// The fixture, and the session feed the host speaks through.
-fn seated(state: &str, dark: bool) -> (TestAppContext, Feed<HostSession>) {
+fn seated(state: &str, dark: bool) -> (TestAppContext, StreamSender<HostSession>) {
     let mut cx = TestAppContext::new();
     cx.host().stream::<ClockTicks>();
     cx.host().stream::<Changes<Valset>>();
@@ -83,8 +83,8 @@ fn seated(state: &str, dark: bool) -> (TestAppContext, Feed<HostSession>) {
     }
     cx.set_global(if dark { Theme::dark() } else { Theme::light() });
     cx.open::<Settings>();
-    props.push(Session {
-        key: if state == "empty" {
+    props.send(Session {
+        signer: if state == "empty" {
             String::new()
         } else {
             "abcd".into()
@@ -97,17 +97,17 @@ fn seated(state: &str, dark: bool) -> (TestAppContext, Feed<HostSession>) {
     cx.run_until_parked();
     if state.starts_with("invite") {
         match state {
-            "invite-loading" => cx.host().never::<InviteMint>(),
+            "invite-loading" => cx.host().never::<InviteCreate>(),
             "invite-refused" => cx
                 .host()
-                .refuse::<InviteMint>("forbidden", "This node does not allow minting invites."),
-            _ => cx.host().handle::<InviteMint>(|request| {
+                .refuse::<InviteCreate>("forbidden", "This node does not allow minting invites."),
+            _ => cx.host().handle::<InviteCreate>(|request| {
                 assert_eq!(request.ttl_days, 7);
-                Ok(Minted {
+                Ok(Invite {
                     invite: "duck-invite:workshop-loopback-example".into(),
-                    notes: vec![ducktape_view_guest::methods::Note {
-                        reason: "expires".into(),
-                        sentence: "This invite expires in 7 days.".into(),
+                    notes: vec![ducktape_view_guest::host::Error {
+                        code: "expires".into(),
+                        message: "This invite expires in 7 days.".into(),
                     }],
                 })
             }),
@@ -144,9 +144,9 @@ fn invite_ttl_copy_and_refusal() {
     cx.simulate_click("settings/invite/copy");
     cx.run_until_parked();
     assert!(cx.has_text("Copied"));
-    cx.host().handle::<InviteMint>(|r| {
+    cx.host().handle::<InviteCreate>(|r| {
         assert_eq!(r.ttl_days, 30);
-        Ok(Minted {
+        Ok(Invite {
             invite: "long-lived".into(),
             notes: vec![],
         })
@@ -171,7 +171,7 @@ fn live_updates_retry_and_restore() {
         s.height = 43;
         Ok(s)
     });
-    live.push(());
+    live.send(());
     cx.run_until_parked();
     assert!(cx.has_text("Height / epoch: 43 / 3"));
     let snapshot = cx.snapshot().unwrap();
@@ -253,7 +253,7 @@ fn unregistered_key_creates_an_account() {
     cx.simulate_click("settings/account/create/submit");
     cx.run_until_parked();
     assert!(cx.has_text("Enter an account name."));
-    assert!(cx.host().asked::<Submit<Identity>>().is_empty());
+    assert!(cx.host().requests::<Submit<Identity>>().is_empty());
 
     // A refusal from the program lands as a human sentence, name kept.
     cx.host()
@@ -296,8 +296,8 @@ fn unregistered_key_creates_an_account() {
     cx.simulate_click("settings/account/create/submit");
     cx.run_until_parked();
     assert!(cx.has_text("Creating…"), "{:?}", cx.texts());
-    props.push(Session {
-        key: "abcd".into(),
+    props.send(Session {
+        signer: "abcd".into(),
         account: Some(9),
         endpoint: "http://127.0.0.1:19001".into(),
         ..Session::default()
@@ -349,8 +349,8 @@ fn long_host_key_is_truncated_and_non_validator_standing_is_quiet() {
     });
     cx.set_global(Theme::light());
     cx.open::<Settings>();
-    props.push(Session {
-        key: long_hex.clone(),
+    props.send(Session {
+        signer: long_hex.clone(),
         dark: false,
         endpoint: "http://127.0.0.1:19001".into(),
         ..Session::default()

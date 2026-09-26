@@ -1,9 +1,9 @@
 //! Typed reads. Every forge list is cursored, so one read follows `next`
 //! until the program stops offering one (or the page budget runs out) and
-//! hands the screen a single reply. A typed refusal becomes a `Refusal`, so
-//! the four states of a `Loaded` slot stay honest.
+//! hands the screen a single reply. A typed refusal becomes an `Error`, so
+//! the four states of a `Loadable` slot stay honest.
 use ducktape_view_guest::Host;
-use ducktape_view_guest::host::{Refusal, pages, wrong_reply};
+use ducktape_view_guest::host::{Error, pages, wrong_reply};
 use ducktape_view_guest::methods::Query as Ask;
 
 use crate::api::{Ask as Forge, ChatApi};
@@ -18,7 +18,7 @@ const MAX_PAGES: usize = 16;
 
 /// One read of forge, `next` followed: the pages after the first fold into
 /// it.
-pub(crate) async fn fetch(host: Host, query: Query) -> Result<Reply, Refusal> {
+pub(crate) async fn fetch(host: Host, query: Query) -> Result<Reply, Error> {
     let mut reply = host.ask::<Forge>(query.clone()).await?;
     let (more, _) = pages(next_cursor(&reply).cloned(), MAX_PAGES - 1, |after| {
         let ask = after
@@ -97,7 +97,7 @@ pub(crate) async fn conversation(
     host: Host,
     channel_id: String,
     viewer: Vec<identity::Principal>,
-) -> Result<(Vec<chat::MsgRow>, bool), Refusal> {
+) -> Result<(Vec<chat::MsgRow>, bool), Error> {
     let (mut all, next) = pages(None, MAX_PAGES, |after| {
         let ask = host.ask::<Ask<ChatApi>>(chat::Query::Roots {
             channel_id: channel_id.clone(),

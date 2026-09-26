@@ -20,7 +20,9 @@ pub struct MemorySandbox {
 /// Identity over `roster`: `OfKey` only.
 fn identity(roster: Rc<RefCell<BTreeMap<Vec<u8>, u64>>>) -> Sibling {
     Box::new(move |request| {
-        let identity::Query::OfKey { key } = abi::decode(request)? else {
+        let identity::Query::OfKey { key } =
+            abi::decode(request).map_err(guest::kernel::error_from)?
+        else {
             return Err(Error::new(code::UNSUPPORTED, "the sandbox answers OfKey"));
         };
         let held = roster.borrow().get(&key).copied();
@@ -54,7 +56,10 @@ impl Default for MemorySandbox {
             "chat".into(),
             Box::new(move |request| {
                 let reads = sibling.query(env_at(Origin::Root, 0, 0));
-                let reply = chat::Chat::query(&reads, abi::decode(request)?)?;
+                let reply = chat::Chat::query(
+                    &reads,
+                    abi::decode(request).map_err(guest::kernel::error_from)?,
+                )?;
                 Ok(abi::encode(&reply))
             }),
         );
@@ -114,10 +119,15 @@ impl MemorySandbox {
             .into_iter()
             .map(|m| {
                 if m.target != "chat" {
-                    return Err(Error::new(code::UNKNOWN_PROGRAM, m.target));
+                    return Err(Error::new(code::UNKNOWN_MODULE, m.target));
                 }
                 let forge = Origin::Module("forge".into());
-                self.chat_execute(forge, height, time, abi::decode(&m.payload)?)
+                self.chat_execute(
+                    forge,
+                    height,
+                    time,
+                    abi::decode(&m.payload).map_err(guest::kernel::error_from)?,
+                )
             })
             .collect()
     }

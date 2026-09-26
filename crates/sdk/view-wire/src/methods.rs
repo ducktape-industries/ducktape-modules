@@ -13,7 +13,7 @@
 //! codec the program abi is written in, so a program's own request rides a
 //! method with no second encoding around it. The rule is held by types, not
 //! by review: [`Method`] is sealed, so a view cannot declare a kind or pick a
-//! codec, and [`Program`]'s bounds are borsh, so a program that speaks
+//! codec, and [`Module`]'s bounds are borsh, so a program that speaks
 //! anything else does not have a method.
 //!
 //! ABSENT is `None`, never a refusal: a method whose thing may not exist replies `Option`, and a refusal means the ask itself failed.
@@ -77,7 +77,7 @@ macro_rules! method {
 
 /// Every [`method!`] below, and [`ALL`] from the same list, so a method is
 /// never declared without being listed. `also` names the kinds written by
-/// hand: the three node methods generic over a [`Program`], and [`HostWidget`].
+/// hand: the three node methods generic over a [`Module`], and [`HostWidget`].
 macro_rules! methods {
     (
         also: [$($also:expr),* $(,)?];
@@ -102,7 +102,7 @@ macro_rules! methods {
 /// Implemented next to the view (a marker type), never by the program
 /// crate, which must not link a view runtime. A read-only program names
 /// `()` as its `Op`.
-pub trait Program {
+pub trait Module {
     const NAME: &'static str;
     type Op: BorshSerialize + BorshDeserialize + std::fmt::Debug;
     type Query: BorshSerialize + BorshDeserialize + std::fmt::Debug;
@@ -125,11 +125,11 @@ fn decode_call<T: BorshDeserialize>(bytes: &[u8], target: &str) -> Result<T, Str
     decode(&call.body)
 }
 
-/// `program.query`: one query to `P`, answered with the bytes it `Respond`ed.
+/// `module.query`: one query to `P`, answered with the bytes it `Respond`ed.
 pub struct Query<P>(std::marker::PhantomData<P>);
-impl<P: Program> sealed::Sealed for Query<P> {}
-impl<P: Program> Method for Query<P> {
-    const KIND: &'static str = "program.query";
+impl<P: Module> sealed::Sealed for Query<P> {}
+impl<P: Module> Method for Query<P> {
+    const KIND: &'static str = "module.query";
     const TARGET: Option<&'static str> = Some(P::NAME);
     type Request = P::Query;
     type Reply = P::Reply;
@@ -153,8 +153,8 @@ impl<P: Program> Method for Query<P> {
 /// `op.submit`: one operation to `P`, signed with the seated key; the
 /// reply is the receipt's output, the program's own bytes.
 pub struct Submit<P>(std::marker::PhantomData<P>);
-impl<P: Program> sealed::Sealed for Submit<P> {}
-impl<P: Program> Method for Submit<P> {
+impl<P: Module> sealed::Sealed for Submit<P> {}
+impl<P: Module> Method for Submit<P> {
     const KIND: &'static str = "op.submit";
     const TARGET: Option<&'static str> = Some(P::NAME);
     type Request = P::Op;
@@ -176,13 +176,13 @@ impl<P: Program> Method for Submit<P> {
     }
 }
 
-/// `program.changes`: a subscription to `P`, one item per block that wrote to it,
+/// `module.changes`: a subscription to `P`, one item per block that wrote to it,
 /// carrying its height; `None` when the node link was reopened and the view
 /// should re-read. The request is `P`'s name, as the host reads it.
 pub struct Changes<P>(std::marker::PhantomData<P>);
-impl<P: Program> sealed::Sealed for Changes<P> {}
-impl<P: Program> Method for Changes<P> {
-    const KIND: &'static str = "program.changes";
+impl<P: Module> sealed::Sealed for Changes<P> {}
+impl<P: Module> Method for Changes<P> {
+    const KIND: &'static str = "module.changes";
     const TARGET: Option<&'static str> = Some(P::NAME);
     type Request = ();
     type Reply = Option<u64>;
@@ -208,7 +208,7 @@ impl<P: Program> Method for Changes<P> {
     Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
 )]
 pub struct NodeStatus {
-    pub network: String,
+    pub chain_id: String,
     pub time: u64,
     pub block_time_ms: u64,
     pub epoch_length: u64,
@@ -220,18 +220,13 @@ pub struct NodeStatus {
     pub contract: u32,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
-pub struct Mint {
+pub struct CreateInvite {
     pub ttl_days: u64,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
-pub struct Note {
-    pub reason: String,
-    pub sentence: String,
-}
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
-pub struct Minted {
+pub struct Invite {
     pub invite: String,
-    pub notes: Vec<Note>,
+    pub notes: Vec<crate::Error>,
 }
 /// A page of finalized blocks, newest first: those below `before` (from the
 /// tip when `None`), at most `limit` (the node caps a page at 100).
@@ -296,8 +291,8 @@ pub struct Head {
 pub struct Session {
     pub connected: bool,
     pub dark: bool,
-    pub chain: String,
-    pub key: String,
+    pub chain_id: String,
+    pub signer: String,
     pub account: Option<u64>,
     pub endpoint: String,
 }
@@ -340,17 +335,17 @@ pub struct Clipboard {
 #[derive(
     Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
 )]
-pub struct Post {
+pub struct Notification {
     pub title: String,
     pub body: String,
     pub tag: String,
     pub link: String,
 }
-/// What the host did with a [`Post`].
+/// What the host did with a [`Notification`].
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
 )]
-pub enum Posted {
+pub enum Delivery {
     /// Logged, and a banner was raised.
     Banner,
     /// Logged in the centre only: no banner (not yet allowed, silenced,
@@ -360,11 +355,11 @@ pub enum Posted {
     Blocked,
 }
 methods! {
-    also: ["program.query", "op.submit", "program.changes", HostWidget::KIND];
+    also: ["module.query", "op.submit", "module.changes", HostWidget::KIND];
     /// `chain.status`: the connected node's status.
     ChainStatus, "chain.status", (), NodeStatus;
-    /// `invite.mint`: mint one invite, once (never retried).
-    InviteMint, "invite.mint", Mint, Minted;
+    /// `invite.create`: mint one invite, once (never retried).
+    InviteCreate, "invite.create", CreateInvite, Invite;
     /// `chain.blocks`: a page of finalized blocks, newest first.
     ChainBlocks, "chain.blocks", BlockPage, Vec<Block>;
     /// `chain.block`: one finalized block; `None` where the node has none by
@@ -403,7 +398,7 @@ methods! {
     /// `clipboard.write`: text onto the clipboard.
     ClipboardWrite, "clipboard.write", String, ();
     /// `notify.post`: hand the host a notice; it says what it did.
-    NotifyPost, "notify.post", Post, Posted;
+    NotifyPost, "notify.post", Notification, Delivery;
     /// `notify.seen`: the reader has seen what this view posted under a
     /// tag; the host marks this view's rows under it read and takes down
     /// its standing banner. Another view's rows are never touched.
@@ -419,17 +414,17 @@ methods! {
     /// could not fill a gap (a reconnect, a node with no archive); a view
     /// that must see every block reads the gap with `chain.blocks`.
     ChainHeads, "chain.heads", (), Head;
-    /// `program.describe`: an op as its program says a person reads it,
+    /// `module.describe`: an op as its program says a person reads it,
     /// from the `ducktape.describe` module in the program's current code;
     /// `None` where the code carries none or it cannot read these bytes.
-    ProgramDescribe, "program.describe", (String, Vec<u8>), Option<Description>;
+    ModuleDescribe, "module.describe", (String, Vec<u8>), Option<Description>;
 }
 
 /// The `<capability>` half of every kind in [`ALL`]: the names a view's
 /// manifest may declare. `export_view!` refuses any other at compile time.
 pub const CAPABILITIES: &[&str] = &[
     "chain",
-    "program",
+    "module",
     "op",
     "invite",
     "link",
@@ -479,11 +474,11 @@ mod tests {
         assert_eq!(prefixes, known);
         assert!(is_capability("chain") && is_capability("link") && is_capability("notify"));
         assert!(!is_capability("rpc"));
-        assert!(!is_capability("chat") && !is_capability("program.query") && !is_capability(""));
+        assert!(!is_capability("chat") && !is_capability("module.query") && !is_capability(""));
     }
 
     struct Binary;
-    impl Program for Binary {
+    impl Module for Binary {
         const NAME: &'static str = "binary";
         type Op = ();
         type Query = (u64, String);

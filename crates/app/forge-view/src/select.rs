@@ -1,7 +1,7 @@
 //! What the screens read out of the view: the replies that have landed,
 //! picked by the query that asked them, and the reader's own identity.
-use ducktape_view_guest::host::Refusal;
-use ducktape_view_guest::view::Loaded;
+use ducktape_view_guest::host::Error;
+use ducktape_view_guest::view::Loadable;
 
 use crate::queries::PAGE;
 use crate::state::{self, ChangeTab, Forge, Nav, change_key};
@@ -22,7 +22,7 @@ pub(crate) type OpenChange<'a> = (
 /// A read, in the three states a screen draws.
 pub(crate) enum Stage<'a> {
     Loading,
-    Failed(&'a Refusal),
+    Failed(&'a Error),
     Ready(&'a Reply),
 }
 
@@ -49,20 +49,20 @@ impl Forge {
     /// with a cursor left over, or a change's conversation cut short.
     pub(crate) fn cut_short(&self) -> bool {
         let reads = self.data.values().any(|loaded| match loaded {
-            Loaded::Ready(reply) => crate::queries::cut_short(reply),
+            Loadable::Ready(reply) => crate::queries::cut_short(reply),
             _ => false,
         });
         let talk = self
             .messages
             .values()
-            .any(|loaded| matches!(loaded, Loaded::Ready((_, true))));
+            .any(|loaded| matches!(loaded, Loadable::Ready((_, true))));
         reads || talk
     }
 
     pub(crate) fn stage(&self, query: &Query) -> Stage<'_> {
         match self.data.get(query) {
-            Some(Loaded::Ready(reply)) => Stage::Ready(reply),
-            Some(Loaded::Failed(refusal)) => Stage::Failed(refusal),
+            Some(Loadable::Ready(reply)) => Stage::Ready(reply),
+            Some(Loadable::Failed(refusal)) => Stage::Failed(refusal),
             _ => Stage::Loading,
         }
     }

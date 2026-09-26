@@ -31,10 +31,10 @@ fn reply(name: &str) -> Reply {
 }
 
 /// One committed refusal, as the host hands the program's `Err` to a view.
-fn refusal(name: &str) -> ducktape_view_guest::host::Refusal {
+fn refusal(name: &str) -> ducktape_view_guest::host::Error {
     let refusal: abi::Refusal =
         borsh::from_slice(&bytes(name)).unwrap_or_else(|error| panic!("decode {name}: {error}"));
-    ducktape_view_guest::host::Refusal::new(&refusal.reason, &refusal.sentence)
+    ducktape_view_guest::host::Error::new(&refusal.reason, &refusal.sentence)
 }
 
 /// Which change record the program is holding in a given scenario.
@@ -221,11 +221,11 @@ pub(crate) fn booted(mode: &'static str) -> (TestAppContext, Entity<Forge>) {
         .stream::<ducktape_view_guest::methods::HostRoute>();
     let view = cx.open::<Forge>();
     cx.run_until_parked();
-    props.push(Session {
-        key: abi::hex(b"reviewer"),
+    props.send(Session {
+        signer: abi::hex(b"reviewer"),
         account: Some(2),
         connected: true,
-        chain: "testnet#0a1b2c3d".into(),
+        chain_id: "testnet#0a1b2c3d".into(),
         ..Session::default()
     });
     cx.run_until_parked();
@@ -269,11 +269,11 @@ fn seated(key: &[u8], account: Option<u64>) -> (TestAppContext, Entity<Forge>) {
         .stream::<ducktape_view_guest::methods::HostRoute>();
     let view = cx.open::<Forge>();
     cx.run_until_parked();
-    props.push(Session {
-        key: abi::hex(key),
+    props.send(Session {
+        signer: abi::hex(key),
         account,
         connected: true,
-        chain: "testnet#0a1b2c3d".into(),
+        chain_id: "testnet#0a1b2c3d".into(),
         ..Session::default()
     });
     cx.run_until_parked();
@@ -287,7 +287,7 @@ fn seated(key: &[u8], account: Option<u64>) -> (TestAppContext, Entity<Forge>) {
 /// The principals forge was asked to judge.
 fn judged(cx: &TestAppContext) -> Vec<identity::Principal> {
     cx.host()
-        .asked::<Ask>()
+        .requests::<Ask>()
         .into_iter()
         .filter_map(|query| match query {
             Query::Judgment { principal, .. } => Some(principal),
@@ -329,7 +329,7 @@ fn a_second_device_key_reads_as_the_same_person() {
     let (mut cx, view) = seated(b"tester-laptop", Some(1));
     cx.simulate_click("forge-filter-authored");
     cx.run_until_parked();
-    let authored = cx.host().asked::<Ask>().into_iter().any(|query| {
+    let authored = cx.host().requests::<Ask>().into_iter().any(|query| {
         matches!(query, Query::Changes { filter, .. }
             if filter.author == Some(identity::Principal::Account(1)))
     });
@@ -354,19 +354,19 @@ fn an_account_gained_later_is_who_forge_judges() {
     let view = cx.open::<Forge>();
     cx.run_until_parked();
     let unregistered = Session {
-        key: abi::hex(b"reviewer"),
+        signer: abi::hex(b"reviewer"),
         connected: true,
-        chain: "testnet#0a1b2c3d".into(),
+        chain_id: "testnet#0a1b2c3d".into(),
         ..Session::default()
     };
-    props.push(unregistered.clone());
+    props.send(unregistered.clone());
     cx.run_until_parked();
     cx.simulate_click("forge-repo-project");
     cx.run_until_parked();
     cx.simulate_click("forge-tab-changes");
     cx.run_until_parked();
     assert!(disabled(&cx, "forge-filter-judgment"));
-    props.push(Session {
+    props.send(Session {
         account: Some(2),
         ..unregistered
     });
@@ -445,10 +445,10 @@ fn a_list_cut_at_its_budget_says_so() {
         .stream::<ducktape_view_guest::methods::HostRoute>();
     cx.open::<Forge>();
     cx.run_until_parked();
-    props.push(Session {
+    props.send(Session {
         account: Some(2),
         connected: true,
-        chain: "testnet#0a1b2c3d".into(),
+        chain_id: "testnet#0a1b2c3d".into(),
         ..Session::default()
     });
     cx.run_until_parked();
@@ -509,15 +509,20 @@ fn creating_a_repository_validates_its_name_then_shows_the_submission() {
         "{:?}",
         cx.texts()
     );
-    assert!(cx.host().asked::<SubmitForge>().is_empty());
+    assert!(cx.host().requests::<SubmitForge>().is_empty());
     cx.simulate_input("forge-new-repo-name", "ledger");
     cx.simulate_click("forge-new-repo-sha256");
     cx.simulate_click("forge-new-repo-submit");
     cx.run_until_parked();
-    assert!(cx.host().asked::<SubmitForge>().iter().any(|op| matches!(
-        op,
-        Op::Create { repo, hash } if repo == "ledger" && *hash == abi::HashKind::Sha256
-    )));
+    assert!(
+        cx.host()
+            .requests::<SubmitForge>()
+            .iter()
+            .any(|op| matches!(
+                op,
+                Op::Create { repo, hash } if repo == "ledger" && *hash == abi::HashKind::Sha256
+            ))
+    );
     view.read(|forge| assert!(forge.new_repo.is_none()));
 }
 
@@ -659,7 +664,7 @@ fn a_folder_opens_its_children_inline_and_keeps_its_state() {
     assert!(before.iter().all(|row| row.depth == 0));
     cx.simulate_click("forge-tree-src");
     cx.run_until_parked();
-    let asked = cx.host().asked::<Ask>();
+    let asked = cx.host().requests::<Ask>();
     assert!(
         asked
             .iter()
@@ -765,7 +770,7 @@ fn commits_follows_the_cursor_and_opens_one_commit_with_its_diff() {
     cx.simulate_click("forge-tab-commits");
     cx.run_until_parked();
     // `log` carries a next cursor; the second page is the root commit.
-    let asked = cx.host().asked::<Ask>();
+    let asked = cx.host().requests::<Ask>();
     assert!(
         asked.iter().any(|query| matches!(
             query,
@@ -846,7 +851,7 @@ fn settings_shows_only_what_the_contract_exposes_and_grants_by_account() {
     cx.simulate_click("forge-settings-head-clean");
     cx.simulate_click("forge-settings-save");
     cx.run_until_parked();
-    assert!(cx.host().asked::<SubmitForge>().iter().any(|op| matches!(
+    assert!(cx.host().requests::<SubmitForge>().iter().any(|op| matches!(
         op,
         Op::Configure { repo, settings }
             if repo == "project" && settings.allow_force && settings.head == b"refs/heads/clean"
@@ -855,14 +860,14 @@ fn settings_shows_only_what_the_contract_exposes_and_grants_by_account() {
     cx.simulate_click("forge-settings-grant");
     cx.run_until_parked();
     assert!(
-        cx.host().asked::<SubmitForge>().iter().any(
+        cx.host().requests::<SubmitForge>().iter().any(
             |op| matches!(op, Op::Grant { principal, .. } if *principal == identity::Principal::Account(1))
         )
     );
     cx.simulate_click("forge-settings-revoke-acct-9");
     cx.run_until_parked();
     assert!(
-        cx.host().asked::<SubmitForge>().iter().any(
+        cx.host().requests::<SubmitForge>().iter().any(
             |op| matches!(op, Op::Revoke { principal, .. } if *principal == identity::Principal::Account(9))
         )
     );
@@ -910,7 +915,7 @@ fn a_snapshot_restores_the_same_screen_without_replaying_events() {
         assert!(forge.viewed.contains("project#1:src/lib.rs"));
     });
     assert!(
-        !restored.host().asked::<Ask>().is_empty(),
+        !restored.host().requests::<Ask>().is_empty(),
         "a restored view reads again"
     );
 }
@@ -925,7 +930,7 @@ fn judgment_is_its_own_query_keyed_by_the_readers_account() {
     view.read(|forge| assert_eq!(forge.filter, Filter::Judgment));
     assert!(
         cx.host()
-            .asked::<Ask>()
+            .requests::<Ask>()
             .iter()
             .any(|query| matches!(query, Query::Judgment { principal, .. } if *principal == identity::Principal::Account(2))),
         "the reader is their account, from the session"
@@ -988,17 +993,17 @@ fn a_forge_link_opens_its_repository() {
         .stream::<ducktape_view_guest::methods::HostRoute>();
     let view = cx.open::<Forge>();
     cx.run_until_parked();
-    props.push(Session {
+    props.send(Session {
         connected: true,
-        chain: "testnet#0a1b2c3d".into(),
+        chain_id: "testnet#0a1b2c3d".into(),
         ..Session::default()
     });
     cx.run_until_parked();
-    routes.push("project".into());
+    routes.send("project".into());
     cx.run_until_parked();
     view.read(|forge| assert_eq!(forge.nav().repo.as_deref(), Some("project")));
     // a change's room links here as `<repo>/<n>`
-    routes.push("project/1".into());
+    routes.send("project/1".into());
     cx.run_until_parked();
     view.read(|forge| {
         assert_eq!(
@@ -1007,7 +1012,7 @@ fn a_forge_link_opens_its_repository() {
         )
     });
     // a route forge does not read falls back to the list
-    routes.push("project/extra".into());
+    routes.send("project/extra".into());
     cx.run_until_parked();
     view.read(|forge| assert!(forge.nav().repo.is_none()));
 }

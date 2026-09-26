@@ -3,7 +3,7 @@
 use super::*;
 use chat::{ChannelInfo, MessageHits, MsgRow, Op, PostPolicy, Principal, Query, Reply};
 use ducktape_view_guest::testing::TestAppContext;
-use ducktape_view_guest::view::Loaded;
+use ducktape_view_guest::view::Loadable;
 use ducktape_view_guest::wire;
 use ducktape_view_guest::{Entity, StyleRefinement, Styled};
 
@@ -156,14 +156,14 @@ fn opened() -> (TestAppContext, Entity<Chat>) {
     let view = cx.open::<Chat>();
     cx.run_until_parked();
     assert!(cx.has_text("Not connected"));
-    props.push(Session {
-        key: "0102".into(),
+    props.send(Session {
+        signer: "0102".into(),
         account: Some(7),
         connected: true,
-        chain: "testnet#0a1b2c3d".into(),
+        chain_id: "testnet#0a1b2c3d".into(),
         ..Session::default()
     });
-    visible.push(true);
+    visible.send(true);
     cx.run_until_parked();
     assert!(cx.has_text("General"));
     assert!(cx.has_text("No channel open"));

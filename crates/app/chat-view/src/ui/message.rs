@@ -415,7 +415,7 @@ fn program_post(
     // one link per run of the program's lines: the room is the same
     let link = message
         .show_author
-        .then(|| crate::links::program_link(&chat.session.chain, &chat.room_id()))
+        .then(|| crate::links::program_link(&chat.session.chain_id, &chat.room_id()))
         .flatten();
     if let Some(link) = link {
         let open = cx.listener(move |chat, event: &ClickEvent, _window, cx| {

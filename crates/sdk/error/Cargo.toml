@@ -1,0 +1,15 @@
+# Why a call failed, one type for a module, the host and a view: `Error` and
+# its `code` tokens. Below both SDKs (guest re-exports it, view-wire carries
+# it), so neither links the other for it. Depends on no ducktape crate.
+[package]
+name = "error"
+version.workspace = true
+edition.workspace = true
+
+[features]
+# view-wire carries `Error` across its MessagePack layer.
+serde = ["dep:serde"]
+
+[dependencies]
+borsh = { workspace = true }
+serde = { workspace = true, optional = true }

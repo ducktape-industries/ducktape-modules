@@ -29,22 +29,22 @@ fn a_direct_message_elsewhere_is_a_notice_and_a_badge_until_read() {
         );
     });
     cx.run_until_parked();
-    let posts = cx.host().asked::<NotifyPost>();
+    let posts = cx.host().requests::<NotifyPost>();
     assert_eq!(posts.len(), 1);
     assert_eq!(
         (posts[0].title.as_str(), posts[0].body.as_str()),
         ("reviewer", "ping")
     );
     assert_eq!(posts[0].link, "duck://testnet-0a1b2c3d/chat/dm-7-8/2");
-    assert_eq!(cx.host().asked::<HostBadge>().last(), Some(&1));
-    assert!(cx.host().asked::<NotifySeen>().is_empty());
+    assert_eq!(cx.host().requests::<HostBadge>().last(), Some(&1));
+    assert!(cx.host().requests::<NotifySeen>().is_empty());
     view.update(&mut cx, |chat, window, cx| {
         cx.notify();
         chat.choose("dm-7-8".into(), window, cx)
     });
     cx.run_until_parked();
-    assert_eq!(cx.host().asked::<HostBadge>().last(), Some(&0));
-    assert_eq!(cx.host().asked::<NotifySeen>(), [posts[0].tag.clone()]);
+    assert_eq!(cx.host().requests::<HostBadge>().last(), Some(&0));
+    assert_eq!(cx.host().requests::<NotifySeen>(), [posts[0].tag.clone()]);
 }
 
 /// A reload carries the read cursors but not the count: the first list after
@@ -67,11 +67,11 @@ fn the_badge_is_counted_again_from_the_read_cursors() {
         })
     });
     let rooms = || vec![channel("general", "General", 3), channel("dm-7-8", "dm", 2)];
-    let posted = cx.host().asked::<NotifyPost>().len();
+    let posted = cx.host().requests::<NotifyPost>().len();
     view.update(&mut cx, |chat, _, cx| {
         cx.notify();
         // as a reload leaves it: the rooms and the cursors, no count
-        chat.channels = Loaded::Ready(rooms());
+        chat.channels = Loadable::Ready(rooms());
         chat.reads.cursors.insert("general".into(), 3);
         chat.reads.cursors.insert("dm-7-8".into(), 1);
         chat.attention.clear();
@@ -81,11 +81,11 @@ fn the_badge_is_counted_again_from_the_read_cursors() {
     });
     cx.run_until_parked();
     assert_eq!(
-        cx.host().asked::<NotifyPost>().len(),
+        cx.host().requests::<NotifyPost>().len(),
         posted,
         "no second notice"
     );
-    assert_eq!(cx.host().asked::<HostBadge>().last(), Some(&1));
+    assert_eq!(cx.host().requests::<HostBadge>().last(), Some(&1));
 }
 
 /// A relaunch starts with no cursors in memory: the ones kept on the device
@@ -133,25 +133,25 @@ fn kept_cursors_bring_the_badge_back_after_a_relaunch() {
     let props = cx.host().stream::<HostSession>();
     let visible = cx.host().stream::<HostVisible>();
     let _view = cx.open::<Chat>();
-    props.push(Session {
-        key: "0102".into(),
+    props.send(Session {
+        signer: "0102".into(),
         account: Some(7),
         connected: true,
-        chain: "testnet#0a1b2c3d".into(),
+        chain_id: "testnet#0a1b2c3d".into(),
         ..Session::default()
     });
-    visible.push(true);
+    visible.send(true);
     cx.run_until_parked();
-    assert_eq!(cx.host().asked::<HostBadge>().last(), Some(&2));
+    assert_eq!(cx.host().requests::<HostBadge>().last(), Some(&2));
     assert!(cx.find("chat-sidebar-channel-general-unread").is_some());
     assert!(cx.find("chat-sidebar-dm-8-unread").is_some());
 
     cx.simulate_click("chat-sidebar-channel-general");
     cx.run_until_parked();
-    assert_eq!(cx.host().asked::<HostBadge>().last(), Some(&1));
+    assert_eq!(cx.host().requests::<HostBadge>().last(), Some(&1));
     let (key, kept) = cx
         .host()
-        .asked::<StoreSet>()
+        .requests::<StoreSet>()
         .pop()
         .expect("the read is kept");
     assert_eq!(key, "reads/0102");
@@ -192,23 +192,23 @@ fn the_relaunch_recount_waits_for_the_readers_account() {
     let visible = cx.host().stream::<HostVisible>();
     let _view = cx.open::<Chat>();
     let unresolved = Session {
-        key: "0102".into(),
+        signer: "0102".into(),
         connected: true,
-        chain: "testnet#0a1b2c3d".into(),
+        chain_id: "testnet#0a1b2c3d".into(),
         ..Session::default()
     };
-    props.push(unresolved.clone());
-    visible.push(true);
+    props.send(unresolved.clone());
+    visible.send(true);
     cx.run_until_parked();
-    assert_ne!(cx.host().asked::<HostBadge>().last(), Some(&1));
+    assert_ne!(cx.host().requests::<HostBadge>().last(), Some(&1));
 
     // the host names her account
-    props.push(Session {
+    props.send(Session {
         account: Some(7),
         ..unresolved
     });
     cx.run_until_parked();
-    assert_eq!(cx.host().asked::<HostBadge>().last(), Some(&1));
+    assert_eq!(cx.host().requests::<HostBadge>().last(), Some(&1));
 }
 
 /// A device store that refuses the kept cursors is asked again, then chat
@@ -236,16 +236,16 @@ fn a_refused_store_read_still_keeps_cursors() {
     let props = cx.host().stream::<HostSession>();
     let visible = cx.host().stream::<HostVisible>();
     let _view = cx.open::<Chat>();
-    props.push(Session {
-        key: "0102".into(),
+    props.send(Session {
+        signer: "0102".into(),
         account: Some(7),
         connected: true,
-        chain: "testnet#0a1b2c3d".into(),
+        chain_id: "testnet#0a1b2c3d".into(),
         ..Session::default()
     });
-    visible.push(true);
+    visible.send(true);
     cx.run_until_parked();
-    let asked = cx.host().asked::<StoreGet>();
+    let asked = cx.host().requests::<StoreGet>();
     assert_eq!(
         asked.iter().filter(|key| *key == "reads/0102").count(),
         3,
@@ -255,7 +255,7 @@ fn a_refused_store_read_still_keeps_cursors() {
     cx.run_until_parked();
     let (key, kept) = cx
         .host()
-        .asked::<StoreSet>()
+        .requests::<StoreSet>()
         .into_iter()
         .rfind(|(key, _)| key == "reads/0102")
         .expect("the read is kept");

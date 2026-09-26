@@ -8,6 +8,7 @@ edition.workspace = true
 # they run over `MockHost`, so a module's native test is its real code.
 [dependencies]
 abi = { workspace = true }
+error = { workspace = true }
 borsh = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

@@ -27,7 +27,7 @@ fn the_room_shows_its_rows_intro_and_actions() {
     );
     assert!(
         cx.host()
-            .asked::<ducktape_view_guest::methods::HostWidget>()
+            .requests::<ducktape_view_guest::methods::HostWidget>()
             .iter()
             .any(|command| {
                 matches!(command, wire::WidgetCommand::Focus { target }
@@ -47,7 +47,7 @@ fn the_room_shows_its_rows_intro_and_actions() {
     cx.run_until_parked();
     assert!(
         cx.host()
-            .asked::<Submit<ChatApi>>()
+            .requests::<Submit<ChatApi>>()
             .iter()
             .any(|op| matches!(op, Op::AddReaction { emoji, .. } if emoji == "🔥"))
     );
@@ -76,7 +76,7 @@ fn the_room_shows_its_rows_intro_and_actions() {
     cx.run_until_parked();
     assert!(
         cx.host()
-            .asked::<Submit<ChatApi>>()
+            .requests::<Submit<ChatApi>>()
             .iter()
             .any(|op| matches!(op, Op::RenameChannel { name, .. } if name == "Lobby"))
     );
@@ -161,7 +161,7 @@ fn unread_rooms_carry_a_dot_and_the_open_room_a_divider() {
         chat.reads.entering = true;
         chat.room = Some(Room {
             id: "general".into(),
-            messages: Loaded::Ready(vec![row(3, 7, "old"), row(9, 8, "new")]),
+            messages: Loadable::Ready(vec![row(3, 7, "old"), row(9, 8, "new")]),
             at_tail: true,
             reaches_head: true,
             ..Room::default()
@@ -209,14 +209,14 @@ fn a_full_room_renders_inside_the_frame_budget() {
     let props = cx.host().stream::<HostSession>();
     let visible = cx.host().stream::<HostVisible>();
     cx.open::<Chat>();
-    props.push(Session {
-        key: "0102".into(),
+    props.send(Session {
+        signer: "0102".into(),
         account: Some(7),
         connected: true,
-        chain: "testnet#0a1b2c3d".into(),
+        chain_id: "testnet#0a1b2c3d".into(),
         ..Session::default()
     });
-    visible.push(true);
+    visible.send(true);
     cx.run_until_parked();
     cx.simulate_click("chat-sidebar-channel-general");
     cx.run_until_parked();
@@ -274,7 +274,7 @@ fn an_empty_thread_says_so_and_its_field_takes_focus() {
     let field = wire::ElementIdWire::Name("draft-general-1/editor".into());
     assert!(
         cx.host()
-            .asked::<ducktape_view_guest::methods::HostWidget>()
+            .requests::<ducktape_view_guest::methods::HostWidget>()
             .iter()
             .any(|command| matches!(command, wire::WidgetCommand::Focus { target } if *target == vec![field.clone()]))
     );
@@ -290,18 +290,18 @@ fn a_link_to_a_forge_room_lands_in_it() {
     let props = cx.host().stream::<HostSession>();
     cx.host().stream::<HostVisible>();
     let view = cx.open::<Chat>();
-    props.push(Session {
-        key: "0102".into(),
+    props.send(Session {
+        signer: "0102".into(),
         account: Some(7),
         connected: true,
-        chain: "testnet#0a1b2c3d".into(),
+        chain_id: "testnet#0a1b2c3d".into(),
         ..Session::default()
     });
     cx.run_until_parked();
     let link = crate::links::channel_link("testnet#0a1b2c3d", "forge:web:3", None).unwrap();
     assert!(link.ends_with("/chat/forge%3Aweb%3A3"), "{link}");
     // what the app does with a chain link: the tail, decoded, joined
-    routes.push(ducklink::Link::parse(&link).unwrap().tail.join("/"));
+    routes.send(ducklink::Link::parse(&link).unwrap().tail.join("/"));
     cx.run_until_parked();
     view.read(|chat| assert_eq!(chat.room.as_ref().unwrap().id, "forge:web:3"));
     // forge's own line reads as its event with a way to where forge shows
@@ -319,7 +319,7 @@ fn a_link_to_a_forge_room_lands_in_it() {
             ..chat::MsgRow::by(Principal::Module("forge".into()))
         };
         let room = chat.room.as_mut().unwrap();
-        room.messages = Loaded::Ready(vec![line]);
+        room.messages = Loadable::Ready(vec![line]);
         cx.notify();
     });
     cx.run_until_parked();
@@ -346,7 +346,7 @@ fn a_dms_details_show_its_two_people_and_nothing_to_reshape() {
     };
     let seat_both = |cx: &mut TestAppContext| {
         view.update(cx, |chat, _, cx| {
-            chat.room.as_mut().unwrap().members = Loaded::Ready(vec![seat(7), seat(8)]);
+            chat.room.as_mut().unwrap().members = Loadable::Ready(vec![seat(7), seat(8)]);
             cx.notify();
         });
         cx.run_until_parked();

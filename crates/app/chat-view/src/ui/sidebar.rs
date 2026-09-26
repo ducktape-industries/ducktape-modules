@@ -102,11 +102,7 @@ fn rooms(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement
         list = list.child(quiet("chat-sidebar-loading", "Loading rooms…", theme));
     }
     if let Some(refusal) = chat.channels.failed() {
-        list = list.child(quiet(
-            "chat-sidebar-failed",
-            refusal.sentence.clone(),
-            theme,
-        ));
+        list = list.child(quiet("chat-sidebar-failed", refusal.message.clone(), theme));
     }
     let open = chat.room.as_ref().map(|room| room.id.as_str());
     let mine = chat.my_account();

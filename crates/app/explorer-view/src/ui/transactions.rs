@@ -218,7 +218,7 @@ fn value(view: &Explorer, shown: &Value, at: &str, cx: Cx, theme: &Theme) -> Any
             Some((holder, _)) => account(view, holder.number, at, cx, theme),
             None => mono(short(key)).into_any_element(),
         },
-        Value::Program(name) => {
+        Value::Module(name) => {
             let runs = view
                 .network
                 .ready()

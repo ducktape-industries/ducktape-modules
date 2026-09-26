@@ -4,8 +4,8 @@ use ducktape_view_guest::design;
 
 pub(super) fn accounts(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
     let list = match &view.accounts {
-        Loaded::Ready(list) => list,
-        Loaded::Failed(refusal) => return failed(&refusal.sentence, cx, theme),
+        Loadable::Ready(list) => list,
+        Loadable::Failed(refusal) => return failed(&refusal.message, cx, theme),
         _ => return quiet("explorer-accounts-loading", "Reading accounts…", theme),
     };
     let rows: Vec<_> = list
@@ -72,14 +72,14 @@ pub(super) fn account(view: &Explorer, number: u64, cx: Cx, theme: &Theme) -> An
         .and_then(|list| list.iter().find(|account| account.number == number))
     else {
         return match &view.accounts {
-            Loaded::Ready(_) => empty_state(
+            Loadable::Ready(_) => empty_state(
                 "explorer-no-account",
                 format!("No account #{number}"),
                 "Identity holds no account by this number.",
                 theme,
             )
             .into_any_element(),
-            Loaded::Failed(refusal) => failed(&refusal.sentence, cx, theme),
+            Loadable::Failed(refusal) => failed(&refusal.message, cx, theme),
             _ => quiet("explorer-account-loading", "Reading the account…", theme),
         };
     };

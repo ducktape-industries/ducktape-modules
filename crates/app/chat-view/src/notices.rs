@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use chat::{Block, ChannelInfo, Mark, MsgRow, Principal, Query, Reply};
 use ducktape_view_guest::Context;
-use ducktape_view_guest::methods::{HostBadge, NotifyPost, NotifySeen, Post};
+use ducktape_view_guest::methods::{HostBadge, Notification, NotifyPost, NotifySeen};
 
 use crate::api::{Ask, ChatApi};
 use crate::message::message_body;
@@ -111,11 +111,11 @@ impl Chat {
                     .info(&channel)
                     .map(|info| info.channel.name.clone())
                     .unwrap_or_default();
-                let posts: Vec<(u64, Post)> = rows
+                let posts: Vec<(u64, Notification)> = rows
                     .iter()
                     .filter(|row| row.seq > was && row.seq <= head)
                     .filter_map(|row| {
-                        notice(row, me, &name, &chat.session.chain, names)
+                        notice(row, me, &name, &chat.session.chain_id, names)
                             .map(|post| (row.seq, post))
                     })
                     .collect();
@@ -170,7 +170,7 @@ impl Chat {
 
 /// The notice `row` makes for account `me`, if it is meant for her: it
 /// mentions her, or it is in a direct room she is in. Her own never is.
-fn notice(row: &MsgRow, me: u64, name: &str, chain: &str, names: &Names) -> Option<Post> {
+fn notice(row: &MsgRow, me: u64, name: &str, chain: &str, names: &Names) -> Option<Notification> {
     if row.deleted || row.author == Principal::Account(me) {
         return None;
     }
@@ -179,7 +179,7 @@ fn notice(row: &MsgRow, me: u64, name: &str, chain: &str, names: &Names) -> Opti
         return None;
     }
     let sender = names.author(&row.author);
-    Some(Post {
+    Some(Notification {
         title: match direct {
             true => sender,
             false => format!("{sender} mentioned you"),

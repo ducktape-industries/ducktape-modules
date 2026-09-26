@@ -201,9 +201,9 @@ impl std::fmt::Display for Link {
 /// `duck://<chain>/<program>/<tail…>` from a session's chain id text
 /// (`<label>#<salt>`); `None` while the session names no chain, or when a
 /// part breaks [`Link::new`]'s rules.
-pub fn mint(chain: &str, program: &str, tail: &[&str]) -> Option<String> {
+pub fn mint(chain: &str, module: &str, tail: &[&str]) -> Option<String> {
     let tail = tail.iter().map(|segment| (*segment).to_owned()).collect();
-    Link::new(chain.parse().ok()?, program, tail)
+    Link::new(chain.parse().ok()?, module, tail)
         .ok()
         .map(|link| link.to_string())
 }

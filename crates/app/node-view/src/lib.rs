@@ -7,10 +7,10 @@
 use abi::hex;
 use ducktape_view_guest::design;
 use ducktape_view_guest::export_view;
-use ducktape_view_guest::host::{Refusal, malformed};
+use ducktape_view_guest::host::{Error, malformed};
 use ducktape_view_guest::methods::Changes;
 use ducktape_view_guest::methods::Query;
-use ducktape_view_guest::view::Loaded;
+use ducktape_view_guest::view::Loadable;
 use ducktape_view_guest::{
     AnyElement, ClickEvent, Context, ElementId, Host, InteractiveElement, IntoElement,
     ParentElement, Render, StatefulInteractiveElement, Styled, Task, Theme, View, Window, div, px,
@@ -25,7 +25,7 @@ use valset::view::Valset;
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct Nodes {
-    set: Loaded<Set>,
+    set: Loadable<Set>,
     #[serde(skip)]
     live: Option<Task<()>>,
 }
@@ -114,7 +114,9 @@ impl Nodes {
     /// What is already on screen stays there while it runs.
     fn read(&mut self, cx: &mut Context<Self>) {
         match self.set.ready() {
-            Some(_) => cx.refresh(set(cx.host()), |view, set, _| view.set = Loaded::Ready(set)),
+            Some(_) => cx.refresh(set(cx.host()), |view, set, _| {
+                view.set = Loadable::Ready(set)
+            }),
             None => self.set = cx.load(set(cx.host()), |view| &mut view.set),
         }
         cx.notify();
@@ -134,17 +136,17 @@ impl Nodes {
     /// The four states of the set: loading, refused, empty, ready.
     fn body(&self, cx: &mut Context<Self>, theme: &Theme) -> AnyElement {
         match &self.set {
-            Loaded::Idle | Loaded::Loading(_) => div()
+            Loadable::Idle | Loadable::Loading(_) => div()
                 .id("nodes-loading")
                 .text_size(design::text::SECONDARY)
                 .text_color(theme.muted)
                 .child("Reading the validator set…")
                 .into_any_element(),
-            Loaded::Failed(refusal) => {
+            Loadable::Failed(refusal) => {
                 let retry = cx.listener(|view, _: &ClickEvent, _, cx| view.read(cx));
-                design::refused("nodes", refusal.sentence.clone(), theme, retry).into_any_element()
+                design::refused("nodes", refusal.message.clone(), theme, retry).into_any_element()
             }
-            Loaded::Ready(set) if set.members.is_empty() && set.validators.is_empty() => {
+            Loadable::Ready(set) if set.members.is_empty() && set.validators.is_empty() => {
                 design::empty_state(
                     "nodes-empty",
                     "No members",
@@ -153,7 +155,7 @@ impl Nodes {
                 )
                 .into_any_element()
             }
-            Loaded::Ready(set) => div()
+            Loadable::Ready(set) => div()
                 .id("nodes-list")
                 .flex_1()
                 .overflow_y_scroll()
@@ -252,7 +254,7 @@ fn members(members: &[Member], theme: &Theme) -> impl IntoElement {
 
 /// The set, read twice: the consensus keys the program answers, then every
 /// membership behind them.
-async fn set(host: Host) -> Result<Set, Refusal> {
+async fn set(host: Host) -> Result<Set, Error> {
     let validators = match host.ask::<Query<Valset>>(valset::Query::Validators).await? {
         valset::Reply::Validators(keys) => keys,
         other => return Err(unexpected(&other)),
@@ -292,7 +294,7 @@ async fn set(host: Host) -> Result<Set, Refusal> {
     })
 }
 
-fn unexpected(reply: &impl std::fmt::Debug) -> Refusal {
+fn unexpected(reply: &impl std::fmt::Debug) -> Error {
     malformed(format!("{} answered {reply:?}", valset::MODULE))
 }
 
@@ -300,7 +302,7 @@ export_view!(
     Nodes,
     "Nodes",
     "The validator set of this network and every membership behind it.",
-    ["program", "host"]
+    ["module", "host"]
 );
 
 #[cfg(test)]

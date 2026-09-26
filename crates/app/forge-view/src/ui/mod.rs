@@ -220,7 +220,7 @@ fn repo(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
 /// minted by ducklink from the session's chain id (`<label>#<salt>`); a
 /// placeholder `duck://<network>/forge/<name>` while no chain is known.
 pub(crate) fn repo_link(forge: &Forge, name: &str) -> String {
-    ducklink::mint(&forge.session.chain, forge::MODULE, &[name])
+    ducklink::mint(&forge.session.chain_id, forge::MODULE, &[name])
         .unwrap_or_else(|| format!("duck://<network>/forge/{name}"))
 }
 
@@ -445,7 +445,7 @@ pub(crate) fn staged<'a>(
                 cx.listener(move |forge, _: &ClickEvent, _, cx| forge.retry(query.clone(), cx));
             Err(ducktape_view_guest::design::refused(
                 element_id,
-                refusal.sentence.clone(),
+                refusal.message.clone(),
                 theme,
                 retry,
             )

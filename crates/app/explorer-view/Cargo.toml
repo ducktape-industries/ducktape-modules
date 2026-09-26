@@ -19,7 +19,7 @@ ducktape-view-guest.workspace = true
 # mints the `duck://<chain>/explorer/…` link a page copies
 ducklink.workspace = true
 # The system programs the explorer asks: accounts, validators, the roster.
-# An op is described by its own program through `program.describe`, not
+# An op is described by its own program through `module.describe`, not
 # by a program crate linked here.
 identity = { workspace = true, features = ["view"] }
 module-registry = { workspace = true, features = ["view"] }

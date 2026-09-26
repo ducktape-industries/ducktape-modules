@@ -5,7 +5,7 @@ use super::*;
 use abi::BlobId;
 use ducktape_view_guest::methods::Session;
 use ducktape_view_guest::methods::{ChainStatus, Tx, Value};
-use ducktape_view_guest::testing::{Feed, TestAppContext};
+use ducktape_view_guest::testing::{StreamSender, TestAppContext};
 
 const ADA: [u8; 32] = [1; 32];
 const STRANGER: [u8; 32] = [2; 32];
@@ -70,7 +70,7 @@ fn page(chain: &[Block], ask: &BlockPage) -> Vec<Block> {
 
 fn status(height: u64) -> NodeStatus {
     NodeStatus {
-        network: "test#1".into(),
+        chain_id: "test#1".into(),
         block_time_ms: 1000,
         epoch_length: 10,
         height,
@@ -96,7 +96,10 @@ fn ada() -> identity::Account {
 }
 
 /// A node at `tip`, whose tip the test may move.
-fn node(cx: &mut TestAppContext, tip: Rc<RefCell<u64>>) -> (Feed<HostSession>, Feed<HostRoute>) {
+fn node(
+    cx: &mut TestAppContext,
+    tip: Rc<RefCell<u64>>,
+) -> (StreamSender<HostSession>, StreamSender<HostRoute>) {
     let feeds = (
         cx.host().stream::<HostSession>(),
         cx.host().stream::<HostRoute>(),
@@ -174,7 +177,7 @@ fn ready() -> (TestAppContext, Rc<RefCell<u64>>) {
 
 // ---------- decoding ----------
 
-/// The host's `program.describe`, as each program's describe module would
+/// The host's `module.describe`, as each program's describe module would
 /// answer: its own `describe` over the op, `None` for a program without one.
 fn describes(cx: &mut TestAppContext) {
     fn with<T: borsh::BorshDeserialize>(
@@ -183,7 +186,7 @@ fn describes(cx: &mut TestAppContext) {
     ) -> Option<Description> {
         borsh::from_slice(op).ok().map(|op| describe(&op))
     }
-    cx.host().handle::<ProgramDescribe>(|(program, op)| {
+    cx.host().handle::<ModuleDescribe>(|(program, op)| {
         Ok(match program.as_str() {
             "chat" => with(&op, chat::describe),
             "forge" => with(&op, forge::describe),
@@ -202,7 +205,7 @@ fn an_op_reads_as_its_program_describes_it_through_the_host() {
     assert!(cx.has_text("Post in #design"), "{:?}", cx.texts());
     // one the host could not describe reads as its bytes
     assert!(cx.has_text("mystery · 4 bytes"), "{:?}", cx.texts());
-    let asked = cx.host().asked::<ProgramDescribe>();
+    let asked = cx.host().requests::<ModuleDescribe>();
     assert!(asked.contains(&("mystery".to_owned(), vec![1, 2, 3, 4])));
 
     // a dm post: its title, the two accounts by name and link
@@ -322,7 +325,7 @@ fn the_overview_shows_the_head_and_the_latest_blocks_and_transactions() {
         "block 8 is folded: {texts:?}"
     );
     assert_eq!(
-        cx.host().asked::<ChainBlocks>(),
+        cx.host().requests::<ChainBlocks>(),
         vec![BlockPage {
             before: None,
             limit: PAGE
@@ -354,7 +357,7 @@ fn a_block_opens_with_its_fields_its_proposer_and_its_transactions() {
     cx.run_until_parked();
     assert!(cx.has_text("mystery · 4 bytes"));
     assert!(
-        cx.host().asked::<ChainBlock>().is_empty(),
+        cx.host().requests::<ChainBlock>().is_empty(),
         "both were in the window"
     );
 }
@@ -433,7 +436,7 @@ fn search_finds_heights_hashes_accounts_and_programs() {
     search(&mut cx, "1,000");
     assert!(cx.has_text("No block 1,000"), "{:?}", cx.texts());
     assert_eq!(
-        cx.host().asked::<ChainBlock>(),
+        cx.host().requests::<ChainBlock>(),
         vec![BlockRef::Id([0xee; 32]), BlockRef::Height(1000)]
     );
     search(&mut cx, "nobody");
@@ -449,18 +452,18 @@ fn a_pushed_head_reads_only_the_new_blocks() {
     cx.open::<Explorer>();
     cx.run_until_parked();
     *tip.borrow_mut() = 14;
-    heads.push(Head {
+    heads.send(Head {
         height: 14,
         time: T0 + 14_000,
         id: [14; 32],
     });
     cx.run_until_parked();
     assert!(cx.has_text("13–14 · 2 empty blocks"), "{:?}", cx.texts());
-    let explorer_asked = cx.host().asked::<ChainBlocks>();
+    let explorer_asked = cx.host().requests::<ChainBlocks>();
     assert_eq!(explorer_asked.len(), 2, "{explorer_asked:?}");
     assert!(explorer_asked.iter().all(|ask| ask.before.is_none()));
     assert_eq!(
-        cx.host().asked::<ChainStatus>().len(),
+        cx.host().requests::<ChainStatus>().len(),
         1,
         "a head moves the status without a read"
     );
@@ -476,9 +479,9 @@ fn a_refused_head_subscription_falls_back_to_polling() {
     node(&mut cx, tip.clone());
     cx.open::<Explorer>();
     cx.run_until_parked();
-    assert_eq!(cx.host().asked::<ClockTicks>(), [TICK]);
+    assert_eq!(cx.host().requests::<ClockTicks>(), [TICK]);
     *tip.borrow_mut() = 14;
-    ticks.push(());
+    ticks.send(());
     cx.run_until_parked();
     assert!(cx.has_text("13–14 · 2 empty blocks"), "{:?}", cx.texts());
 }
@@ -530,11 +533,11 @@ fn a_snapshot_restores_without_reading_the_window_again() {
     restored.host().never::<Query<Identity>>();
     restored.host().never::<Query<Valset>>();
     restored.host().never::<Query<Registry>>();
-    restored.host().never::<ProgramDescribe>();
+    restored.host().never::<ModuleDescribe>();
     restored.restore::<Explorer>(&bytes).unwrap();
     restored.run_until_parked();
     assert!(restored.has_text("Post in #design"));
-    assert!(restored.host().asked::<ChainBlocks>().is_empty());
+    assert!(restored.host().requests::<ChainBlocks>().is_empty());
 }
 
 #[test]
@@ -618,7 +621,7 @@ fn a_link_opens_the_page_it_names() {
     cx.open::<Explorer>();
     cx.run_until_parked();
     let open = |cx: &mut TestAppContext, route: &str| {
-        routes.push(route.to_string());
+        routes.send(route.to_string());
         cx.run_until_parked();
     };
     open(&mut cx, &format!("tx/{}", abi::hex(&[0xa1; 32])));
@@ -655,8 +658,8 @@ fn a_page_copies_its_link_once_the_session_names_a_chain() {
     cx.simulate_click("explorer-block-11");
     cx.run_until_parked();
     assert!(cx.find("explorer-copy-link").is_none(), "no chain, no link");
-    props.push(Session {
-        chain: "testkit#0a1b2c3d".into(),
+    props.send(Session {
+        chain_id: "testkit#0a1b2c3d".into(),
         ..Session::default()
     });
     cx.run_until_parked();

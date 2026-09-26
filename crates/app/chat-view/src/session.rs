@@ -2,7 +2,7 @@
 //! account it holds), and what that lets her do in the open room.
 use chat::Principal;
 use ducktape_view_guest::Context;
-use ducktape_view_guest::view::Loaded;
+use ducktape_view_guest::view::Loadable;
 
 use crate::Chat;
 use crate::api::Session;
@@ -22,9 +22,9 @@ pub(crate) enum Gate {
 impl Chat {
     pub(crate) fn session_changed(&mut self, next: Session, cx: &mut Context<Self>) {
         let prev = std::mem::replace(&mut self.session, next);
-        let reader_changed = self.session.key != prev.key
+        let reader_changed = self.session.signer != prev.signer
             || self.session.endpoint != prev.endpoint
-            || self.session.chain != prev.chain;
+            || self.session.chain_id != prev.chain_id;
         if reader_changed {
             self.load_names(cx);
         }
@@ -76,14 +76,14 @@ impl Chat {
         let task = cx.spawn(async move |this, cx| {
             let result = list.await;
             let _ = this.update(cx, |chat, cx| {
-                chat.channels = Loaded::from(result.map(|(rooms, more)| {
+                chat.channels = Loadable::from(result.map(|(rooms, more)| {
                     chat.channels_more = more;
                     rooms
                 }));
                 cx.notify();
             });
         });
-        self.channels = Loaded::Loading(task);
+        self.channels = Loadable::Loading(task);
     }
 
     /// The reader's account number, as the host resolved it.

@@ -10,7 +10,7 @@ struct BehaviorView {
     surface_event: String,
 }
 
-impl crate::Declared for BehaviorView {
+impl crate::Capabilities for BehaviorView {
     const CAPABILITIES: &'static [&'static str] = &[];
 }
 
@@ -23,7 +23,7 @@ impl View for BehaviorView {
 #[derive(Default, serde::Deserialize, serde::Serialize)]
 struct DefaultSensorView;
 
-impl crate::Declared for DefaultSensorView {
+impl crate::Capabilities for DefaultSensorView {
     const CAPABILITIES: &'static [&'static str] = &[];
 }
 

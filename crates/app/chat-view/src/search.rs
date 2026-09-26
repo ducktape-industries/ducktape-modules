@@ -51,7 +51,7 @@ impl Chat {
                 let (rows, _, next_after) = match result {
                     Ok(page) => page,
                     Err(refusal) => {
-                        chat.notice = format!("Couldn’t search further: {}", refusal.sentence);
+                        chat.notice = format!("Couldn’t search further: {}", refusal.message);
                         return;
                     }
                 };

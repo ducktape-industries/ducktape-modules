@@ -1677,8 +1677,8 @@
         "id": 1,
         "result": {
           "Err": {
-            "reason": "not_found",
-            "sentence": "no such room"
+            "code": "not_found",
+            "message": "no such room"
           }
         },
         "done": true

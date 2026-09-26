@@ -1935,6 +1935,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "error"
+version = "0.1.0"
+dependencies = [
+ "borsh",
+ "serde",
+]
+
+[[package]]
 name = "etagere"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2761,6 +2769,7 @@ version = "0.1.0"
 dependencies = [
  "abi",
  "borsh",
+ "error",
  "sha1",
  "sha2 0.10.9",
 ]
@@ -6414,6 +6423,7 @@ version = "0.1.0"
 dependencies = [
  "borsh",
  "design",
+ "error",
  "futures",
  "gpui-pre",
  "serde",
@@ -6436,11 +6446,11 @@ dependencies = [
 name = "view-wire"
 version = "0.1.0"
 dependencies = [
- "abi",
  "accesskit",
  "borsh",
  "describe",
  "design",
+ "error",
  "futures",
  "gpui-pre",
  "memchr",

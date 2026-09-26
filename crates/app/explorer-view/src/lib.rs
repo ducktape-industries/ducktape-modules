@@ -10,12 +10,12 @@
 //! finds. The window is the last [`WINDOW`] blocks, read a page at a time
 //! and then followed at the head as `chain.heads` pushes it.
 use ducktape_view_guest::export_view;
-use ducktape_view_guest::host::{Refusal, malformed};
+use ducktape_view_guest::host::{Error, malformed};
 use ducktape_view_guest::methods::{
     Block, BlockPage, BlockRef, ChainBlock, ChainBlocks, ChainHeads, ClipboardWrite, ClockTicks,
-    Description, Head, HostRoute, HostSession, NodeStatus, ProgramDescribe, Query,
+    Description, Head, HostRoute, HostSession, ModuleDescribe, NodeStatus, Query,
 };
-use ducktape_view_guest::view::Loaded;
+use ducktape_view_guest::view::Loadable;
 use ducktape_view_guest::{Context, Host, IntoElement, Render, Task, View, Window};
 use futures::StreamExt;
 use module_registry as registry;
@@ -349,13 +349,13 @@ pub struct Explorer {
     /// the session's chain id (`<label>#<salt>`), which links are minted in
     #[serde(default)]
     session_chain: String,
-    status: Loaded<NodeStatus>,
+    status: Loadable<NodeStatus>,
     chain: Chain,
-    accounts: Loaded<Vec<Account>>,
-    validators: Loaded<Vec<Vec<u8>>>,
-    network: Loaded<Network>,
+    accounts: Loadable<Vec<Account>>,
+    validators: Loadable<Vec<Vec<u8>>>,
+    network: Loadable<Network>,
     /// a block opened outside the window
-    opened: Loaded<Option<(BlockRow, Vec<TxRow>)>>,
+    opened: Loadable<Option<(BlockRow, Vec<TxRow>)>>,
     #[serde(skip)]
     pulling: bool,
     #[serde(skip)]
@@ -386,7 +386,7 @@ impl View for Explorer {
         self.watches.push(cx.spawn(async move |this, cx| {
             while let Some(Ok(session)) = props.next().await {
                 let landed = this.update(cx, |view, cx| {
-                    view.session_chain = session.chain;
+                    view.session_chain = session.chain_id;
                     cx.notify();
                 });
                 if landed.is_err() {
@@ -429,7 +429,7 @@ impl Explorer {
     /// and the window follows.
     fn at_head(&mut self, head: Head, cx: &mut Context<Self>) {
         match &mut self.status {
-            Loaded::Ready(status) => {
+            Loadable::Ready(status) => {
                 if head.height > status.height {
                     status.height = head.height;
                     status.tip = head.id;
@@ -458,7 +458,7 @@ impl Explorer {
             .ask::<ducktape_view_guest::methods::ChainStatus>(());
         if self.status.ready().is_some() {
             cx.refresh(ask, |view, status, cx| {
-                view.status = Loaded::Ready(status);
+                view.status = Loadable::Ready(status);
                 view.pull(cx);
             });
         } else if !self.status.is_loading() {
@@ -475,7 +475,7 @@ impl Explorer {
         let work = accounts(cx.host());
         match self.accounts.ready() {
             Some(_) => cx.refresh(work, |view, accounts, _| {
-                view.accounts = Loaded::Ready(accounts)
+                view.accounts = Loadable::Ready(accounts)
             }),
             None => self.accounts = cx.load(work, |view| &mut view.accounts),
         }
@@ -484,7 +484,9 @@ impl Explorer {
     fn read_validators(&mut self, cx: &mut Context<Self>) {
         let work = validators(cx.host());
         match self.validators.ready() {
-            Some(_) => cx.refresh(work, |view, keys, _| view.validators = Loaded::Ready(keys)),
+            Some(_) => cx.refresh(work, |view, keys, _| {
+                view.validators = Loadable::Ready(keys)
+            }),
             None => self.validators = cx.load(work, |view| &mut view.validators),
         }
     }
@@ -493,7 +495,7 @@ impl Explorer {
         let work = network(cx.host());
         match self.network.ready() {
             Some(_) => cx.refresh(work, |view, network, _| {
-                view.network = Loaded::Ready(network)
+                view.network = Loadable::Ready(network)
             }),
             None => self.network = cx.load(work, |view| &mut view.network),
         }
@@ -534,7 +536,7 @@ impl Explorer {
                             view.pull(cx);
                         }
                     }
-                    Err(refusal) => view.chain.failed = Some(refusal.sentence),
+                    Err(refusal) => view.chain.failed = Some(refusal.message),
                 }
                 cx.notify();
             });
@@ -652,7 +654,7 @@ impl Explorer {
                     Ok(Some(block)) => {
                         let (row, txs) = rows(block);
                         let height = row.height;
-                        view.opened = Loaded::Ready(Some((row, txs)));
+                        view.opened = Loadable::Ready(Some((row, txs)));
                         view.go(Route::Block(height), cx);
                     }
                     Ok(None) => {
@@ -661,7 +663,7 @@ impl Explorer {
                             decode::plural(blocks as u64, "block", "blocks")
                         ))
                     }
-                    Err(refusal) => view.note = Some(refusal.sentence),
+                    Err(refusal) => view.note = Some(refusal.message),
                 }
                 cx.notify();
             });
@@ -703,7 +705,7 @@ impl Explorer {
             let _ = this.update(cx, |view, cx| {
                 view.note = Some(match copied {
                     Ok(()) => "Copied the link.".into(),
-                    Err(refusal) => refusal.sentence,
+                    Err(refusal) => refusal.message,
                 });
                 cx.notify();
             });
@@ -726,7 +728,7 @@ impl Explorer {
         }
         let ask = cx
             .host()
-            .ask::<ProgramDescribe>((tx.target.clone(), tx.payload.clone()));
+            .ask::<ModuleDescribe>((tx.target.clone(), tx.payload.clone()));
         let hash = tx.hash;
         cx.spawn(async move |this, cx| {
             let described = ask.await;
@@ -792,7 +794,7 @@ fn hash_of(query: &str) -> Option<[u8; 32]> {
     Some(hash)
 }
 
-async fn accounts(host: Host) -> Result<Vec<Account>, Refusal> {
+async fn accounts(host: Host) -> Result<Vec<Account>, Error> {
     let mut accounts = Vec::new();
     let mut after = None;
     loop {
@@ -826,7 +828,7 @@ async fn accounts(host: Host) -> Result<Vec<Account>, Refusal> {
     }
 }
 
-async fn validators(host: Host) -> Result<Vec<Vec<u8>>, Refusal> {
+async fn validators(host: Host) -> Result<Vec<Vec<u8>>, Error> {
     match host.ask::<Query<Valset>>(valset::Query::Validators).await? {
         valset::Reply::Validators(keys) => Ok(keys),
         other => Err(malformed(format!(
@@ -840,7 +842,7 @@ async fn validators(host: Host) -> Result<Vec<Vec<u8>>, Refusal> {
 /// `At(0)` is the folded set: the registry applies the changes due at or
 /// before the height asked, and it answers no height of its own, so there is
 /// no "as of now" to ask for — the scheduled list is what is still to come.
-async fn network(host: Host) -> Result<Network, Refusal> {
+async fn network(host: Host) -> Result<Network, Error> {
     let unexpected =
         |reply: &dyn std::fmt::Debug| malformed(format!("{} answered {reply:?}", registry::MODULE));
     let programs = match host.ask::<Query<Registry>>(registry::Query::At(0)).await? {
@@ -892,7 +894,7 @@ export_view!(
     Explorer,
     "Explorer",
     "The chain as this node keeps it: blocks, transactions, accounts and programs.",
-    ["chain", "program", "host", "clock", "clipboard"]
+    ["chain", "module", "host", "clock", "clipboard"]
 );
 
 #[cfg(test)]

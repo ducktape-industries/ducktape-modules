@@ -286,7 +286,7 @@ pub fn every_event() -> Vec<Event> {
         },
         Event::Response {
             id: 1,
-            result: Err(Refusal::new("not_found", "no such room")),
+            result: Err(Error::new("not_found", "no such room")),
             done: true,
         },
         Event::Resync,

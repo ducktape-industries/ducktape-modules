@@ -24,14 +24,14 @@ pub(super) fn blocks(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
 pub(super) fn block(view: &Explorer, height: u64, cx: Cx, theme: &Theme) -> AnyElement {
     let Some((block, txs)) = view.block(height) else {
         return match &view.opened {
-            Loaded::Ready(None) => empty_state(
+            Loadable::Ready(None) => empty_state(
                 "explorer-no-block",
                 format!("No block {}", grouped(height)),
                 "This node keeps no finalized block at this height.",
                 theme,
             )
             .into_any_element(),
-            Loaded::Failed(refusal) => failed(&refusal.sentence, cx, theme),
+            Loadable::Failed(refusal) => failed(&refusal.message, cx, theme),
             _ => quiet("explorer-block-loading", "Reading the block…", theme),
         };
     };

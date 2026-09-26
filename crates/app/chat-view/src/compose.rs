@@ -86,7 +86,7 @@ impl Chat {
                                 });
                             }
                             Err(refusal) => {
-                                chat.drafts.entry(key).or_default().note = refusal.sentence
+                                chat.drafts.entry(key).or_default().note = refusal.message
                             }
                         }
                     });
@@ -110,7 +110,7 @@ impl Chat {
                     let _ = this.update(cx, |chat, cx| {
                         cx.notify();
                         if let Err(refusal) = result {
-                            chat.drafts.entry(key).or_default().note = refusal.sentence;
+                            chat.drafts.entry(key).or_default().note = refusal.message;
                         }
                     });
                 })
@@ -153,7 +153,7 @@ impl Chat {
                         chat.refresh(cx);
                     }
                     Err(refusal) => {
-                        draft.note = refusal.sentence;
+                        draft.note = refusal.message;
                         draft.failed(send);
                     }
                 }

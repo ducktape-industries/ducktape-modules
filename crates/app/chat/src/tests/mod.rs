@@ -34,7 +34,9 @@ impl Default for Chat {
         store.borrow_mut().siblings.insert(
             identity::MODULE.into(),
             Box::new(|request| {
-                let identity::Query::OfKey { key } = abi::decode(request)? else {
+                let identity::Query::OfKey { key } =
+                    abi::decode(request).map_err(guest::kernel::error_from)?
+                else {
                     panic!("the harness answers identity's OfKey only");
                 };
                 let number = <[u8; 8]>::try_from(key.as_slice()).map(u64::from_be_bytes);

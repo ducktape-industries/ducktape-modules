@@ -72,20 +72,25 @@ fn merging_submits_the_client_computed_fast_forward() {
     let (mut cx, _) = change_screen("default", ChangeTab::Conversation);
     cx.simulate_click("forge-merge");
     cx.run_until_parked();
-    assert!(cx.host().asked::<SubmitForge>().iter().any(|op| matches!(
-        op,
-        Op::Merge {
-            repo,
-            expected_into,
-            expected_from,
-            result,
-            change: Some(1),
-            ..
-        } if repo == "project"
-            && expected_into == "ebfb8b62a50d6e5f7d10062af7cc5d15fd224e16"
-            && expected_from == "26607f522099476177a45a8058a93108fba5a84d"
-            && result == expected_from
-    )));
+    assert!(
+        cx.host()
+            .requests::<SubmitForge>()
+            .iter()
+            .any(|op| matches!(
+                op,
+                Op::Merge {
+                    repo,
+                    expected_into,
+                    expected_from,
+                    result,
+                    change: Some(1),
+                    ..
+                } if repo == "project"
+                    && expected_into == "ebfb8b62a50d6e5f7d10062af7cc5d15fd224e16"
+                    && expected_from == "26607f522099476177a45a8058a93108fba5a84d"
+                    && result == expected_from
+            ))
+    );
     assert!(cx.has_text("Merging this change"));
 }
 
@@ -190,7 +195,7 @@ fn the_conversation_is_the_hidden_chat_channel_and_the_forge_body() {
     cx.run_until_parked();
     assert!(
         cx.host()
-            .asked::<Submit<ChatApi>>()
+            .requests::<Submit<ChatApi>>()
             .iter()
             .any(|op| matches!(
                 op,
@@ -321,7 +326,7 @@ fn a_review_batches_every_anchor_into_exactly_one_operation() {
     cx.simulate_click("forge-verdict-request-changes");
     cx.run_until_parked();
 
-    let submitted = cx.host().asked::<SubmitForge>();
+    let submitted = cx.host().requests::<SubmitForge>();
     let reviews: Vec<&Op> = submitted
         .iter()
         .filter(|op| matches!(op, Op::ReviewSubmit { .. }))
@@ -399,12 +404,12 @@ fn an_empty_comment_verdict_is_refused_before_it_reaches_the_program() {
     let (mut cx, view) = change_screen("reviewed", ChangeTab::Files);
     cx.simulate_click("forge-start-review");
     cx.run_until_parked();
-    let before = cx.host().asked::<SubmitForge>().len();
+    let before = cx.host().requests::<SubmitForge>().len();
     cx.simulate_click("forge-finish-review");
     cx.run_until_parked();
     cx.simulate_click("forge-verdict-comment");
     cx.run_until_parked();
-    assert_eq!(cx.host().asked::<SubmitForge>().len(), before);
+    assert_eq!(cx.host().requests::<SubmitForge>().len(), before);
     assert!(
         cx.has_text("A comment review needs a body or a line comment"),
         "{:?}",

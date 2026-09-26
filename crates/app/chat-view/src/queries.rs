@@ -4,7 +4,7 @@ use chat::{
     ChannelInfo, MemberRow, MessageHits, MsgRow, PageRequest, PageResponse, Principal, Query, Reply,
 };
 use ducktape_view_guest::Host;
-use ducktape_view_guest::host::{Refusal, pages, wrong_reply};
+use ducktape_view_guest::host::{Error, pages, wrong_reply};
 
 use crate::api::{Ask, ChatApi};
 use crate::{PAGE, WINDOW};
@@ -20,7 +20,7 @@ fn page(after: Option<Vec<u8>>, limit: usize) -> PageRequest {
 }
 
 /// Every room, up to [`CHANNEL_PAGES`] pages, and whether more follow.
-pub(crate) async fn channels(host: Host) -> Result<(Vec<ChannelInfo>, bool), Refusal> {
+pub(crate) async fn channels(host: Host) -> Result<(Vec<ChannelInfo>, bool), Error> {
     let (all, next) = pages(None, CHANNEL_PAGES, |after| {
         let ask = host.ask::<Ask<ChatApi>>(Query::Channels {
             page: page(after, PAGE),
@@ -44,7 +44,7 @@ pub(crate) async fn roots(
     viewer: Vec<Principal>,
     below: Option<Vec<u8>>,
     limit: usize,
-) -> Result<(Vec<MsgRow>, bool), Refusal> {
+) -> Result<(Vec<MsgRow>, bool), Error> {
     let (all, next) = pages(below, limit.div_ceil(PAGE), |after| {
         let ask = host.ask::<Ask<ChatApi>>(Query::Roots {
             channel_id: channel_id.clone(),
@@ -68,7 +68,7 @@ pub(crate) async fn around(
     channel_id: String,
     seq: u64,
     viewer: Vec<Principal>,
-) -> Result<Vec<MsgRow>, Refusal> {
+) -> Result<Vec<MsgRow>, Error> {
     match host
         .ask::<Ask<ChatApi>>(Query::MessagesAround {
             channel_id,
@@ -88,7 +88,7 @@ pub(crate) fn sorted(mut rows: Vec<MsgRow>) -> Vec<MsgRow> {
     rows
 }
 
-pub(crate) async fn members(host: Host, channel_id: String) -> Result<Vec<MemberRow>, Refusal> {
+pub(crate) async fn members(host: Host, channel_id: String) -> Result<Vec<MemberRow>, Error> {
     match host
         .ask::<Ask<ChatApi>>(Query::Members {
             channel_id,
@@ -108,7 +108,7 @@ pub(crate) async fn thread(
     root_seq: u64,
     viewer: Vec<Principal>,
     after: Option<Vec<u8>>,
-) -> Result<(Vec<MsgRow>, Option<Vec<u8>>), Refusal> {
+) -> Result<(Vec<MsgRow>, Option<Vec<u8>>), Error> {
     match host
         .ask::<Ask<ChatApi>>(Query::Thread {
             channel_id,
@@ -135,7 +135,7 @@ pub(crate) async fn search_hits(
     channel_id: Option<String>,
     viewer: Vec<Principal>,
     after: Option<Vec<u8>>,
-) -> Result<(Vec<MsgRow>, bool, Option<Vec<u8>>), Refusal> {
+) -> Result<(Vec<MsgRow>, bool, Option<Vec<u8>>), Error> {
     let query = match text.strip_prefix('#') {
         Some(tag) if !tag.is_empty() => Query::TagSearch {
             tag: tag.to_owned(),

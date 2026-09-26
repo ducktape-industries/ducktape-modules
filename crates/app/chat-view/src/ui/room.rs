@@ -7,7 +7,7 @@ use ducktape_view_guest::{
 };
 
 use chat::{ChannelInfo, MsgRow};
-use ducktape_view_guest::view::Loaded;
+use ducktape_view_guest::view::Loadable;
 
 use super::timeline;
 use crate::composer::Target;
@@ -220,28 +220,28 @@ fn header(chat: &Chat, room: &Room, cx: &mut Context<Chat>, theme: &Theme) -> im
 
 fn no_room(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement {
     match &chat.channels {
-        Loaded::Idle | Loaded::Loading(_) => empty_state(
+        Loadable::Idle | Loadable::Loading(_) => empty_state(
             "chat-no-room-loading",
             "Loading channels…",
             "Choose a room when they arrive.",
             theme,
         )
         .into_any_element(),
-        Loaded::Failed(refusal) => empty_state(
+        Loadable::Failed(refusal) => empty_state(
             "chat-no-room-failed",
             "Couldn’t read the channels",
-            refusal.sentence.clone(),
+            refusal.message.clone(),
             theme,
         )
         .into_any_element(),
-        Loaded::Ready(rooms) if !rooms.is_empty() => empty_state(
+        Loadable::Ready(rooms) if !rooms.is_empty() => empty_state(
             "chat-no-room",
             "No channel open",
             "Choose a channel from the sidebar.",
             theme,
         )
         .into_any_element(),
-        Loaded::Ready(_) => {
+        Loadable::Ready(_) => {
             let open = cx.listener(|chat, _: &ClickEvent, _window, cx| {
                 chat.create = Some(Default::default());
                 cx.notify();
@@ -297,9 +297,11 @@ fn huddle(info: &ChannelInfo, theme: &Theme) -> impl IntoElement {
 
 fn search_results(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement {
     let found = match &chat.search.hits {
-        Loaded::Idle | Loaded::Loading(_) => vec![quiet("Searching…", theme).into_any_element()],
-        Loaded::Failed(refusal) => vec![quiet(refusal.sentence.clone(), theme).into_any_element()],
-        Loaded::Ready(hits) if hits.rows.is_empty() => vec![
+        Loadable::Idle | Loadable::Loading(_) => {
+            vec![quiet("Searching…", theme).into_any_element()]
+        }
+        Loadable::Failed(refusal) => vec![quiet(refusal.message.clone(), theme).into_any_element()],
+        Loadable::Ready(hits) if hits.rows.is_empty() => vec![
             empty_state(
                 "chat-search-empty",
                 "No results",
@@ -308,7 +310,7 @@ fn search_results(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl In
             )
             .into_any_element(),
         ],
-        Loaded::Ready(hits) => hit_list(chat, hits, cx, theme),
+        Loadable::Ready(hits) => hit_list(chat, hits, cx, theme),
     };
     let clear = cx.listener(|chat, _: &ClickEvent, _window, cx| {
         chat.search_clear();

@@ -2,7 +2,7 @@ use super::{assert_accessible, find, texts, FakeHost};
 use crate::{
     host::Host,
     wire::{Event, Frame, Node},
-    App, Declared, Driver, Entity, View,
+    App, Capabilities, Driver, Entity, View,
 };
 
 trait TestDriver {
@@ -43,7 +43,7 @@ impl TestAppContext {
     pub fn host(&self) -> FakeHost {
         self.host.clone()
     }
-    pub fn open<V: View + Declared>(&mut self) -> Entity<V> {
+    pub fn open<V: View + Capabilities>(&mut self) -> Entity<V> {
         self.host.declare(V::CAPABILITIES);
         let driver = Driver::<V>::initialize_in(self.fresh_app(), None).expect("view initializes");
         let entity = driver.entity();
@@ -56,7 +56,7 @@ impl TestAppContext {
     pub fn snapshot(&self) -> Result<Vec<u8>, String> {
         self.driver.as_ref().expect("open a view first").snapshot()
     }
-    pub fn restore<V: View + Declared>(&mut self, bytes: &[u8]) -> Result<Entity<V>, String> {
+    pub fn restore<V: View + Capabilities>(&mut self, bytes: &[u8]) -> Result<Entity<V>, String> {
         self.host.declare(V::CAPABILITIES);
         let value = serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
         let driver = Driver::<V>::initialize_in(self.fresh_app(), Some(value))?;
@@ -212,8 +212,8 @@ mod tests {
             }));
         }
     }
-    impl Declared for LiveView {
-        const CAPABILITIES: &'static [&'static str] = &["program"];
+    impl Capabilities for LiveView {
+        const CAPABILITIES: &'static [&'static str] = &["module"];
     }
     impl Render for LiveView {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl crate::IntoElement {
@@ -226,17 +226,17 @@ mod tests {
         let mut cx = TestAppContext::new();
         let feed = cx.host().stream::<Changes<Probe>>();
         cx.open::<LiveView>();
-        feed.push(None);
+        feed.send(None);
         cx.run_until_parked();
         assert!(cx.has_text("1"));
         let snapshot = cx.snapshot().unwrap();
-        feed.push(None);
+        feed.send(None);
         let restored = cx.restore::<LiveView>(&snapshot).unwrap();
         restored.read(|view| assert_eq!(view.items, 1));
-        feed.push(None);
+        feed.send(None);
         cx.run_until_parked();
         restored.read(|view| assert_eq!(view.items, 2));
-        assert_eq!(cx.host().asked::<Changes<Probe>>().len(), 2);
+        assert_eq!(cx.host().requests::<Changes<Probe>>().len(), 2);
     }
 
     /// Logs through `host`, which its manifest leaves out.
@@ -248,8 +248,8 @@ mod tests {
             Self
         }
     }
-    impl Declared for Undeclared {
-        const CAPABILITIES: &'static [&'static str] = &["program"];
+    impl Capabilities for Undeclared {
+        const CAPABILITIES: &'static [&'static str] = &["module"];
     }
     impl Render for Undeclared {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl crate::IntoElement {

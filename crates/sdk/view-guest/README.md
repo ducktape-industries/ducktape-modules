@@ -37,14 +37,14 @@ let mut live = cx.host().subscribe::<Changes<Valset>>(());
 cx.host().notify::<methods::HostBadge>(3);
 ```
 
-A node program is addressed by a `methods::Program` impl beside the view
+A node program is addressed by a `methods::Module` impl beside the view
 (`crates/app/forge-view/src/api.rs`), never by the program crate; `Query<P>`,
-`Submit<P>` and `Changes<P>` are its three methods. Every refusal is `abi::Refusal`
-(`reason` token, `sentence`), one type end to end. `Loaded<T>` + `cx.load`
+`Submit<P>` and `Changes<P>` are its three methods. Every refusal is the module SDK's `Error`
+(`code` token, `message`), one type end to end. `Loadable<T>` + `cx.load`
 (`src/view.rs`) hold an ask's four states and snapshot `Loading` as `Idle`.
 
 `Session` (`methods.rs`, `subscribe::<HostSession>`) is what every view is handed:
-`connected`, `dark`, `chain`, `key` (the seated key, hex), `account` (its
+`connected`, `dark`, `chain_id`, `signer` (the seated key, hex), `account` (its
 account number, `None` until the host resolves one), `endpoint`; an item per
 change. Read "who am I" from `account`; no view asks identity for it.
 
@@ -55,11 +55,11 @@ snapshot came back, `PREFERRED_WINDOW_SIZE` as `"w,h"` or `"none"`. The
 snapshot is the view's own serde (`src/snapshot.rs`), refused while work is
 pending; a host holds it to `view_wire::MAX_SNAPSHOT_BYTES` (8 MiB,
 `view-wire/src/snapshot.rs`). Derive `Serialize`/`Deserialize` and keep
-`Task`s out of the state (`Loaded` does).
+`Task`s out of the state (`Loadable` does).
 
 ## Exporting
 
-`export_view!(View, "Name", "description", ["program", "host"])` (`src/view.rs`)
+`export_view!(View, "Name", "description", ["module", "host"])` (`src/view.rs`)
 writes the five wasm exports and the manifest section `ducktape.view.manifest`
 (`view-wire/src/manifest.rs`: header, name, description, capabilities,
 preferred size, `WIRE_EPOCH`). Each capability must be one of
@@ -78,7 +78,7 @@ pinned by `view-wire/tests/golden.rs`: a shape change is a new `WIRE_EPOCH`.
 
 `testing::TestAppContext` (`src/testing/context.rs`) opens a view over a
 `FakeHost` (`src/testing/fake_host.rs`): `handle::<Method>`, `refuse`,
-`stream`, `asked`; then `simulate_click`, `texts`, `assert_accessible`.
+`stream`, `requests`; then `simulate_click`, `texts`, `assert_accessible`.
 It holds the view to its `export_view!` capabilities as the app does: a method
 whose capability the manifest leaves out panics with `undeclared_capability`.
 Screen export: a test gated on `*_SCREEN_EXPORT=1` (`FORGE_SCREEN_EXPORT`,

@@ -72,7 +72,7 @@ fn ready() -> TestAppContext {
     cx.open::<Nodes>();
     cx.run_until_parked();
     assert_eq!(
-        cx.host().asked::<Query<Valset>>(),
+        cx.host().requests::<Query<Valset>>(),
         vec![
             valset::Query::Validators,
             valset::Query::Memberships {
@@ -83,7 +83,7 @@ fn ready() -> TestAppContext {
             }
         ]
     );
-    assert_eq!(cx.host().asked::<Changes<Valset>>().len(), 1);
+    assert_eq!(cx.host().requests::<Changes<Valset>>().len(), 1);
     cx
 }
 
@@ -166,7 +166,7 @@ fn a_refusal_shows_its_sentence_and_retry_asks_again() {
     cx.simulate_click("nodes-retry");
     cx.run_until_parked();
     assert!(cx.has_text("10.0.0.1:4000"));
-    assert_eq!(cx.host().asked::<Query<Valset>>().len(), 3);
+    assert_eq!(cx.host().requests::<Query<Valset>>().len(), 3);
 }
 
 #[test]
@@ -178,10 +178,10 @@ fn a_live_bump_re_reads_and_a_snapshot_restores_the_screen() {
     cx.run_until_parked();
     cx.host()
         .refuse::<Query<Valset>>("unavailable", "refresh temporarily unavailable");
-    feed.push(None);
+    feed.send(None);
     cx.run_until_parked();
     assert!(cx.has_text("10.0.0.1:4000"));
-    assert_eq!(cx.host().asked::<Query<Valset>>().len(), 3);
+    assert_eq!(cx.host().requests::<Query<Valset>>().len(), 3);
     cx.host().handle::<Query<Valset>>(|query| {
         Ok(match query {
             valset::Query::Validators => validators(),
@@ -195,7 +195,7 @@ fn a_live_bump_re_reads_and_a_snapshot_restores_the_screen() {
             other => panic!("unexpected query: {other:?}"),
         })
     });
-    feed.push(None);
+    feed.send(None);
     cx.run_until_parked();
     assert!(cx.has_text("10.9.9.9:4000") && !cx.has_text("10.0.0.1:4000"));
 
@@ -206,8 +206,8 @@ fn a_live_bump_re_reads_and_a_snapshot_restores_the_screen() {
     restored.restore::<Nodes>(&bytes).unwrap();
     restored.run_until_parked();
     assert!(restored.has_text("10.9.9.9:4000"));
-    assert_eq!(restored.host().asked::<Query<Valset>>().len(), 1);
-    assert_eq!(restored.host().asked::<Changes<Valset>>().len(), 1);
+    assert_eq!(restored.host().requests::<Query<Valset>>().len(), 1);
+    assert_eq!(restored.host().requests::<Changes<Valset>>().len(), 1);
 }
 
 #[test]

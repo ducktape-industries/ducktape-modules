@@ -124,7 +124,7 @@ fn the_roster_lists_each_account_with_its_standing() {
             .count(),
         1
     );
-    assert_eq!(cx.host().asked::<Changes<Identity>>().len(), 1);
+    assert_eq!(cx.host().requests::<Changes<Identity>>().len(), 1);
 }
 
 #[test]
@@ -163,16 +163,16 @@ fn a_refusal_shows_its_sentence_and_retry_asks_again() {
     cx.simulate_click("members-retry");
     cx.run_until_parked();
     assert!(cx.has_text("eddy"));
-    assert_eq!(cx.host().asked::<Query<Identity>>().len(), 2);
+    assert_eq!(cx.host().requests::<Query<Identity>>().len(), 2);
 }
 
 #[test]
 fn the_filter_narrows_the_list_without_asking_again() {
     let mut cx = ready();
-    let reads = cx.host().asked::<Query<Identity>>().len();
+    let reads = cx.host().requests::<Query<Identity>>().len();
     cx.simulate_input("members-filter", "ed");
     assert!(cx.has_text("eddy") && !cx.has_text("chat"));
-    assert_eq!(cx.host().asked::<Query<Identity>>().len(), reads);
+    assert_eq!(cx.host().requests::<Query<Identity>>().len(), reads);
     cx.simulate_input("members-filter", "8");
     assert!(cx.has_text("chat") && !cx.has_text("eddy"));
     cx.simulate_input("members-filter", "nobody");
@@ -188,16 +188,16 @@ fn a_live_bump_re_reads_and_a_snapshot_restores_the_screen() {
     cx.run_until_parked();
     cx.host()
         .refuse::<Query<Identity>>("unavailable", "refresh temporarily unavailable");
-    feed.push(None);
+    feed.send(None);
     cx.run_until_parked();
     assert!(cx.has_text("eddy"));
-    assert_eq!(cx.host().asked::<Query<Identity>>().len(), 2);
+    assert_eq!(cx.host().requests::<Query<Identity>>().len(), 2);
     cx.host().handle::<Query<Identity>>(|_| {
         Ok(identity::Reply::Accounts(page(vec![person(
             9, "newcomer", b"\x09",
         )])))
     });
-    feed.push(None);
+    feed.send(None);
     cx.run_until_parked();
     assert!(cx.has_text("newcomer") && !cx.has_text("eddy"));
     cx.simulate_input("members-filter", "new");
@@ -209,8 +209,8 @@ fn a_live_bump_re_reads_and_a_snapshot_restores_the_screen() {
     restored.run_until_parked();
     assert!(restored.has_text("newcomer"));
     view.read(|view| assert_eq!(view.filter, "new"));
-    assert_eq!(restored.host().asked::<Query<Identity>>().len(), 1);
-    assert_eq!(restored.host().asked::<Changes<Identity>>().len(), 1);
+    assert_eq!(restored.host().requests::<Query<Identity>>().len(), 1);
+    assert_eq!(restored.host().requests::<Changes<Identity>>().len(), 1);
 }
 
 #[test]
