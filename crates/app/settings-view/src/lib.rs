@@ -11,7 +11,9 @@ use ducktape_view_guest::view::Loadable;
 use ducktape_view_guest::{Context, Render, Task, View, Window, export_view};
 use ducktape_view_guest::{Div, FontWeight, Stateful};
 use futures::StreamExt;
+use identity::Standing;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct Settings {
@@ -24,10 +26,16 @@ pub struct Settings {
     create_account: Form,
     create_agent: Form,
     agent_key: Form,
+    /// each agent's rename, by its number
+    #[serde(default)]
+    rename_agent: BTreeMap<u64, Form>,
+    /// the one suspend, resume or revoke in flight
+    #[serde(default)]
+    agent_standing: Form,
     #[serde(skip)]
     watches: Vec<Task<()>>,
 }
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 /// A one-field form: what was typed, whether its submit is in flight, and
 /// the refusal it met.
 struct Form {
@@ -188,7 +196,7 @@ impl Settings {
                 if a.number.is_none() {
                     body = body.child(self.create_account_form(cx, theme));
                 }
-                if a.person {
+                if a.manages {
                     body = body.child(self.agents(a, cx, theme));
                 }
                 body.into_any_element()
@@ -322,9 +330,11 @@ impl Settings {
         })
         .detach();
     }
-    /// The agents this person manages, a form to create one, and one to add
-    /// a key to one: the agent's key request (the hex of an `AddKey` whose
-    /// consent the new key signed), which this key submits as the manager.
+    /// The agents this person manages, each with what its manager does to
+    /// it (rename, suspend or resume, revoke), a form to create one, and
+    /// one to add a key to one: the agent's key request (the hex of an
+    /// `AddKey` whose consent the new key signed), which this key submits
+    /// as the manager.
     fn agents(&self, a: &Account, cx: &mut Context<Self>, theme: &Theme) -> AnyElement {
         let create_typed = cx.listener(|v, event: &String, _, cx| {
             v.create_agent.text = event.clone();
@@ -348,18 +358,7 @@ impl Settings {
                 "Agents act as accounts you manage. You answer for what they do.",
                 theme,
             ))
-            .children(a.agents.iter().map(|agent| {
-                line(
-                    &format!("agents/{}", agent.number),
-                    &agent.name,
-                    &format!(
-                        "Agent · account {} · {} · {}",
-                        agent.number,
-                        design::plural(agent.keys as u64, "key", "keys"),
-                        agent.status
-                    ),
-                )
-            }))
+            .children(a.agents.iter().map(|agent| self.agent(agent, cx, theme)))
             .child(field(
                 "settings/agents/create/name",
                 "Agent name",
@@ -390,12 +389,128 @@ impl Settings {
                 theme,
                 add,
             ));
-        for (key, form) in [("create", &self.create_agent), ("key", &self.agent_key)] {
+        for (key, form) in [
+            ("create", &self.create_agent),
+            ("key", &self.agent_key),
+            ("standing", &self.agent_standing),
+        ] {
             if !form.error.is_empty() {
                 body = body.child(refusal(&format!("agents/{key}"), &form.error, theme));
             }
         }
         body.into_any_element()
+    }
+    /// One agent's line and what its manager does to it. Revoked, it only
+    /// reads as such.
+    fn agent(&self, agent: &account::Agent, cx: &mut Context<Self>, theme: &Theme) -> AnyElement {
+        let number = agent.number;
+        let standing = match agent.standing {
+            Standing::Active => "active",
+            Standing::Suspended => "suspended",
+            Standing::Revoked => "revoked",
+        };
+        let mut body = div()
+            .id(format!("settings/agents/{number}/card"))
+            .flex()
+            .flex_col()
+            .gap_1()
+            .w_full()
+            .child(line(
+                &format!("agents/{number}"),
+                &agent.name,
+                &format!(
+                    "Agent · account {number} · {} · {standing}",
+                    design::plural(agent.keys as u64, "key", "keys"),
+                ),
+            ));
+        if agent.standing == Standing::Revoked {
+            return body.into_any_element();
+        }
+        let rename = self.rename_agent.get(&number).cloned().unwrap_or_default();
+        let typed = cx.listener(move |v, event: &String, _, cx| {
+            v.rename_agent.entry(number).or_default().text = event.clone();
+            cx.notify();
+        });
+        let (toggle_id, toggle_label, toggle_op) = match agent.standing {
+            Standing::Suspended => ("resume", "Resume", identity::Op::Resume { account: number }),
+            Standing::Active | Standing::Revoked => (
+                "suspend",
+                "Suspend",
+                identity::Op::Suspend { account: number },
+            ),
+        };
+        let busy = self.agent_standing.busy;
+        let standing_op = |op: identity::Op| {
+            cx.listener(move |v, _: &ClickEvent, _, cx| {
+                v.submit_agent_op(op.clone(), |v| &mut v.agent_standing, cx)
+            })
+        };
+        let toggle = standing_op(toggle_op);
+        let revoke = standing_op(identity::Op::Revoke { account: number });
+        let renamed =
+            cx.listener(move |v, _: &ClickEvent, _, cx| v.submit_rename_agent(number, cx));
+        body = body
+            .child(field(
+                &format!("settings/agents/{number}/name"),
+                "New name",
+                &rename,
+                theme,
+                typed,
+            ))
+            .child(
+                div()
+                    .id(format!("settings/agents/{number}/actions"))
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .w_full()
+                    .child(submit(
+                        &format!("settings/agents/{number}/rename"),
+                        "Rename",
+                        "Renaming…",
+                        rename.busy,
+                        theme,
+                        renamed,
+                    ))
+                    .child(submit(
+                        &format!("settings/agents/{number}/{toggle_id}"),
+                        toggle_label,
+                        "Working…",
+                        busy,
+                        theme,
+                        toggle,
+                    ))
+                    .child(submit(
+                        &format!("settings/agents/{number}/revoke"),
+                        "Revoke",
+                        "Working…",
+                        busy,
+                        theme,
+                        revoke,
+                    )),
+            );
+        if !rename.error.is_empty() {
+            body = body.child(refusal(
+                &format!("agents/{number}/rename"),
+                &rename.error,
+                theme,
+            ));
+        }
+        body.into_any_element()
+    }
+    fn submit_rename_agent(&mut self, number: u64, cx: &mut Context<Self>) {
+        let form = self.rename_agent.entry(number).or_default();
+        let name = form.text.trim().to_string();
+        if name.is_empty() {
+            form.error = "Enter the agent's new name.".into();
+            cx.notify();
+            return;
+        }
+        let op = identity::Op::SetName {
+            account: number,
+            name,
+        };
+        self.submit_agent_op(op, move |v| v.rename_agent.entry(number).or_default(), cx);
     }
     fn submit_create_agent(&mut self, cx: &mut Context<Self>) {
         let name = self.create_agent.text.trim().to_string();
@@ -431,7 +546,7 @@ impl Settings {
     fn submit_agent_op(
         &mut self,
         op: identity::Op,
-        form: fn(&mut Settings) -> &mut Form,
+        form: impl Fn(&mut Settings) -> &mut Form + 'static,
         cx: &mut Context<Self>,
     ) {
         if form(self).busy {

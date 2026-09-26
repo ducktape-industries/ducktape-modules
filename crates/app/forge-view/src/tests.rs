@@ -113,13 +113,10 @@ fn accounts() -> chat::PageResponse<chat::Profile> {
     let row = |number, name: &str| chat::Profile {
         number,
         name: name.into(),
-        category: None,
-        manager: None,
-        module: None,
-        status: chat::Status::Active,
+        kind: chat::Kind::Person,
     };
     let forge = chat::Profile {
-        module: Some(forge::MODULE.into()),
+        kind: chat::Kind::Module(forge::MODULE.into()),
         ..row(FORGE, forge::MODULE)
     };
     chat::PageResponse {

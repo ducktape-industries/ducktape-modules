@@ -2,7 +2,7 @@
 use super::*;
 
 /// A direct message landing in a room the reader is not in is handed to the
-/// host as a notice linking to it, and counted on the tab until she opens
+/// host as a notice linking to it, and counted on the tab until they open
 /// the room; opening it reads the host's rows under the notice's tag.
 #[test]
 fn a_direct_message_elsewhere_is_a_notice_and_a_badge_until_read() {
@@ -164,7 +164,7 @@ fn kept_cursors_bring_the_badge_back_after_a_relaunch() {
 }
 
 /// On a relaunch the kept cursors and the room list can land before the
-/// host names the reader's account: the recount waits for her account, then
+/// host names the reader's account: the recount waits for their account, then
 /// runs without another chat write to prompt it.
 #[test]
 fn the_relaunch_recount_waits_for_the_readers_account() {
@@ -202,7 +202,7 @@ fn the_relaunch_recount_waits_for_the_readers_account() {
     cx.run_until_parked();
     assert_ne!(cx.host().requests::<HostBadge>().last(), Some(&1));
 
-    // the host names her account
+    // the host names their account
     props.send(Session {
         account: Some(7),
         ..unresolved

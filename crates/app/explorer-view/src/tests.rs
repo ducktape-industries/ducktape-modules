@@ -33,7 +33,7 @@ fn tx(seed: u8, signer: [u8; 32], target: &str, payload: Vec<u8>) -> Tx {
     }
 }
 
-/// Blocks 0..=`tip`: 11 carries Ada's post and her DM to account 7, 12 a
+/// Blocks 0..=`tip`: 11 carries Ada's post and their DM to account 7, 12 a
 /// stranger's op to a program that describes nothing.
 fn chain(tip: u64) -> Vec<Block> {
     (0..=tip)
@@ -79,50 +79,53 @@ fn status(height: u64) -> NodeStatus {
     }
 }
 
-fn ada() -> identity::Account {
+fn account(number: u64, name: &str, control: identity::Control) -> identity::Account {
     identity::Account {
-        number: 3,
-        name: "Ada".into(),
-        avatar: None,
-        bio: None,
-        updated_at: 0,
-        keys: vec![identity::Key {
-            scheme: abi::Scheme::Ed25519,
-            key: ADA.to_vec(),
-            label: Some("laptop".into()),
-            added_at: 0,
-        }],
-        module: None,
-        manager: None,
-        status: identity::Status::Active,
-        category: None,
+        number,
+        card: identity::Card {
+            name: name.into(),
+            avatar: None,
+            bio: None,
+            updated_at: 0,
+        },
+        control,
     }
+}
+
+fn ada() -> identity::Account {
+    let keys = vec![identity::Key {
+        scheme: abi::Scheme::Ed25519,
+        key: ADA.to_vec(),
+        label: Some("laptop".into()),
+        added_at: 0,
+    }];
+    account(3, "Ada", identity::Control::Person { keys })
 }
 
 /// The agent Ada manages, suspended: no keys yet.
 fn scout() -> identity::Account {
-    identity::Account {
-        number: 5,
-        name: "Scout".into(),
-        keys: Vec::new(),
-        manager: Some(3),
-        category: Some(identity::Category::Agent),
-        status: identity::Status::Suspended,
-        ..ada()
-    }
+    account(
+        5,
+        "Scout",
+        identity::Control::Managed {
+            manager: 3,
+            category: identity::Category::Agent,
+            life: identity::Life::Suspended { keys: Vec::new() },
+            transfers: 0,
+        },
+    )
 }
 
 /// forge's own account.
 fn forge() -> identity::Account {
-    identity::Account {
-        number: 6,
-        name: "forge".into(),
-        keys: Vec::new(),
-        module: Some("forge".into()),
-        ..ada()
-    }
+    account(
+        6,
+        "forge",
+        identity::Control::Module {
+            module: "forge".into(),
+        },
+    )
 }
-
 /// A node at `tip`, whose tip the test may move.
 fn node(
     cx: &mut TestAppContext,

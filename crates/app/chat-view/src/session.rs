@@ -1,5 +1,5 @@
 //! Who reads: the session the host hands over (the seated key and the
-//! account it holds), and what that lets her do in the open room.
+//! account it holds), and what that lets them do in the open room.
 use chat::Principal;
 use ducktape_view_guest::Context;
 use ducktape_view_guest::view::Loadable;
@@ -15,7 +15,7 @@ pub(crate) enum Gate {
     /// every write is an account's: a key that holds none only reads
     NoAccount,
     Archived,
-    /// members-only, and she is not on the roster
+    /// members-only, and they are not on the roster
     NotMember,
 }
 
@@ -29,8 +29,8 @@ impl Chat {
             self.load_names(cx);
         }
         // a key that gains an account while this view stays open writes
-        // without a relaunch; the rooms are looked at again once she is
-        // known, since the recount of what is meant for her waits on it
+        // without a relaunch; the rooms are looked at again once they are
+        // known, since the recount of what is meant for them waits on it
         if (reader_changed || self.session.account != prev.account)
             && let Some(list) = self.channels.ready().cloned()
         {
@@ -91,7 +91,7 @@ impl Chat {
         self.session.account
     }
 
-    /// The principal chat writes the reader as: her account; none while her
+    /// The principal chat writes the reader as: their account; none while their
     /// key holds none, since only an account writes.
     pub(crate) fn me(&self) -> Option<Principal> {
         Principal::writer(self.my_account())
@@ -106,7 +106,7 @@ impl Chat {
         self.me().is_some()
     }
 
-    /// Why the reader may not write in the open room; none when she may.
+    /// Why the reader may not write in the open room; none when they may.
     pub(crate) fn write_gate(&self) -> Option<Gate> {
         if !self.holds_account() {
             return Some(Gate::NoAccount);

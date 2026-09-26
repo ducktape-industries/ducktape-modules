@@ -140,6 +140,7 @@ fn grant_and_revoke_are_the_owners_and_name_a_person() {
     };
 
     rig.execute(&grant(person(WRITER))).unwrap();
+    rig.sandbox.hold(b"ninth", 9);
     rig.execute(&grant(Principal::Account(9))).unwrap();
     assert_eq!(writers(&rig), [Principal::Account(9), person(WRITER)]);
     assert_eq!(
@@ -227,6 +228,9 @@ fn edit_is_the_authors_and_drops_the_reviewers_it_unasks() {
     assert_eq!(refused_as(&mut rig, REVIEWER, &retitle), code::UNAUTHORIZED);
 
     // Asking a fleet of accounts and unasking them leaves nothing behind.
+    for i in 0..(3 * 64u64) {
+        rig.sandbox.hold(&i.to_be_bytes(), 100 + i);
+    }
     for round in 0..3u8 {
         let fleet = (0..64)
             .map(|i| Principal::Account(100 + 64 * round as u64 + i))

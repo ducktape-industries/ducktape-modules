@@ -1,6 +1,6 @@
 //! What chat keeps on this device between runs (`store`): the reader's read
 //! cursors, so the tab badge and the unread dots come back right after a
-//! relaunch, and her frequent reactions. Per network by the host, per
+//! relaunch, and their frequent reactions. Per network by the host, per
 //! reader by the key.
 use std::collections::BTreeMap;
 
@@ -50,7 +50,7 @@ impl Chat {
     }
 
     /// The kept cursors, asked again on a refusal. After [`READ_ATTEMPTS`]
-    /// the reader starts from what this session sees, so her reads still
+    /// the reader starts from what this session sees, so their reads still
     /// save; what the device held for rooms not seen yet is lost.
     fn load_reads(&mut self, key: String, attempt: u32, cx: &mut Context<Self>) {
         let reads = store::get::<BTreeMap<String, u64>>(&cx.host(), &key);
@@ -60,7 +60,7 @@ impl Chat {
                 cx.notify();
                 match reads {
                     Ok(reads) => chat.reads_landed(key, reads.unwrap_or_default(), cx),
-                    // the reader changed meanwhile: her own load is under way
+                    // the reader changed meanwhile: their own load is under way
                     Err(_) if chat.reads_key().as_ref() != Some(&key) => {}
                     Err(refusal) if attempt < READ_ATTEMPTS => {
                         cx.host()

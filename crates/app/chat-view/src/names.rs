@@ -45,46 +45,37 @@ pub fn dm_peer_of(mine: u64, channel_id: &str) -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
-    use chat::{Category, Principal, Profile, Status};
+    use chat::{Category, Kind, Principal, Profile, Standing};
 
     use super::*;
 
-    fn profile(number: u64, name: &str) -> Profile {
+    fn profile(number: u64, name: &str, kind: Kind) -> Profile {
         Profile {
             number,
             name: name.into(),
-            category: None,
-            manager: None,
-            module: None,
-            status: Status::Active,
+            kind,
+        }
+    }
+
+    fn agent(manager: u64, standing: Standing) -> Kind {
+        Kind::Managed {
+            manager,
+            category: Category::Agent,
+            standing,
         }
     }
 
     /// Mentions and reviewers offer people and agents that act: no
-    /// module's account, no suspended or revoked one.
+    /// module's account, no suspended or revoked one. Each wears the one
+    /// badge and note its kind gives it.
     #[test]
     fn the_pickers_offer_people_and_live_agents_only() {
         let names = Names::from_roster([
-            profile(1, "ada"),
-            Profile {
-                category: Some(Category::Agent),
-                manager: Some(1),
-                ..profile(2, "scout")
-            },
-            Profile {
-                module: Some("forge".into()),
-                ..profile(3, "forge")
-            },
-            Profile {
-                category: Some(Category::Agent),
-                manager: Some(1),
-                status: Status::Suspended,
-                ..profile(4, "idle")
-            },
-            Profile {
-                status: Status::Revoked,
-                ..profile(5, "gone")
-            },
+            profile(1, "ada", Kind::Person),
+            profile(2, "scout", agent(1, Standing::Active)),
+            profile(3, "forge", Kind::Module("forge".into())),
+            profile(4, "idle", agent(1, Standing::Suspended)),
+            profile(5, "gone", agent(1, Standing::Revoked)),
         ]);
         assert_eq!(names.people().collect::<Vec<_>>(), [1, 2]);
         let members = [3, 4, 9].map(Principal::Account);
@@ -93,6 +84,17 @@ mod tests {
             .map(|choice| choice.label)
             .collect();
         assert_eq!(labels, ["account-9", "ada", "scout"]);
-        assert_eq!(names.member(&Principal::Account(4)), "idle (suspended)");
+        let account = Principal::Account;
+        assert_eq!(names.member(&account(4)), "idle (suspended)");
+        assert_eq!(names.member(&account(5)), "gone (revoked)");
+        assert_eq!(names.badge(&account(1)), None);
+        assert_eq!(
+            names.badge(&account(2)).as_deref(),
+            Some("Agent · managed by ada")
+        );
+        assert_eq!(names.badge(&account(3)).as_deref(), Some("Module · forge"));
+        assert_eq!(names.module(&account(3)), Some("forge"));
+        assert!(crate::message::agent(&names, &account(2)));
+        assert!(!crate::message::agent(&names, &account(3)));
     }
 }

@@ -38,7 +38,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
 pub use abi::hex;
-pub use abi::role::identity::{Category, Profile, Status};
+pub use abi::role::identity::{Category, Kind, Profile, Standing};
 pub use description::describe;
 pub use guest::{AccountNumber, Principal};
 pub use message::{Block, Mark, Span, parse_message};

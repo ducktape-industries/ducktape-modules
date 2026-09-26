@@ -58,7 +58,7 @@ pub struct Chat {
     pub(crate) timeline_rows: RefCell<Vec<String>>,
     #[serde(skip)]
     pub(crate) thread_rows: RefCell<Vec<String>>,
-    /// messages meant for the reader in rooms she has not read, by room
+    /// messages meant for the reader in rooms they have not read, by room
     #[serde(skip)]
     pub(crate) attention: BTreeMap<String, i64>,
     /// the tab badge last sent
@@ -177,7 +177,7 @@ impl Layout {
     }
 }
 
-/// What the reader has read: per room, the head seq when she last had it on
+/// What the reader has read: per room, the head seq when they last had it on
 /// screen. `boundary` is the cursor the open room was entered with — the
 /// unread divider's row is the first message past it.
 #[derive(Serialize, Deserialize, Default)]

@@ -1,14 +1,15 @@
 //! forge's host with chat's beside it: the sibling forge queries, and where
 //! its emissions land when a block delivers them. `accounts` is identity's
 //! roster: each key the account it belongs to, the harness keys
-//! ([`HOLDERS`](super::HOLDERS)) from the start, and each module its account
-//! ([`MODULES`]). A frame's sender is resolved against it, as the host asks
-//! identity.
+//! ([`HOLDERS`](super::HOLDERS)) from the start, each module its account
+//! ([`MODULES`]) and each agent its standing (`agents`). A frame's sender
+//! is resolved against it, as the host asks identity.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
+use abi::role::identity::{Category, Kind, Profile, Standing};
 use guest::{Cause, Env, Error, Origin, Principal, code};
 use guest::{ExecCtx, MockHost, Module, QueryCtx};
 
@@ -16,7 +17,12 @@ pub struct MemorySandbox {
     pub forge: MockHost,
     pub chat: MockHost,
     pub accounts: Rc<RefCell<BTreeMap<Vec<u8>, u64>>>,
+    /// the agents [`AGENT_MANAGER`] manages, each with its standing
+    pub agents: Rc<RefCell<BTreeMap<u64, Standing>>>,
 }
+
+/// The person every agent of the roster is managed by.
+pub const AGENT_MANAGER: u64 = 11;
 
 /// The account identity registered for each module.
 pub const MODULES: [(&str, u64); 2] = [("forge", 900), ("chat", 901)];
@@ -61,52 +67,46 @@ impl Default for MemorySandbox {
                 Ok(abi::encode(&reply))
             }),
         );
-        let roster = accounts.clone();
+        let agents = Rc::new(RefCell::new(BTreeMap::new()));
+        let (roster, standing) = (accounts.clone(), agents.clone());
         forge.borrow_mut().siblings.insert(
-            "identity".into(),
-            Box::new(move |request| profiles(&roster, request)),
+            guest::MockHost::roles().identity,
+            Box::new(move |request| {
+                guest::identity_role(&profiles(&roster.borrow(), &standing.borrow()), request)
+            }),
         );
         MemorySandbox {
             forge,
             chat,
             accounts,
+            agents,
         }
     }
 }
 
-/// The identity role's `Profiles` over the roster: each key's account a
-/// person's, each of [`MODULES`] its module's.
-fn profiles(roster: &RefCell<BTreeMap<Vec<u8>, u64>>, request: &[u8]) -> Result<Vec<u8>, Error> {
-    use abi::role::identity as role;
-    let role::Query::Profiles { after, limit } =
-        abi::decode(request).map_err(guest::kernel::error_from)?
-    else {
-        panic!("forge asks the identity role only for profiles");
-    };
-    let people = roster
-        .borrow()
-        .values()
-        .map(|number| (*number, None))
-        .collect::<Vec<_>>();
-    let modules = MODULES.map(|(module, number)| (number, Some(module.to_owned())));
-    let every: BTreeMap<u64, Option<String>> = people.into_iter().chain(modules).collect();
-    let profiles = every
-        .into_iter()
-        .filter(|(number, _)| after.is_none_or(|after| *number > after))
-        .take(limit as usize)
-        .map(|(number, module)| role::Profile {
+/// The roster as the identity role profiles it: each key's account a
+/// person's, each of [`MODULES`] its module's, each agent managed by
+/// [`AGENT_MANAGER`].
+fn profiles(roster: &BTreeMap<Vec<u8>, u64>, agents: &BTreeMap<u64, Standing>) -> Vec<Profile> {
+    let people = roster.values().map(|number| (*number, Kind::Person));
+    let modules = MODULES.map(|(module, number)| (number, Kind::Module(module.into())));
+    let agents = agents.iter().map(|(number, standing)| {
+        let kind = Kind::Managed {
+            manager: AGENT_MANAGER,
+            category: Category::Agent,
+            standing: *standing,
+        };
+        (*number, kind)
+    });
+    people
+        .chain(modules)
+        .chain(agents)
+        .map(|(number, kind)| Profile {
             number,
             name: format!("account {number}"),
-            category: None,
-            manager: None,
-            module,
-            status: role::Status::Active,
+            kind,
         })
-        .collect();
-    Ok(abi::encode(&role::Reply::Profiles {
-        profiles,
-        next: None,
-    }))
+        .collect()
 }
 
 impl MemorySandbox {

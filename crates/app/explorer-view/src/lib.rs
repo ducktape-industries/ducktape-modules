@@ -296,14 +296,26 @@ pub struct Device {
     pub label: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Account {
     pub number: u64,
     pub name: String,
     pub devices: Vec<Device>,
-    /// what the account is, as members shows it (`identity::view::kind`):
-    /// "Person", "Agent · managed by Dev · suspended", "Module · forge"
-    pub kind: String,
+    /// what the account is, labelled as members labels it
+    /// ([`identity::view::kind`]) when it is drawn
+    #[serde(with = "borsh_bytes")]
+    pub kind: identity::Kind,
+}
+
+/// What `account` is, its manager named from `accounts`: "Person", "Agent ·
+/// managed by Dev · suspended", "Module · forge".
+pub fn kind_of(account: &Account, accounts: &[Account]) -> String {
+    identity::view::kind(&account.kind, |manager| {
+        accounts
+            .iter()
+            .find(|other| other.number == manager)
+            .map(|other| other.name.clone())
+    })
 }
 
 /// One running program: its id and the blob its code lives in.
@@ -314,23 +326,7 @@ pub struct Entry {
     pub params: usize,
 }
 
-/// A borsh value in the view's serde snapshot, as its bytes: the registry's
-/// own types, kept as they came.
-mod borsh_bytes {
-    use borsh::{BorshDeserialize, BorshSerialize};
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    pub fn serialize<T: BorshSerialize, S: Serializer>(value: &T, s: S) -> Result<S::Ok, S::Error> {
-        Serialize::serialize(&abi::encode(value), s)
-    }
-
-    pub fn deserialize<'de, T: BorshDeserialize, D: Deserializer<'de>>(
-        d: D,
-    ) -> Result<T, D::Error> {
-        abi::decode(&<Vec<u8> as Deserialize>::deserialize(d)?)
-            .map_err(|refusal| serde::de::Error::custom(refusal.sentence))
-    }
-}
+use identity::view::borsh_bytes;
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Network {
@@ -819,9 +815,9 @@ async fn accounts(host: Host) -> Result<Vec<Account>, Error> {
         .iter()
         .map(|account| Account {
             number: account.number,
-            name: account.name.clone(),
+            name: account.card.name.clone(),
             devices: account
-                .keys
+                .keys()
                 .iter()
                 .map(|key| Device {
                     key: key.key.clone(),
@@ -829,7 +825,7 @@ async fn accounts(host: Host) -> Result<Vec<Account>, Error> {
                     label: key.label.clone(),
                 })
                 .collect(),
-            kind: identity::view::kind(account, &listed),
+            kind: account.kind(),
         })
         .collect())
 }

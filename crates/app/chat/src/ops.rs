@@ -339,7 +339,7 @@ fn count_out(reactions: &mut Vec<Reaction>, emoji: &str) {
 
 // ── huddles ─────────────────────────────────────────────────────────────────
 
-/// Seats the actor's node in the channel's huddle, or moves her seat to a
+/// Seats the actor's node in the channel's huddle, or moves their seat to a
 /// new node, once the node's consent verifies (`origin::node_consents`).
 pub(crate) fn join_huddle(
     ctx: &ExecCtx,

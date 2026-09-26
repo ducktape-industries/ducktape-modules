@@ -5,7 +5,9 @@ use abi::role::identity as role;
 use gitcore::server::{Policy, RefUpdate};
 use gitcore::{Error as GitError, Limits, server};
 use guest::{Error, HashKind, code};
-use guest::{ExecCtx, QueryCtx, already_exists, capacity, decoded, invalid, unauthorized};
+use guest::{
+    ExecCtx, QueryCtx, already_exists, capacity, decoded, invalid, unauthorized, wrong_state,
+};
 
 use crate::contract::{Bounds, MAX_PATH_BYTES, Principal, Repo, Settings, valid_repo_name};
 use crate::objects::{ObjectWriter, object_not_held};
@@ -191,35 +193,48 @@ pub(crate) fn require_named(principal: &Principal) -> Result<(), Error> {
     Ok(())
 }
 
-/// Whom a person asks to write or review: an account that is not a
-/// module's, as the identity role's profile of it says. The role pages
-/// profiles by number, so the page of one past `number - 1` is its own.
+/// Whom a person asks to write or review: an account the identity role
+/// profiles as a person or an agent that acts. No absent account, no
+/// module's, no agent suspended or revoked.
 pub(crate) fn require_person_or_agent(ctx: &QueryCtx, principal: &Principal) -> Result<(), Error> {
     let Some(number) = principal.account() else {
         return Err(invalid("only an account is named here"));
     };
-    let asked = role::Query::Profiles {
-        after: number.checked_sub(1),
-        limit: 1,
-    };
-    let role::Reply::Profiles { profiles, .. } =
+    let asked = role::Query::Profile(number);
+    let role::Reply::Profile(profile) =
         ctx.ask::<role::Query, role::Reply>(&ctx.env().roles.identity, &asked)?
     else {
         return Err(Error::new(
             code::UNEXPECTED_REPLY,
-            "identity answered Profiles with something else",
+            "identity answered Profile with something else",
         ));
     };
-    let module = profiles
-        .iter()
-        .find(|profile| profile.number == number)
-        .and_then(|profile| profile.module.as_ref());
-    if let Some(module) = module {
-        return Err(invalid(format!(
+    let Some(profile) = profile else {
+        return Err(invalid(format!("there is no account {number}")));
+    };
+    use role::{Kind, Standing};
+    match profile.kind {
+        Kind::Person
+        | Kind::Managed {
+            standing: Standing::Active,
+            ..
+        } => Ok(()),
+        Kind::Managed {
+            standing: Standing::Suspended,
+            ..
+        } => Err(wrong_state(format!(
+            "account {number} is suspended: only agents that act are asked"
+        ))),
+        Kind::Managed {
+            standing: Standing::Revoked,
+            ..
+        } => Err(wrong_state(format!(
+            "account {number} is revoked: only agents that act are asked"
+        ))),
+        Kind::Module(module) => Err(invalid(format!(
             "account {number} is module {module}'s: only people and agents are asked"
-        )));
+        ))),
     }
-    Ok(())
 }
 
 pub fn limits_of(bounds: &Bounds) -> Limits {

@@ -1,44 +1,38 @@
 //! The module's own path, run natively: the sender the host resolved, a
 //! huddle join's node proof, the identity role's profiles paged through chat. Each
 //! refusal leaves the store as it was.
-use abi::role::identity as role;
 use guest::{Cause, Env, Origin};
 
 use super::*;
-use crate::{HUDDLE_JOIN_NS, HUDDLE_NODE_KEY_BYTES, Profile};
+use crate::{Category, HUDDLE_JOIN_NS, HUDDLE_NODE_KEY_BYTES, Kind, Profile, Standing};
 
-/// Ada's key; she holds account 1.
+/// Ada's key; it holds account 1.
 const ADA_KEY: [u8; 32] = [1; 32];
 /// Bo's key: it holds account 2 once identity seats it.
 const LONE_KEY: [u8; 32] = [2; 32];
-/// Cy's key; she holds account 3.
+/// Cy's key; it holds account 3.
 const CY_KEY: [u8; 32] = [3; 32];
 
-/// The identity role over three accounts, the third an agent Ada manages;
-/// `Profiles` pages by number.
+/// The identity role over three accounts, the third an agent Ada manages.
 fn identity() -> guest::Sibling {
-    Box::new(move |request| {
-        let profile = |number: u64| Profile {
-            number,
-            name: format!("user{number}"),
-            category: (number == 3).then_some(crate::Category::Agent),
-            manager: (number == 3).then_some(1),
-            module: None,
-            status: crate::Status::Active,
-        };
-        let role::Query::Profiles { after, limit } =
-            abi::decode(request).map_err(guest::kernel::error_from)?
-        else {
-            panic!("chat asks the identity role only for profiles");
-        };
-        let from = after.unwrap_or(0) + 1;
-        let to = (from + u64::from(limit)).min(4);
-        let reply = role::Reply::Profiles {
-            profiles: (from..to).map(profile).collect(),
-            next: (to < 4).then_some(to - 1),
-        };
-        Ok(abi::encode(&reply))
-    })
+    let profile = |number: u64, kind| Profile {
+        number,
+        name: format!("user{number}"),
+        kind,
+    };
+    let roster = vec![
+        profile(1, Kind::Person),
+        profile(2, Kind::Person),
+        profile(
+            3,
+            Kind::Managed {
+                manager: 1,
+                category: Category::Agent,
+                standing: Standing::Active,
+            },
+        ),
+    ];
+    Box::new(move |request| guest::identity_role(&roster, request))
 }
 
 /// A store with identity beside it and a verifier that takes `b"signed"`
@@ -255,6 +249,9 @@ fn the_roster_pages_through_the_identity_role() {
     assert_eq!(first.items[0].name, "user1");
     let rest = page(first.next);
     assert_eq!(numbers(&rest.items), [3]);
-    assert_eq!(rest.items[0].category, Some(crate::Category::Agent));
+    assert!(matches!(
+        rest.items[0].kind,
+        Kind::Managed { manager: 1, .. }
+    ));
     assert_eq!(rest.next, None);
 }

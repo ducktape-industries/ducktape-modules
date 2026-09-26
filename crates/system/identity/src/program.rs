@@ -4,7 +4,7 @@ use guest::{Error, ExecCtx, Module, QueryCtx};
 
 use crate::rules::{
     ACCOUNTS, MANAGED, OF_MODULE, account, add_key, create, create_agent, generation, of_key,
-    profiles, register_module, remove_key, resolve, set_name, set_profile, set_status,
+    profiles, register_module, remove_key, resolve, resume, revoke, set_name, set_profile, suspend,
     transfer_manager,
 };
 use crate::{Op, Query, Reply};
@@ -33,8 +33,14 @@ impl Module for Identity {
                 avatar,
                 bio,
             } => set_profile(ctx, account, avatar, bio),
-            Op::SetStatus { account, status } => set_status(ctx, account, status),
-            Op::TransferManager { account, to } => transfer_manager(ctx, account, to),
+            Op::Suspend { account } => suspend(ctx, account),
+            Op::Resume { account } => resume(ctx, account),
+            Op::Revoke { account } => revoke(ctx, account),
+            Op::TransferManager {
+                account,
+                to,
+                consent,
+            } => transfer_manager(ctx, account, to, consent),
         }
     }
 
@@ -42,8 +48,11 @@ impl Module for Identity {
         let height = ctx.env().height;
         Ok(match query {
             Query::OfKey { key } => Reply::Number(of_key(ctx, &key)?),
-            Query::Profiles { after, limit } => profiles(ctx, after, limit)?,
             Query::OfModule { module } => Reply::Number(OF_MODULE.get(ctx, &module)?),
+            Query::Profile { number } => {
+                Reply::Profile(ACCOUNTS.get(ctx, &number)?.map(|account| account.profile()))
+            }
+            Query::Profiles { after, limit } => profiles(ctx, after, limit)?,
             Query::Get { number } => Reply::Account(ACCOUNTS.get(ctx, &number)?),
             Query::Generation { key } => Reply::Generation(generation(ctx, &key)?),
             Query::Resolve { references } => Reply::Resolved(

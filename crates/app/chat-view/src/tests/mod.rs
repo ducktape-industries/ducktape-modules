@@ -107,13 +107,16 @@ fn configure(cx: &mut TestAppContext) {
                 person(7, "eddy"),
                 // an agent eddy manages
                 chat::Profile {
-                    category: Some(chat::Category::Agent),
-                    manager: Some(7),
+                    kind: chat::Kind::Managed {
+                        manager: 7,
+                        category: chat::Category::Agent,
+                        standing: chat::Standing::Active,
+                    },
                     ..person(8, "reviewer")
                 },
                 // forge's own account
                 chat::Profile {
-                    module: Some("forge".into()),
+                    kind: chat::Kind::Module("forge".into()),
                     ..person(9, "forge")
                 },
             ])),
@@ -216,9 +219,6 @@ fn person(number: u64, name: &str) -> chat::Profile {
     chat::Profile {
         number,
         name: name.into(),
-        category: None,
-        manager: None,
-        module: None,
-        status: chat::Status::Active,
+        kind: chat::Kind::Person,
     }
 }

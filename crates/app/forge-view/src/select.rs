@@ -32,7 +32,7 @@ impl Forge {
         self.session.account
     }
 
-    /// The reader as a principal: her account; nobody while her seated key
+    /// The reader as a principal: their account; nobody while their seated key
     /// holds none. [`Principal::writer`] is the one rule every view gates its
     /// writes on, as `ExecCtx::sender` refuses them.
     pub(crate) fn me_principal(&self) -> Option<Principal> {

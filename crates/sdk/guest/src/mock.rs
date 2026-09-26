@@ -9,6 +9,7 @@ use std::cell::{Ref, RefCell, RefMut};
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
+use abi::role::identity::Profile;
 use abi::{
     Blob, BlobHeader, BlobId, CryptoOp, CryptoReply, Entry, HashKind, HostOp, HostReply, Message,
     Scheme,
@@ -18,6 +19,43 @@ use sha1::Digest as _;
 use crate::{Env, Error, ExecCtx, ModuleId, Order, QueryCtx, Range, Roles, code};
 
 pub type Sibling = Box<dyn Fn(&[u8]) -> Result<Vec<u8>, Error>>;
+
+/// The identity role over a fixed roster, for a native test of a module
+/// that names accounts: `Profile` and `Profiles` (paged by number) out of
+/// `profiles`, in any order given. `Account` and `OfModule` are the
+/// kernel's to ask, so a module asking them is refused, as a sibling
+/// answers only what its role says.
+pub fn identity_role(profiles: &[Profile], request: &[u8]) -> Result<Vec<u8>, Error> {
+    use abi::role::identity::{Query, Reply};
+    let reply = match abi::decode(request).map_err(crate::kernel::error_from)? {
+        Query::Profile(number) => {
+            Reply::Profile(profiles.iter().find(|p| p.number == number).cloned())
+        }
+        Query::Profiles { after, limit } => {
+            let mut page: Vec<Profile> = profiles
+                .iter()
+                .filter(|p| after.is_none_or(|after| p.number > after))
+                .cloned()
+                .collect();
+            page.sort_by_key(|p| p.number);
+            let limit = limit.max(1) as usize;
+            let more = page.len() > limit;
+            page.truncate(limit);
+            let next = page.last().filter(|_| more).map(|p| p.number);
+            Reply::Profiles {
+                profiles: page,
+                next,
+            }
+        }
+        Query::Account(_) | Query::OfModule(_) => {
+            return Err(Error::new(
+                code::UNSUPPORTED,
+                "the kernel alone asks identity who holds a key or a module",
+            ));
+        }
+    };
+    Ok(abi::encode(&reply))
+}
 pub type Verifier = Box<dyn Fn(Scheme, &[u8], &[u8], &[u8], &[u8]) -> bool>;
 
 #[derive(Default)]

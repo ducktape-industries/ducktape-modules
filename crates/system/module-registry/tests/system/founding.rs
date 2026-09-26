@@ -56,16 +56,17 @@ fn founding_seats_the_validators_and_every_program_answers() {
         let modules: Vec<_> = accounts
             .items
             .iter()
-            .map(|account| account.module.as_deref())
+            .map(|account| account.kind())
             .collect();
+        let module = |module: &str| identity::Kind::Module(module.into());
         assert_eq!(
             modules,
             [
-                Some(module_registry::MODULE),
-                Some(valset::MODULE),
-                Some(identity::MODULE),
-                Some(AUTHORITY),
-                Some("probe"),
+                module(module_registry::MODULE),
+                module(valset::MODULE),
+                module(identity::MODULE),
+                module(AUTHORITY),
+                module("probe"),
             ]
         );
     });

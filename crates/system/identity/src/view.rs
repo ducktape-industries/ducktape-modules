@@ -13,29 +13,37 @@ impl Module for Identity {
     type Reply = Reply;
 }
 
-/// What an account is, as a view labels it: "Person", "Agent · managed by
-/// eddy", "Module · chat", and its status where it does not act. `accounts`
-/// names the manager.
-pub fn kind(account: &crate::Account, accounts: &[crate::Account]) -> String {
-    use crate::{Category, Status};
-    let what = match (&account.module, account.manager) {
-        (Some(module), _) => format!("Module · {module}"),
-        (None, Some(manager)) => {
-            let label = match account.category {
-                Some(Category::Agent) => "Agent",
-                None => "Managed",
-            };
-            let by = accounts
-                .iter()
-                .find(|other| other.number == manager)
-                .map_or_else(|| format!("#{manager}"), |other| other.name.clone());
-            format!("{label} · managed by {by}")
-        }
-        (None, None) => "Person".into(),
-    };
-    match account.status {
-        Status::Active => what,
-        Status::Suspended => format!("{what} · suspended"),
-        Status::Revoked => format!("{what} · revoked"),
+/// What an account is, as members and explorer label it: "Person",
+/// "Agent · managed by eddy · suspended", "Module · chat". The badge and
+/// the note are [`Kind`](crate::Kind)'s; `name_of` names the manager, or
+/// its number stands in.
+pub fn kind(
+    kind: &crate::Kind,
+    name_of: impl FnOnce(crate::AccountNumber) -> Option<String>,
+) -> String {
+    let what = kind
+        .badge(|manager| name_of(manager).unwrap_or_else(|| format!("#{manager}")))
+        .unwrap_or_else(|| "Person".into());
+    match kind.note() {
+        Some(note) => format!("{what} · {note}"),
+        None => what,
+    }
+}
+
+/// A borsh value in a view's serde snapshot, as its bytes: what a program
+/// said, kept as it came (`#[serde(with = "identity::view::borsh_bytes")]`).
+pub mod borsh_bytes {
+    use borsh::{BorshDeserialize, BorshSerialize};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<T: BorshSerialize, S: Serializer>(value: &T, s: S) -> Result<S::Ok, S::Error> {
+        Serialize::serialize(&abi::encode(value), s)
+    }
+
+    pub fn deserialize<'de, T: BorshDeserialize, D: Deserializer<'de>>(
+        d: D,
+    ) -> Result<T, D::Error> {
+        abi::decode(&<Vec<u8> as Deserialize>::deserialize(d)?)
+            .map_err(|refusal| serde::de::Error::custom(refusal.sentence))
     }
 }

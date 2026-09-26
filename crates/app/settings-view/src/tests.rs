@@ -19,36 +19,40 @@ fn status() -> NodeStatus {
         contract: 7,
     }
 }
-/// Maya's account: a person holding one key.
-fn maya(number: u64, label: &str) -> identity::Account {
+fn account(number: u64, name: &str, control: identity::Control) -> identity::Account {
     identity::Account {
         number,
-        name: "Maya".into(),
-        avatar: None,
-        bio: None,
-        updated_at: 1,
-        keys: vec![identity::Key {
-            scheme: abi::Scheme::Ed25519,
-            key: vec![0xab, 0xcd],
-            label: Some(label.into()),
-            added_at: 1,
-        }],
-        module: None,
-        manager: None,
-        status: identity::Status::Active,
-        category: None,
+        card: identity::Card {
+            name: name.into(),
+            avatar: None,
+            bio: None,
+            updated_at: 1,
+        },
+        control,
     }
+}
+/// Maya's account: a person holding one key.
+fn maya(number: u64, label: &str) -> identity::Account {
+    let keys = vec![identity::Key {
+        scheme: abi::Scheme::Ed25519,
+        key: vec![0xab, 0xcd],
+        label: Some(label.into()),
+        added_at: 1,
+    }];
+    account(number, "Maya", identity::Control::Person { keys })
 }
 /// Scout, the agent Maya (7) manages, keyless.
 fn scout() -> identity::Account {
-    identity::Account {
-        number: 12,
-        name: "Scout".into(),
-        keys: Vec::new(),
-        manager: Some(7),
-        category: Some(identity::Category::Agent),
-        ..maya(12, "")
-    }
+    account(
+        12,
+        "Scout",
+        identity::Control::Managed {
+            manager: 7,
+            category: identity::Category::Agent,
+            life: identity::Life::Active { keys: Vec::new() },
+            transfers: 0,
+        },
+    )
 }
 fn respond(cx: &TestAppContext) {
     cx.host().handle::<ChainStatus>(|()| Ok(status()));
@@ -425,5 +429,99 @@ fn a_person_creates_an_agent_and_adds_its_key() {
     cx.run_until_parked();
     assert_eq!(cx.host().requests::<Submit<Identity>>().len(), 2);
     assert!(!cx.has_text("That isn’t a key request for one of your agents."));
+    cx.assert_accessible();
+}
+
+/// The manager alone renames, suspends, resumes and revokes an agent from
+/// its line; each is one op, and the agents are read again after it.
+#[test]
+fn a_manager_renames_suspends_and_revokes_an_agent() {
+    let mut cx = fixture("ready", false);
+    let sent = |cx: &TestAppContext| cx.host().requests::<Submit<Identity>>().len();
+    cx.simulate_click("settings/agents/12/rename");
+    cx.run_until_parked();
+    assert!(
+        cx.has_text("Enter the agent's new name."),
+        "{:?}",
+        cx.texts()
+    );
+    cx.host().handle::<Submit<Identity>>(|op| {
+        assert_eq!(
+            op,
+            identity::Op::SetName {
+                account: 12,
+                name: "Scout II".into()
+            }
+        );
+        Ok(Vec::new())
+    });
+    cx.simulate_input("settings/agents/12/name", " Scout II ");
+    cx.simulate_click("settings/agents/12/rename");
+    cx.run_until_parked();
+    assert_eq!(sent(&cx), 1);
+    assert!(!cx.has_text("Enter the agent's new name."));
+
+    // active, its line offers Suspend; suspended, Resume; revoked, nothing
+    assert!(cx.find("settings/agents/12/suspend").is_some());
+    assert!(cx.find("settings/agents/12/resume").is_none());
+    cx.host().handle::<Submit<Identity>>(|op| {
+        assert_eq!(op, identity::Op::Suspend { account: 12 });
+        Ok(Vec::new())
+    });
+    let suspended = |cx: &TestAppContext, life: identity::Life| {
+        cx.host().handle::<Query<Identity>>(move |q| {
+            let life = life.clone();
+            Ok(match q {
+                identity::Query::Get { number } => {
+                    identity::Reply::Account(Some(maya(number, "Laptop key")))
+                }
+                identity::Query::Managed { by: 7, .. } => {
+                    let identity::Control::Managed {
+                        manager,
+                        category,
+                        transfers,
+                        ..
+                    } = scout().control
+                    else {
+                        panic!()
+                    };
+                    let control = identity::Control::Managed {
+                        manager,
+                        category,
+                        life,
+                        transfers,
+                    };
+                    identity::Reply::Accounts(identity::PageResponse {
+                        height: 42,
+                        items: vec![identity::Account { control, ..scout() }],
+                        next: None,
+                    })
+                }
+                q => panic!("unexpected query: {q:?}"),
+            })
+        });
+    };
+    suspended(&cx, identity::Life::Suspended { keys: Vec::new() });
+    cx.simulate_click("settings/agents/12/suspend");
+    cx.run_until_parked();
+    assert_eq!(sent(&cx), 2);
+    assert!(
+        cx.has_text("Scout: Agent · account 12 · 0 keys · suspended"),
+        "{:?}",
+        cx.texts()
+    );
+    assert!(cx.find("settings/agents/12/resume").is_some());
+    cx.host().handle::<Submit<Identity>>(|op| {
+        assert_eq!(op, identity::Op::Revoke { account: 12 });
+        Ok(Vec::new())
+    });
+    suspended(&cx, identity::Life::Revoked);
+    cx.simulate_click("settings/agents/12/revoke");
+    cx.run_until_parked();
+    assert_eq!(sent(&cx), 3);
+    assert!(cx.has_text("Scout: Agent · account 12 · 0 keys · revoked"));
+    for action in ["rename", "suspend", "resume", "revoke"] {
+        assert!(cx.find(&format!("settings/agents/12/{action}")).is_none());
+    }
     cx.assert_accessible();
 }

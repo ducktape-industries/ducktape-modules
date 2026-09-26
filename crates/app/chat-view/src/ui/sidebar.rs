@@ -390,7 +390,7 @@ fn dm_button(
         || format!("account {peer}"),
         |n| n.member(&Principal::Account(peer)),
     );
-    let agent = names.is_some_and(|n| n.is_agent(&Principal::Account(peer)));
+    let agent = names.is_some_and(|n| crate::message::agent(n, &Principal::Account(peer)));
     let unread = chat.unread(info) && !selected;
     let id = info.channel.id.clone();
     let click = cx.listener(move |chat, _: &ClickEvent, window, cx| {
@@ -473,6 +473,6 @@ pub fn dm_peer(chat: &Chat) -> Option<(String, bool)> {
     let peer = dm_peer_of(chat.my_account()?, &room.id)?;
     Some((
         names.member(&Principal::Account(peer)),
-        names.is_agent(&Principal::Account(peer)),
+        crate::message::agent(names, &Principal::Account(peer)),
     ))
 }

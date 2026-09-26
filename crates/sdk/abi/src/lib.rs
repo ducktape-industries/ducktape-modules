@@ -448,38 +448,52 @@ pub mod role {
 
     /// Who holds a key or runs as a program (the account a frame acts as),
     /// and how each account reads to the programs and views that name it.
+    /// The kernel writes `RegisterModule` and asks `Account` and `OfModule`
+    /// alone; `Profile` and `Profiles` are for the modules and views that
+    /// name accounts.
     pub mod identity {
         use crate::{BorshDeserialize, BorshSerialize, ProgramId};
 
         pub type AccountNumber = u64;
 
-        /// What an account's manager declares it to be. The enum only grows
-        /// at its end.
+        /// What an account is, in one field, so no account is two things
+        /// at once: a person holds their own keys; a managed account holds
+        /// the keys its `manager`, a person, gives it and acts only while
+        /// its `standing` is `Active`; a module's account is its program's
+        /// and holds no keys.
+        #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+        pub enum Kind {
+            Person,
+            Managed {
+                manager: AccountNumber,
+                category: Category,
+                standing: Standing,
+            },
+            Module(ProgramId),
+        }
+
+        /// What a manager declares a managed account to be. The enum only
+        /// grows at its end.
         #[derive(Clone, Copy, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
         pub enum Category {
             Agent,
         }
 
-        /// Whether an account acts. Only a manager changes it; `Revoked` is
-        /// final.
+        /// Whether a managed account acts. Its manager alone changes it;
+        /// `Revoked` is final.
         #[derive(Clone, Copy, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
-        pub enum Status {
+        pub enum Standing {
             Active,
             Suspended,
             Revoked,
         }
 
-        /// An account as others show it: its name, what its manager declares
-        /// it (`category`), who manages it, the program it is the account
-        /// of, and whether it acts (`status`).
+        /// An account as others show it: its name and what it is.
         #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
         pub struct Profile {
             pub number: AccountNumber,
             pub name: String,
-            pub category: Option<Category>,
-            pub manager: Option<AccountNumber>,
-            pub module: Option<ProgramId>,
-            pub status: Status,
+            pub kind: Kind,
         }
 
         /// The one write the kernel makes: as it admits a program, with the
@@ -492,29 +506,76 @@ pub mod role {
 
         #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
         pub enum Query {
-            /// The account a frame signed by this key acts as, `None` for a
-            /// key that holds none. Refused while that account does not act:
-            /// its [`Status`] or its manager's is not `Active`. The host
-            /// rejects a frame whose key is refused.
+            /// The kernel's: the account a frame signed by this key acts
+            /// as, `None` for a key that holds none. Refused while that
+            /// account does not act (a managed one whose [`Standing`] is
+            /// not `Active`). The host rejects a frame whose key is
+            /// refused.
             Account(Vec<u8>),
+            /// The kernel's: the account of a program, answered as
+            /// `Account`.
+            OfModule(ProgramId),
+            /// One account's profile, `None` for a number no account has.
+            Profile(AccountNumber),
             /// Every account's profile, ascending by number from past
             /// `after`, at most `limit` of them (the program may cap it).
             Profiles {
                 after: Option<AccountNumber>,
                 limit: u32,
             },
-            /// The account of a program, answered as `Account`.
-            OfModule(ProgramId),
         }
 
         #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
         pub enum Reply {
             Account(Option<AccountNumber>),
+            Profile(Option<Profile>),
             /// `next` is the `after` of the following page; `None` at the end.
             Profiles {
                 profiles: Vec<Profile>,
                 next: Option<AccountNumber>,
             },
+        }
+    }
+}
+
+/// What an account is beside its name, as every view shows it: the one
+/// place a [`Kind`](role::identity::Kind) turns into a badge and a note, so
+/// chat's, forge's and identity's screens agree. Not in ducktape's copy of
+/// this crate: the kernel shows no one anything.
+impl role::identity::Kind {
+    /// The badge beside an account's name: "Agent · managed by <name>" or
+    /// "Module · <program>". A person wears none. `name_of` names the
+    /// manager.
+    pub fn badge(
+        &self,
+        name_of: impl FnOnce(role::identity::AccountNumber) -> String,
+    ) -> Option<String> {
+        use role::identity::{Category, Kind};
+        match self {
+            Kind::Person => None,
+            Kind::Managed {
+                manager,
+                category: Category::Agent,
+                ..
+            } => Some(format!("Agent · managed by {}", name_of(*manager))),
+            Kind::Module(module) => Some(format!("Module · {module}")),
+        }
+    }
+
+    /// Why an account does not act, noted beside its name: "suspended" or
+    /// "revoked". `None` while it acts.
+    pub fn note(&self) -> Option<&'static str> {
+        use role::identity::{Kind, Standing};
+        match self {
+            Kind::Managed {
+                standing: Standing::Suspended,
+                ..
+            } => Some("suspended"),
+            Kind::Managed {
+                standing: Standing::Revoked,
+                ..
+            } => Some("revoked"),
+            Kind::Person | Kind::Module(_) | Kind::Managed { .. } => None,
         }
     }
 }

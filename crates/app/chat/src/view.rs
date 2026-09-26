@@ -8,7 +8,7 @@ use ducktape_view_guest::Host;
 use ducktape_view_guest::host::{Error, pages, wrong_reply};
 use ducktape_view_guest::methods::{Module, Query as Ask};
 
-use crate::{Category, PageRequest, Principal, Profile, Query, Reply, Status};
+use crate::{Kind, PageRequest, Principal, Profile, Query, Reply, Standing};
 
 pub struct Chat;
 impl Module for Chat {
@@ -90,21 +90,26 @@ impl Names {
     pub fn people(&self) -> impl Iterator<Item = u64> + '_ {
         self.profiles
             .values()
-            .filter(|profile| picks(profile))
+            .filter(|profile| picks(&profile.kind))
             .map(|profile| profile.number)
     }
 
     /// Whether a person picks `principal` ([`Names::people`]). An account
     /// past the roster's read is picked by its number.
     pub fn pickable(&self, principal: &Principal) -> bool {
-        match self.profile(principal) {
-            Some(profile) => picks(profile),
+        match self.kind(principal) {
+            Some(kind) => picks(kind),
             None => principal.account().is_some(),
         }
     }
 
     fn profile(&self, principal: &Principal) -> Option<&Profile> {
         self.profiles.get(&principal.account()?)
+    }
+
+    /// What the roster says a principal is; `None` past the roster.
+    pub fn kind(&self, principal: &Principal) -> Option<&Kind> {
+        self.profile(principal).map(|profile| &profile.kind)
     }
 
     /// The name the roster gives a principal: an account's own.
@@ -118,16 +123,15 @@ impl Names {
     }
 
     /// A member row, a huddle seat or a dm peer: the name, else what the
-    /// principal is; marked while the account does not act.
+    /// principal is; noted while the account does not act ("(suspended)").
     pub fn member(&self, principal: &Principal) -> String {
         let name = match self.name(principal) {
             Some(name) => name.to_owned(),
             None => unnamed(principal),
         };
-        match self.profile(principal).map(|profile| profile.status) {
-            Some(Status::Suspended) => format!("{name} (suspended)"),
-            Some(Status::Revoked) => format!("{name} (revoked)"),
-            Some(Status::Active) | None => name,
+        match self.kind(principal).and_then(Kind::note) {
+            Some(note) => format!("{name} ({note})"),
+            None => name,
         }
     }
 
@@ -142,34 +146,30 @@ impl Names {
         }
     }
 
-    /// An account its manager declares an agent.
-    pub fn is_agent(&self, principal: &Principal) -> bool {
-        self.profile(principal)
-            .is_some_and(|profile| profile.category == Some(Category::Agent))
-    }
-
     /// The module an account is the account of.
     pub fn module(&self, principal: &Principal) -> Option<&str> {
-        self.profile(principal)?.module.as_deref()
+        match self.kind(principal)? {
+            Kind::Module(module) => Some(module),
+            Kind::Person | Kind::Managed { .. } => None,
+        }
     }
 
-    /// What an account is, beside its name: an agent and who manages it
-    /// ("Agent · managed by Dev"), or the module it is ("Module · forge").
-    /// None for a person.
+    /// What an account is, beside its name ([`Kind::badge`]): an agent and
+    /// who manages it ("Agent · managed by Dev"), or the module it is
+    /// ("Module · forge"). None for a person.
     pub fn badge(&self, principal: &Principal) -> Option<String> {
-        let profile = self.profile(principal)?;
-        if let Some(module) = &profile.module {
-            return Some(format!("Module · {module}"));
-        }
-        let manager = Principal::Account(profile.manager?);
-        (profile.category == Some(Category::Agent))
-            .then(|| format!("Agent · managed by {}", self.member(&manager)))
+        self.kind(principal)?
+            .badge(|manager| self.member(&Principal::Account(manager)))
     }
 }
 
 /// A person picks a person or an agent that acts.
-fn picks(profile: &Profile) -> bool {
-    profile.module.is_none() && profile.status == Status::Active
+fn picks(kind: &Kind) -> bool {
+    match kind {
+        Kind::Person => true,
+        Kind::Managed { standing, .. } => *standing == Standing::Active,
+        Kind::Module(_) => false,
+    }
 }
 
 /// A principal no roster names: its account number, or the system.

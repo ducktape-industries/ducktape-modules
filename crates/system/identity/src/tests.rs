@@ -4,13 +4,14 @@ use guest::{Cause, Env, Origin, Principal, Scheme, code};
 use guest::{MockHost, Module};
 use store::PageRequest;
 
-use crate::rules::ACCOUNTS;
 use crate::{
-    Account, Admission, CONSENT_NAMESPACE, Category, Consent, Identity, Op, Query, Reply, Status,
+    Account, Admission, CONSENT_NAMESPACE, Category, Consent, Control, Handover, Identity, Kind,
+    Life, Op, Query, Reply, Standing,
 };
 
 const ALICE: &[u8] = b"alice-key";
 const SECOND: &[u8] = b"alice-second-key";
+const BOB: &[u8] = b"bob";
 const BOT: &[u8] = b"bot-key";
 
 fn env(origin: Origin, sender: Option<Principal>, time: u64) -> Env {
@@ -81,6 +82,12 @@ fn run(store: &MockHost, env: &Env, op: Op) -> Result<u64, guest::Error> {
     })
 }
 
+/// `op` as `env`, which must refuse and leave the store as it was.
+#[track_caller]
+fn refused(store: &MockHost, env: &Env, op: Op) -> guest::Error {
+    store.refused(|| run(store, env, op))
+}
+
 fn query(store: &MockHost, query: Query) -> Reply {
     Identity::query(&store.query(env(Origin::Root, None, 100)), query).unwrap()
 }
@@ -142,14 +149,42 @@ fn agent_key(agent: u64, key: &[u8], generation: u64) -> Op {
     }
 }
 
+/// `to`'s consent, by `key`, to receiving `agent` at its `transfers`th
+/// handover, expiring at `expires_at`.
+fn handover(agent: u64, to: u64, key: &[u8], transfers: u64, expires_at: u64) -> Op {
+    let handover = Handover {
+        network: b"net".to_vec(),
+        account: agent,
+        to,
+        transfers,
+        expires_at,
+    };
+    Op::TransferManager {
+        account: agent,
+        to,
+        consent: Consent {
+            key: key.to_vec(),
+            account: agent,
+            expires_at,
+            proof: handover.preimage(),
+        },
+    }
+}
+
+/// An agent's keys, whatever its life.
+fn keys_of(account: &Account) -> Vec<Vec<u8>> {
+    account.keys().iter().map(|key| key.key.clone()).collect()
+}
+
 #[test]
 fn accounts_are_numbered_from_one_and_a_key_holds_one_account() {
     let store = memory();
     assert_eq!(create(&store, ALICE, "  Alice "), 1);
-    assert_eq!(get(&store, 1).name, "Alice");
-    assert!(get(&store, 1).is_person());
-    assert_eq!(create(&store, b"bob", "Bob"), 2);
-    let again = run(
+    let alice = get(&store, 1);
+    assert_eq!(alice.card.name, "Alice");
+    assert!(matches!(alice.control, Control::Person { .. }));
+    assert_eq!(create(&store, BOB, "Bob"), 2);
+    let again = refused(
         &store,
         &signed(&store, ALICE),
         Op::Create {
@@ -157,7 +192,7 @@ fn accounts_are_numbered_from_one_and_a_key_holds_one_account() {
             scheme: Scheme::Ed25519,
         },
     );
-    assert_eq!(again.unwrap_err().code, code::ALREADY_EXISTS);
+    assert_eq!(again.code, code::ALREADY_EXISTS);
     assert_eq!(
         query(
             &store,
@@ -167,7 +202,7 @@ fn accounts_are_numbered_from_one_and_a_key_holds_one_account() {
         ),
         Reply::Number(Some(1))
     );
-    let unsigned = run(
+    let unsigned = refused(
         &store,
         &root(),
         Op::Create {
@@ -175,7 +210,7 @@ fn accounts_are_numbered_from_one_and_a_key_holds_one_account() {
             scheme: Scheme::Ed25519,
         },
     );
-    assert_eq!(unsigned.unwrap_err().code, code::UNAUTHORIZED);
+    assert_eq!(unsigned.code, code::UNAUTHORIZED);
 }
 
 #[test]
@@ -202,12 +237,12 @@ fn a_key_joins_by_consent_and_leaves_only_junior_to_its_remover() {
         consent: consent(proof, expires_at),
     };
     let second = |time| signed_at(&store, SECOND, time).unwrap();
-    let forged = run(&store, &second(100), add(b"nope".to_vec(), 200));
-    assert_eq!(forged.unwrap_err().code, code::UNAUTHORIZED);
-    let expired = run(&store, &second(300), add(admission.preimage(), 200));
-    assert_eq!(expired.unwrap_err().code, code::UNAUTHORIZED);
+    let forged = refused(&store, &second(100), add(b"nope".to_vec(), 200));
+    assert_eq!(forged.code, code::UNAUTHORIZED);
+    let expired = refused(&store, &second(300), add(admission.preimage(), 200));
+    assert_eq!(expired.code, code::UNAUTHORIZED);
     run(&store, &second(150), add(admission.preimage(), 200)).unwrap();
-    assert_eq!(get(&store, 1).keys.len(), 2);
+    assert_eq!(get(&store, 1).keys().len(), 2);
     assert_eq!(
         query(
             &store,
@@ -221,110 +256,335 @@ fn a_key_joins_by_consent_and_leaves_only_junior_to_its_remover() {
         account: 1,
         key: key.to_vec(),
     };
-    let senior = run(&store, &second(150), remove(ALICE));
-    assert_eq!(senior.unwrap_err().code, code::UNAUTHORIZED);
+    let senior = refused(&store, &second(150), remove(ALICE));
+    assert_eq!(senior.code, code::UNAUTHORIZED);
     run(&store, &signed(&store, ALICE), remove(SECOND)).unwrap();
     assert!(!get(&store, 1).holds(SECOND));
-    let last = run(&store, &signed(&store, ALICE), remove(ALICE));
-    assert_eq!(last.unwrap_err().code, code::WRONG_STATE);
+    let last = refused(&store, &signed(&store, ALICE), remove(ALICE));
+    assert_eq!(last.code, code::WRONG_STATE);
 }
 
+/// A person creates an agent and alone adds and removes its keys; the
+/// agent itself neither creates agents nor touches its own keys.
 #[test]
 fn a_person_manages_an_agent_and_its_keys() {
     let store = memory();
     create(&store, ALICE, "Alice");
-    create(&store, b"bob", "Bob");
+    create(&store, BOB, "Bob");
     let agent = create_agent(&store, ALICE, "Scout");
     assert_eq!(agent, 3);
-    let made = get(&store, agent);
     assert_eq!(
-        (made.manager, made.category, made.keys.len()),
-        (Some(1), Some(Category::Agent), 0)
+        get(&store, agent).control,
+        Control::Managed {
+            manager: 1,
+            category: Category::Agent,
+            life: Life::Active { keys: Vec::new() },
+            transfers: 0,
+        }
     );
 
     // only the manager adds a key, and the key consents to joining
-    let stranger = add_agent_key(&store, b"bob", agent, BOT);
-    assert_eq!(stranger.unwrap_err().code, code::UNAUTHORIZED);
+    let stranger = refused(&store, &signed(&store, BOB), agent_key(agent, BOT, 0));
+    assert_eq!(stranger.code, code::UNAUTHORIZED);
     add_agent_key(&store, ALICE, agent, BOT).unwrap();
     assert_eq!(signed(&store, BOT).sender, Some(Principal::Account(agent)));
 
-    // an agent creates no agent, and names itself or is named by its manager
-    let nested = run(
+    // an agent creates no agent
+    let nested = refused(
         &store,
         &signed(&store, BOT),
         Op::CreateAgent { name: "x".into() },
     );
-    assert_eq!(nested.unwrap_err().code, code::UNAUTHORIZED);
-    let rename = |name: &str| Op::SetName {
-        account: agent,
-        name: name.into(),
-    };
-    let by_stranger = run(&store, &signed(&store, b"bob"), rename("Mine"));
-    assert_eq!(by_stranger.unwrap_err().code, code::UNAUTHORIZED);
-    run(&store, &signed(&store, ALICE), rename("Scout II")).unwrap();
-    run(&store, &signed(&store, BOT), rename("Scout III")).unwrap();
-    assert_eq!(get(&store, agent).name, "Scout III");
+    assert_eq!(nested.code, code::UNAUTHORIZED);
 
     // only the manager removes its key
     let remove = Op::RemoveKey {
         account: agent,
         key: BOT.to_vec(),
     };
-    let by_itself = run(&store, &signed(&store, BOT), remove.clone());
-    assert_eq!(by_itself.unwrap_err().code, code::UNAUTHORIZED);
-    let by_stranger = run(&store, &signed(&store, b"bob"), remove.clone());
-    assert_eq!(by_stranger.unwrap_err().code, code::UNAUTHORIZED);
+    let by_itself = refused(&store, &signed(&store, BOT), remove.clone());
+    assert_eq!(by_itself.code, code::UNAUTHORIZED);
+    let by_stranger = refused(&store, &signed(&store, BOB), remove.clone());
+    assert_eq!(by_stranger.code, code::UNAUTHORIZED);
     run(&store, &signed(&store, ALICE), remove).unwrap();
     assert_eq!(signed(&store, BOT).sender, None);
 }
 
+/// A card (name, avatar, bio) is a person's own, an agent's manager's alone
+/// (never the agent's own), and a module's own alone.
 #[test]
-fn a_suspended_or_revoked_agent_acts_as_no_one() {
+fn a_card_is_edited_by_its_person_its_manager_or_its_module() {
     let store = memory();
     create(&store, ALICE, "Alice");
-    create(&store, b"bob", "Bob");
+    create(&store, BOB, "Bob");
     let agent = create_agent(&store, ALICE, "Scout");
     add_agent_key(&store, ALICE, agent, BOT).unwrap();
-    let status = |status| Op::SetStatus {
-        account: agent,
-        status,
+    run(
+        &store,
+        &root(),
+        Op::RegisterModule {
+            module: "forge".into(),
+        },
+    )
+    .unwrap();
+    let forge = from_module(&store, "forge");
+    let Some(Principal::Account(forge_account)) = forge.sender else {
+        panic!("forge acts as its account");
     };
-    let by_itself = run(&store, &signed(&store, BOT), status(Status::Suspended));
-    assert_eq!(by_itself.unwrap_err().code, code::UNAUTHORIZED);
-    run(&store, &signed(&store, ALICE), status(Status::Suspended)).unwrap();
-    let refused = signed_at(&store, BOT, 100).unwrap_err();
-    assert_eq!(refused.code, code::UNAUTHORIZED);
-    run(&store, &signed(&store, ALICE), status(Status::Active)).unwrap();
+    let bio = |account: u64, bio: &str| Op::SetProfile {
+        account,
+        avatar: None,
+        bio: Some(bio.into()),
+    };
+    let rename = |account: u64, name: &str| Op::SetName {
+        account,
+        name: name.into(),
+    };
+    run(&store, &signed(&store, ALICE), bio(1, " mine ")).unwrap();
+    assert_eq!(get(&store, 1).card.bio.as_deref(), Some("mine"));
+    run(&store, &signed(&store, ALICE), bio(agent, "managed")).unwrap();
+    run(&store, &signed(&store, ALICE), rename(agent, "Scout II")).unwrap();
+    assert_eq!(get(&store, agent).card.bio.as_deref(), Some("managed"));
+    assert_eq!(get(&store, agent).card.name, "Scout II");
+    run(&store, &forge, rename(forge_account, "Forge")).unwrap();
+    run(&store, &forge, bio(forge_account, "the forge")).unwrap();
+    assert_eq!(get(&store, forge_account).card.name, "Forge");
+    for (by, account) in [
+        (signed(&store, BOB), 1),
+        (signed(&store, BOB), agent),
+        (signed(&store, BOT), 1),
+        // the agent does not edit its own card: its manager answers for it
+        (signed(&store, BOT), agent),
+        (forge.clone(), 1),
+        (forge.clone(), agent),
+        (signed(&store, ALICE), forge_account),
+        (signed(&store, BOT), forge_account),
+    ] {
+        let why = format!("{:?} on {account}", by.origin);
+        assert_eq!(
+            refused(&store, &by, bio(account, "not yours")).code,
+            code::UNAUTHORIZED,
+            "{why}"
+        );
+        assert_eq!(
+            refused(&store, &by, rename(account, "not yours")).code,
+            code::UNAUTHORIZED,
+            "{why}"
+        );
+    }
+}
+
+/// Suspended, an agent acts as no one and keeps its keys for its resume;
+/// revoked, it is done for good: its keys are gone, its every op refused,
+/// and its manager's list still names it.
+#[test]
+fn an_agent_is_suspended_resumed_or_revoked_by_its_manager_alone() {
+    let store = memory();
+    create(&store, ALICE, "Alice");
+    create(&store, BOB, "Bob");
+    let agent = create_agent(&store, ALICE, "Scout");
+    add_agent_key(&store, ALICE, agent, BOT).unwrap();
+    let suspend = || Op::Suspend { account: agent };
+    let resume = || Op::Resume { account: agent };
+    let revoke = || Op::Revoke { account: agent };
+    for op in [suspend(), resume(), revoke()] {
+        let why = format!("{op:?}");
+        assert_eq!(
+            refused(&store, &signed(&store, BOT), op.clone()).code,
+            code::UNAUTHORIZED,
+            "by itself: {why}"
+        );
+        assert_eq!(
+            refused(&store, &signed(&store, BOB), op).code,
+            code::UNAUTHORIZED,
+            "by a stranger: {why}"
+        );
+    }
+    let already = refused(&store, &signed(&store, ALICE), resume());
+    assert_eq!(already.code, code::WRONG_STATE);
+
+    run(&store, &signed(&store, ALICE), suspend()).unwrap();
+    let refused_key = signed_at(&store, BOT, 100).unwrap_err();
+    assert_eq!(refused_key.code, code::UNAUTHORIZED);
+    assert_eq!(keys_of(&get(&store, agent)), [BOT.to_vec()]);
+    assert_eq!(get(&store, agent).kind().note(), Some("suspended"));
+    let again = refused(&store, &signed(&store, ALICE), suspend());
+    assert_eq!(again.code, code::WRONG_STATE);
+    // a suspended agent's manager still works its keys and its card
+    run(
+        &store,
+        &signed(&store, ALICE),
+        agent_key(agent, b"second-bot", 0),
+    )
+    .unwrap();
+    run(
+        &store,
+        &signed(&store, ALICE),
+        Op::SetName {
+            account: agent,
+            name: "Idle".into(),
+        },
+    )
+    .unwrap();
+    run(&store, &signed(&store, ALICE), resume()).unwrap();
     assert_eq!(signed(&store, BOT).sender, Some(Principal::Account(agent)));
 
-    // a manager that is not live stops its agents with it
-    let mut alice = get(&store, 1);
-    alice.status = Status::Suspended;
-    ACCOUNTS.put(&store.exec(root()), &1, &alice);
-    assert!(signed_at(&store, BOT, 100).is_err());
-    alice.status = Status::Active;
-    ACCOUNTS.put(&store.exec(root()), &1, &alice);
-
-    // the manager hands it to a person; the old one no longer manages it
-    let to = |to| Op::TransferManager { account: agent, to };
-    let to_agent = run(&store, &signed(&store, ALICE), to(agent));
-    assert_eq!(to_agent.unwrap_err().code, code::WRONG_STATE);
-    run(&store, &signed(&store, ALICE), to(2)).unwrap();
-    assert_eq!(get(&store, agent).manager, Some(2));
-    let former = run(&store, &signed(&store, ALICE), status(Status::Revoked));
-    assert_eq!(former.unwrap_err().code, code::UNAUTHORIZED);
-    run(&store, &signed(&store, b"bob"), status(Status::Revoked)).unwrap();
-    assert!(signed_at(&store, BOT, 100).is_err());
-    let revived = run(&store, &signed(&store, b"bob"), status(Status::Active));
-    assert_eq!(revived.unwrap_err().code, code::WRONG_STATE);
-
-    // a person has no manager, so no one sets her status
-    let alice_status = Op::SetStatus {
-        account: 1,
-        status: Status::Suspended,
+    run(&store, &signed(&store, ALICE), revoke()).unwrap();
+    let account = get(&store, agent);
+    assert_eq!(account.kind().note(), Some("revoked"));
+    assert!(account.keys().is_empty(), "revoked, it keeps no key");
+    assert_eq!(
+        query(&store, Query::OfKey { key: BOT.to_vec() }),
+        Reply::Number(None),
+        "its key holds nothing"
+    );
+    let ops = [
+        suspend(),
+        resume(),
+        revoke(),
+        agent_key(agent, b"third-bot", 0),
+        Op::RemoveKey {
+            account: agent,
+            key: BOT.to_vec(),
+        },
+        Op::SetName {
+            account: agent,
+            name: "Back".into(),
+        },
+        Op::SetProfile {
+            account: agent,
+            avatar: None,
+            bio: Some("back".into()),
+        },
+        handover(agent, 2, BOB, 0, 200),
+    ];
+    for op in ops {
+        let why = format!("{op:?}");
+        let refused = refused(&store, &signed(&store, ALICE), op);
+        assert_eq!(refused.code, code::WRONG_STATE, "{why}");
+    }
+    // its key is free for another account, and the manager's list keeps it
+    create(&store, BOT, "Reborn");
+    let Reply::Accounts(managed) = query(
+        &store,
+        Query::Managed {
+            by: 1,
+            page: PageRequest::first(10),
+        },
+    ) else {
+        panic!("Managed answers accounts");
     };
-    let own = run(&store, &signed(&store, ALICE), alice_status);
-    assert_eq!(own.unwrap_err().code, code::UNAUTHORIZED);
+    assert_eq!(
+        managed.items.iter().map(|a| a.number).collect::<Vec<_>>(),
+        [agent]
+    );
+
+    // a person is no one's agent: no one suspends them
+    let alice = refused(&store, &signed(&store, ALICE), Op::Suspend { account: 1 });
+    assert_eq!(alice.code, code::WRONG_STATE);
+    let bob = refused(&store, &signed(&store, BOB), Op::Suspend { account: 1 });
+    assert_eq!(bob.code, code::WRONG_STATE);
+}
+
+/// A manager hands an agent to a person who consented to it with their key,
+/// once: the consent expires, names one handover, and the agent's keys go
+/// with the old manager.
+#[test]
+fn a_manager_hands_an_agent_to_a_consenting_person() {
+    let store = memory();
+    create(&store, ALICE, "Alice");
+    create(&store, BOB, "Bob");
+    let agent = create_agent(&store, ALICE, "Scout");
+    let other = create_agent(&store, ALICE, "Other");
+    add_agent_key(&store, ALICE, agent, BOT).unwrap();
+    run(
+        &store,
+        &root(),
+        Op::RegisterModule {
+            module: "forge".into(),
+        },
+    )
+    .unwrap();
+    let alice = || signed(&store, ALICE);
+    let bob = || signed(&store, BOB);
+
+    // the receiver is a person, who consented with a key of theirs
+    let to_agent = refused(&store, &alice(), handover(agent, other, BOB, 0, 200));
+    assert_eq!(to_agent.code, code::WRONG_STATE);
+    let to_module = refused(&store, &alice(), handover(agent, 5, BOB, 0, 200));
+    assert_eq!(to_module.code, code::WRONG_STATE);
+    let not_bobs = refused(&store, &alice(), handover(agent, 2, ALICE, 0, 200));
+    assert_eq!(not_bobs.code, code::UNAUTHORIZED);
+    let forged = Op::TransferManager {
+        account: agent,
+        to: 2,
+        consent: Consent {
+            key: BOB.to_vec(),
+            account: agent,
+            expires_at: 200,
+            proof: b"nope".to_vec(),
+        },
+    };
+    assert_eq!(refused(&store, &alice(), forged).code, code::UNAUTHORIZED);
+    let late = signed_at(&store, ALICE, 300).unwrap();
+    let expired = refused(&store, &late, handover(agent, 2, BOB, 0, 200));
+    assert_eq!(expired.code, code::UNAUTHORIZED);
+    let by_stranger = refused(&store, &bob(), handover(agent, 2, BOB, 0, 200));
+    assert_eq!(by_stranger.code, code::UNAUTHORIZED);
+
+    run(&store, &alice(), handover(agent, 2, BOB, 0, 200)).unwrap();
+    let moved = get(&store, agent);
+    assert_eq!(
+        moved.control,
+        Control::Managed {
+            manager: 2,
+            category: Category::Agent,
+            life: Life::Active { keys: Vec::new() },
+            transfers: 1,
+        },
+        "the keys went with the old manager"
+    );
+    assert_eq!(signed(&store, BOT).sender, None);
+    let managed_by = |by: u64| match query(
+        &store,
+        Query::Managed {
+            by,
+            page: PageRequest::first(10),
+        },
+    ) {
+        Reply::Accounts(page) => page.items.iter().map(|a| a.number).collect::<Vec<_>>(),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!((managed_by(1), managed_by(2)), (vec![other], vec![agent]));
+    let former = refused(&store, &alice(), Op::Suspend { account: agent });
+    assert_eq!(former.code, code::UNAUTHORIZED);
+
+    // the old consent takes it no second time: Bob hands it back, and
+    // Alice, managing again, cannot push it to Bob with it
+    run(&store, &bob(), handover(agent, 1, ALICE, 1, 200)).unwrap();
+    let replayed = refused(&store, &alice(), handover(agent, 2, BOB, 0, 200));
+    assert_eq!(replayed.code, code::UNAUTHORIZED);
+    run(&store, &alice(), handover(agent, 2, BOB, 2, 200)).unwrap();
+    assert_eq!(managed_by(2), [agent]);
+
+    // suspended, it arrives suspended, and its new manager resumes it
+    run(&store, &bob(), agent_key(agent, BOT, 1)).unwrap();
+    run(&store, &bob(), Op::Suspend { account: agent }).unwrap();
+    run(&store, &bob(), handover(agent, 1, ALICE, 3, 200)).unwrap();
+    assert_eq!(
+        get(&store, agent).control,
+        Control::Managed {
+            manager: 1,
+            category: Category::Agent,
+            life: Life::Suspended { keys: Vec::new() },
+            transfers: 4,
+        }
+    );
+    assert_eq!(
+        query(&store, Query::OfKey { key: BOT.to_vec() }),
+        Reply::Number(None)
+    );
+    run(&store, &alice(), Op::Resume { account: agent }).unwrap();
 }
 
 #[test]
@@ -334,40 +594,48 @@ fn the_system_registers_a_module_which_alone_names_its_account() {
     let register = || Op::RegisterModule {
         module: "forge".into(),
     };
-    let by_person = run(&store, &signed(&store, ALICE), register());
-    assert_eq!(by_person.unwrap_err().code, code::UNAUTHORIZED);
+    let by_person = refused(&store, &signed(&store, ALICE), register());
+    assert_eq!(by_person.code, code::UNAUTHORIZED);
     run(&store, &root(), register()).unwrap();
     run(&store, &root(), register()).unwrap();
     let forge = from_module(&store, "forge");
-    let by_module = run(
+    let by_module = refused(
         &store,
         &forge,
         Op::RegisterModule {
             module: "other".into(),
         },
     );
-    assert_eq!(by_module.unwrap_err().code, code::UNAUTHORIZED);
+    assert_eq!(by_module.code, code::UNAUTHORIZED);
     assert_eq!(forge.sender, Some(Principal::Account(2)));
     let account = get(&store, 2);
+    assert_eq!(account.card.name, "forge");
     assert_eq!(
-        (account.name.as_str(), account.module.as_deref()),
-        ("forge", Some("forge"))
+        account.control,
+        Control::Module {
+            module: "forge".into()
+        }
     );
-    assert!(account.keys.is_empty() && account.manager.is_none());
+    assert!(account.keys().is_empty());
 
-    let rename = || Op::SetName {
-        account: 2,
-        name: "Forge".into(),
-    };
-    let by_person = run(&store, &signed(&store, ALICE), rename());
-    assert_eq!(by_person.unwrap_err().code, code::UNAUTHORIZED);
-    run(&store, &forge, rename()).unwrap();
-    assert_eq!(get(&store, 2).name, "Forge");
     // a module's account holds no keys and manages no one
-    let agent = run(&store, &forge, Op::CreateAgent { name: "x".into() });
-    assert_eq!(agent.unwrap_err().code, code::UNAUTHORIZED);
-    let key = add_agent_key(&store, ALICE, 2, BOT);
-    assert_eq!(key.unwrap_err().code, code::WRONG_STATE);
+    let agent = refused(&store, &forge, Op::CreateAgent { name: "x".into() });
+    assert_eq!(agent.code, code::UNAUTHORIZED);
+    let key = refused(&store, &signed(&store, ALICE), agent_key(2, BOT, 0));
+    assert_eq!(key.code, code::WRONG_STATE);
+    let key = refused(&store, &forge, agent_key(2, BOT, 0));
+    assert_eq!(key.code, code::WRONG_STATE);
+    let remove = refused(
+        &store,
+        &forge,
+        Op::RemoveKey {
+            account: 2,
+            key: BOT.to_vec(),
+        },
+    );
+    assert_eq!(remove.code, code::WRONG_STATE);
+    let suspend = refused(&store, &signed(&store, ALICE), Op::Suspend { account: 2 });
+    assert_eq!(suspend.code, code::WRONG_STATE);
 }
 
 #[test]
@@ -457,6 +725,16 @@ fn the_identity_role_is_its_first_variants() {
         abi::encode(&Query::OfKey { key })
     );
     assert_eq!(
+        abi::encode(&role::Query::OfModule("chat".into())),
+        abi::encode(&Query::OfModule {
+            module: "chat".into()
+        })
+    );
+    assert_eq!(
+        abi::encode(&role::Query::Profile(4)),
+        abi::encode(&Query::Profile { number: 4 })
+    );
+    assert_eq!(
         abi::encode(&role::Query::Profiles {
             after: Some(2),
             limit: 5
@@ -467,36 +745,36 @@ fn the_identity_role_is_its_first_variants() {
         })
     );
     assert_eq!(
-        abi::encode(&role::Query::OfModule("chat".into())),
-        abi::encode(&Query::OfModule {
-            module: "chat".into()
-        })
-    );
-    assert_eq!(
         abi::encode(&role::Reply::Account(Some(3))),
         abi::encode(&Reply::Number(Some(3)))
     );
-    let profiles = vec![crate::Profile {
+    let profile = crate::Profile {
         number: 1,
         name: "Alice".into(),
-        category: None,
-        manager: None,
-        module: None,
-        status: Status::Active,
-    }];
+        kind: Kind::Managed {
+            manager: 2,
+            category: Category::Agent,
+            standing: Standing::Suspended,
+        },
+    };
+    assert_eq!(
+        abi::encode(&role::Reply::Profile(Some(profile.clone()))),
+        abi::encode(&Reply::Profile(Some(profile.clone())))
+    );
     assert_eq!(
         abi::encode(&role::Reply::Profiles {
-            profiles: profiles.clone(),
+            profiles: vec![profile.clone()],
             next: Some(1)
         }),
         abi::encode(&Reply::Profiles {
-            profiles,
+            profiles: vec![profile],
             next: Some(1)
         })
     );
 }
 
-/// Profiles page in number order and say what each account is.
+/// Profiles page in number order and say what each account is; one is
+/// asked by number.
 #[test]
 fn profiles_page_in_number_order_and_say_what_each_is() {
     let store = memory();
@@ -517,70 +795,38 @@ fn profiles_page_in_number_order_and_say_what_each_is() {
     let (first, next) = page(None, 2);
     let what: Vec<_> = first
         .iter()
-        .map(|p| (p.number, p.name.as_str(), p.category, p.manager))
+        .map(|p| (p.number, p.name.as_str(), p.kind.clone()))
         .collect();
     assert_eq!(
         what,
         [
-            (1, "Alice", None, None),
-            (2, "Scout", Some(Category::Agent), Some(1))
+            (1, "Alice", Kind::Person),
+            (
+                2,
+                "Scout",
+                Kind::Managed {
+                    manager: 1,
+                    category: Category::Agent,
+                    standing: Standing::Active
+                }
+            )
         ]
     );
     assert_eq!(next, Some(2));
     let (rest, next) = page(next, 2);
     assert_eq!(
         rest.iter()
-            .map(|p| (p.number, p.module.as_deref()))
+            .map(|p| (p.number, p.kind.clone()))
             .collect::<Vec<_>>(),
-        [(3, Some("chat"))]
+        [(3, Kind::Module("chat".into()))]
     );
     assert_eq!(next, None);
-}
-
-/// An account's profile is set by the account itself or its manager; a
-/// stranger sets none, nor anyone a module's.
-#[test]
-fn a_profile_is_set_by_its_account_or_its_manager() {
-    let store = memory();
-    create(&store, ALICE, "Alice");
-    create(&store, b"bob", "Bob");
-    let agent = create_agent(&store, ALICE, "Scout");
-    add_agent_key(&store, ALICE, agent, BOT).unwrap();
-    run(
-        &store,
-        &root(),
-        Op::RegisterModule {
-            module: "forge".into(),
-        },
-    )
-    .unwrap();
-    let forge = from_module(&store, "forge");
-    let Some(Principal::Account(forge_account)) = forge.sender else {
-        panic!("forge acts as its account");
+    let one = |number| match query(&store, Query::Profile { number }) {
+        Reply::Profile(profile) => profile,
+        other => panic!("{other:?}"),
     };
-    let bio = |account: u64, bio: &str| Op::SetProfile {
-        account,
-        avatar: None,
-        bio: Some(bio.into()),
-    };
-    run(&store, &signed(&store, ALICE), bio(1, " mine ")).unwrap();
-    assert_eq!(get(&store, 1).bio.as_deref(), Some("mine"));
-    run(&store, &signed(&store, BOT), bio(agent, "itself")).unwrap();
-    run(&store, &signed(&store, ALICE), bio(agent, "managed")).unwrap();
-    assert_eq!(get(&store, agent).bio.as_deref(), Some("managed"));
-    for (by, account) in [
-        (signed(&store, b"bob"), 1),
-        (signed(&store, b"bob"), agent),
-        (signed(&store, BOT), 1),
-        (forge.clone(), 1),
-        (signed(&store, ALICE), forge_account),
-        (signed(&store, BOT), forge_account),
-    ] {
-        let refused = run(&store, &by, bio(account, "not yours"));
-        assert_eq!(refused.unwrap_err().code, code::UNAUTHORIZED, "{account}");
-    }
-    run(&store, &forge, bio(forge_account, "the forge")).unwrap();
-    assert_eq!(get(&store, forge_account).bio.as_deref(), Some("the forge"));
+    assert_eq!(one(2).map(|p| p.name), Some("Scout".into()));
+    assert_eq!(one(9), None);
 }
 
 /// An agent's new key consents over its generation and before it expires:
@@ -591,16 +837,16 @@ fn an_agents_key_consent_expires_and_is_not_replayed() {
     create(&store, ALICE, "Alice");
     let agent = create_agent(&store, ALICE, "Scout");
     let late = signed_at(&store, ALICE, 300).unwrap();
-    let expired = run(&store, &late, agent_key(agent, BOT, 0));
-    assert_eq!(expired.unwrap_err().code, code::UNAUTHORIZED);
+    let expired = refused(&store, &late, agent_key(agent, BOT, 0));
+    assert_eq!(expired.code, code::UNAUTHORIZED);
     add_agent_key(&store, ALICE, agent, BOT).unwrap();
     let remove = Op::RemoveKey {
         account: agent,
         key: BOT.to_vec(),
     };
     run(&store, &signed(&store, ALICE), remove).unwrap();
-    let replayed = add_agent_key(&store, ALICE, agent, BOT);
-    assert_eq!(replayed.unwrap_err().code, code::UNAUTHORIZED);
+    let replayed = refused(&store, &signed(&store, ALICE), agent_key(agent, BOT, 0));
+    assert_eq!(replayed.code, code::UNAUTHORIZED);
     let fresh = agent_key(agent, BOT, 1);
     run(&store, &signed(&store, ALICE), fresh).unwrap();
     assert!(get(&store, agent).holds(BOT));

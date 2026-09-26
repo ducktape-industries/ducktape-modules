@@ -5,7 +5,7 @@ use ducktape_view_guest::{
     methods::Query,
 };
 
-use identity::PageRequest;
+use identity::{Control, Kind, PageRequest, Standing};
 use serde::{Deserialize, Serialize};
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Account {
@@ -13,7 +13,7 @@ pub struct Account {
     pub name: String,
     pub keys: Vec<Key>,
     /// a person's account manages agents; an agent's or a module's none
-    pub person: bool,
+    pub manages: bool,
     pub agents: Vec<Agent>,
 }
 /// An agent the account manages, as its line reads.
@@ -22,7 +22,8 @@ pub struct Agent {
     pub number: u64,
     pub name: String,
     pub keys: usize,
-    pub status: String,
+    #[serde(with = "identity::view::borsh_bytes")]
+    pub standing: Standing,
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Key {
@@ -52,7 +53,7 @@ pub async fn read_account(
             number: None,
             name: "Unregistered key".into(),
             keys: vec![read_key(&host, &key, "Host key".into()).await?],
-            person: false,
+            manages: false,
             agents: Vec::new(),
         }));
     };
@@ -67,7 +68,7 @@ pub async fn read_account(
         return Ok(None);
     };
     let mut keys = Vec::new();
-    for key in &account.keys {
+    for key in account.keys() {
         keys.push(
             read_key(
                 &host,
@@ -77,17 +78,17 @@ pub async fn read_account(
             .await?,
         );
     }
-    let person = account.is_person();
-    let agents = if person {
+    let manages = matches!(account.control, Control::Person { .. });
+    let agents = if manages {
         read_agents(&host, number).await?
     } else {
         Vec::new()
     };
     Ok(Some(Account {
         number: Some(number),
-        name: account.name,
+        name: account.card.name,
         keys,
-        person,
+        manages,
         agents,
     }))
 }
@@ -107,19 +108,20 @@ async fn read_agents(host: &Host, manager: u64) -> Result<Vec<Agent>, Error> {
                 )));
             }
         };
-        agents.extend(reply.items.into_iter().map(|agent| {
-            Agent {
+        for agent in reply.items {
+            let Kind::Managed { standing, .. } = agent.kind() else {
+                return Err(malformed(format!(
+                    "identity lists account {} as managed, and it is not",
+                    agent.number
+                )));
+            };
+            agents.push(Agent {
                 number: agent.number,
-                name: agent.name,
-                keys: agent.keys.len(),
-                status: match agent.status {
-                    identity::Status::Active => "active",
-                    identity::Status::Suspended => "suspended",
-                    identity::Status::Revoked => "revoked",
-                }
-                .into(),
-            }
-        }));
+                keys: agent.keys().len(),
+                name: agent.card.name,
+                standing,
+            });
+        }
         match reply.next {
             Some(next) => after = Some(next),
             None => return Ok(agents),

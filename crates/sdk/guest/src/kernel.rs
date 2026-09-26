@@ -99,7 +99,7 @@ impl Principal {
         }
     }
 
-    /// The principal a reader writes as, from the account her seated key
+    /// The principal a reader writes as, from the account their seated key
     /// holds. None while it holds none: every view gates its writes on this,
     /// the way [`ExecCtx::sender`](crate::ExecCtx::sender) refuses them.
     pub fn writer(account: Option<AccountNumber>) -> Option<Principal> {

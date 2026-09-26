@@ -7,20 +7,18 @@ use guest::{
 use store::{Item, Map, PageRequest, Set};
 
 use crate::{
-    Account, AccountNumber, Admission, CONSENT_NAMESPACE, Category, Consent, Key, Reference, Reply,
-    Status,
+    Account, AccountNumber, Admission, CONSENT_NAMESPACE, Card, Category, Consent, Control,
+    Handover, Key, Life, Reference, Reply,
 };
 
 pub(crate) const ACCOUNTS: Map<AccountNumber, Account> = Map::new("a/");
 pub(crate) const OF_KEY: Map<Vec<u8>, AccountNumber> = Map::new("k/");
 pub(crate) const OF_MODULE: Map<ModuleId, AccountNumber> = Map::new("m/");
 const GENERATION: Map<Vec<u8>, u64> = Map::new("g/");
-/// `(manager, managed)`: the agents an account manages.
+/// `(manager, managed)`: the agents an account manages, revoked ones too,
+/// so a manager's list keeps what they answered for.
 pub(crate) const MANAGED: Set<(AccountNumber, AccountNumber)> = Set::new("d/");
 const NEXT: Item<AccountNumber> = Item::new("next");
-
-/// The refusal a key meets while its account does not act.
-pub(crate) const SUSPENDED: &str = "this account is suspended";
 
 pub(crate) fn account(ctx: &QueryCtx, number: AccountNumber) -> Result<Account, Error> {
     ACCOUNTS
@@ -28,27 +26,23 @@ pub(crate) fn account(ctx: &QueryCtx, number: AccountNumber) -> Result<Account, 
         .ok_or_else(|| not_found(format!("account {number}")))
 }
 
-/// An account acts while it is active and so is its manager.
-pub(crate) fn live(ctx: &QueryCtx, account: &Account) -> Result<bool, Error> {
-    if account.status != Status::Active {
-        return Ok(false);
-    }
-    match account.manager {
-        Some(manager) => Ok(self::account(ctx, manager)?.status == Status::Active),
-        None => Ok(true),
-    }
-}
-
-/// The account a frame signed by `key` acts as: refused while it is not
-/// live, so the host rejects the frame.
+/// The account a frame signed by `key` acts as: refused while it does not
+/// act, so the host rejects the frame. A person and a module always act;
+/// an agent while its manager keeps it active (a revoked one holds no key
+/// to be asked about).
 pub(crate) fn of_key(ctx: &QueryCtx, key: &Vec<u8>) -> Result<Option<AccountNumber>, Error> {
     let Some(number) = OF_KEY.get(ctx, key)? else {
         return Ok(None);
     };
-    if !live(ctx, &account(ctx, number)?)? {
-        return Err(unauthorized(SUSPENDED));
+    match account(ctx, number)?.control {
+        Control::Person { .. }
+        | Control::Module { .. }
+        | Control::Managed {
+            life: Life::Active { .. },
+            ..
+        } => Ok(Some(number)),
+        Control::Managed { .. } => Err(unauthorized(format!("account {number} is suspended"))),
     }
-    Ok(Some(number))
 }
 
 pub(crate) fn resolve(
@@ -103,6 +97,14 @@ fn admit_key(ctx: &ExecCtx, key: &Vec<u8>, number: AccountNumber) -> Result<(), 
     Ok(())
 }
 
+/// Forgets every key in `keys`: the account no longer holds them. Their
+/// generations stay, so no old consent admits one again.
+fn drop_keys(ctx: &ExecCtx, keys: &[Key]) {
+    for key in keys {
+        OF_KEY.remove(ctx, &key.key);
+    }
+}
+
 fn named(name: String) -> Result<String, Error> {
     let name = name.trim().to_owned();
     if name.is_empty() {
@@ -111,20 +113,19 @@ fn named(name: String) -> Result<String, Error> {
     Ok(name)
 }
 
-/// A fresh account: active, no keys, no profile.
-fn fresh(ctx: &ExecCtx, number: AccountNumber, name: String) -> Account {
-    Account {
-        number,
-        name,
+/// A fresh card: a name, nothing else yet.
+fn card(ctx: &ExecCtx, name: String) -> Result<Card, Error> {
+    Ok(Card {
+        name: named(name)?,
         avatar: None,
         bio: None,
         updated_at: ctx.env().time,
-        keys: Vec::new(),
-        module: None,
-        manager: None,
-        status: Status::Active,
-        category: None,
-    }
+    })
+}
+
+fn save(ctx: &ExecCtx, mut account: Account) {
+    account.card.updated_at = ctx.env().time;
+    ACCOUNTS.put(ctx, &account.number, &account);
 }
 
 /// The kernel, admitting `module`, gives it its account, named after it.
@@ -136,10 +137,14 @@ pub(crate) fn register_module(ctx: &ExecCtx, module: ModuleId) -> Result<(), Err
     if OF_MODULE.has(ctx, &module) {
         return Ok(());
     }
+    let card = card(ctx, module.clone())?;
     let number = next_number(ctx)?;
     let account = Account {
-        module: Some(module.clone()),
-        ..fresh(ctx, number, named(module.clone())?)
+        number,
+        card,
+        control: Control::Module {
+            module: module.clone(),
+        },
     };
     ACCOUNTS.put(ctx, &number, &account);
     OF_MODULE.put(ctx, &module, &number);
@@ -149,6 +154,10 @@ pub(crate) fn register_module(ctx: &ExecCtx, module: ModuleId) -> Result<(), Err
 pub(crate) fn create(ctx: &ExecCtx, name: String, scheme: Scheme) -> Result<(), Error> {
     let env = ctx.env();
     let signer = env.signer()?;
+    let card = card(ctx, name)?;
+    if OF_KEY.has(ctx, &signer) {
+        return Err(already_exists("this key already belongs to an account"));
+    }
     let number = next_number(ctx)?;
     admit_key(ctx, &signer, number)?;
     let key = Key {
@@ -158,24 +167,13 @@ pub(crate) fn create(ctx: &ExecCtx, name: String, scheme: Scheme) -> Result<(), 
         added_at: env.time,
     };
     let account = Account {
-        keys: vec![key],
-        ..fresh(ctx, number, named(name)?)
+        number,
+        card,
+        control: Control::Person { keys: vec![key] },
     };
     ACCOUNTS.put(ctx, &number, &account);
     ctx.set_return_data(abi::encode(&number));
     Ok(())
-}
-
-/// The account the frame acts as, which must be a person's.
-fn person(ctx: &ExecCtx) -> Result<Account, Error> {
-    let number = acting(ctx)?;
-    let account = account(ctx, number)?;
-    if !account.is_person() {
-        return Err(unauthorized(format!(
-            "account {number} is not a person's: an agent or a module manages no one"
-        )));
-    }
-    Ok(account)
 }
 
 /// The account number the frame acts as.
@@ -185,13 +183,31 @@ fn acting(ctx: &ExecCtx) -> Result<AccountNumber, Error> {
         .ok_or_else(|| unauthorized("the system acts as no account"))
 }
 
+/// `number`'s account, which must be a person's: the one kind that
+/// manages.
+fn person(ctx: &ExecCtx, number: AccountNumber) -> Result<Account, Error> {
+    let account = account(ctx, number)?;
+    match account.control {
+        Control::Person { .. } => Ok(account),
+        Control::Managed { .. } | Control::Module { .. } => Err(unauthorized(format!(
+            "account {number} is not a person's: an agent or a module manages no one"
+        ))),
+    }
+}
+
 pub(crate) fn create_agent(ctx: &ExecCtx, name: String) -> Result<(), Error> {
-    let manager = person(ctx)?.number;
+    let manager = person(ctx, acting(ctx)?)?.number;
+    let card = card(ctx, name)?;
     let number = next_number(ctx)?;
     let account = Account {
-        manager: Some(manager),
-        category: Some(Category::Agent),
-        ..fresh(ctx, number, named(name)?)
+        number,
+        card,
+        control: Control::Managed {
+            manager,
+            category: Category::Agent,
+            life: Life::Active { keys: Vec::new() },
+            transfers: 0,
+        },
     };
     ACCOUNTS.put(ctx, &number, &account);
     MANAGED.insert(ctx, &(manager, number));
@@ -199,34 +215,26 @@ pub(crate) fn create_agent(ctx: &ExecCtx, name: String) -> Result<(), Error> {
     Ok(())
 }
 
-/// Refused unless the frame acts as `account`'s manager.
-fn managing(ctx: &ExecCtx, account: &Account) -> Result<(), Error> {
+/// Refused unless the frame acts as `manager`, the manager of `number`.
+fn managing(ctx: &ExecCtx, manager: AccountNumber, number: AccountNumber) -> Result<(), Error> {
     let acting = acting(ctx)?;
-    if account.manager != Some(acting) {
+    if acting != manager {
         return Err(unauthorized(format!(
-            "account {acting} does not manage account {}",
-            account.number
+            "account {acting} does not manage account {number}"
         )));
     }
     Ok(())
 }
 
-/// Refused unless the frame acts as `account` itself or as its manager.
-fn acts_for(ctx: &ExecCtx, account: &Account) -> Result<(), Error> {
-    let acting = acting(ctx)?;
-    let acts = acting == account.number || account.manager == Some(acting);
-    if !acts {
-        return Err(unauthorized(format!(
-            "account {acting} does not act for account {}",
-            account.number
-        )));
-    }
-    Ok(())
+/// The refusal every op on a revoked agent meets.
+fn revoked(number: AccountNumber) -> Error {
+    wrong_state(format!("account {number} is revoked for good"))
 }
 
-/// A person's new key signs the frame and a key already on her account
+/// A person's new key signs the frame and a key already on their account
 /// consents; an agent's manager signs the frame and the new key consents to
-/// itself. Either way the consent proves a key agreed to the admission.
+/// itself. Either way the consent proves a key agreed to the admission. A
+/// module's account holds no keys; a revoked agent takes none.
 pub(crate) fn add_key(
     ctx: &ExecCtx,
     scheme: Scheme,
@@ -234,27 +242,37 @@ pub(crate) fn add_key(
     consent: Consent,
 ) -> Result<(), Error> {
     let env = ctx.env();
-    let signer = env.signer()?;
     let mut account = account(ctx, consent.account)?;
-    if account.module.is_some() {
-        return Err(wrong_state("a module's account holds no keys"));
-    }
-    let (key, consenting_scheme) = match account.manager {
-        Some(_) => {
-            managing(ctx, &account)?;
-            (consent.key.clone(), scheme)
-        }
-        None => {
-            let authorizer = account
-                .keys
+    let (keys, key, consenting_scheme) = match &mut account.control {
+        Control::Person { keys } => {
+            let authorizer = keys
                 .iter()
                 .find(|key| key.key == consent.key)
                 .ok_or_else(|| unauthorized("the consenting key is not on this account"))?;
-            (signer, authorizer.scheme)
+            let consenting_scheme = authorizer.scheme;
+            (keys, env.signer()?, consenting_scheme)
+        }
+        Control::Managed {
+            manager,
+            life: Life::Active { keys } | Life::Suspended { keys },
+            ..
+        } => {
+            managing(ctx, *manager, consent.account)?;
+            (keys, consent.key.clone(), scheme)
+        }
+        Control::Managed {
+            manager,
+            life: Life::Revoked,
+            ..
+        } => {
+            managing(ctx, *manager, consent.account)?;
+            return Err(revoked(consent.account));
+        }
+        Control::Module { .. } => {
+            return Err(wrong_state("a module's account holds no keys"));
         }
     };
-    let expired = env.time > consent.expires_at;
-    if expired {
+    if env.time > consent.expires_at {
         return Err(unauthorized("the consent has expired"));
     }
     let admission = Admission {
@@ -276,58 +294,91 @@ pub(crate) fn add_key(
         return Err(unauthorized("the consent does not verify"));
     }
     admit_key(ctx, &key, consent.account)?;
-    account.keys.push(Key {
+    keys.push(Key {
         scheme,
         key,
         label,
         added_at: env.time,
     });
-    account.keys.sort_by(|a, b| a.key.cmp(&b.key));
-    account.updated_at = env.time;
-    ACCOUNTS.put(ctx, &account.number, &account);
+    keys.sort_by(|a, b| a.key.cmp(&b.key));
+    save(ctx, account);
     Ok(())
 }
 
-/// A person removes her own keys, never a senior one nor her last; an
+/// A person removes their own keys, never a senior one nor their last; an
 /// agent's manager removes any of its keys.
 pub(crate) fn remove_key(ctx: &ExecCtx, number: AccountNumber, key: &Vec<u8>) -> Result<(), Error> {
     let env = ctx.env();
     let mut account = account(ctx, number)?;
-    let removed = account
-        .keys
-        .iter()
-        .find(|held| &held.key == key)
-        .ok_or_else(|| not_found("that key is not on this account"))?;
-    if account.manager.is_some() {
-        managing(ctx, &account)?;
-    } else {
-        let signer = env.signer()?;
-        let remover_added_at = account
-            .keys
-            .iter()
-            .find(|held| held.key == signer)
-            .map(|held| held.added_at)
-            .ok_or_else(|| unauthorized("the signer is not on this account"))?;
-        if account.keys.len() == 1 {
-            return Err(wrong_state("an account keeps its last key"));
+    let keys = match &mut account.control {
+        Control::Person { keys } => {
+            let signer = env.signer()?;
+            let held = |wanted: &[u8]| keys.iter().find(|held| held.key == wanted);
+            let removed = held(key).ok_or_else(|| not_found("that key is not on this account"))?;
+            let remover =
+                held(&signer).ok_or_else(|| unauthorized("the signer is not on this account"))?;
+            if keys.len() == 1 {
+                return Err(wrong_state("an account keeps its last key"));
+            }
+            if removed.added_at < remover.added_at {
+                return Err(unauthorized("a key removes only itself or a junior key"));
+            }
+            keys
         }
-        if removed.added_at < remover_added_at {
-            return Err(unauthorized("a key removes only itself or a junior key"));
+        Control::Managed {
+            manager,
+            life: Life::Active { keys } | Life::Suspended { keys },
+            ..
+        } => {
+            managing(ctx, *manager, number)?;
+            if !keys.iter().any(|held| &held.key == key) {
+                return Err(not_found("that key is not on this account"));
+            }
+            keys
         }
-    }
-    account.keys.retain(|held| &held.key != key);
+        Control::Managed {
+            manager,
+            life: Life::Revoked,
+            ..
+        } => {
+            managing(ctx, *manager, number)?;
+            return Err(revoked(number));
+        }
+        Control::Module { .. } => {
+            return Err(wrong_state("a module's account holds no keys"));
+        }
+    };
+    keys.retain(|held| &held.key != key);
     OF_KEY.remove(ctx, key);
-    account.updated_at = env.time;
-    ACCOUNTS.put(ctx, &number, &account);
+    save(ctx, account);
     Ok(())
 }
 
+/// The account whose card the frame may edit: a person's or a module's
+/// own, an agent's by its manager alone.
+fn editable(ctx: &ExecCtx, number: AccountNumber) -> Result<Account, Error> {
+    let account = account(ctx, number)?;
+    let acting = acting(ctx)?;
+    let editor = match &account.control {
+        Control::Person { .. } | Control::Module { .. } => number,
+        Control::Managed {
+            life: Life::Revoked,
+            ..
+        } => return Err(revoked(number)),
+        Control::Managed { manager, .. } => *manager,
+    };
+    if acting != editor {
+        return Err(unauthorized(format!(
+            "account {acting} does not edit account {number}"
+        )));
+    }
+    Ok(account)
+}
+
 pub(crate) fn set_name(ctx: &ExecCtx, number: AccountNumber, name: String) -> Result<(), Error> {
-    let mut account = account(ctx, number)?;
-    acts_for(ctx, &account)?;
-    account.name = named(name)?;
-    account.updated_at = ctx.env().time;
-    ACCOUNTS.put(ctx, &number, &account);
+    let mut account = editable(ctx, number)?;
+    account.card.name = named(name)?;
+    save(ctx, account);
     Ok(())
 }
 
@@ -337,53 +388,128 @@ pub(crate) fn set_profile(
     avatar: Option<abi::BlobId>,
     bio: Option<String>,
 ) -> Result<(), Error> {
-    let mut account = account(ctx, number)?;
-    acts_for(ctx, &account)?;
-    account.avatar = avatar;
-    account.bio = bio
+    let mut account = editable(ctx, number)?;
+    account.card.avatar = avatar;
+    account.card.bio = bio
         .map(|bio| bio.trim().to_owned())
         .filter(|bio| !bio.is_empty());
-    account.updated_at = ctx.env().time;
-    ACCOUNTS.put(ctx, &number, &account);
+    save(ctx, account);
     Ok(())
 }
 
-pub(crate) fn set_status(
+/// The agent `number` as its manager, who signed the frame, changes it:
+/// `change` takes its life and gives the next, or says why not.
+fn relive(
     ctx: &ExecCtx,
     number: AccountNumber,
-    status: Status,
+    change: impl FnOnce(Life) -> Result<Life, Error>,
 ) -> Result<(), Error> {
     let mut account = account(ctx, number)?;
-    managing(ctx, &account)?;
-    if account.status == Status::Revoked {
-        return Err(wrong_state(format!("account {number} is revoked for good")));
-    }
-    account.status = status;
-    account.updated_at = ctx.env().time;
-    ACCOUNTS.put(ctx, &number, &account);
+    let Control::Managed { manager, life, .. } = &mut account.control else {
+        return Err(wrong_state(format!("account {number} is no one's agent")));
+    };
+    managing(ctx, *manager, number)?;
+    let was = std::mem::replace(life, Life::Revoked);
+    *life = change(was)?;
+    save(ctx, account);
     Ok(())
 }
 
+pub(crate) fn suspend(ctx: &ExecCtx, number: AccountNumber) -> Result<(), Error> {
+    relive(ctx, number, |life| match life {
+        Life::Active { keys } => Ok(Life::Suspended { keys }),
+        Life::Suspended { .. } => Err(wrong_state(format!(
+            "account {number} is already suspended"
+        ))),
+        Life::Revoked => Err(revoked(number)),
+    })
+}
+
+pub(crate) fn resume(ctx: &ExecCtx, number: AccountNumber) -> Result<(), Error> {
+    relive(ctx, number, |life| match life {
+        Life::Suspended { keys } => Ok(Life::Active { keys }),
+        Life::Active { .. } => Err(wrong_state(format!("account {number} is active"))),
+        Life::Revoked => Err(revoked(number)),
+    })
+}
+
+/// Final: the agent's keys are dropped and act as no one; the manager's
+/// list keeps it.
+pub(crate) fn revoke(ctx: &ExecCtx, number: AccountNumber) -> Result<(), Error> {
+    relive(ctx, number, |life| match life {
+        Life::Active { keys } | Life::Suspended { keys } => {
+            drop_keys(ctx, &keys);
+            Ok(Life::Revoked)
+        }
+        Life::Revoked => Err(revoked(number)),
+    })
+}
+
+/// The manager hands `number` to the person `to`, who consented to this
+/// handover with a key on their account. The agent's keys are dropped, so
+/// nothing the old manager gave it acts on; suspended, it stays so.
 pub(crate) fn transfer_manager(
     ctx: &ExecCtx,
     number: AccountNumber,
     to: AccountNumber,
+    consent: Consent,
 ) -> Result<(), Error> {
+    let env = ctx.env();
     let mut account = account(ctx, number)?;
-    managing(ctx, &account)?;
+    let Control::Managed {
+        manager,
+        life,
+        transfers,
+        ..
+    } = &mut account.control
+    else {
+        return Err(wrong_state(format!("account {number} is no one's agent")));
+    };
+    managing(ctx, *manager, number)?;
+    let keys = match life {
+        Life::Active { keys } | Life::Suspended { keys } => keys,
+        Life::Revoked => return Err(revoked(number)),
+    };
+    if consent.account != number {
+        return Err(invalid("the consent names another account"));
+    }
     let receiver = self::account(ctx, to)?;
-    if !receiver.is_person() {
+    let Control::Person {
+        keys: receiver_keys,
+    } = &receiver.control
+    else {
         return Err(wrong_state(format!("account {to} is not a person's")));
+    };
+    let consenting = receiver_keys
+        .iter()
+        .find(|key| key.key == consent.key)
+        .ok_or_else(|| unauthorized("the consenting key is not on the receiver's account"))?;
+    if env.time > consent.expires_at {
+        return Err(unauthorized("the consent has expired"));
     }
-    if !live(ctx, &receiver)? {
-        return Err(wrong_state(format!("account {to} is not live")));
+    let handover = Handover {
+        network: env.chain_id.clone(),
+        account: number,
+        to,
+        transfers: *transfers,
+        expires_at: consent.expires_at,
+    };
+    let consented = ctx.verify(
+        consenting.scheme,
+        consent.key,
+        CONSENT_NAMESPACE,
+        handover.preimage(),
+        consent.proof,
+    )?;
+    if !consented {
+        return Err(unauthorized("the consent does not verify"));
     }
-    if let Some(from) = account.manager {
-        MANAGED.remove(ctx, &(from, number));
-    }
+    drop_keys(ctx, keys);
+    keys.clear();
+    MANAGED.remove(ctx, &(*manager, number));
     MANAGED.insert(ctx, &(to, number));
-    account.manager = Some(to);
-    account.updated_at = ctx.env().time;
-    ACCOUNTS.put(ctx, &number, &account);
+    *manager = to;
+    *transfers += 1;
+    save(ctx, account);
     Ok(())
 }

@@ -342,3 +342,22 @@ fn a_modules_account_is_neither_reviewer_nor_writer() {
     };
     assert_eq!(rig.refused(&grant).code, code::INVALID_INPUT);
 }
+
+/// Nor is an account identity has none of, nor an agent that does not act:
+/// the profile of each says so, and only an active agent is asked.
+#[test]
+fn an_absent_account_and_an_idle_agent_are_neither_reviewer_nor_writer() {
+    use abi::role::identity::Standing;
+    let (mut rig, _) = story();
+    let grant = |number| Op::Grant {
+        repo: REPO.into(),
+        principal: Principal::Account(number),
+    };
+    assert_eq!(rig.refused(&grant(404)).code, code::INVALID_INPUT);
+    for (agent, standing) in [(31, Standing::Suspended), (32, Standing::Revoked)] {
+        rig.sandbox.agents.borrow_mut().insert(agent, standing);
+        assert_eq!(rig.refused(&grant(agent)).code, code::WRONG_STATE);
+    }
+    rig.sandbox.agents.borrow_mut().insert(33, Standing::Active);
+    rig.execute(&grant(33)).unwrap();
+}

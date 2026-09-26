@@ -1,5 +1,5 @@
 //! What chat hands the host's notification centre: a message that mentions
-//! the reader, or one in a direct room she is in, landing in a room she is
+//! the reader, or one in a direct room they are in, landing in a room they are
 //! not looking at. The host decides whether it becomes a banner. The tab
 //! badge counts such messages in rooms still unread.
 use std::collections::BTreeMap;
@@ -33,7 +33,7 @@ impl Chat {
         if let Some(me) = self.my_account() {
             // the count is not kept, the read cursors are: the first list
             // a view that started over (a reload carries its state, not the
-            // count) sees counts again what is meant for her in each room
+            // count) sees counts again what is meant for them in each room
             // still unread, and announces only what moved since `before`
             let recount = !std::mem::replace(&mut self.recounted, true);
             let viewing = self.viewing();
@@ -168,8 +168,8 @@ impl Chat {
     }
 }
 
-/// The notice `row` makes for account `me`, if it is meant for her: it
-/// mentions her, or it is in a direct room she is in. Her own never is.
+/// The notice `row` makes for account `me`, if it is meant for them: it
+/// mentions them, or it is in a direct room they are in. Their own never is.
 fn notice(row: &MsgRow, me: u64, name: &str, chain: &str, names: &Names) -> Option<Notification> {
     if row.deleted || row.author == Principal::Account(me) {
         return None;

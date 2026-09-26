@@ -29,42 +29,51 @@ fn the_root_tracks_the_shared_theme() {
     assert_eq!(style.text.color, Some(dark.foreground));
 }
 
-fn person(number: u64, name: &str, key: &[u8]) -> identity::Account {
+fn account(number: u64, name: &str, control: identity::Control) -> identity::Account {
     identity::Account {
         number,
-        name: name.into(),
-        avatar: None,
-        bio: None,
-        updated_at: 0,
-        keys: vec![identity::Key {
-            scheme: Scheme::Ed25519,
-            key: key.to_vec(),
-            label: None,
-            added_at: 0,
-        }],
-        module: None,
-        manager: None,
-        status: identity::Status::Active,
-        category: None,
+        card: identity::Card {
+            name: name.into(),
+            avatar: None,
+            bio: None,
+            updated_at: 0,
+        },
+        control,
     }
+}
+
+fn person(number: u64, name: &str, key: &[u8]) -> identity::Account {
+    let keys = vec![identity::Key {
+        scheme: Scheme::Ed25519,
+        key: key.to_vec(),
+        label: None,
+        added_at: 0,
+    }];
+    account(number, name, identity::Control::Person { keys })
 }
 
 fn module(number: u64, name: &str) -> identity::Account {
-    identity::Account {
-        module: Some(name.into()),
-        keys: Vec::new(),
-        ..person(number, name, b"")
-    }
+    account(
+        number,
+        name,
+        identity::Control::Module {
+            module: name.into(),
+        },
+    )
 }
 
+/// A suspended agent `manager` manages, keyless.
 fn agent(number: u64, name: &str, manager: u64) -> identity::Account {
-    identity::Account {
-        manager: Some(manager),
-        category: Some(identity::Category::Agent),
-        status: identity::Status::Suspended,
-        keys: Vec::new(),
-        ..person(number, name, b"")
-    }
+    account(
+        number,
+        name,
+        identity::Control::Managed {
+            manager,
+            category: identity::Category::Agent,
+            life: identity::Life::Suspended { keys: Vec::new() },
+            transfers: 0,
+        },
+    )
 }
 
 fn membership(key: &[u8], role: valset::Role) -> valset::Membership {

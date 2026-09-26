@@ -1,5 +1,5 @@
 //! The `identity` program: accounts, and who acts as each. Everything that
-//! acts is an account: a person (the keys she holds), an agent (the keys its
+//! acts is an account: a person (the keys they hold), an agent (the keys its
 //! manager, a person, adds) and a module (the account the kernel registers
 //! as it admits the module). The types, rules and [`Identity`] module are
 //! always built; a view links them with `module` off. The `module` feature
@@ -12,7 +12,7 @@ mod tests;
 #[cfg(feature = "view")]
 pub mod view;
 
-pub use abi::role::identity::{Category, Profile, Status};
+pub use abi::role::identity::{Category, Kind, Profile, Standing};
 pub use guest::AccountNumber;
 pub use program::Identity;
 
@@ -31,54 +31,113 @@ pub struct Key {
     pub added_at: u64,
 }
 
-/// One account. A person holds keys and has no manager; an agent is
-/// managed by a person and holds the keys that person adds; a module's
-/// account holds no keys and names its `module`.
+/// One account: what it shows ([`Card`]) and who acts as it ([`Control`]).
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct Account {
     pub number: AccountNumber,
+    pub card: Card,
+    pub control: Control,
+}
+
+/// What an account shows of itself.
+#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+pub struct Card {
     pub name: String,
     pub avatar: Option<BlobId>,
     pub bio: Option<String>,
     pub updated_at: u64,
-    /// who acts as this account
-    pub keys: Vec<Key>,
-    /// set for a module's account
-    pub module: Option<ModuleId>,
-    /// structure the chain enforces: one level deep, a person
-    pub manager: Option<AccountNumber>,
-    pub status: Status,
-    /// a label the manager answers for; only a managed account has one
-    pub category: Option<Category>,
+}
+
+/// Who acts as an account, and with which keys. A module's account has no
+/// keys to hold; a revoked agent has none left ([`Life`]).
+#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+pub enum Control {
+    /// A person: their own keys, which they add and remove.
+    Person { keys: Vec<Key> },
+    /// An agent: its `manager`, a person, adds its keys, declares its
+    /// `category`, suspends, resumes, revokes and hands it over.
+    /// `transfers` counts the handovers so far: a receiver's consent
+    /// names it, so no consent takes an agent twice.
+    Managed {
+        manager: AccountNumber,
+        category: Category,
+        life: Life,
+        transfers: u64,
+    },
+    /// A module's account: the module alone acts as it.
+    Module { module: ModuleId },
+}
+
+/// Whether an agent acts. Suspended keeps its keys, so resuming issues
+/// none again; revoked is final and keeps none.
+#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+pub enum Life {
+    Active { keys: Vec<Key> },
+    Suspended { keys: Vec<Key> },
+    Revoked,
 }
 
 impl Account {
-    pub fn holds(&self, key: &[u8]) -> bool {
-        self.keys.iter().any(|held| held.key == key)
+    /// The keys that act as this account: none for a module's or a
+    /// revoked agent.
+    pub fn keys(&self) -> &[Key] {
+        match &self.control {
+            Control::Person { keys } => keys,
+            Control::Managed {
+                life: Life::Active { keys } | Life::Suspended { keys },
+                ..
+            } => keys,
+            Control::Managed {
+                life: Life::Revoked,
+                ..
+            }
+            | Control::Module { .. } => &[],
+        }
     }
 
-    /// A person: neither managed nor a module's.
-    pub fn is_person(&self) -> bool {
-        self.manager.is_none() && self.module.is_none()
+    pub fn holds(&self, key: &[u8]) -> bool {
+        self.keys().iter().any(|held| held.key == key)
+    }
+
+    /// What this account is, as the identity role says it.
+    pub fn kind(&self) -> Kind {
+        match &self.control {
+            Control::Person { .. } => Kind::Person,
+            Control::Managed {
+                manager,
+                category,
+                life,
+                ..
+            } => Kind::Managed {
+                manager: *manager,
+                category: *category,
+                standing: match life {
+                    Life::Active { .. } => Standing::Active,
+                    Life::Suspended { .. } => Standing::Suspended,
+                    Life::Revoked => Standing::Revoked,
+                },
+            },
+            Control::Module { module } => Kind::Module(module.clone()),
+        }
     }
 
     /// How others show this account.
     pub fn profile(&self) -> Profile {
         Profile {
             number: self.number,
-            name: self.name.clone(),
-            category: self.category,
-            manager: self.manager,
-            module: self.module.clone(),
-            status: self.status,
+            name: self.card.name.clone(),
+            kind: self.kind(),
         }
     }
 }
 
-/// A key's consent to a new key joining an account: `proof` is `key`'s
-/// signature over the [`Admission`]. For a person, `key` is one already on
-/// the account and the new key signs the frame; for an agent, `key` is the
-/// new key itself and the manager signs the frame.
+/// A key's consent, `proof` being `key`'s signature over what it agrees
+/// to. To a new key joining an account (`AddKey`, over the [`Admission`]):
+/// for a person, `key` is one already on the account and the new key signs
+/// the frame; for an agent, `key` is the new key itself and the manager
+/// signs the frame. To receiving an agent (`TransferManager`, over the
+/// [`Handover`]): `key` is one on the receiver's account, `account` the
+/// agent, and the manager signs the frame.
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct Consent {
     pub key: Vec<u8>,
@@ -103,15 +162,40 @@ impl Admission {
     }
 }
 
+/// What a receiver signs to take an agent over: the agent (`account`),
+/// themselves (`to`), and the agent's handovers so far (`transfers`, from
+/// its [`Control::Managed`]), so the consent fits one transfer alone.
+#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+pub struct Handover {
+    pub network: Vec<u8>,
+    pub account: AccountNumber,
+    pub to: AccountNumber,
+    pub transfers: u64,
+    pub expires_at: u64,
+}
+
+impl Handover {
+    pub fn preimage(&self) -> Vec<u8> {
+        abi::encode(self)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Op {
     /// The identity role's op (`abi::role::identity::Op`), first: the
     /// system gives an admitted module its account.
-    RegisterModule { module: ModuleId },
+    RegisterModule {
+        module: ModuleId,
+    },
     /// A person's account, holding the signing key.
-    Create { name: String, scheme: Scheme },
+    Create {
+        name: String,
+        scheme: Scheme,
+    },
     /// An agent the signer's account manages; it holds no key yet.
-    CreateAgent { name: String },
+    CreateAgent {
+        name: String,
+    },
     AddKey {
         scheme: Scheme,
         label: Option<String>,
@@ -130,13 +214,24 @@ pub enum Op {
         avatar: Option<BlobId>,
         bio: Option<String>,
     },
-    SetStatus {
+    /// An agent stops acting; its keys stay for `Resume`. Its manager's.
+    Suspend {
         account: AccountNumber,
-        status: Status,
     },
+    Resume {
+        account: AccountNumber,
+    },
+    /// An agent stops for good: its keys are dropped. Its manager's.
+    Revoke {
+        account: AccountNumber,
+    },
+    /// An agent's manager hands it to the person `to`, who consented
+    /// (`consent` is over the [`Handover`]). The agent's keys are dropped;
+    /// suspended, it stays suspended.
     TransferManager {
         account: AccountNumber,
         to: AccountNumber,
+        consent: Consent,
     },
 }
 
@@ -149,17 +244,21 @@ pub enum Reference {
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Query {
     /// The identity role's queries (`abi::role::identity::Query`), first
-    /// and in its order: the account a key acts as (refused while it is not
-    /// live), every account's profile, and a module's account.
+    /// and in its order: the account a key acts as (refused while it does
+    /// not act), a module's account, one account's profile and every
+    /// account's.
     OfKey {
         key: Vec<u8>,
+    },
+    OfModule {
+        module: ModuleId,
+    },
+    Profile {
+        number: AccountNumber,
     },
     Profiles {
         after: Option<AccountNumber>,
         limit: u32,
-    },
-    OfModule {
-        module: ModuleId,
     },
     Get {
         number: AccountNumber,
@@ -181,8 +280,10 @@ pub enum Query {
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Reply {
-    /// The identity role's replies (`abi::role::identity::Reply`).
+    /// The identity role's replies (`abi::role::identity::Reply`), first
+    /// and in its order.
     Number(Option<AccountNumber>),
+    Profile(Option<Profile>),
     Profiles {
         profiles: Vec<Profile>,
         next: Option<AccountNumber>,
@@ -209,13 +310,6 @@ pub fn describe(op: &Op) -> describe::Description {
                 abi::Scheme::Bls12381 => "BLS12-381",
             }),
         )
-    };
-    let status = |status: &Status| {
-        Value::text(match status {
-            Status::Active => "active",
-            Status::Suspended => "suspended",
-            Status::Revoked => "revoked",
-        })
     };
     let (title, fields) = match op {
         Op::RegisterModule { module } => (
@@ -276,19 +370,21 @@ pub fn describe(op: &Op) -> describe::Description {
                 field("bio", optional(bio)),
             ],
         ),
-        Op::SetStatus {
-            account: number,
-            status: to,
-        } => (
-            "Set status".into(),
-            vec![account(number), field("status", status(to))],
-        ),
+        Op::Suspend { account: number } => ("Suspend".into(), vec![account(number)]),
+        Op::Resume { account: number } => ("Resume".into(), vec![account(number)]),
+        Op::Revoke { account: number } => ("Revoke".into(), vec![account(number)]),
         Op::TransferManager {
             account: number,
             to,
+            consent,
         } => (
             "Transfer manager".into(),
-            vec![account(number), field("to", Value::Account(*to))],
+            vec![
+                account(number),
+                field("to", Value::Account(*to)),
+                field("consenting key", Value::Key(consent.key.clone())),
+                field("expires at", Value::Time(consent.expires_at)),
+            ],
         ),
     };
     describe::Description { title, fields }
@@ -310,7 +406,9 @@ fn op_variants_only_append() {
             "RemoveKey",
             "SetName",
             "SetProfile",
-            "SetStatus",
+            "Suspend",
+            "Resume",
+            "Revoke",
             "TransferManager",
         ]
     );

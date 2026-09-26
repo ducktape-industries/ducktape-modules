@@ -27,6 +27,30 @@ fn consent(
     }
 }
 
+/// `to`'s consent, by `key` (one of theirs), to receiving `agent` at its
+/// `transfers`th handover.
+fn handover(
+    key: &ed25519::PrivateKey,
+    agent: AccountNumber,
+    to: AccountNumber,
+    transfers: u64,
+    expires_at: u64,
+) -> identity::Consent {
+    let handover = identity::Handover {
+        network: NETWORK.to_vec(),
+        account: agent,
+        to,
+        transfers,
+        expires_at,
+    };
+    identity::Consent {
+        key: key.public_key().as_ref().to_vec(),
+        account: agent,
+        expires_at,
+        proof: testkit::ed25519_proof(key, identity::CONSENT_NAMESPACE, &handover.preimage()),
+    }
+}
+
 /// The founding programs, in admission order: identity numbers their
 /// accounts first, so a person's account comes after them.
 const FOUNDED: [&str; 5] = [
@@ -101,8 +125,8 @@ fn identity_founds_accounts_and_admits_keys_by_consent() {
         )
         .await;
         let account = net.account(ALICE).await;
-        assert_eq!(account.name, "Alice");
-        assert_eq!(account.keys.len(), 2);
+        assert_eq!(account.card.name, "Alice");
+        assert_eq!(account.keys().len(), 2);
         let identity::Reply::Number(of_phone) = net
             .ask(
                 identity::MODULE,
@@ -208,8 +232,12 @@ fn every_module_has_its_account_from_its_admission() {
             let number = at as AccountNumber + 1;
             assert_eq!(net.of_module(module).await, Some(number), "{module}");
             let account = net.account(number).await;
-            assert_eq!(account.module.as_deref(), Some(module));
-            assert!(account.keys.is_empty() && account.manager.is_none());
+            assert_eq!(
+                account.control,
+                identity::Control::Module {
+                    module: module.into()
+                }
+            );
         }
 
         // a module installed later has its account once it runs
@@ -242,7 +270,7 @@ fn every_module_has_its_account_from_its_admission() {
         assert_eq!(net.of_module("late").await, None);
         net.ticks(lands_at - net.height).await;
         let late = net.of_module("late").await.expect("late has an account");
-        assert_eq!(net.account(late).await.name, "late");
+        assert_eq!(net.account(late).await.card.name, "late");
 
         // the module alone names its account; its frames act as it
         let alice = net.create(1, "Alice").await;
@@ -254,7 +282,7 @@ fn every_module_has_its_account_from_its_admission() {
         let by_person = net.refuse(&public(1), identity::MODULE, &rename).await;
         assert_eq!(by_person, reason::UNAUTHORIZED);
         output_of(&net.sent_by("probe", identity::MODULE, &rename).await);
-        assert_eq!(net.account(probe).await.name, "Probe");
+        assert_eq!(net.account(probe).await.card.name, "Probe");
         let theirs = identity::Op::SetName {
             account: alice,
             name: "Probed".into(),
@@ -281,10 +309,14 @@ fn an_agent_acts_until_its_manager_suspends_it() {
             )
             .await;
         let agent: AccountNumber = abi::decode(&output).unwrap();
-        let made = net.account(agent).await;
         assert_eq!(
-            (made.manager, made.category),
-            (Some(alice), Some(identity::Category::Agent))
+            net.account(agent).await.control,
+            identity::Control::Managed {
+                manager: alice,
+                category: identity::Category::Agent,
+                life: identity::Life::Active { keys: Vec::new() },
+                transfers: 0,
+            }
         );
 
         // the manager signs; the agent's new key consents to joining
@@ -307,76 +339,208 @@ fn an_agent_acts_until_its_manager_suspends_it() {
             .await;
         assert_eq!(nested, reason::UNAUTHORIZED);
 
-        // the agent acts: it names itself
+        // the agent acts, as a member of chat would see; its card is its
+        // manager's alone
         let rename = |name: &str| identity::Op::SetName {
             account: agent,
             name: name.into(),
         };
-        net.apply(&bot_key, identity::MODULE, &rename("Scout 2"))
+        let own_name = net.refuse(&bot_key, identity::MODULE, &rename("Me")).await;
+        assert_eq!(own_name, reason::UNAUTHORIZED);
+        net.apply(&public(1), identity::MODULE, &rename("Scout 2"))
             .await;
+        let identity::Reply::Profile(Some(profile)) = net
+            .ask(
+                identity::MODULE,
+                &identity::Query::Profile { number: agent },
+            )
+            .await
+        else {
+            panic!()
+        };
+        assert_eq!(profile.name, "Scout 2");
 
         // suspended, its every frame is refused before it runs
-        let status = |status| identity::Op::SetStatus {
-            account: agent,
-            status,
-        };
-        let by_bob = net
+        let suspend = identity::Op::Suspend { account: agent };
+        let by_bob = net.refuse(&public(2), identity::MODULE, &suspend).await;
+        assert_eq!(by_bob, reason::UNAUTHORIZED);
+        net.apply(&public(1), identity::MODULE, &suspend).await;
+        let suspended = net
             .refuse(
-                &public(2),
+                &bot_key,
                 identity::MODULE,
-                &status(identity::Status::Suspended),
+                &identity::Op::SetProfile {
+                    account: agent,
+                    avatar: None,
+                    bio: None,
+                },
             )
             .await;
-        assert_eq!(by_bob, reason::UNAUTHORIZED);
-        net.apply(
-            &public(1),
-            identity::MODULE,
-            &status(identity::Status::Suspended),
-        )
-        .await;
-        let suspended = net
-            .refuse(&bot_key, identity::MODULE, &rename("Scout 3"))
-            .await;
         assert_eq!(suspended, reason::UNAUTHORIZED);
+        assert_eq!(net.account(agent).await.keys().len(), 1, "it keeps its key");
         net.apply(
             &public(1),
             identity::MODULE,
-            &status(identity::Status::Active),
+            &identity::Op::Resume { account: agent },
         )
         .await;
-        net.apply(&bot_key, identity::MODULE, &rename("Scout 3"))
-            .await;
+        let identity::Reply::Number(holds) = net
+            .ask(
+                identity::MODULE,
+                &identity::Query::OfKey {
+                    key: bot_key.clone(),
+                },
+            )
+            .await
+        else {
+            panic!()
+        };
+        assert_eq!(holds, Some(agent), "resumed, its key acts again");
 
-        // handed to Bob, then revoked for good
-        net.apply(
-            &public(1),
-            identity::MODULE,
-            &identity::Op::TransferManager {
-                account: agent,
-                to: bob,
-            },
-        )
-        .await;
+        // handed to Bob, who consented: its keys go with Alice
+        let expires_at = TIME + 600_000;
+        let unconsented = identity::Op::TransferManager {
+            account: agent,
+            to: bob,
+            consent: handover(&key(1), agent, bob, 0, expires_at),
+        };
+        let not_bobs = net.refuse(&public(1), identity::MODULE, &unconsented).await;
+        assert_eq!(not_bobs, reason::UNAUTHORIZED);
+        let transfer = identity::Op::TransferManager {
+            account: agent,
+            to: bob,
+            consent: handover(&key(2), agent, bob, 0, expires_at),
+        };
+        net.apply(&public(1), identity::MODULE, &transfer).await;
+        assert_eq!(
+            net.account(agent).await.control,
+            identity::Control::Managed {
+                manager: bob,
+                category: identity::Category::Agent,
+                life: identity::Life::Active { keys: Vec::new() },
+                transfers: 1,
+            }
+        );
+        let former = net.refuse(&public(1), identity::MODULE, &suspend).await;
+        assert_eq!(former, reason::UNAUTHORIZED);
+        let identity::Reply::Number(holds) = net
+            .ask(
+                identity::MODULE,
+                &identity::Query::OfKey {
+                    key: bot_key.clone(),
+                },
+            )
+            .await
+        else {
+            panic!()
+        };
+        assert_eq!(holds, None, "the key Alice gave it is gone");
+        let replayed = net.refuse(&public(2), identity::MODULE, &transfer).await;
+        assert_eq!(replayed, reason::UNAUTHORIZED, "one consent, one handover");
+
+        // then revoked for good
         net.apply(
             &public(2),
             identity::MODULE,
-            &status(identity::Status::Revoked),
+            &identity::Op::Revoke { account: agent },
         )
         .await;
-        let revoked = net
-            .refuse(&bot_key, identity::MODULE, &rename("Scout 4"))
-            .await;
-        assert_eq!(revoked, reason::UNAUTHORIZED);
         let revived = net
             .refuse(
                 &public(2),
                 identity::MODULE,
-                &status(identity::Status::Active),
+                &identity::Op::Resume { account: agent },
             )
             .await;
         assert_eq!(revived, reason::WRONG_STATE);
-        assert_eq!(net.account(agent).await.name, "Scout 3");
+        let account = net.account(agent).await;
+        assert_eq!(account.card.name, "Scout 2");
+        assert_eq!(
+            account.kind(),
+            identity::Kind::Managed {
+                manager: bob,
+                category: identity::Category::Agent,
+                standing: identity::Standing::Revoked,
+            }
+        );
     });
+}
+
+/// The identity role modules answer is the one ducktape's kernel speaks:
+/// `abi::role::identity` here is a copy of ducktape's, and this compares
+/// the two sources. (The workspace patches ducktape's `abi` to this copy,
+/// so nothing links both: the source is what can drift.) The checkout is
+/// the one cargo resolved `host` from.
+#[test]
+fn the_identity_role_is_ducktapes_byte_for_byte() {
+    let metadata = std::process::Command::new(env!("CARGO"))
+        .args(["metadata", "--format-version", "1", "--no-deps"])
+        .arg("--manifest-path")
+        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"))
+        .output()
+        .expect("cargo metadata runs");
+    assert!(metadata.status.success(), "{metadata:?}");
+    let metadata: serde_json::Value = serde_json::from_slice(&metadata.stdout).unwrap();
+    // `--no-deps` lists the workspace alone; the git source of `host` is
+    // in this package's dependency list, as cargo resolved it
+    let host = metadata["packages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|package| package["name"] == "module-registry")
+        .and_then(|package| package["dependencies"].as_array())
+        .unwrap()
+        .iter()
+        .find(|dependency| dependency["name"] == "host")
+        .expect("the founding suite links ducktape's host");
+    // `git+https://…/ducktape?rev=<rev>`
+    let source = host["source"].as_str().unwrap();
+    let (_, rev) = source.split_once("rev=").expect("host is pinned to a rev");
+    let ducktape = cargo_git_checkout(rev);
+    let theirs = std::fs::read_to_string(ducktape.join("crates/kernel/abi/src/lib.rs")).unwrap();
+    let ours = include_str!("../../../../sdk/abi/src/lib.rs");
+    let block = |text: &str| {
+        let start = text
+            .find("    pub mod identity {")
+            .expect("abi::role::identity");
+        let end = text[start..]
+            .find(
+                "
+    }
+",
+            )
+            .unwrap()
+            + start;
+        text[start..end].to_owned()
+    };
+    assert_eq!(
+        block(&theirs),
+        block(ours),
+        "abi::role::identity drifted from ducktape's"
+    );
+}
+
+/// Where cargo checked ducktape out at `rev`: `$CARGO_HOME/git/checkouts/
+/// ducktape-<hash>/<short rev>`.
+fn cargo_git_checkout(rev: &str) -> std::path::PathBuf {
+    let home = std::env::var_os("CARGO_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| std::path::Path::new(&home).join(".cargo")))
+        .expect("CARGO_HOME or HOME");
+    let checkouts = home.join("git/checkouts");
+    let short = &rev[..7];
+    std::fs::read_dir(&checkouts)
+        .unwrap_or_else(|error| panic!("{}: {error}", checkouts.display()))
+        .flatten()
+        .filter(|entry| entry.file_name().to_string_lossy().starts_with("ducktape-"))
+        .map(|entry| entry.path().join(short))
+        .find(|path| path.join("crates/kernel/abi/src/lib.rs").is_file())
+        .unwrap_or_else(|| {
+            panic!(
+                "no checkout of ducktape @ {short} under {}",
+                checkouts.display()
+            )
+        })
 }
 
 #[test]

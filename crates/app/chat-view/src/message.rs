@@ -106,7 +106,7 @@ pub fn chat_message(row: MsgRow, names: &Names) -> ChatMessage {
         thread: row.thread,
         show_author: true,
         initial: design::initial(&names.member(&row.author)),
-        agent: names.is_agent(&row.author),
+        agent: agent(names, &row.author),
         badge: names.badge(&row.author),
         from: row.author,
         height: row.height,
@@ -114,6 +114,18 @@ pub fn chat_message(row: MsgRow, names: &Names) -> ChatMessage {
         reactions: row.reactions,
         system,
     }
+}
+
+/// Whether the roster says `principal` is an agent: its face wears the
+/// agent tint.
+pub fn agent(names: &Names, principal: &chat::Principal) -> bool {
+    matches!(
+        names.kind(principal),
+        Some(chat::Kind::Managed {
+            category: chat::Category::Agent,
+            ..
+        })
+    )
 }
 
 /// A quiet longer than this opens a new run, as Slack's does.
