@@ -17,7 +17,7 @@
 //!   to its repository, object and change questions
 //! - `objects.rs`: git objects over the store's blobs
 //! - `discussion.rs`: what forge asks of and posts into chat
-//! - `description.rs`: [`describe`], an op in a person's words
+//! - `description.rs`: [`describe()`], an op in a person's words
 
 // The wire, as a view and a git client see it.
 mod contract;
@@ -44,8 +44,6 @@ pub use contract::*;
 pub use description::describe;
 pub use ops::MODULE;
 pub use program::{Forge, RawReply};
-
-describe::export!(Op, describe);
 
 /// Old op bytes are described with the current code (`describe`): the op
 /// enum only grows at its end. Append a new variant here; never reorder.

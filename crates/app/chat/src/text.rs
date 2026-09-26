@@ -39,7 +39,7 @@ pub fn tokens(text: &str) -> BTreeSet<String> {
 }
 
 /// `#tag` labels in appearance order, at most [`MAX_TAGS_PER_MESSAGE`]:
-/// outside code and links, each one [`tag_label`]-normalized.
+/// outside code and links, each one `tag_label`-normalized.
 pub fn tags(blocks: &[Block]) -> Vec<String> {
     let spans = blocks.iter().flat_map(|block| match block {
         Block::Paragraph(spans) | Block::Quote(spans) => spans.as_slice(),

@@ -356,7 +356,10 @@ pub enum OpReply {
     },
 }
 
-pub const MAX_REPO_NAME: usize = 37; // forge:<repo>:<u64> fits chat's 64-byte id.
+/// The longest repository name whose change channels fit chat's id limit:
+/// `forge:<repo>:<n>` is the module, two `:` and up to 20 digits of `n`.
+pub const MAX_REPO_NAME: usize =
+    chat::MAX_ID_BYTES - crate::MODULE.len() - 2 - (u64::MAX.ilog10() as usize + 1);
 
 pub fn valid_repo_name(name: &str) -> bool {
     !name.is_empty()

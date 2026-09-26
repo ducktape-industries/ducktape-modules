@@ -13,7 +13,7 @@ use ducktape_view_guest::design;
 pub(crate) use ducktape_view_guest::design::{badge, button, empty_state, quiet};
 use ducktape_view_guest::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement, Pixels, Styled, Theme,
-    div, hsla, modal_overlay, sensor,
+    Window, div, hsla, modal_overlay, sensor,
 };
 
 use crate::Chat;
@@ -44,20 +44,22 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>) -> impl IntoElement {
         .into_any_element();
     let screen = with_menu(chat, screen, cx, &theme);
     let screen = with_create(chat, screen, cx, &theme);
-    let measured = cx.listener(|chat, size: &(Pixels, Pixels), _window, cx| {
-        chat.layout.viewport = (size.0.into(), size.1.into());
-        chat.layout.clamp();
-        cx.notify();
-    });
-    let resized = cx.listener(|chat, size: &(Pixels, Pixels), _window, cx| {
-        chat.layout.viewport = (size.0.into(), size.1.into());
-        chat.layout.clamp();
-        cx.notify();
-    });
     sensor("chat-viewport", screen)
         .size_full()
-        .on_show(measured)
-        .on_resize(resized)
+        .on_show(cx.listener(viewport))
+        .on_resize(cx.listener(viewport))
+}
+
+/// The window's size, measured or resized: the panes clamp to it.
+fn viewport(
+    chat: &mut Chat,
+    size: &(Pixels, Pixels),
+    _window: &mut Window,
+    cx: &mut Context<Chat>,
+) {
+    chat.layout.viewport = (size.0.into(), size.1.into());
+    chat.layout.clamp();
+    cx.notify();
 }
 
 /// The screen under the open message menu, if any.

@@ -63,7 +63,7 @@ pub(crate) fn open(
         merge_oid: None,
         closed_by: None,
         merged_by: None,
-        channel: format!("forge:{repo}:{n}"),
+        channel: crate::state::channel_id(repo, n),
         system_seq: 1,
     };
     fits(ctx, &change)?;

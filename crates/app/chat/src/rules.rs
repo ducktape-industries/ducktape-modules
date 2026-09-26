@@ -20,7 +20,7 @@ pub(crate) fn id(what: &str, id: &str) -> Result<(), Error> {
 /// An id with a `:` belongs to the program its prefix names: `forge:web:3`
 /// is for forge's own frames alone. The system may use any.
 pub(crate) fn namespace(id: &str, env: &Env) -> Result<(), Error> {
-    let Some(prefix) = crate::program_of(id) else {
+    let Some(prefix) = crate::namespace::program(id) else {
         return Ok(());
     };
     let allowed = match &env.origin {
