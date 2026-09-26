@@ -328,10 +328,10 @@ fn lists_page_in_number_order_and_controlled_lists_one_controller() {
     );
 }
 
-/// Identity answers the kernel's role: its first query and reply are the
-/// role interface's bytes.
+/// Identity answers its role: the role's queries and replies are its
+/// first ones, byte for byte.
 #[test]
-fn the_identity_role_is_its_first_query() {
+fn the_identity_role_is_its_first_queries() {
     use abi::role::identity as role;
     let key = ALICE.to_vec();
     assert_eq!(
@@ -339,7 +339,65 @@ fn the_identity_role_is_its_first_query() {
         abi::encode(&Query::OfKey { key })
     );
     assert_eq!(
+        abi::encode(&role::Query::Profiles {
+            after: Some(2),
+            limit: 5
+        }),
+        abi::encode(&Query::Profiles {
+            after: Some(2),
+            limit: 5
+        })
+    );
+    assert_eq!(
         abi::encode(&role::Reply::Account(Some(3))),
         abi::encode(&Reply::Number(Some(3)))
     );
+    let profiles = vec![crate::Profile {
+        number: 1,
+        name: "Alice".into(),
+        agent: false,
+    }];
+    assert_eq!(
+        abi::encode(&role::Reply::Profiles {
+            profiles: profiles.clone(),
+            next: Some(1)
+        }),
+        abi::encode(&Reply::Profiles {
+            profiles,
+            next: Some(1)
+        })
+    );
+}
+
+/// Profiles page in number order; a program account reads as an agent.
+#[test]
+fn profiles_page_in_number_order_and_name_agents() {
+    let store = memory();
+    create(&store, ALICE, "Alice");
+    create(&store, b"bob", "Bob");
+    let agent = Op::CreateProgram {
+        name: "Agent".into(),
+        controller: 1,
+    };
+    run(&store, &by_program(), agent).unwrap();
+    let page = |after, limit| {
+        let query = Query::Profiles { after, limit };
+        match Identity::query(&store.query(signed(ALICE)), query).unwrap() {
+            Reply::Profiles { profiles, next } => (profiles, next),
+            other => panic!("{other:?}"),
+        }
+    };
+    let (first, next) = page(None, 2);
+    let names: Vec<_> = first
+        .iter()
+        .map(|p| (p.number, p.name.as_str(), p.agent))
+        .collect();
+    assert_eq!(names, [(1, "Alice", false), (2, "Bob", false)]);
+    assert_eq!(next, Some(2));
+    let (rest, next) = page(next, 2);
+    assert_eq!(
+        rest.iter().map(|p| (p.number, p.agent)).collect::<Vec<_>>(),
+        [(3, true)]
+    );
+    assert_eq!(next, None);
 }

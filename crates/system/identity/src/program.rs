@@ -3,8 +3,8 @@
 use guest::{Error, ExecCtx, Module, QueryCtx};
 
 use crate::rules::{
-    ACCOUNTS, CONTROLLED, OF_KEY, account, add_key, create, create_program, generation, remove_key,
-    resolve, revoke, set_name, set_profile, set_status, transfer_control,
+    ACCOUNTS, CONTROLLED, OF_KEY, account, add_key, create, create_program, generation, profiles,
+    remove_key, resolve, revoke, set_name, set_profile, set_status, transfer_control,
 };
 use crate::{Op, Query, Reply};
 
@@ -42,6 +42,7 @@ impl Module for Identity {
         Ok(match query {
             Query::Get { number } => Reply::Account(ACCOUNTS.get(ctx, &number)?),
             Query::OfKey { key } => Reply::Number(OF_KEY.get(ctx, &key)?),
+            Query::Profiles { after, limit } => profiles(ctx, after, limit)?,
             Query::Generation { key } => Reply::Generation(generation(ctx, &key)?),
             Query::Resolve { references } => Reply::Resolved(
                 references

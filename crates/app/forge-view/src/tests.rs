@@ -14,8 +14,8 @@ use ducktape_view_guest::{Entity, Theme, wire};
 use forge::{ChangeFilter, ChangeState, Op, PageRequest, PageResponse, Query, Reply};
 
 use crate::api::{ChatApi, ForgeProgram};
+use chat::view::Identity;
 use ducktape_view_guest::methods::Changes;
-use identity::view::Identity;
 
 #[path = "../../forge/fixtures/loader.rs"]
 mod loader;
@@ -106,22 +106,16 @@ fn answer(query: &Query, mode: &str) -> Reply {
     }
 }
 
-fn accounts() -> chat::PageResponse<chat::AccountRow> {
-    let row = |number, name: &str, keys: &[&[u8]]| chat::AccountRow {
+fn accounts() -> chat::PageResponse<chat::Profile> {
+    let row = |number, name: &str| chat::Profile {
         number,
         name: name.into(),
-        program: false,
-        keys: keys.iter().map(|key| abi::hex(key)).collect(),
+        agent: false,
     };
     chat::PageResponse {
         height: 1,
         next: None,
-        items: vec![
-            row(1, "Ada", &[b"tester", b"tester-laptop"]),
-            row(2, "Rae", &[b"reviewer", b"reviewer-phone"]),
-            row(4, "Tal", &[b"talker"]),
-            row(9, "Wren", &[b"writer"]),
-        ],
+        items: vec![row(1, "Ada"), row(2, "Rae"), row(4, "Tal"), row(9, "Wren")],
     }
 }
 

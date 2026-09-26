@@ -10,6 +10,7 @@ mod tests;
 #[cfg(feature = "view")]
 pub mod view;
 
+pub use abi::role::identity::Profile;
 pub use guest::AccountNumber;
 pub use program::Identity;
 
@@ -67,6 +68,16 @@ impl Account {
 
     pub fn holds(&self, key: &[u8]) -> bool {
         self.keys().iter().any(|held| held.key == key)
+    }
+
+    /// How others show this account: its name, and whether a program acts
+    /// through it.
+    pub fn profile(&self) -> Profile {
+        Profile {
+            number: self.number,
+            name: self.name.clone(),
+            agent: matches!(self.control, Control::Program { .. }),
+        }
     }
 
     pub fn live(&self) -> bool {
@@ -150,10 +161,15 @@ pub enum Reference {
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Query {
-    /// The identity role's query (`abi::role::identity::Query::Account`),
-    /// first and in its order: the account that holds a key.
+    /// The identity role's queries (`abi::role::identity::Query`), first
+    /// and in its order: the account that holds a key, and every account's
+    /// profile.
     OfKey {
         key: Vec<u8>,
+    },
+    Profiles {
+        after: Option<AccountNumber>,
+        limit: u32,
     },
     Get {
         number: AccountNumber,
@@ -175,8 +191,12 @@ pub enum Query {
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Reply {
-    /// The identity role's reply (`abi::role::identity::Reply::Account`).
+    /// The identity role's replies (`abi::role::identity::Reply`).
     Number(Option<AccountNumber>),
+    Profiles {
+        profiles: Vec<Profile>,
+        next: Option<AccountNumber>,
+    },
     Account(Option<Account>),
     Generation(u64),
     Resolved(Vec<Option<AccountNumber>>),

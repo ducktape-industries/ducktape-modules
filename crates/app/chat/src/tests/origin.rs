@@ -1,11 +1,11 @@
 //! The module's own path, run natively: the sender the host resolved, a
-//! huddle join's node proof, identity's roster paged through chat. Each
+//! huddle join's node proof, the identity role's profiles paged through chat. Each
 //! refusal leaves the store as it was.
+use abi::role::identity as role;
 use guest::{Cause, Env, Origin};
-use identity::{Account, Control, Key};
 
 use super::*;
-use crate::{AccountRow, HUDDLE_JOIN_NS, HUDDLE_NODE_KEY_BYTES};
+use crate::{HUDDLE_JOIN_NS, HUDDLE_NODE_KEY_BYTES, Profile};
 
 /// Ada's key; she holds account 1.
 const ADA_KEY: [u8; 32] = [1; 32];
@@ -14,47 +14,26 @@ const LONE_KEY: [u8; 32] = [2; 32];
 /// Cy's key; she holds account 3.
 const CY_KEY: [u8; 32] = [3; 32];
 
-fn account(number: u64, keys: Vec<Vec<u8>>) -> Account {
-    Account {
-        number,
-        name: format!("user{number}"),
-        control: Control::Keys(
-            keys.into_iter()
-                .map(|key| Key {
-                    scheme: abi::Scheme::Ed25519,
-                    key,
-                    label: None,
-                    added_at: 0,
-                })
-                .collect(),
-        ),
-        avatar: None,
-        bio: None,
-        updated_at: 0,
-    }
-}
-
-/// Identity over three accounts, Ada's first; `List` pages by number.
+/// The identity role over three accounts, the third an agent; `Profiles`
+/// pages by number.
 fn identity() -> guest::Sibling {
     Box::new(move |request| {
-        let roster = [
-            account(1, vec![ADA_KEY.to_vec()]),
-            account(2, vec![LONE_KEY.to_vec()]),
-            account(3, vec![CY_KEY.to_vec()]),
-        ];
-        let reply =
-            match abi::decode::<identity::Query>(request).map_err(guest::kernel::error_from)? {
-                identity::Query::List { page } => {
-                    let from = page.after.as_ref().map_or(0, |after| after[0] as usize);
-                    let to = (from + page.limit() as usize).min(roster.len());
-                    identity::Reply::Accounts(PageResponse {
-                        height: 1,
-                        items: roster[from..to].to_vec(),
-                        next: (to < roster.len()).then(|| vec![to as u8]),
-                    })
-                }
-                other => panic!("chat never asks identity {other:?}"),
-            };
+        let profile = |number: u64| Profile {
+            number,
+            name: format!("user{number}"),
+            agent: number == 3,
+        };
+        let role::Query::Profiles { after, limit } =
+            abi::decode(request).map_err(guest::kernel::error_from)?
+        else {
+            panic!("chat asks the identity role only for profiles");
+        };
+        let from = after.unwrap_or(0) + 1;
+        let to = (from + u64::from(limit)).min(4);
+        let reply = role::Reply::Profiles {
+            profiles: (from..to).map(profile).collect(),
+            next: (to < 4).then_some(to - 1),
+        };
         Ok(abi::encode(&reply))
     })
 }
@@ -66,7 +45,7 @@ fn store() -> MockHost {
     store
         .borrow_mut()
         .siblings
-        .insert(identity::MODULE.into(), identity());
+        .insert(crate::IDENTITY.into(), identity());
     store.borrow_mut().verifier = Some(Box::new(|_, _, namespace, message, signature| {
         let expected = [b"general".as_slice(), &ADA_KEY].concat();
         namespace == HUDDLE_JOIN_NS && message == expected && signature == b"signed"
@@ -254,7 +233,7 @@ fn a_huddle_join_needs_its_nodes_signature() {
 }
 
 #[test]
-fn the_roster_pages_through_identity() {
+fn the_roster_pages_through_the_identity_role() {
     let store = store();
     let page = |after: Option<Vec<u8>>| {
         let asked = Query::Accounts {
@@ -269,10 +248,11 @@ fn the_roster_pages_through_identity() {
         page
     };
     let first = page(None);
-    let numbers = |rows: &[AccountRow]| rows.iter().map(|row| row.number).collect::<Vec<_>>();
+    let numbers = |rows: &[Profile]| rows.iter().map(|row| row.number).collect::<Vec<_>>();
     assert_eq!(numbers(&first.items), [1, 2]);
-    assert_eq!(first.items[0].keys, [crate::hex(&ADA_KEY)]);
+    assert_eq!(first.items[0].name, "user1");
     let rest = page(first.next);
     assert_eq!(numbers(&rest.items), [3]);
+    assert!(rest.items[0].agent);
     assert_eq!(rest.next, None);
 }

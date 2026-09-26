@@ -12,7 +12,7 @@
 //! - `state.rs`: every table and index the module keeps, declared once
 //! - `rules.rs`: the checks an op passes before it writes
 //! - `ops.rs`: one short function per op
-//! - `origin.rs`: a huddle join's node proof, and identity's roster
+//! - `origin.rs`: a huddle join's node proof, and the identity role's roster
 //! - `queries.rs`: one short function per question
 //! - `text.rs`: what search and tags read out of a message
 //! - `description.rs`: [`describe`], an op in a person's words
@@ -38,6 +38,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
 pub use abi::hex;
+pub use abi::role::identity::Profile;
 pub use description::describe;
 pub use guest::{AccountNumber, Principal};
 pub use message::{Block, Mark, Span, parse_message};
@@ -48,6 +49,10 @@ pub use text::{plain_text, tags, tokens};
 
 /// The name this module runs under.
 pub const MODULE: &str = "chat";
+
+/// The program chat asks as the identity role. A module cannot read the
+/// genesis binding, so it names the program every network binds there.
+pub const IDENTITY: &str = "identity";
 
 pub const MAX_ID_BYTES: usize = 64;
 pub const MAX_NAME_BYTES: usize = 128;
@@ -197,8 +202,8 @@ pub enum Query {
         channel_id: Option<String>,
         page: PageRequest,
     },
-    /// The identity roster, ascending by number, a page at a time: the
-    /// module asks identity, so a view links one module.
+    /// Every account's profile, ascending by number, a page at a time:
+    /// the module asks the identity role, so a view links one module.
     Accounts {
         page: PageRequest,
     },
@@ -219,7 +224,7 @@ pub enum Reply {
     Members(PageResponse<MemberRow>),
     Hits(MessageHits),
     TagHits(PageResponse<MsgRow>),
-    Accounts(PageResponse<AccountRow>),
+    Accounts(PageResponse<Profile>),
 }
 
 #[derive(
@@ -342,16 +347,6 @@ pub struct Reaction {
 pub struct MessageHits {
     pub hits: Vec<MsgRow>,
     pub capped: bool,
-}
-
-#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct AccountRow {
-    pub number: AccountNumber,
-    pub name: String,
-    /// a program-controlled account: an agent, not a person
-    pub program: bool,
-    /// the account's keys, hex
-    pub keys: Vec<String>,
 }
 
 /// The room two accounts share: `dm-<lower>-<higher>`.

@@ -5,7 +5,7 @@
 use guest::{Cause, Env, Origin, code};
 use guest::{ExecCtx, MockHost, Module, QueryCtx};
 
-use crate::{Op, PageRequest, PageResponse, PostPolicy, Principal, Query, Reply, parse_message};
+use crate::{Op, PageRequest, PostPolicy, Principal, Query, Reply, parse_message};
 
 mod channels;
 mod messages;

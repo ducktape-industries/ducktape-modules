@@ -5,10 +5,10 @@ use crate::Forge;
 use crate::api::ForgeProgram;
 use crate::api::{Ask, ChatApi, HostSession};
 use crate::state::ChangeTab;
+use chat::view::Identity;
 use ducktape_view_guest::Theme;
 use ducktape_view_guest::methods::{Changes, HostVisible, Query};
 use ducktape_view_guest::testing::TestAppContext;
-use identity::view::Identity;
 
 /// `FORGE_SCREEN_EXPORT=1` writes each screen's tree for the app's
 /// node-less renderer (`ducktape-app --render-tree <json>`), light and dark.

@@ -8,7 +8,7 @@ use ducktape_view_guest::Host;
 use ducktape_view_guest::host::{Error, pages, wrong_reply};
 use ducktape_view_guest::methods::{Module, Query as Ask};
 
-use crate::{AccountRow, PageRequest, Principal, Query, Reply};
+use crate::{PageRequest, Principal, Profile, Query, Reply};
 
 pub struct Chat;
 impl Module for Chat {
@@ -18,10 +18,20 @@ impl Module for Chat {
     type Reply = crate::Reply;
 }
 
+/// The identity role, by the program chat asks ([`IDENTITY`](crate::IDENTITY)):
+/// a view follows its changes to refresh names. It sends it nothing.
+pub struct Identity;
+impl Module for Identity {
+    const NAME: &'static str = crate::IDENTITY;
+    type Op = ();
+    type Query = abi::role::identity::Query;
+    type Reply = abi::role::identity::Reply;
+}
+
 /// How many roster pages one read follows: 64 pages of 256 accounts.
 const ROSTER_PAGES: usize = 64;
 
-/// The identity roster, every page of it, folded into [`Names`].
+/// Every account's profile, every page of it, folded into [`Names`].
 pub async fn roster(host: Host) -> Result<Names, Error> {
     let (rows, next) = pages(None, ROSTER_PAGES, |after| {
         let ask = host.ask::<Ask<Chat>>(Query::Accounts {
@@ -62,10 +72,10 @@ impl Names {
         }
     }
 
-    pub fn from_roster(roster: impl IntoIterator<Item = AccountRow>) -> Self {
+    pub fn from_roster(roster: impl IntoIterator<Item = Profile>) -> Self {
         let mut names = Self::empty();
         for account in roster {
-            if account.program {
+            if account.agent {
                 names.programs.insert(account.number);
             }
             names.names.insert(account.number, account.name);

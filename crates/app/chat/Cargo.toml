@@ -23,7 +23,6 @@ abi = { workspace = true }
 describe = { workspace = true }
 borsh = { workspace = true }
 guest = { workspace = true, features = ["serde"] }
-identity = { workspace = true }
 serde = { workspace = true }
 store = { workspace = true }
 unicode-normalization = { workspace = true }

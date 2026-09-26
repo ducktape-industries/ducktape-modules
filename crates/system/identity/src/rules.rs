@@ -5,10 +5,11 @@ use guest::{
     Error, ExecCtx, QueryCtx, already_exists, invalid, not_found, unauthorized, wrong_state,
 };
 use module_registry::helpers;
-use store::{Item, Map, Set};
+use store::{Item, Map, PageRequest, Set};
 
 use crate::{
-    Account, AccountNumber, Admission, CONSENT_NAMESPACE, Consent, Control, Key, Reference, Status,
+    Account, AccountNumber, Admission, CONSENT_NAMESPACE, Consent, Control, Key, Reference, Reply,
+    Status,
 };
 
 pub(crate) const ACCOUNTS: Map<AccountNumber, Account> = Map::new("a/");
@@ -32,6 +33,29 @@ pub(crate) fn resolve(
         Reference::Account(number) => Ok(ACCOUNTS.has(ctx, number).then_some(*number)),
         Reference::Key(key) => OF_KEY.get(ctx, key),
     }
+}
+
+/// A page of profiles past `after`, at most `limit` (capped as every page
+/// is); `next` names the last one while more remain.
+pub(crate) fn profiles(
+    ctx: &QueryCtx,
+    after: Option<AccountNumber>,
+    limit: u32,
+) -> Result<Reply, Error> {
+    let limit = u64::from(limit).clamp(1, PageRequest::MAX_LIMIT);
+    let mut range = ACCOUNTS.prefix_of(&());
+    if let Some(after) = after {
+        range = range.after(ACCOUNTS.key(&after));
+    }
+    let mut accounts = ACCOUNTS.scan(ctx, range.limit(limit + 1))?;
+    let more = accounts.len() as u64 > limit;
+    accounts.truncate(limit as usize);
+    let next = accounts.last().filter(|_| more).map(|(number, _)| *number);
+    let profiles = accounts
+        .iter()
+        .map(|(_, account)| account.profile())
+        .collect();
+    Ok(Reply::Profiles { profiles, next })
 }
 
 pub(crate) fn generation(ctx: &QueryCtx, key: &Vec<u8>) -> Result<u64, Error> {
