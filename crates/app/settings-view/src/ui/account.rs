@@ -238,7 +238,7 @@ fn agent(
     .when(confirming, |body| {
         body.child(secondary(
             format!("settings/agents/{number}/revoke/warning"),
-            "Revoking is final: its keys stop working and it never acts again.",
+            "Revoking is final: this agent account never acts again.",
             theme,
         ))
     })

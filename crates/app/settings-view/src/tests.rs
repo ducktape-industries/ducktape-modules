@@ -605,7 +605,7 @@ fn a_manager_renames_suspends_and_revokes_an_agent() {
     cx.simulate_click("settings/agents/12/revoke");
     cx.run_until_parked();
     assert_eq!(sent(&cx), 2, "the first press only asks");
-    assert!(cx.has_text("Revoking is final: its keys stop working and it never acts again."));
+    assert!(cx.has_text("Revoking is final: this agent account never acts again."));
     assert!(cx.has_text("Revoke for good"));
     // another action drops the question
     cx.simulate_click("settings/agents/12/resume");
