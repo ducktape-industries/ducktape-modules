@@ -73,6 +73,11 @@ fn every_profile<F: Fixture>(host: &MockHost, limit: u32) -> Vec<Profile> {
             "identity: {asked:?} answered {} profiles, past its limit",
             profiles.len()
         );
+        assert!(
+            after.is_none() || !profiles.is_empty(),
+            "identity: {asked:?} answers nothing, yet the page before said more followed: \
+             `next` is None at the end"
+        );
         for profile in &profiles {
             let last = all.last().map(|p| p.number).or(after);
             assert!(
