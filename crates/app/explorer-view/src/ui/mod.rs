@@ -14,10 +14,12 @@ const LIST_ROWS: usize = 50;
 /// The rows each Overview panel draws.
 const LATEST: usize = 12;
 
-/// The bar's height, and a section heading's.
+/// The bar's height, each line of it once the search wraps under the tabs, and a section heading's.
 const BAR_H: Pixels = px(44.);
-/// The search field's width.
+/// The search field grows to this; the tabs keep their room first.
 const SEARCH_W: Pixels = px(360.);
+/// The search field keeps this much of the bar: past it, it wraps under the tabs.
+const SEARCH_MIN_W: Pixels = px(160.);
 /// A list row's height, and a detail field's least.
 const ROW_H: Pixels = px(40.);
 /// The signer column.
@@ -38,7 +40,7 @@ const DEVICES_W: Pixels = px(90.);
 const COUNT_W: Pixels = px(60.);
 /// An account page's side column: devices and programs used.
 const SIDE_W: Pixels = px(380.);
-/// The Overview's latest blocks, beside the latest transactions.
+/// The Overview's latest blocks at their widest, beside the latest transactions.
 const LATEST_BLOCKS_W: Pixels = px(420.);
 /// The avatar an account page opens with.
 const PAGE_AVATAR: Pixels = px(40.);
@@ -129,33 +131,41 @@ fn bar(view: &Explorer, cx: Cx, theme: &Theme) -> impl IntoElement {
             .h_full()
             .mx_1()
     });
+    // on a narrow window the search wraps under the tabs, a line of its own
     div()
         .id("explorer-bar")
         .w_full()
         .flex()
+        .flex_wrap()
         .items_center()
         .justify_between()
-        .h(BAR_H)
         .px_3()
         .border_b_1()
         .border_color(theme.border)
-        .child(div().h_full().flex().items_center().children(tabs))
+        .child(div().h(BAR_H).flex().items_center().children(tabs))
         .child(
-            div().w(SEARCH_W).flex_shrink_0().child(
-                Input::new("explorer-search")
-                    .w_full()
-                    .h(design::size::CONTROL)
-                    .px_2()
-                    .border_1()
-                    .border_color(theme.border)
-                    .bg(theme.background)
-                    .text_size(design::text::SECONDARY)
-                    .value(view.search.clone())
-                    .placeholder("Search by height, hash, account or program")
-                    .label("Search the chain")
-                    .on_input(typed)
-                    .on_submit(submit),
-            ),
+            div()
+                .flex_1()
+                .min_w(SEARCH_MIN_W)
+                .max_w(SEARCH_W)
+                .h(BAR_H)
+                .flex()
+                .items_center()
+                .child(
+                    Input::new("explorer-search")
+                        .w_full()
+                        .h(design::size::CONTROL)
+                        .px_2()
+                        .border_1()
+                        .border_color(theme.border)
+                        .bg(theme.background)
+                        .text_size(design::text::SECONDARY)
+                        .value(view.search.clone())
+                        .placeholder("Search by height, hash, account or program")
+                        .label("Search the chain")
+                        .on_input(typed)
+                        .on_submit(submit),
+                ),
         )
 }
 
