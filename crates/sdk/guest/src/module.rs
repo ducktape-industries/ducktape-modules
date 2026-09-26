@@ -4,7 +4,7 @@
 
 use borsh::{BorshDeserialize, BorshSerialize};
 
-use crate::{Error, ExecCtx, QueryCtx, decoded};
+use crate::{Cause, Error, ExecCtx, MessageId, Outcome, QueryCtx, decoded};
 
 /// A module: its op, query and response types, and what it does with each.
 pub trait Module {
@@ -20,12 +20,24 @@ pub trait Module {
 
     fn execute(ctx: &ExecCtx, op: Self::Op) -> Result<(), Error>;
 
+    /// The outcome of message `id`, which this module emitted with
+    /// [`Reply::Wanted`](crate::Reply::Wanted). A refusal here fails the
+    /// frame; Ok absorbs the outcome. Absorbed by default; override only
+    /// where the module wants replies.
+    fn reply(_ctx: &ExecCtx, _id: &MessageId, _outcome: &Outcome) -> Result<(), Error> {
+        Ok(())
+    }
+
     fn query(ctx: &QueryCtx, query: Self::Query) -> Result<Self::Response, Error>;
 }
 
 /// An execute's payload decoded as `M::Op` (refused as invalid input when it
-/// does not decode), then run.
+/// does not decode), then run; a [`Cause::Reply`] carries no op (the kernel
+/// sends an empty payload) and runs [`Module::reply`] instead.
 pub fn execute<M: Module>(ctx: &ExecCtx, payload: &[u8]) -> Result<(), Error> {
+    if let Cause::Reply { id, outcome } = &ctx.env().cause {
+        return M::reply(ctx, id, outcome);
+    }
     let op = decoded::<M::Op>(&ctx.env().module, "Op", payload)?;
     M::execute(ctx, op)
 }
@@ -120,4 +132,59 @@ macro_rules! export {
             $crate::exports::call::<$module>(ptr, len)
         }
     };
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+    use crate::{MockHost, Origin, Principal, code};
+
+    /// A module whose op, a `u64`, never decodes from a reply's empty
+    /// payload, and which keeps the replies it gets.
+    struct Asker;
+
+    impl Module for Asker {
+        type Op = u64;
+        type Query = ();
+        type Response = ();
+
+        fn execute(_: &ExecCtx, _: u64) -> Result<(), Error> {
+            Err(Error::new(code::WRONG_STATE, "a reply is not an op"))
+        }
+
+        fn reply(ctx: &ExecCtx, id: &MessageId, outcome: &Outcome) -> Result<(), Error> {
+            ctx.put("reply", &(id, outcome));
+            Ok(())
+        }
+
+        fn query(_: &QueryCtx, (): ()) -> Result<(), Error> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_reply_runs_reply_with_its_id_and_outcome_not_the_op() {
+        let id = MessageId {
+            module: "asker".into(),
+            seq: 3,
+        };
+        let outcome = Outcome::Rejected(Error::new(code::NOT_FOUND, "no such thing"));
+        let env = crate::Env {
+            chain_id: b"n".to_vec(),
+            height: 1,
+            time: 2,
+            module: "asker".into(),
+            origin: Origin::Module("target".into()),
+            sender: Some(Principal::Account(7)),
+            roles: MockHost::roles(),
+            cause: Cause::Reply {
+                id: id.clone(),
+                outcome: outcome.clone(),
+            },
+        };
+        let host = MockHost::default();
+        execute::<Asker>(&host.exec(env.clone()), &[]).unwrap();
+        let kept: Option<(MessageId, Outcome)> = host.query(env).record("reply").unwrap();
+        assert_eq!(kept, Some((id, outcome)));
+    }
 }

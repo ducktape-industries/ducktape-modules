@@ -5,6 +5,9 @@
 //! `verify`, and the two ways to another module: `emit` (a write it runs
 //! in this frame, replying or not) and `query` (a read). On wasm32 they
 //! are host calls; natively the same contexts run over a [`MockHost`].
+//! A message emitted with [`Reply::Wanted`] comes back to its emitter in
+//! the same frame as [`Module::reply`], with its id and outcome; a module
+//! that never wants a reply leaves `reply` at its default.
 //!
 //! ```ignore
 //! use guest::{Error, ExecCtx, Module, QueryCtx};
