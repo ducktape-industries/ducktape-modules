@@ -28,6 +28,7 @@ fn markers(tag: &str) -> Option<(&'static str, &'static str)> {
         "italic" => Some(("*", "*")),
         "code" => Some(("```\n", "\n```")),
         "quote" => Some(("> ", "")),
+        "list" => Some(("- ", "")),
         _ => None,
     }
 }

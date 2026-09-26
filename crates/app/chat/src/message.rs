@@ -54,6 +54,43 @@ impl Block {
     }
 }
 
+/// A one-level list item's marker: `- ` / `* ` bullets and `1. ` numbers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListMarker {
+    Bullet,
+    Ordered(u64),
+}
+
+/// A paragraph that opens with a list marker, read at display time: the
+/// marker and the item's spans without it. Chat keeps the line as typed —
+/// a list item is a [`Block::Paragraph`] on the wire — so a view reads it
+/// here. One level: no nesting, no checkboxes; a marker inside a mark
+/// (`**- x**`) is text.
+pub fn list_item(spans: &[Span]) -> Option<(ListMarker, Vec<Span>)> {
+    let first = spans.first().filter(|span| span.marks.is_empty())?;
+    let (marker, rest) = if let Some(rest) = first
+        .text
+        .strip_prefix("- ")
+        .or_else(|| first.text.strip_prefix("* "))
+    {
+        (ListMarker::Bullet, rest)
+    } else {
+        let digits = first.text.bytes().take_while(u8::is_ascii_digit).count();
+        let rest = first.text[digits..].strip_prefix(". ")?;
+        (
+            ListMarker::Ordered(first.text[..digits].parse().ok()?),
+            rest,
+        )
+    };
+    let rest = rest.trim_start();
+    let mut item: Vec<Span> = (!rest.is_empty())
+        .then(|| Span::plain(rest))
+        .into_iter()
+        .collect();
+    item.extend(spans[1..].iter().cloned());
+    (!item.is_empty()).then_some((marker, item))
+}
+
 /// Parse composer text into wire `Block`s: fenced ```code``` (optional language),
 /// `>` quotes, `---`/`***` dividers, and paragraphs with inline `**bold**` /
 /// `__bold__`, `*italic*` / `_italic_`, `` `code` ``, `<@7>` mentions,

@@ -212,8 +212,8 @@ fn every_mark_is_the_same_square_and_the_field_writes_at_body_size() {
     });
     assert_eq!(
         marks.len(),
-        4,
-        "bold, italic, code and quote are control-high squares"
+        5,
+        "bold, italic, code, quote and list are control-high squares"
     );
     assert_eq!(
         body_size,
@@ -271,6 +271,7 @@ fn toolbar_mention_and_restore_actions_have_reachable_aria_routes() {
         ("c/italic", "Italic"),
         ("c/code", "Code"),
         ("c/quote", "Quote"),
+        ("c/list", "List"),
         ("c/restore", "Restore"),
     ] {
         let Some(wire::Node::Container(crate::wire::ContainerNode { interactivity, .. })) =

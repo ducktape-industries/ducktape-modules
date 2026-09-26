@@ -2,8 +2,9 @@
 //! links opened into it, and the live heads of the programs whose lists it
 //! shows. Every follower says what a refusal means to it; none ends on one.
 use ducktape_view_guest::Context;
+use ducktape_view_guest::design;
 use ducktape_view_guest::host::Error;
-use ducktape_view_guest::methods::{ChainHeads, Changes, HostRoute, HostSession};
+use ducktape_view_guest::methods::{ChainHeads, Changes, HostOffset, HostRoute, HostSession};
 use futures::StreamExt;
 use identity::view::Identity;
 use module_registry::view::Registry;
@@ -25,6 +26,7 @@ impl Explorer {
         let identity = host.subscribe::<Changes<Identity>>(());
         let valset = host.subscribe::<Changes<Valset>>(());
         let registry = host.subscribe::<Changes<Registry>>(());
+        let offset = host.subscribe::<HostOffset>(());
         self.followers = vec![
             cx.for_each(heads, |view, head, _, cx| match head {
                 Some(Ok(head)) => view.at_head(head, cx),
@@ -56,6 +58,11 @@ impl Explorer {
             cx.for_each(registry, |view, head, _, cx| match head {
                 Ok(_) => view.read_network(cx),
                 Err(refusal) => log(cx, "the registry's live heads", &refusal),
+            }),
+            // the reader's zone, for the dates a block and a tx read
+            cx.for_each(offset, |_, offset, _, cx| match offset {
+                Ok(minutes) => design::set_utc_offset(minutes),
+                Err(refusal) => log(cx, "the UTC offset", &refusal),
             }),
         ];
     }

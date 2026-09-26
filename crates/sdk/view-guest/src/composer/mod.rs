@@ -204,6 +204,26 @@ mod tests {
         }
     }
 
+    /// List prefixes the selection with `- `, the bullet chat's parser
+    /// reads as a list item.
+    #[test]
+    fn list_prefixes_the_selection_with_a_bullet() {
+        let mut draft = Draft::from_body("apples", &[]);
+        draft.editor.move_to(wire::EditorCursor {
+            position: wire::EditorPosition { line: 0, column: 6 },
+            selection: Some(wire::EditorPosition { line: 0, column: 0 }),
+        });
+        let before = draft.editor.text();
+        let wire::EditorDecision::Apply {
+            patches, cursor, ..
+        } = draft.decide("list", &[], draft.editor.state_view())
+        else {
+            panic!("list decision");
+        };
+        let after = wire::patched_editor_text(&before, &patches, cursor).unwrap();
+        assert_eq!(after, "- apples");
+    }
+
     #[test]
     fn replacement_retains_the_bodies_of_interrupted_send_tasks() {
         let mut draft = Draft::from_body("new typing", &[]);

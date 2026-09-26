@@ -420,6 +420,11 @@
     "reply": true
   },
   {
+    "kind": "host.offset",
+    "request": null,
+    "reply": -330
+  },
+  {
     "kind": "host.badge",
     "request": 3,
     "reply": null

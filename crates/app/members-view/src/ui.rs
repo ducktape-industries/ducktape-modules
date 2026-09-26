@@ -640,7 +640,7 @@ fn devices(row: &Row, theme: &Theme) -> impl IntoElement {
                             .text_color(theme.muted),
                     )
                     .child(
-                        design::mono(format!("added {}", activity::date(device.added_at)))
+                        design::mono(format!("added {}", design::day(device.added_at)))
                             .ml_auto()
                             .text_size(text::CAPTION)
                             .text_color(theme.faint),

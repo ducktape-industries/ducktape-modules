@@ -142,6 +142,20 @@ pub fn unread_seq(messages: &[ChatMessage], boundary: Option<u64>) -> Option<u64
         .map(|message| message.seq)
 }
 
+const DAY_MS: u64 = 86_400_000;
+
+/// The day message `index` opens, when it is the first of its day: a
+/// served row whose day differs from the served row above it (or that has
+/// none above). Pending rows carry no time and open nothing.
+pub fn new_day(messages: &[ChatMessage], index: usize) -> Option<String> {
+    let time = messages.get(index)?.time;
+    let above = messages[..index].iter().rev().find(|above| above.time > 0);
+    let opens = time > 0
+        && above
+            .is_none_or(|above| design::local(above.time) / DAY_MS != design::local(time) / DAY_MS);
+    opens.then(|| design::day(time))
+}
+
 /// Slack-style grouping: a message shows its author header only when it
 /// opens a run. Deleted messages, the unread divider, and a quiet longer
 /// than [`GROUP_GAP_MS`] always break a run.
@@ -156,6 +170,8 @@ pub fn mark_message_groups(messages: &mut [ChatMessage], boundary: Option<u64>) 
                 || above.from != this.from
                 || unread == Some(this.seq)
                 || this.time.saturating_sub(above.time) > GROUP_GAP_MS
+                || (above.time > 0
+                    && design::local(above.time) / DAY_MS != design::local(this.time) / DAY_MS)
         });
         messages[index].show_author = opens;
     }

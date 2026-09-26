@@ -153,6 +153,8 @@ fn ready() -> (TestAppContext, StreamSender<Changes<Identity>>) {
     let mut cx = TestAppContext::new();
     let session = cx.host().stream::<HostSession>();
     let feed = cx.host().stream::<Changes<Identity>>();
+    cx.host()
+        .never::<ducktape_view_guest::methods::HostOffset>();
     respond(&mut cx);
     cx.open::<Members>();
     session.send(Session {
@@ -329,6 +331,8 @@ fn loading_waits_for_the_host() {
     let mut cx = TestAppContext::new();
     cx.host().stream::<HostSession>();
     cx.host().stream::<Changes<Identity>>();
+    cx.host()
+        .never::<ducktape_view_guest::methods::HostOffset>();
     cx.host().never::<Query<Identity>>();
     cx.open::<Members>();
     cx.run_until_parked();
@@ -340,6 +344,8 @@ fn a_roster_with_nobody_in_it_says_so() {
     let mut cx = TestAppContext::new();
     cx.host().stream::<HostSession>();
     cx.host().stream::<Changes<Identity>>();
+    cx.host()
+        .never::<ducktape_view_guest::methods::HostOffset>();
     cx.host()
         .handle::<Query<Identity>>(|_| Ok(identity::Reply::Accounts(page(vec![]))));
     cx.host()
@@ -354,6 +360,8 @@ fn a_refusal_shows_its_sentence_and_retry_asks_again() {
     let mut cx = TestAppContext::new();
     cx.host().stream::<HostSession>();
     cx.host().stream::<Changes<Identity>>();
+    cx.host()
+        .never::<ducktape_view_guest::methods::HostOffset>();
     cx.host()
         .refuse::<Query<Identity>>("unavailable", "identity is not running here");
     cx.open::<Members>();
@@ -399,6 +407,9 @@ fn a_live_bump_re_reads_and_a_snapshot_restores_the_choice() {
     let mut restored = TestAppContext::new();
     restored.host().stream::<HostSession>();
     restored.host().stream::<Changes<Identity>>();
+    restored
+        .host()
+        .never::<ducktape_view_guest::methods::HostOffset>();
     restored.host().never::<Query<Identity>>();
     restored.host().never::<ChainBlocks>();
     let view = restored.restore::<Members>(&bytes).unwrap();
@@ -428,6 +439,8 @@ fn a_kind_with_no_one_in_it_says_so_without_quoting_an_empty_filter() {
     let mut cx = TestAppContext::new();
     cx.host().stream::<HostSession>();
     cx.host().stream::<Changes<Identity>>();
+    cx.host()
+        .never::<ducktape_view_guest::methods::HostOffset>();
     cx.host().handle::<Query<Identity>>(|_| {
         Ok(identity::Reply::Accounts(page(vec![person(
             7,

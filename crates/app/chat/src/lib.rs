@@ -40,7 +40,7 @@ pub use abi::hex;
 pub use abi::role::identity::{Category, Kind, Profile, Standing};
 pub use description::describe;
 pub use guest::{AccountNumber, Principal};
-pub use message::{Block, Mark, Span, parse_message};
+pub use message::{Block, ListMarker, Mark, Span, list_item, parse_message};
 pub use program::Chat;
 pub use queries::roots_below;
 pub use store::{Cursor, PageRequest, PageResponse};

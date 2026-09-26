@@ -137,3 +137,98 @@ fn a_headers_block_number_opens_explorer_at_that_block() {
         Some("duck://explorer/block/12345")
     );
 }
+
+/// A run's header says when it was posted beside its block, and a new day
+/// opens under a divider naming it.
+#[test]
+fn a_header_tells_the_time_and_a_new_day_opens_under_a_divider() {
+    let (mut cx, view) = opened();
+    // 24 Sep 2026, 15:42 UTC, and the next morning
+    let today = 1_790_264_527_000;
+    let tomorrow = today + 18 * 3_600_000;
+    view.update(&mut cx, |chat, _, cx| {
+        let messages = chat.room.as_mut().unwrap().messages.ready_mut().unwrap();
+        for (seq, time) in [(3, today), (4, tomorrow)] {
+            let mut late = row(seq, 7, "late");
+            late.height = 4_908;
+            late.time = time;
+            messages.push(late);
+        }
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(cx.has_text("3:42 PM ·"));
+    assert!(cx.has_text("block 4,908"));
+    assert!(cx.has_text("9:42 AM ·"), "a new day reopens the run");
+    assert!(
+        cx.find("chat-day-m3").is_some(),
+        "the first dated row opens its day"
+    );
+    assert!(cx.has_text("24 Sep 2026"));
+    assert!(cx.find("chat-day-m4").is_some());
+    assert!(cx.has_text("25 Sep 2026"));
+}
+
+/// A line typed as `- x` or `1. x` renders as a list row: its marker in a
+/// gutter and the item, marks and all, beside it.
+#[test]
+fn list_lines_render_as_list_rows() {
+    let (mut cx, view) = opened();
+    view.update(&mut cx, |chat, _, cx| {
+        let mut list = row(3, 7, "list");
+        list.message_id = "list".into();
+        list.blocks = chat::parse_message("- **apples**\n2. pears\nplain");
+        chat.room
+            .as_mut()
+            .unwrap()
+            .messages
+            .ready_mut()
+            .unwrap()
+            .push(list);
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(cx.find("chat-message-list-block-0-item").is_some());
+    assert!(cx.has_text("•"));
+    let Some(wire::Node::RichText { text, .. }) = cx.find("chat-message-list-block-0") else {
+        panic!("the item is one rich text node");
+    };
+    assert_eq!(text, "apples", "the marker leaves the item's text");
+    assert!(cx.find("chat-message-list-block-1-item").is_some());
+    assert!(cx.has_text("2."));
+    assert!(
+        cx.find("chat-message-list-block-2-item").is_none(),
+        "a plain line stays a paragraph"
+    );
+}
+
+/// The reader's offset landing after the rows moves the day dividers onto
+/// the reader's midnights without a refresh.
+#[test]
+fn an_offset_landing_late_moves_the_day_dividers() {
+    let (mut cx, view) = opened();
+    // 24 Sep 2026, 13:00 and 16:00 UTC: one UTC day, two in Seoul
+    let afternoon = 1_790_254_800_000;
+    let evening = afternoon + 3 * 3_600_000;
+    let offset = cx.host().stream::<api::HostOffset>();
+    view.update(&mut cx, |chat, _, cx| {
+        let messages = chat.room.as_mut().unwrap().messages.ready_mut().unwrap();
+        for (seq, time) in [(3, afternoon), (4, evening)] {
+            let mut late = row(seq, 7, "late");
+            late.time = time;
+            messages.push(late);
+        }
+        chat.watch(cx);
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(cx.find("chat-day-m3").is_some());
+    assert!(cx.find("chat-day-m4").is_none(), "one UTC day");
+    offset.send(540);
+    cx.run_until_parked();
+    assert!(
+        cx.find("chat-day-m4").is_some(),
+        "Seoul's midnight falls between"
+    );
+    assert!(cx.has_text("25 Sep 2026"));
+}
