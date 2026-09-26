@@ -92,7 +92,7 @@ fn a_refused_window_says_why_and_retry_reads_again() {
         .handle::<ChainBlocks>(move |ask| Ok(page(&chain_, &ask)));
     cx.simulate_click("explorer-retry");
     cx.run_until_parked();
-    assert!(cx.has_text("Latest blocks"));
+    assert!(cx.has_text("Latest activity"));
 }
 
 #[test]
