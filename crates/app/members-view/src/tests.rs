@@ -423,3 +423,44 @@ fn the_list_and_the_detail_are_accessible() {
     cx.run_until_parked();
     cx.assert_accessible();
 }
+
+#[test]
+fn choosing_an_account_again_reuses_its_scan_until_its_keys_change() {
+    let (mut cx, feed) = ready();
+    cx.simulate_click("members-row-7");
+    cx.run_until_parked();
+    cx.simulate_click("members-row-9");
+    cx.run_until_parked();
+    let scans = cx.host().requests::<ChainBlocks>().len();
+    let described = cx.host().requests::<ModuleDescribe>().len();
+    assert_eq!(scans, 2);
+    cx.simulate_click("members-row-7");
+    cx.run_until_parked();
+    assert!(cx.has_text("Post 2 in chat") && cx.has_text("Post 1 in chat"));
+    assert_eq!(cx.host().requests::<ChainBlocks>().len(), scans);
+    assert_eq!(cx.host().requests::<ModuleDescribe>().len(), described);
+    // a bump that leaves the keys alone keeps the scan
+    feed.send(None);
+    cx.run_until_parked();
+    assert_eq!(cx.host().requests::<ChainBlocks>().len(), scans);
+    // eddy adds a key: the chosen account is read again, scout's scan stays
+    cx.host().handle::<Query<Identity>>(|_| {
+        Ok(identity::Reply::Accounts(page(vec![
+            person(7, "eddy", vec![key(EDDY, "laptop"), key(b"\x03", "phone")]),
+            agent(
+                9,
+                "scout",
+                7,
+                identity::Life::Active {
+                    keys: vec![key(SCOUT, "sandbox")],
+                },
+            ),
+        ])))
+    });
+    feed.send(None);
+    cx.run_until_parked();
+    assert_eq!(cx.host().requests::<ChainBlocks>().len(), scans + 1);
+    cx.simulate_click("members-row-9");
+    cx.run_until_parked();
+    assert_eq!(cx.host().requests::<ChainBlocks>().len(), scans + 1);
+}

@@ -22,6 +22,7 @@ use ducktape_view_guest::view::Loadable;
 use ducktape_view_guest::{Context, Host, IntoElement, Render, Task, View, Window};
 use module_registry::PageRequest;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 use identity::view::Identity;
 use valset::view::Valset;
@@ -48,6 +49,10 @@ pub struct Members {
     /// what the selected account signed lately; read again on restore
     #[serde(skip)]
     activity: Loadable<Recent>,
+    /// each account's last finished scan, so choosing it again reads nothing;
+    /// an entry goes when a bump changes that account's keys
+    #[serde(skip)]
+    scans: BTreeMap<u64, Recent>,
     #[serde(skip)]
     watches: Vec<Task<()>>,
 }
@@ -160,12 +165,21 @@ impl Members {
         let task = cx.spawn(async move |this, cx| {
             let result = work.await;
             let _ = this.update(cx, |view, cx| {
-                match (result, view.rows.ready().is_some()) {
-                    (Ok(rows), _) => view.rows = Loadable::Ready(rows),
-                    (Err(refusal), true) => log(cx, "a refresh", &refusal),
-                    (Err(refusal), false) => view.rows = Loadable::Failed(refusal),
+                let mut rescan = view.activity.is_idle();
+                match (result, view.rows.ready()) {
+                    (Ok(rows), old) => {
+                        let old = old.map_or(&[][..], Vec::as_slice);
+                        view.scans
+                            .retain(|&number, _| keys(old, number) == keys(&rows, number));
+                        rescan |= view
+                            .selected
+                            .is_some_and(|number| keys(old, number) != keys(&rows, number));
+                        view.rows = Loadable::Ready(rows);
+                    }
+                    (Err(refusal), Some(_)) => log(cx, "a refresh", &refusal),
+                    (Err(refusal), None) => view.rows = Loadable::Failed(refusal),
                 }
-                if view.activity.is_idle() {
+                if rescan {
                     view.read_activity(cx);
                 }
                 cx.notify();
@@ -190,12 +204,19 @@ impl Members {
     }
 
     /// Reads the selected account's recent activity, once its keys are
-    /// known; an account with no keys signs nothing and asks nothing.
+    /// known, unless an earlier scan of the same keys is kept; an account
+    /// with no keys signs nothing and asks nothing.
     fn read_activity(&mut self, cx: &mut Context<Self>) {
         let Some(row) = self.selected_row() else {
             return;
         };
+        let number = row.number;
+        if let Some(recent) = self.scans.get(&number) {
+            self.activity = Loadable::Ready(recent.clone());
+            return;
+        }
         if row.devices.is_empty() {
+            self.activity = Loadable::Idle;
             return;
         }
         let keys = row
@@ -203,7 +224,19 @@ impl Members {
             .iter()
             .map(|device| device.key.clone())
             .collect();
-        self.activity = cx.load(activity::recent(cx.host(), keys), |view| &mut view.activity);
+        let work = activity::recent(cx.host(), keys);
+        // held in `activity`, so choosing someone else drops it unfinished
+        let task = cx.spawn(async move |this, cx| {
+            let result = work.await;
+            let _ = this.update(cx, |view, cx| {
+                if let Ok(recent) = &result {
+                    view.scans.insert(number, recent.clone());
+                }
+                view.activity = Loadable::from(result);
+                cx.notify();
+            });
+        });
+        self.activity = Loadable::Loading(task);
     }
 
     fn selected_row(&self) -> Option<&Row> {
@@ -292,6 +325,12 @@ async fn roster(host: Host) -> Result<Vec<Row>, Error> {
         .iter()
         .map(|account| row(account, &members))
         .collect())
+}
+
+/// The keys account `number` holds in `rows`, if it is there.
+fn keys(rows: &[Row], number: u64) -> Option<Vec<&[u8]>> {
+    let row = rows.iter().find(|row| row.number == number)?;
+    Some(row.devices.iter().map(|device| &device.key[..]).collect())
 }
 
 fn row(account: &identity::Account, members: &[valset::Membership]) -> Row {
