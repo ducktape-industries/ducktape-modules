@@ -5,10 +5,10 @@ use ducktape_view_guest::view::Loadable;
 
 use crate::queries::PAGE;
 use crate::state::{self, ChangeTab, Forge, Nav, change_key};
+use forge::Principal;
 use forge::{
     Bounds, Change, Comparison, PageResponse, Query, RefInfo, Reply, RepoInfo, Review, Revision,
 };
-use identity::Principal;
 
 /// The open change, as its screens read it: the record, its two current
 /// endpoints (either can be gone) and the reviews landed so far.
@@ -34,7 +34,7 @@ impl Forge {
 
     /// The reader as a principal: her account; nobody while her seated key
     /// holds none. [`Principal::writer`] is the one rule every view gates its
-    /// writes on, as identity's `principal_of` refuses them.
+    /// writes on, as `ExecCtx::sender` refuses them.
     pub(crate) fn me_principal(&self) -> Option<Principal> {
         Principal::writer(self.my_account())
     }

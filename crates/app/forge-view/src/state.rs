@@ -323,7 +323,7 @@ pub(crate) struct ChangeForm {
     pub into: Vec<u8>,
     pub title: String,
     pub body: String,
-    pub reviewers: Vec<identity::Principal>,
+    pub reviewers: Vec<forge::Principal>,
     pub error: String,
 }
 

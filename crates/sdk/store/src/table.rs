@@ -265,6 +265,7 @@ mod tests {
             time: 0,
             module: "test".into(),
             origin: Origin::Root,
+            sender: Some(guest::Principal::Root),
             cause: Cause::Direct,
         })
     }

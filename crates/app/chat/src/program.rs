@@ -21,7 +21,7 @@ impl Module for Chat {
     type Response = Reply;
 
     fn execute(ctx: &ExecCtx, op: Op) -> Result<(), Error> {
-        let sender = identity::principal_of(ctx, &ctx.env().origin)?;
+        let sender = ctx.sender()?;
         match op {
             Op::CreateChannel {
                 channel_id,

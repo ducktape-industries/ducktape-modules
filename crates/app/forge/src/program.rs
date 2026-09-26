@@ -36,10 +36,10 @@ impl Module for Forge {
         init(ctx, params)
     }
 
-    /// Runs one op as the signer's account ([`identity::principal_of`]).
+    /// Runs one op as the signer's account (`ctx.sender()`).
     /// Every op names its repository; an accepted one marks it active.
     fn execute(ctx: &ExecCtx, op: Op) -> Result<(), Error> {
-        let sender = identity::principal_of(ctx, &ctx.env().origin)?;
+        let sender = ctx.sender()?;
         let actor = person(&sender)?;
         let repo = op.repo().to_owned();
         let reply = match op {

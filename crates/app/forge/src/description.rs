@@ -41,12 +41,12 @@ pub fn describe(op: &Op) -> Description {
         Op::Grant { repo, principal } => (
             "Grant writer",
             repo,
-            vec![field("writer", principal.value())],
+            vec![field("writer", writer(principal))],
         ),
         Op::Revoke { repo, principal } => (
             "Revoke writer",
             repo,
-            vec![field("writer", principal.value())],
+            vec![field("writer", writer(principal))],
         ),
         Op::Push { repo, request } => ("Push", repo, vec![field("request", Value::bytes(request))]),
         Op::Merge {
@@ -83,7 +83,7 @@ pub fn describe(op: &Op) -> Description {
                 field("into", text(into)),
                 field(
                     "reviewers",
-                    Value::List(reviewers.iter().map(Principal::value).collect()),
+                    Value::List(reviewers.iter().map(writer).collect()),
                 ),
             ],
         ),
@@ -102,7 +102,7 @@ pub fn describe(op: &Op) -> Description {
                 ),
             ];
             if let Some(reviewers) = reviewers {
-                let reviewers = reviewers.iter().map(Principal::value).collect();
+                let reviewers = reviewers.iter().map(writer).collect();
                 fields.push(field("reviewers", Value::List(reviewers)));
             }
             ("Edit change", repo, fields)
@@ -131,5 +131,14 @@ pub fn describe(op: &Op) -> Description {
     Description {
         title: format!("{verb} · {repo}"),
         fields: all,
+    }
+}
+
+/// A principal as a describe field shows it: an account or a module.
+fn writer(principal: &Principal) -> Value {
+    match principal {
+        Principal::Account(number) => Value::Account(*number),
+        Principal::Module(module) => Value::Module(module.clone()),
+        Principal::Root => Value::text("system"),
     }
 }

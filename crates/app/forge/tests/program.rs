@@ -19,7 +19,7 @@ fn founding_requires_bounds_and_ops_require_a_signer() {
         hash: HashKind::Sha1,
     };
     for origin in [Origin::Root, Origin::Module("chat".into())] {
-        let ctx = sandbox.forge.exec(env_at(origin, 1, TIME));
+        let ctx = sandbox.forge.exec(sandbox.env_at(origin, 1, TIME));
         let refusal = sandbox
             .forge
             .refused(|| Forge::execute(&ctx, create.clone()));

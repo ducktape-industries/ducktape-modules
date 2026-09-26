@@ -43,7 +43,10 @@ pub use abi::{
     Blob, BlobHeader, BlobId, CryptoOp, CryptoReply, Entry, HashKind, Message, Root, Scheme,
 };
 pub use ctx::{ExecCtx, QueryCtx};
-pub use kernel::{Cause, Env, Error, MessageId, ModuleId, Order, Origin, Outcome, Range, code};
+pub use kernel::{
+    AccountNumber, Cause, Env, Error, MessageId, ModuleId, Order, Origin, Outcome, Principal,
+    Range, code,
+};
 #[cfg(not(target_arch = "wasm32"))]
 pub use mock::{MockHost, MockState, Sibling, Verifier, blob_id};
 #[cfg(target_arch = "wasm32")]

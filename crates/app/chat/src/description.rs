@@ -6,7 +6,6 @@ use describe::{Description, Field, Value, field};
 use crate::{Op, PostPolicy, Principal, dm_peers, plain_text};
 
 pub fn describe(op: &Op) -> Description {
-    let principal = Principal::value;
     let seq = |seq: &u64| field("seq", Value::text(seq.to_string()));
     let (title, channel, fields) = match op {
         Op::CreateChannel {
@@ -166,4 +165,13 @@ fn place(channel_id: &str) -> Vec<Field> {
         )
     }));
     fields
+}
+
+/// A principal as a describe field shows it: an account or a module.
+fn principal(principal: &Principal) -> Value {
+    match principal {
+        Principal::Account(number) => Value::Account(*number),
+        Principal::Module(module) => Value::Module(module.clone()),
+        Principal::Root => Value::text("system"),
+    }
 }

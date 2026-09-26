@@ -33,8 +33,8 @@ pub(crate) fn init(ctx: &ExecCtx, params: &[u8]) -> Result<(), Error> {
 }
 
 /// Forge is written by people (an account), never by a module or the
-/// system. A key that holds no account never gets here: identity's
-/// [`principal_of`](identity::principal_of) refuses it.
+/// system. A key that holds no account never gets here:
+/// [`ExecCtx::sender`](guest::ExecCtx::sender) refuses it.
 pub(crate) fn person(principal: &Principal) -> Result<&Principal, Error> {
     if !principal.is_person() {
         return Err(unauthorized("a repository op is signed by a person"));

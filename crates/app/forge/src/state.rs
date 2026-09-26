@@ -283,6 +283,7 @@ mod tests {
             time: 1,
             module: crate::MODULE.into(),
             origin: Origin::Root,
+            sender: Some(guest::Principal::Root),
             cause: Cause::Direct,
         });
         for (repo, n) in [("zz", 1), ("abc", 2), ("ab", 1), ("abc", 1)] {

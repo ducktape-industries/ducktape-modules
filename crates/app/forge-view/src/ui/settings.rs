@@ -170,7 +170,7 @@ fn grant_field(
 /// One row per writer with its Revoke, or the owner-only empty state.
 fn writer_rows(
     forge: &Forge,
-    writers: &[identity::Principal],
+    writers: &[forge::Principal],
     cx: &mut Context<Forge>,
     theme: &Theme,
 ) -> Vec<AnyElement> {
@@ -210,10 +210,10 @@ fn writer_rows(
 }
 
 /// A writer's element id: `acct-<n>` for an account.
-fn principal_id(principal: &identity::Principal) -> String {
+fn principal_id(principal: &forge::Principal) -> String {
     match principal {
-        identity::Principal::Account(number) => format!("acct-{number}"),
-        identity::Principal::Module(module) => module.clone(),
-        identity::Principal::Root => "system".into(),
+        forge::Principal::Account(number) => format!("acct-{number}"),
+        forge::Principal::Module(module) => module.clone(),
+        forge::Principal::Root => "system".into(),
     }
 }

@@ -3,8 +3,8 @@
 //!
 //! A write is an [`Op`], a read a [`Query`] answered by a [`Reply`], all
 //! borsh, the same types `chat-view` links. The acting [`Principal`] is the
-//! env's origin: an external key resolved by identity's `principal_of` to its
-//! account (a key that holds none writes nothing). The layout, in reading order:
+//! sender the host resolved (`ctx.sender()`): a signed frame is the account its
+//! key holds (a key that holds none writes nothing). The layout, in reading order:
 //!
 //! - `lib.rs` (here): the types on the wire and the rows they carry
 //! - `program.rs`: [`Chat`], the module: the signer resolved, then one match
@@ -39,7 +39,7 @@ use serde::{Deserialize, Serialize};
 
 pub use abi::hex;
 pub use description::describe;
-pub use identity::{AccountNumber, Principal};
+pub use guest::{AccountNumber, Principal};
 pub use message::{Block, Mark, Span, parse_message};
 pub use program::Chat;
 pub use queries::roots_below;

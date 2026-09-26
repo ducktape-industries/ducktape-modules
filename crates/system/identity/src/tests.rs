@@ -19,6 +19,9 @@ fn env(origin: Origin, time: u64) -> Env {
         time,
         module: crate::MODULE.into(),
         origin,
+        // identity reads the raw signer: its own create runs for a key
+        // that holds no account yet
+        sender: None,
         cause: Cause::Direct,
     }
 }
@@ -322,5 +325,21 @@ fn lists_page_in_number_order_and_controlled_lists_one_controller() {
         )
         .unwrap(),
         Reply::Resolved(vec![Some(15), None, Some(4)])
+    );
+}
+
+/// Identity answers the kernel's role: its first query and reply are the
+/// role interface's bytes.
+#[test]
+fn the_identity_role_is_its_first_query() {
+    use abi::role::identity as role;
+    let key = ALICE.to_vec();
+    assert_eq!(
+        abi::encode(&role::Query::Account(key.clone())),
+        abi::encode(&Query::OfKey { key })
+    );
+    assert_eq!(
+        abi::encode(&role::Reply::Account(Some(3))),
+        abi::encode(&Reply::Number(Some(3)))
     );
 }

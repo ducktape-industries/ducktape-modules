@@ -97,6 +97,16 @@ impl<const N: usize> KeyCodec for [u8; N] {
     }
 }
 
+/// A principal in a table key: its borsh, encoded like any bytes.
+impl KeyCodec for guest::Principal {
+    fn encode_key(&self, out: &mut Vec<u8>) {
+        abi::encode(self).encode_key(out);
+    }
+    fn decode_key(bytes: &mut &[u8]) -> Option<Self> {
+        abi::decode(&Vec::<u8>::decode_key(bytes)?).ok()
+    }
+}
+
 impl KeyCodec for () {
     fn encode_key(&self, _out: &mut Vec<u8>) {}
     fn decode_key(_bytes: &mut &[u8]) -> Option<Self> {
@@ -137,6 +147,13 @@ mod tests {
         assert!(round_trip((7u64, "b".to_string())).starts_with(&head));
         assert!(round_trip((7u64, vec![1u8, 2], [9u8; 3])).starts_with(&head));
         assert!(round_trip((1u8, 2u16, 3u32, "s".to_string())).len() == 1 + 2 + 4 + 1 + 2);
+        for principal in [
+            guest::Principal::Account(7),
+            guest::Principal::Module("forge".into()),
+            guest::Principal::Root,
+        ] {
+            round_trip(principal);
+        }
         assert_eq!(u64::decode_key(&mut &[1u8, 2][..]), None);
         assert_eq!(String::decode_key(&mut &[b'a'][..]), None, "unterminated");
         assert_eq!(Vec::<u8>::decode_key(&mut &[0, 1][..]), None, "bad escape");

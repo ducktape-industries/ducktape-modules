@@ -4,7 +4,7 @@ use guest::HashKind;
 
 pub use crate::read_contract::*;
 pub use crate::review_contract::*;
-pub use identity::Principal;
+pub use guest::Principal;
 pub use store::{PageRequest, PageResponse};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]

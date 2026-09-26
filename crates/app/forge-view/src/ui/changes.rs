@@ -363,7 +363,7 @@ fn reviewers(
         .gap_1()
         .child(quiet("Reviewers", theme));
     for number in names.numbers().take(24) {
-        let key = identity::Principal::Account(number);
+        let key = forge::Principal::Account(number);
         let picked = form.reviewers.contains(&key);
         let toggle = cx.listener({
             let key = key.clone();

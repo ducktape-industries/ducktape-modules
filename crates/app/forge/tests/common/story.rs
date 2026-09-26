@@ -62,7 +62,7 @@ impl Rig {
         let (actor, height) = (self.actor.clone(), self.height);
         self.sandbox
             .forge
-            .attempt(|| signed_op(&self.sandbox.forge, &actor, height, op))?;
+            .attempt(|| signed_op(&self.sandbox, &actor, height, op))?;
         Ok(self.sandbox.forge.take_output())
     }
 
@@ -73,7 +73,7 @@ impl Rig {
         let (actor, height) = (self.actor.clone(), self.height);
         self.sandbox
             .forge
-            .refused(|| signed_op(&self.sandbox.forge, &actor, height, op))
+            .refused(|| signed_op(&self.sandbox, &actor, height, op))
     }
 
     pub fn query(&self, query: &Query) -> Result<Vec<u8>, guest::Error> {

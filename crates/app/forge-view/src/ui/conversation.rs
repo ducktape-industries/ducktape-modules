@@ -176,7 +176,7 @@ fn forge_line(
     if reviews.next.is_some() {
         return None;
     }
-    let actor = |principal: &Option<identity::Principal>| {
+    let actor = |principal: &Option<forge::Principal>| {
         principal
             .as_ref()
             .map(|principal| forge.principal_name(principal))
@@ -203,7 +203,7 @@ fn forge_line(
 }
 
 fn is_forge(row: &chat::MsgRow) -> bool {
-    row.author == identity::Principal::Module(forge::MODULE.into())
+    row.author == forge::Principal::Module(forge::MODULE.into())
 }
 
 /// The hidden chat channel of this change, in chat's row shape.

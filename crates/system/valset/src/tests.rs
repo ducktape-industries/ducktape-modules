@@ -18,6 +18,8 @@ fn env(origin: Origin) -> Env {
         time: 0,
         module: crate::MODULE.into(),
         origin,
+        // these rules read the origin alone
+        sender: None,
         cause: Cause::Direct,
     }
 }

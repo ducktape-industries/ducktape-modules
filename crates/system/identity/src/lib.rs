@@ -3,7 +3,6 @@
 //! [`Identity`] module are always built; a view links them with `module`
 //! off. The `module` feature adds its wasm exports. The `view` feature
 //! adds the ask a view makes of identity directly (`view.rs`).
-mod principal;
 mod program;
 mod rules;
 #[cfg(test)]
@@ -11,14 +10,12 @@ mod tests;
 #[cfg(feature = "view")]
 pub mod view;
 
-pub use principal::{NO_ACCOUNT, Principal, principal_of};
+pub use guest::AccountNumber;
 pub use program::Identity;
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use guest::{BlobId, ModuleId, Scheme};
 use module_registry::{PageRequest, PageResponse};
-
-pub type AccountNumber = u64;
 
 pub const MODULE: &str = "identity";
 pub const CONSENT_NAMESPACE: &[u8] = b"ducktape:identity:consent";
@@ -153,11 +150,13 @@ pub enum Reference {
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Query {
-    Get {
-        number: AccountNumber,
-    },
+    /// The identity role's query (`abi::role::identity::Query::Account`),
+    /// first and in its order: the account that holds a key.
     OfKey {
         key: Vec<u8>,
+    },
+    Get {
+        number: AccountNumber,
     },
     Generation {
         key: Vec<u8>,
@@ -176,8 +175,9 @@ pub enum Query {
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Reply {
-    Account(Option<Account>),
+    /// The identity role's reply (`abi::role::identity::Reply::Account`).
     Number(Option<AccountNumber>),
+    Account(Option<Account>),
     Generation(u64),
     Resolved(Vec<Option<AccountNumber>>),
     Accounts(PageResponse<Account>),

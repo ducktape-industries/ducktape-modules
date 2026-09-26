@@ -2,9 +2,9 @@
 //! system lines into it, and asks chat about the replies a review drew.
 
 use chat::{Block, MsgRow, Op, PostPolicy, Query, Reply};
+use guest::Principal;
 use guest::{Error, code};
 use guest::{ExecCtx, QueryCtx};
-use identity::Principal;
 
 use crate::Change;
 
