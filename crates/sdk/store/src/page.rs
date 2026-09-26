@@ -8,10 +8,12 @@ use serde::{Deserialize, Serialize};
 use guest::{invalid, stale};
 
 /// What `PageRequest::after` and `PageResponse::next` carry, opaque to clients: the
-/// listing the cursor belongs to (`scope`), the height that answered it, and
-/// the raw position to resume after.
+/// listing the cursor belongs to (`scope`), what it is pinned to (the height
+/// that answered it, unless the module pinned it to something of its own:
+/// see [`Listing::pinned`]), and the raw position to resume after.
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct Cursor {
+    /// the pin: the answering height unless the module set another
     pub height: u64,
     pub scope: Vec<u8>,
     pub after: Vec<u8>,
@@ -80,15 +82,16 @@ impl PageRequest {
     }
 
     /// This page over one listing: its cursor opened against `scope`, and
-    /// every `next` it answers bound to `scope` and `height`.
+    /// every `next` it answers bound to `scope` and pinned to `height`.
     pub fn listing(&self, scope: Vec<u8>, height: u64) -> Result<Listing, Error> {
         let cursor = self.open(&scope)?;
         Ok(Listing {
             limit: self.limit(),
-            cursor_height: cursor.as_ref().map(|c| c.height),
+            cursor_pin: cursor.as_ref().map(|c| c.height),
             after: cursor.map(|c| c.after),
             scope,
             height,
+            pin: height,
         })
     }
 }
@@ -100,9 +103,12 @@ pub struct Listing {
     after: Option<Vec<u8>>,
     scope: Vec<u8>,
     height: u64,
-    /// The height that answered the cursor, for a module whose listings
-    /// are rewritten (forge refuses a cursor from another height).
-    pub cursor_height: Option<u64>,
+    /// What every `next` is pinned to: the answering height, or what
+    /// [`Listing::pinned`] set.
+    pin: u64,
+    /// What the cursor was pinned to, for a module whose listings are
+    /// rewritten (forge refuses a cursor pinned to another write count).
+    pub cursor_pin: Option<u64>,
 }
 
 impl Listing {
@@ -110,9 +116,19 @@ impl Listing {
         self.limit
     }
 
+    /// Pins every `next` to `pin` instead of the answering height: a module
+    /// whose listings are rewritten by its own ops, and by nothing else,
+    /// pins to a count of them, so a walk outlives the blocks that wrote
+    /// nothing there and a write that shares the answering height (one of
+    /// several in a block) still tells.
+    pub fn pinned(mut self, pin: u64) -> Self {
+        self.pin = pin;
+        self
+    }
+
     fn next(&self, after: Vec<u8>) -> Vec<u8> {
         abi::encode(&Cursor {
-            height: self.height,
+            height: self.pin,
             scope: self.scope.clone(),
             after,
         })
@@ -233,7 +249,18 @@ mod tests {
         assert_eq!(PageRequest::first(500).bounded(10).limit(), 10);
         let other = page.listing(b"q/".to_vec(), 7).unwrap_err();
         assert_eq!(other.code, guest::code::STALE);
-        assert_eq!(listing(&page).cursor_height, Some(7));
+        assert_eq!(listing(&page).cursor_pin, Some(7));
+        let pinned = listing(&PageRequest::first(2)).pinned(3).reply([
+            (b"p/3".to_vec(), 3u8),
+            (b"p/4".to_vec(), 4),
+            (b"p/5".to_vec(), 5),
+        ]);
+        let page = PageRequest {
+            after: pinned.next,
+            limit: Some(2),
+        };
+        assert_eq!(listing(&page).cursor_pin, Some(3));
+        assert_eq!(pinned.height, 7);
         let garbage = PageRequest {
             after: Some(vec![1]),
             limit: None,

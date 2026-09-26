@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use ducktape_view_guest::view::Loadable;
-use ducktape_view_guest::{Task, UniformListScrollHandle};
+use ducktape_view_guest::{Editor, Task, UniformListScrollHandle};
 use serde::{Deserialize, Serialize};
 
 use crate::api::Session;
@@ -28,8 +28,8 @@ pub struct Forge {
     pub(crate) new_repo: Option<NewRepo>,
     pub(crate) form: Option<ChangeForm>,
     pub(crate) repo_settings: Option<SettingsForm>,
-    /// the conversation composer of the open change
-    pub(crate) reply: String,
+    /// the conversation composer of the open change, multi-line
+    pub(crate) reply: Editor,
     pub(crate) notice: String,
     /// the repository whose address was copied last, so its row says so
     #[serde(skip)]
@@ -241,7 +241,8 @@ pub(crate) struct ReviewSession {
     pub comments: Vec<PendingComment>,
     /// the anchor whose composer is open
     pub open: Option<PendingComment>,
-    pub body: String,
+    /// what the review says overall, multi-line
+    pub body: Editor,
     pub finishing: bool,
     pub error: String,
 }
@@ -322,7 +323,8 @@ pub(crate) struct ChangeForm {
     pub from: Vec<u8>,
     pub into: Vec<u8>,
     pub title: String,
-    pub body: String,
+    /// the multi-line body, as the host's editor holds it
+    pub body: Editor,
     pub reviewers: Vec<forge::Principal>,
     pub error: String,
 }

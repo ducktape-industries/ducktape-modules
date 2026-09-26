@@ -13,9 +13,9 @@ pub fn channel_link(chain: &str, channel: &str, seq: Option<u64>) -> Option<Stri
 
 /// Where a program's room (`forge:web:3`) is shown by its program:
 /// `duck://<chain>/forge/web/3`, the room id's own path
-/// ([`chat::program_of`]). None for a room people opened, or no chain yet.
+/// ([`chat::namespace::program`]). None for a room people opened, or no chain yet.
 pub fn program_link(chain: &str, channel: &str) -> Option<String> {
-    let program = ::chat::program_of(channel)?;
+    let program = ::chat::namespace::program(channel)?;
     let path: Vec<&str> = channel[program.len() + 1..].split(':').collect();
     ducklink::mint(chain, program, &path)
 }

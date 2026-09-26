@@ -166,6 +166,11 @@ impl Host {
     pub fn log(&self, message: impl AsRef<str>) {
         self.notify::<methods::HostLog>(message.as_ref().to_owned());
     }
+    /// A refusal nothing on screen waits for, kept in the host's log:
+    /// `<view>: <what> refused: <refusal>`.
+    pub fn log_refused(&self, view: &str, what: &str, refusal: &Error) {
+        self.log(format!("{view}: {what} refused: {refusal}"));
+    }
     pub fn open_link(&self, link: &str) {
         self.notify::<methods::LinkOpen>(link.to_owned());
     }

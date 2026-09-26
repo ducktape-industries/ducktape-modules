@@ -80,7 +80,7 @@ fn search(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElemen
         })
 }
 
-/// The rooms in three sections: channels, voice rooms, direct messages.
+/// The rooms in two sections: channels, direct messages.
 /// A program's own rooms (`forge:…` review threads) are its to show.
 fn rooms(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement {
     let mut list = div()
@@ -106,11 +106,10 @@ fn rooms(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement
     }
     let open = chat.room.as_ref().map(|room| room.id.as_str());
     let mine = chat.my_account();
-    let mut voice = Vec::new();
     let mut dms = Vec::new();
     for info in channels {
         let id = info.channel.id.as_str();
-        if chat::program_of(id).is_some() {
+        if chat::namespace::program(id).is_some() {
             continue;
         }
         if chat::dm_peers(id).is_some() {
@@ -118,21 +117,8 @@ fn rooms(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement
                 mine.and_then(|mine| dm_peer_of(mine, id))
                     .map(|peer| (info, peer)),
             );
-        } else if info.channel.voice {
-            voice.push(info);
         } else {
             list = list.child(channel_button(chat, info, open == Some(id), cx, theme));
-        }
-    }
-    if !voice.is_empty() {
-        list = list.child(section_header(
-            "chat-sidebar-voice-header",
-            "Voice",
-            div(),
-            theme,
-        ));
-        for info in voice {
-            list = list.child(voice_button(chat, info, cx, theme));
         }
     }
     if !dms.is_empty() {
@@ -250,14 +236,6 @@ fn channel_button(
                 })
                 .child(info.channel.name.clone()),
         );
-    if !info.channel.huddle.is_empty() {
-        row = row.child(
-            div()
-                .text_size(design::text::CAPTION)
-                .text_color(theme.success)
-                .child(format!("🔊 {}", info.channel.huddle.len())),
-        );
-    }
     if info.channel.members_only() {
         row = row.child(
             div()
@@ -283,98 +261,7 @@ fn channel_button(
                 .bg(theme.accent),
         );
     }
-    with_seats(chat, info, row, theme)
-}
-
-fn voice_button(
-    chat: &Chat,
-    info: &ChannelInfo,
-    cx: &mut Context<Chat>,
-    theme: &Theme,
-) -> AnyElement {
-    let id = info.channel.id.clone();
-    let click = cx.listener(move |chat, _: &ClickEvent, window, cx| {
-        chat.open(id.clone(), window, cx);
-    });
-    let selected = chat
-        .room
-        .as_ref()
-        .is_some_and(|room| room.id == info.channel.id);
-    let row = div()
-        .id(format!("chat-sidebar-voice-{}", info.channel.id))
-        .flex()
-        .items_center()
-        .gap_1()
-        .min_h(design::size::CONTROL)
-        .px_1()
-        .bg(if selected {
-            theme.sidebar_raised
-        } else {
-            theme.sidebar
-        })
-        .hover(|s| s.bg(theme.sidebar_raised))
-        .when(!info.channel.archived, |el| {
-            el.role(ducktape_view_guest::Role::Button)
-                .focusable()
-                .on_click(click)
-        })
-        .child("🔊")
-        .child(div().flex_1().child(info.channel.name.clone()))
-        .when(info.channel.archived, |el| {
-            el.child(quiet("archived", "Archived", theme))
-        });
-    with_seats(chat, info, row, theme)
-}
-
-fn with_seats(chat: &Chat, info: &ChannelInfo, row: impl IntoElement, theme: &Theme) -> AnyElement {
-    let mut content = div()
-        .id(format!("chat-sidebar-seats-{}", info.channel.id))
-        .flex()
-        .flex_col()
-        .child(row);
-    let Some(names) = chat.names.ready() else {
-        return content.into_any_element();
-    };
-    let me = chat.me();
-    for (index, seat) in info.channel.huddle.iter().enumerate() {
-        let label = names.member(&seat.principal);
-        let is_you = Some(&seat.principal) == me.as_ref();
-        let speaking = false;
-        let note = if is_you { "you" } else { "" };
-        content = content.child(
-            div()
-                .id(ElementId::named_usize("chat-sidebar-seat", index))
-                .flex()
-                .items_center()
-                .gap_1()
-                .pl_7()
-                .py_0p5()
-                .child(
-                    design::avatar(&label, design::size::AVATAR, theme)
-                        .bg(if speaking {
-                            theme.success_soft
-                        } else {
-                            theme.sidebar_raised
-                        })
-                        .text_size(design::text::CAPTION)
-                        .text_color(if speaking {
-                            theme.success
-                        } else {
-                            theme.sidebar_muted
-                        }),
-                )
-                .child(div().flex_1().text_size(design::text::CAPTION).child(label))
-                .when(!note.is_empty(), |el| {
-                    el.child(
-                        div()
-                            .text_size(design::text::CAPTION)
-                            .text_color(theme.sidebar_muted)
-                            .child(note),
-                    )
-                }),
-        );
-    }
-    content.into_any_element()
+    row.into_any_element()
 }
 
 fn dm_button(

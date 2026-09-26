@@ -1,17 +1,15 @@
 //! The module's own path, run natively: the sender the host resolved, a
-//! huddle join's node proof, the identity role's profiles paged through chat. Each
+//! the identity role's profiles paged through chat. Each
 //! refusal leaves the store as it was.
 use guest::{Cause, Env, Origin};
 
 use super::*;
-use crate::{Category, HUDDLE_JOIN_NS, HUDDLE_NODE_KEY_BYTES, Kind, Profile, Standing};
+use crate::{Category, Kind, Profile, Standing};
 
 /// Ada's key; it holds account 1.
 const ADA_KEY: [u8; 32] = [1; 32];
 /// Bo's key: it holds account 2 once identity seats it.
 const LONE_KEY: [u8; 32] = [2; 32];
-/// Cy's key; it holds account 3.
-const CY_KEY: [u8; 32] = [3; 32];
 
 /// The identity role over three accounts, the third an agent Ada manages.
 fn identity() -> guest::Sibling {
@@ -35,18 +33,13 @@ fn identity() -> guest::Sibling {
     Box::new(move |request| guest::identity_role(&roster, request))
 }
 
-/// A store with identity beside it and a verifier that takes `b"signed"`
-/// over exactly the join message.
+/// A store with identity beside it.
 fn store() -> MockHost {
     let store = MockHost::default();
     store
         .borrow_mut()
         .siblings
         .insert(guest::MockHost::roles().identity, identity());
-    store.borrow_mut().verifier = Some(Box::new(|_, _, namespace, message, signature| {
-        let expected = [b"general".as_slice(), &ADA_KEY].concat();
-        namespace == HUDDLE_JOIN_NS && message == expected && signature == b"signed"
-    }));
     store
 }
 
@@ -114,10 +107,6 @@ fn every_op() -> Vec<Op> {
     let general = || "general".to_string();
     vec![
         create("room", PostPolicy::Open),
-        Op::CreateVoiceChannel {
-            channel_id: "voice".into(),
-            name: "voice".into(),
-        },
         Op::CreateDmChannel {
             counterpart: 1,
             name: "ada".into(),
@@ -161,14 +150,6 @@ fn every_op() -> Vec<Op> {
             principal: Principal::Account(3),
             member: true,
         },
-        Op::JoinHuddle {
-            channel_id: general(),
-            node: vec![7; HUDDLE_NODE_KEY_BYTES],
-            node_proof: b"signed".to_vec(),
-        },
-        Op::LeaveHuddle {
-            channel_id: general(),
-        },
     ]
 }
 
@@ -193,39 +174,6 @@ fn a_key_writes_only_once_it_holds_an_account() {
     crate::Chat::execute(&store.exec(bo()), post("general", "m2", "now I can", None)).unwrap();
     let row = crate::state::message(&reads(&store), "general", 2).unwrap();
     assert_eq!(row.author, Principal::Account(2));
-}
-
-#[test]
-fn a_huddle_join_needs_its_nodes_signature() {
-    let join = |proof: &[u8]| Op::JoinHuddle {
-        channel_id: "general".into(),
-        node: vec![7; HUDDLE_NODE_KEY_BYTES],
-        node_proof: proof.to_vec(),
-    };
-    let store = store();
-    crate::Chat::execute(&store.exec(ada()), create("general", PostPolicy::Open)).unwrap();
-    assert_eq!(refused(&store, ada(), join(b"forged")), code::INVALID_INPUT);
-    // the proof binds the key: another account's key cannot reuse Ada's
-    assert_eq!(
-        refused(&store, key(&CY_KEY, Some(3)), join(b"signed")),
-        code::INVALID_INPUT
-    );
-    assert_eq!(refused(&store, root(), join(b"signed")), code::UNAUTHORIZED);
-    let unverified = MockHost::default();
-    crate::Chat::execute(
-        &unverified.exec(root()),
-        create("general", PostPolicy::Open),
-    )
-    .unwrap();
-    assert_eq!(
-        refused(&unverified, ada(), join(b"signed")),
-        code::UNSUPPORTED
-    );
-    crate::Chat::execute(&store.exec(ada()), join(b"signed")).unwrap();
-    let huddle = crate::state::channel(&reads(&store), "general")
-        .unwrap()
-        .huddle;
-    assert_eq!(huddle[0].principal, Principal::Account(1));
 }
 
 #[test]

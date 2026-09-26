@@ -8,11 +8,12 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-futures.workspace = true
 abi.workspace = true
-borsh.workspace = true
 ducktape-view-guest.workspace = true
 identity = { workspace = true, features = ["view"] }
 valset = { workspace = true, features = ["view"] }
 serde.workspace = true
+
+[dev-dependencies]
+# the screen export writes the fixtures as JSON
 serde_json.workspace = true

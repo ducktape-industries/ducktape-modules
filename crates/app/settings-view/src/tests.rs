@@ -1,9 +1,8 @@
-use super::*;
-use ducktape_view_guest::{
-    methods::Query,
-    testing::{StreamSender, TestAppContext},
-    wire,
-};
+use crate::Settings;
+use crate::api::*;
+use ducktape_view_guest::methods::{Changes, ClipboardWrite, ClockTicks, Query};
+use ducktape_view_guest::testing::{StreamSender, TestAppContext};
+use ducktape_view_guest::{Theme, wire};
 
 fn status() -> NodeStatus {
     NodeStatus {
@@ -50,7 +49,6 @@ fn scout() -> identity::Account {
             manager: 7,
             category: identity::Category::Agent,
             life: identity::Life::Active { keys: Vec::new() },
-            transfers: 0,
         },
     )
 }
@@ -93,11 +91,35 @@ fn seated(state: &str, dark: bool) -> (TestAppContext, StreamSender<HostSession>
     let mut cx = TestAppContext::new();
     cx.host().stream::<ClockTicks>();
     cx.host().stream::<Changes<Valset>>();
+    cx.host().stream::<Changes<Identity>>();
     let props = cx.host().stream::<HostSession>();
     respond(&cx);
     match state {
-        "unregistered" => cx.host().handle::<Query<Identity>>(|q| {
-            panic!("an unregistered key asks identity nothing: {q:?}")
+        "unregistered" => cx.host().handle::<Query<Identity>>(|q| match q {
+            identity::Query::Resolve { references } => {
+                Ok(identity::Reply::Resolved(vec![None; references.len()]))
+            }
+            q => panic!("an unregistered key asks identity who holds it, nothing more: {q:?}"),
+        }),
+        "suspended" => cx.host().handle::<Query<Identity>>(|q| {
+            Ok(match q {
+                identity::Query::Resolve { references } => {
+                    assert_eq!(references, vec![identity::Reference::Key(vec![0xab, 0xcd])]);
+                    identity::Reply::Resolved(vec![Some(12)])
+                }
+                identity::Query::Profile { number: 12 } => {
+                    identity::Reply::Profile(Some(identity::Profile {
+                        number: 12,
+                        name: "Scout".into(),
+                        kind: identity::Kind::Managed {
+                            manager: 7,
+                            category: identity::Category::Agent,
+                            standing: identity::Standing::Suspended,
+                        },
+                    }))
+                }
+                q => panic!("unexpected query: {q:?}"),
+            })
         }),
         "loading" => {
             cx.host().never::<ChainStatus>();
@@ -119,7 +141,7 @@ fn seated(state: &str, dark: bool) -> (TestAppContext, StreamSender<HostSession>
         } else {
             "abcd".into()
         },
-        account: (!matches!(state, "empty" | "unregistered")).then_some(7),
+        account: (!matches!(state, "empty" | "unregistered" | "suspended")).then_some(7),
         dark,
         endpoint: "http://127.0.0.1:19001".into(),
         ..Session::default()
@@ -193,6 +215,7 @@ fn live_updates_retry_and_restore() {
     let mut cx = TestAppContext::new();
     let live = cx.host().stream::<ClockTicks>();
     cx.host().stream::<Changes<Valset>>();
+    cx.host().stream::<Changes<Identity>>();
     cx.host().stream::<HostSession>();
     respond(&cx);
     cx.open::<Settings>();
@@ -210,9 +233,55 @@ fn live_updates_retry_and_restore() {
     assert!(cx.has_text("Height / epoch: 43 / 3"));
     let mut cx = fixture("refused", false);
     respond(&cx);
-    cx.simulate_click("settings/node/retry");
+    cx.simulate_click("settings/node-retry");
     cx.run_until_parked();
     assert!(cx.has_text("Network: Workshop"));
+}
+#[test]
+fn an_account_changed_elsewhere_is_read_again() {
+    let mut cx = TestAppContext::new();
+    cx.host().stream::<ClockTicks>();
+    cx.host().stream::<Changes<Valset>>();
+    let accounts = cx.host().stream::<Changes<Identity>>();
+    let props = cx.host().stream::<HostSession>();
+    respond(&cx);
+    cx.open::<Settings>();
+    props.send(Session {
+        signer: "abcd".into(),
+        account: Some(7),
+        ..Session::default()
+    });
+    cx.run_until_parked();
+    assert!(cx.find("settings/agents/12/suspend").is_some());
+    // Maya suspends Scout from another device
+    cx.host().handle::<Query<Identity>>(|q| {
+        Ok(match q {
+            identity::Query::Get { number } => {
+                identity::Reply::Account(Some(maya(number, "Laptop key")))
+            }
+            identity::Query::Managed { .. } => {
+                let mut scout = scout();
+                scout.control = identity::Control::Managed {
+                    manager: 7,
+                    category: identity::Category::Agent,
+                    life: identity::Life::Suspended { keys: Vec::new() },
+                };
+                identity::Reply::Accounts(identity::PageResponse {
+                    height: 43,
+                    items: vec![scout],
+                    next: None,
+                })
+            }
+            q => panic!("unexpected query: {q:?}"),
+        })
+    });
+    accounts.send(Some(43));
+    cx.run_until_parked();
+    assert!(
+        cx.find("settings/agents/12/resume").is_some(),
+        "{:?}",
+        cx.texts()
+    );
 }
 #[test]
 fn export_settings_screens() {
@@ -271,6 +340,14 @@ fn no_key_offers_no_form() {
 }
 
 #[test]
+fn a_suspended_agents_key_reads_as_such_and_creates_nothing() {
+    let cx = fixture("suspended", false);
+    assert!(cx.has_text("Who I am: Scout"), "{:?}", cx.texts());
+    assert!(cx.has_text("This key belongs to Scout, suspended by its manager."));
+    assert!(cx.find("settings/account/create").is_none());
+    cx.assert_accessible();
+}
+#[test]
 fn unregistered_key_creates_an_account() {
     let (mut cx, props) = seated("unregistered", false);
     assert!(cx.has_text(
@@ -291,7 +368,7 @@ fn unregistered_key_creates_an_account() {
     cx.simulate_input("settings/account/create/name", "Maya");
     cx.simulate_submit("settings/account/create/name");
     cx.run_until_parked();
-    assert!(cx.has_text("Couldn’t create this account: a name is not empty"));
+    assert!(cx.has_text("That didn’t go through: a name is not empty"));
 
     // Success holds the form busy until the host's session names the new
     // account, which is read: "Who I am" now carries the name.
@@ -360,6 +437,7 @@ fn long_host_key_is_truncated_and_non_validator_standing_is_quiet() {
     let mut cx = TestAppContext::new();
     cx.host().stream::<ClockTicks>();
     cx.host().stream::<Changes<Valset>>();
+    cx.host().stream::<Changes<Identity>>();
     let props = cx.host().stream::<HostSession>();
     cx.host().handle::<ChainStatus>(|()| Ok(status()));
     let long_key = vec![0x11; 32];
@@ -369,6 +447,10 @@ fn long_host_key_is_truncated_and_non_validator_standing_is_quiet() {
             valset::Query::Membership { .. } => valset::Reply::Membership(None),
             q => panic!("unexpected query: {q:?}"),
         })
+    });
+    cx.host().handle::<Query<Identity>>(|q| match q {
+        identity::Query::Resolve { .. } => Ok(identity::Reply::Resolved(vec![None])),
+        q => panic!("unexpected query: {q:?}"),
     });
     cx.set_global(Theme::light());
     cx.open::<Settings>();
@@ -391,7 +473,7 @@ fn long_host_key_is_truncated_and_non_validator_standing_is_quiet() {
 fn a_person_creates_an_agent_and_adds_its_key() {
     let mut cx = fixture("ready", false);
     assert!(
-        cx.has_text("Scout: Agent · account 12 · 0 keys · active"),
+        cx.has_text("Scout: Agent · managed by Maya · account 12 · 0 keys"),
         "{:?}",
         cx.texts()
     );
@@ -478,10 +560,7 @@ fn a_manager_renames_suspends_and_revokes_an_agent() {
                 }
                 identity::Query::Managed { by: 7, .. } => {
                     let identity::Control::Managed {
-                        manager,
-                        category,
-                        transfers,
-                        ..
+                        manager, category, ..
                     } = scout().control
                     else {
                         panic!()
@@ -490,7 +569,6 @@ fn a_manager_renames_suspends_and_revokes_an_agent() {
                         manager,
                         category,
                         life,
-                        transfers,
                     };
                     identity::Reply::Accounts(identity::PageResponse {
                         height: 42,
@@ -507,7 +585,7 @@ fn a_manager_renames_suspends_and_revokes_an_agent() {
     cx.run_until_parked();
     assert_eq!(sent(&cx), 2);
     assert!(
-        cx.has_text("Scout: Agent · account 12 · 0 keys · suspended"),
+        cx.has_text("Scout: Agent · managed by Maya · account 12 · 0 keys · suspended"),
         "{:?}",
         cx.texts()
     );
@@ -521,7 +599,7 @@ fn a_manager_renames_suspends_and_revokes_an_agent() {
     cx.simulate_click("settings/agents/12/revoke");
     cx.run_until_parked();
     assert_eq!(sent(&cx), 2, "the first press only asks");
-    assert!(cx.has_text("Revoking is final: its keys stop working and it never acts again."));
+    assert!(cx.has_text("Revoking is final: this agent account never acts again."));
     assert!(cx.has_text("Revoke for good"));
     // another action drops the question
     cx.simulate_click("settings/agents/12/resume");
@@ -540,9 +618,52 @@ fn a_manager_renames_suspends_and_revokes_an_agent() {
             identity::Op::Revoke { account: 12 },
         ]
     );
-    assert!(cx.has_text("Scout: Agent · account 12 · 0 keys · revoked"));
+    assert!(cx.has_text("Scout: Agent · managed by Maya · account 12 · 0 keys · revoked"));
     for action in ["rename", "suspend", "resume", "revoke"] {
         assert!(cx.find(&format!("settings/agents/12/{action}")).is_none());
     }
     cx.assert_accessible();
+}
+
+/// Identity's live heads re-read the account in place: a rename made
+/// elsewhere shows without the account leaving the screen first.
+#[test]
+fn an_identity_head_re_reads_the_account_in_place() {
+    let mut cx = TestAppContext::new();
+    cx.host().stream::<ClockTicks>();
+    cx.host().stream::<Changes<Valset>>();
+    let heads = cx.host().stream::<Changes<Identity>>();
+    let props = cx.host().stream::<HostSession>();
+    respond(&cx);
+    cx.open::<Settings>();
+    props.send(Session {
+        signer: "abcd".into(),
+        account: Some(7),
+        ..Session::default()
+    });
+    cx.run_until_parked();
+    assert!(cx.has_text("Who I am: Maya · account 7"));
+    cx.host().handle::<Query<Identity>>(|q| {
+        Ok(match q {
+            identity::Query::Get { number } => {
+                let mut renamed = maya(number, "Laptop key");
+                renamed.card.name = "Maya R".into();
+                identity::Reply::Account(Some(renamed))
+            }
+            identity::Query::Managed { .. } => identity::Reply::Accounts(identity::PageResponse {
+                height: 43,
+                items: vec![],
+                next: None,
+            }),
+            q => panic!("unexpected query: {q:?}"),
+        })
+    });
+    heads.send(Some(43));
+    cx.run_until_parked();
+    assert!(
+        cx.has_text("Who I am: Maya R · account 7"),
+        "{:?}",
+        cx.texts()
+    );
+    assert!(!cx.has_text("Reading your account…"));
 }

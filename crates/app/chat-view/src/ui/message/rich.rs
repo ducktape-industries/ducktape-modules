@@ -27,6 +27,7 @@ pub(super) fn rich_line(
     let mut highlights = Vec::new();
     let mut clickable = Vec::new();
     let mut targets = Vec::new();
+    let mut mono = Vec::new();
     for span in &styled {
         let start = text.len();
         text.push_str(&span.text);
@@ -61,10 +62,17 @@ pub(super) fn rich_line(
                     targets.push(account.clone());
                 }
             }
+            SpanStyle::Code => {
+                // the fenced block's ground, at the paragraph's size
+                style.background_color = Some(theme.surface);
+                mono.push((range.clone(), design::fonts::FAMILY_MONO.into()));
+            }
         }
         highlights.push((range, style));
     }
-    let styled = StyledText::new(text).with_highlights(highlights);
+    let styled = StyledText::new(text)
+        .with_highlights(highlights)
+        .with_font_family_overrides(mono);
     let open = cx.processor(move |chat, index: usize, _window, cx| {
         if let Some(target) = targets.get(index) {
             cx.notify();

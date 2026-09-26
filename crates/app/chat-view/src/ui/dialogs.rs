@@ -44,7 +44,7 @@ pub fn channel_create(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> Opt
                 .child("Channel name"),
         )
         .child(name_field(create, can_submit, cx, theme))
-        .children(toggles(create, cx, theme))
+        .child(members_only(create, cx, theme))
         .children(notes(chat, create, theme))
         .child(design::button("chat-create-cancel", "Cancel", theme, cancel).enabled(!busy))
         .child(
@@ -88,38 +88,21 @@ fn name_field(
     }
 }
 
-/// Voice room, and members only (which a voice room never is).
-fn toggles(create: &ChannelCreate, cx: &mut Context<Chat>, theme: &Theme) -> [AnyElement; 2] {
-    let voice = cx.listener(|chat, _: &ClickEvent, _window, cx| {
+/// Members only: on, posting takes a seat.
+fn members_only(create: &ChannelCreate, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement {
+    let toggle = cx.listener(|chat, _: &ClickEvent, _window, cx| {
         if let Some(create) = &mut chat.create {
-            create.voice = !create.voice;
-        }
-        cx.notify();
-    });
-    let members = cx.listener(|chat, _: &ClickEvent, _window, cx| {
-        if let Some(create) = &mut chat.create
-            && !create.voice
-        {
             create.members_only = !create.members_only;
         }
         cx.notify();
     });
-    let voice_label = match create.voice {
-        true => "Voice room: On",
-        false => "Voice room: Off",
-    };
-    let members_label = match create.members_only {
+    let label = match create.members_only {
         true => "Members only: On",
         false => "Members only: Off",
     };
-    [
-        design::button("chat-create-voice", voice_label, theme, voice)
-            .enabled(!create.busy)
-            .into_any_element(),
-        design::button("chat-create-members", members_label, theme, members)
-            .enabled(!create.busy && !create.voice)
-            .into_any_element(),
-    ]
+    design::button("chat-create-members", label, theme, toggle)
+        .enabled(!create.busy)
+        .into_any_element()
 }
 
 /// Why the dialog failed, and why it cannot create at all.

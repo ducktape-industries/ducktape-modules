@@ -2,11 +2,9 @@
 
 use ducktape_view_guest::design;
 use ducktape_view_guest::prelude::*;
-use ducktape_view_guest::{
-    AnyElement, ClickEvent, Context, ElementId, ParentElement, Styled, Theme, div, px,
-};
+use ducktape_view_guest::{AnyElement, ClickEvent, Context, ParentElement, Styled, Theme, div, px};
 
-use chat::{ChannelInfo, MsgRow};
+use chat::MsgRow;
 use ducktape_view_guest::view::Loadable;
 
 use super::timeline;
@@ -32,15 +30,10 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
         true => timeline::list(chat, Pane::Timeline, cx, theme).into_any_element(),
         false => search_results(chat, cx, theme).into_any_element(),
     };
-    let huddled = chat
-        .room_info()
-        .filter(|info| !info.channel.huddle.is_empty())
-        .map(|info| huddle(info, theme));
     pane.child(header(chat, room, cx, theme))
         .children(notice(chat, cx, theme))
         .children(confirmation(chat, cx, theme))
         .child(body)
-        .children(huddled)
         .child(compose(chat, room, cx, theme))
 }
 
@@ -212,7 +205,11 @@ fn header(chat: &Chat, room: &Room, cx: &mut Context<Chat>, theme: &Theme) -> im
         .child(div().flex_1().child(title))
         .child(button(
             "chat-room-details",
-            if direct { "Details" } else { "Channel details" },
+            if direct {
+                "Conversation details"
+            } else {
+                "Channel details"
+            },
             theme,
             details,
         ))
@@ -269,30 +266,6 @@ fn no_room(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement {
         }
     }
     .into_any_element()
-}
-
-fn huddle(info: &ChannelInfo, theme: &Theme) -> impl IntoElement {
-    div()
-        .id("chat-room-huddle")
-        .flex()
-        .items_center()
-        .gap_2()
-        .mx_3()
-        .my_1()
-        .p_2()
-        .bg(theme.surface)
-        .child(badge(
-            "chat-room-huddle-live",
-            "Voice",
-            theme.success,
-            theme.success_soft,
-        ))
-        .child(
-            div()
-                .text_size(design::text::SECONDARY)
-                .text_color(theme.muted)
-                .child(format!("{} people", info.channel.huddle.len())),
-        )
 }
 
 fn search_results(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement {
@@ -358,12 +331,14 @@ fn hit_list(chat: &Chat, hits: &Hits, cx: &mut Context<Chat>, theme: &Theme) -> 
 fn hit(row: &MsgRow, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement {
     let id = row.channel_id.clone();
     let seq = row.seq;
+    // seq is per channel: two channels' hits at one seq are two rows
+    let key = format!("chat-search-hit-{id}-{seq}");
     let open = cx.listener(move |chat, _: &ClickEvent, window, cx| {
         cx.notify();
         chat.open_hit(id.clone(), seq, window, cx)
     });
     div()
-        .id(ElementId::named_usize("chat-search-hit", seq as usize))
+        .id(key)
         .flex()
         .flex_col()
         .gap_1()

@@ -32,6 +32,8 @@ const REFS_W: Pixels = px(52.);
 const ACTIVITY_W: Pixels = px(96.);
 /// The overview's filter field.
 const SEARCH_W: Pixels = px(320.);
+/// The name keeps this much of a row: past it, the facts wrap under it.
+const NAME_MIN_W: Pixels = px(120.);
 
 /// One repository: its name over the address it clones from, and what it
 /// is (owner, default branch, refs, last activity) on the right.
@@ -52,6 +54,7 @@ fn repo_row(
         .id(id(format!("forge-repo-{name}")))
         .group(group.clone())
         .flex()
+        .flex_wrap()
         .items_center()
         .gap_4()
         .px_4()
@@ -79,7 +82,7 @@ fn repo_title(
     let url = crate::ui::repo_link(forge, name);
     div()
         .flex_1()
-        .min_w(px(0.))
+        .min_w(NAME_MIN_W)
         .flex()
         .flex_col()
         .gap(design::space::HAIR)
@@ -151,13 +154,15 @@ fn copy_button(
     }
 }
 
-/// What a repository is: owner, default branch, refs, last activity.
+/// What a repository is: owner, default branch, refs, last activity; on a
+/// narrow row they wrap under the name, and wrap among themselves.
 fn repo_facts(info: &RepoInfo, owner: String, theme: &Theme) -> Div {
     div()
         .flex()
+        .flex_wrap()
         .items_center()
         .gap_5()
-        .flex_shrink_0()
+        .min_w(px(0.))
         .text_size(design::text::SECONDARY)
         .text_color(theme.muted)
         .child(

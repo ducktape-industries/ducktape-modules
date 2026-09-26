@@ -3,15 +3,15 @@
 //! hands the screen a single reply. A typed refusal becomes an `Error`, so
 //! the four states of a `Loadable` slot stay honest.
 use ducktape_view_guest::Host;
-use ducktape_view_guest::host::{Error, pages, wrong_reply};
-use ducktape_view_guest::methods::Query as Ask;
+use ducktape_view_guest::host::{Error, pages};
 
-use crate::api::{Ask as Forge, ChatApi};
+use crate::api::Ask as Forge;
 use forge::{PageRequest, PageResponse, Query, Reply};
 
 /// What one page asks for: 64 rows, from the start. A limit above the
 /// program's `Bounds.page_size` is clamped to it.
-pub(crate) const PAGE: PageRequest = PageRequest::first(64);
+pub(crate) const PAGE: PageRequest = PageRequest::first(PER_PAGE);
+const PER_PAGE: u64 = 64;
 /// How many pages one read follows. A history longer than this shows what
 /// it read and says more follows, rather than walking a repository forever.
 const MAX_PAGES: usize = 16;
@@ -98,20 +98,5 @@ pub(crate) async fn conversation(
     channel_id: String,
     viewer: Vec<forge::Principal>,
 ) -> Result<(Vec<chat::MsgRow>, bool), Error> {
-    let (mut all, next) = pages(None, MAX_PAGES, |after| {
-        let ask = host.ask::<Ask<ChatApi>>(chat::Query::Roots {
-            channel_id: channel_id.clone(),
-            viewer: viewer.clone(),
-            page: PageRequest { after, ..PAGE },
-        });
-        async move {
-            match ask.await? {
-                chat::Reply::Roots(roots) => Ok((roots.items, roots.next)),
-                _ => Err(wrong_reply()),
-            }
-        }
-    })
-    .await?;
-    all.sort_by_key(|row: &chat::MsgRow| row.seq);
-    Ok((all, next.is_some()))
+    chat::view::roots(host, channel_id, viewer, None, MAX_PAGES, PER_PAGE).await
 }

@@ -2,7 +2,6 @@
 //! it, whether it is on screen, and the live heads of chat and identity.
 //! Every follower says what a refusal means to it; none ends on one.
 use ducktape_view_guest::Context;
-use ducktape_view_guest::host::Error;
 
 use crate::api::{Changes, ChatApi, HostRoute, HostSession, HostVisible};
 use crate::{Chat, links};
@@ -26,7 +25,7 @@ impl Chat {
             }),
             cx.for_each(changes, |chat, head, _, cx| match head {
                 Ok(_) => chat.refresh(cx),
-                Err(refusal) => log(cx, "chat's live heads", &refusal),
+                Err(refusal) => cx.host().log_refused("chat", "chat's live heads", &refusal),
             }),
             // `duck://<chain>/chat/<channel>[/<seq>]`: a link opened into
             // this view (a notice's, say) names the room and the message
@@ -38,23 +37,20 @@ impl Chat {
                         chat.settle_badge(cx);
                     }
                 }
-                Err(refusal) => log(cx, "the route", &refusal),
+                Err(refusal) => cx.host().log_refused("chat", "the route", &refusal),
             }),
             cx.for_each(visible, |chat, visible, _, cx| match visible {
                 Ok(visible) => chat.visibility_changed(visible, cx),
-                Err(refusal) => log(cx, "visibility", &refusal),
+                Err(refusal) => cx.host().log_refused("chat", "visibility", &refusal),
             }),
             // re-read the roster on identity's heads, so a name another
             // signer claims replaces its "account N" fallback
             cx.for_each(identity, |chat, head, _, cx| match head {
                 Ok(_) => chat.load_names(cx),
-                Err(refusal) => log(cx, "identity's live heads", &refusal),
+                Err(refusal) => cx
+                    .host()
+                    .log_refused("chat", "identity's live heads", &refusal),
             }),
         ];
     }
-}
-
-/// A refusal nothing on screen waits for, kept in the host's log.
-pub(crate) fn log(cx: &mut Context<Chat>, what: &str, refusal: &Error) {
-    cx.host().log(format!("chat: {what} refused: {refusal}"));
 }

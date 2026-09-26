@@ -5,8 +5,8 @@ use guest::{MockHost, Module};
 use store::PageRequest;
 
 use crate::{
-    Acceptance, Account, Admission, CONSENT_NAMESPACE, Category, Consent, Control,
-    HANDOVER_NAMESPACE, Handover, Identity, Kind, Life, Op, Query, Reply, Standing,
+    Account, Admission, CONSENT_NAMESPACE, Category, Consent, Control, Identity, Kind, Life, Op,
+    Query, Reply, Standing,
 };
 
 const ALICE: &[u8] = b"alice-key";
@@ -155,27 +155,6 @@ fn agent_key(agent: u64, key: &[u8], generation: u64) -> Op {
     }
 }
 
-/// `to`'s acceptance, by `key`, of `agent` at its `transfers`th handover,
-/// expiring at `expires_at`.
-fn handover(agent: u64, to: u64, key: &[u8], transfers: u64, expires_at: u64) -> Op {
-    let handover = Handover {
-        network: b"net".to_vec(),
-        account: agent,
-        to,
-        transfers,
-        expires_at,
-    };
-    Op::TransferManager {
-        account: agent,
-        to,
-        acceptance: Acceptance {
-            key: key.to_vec(),
-            expires_at,
-            proof: proof(HANDOVER_NAMESPACE, &handover.preimage()),
-        },
-    }
-}
-
 /// An agent's keys, whatever its life.
 fn keys_of(account: &Account) -> Vec<Vec<u8>> {
     account.keys().iter().map(|key| key.key.clone()).collect()
@@ -285,7 +264,6 @@ fn a_person_manages_an_agent_and_its_keys() {
             manager: 1,
             category: Category::Agent,
             life: Life::Active { keys: Vec::new() },
-            transfers: 0,
         }
     );
 
@@ -462,7 +440,6 @@ fn an_agent_is_suspended_resumed_or_revoked_by_its_manager_alone() {
             avatar: None,
             bio: Some("back".into()),
         },
-        handover(agent, 2, BOB, 0, 200),
     ];
     for op in ops {
         let why = format!("{op:?}");
@@ -490,121 +467,6 @@ fn an_agent_is_suspended_resumed_or_revoked_by_its_manager_alone() {
     assert_eq!(alice.code, code::WRONG_STATE);
     let bob = refused(&store, &signed(&store, BOB), Op::Suspend { account: 1 });
     assert_eq!(bob.code, code::WRONG_STATE);
-}
-
-/// A manager hands an agent to a person who consented to it with their key,
-/// once: the consent expires, names one handover, and the agent's keys go
-/// with the old manager.
-#[test]
-fn a_manager_hands_an_agent_to_a_consenting_person() {
-    let store = memory();
-    create(&store, ALICE, "Alice");
-    create(&store, BOB, "Bob");
-    let agent = create_agent(&store, ALICE, "Scout");
-    let other = create_agent(&store, ALICE, "Other");
-    add_agent_key(&store, ALICE, agent, BOT).unwrap();
-    run(
-        &store,
-        &root(),
-        Op::RegisterModule {
-            module: "forge".into(),
-        },
-    )
-    .unwrap();
-    let alice = || signed(&store, ALICE);
-    let bob = || signed(&store, BOB);
-
-    // the receiver is a person, who consented with a key of theirs
-    let to_agent = refused(&store, &alice(), handover(agent, other, BOB, 0, 200));
-    assert_eq!(to_agent.code, code::WRONG_STATE);
-    let to_module = refused(&store, &alice(), handover(agent, 5, BOB, 0, 200));
-    assert_eq!(to_module.code, code::WRONG_STATE);
-    let not_bobs = refused(&store, &alice(), handover(agent, 2, ALICE, 0, 200));
-    assert_eq!(not_bobs.code, code::UNAUTHORIZED);
-    let accepted_as = |proof: Vec<u8>| Op::TransferManager {
-        account: agent,
-        to: 2,
-        acceptance: Acceptance {
-            key: BOB.to_vec(),
-            expires_at: 200,
-            proof,
-        },
-    };
-    let forged = accepted_as(b"nope".to_vec());
-    assert_eq!(refused(&store, &alice(), forged).code, code::UNAUTHORIZED);
-    // a signature under the add-key namespace is no acceptance, even over
-    // the very handover
-    let first = Handover {
-        network: b"net".to_vec(),
-        account: agent,
-        to: 2,
-        transfers: 0,
-        expires_at: 200,
-    };
-    let as_consent = accepted_as(proof(CONSENT_NAMESPACE, &first.preimage()));
-    assert_eq!(
-        refused(&store, &alice(), as_consent).code,
-        code::UNAUTHORIZED
-    );
-    let late = signed_at(&store, ALICE, 300).unwrap();
-    let expired = refused(&store, &late, handover(agent, 2, BOB, 0, 200));
-    assert_eq!(expired.code, code::UNAUTHORIZED);
-    let by_stranger = refused(&store, &bob(), handover(agent, 2, BOB, 0, 200));
-    assert_eq!(by_stranger.code, code::UNAUTHORIZED);
-
-    run(&store, &alice(), handover(agent, 2, BOB, 0, 200)).unwrap();
-    let moved = get(&store, agent);
-    assert_eq!(
-        moved.control,
-        Control::Managed {
-            manager: 2,
-            category: Category::Agent,
-            life: Life::Active { keys: Vec::new() },
-            transfers: 1,
-        },
-        "the keys went with the old manager"
-    );
-    assert_eq!(signed(&store, BOT).sender, None);
-    let managed_by = |by: u64| match query(
-        &store,
-        Query::Managed {
-            by,
-            page: PageRequest::first(10),
-        },
-    ) {
-        Reply::Accounts(page) => page.items.iter().map(|a| a.number).collect::<Vec<_>>(),
-        other => panic!("{other:?}"),
-    };
-    assert_eq!((managed_by(1), managed_by(2)), (vec![other], vec![agent]));
-    let former = refused(&store, &alice(), Op::Suspend { account: agent });
-    assert_eq!(former.code, code::UNAUTHORIZED);
-
-    // the old consent takes it no second time: Bob hands it back, and
-    // Alice, managing again, cannot push it to Bob with it
-    run(&store, &bob(), handover(agent, 1, ALICE, 1, 200)).unwrap();
-    let replayed = refused(&store, &alice(), handover(agent, 2, BOB, 0, 200));
-    assert_eq!(replayed.code, code::UNAUTHORIZED);
-    run(&store, &alice(), handover(agent, 2, BOB, 2, 200)).unwrap();
-    assert_eq!(managed_by(2), [agent]);
-
-    // suspended, it arrives suspended, and its new manager resumes it
-    run(&store, &bob(), agent_key(agent, BOT, 1)).unwrap();
-    run(&store, &bob(), Op::Suspend { account: agent }).unwrap();
-    run(&store, &bob(), handover(agent, 1, ALICE, 3, 200)).unwrap();
-    assert_eq!(
-        get(&store, agent).control,
-        Control::Managed {
-            manager: 1,
-            category: Category::Agent,
-            life: Life::Suspended { keys: Vec::new() },
-            transfers: 4,
-        }
-    );
-    assert_eq!(
-        query(&store, Query::OfKey { key: BOT.to_vec() }),
-        Reply::Number(None)
-    );
-    run(&store, &alice(), Op::Resume { account: agent }).unwrap();
 }
 
 #[test]

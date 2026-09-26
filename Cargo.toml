@@ -6,8 +6,9 @@
 #                   `ExecCtx`/`QueryCtx`, `export!`, refusals; `MockHost`
 #                   runs a module natively), `store` (optional typed tables
 #                   and paging over guest's contexts), `ducklink` (the `duck://`
-#                   grammar), and the view contract (`view-wire`,
-#                   `view-guest`, `design`)
+#                   grammar), the view contract (`view-wire`,
+#                   `view-guest`, `design`), and `conformance` (the
+#                   role suite a module proves it fills a role with)
 #   crates/system/  the boot set: module-registry, valset and identity, one
 #                   crate each in the same shape as the app programs; the
 #                   suite under module-registry/tests founds ducktape's host
@@ -37,6 +38,7 @@ members = [
     "crates/sdk/ducklink",
     "crates/sdk/design",
     "crates/sdk/describe",
+    "crates/sdk/conformance",
     "crates/sdk/view-wire",
     "crates/sdk/view-guest",
     "crates/sdk/view-guest-derive",
@@ -69,6 +71,7 @@ ducklink = { path = "crates/sdk/ducklink" }
 design = { path = "crates/sdk/design" }
 view-wire = { path = "crates/sdk/view-wire" }
 describe = { path = "crates/sdk/describe" }
+conformance = { path = "crates/sdk/conformance" }
 view-guest = { path = "crates/sdk/view-guest" }
 ducktape-view-guest = { path = "crates/sdk/view-guest", package = "view-guest" }
 gpui = { package = "gpui-pre", git = "https://github.com/ducktape-industries/gpui-pre", rev = "79bdf74455094b943794cc32aa136a48f445cdb9", default-features = false }

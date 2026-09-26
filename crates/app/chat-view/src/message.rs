@@ -56,7 +56,7 @@ pub struct ChatSpan {
 }
 
 /// The one style arm a run renders through: a link outranks every other
-/// mark, a mention outranks emphasis.
+/// mark, a mention outranks code, code outranks emphasis.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SpanStyle {
     Plain,
@@ -66,6 +66,7 @@ pub enum SpanStyle {
     Link(String),
     /// the account the mention names, in decimal ("" for a module)
     Mention(String),
+    Code,
 }
 
 pub fn chat_message(row: MsgRow, names: &Names) -> ChatMessage {
@@ -210,6 +211,7 @@ fn draft_spans(spans: &[Span]) -> String {
                     Mark::Italic => format!("_{text}_"),
                     Mark::Link(url) => format!("[{text}]({url})"),
                     Mark::Mention(_) => text,
+                    Mark::Code => format!("`{text}`"),
                 };
             }
             text
@@ -241,9 +243,11 @@ pub fn styled_spans(spans: &[Span], names: &Names) -> Vec<ChatSpan> {
             });
             let bold = span.marks.contains(&Mark::Bold);
             let italic = span.marks.contains(&Mark::Italic);
+            let code = span.marks.contains(&Mark::Code);
             let style = match (link, mention, bold, italic) {
                 (Some(url), _, _, _) => SpanStyle::Link(url),
                 (None, Some(account), _, _) => SpanStyle::Mention(account),
+                (None, None, _, _) if code => SpanStyle::Code,
                 (None, None, true, true) => SpanStyle::BoldItalic,
                 (None, None, true, false) => SpanStyle::Bold,
                 (None, None, false, true) => SpanStyle::Italic,
@@ -302,5 +306,14 @@ mod tests {
         mark_message_groups(&mut messages, None);
         let heads: Vec<bool> = messages.iter().map(|m| m.show_author).collect();
         assert_eq!(heads, [true, false, false, true]);
+    }
+
+    #[test]
+    fn a_draft_writes_marks_back_as_the_markdown_that_parses_to_them() {
+        let source = "say **hi** and `code` to <@7> at [x](https://x.example)";
+        let blocks = chat::message::parse_message(source);
+        assert_ne!(blocks[0], Block::paragraph(source));
+        assert_eq!(draft_body(&blocks), source);
+        assert_eq!(chat::message::parse_message(&draft_body(&blocks)), blocks);
     }
 }

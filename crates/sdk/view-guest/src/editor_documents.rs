@@ -93,23 +93,7 @@ mod tests {
 
     #[derive(Serialize, Deserialize)]
     struct DocumentApp {
-        #[serde(with = "editor_snapshot")]
         editor: Editor,
-    }
-    mod editor_snapshot {
-        use super::*;
-        pub fn serialize<S: serde::Serializer>(
-            editor: &Editor,
-            serializer: S,
-        ) -> Result<S::Ok, S::Error> {
-            editor.snapshot().serialize(serializer)
-        }
-        pub fn deserialize<'de, D: serde::Deserializer<'de>>(
-            deserializer: D,
-        ) -> Result<Editor, D::Error> {
-            let bytes = Vec::<u8>::deserialize(deserializer)?;
-            Editor::restore(&bytes).ok_or_else(|| serde::de::Error::custom("invalid editor"))
-        }
     }
     impl View for DocumentApp {
         fn new(_: &mut Window, _: &mut Context<Self>) -> Self {

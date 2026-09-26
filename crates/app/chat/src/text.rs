@@ -39,14 +39,19 @@ pub fn tokens(text: &str) -> BTreeSet<String> {
 }
 
 /// `#tag` labels in appearance order, at most [`MAX_TAGS_PER_MESSAGE`]:
-/// outside code and links, each one [`tag_label`]-normalized.
+/// outside code and links, each one `tag_label`-normalized.
 pub fn tags(blocks: &[Block]) -> Vec<String> {
     let spans = blocks.iter().flat_map(|block| match block {
         Block::Paragraph(spans) | Block::Quote(spans) => spans.as_slice(),
         Block::Code { .. } | Block::Divider => &[],
     });
     let mut out: Vec<String> = Vec::new();
-    for span in spans.filter(|span| !span.marks.iter().any(|m| matches!(m, Mark::Link(_)))) {
+    for span in spans.filter(|span| {
+        !span
+            .marks
+            .iter()
+            .any(|m| matches!(m, Mark::Link(_) | Mark::Code))
+    }) {
         for label in span_tags(&span.text) {
             if !out.contains(&label) {
                 out.push(label);

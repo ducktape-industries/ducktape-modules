@@ -166,6 +166,7 @@ impl Forge {
         let log = self.ready(&Query::Log {
             repo: self.repo_name(),
             from: self.revision(),
+            exclude: None,
             page: PAGE,
         })?;
         let Reply::Log { page, .. } = log else {
@@ -250,6 +251,12 @@ impl Forge {
     pub(crate) fn review(&self) -> Option<&state::ReviewSession> {
         self.reviews
             .get(&change_key(self.nav.repo.as_deref()?, self.nav.change?))
+    }
+
+    /// The open change's review being written, to edit.
+    pub(crate) fn review_mut(&mut self) -> Option<&mut state::ReviewSession> {
+        let key = change_key(self.nav.repo.as_deref()?, self.nav.change?);
+        self.reviews.get_mut(&key)
     }
 
     pub(crate) fn pending_in(&self, scope: &str) -> Vec<&state::Pending> {

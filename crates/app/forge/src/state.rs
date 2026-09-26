@@ -14,6 +14,10 @@ use crate::objects::hash_of;
 
 /// The bounds forge was founded with.
 const BOUNDS: Item<Bounds> = Item::new("bounds");
+/// How many ops forge has accepted. Every listing cursor is pinned to it:
+/// only a forge op rewrites a listing, and two ops in one block share a
+/// height but not a count.
+const WRITES: Item<u64> = Item::new("writes");
 /// One record per repository, by name.
 const REPOS: Map<String, Repo> = Map::new("p/");
 /// Index: every repository by its last activity, newest first.
@@ -72,6 +76,17 @@ pub fn save_repo(ctx: &ExecCtx, name: &str, repo: &Repo) -> Result<(), Error> {
     }
     ACTIVITY.insert(ctx, &(newest_first(repo.last_activity), name.to_owned()));
     REPOS.put(ctx, &name.to_owned(), repo);
+    Ok(())
+}
+
+/// How many ops forge has accepted so far (0 before any).
+pub(crate) fn writes(ctx: &QueryCtx) -> Result<u64, Error> {
+    Ok(WRITES.get(ctx)?.unwrap_or(0))
+}
+
+/// Counts an accepted op.
+pub(crate) fn wrote(ctx: &ExecCtx) -> Result<(), Error> {
+    WRITES.put(ctx, &(writes(ctx)? + 1));
     Ok(())
 }
 
@@ -172,7 +187,12 @@ fn next_message_number(ctx: &QueryCtx) -> Result<u64, Error> {
 }
 
 fn message_id(n: u64) -> String {
-    format!("forge:{n:016x}")
+    chat::namespace::id(crate::MODULE, &format!("{n:016x}"))
+}
+
+/// Change `n`'s hidden chat channel: `forge:<repo>:<n>`.
+pub(crate) fn channel_id(repo: &str, n: u64) -> String {
+    chat::namespace::id(crate::MODULE, &format!("{repo}:{n}"))
 }
 
 /// A counter one step on, refused rather than wrapped.
@@ -271,6 +291,15 @@ mod tests {
             channel: String::new(),
             system_seq: 1,
         }
+    }
+
+    /// The longest ids forge gives chat fit chat's id limit, and
+    /// [`MAX_REPO_NAME`](crate::MAX_REPO_NAME) is the longest that does.
+    #[test]
+    fn longest_ids_fit_chat() {
+        let repo = "r".repeat(crate::MAX_REPO_NAME);
+        assert_eq!(channel_id(&repo, u64::MAX).len(), chat::MAX_ID_BYTES);
+        assert!(message_id(u64::MAX).len() <= chat::MAX_ID_BYTES);
     }
 
     /// Judgment pages every change across repositories: by name, not by

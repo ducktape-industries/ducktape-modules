@@ -1,5 +1,4 @@
-//! The `chat` module: channels, messages, threads, reactions, members and
-//! huddles.
+//! The `chat` module: channels, messages, threads, reactions, and members.
 //!
 //! A write is an [`Op`], a read a [`Query`] answered by a [`Reply`], all
 //! borsh, the same types `chat-view` links. The acting [`Principal`] is the
@@ -12,10 +11,10 @@
 //! - `state.rs`: every table and index the module keeps, declared once
 //! - `rules.rs`: the checks an op passes before it writes
 //! - `ops.rs`: one short function per op
-//! - `origin.rs`: a huddle join's node proof, and the identity role's roster
+//! - `origin.rs`: the identity role's roster
 //! - `queries.rs`: one short function per question
 //! - `text.rs`: what search and tags read out of a message
-//! - `description.rs`: [`describe`], an op in a person's words
+//! - `description.rs`: [`describe()`], an op in a person's words
 //!
 //! The module runs over `guest`'s contexts, so a native test runs it over
 //! [`guest::MockHost`] exactly as the host does. The `module` feature adds
@@ -57,13 +56,8 @@ pub const MAX_REVISIONS: u32 = 256;
 pub const MAX_EMOJI_BYTES: usize = 64;
 pub const MAX_REACTION_EMOJIS: usize = 64;
 pub const MAX_THREAD_REPLIES: u64 = 4096;
-pub const MAX_HUDDLE_MEMBERS: usize = 32;
 /// The most principals a read's `viewer` names (a reader is one account).
 pub const MAX_VIEWERS: usize = 8;
-pub const HUDDLE_NODE_KEY_BYTES: usize = 32;
-/// The namespace a node key signs under to join a huddle; the message is
-/// the channel id then the joining origin key.
-pub const HUDDLE_JOIN_NS: &[u8] = b"ducktape/huddle-join/v1";
 pub const MAX_TAGS_PER_MESSAGE: usize = 16;
 pub const MAX_TAG_CHARS: usize = 64;
 /// How many postings a search reads before it reports `capped`.
@@ -76,10 +70,6 @@ pub enum Op {
         channel_id: String,
         name: String,
         post_policy: PostPolicy,
-    },
-    CreateVoiceChannel {
-        channel_id: String,
-        name: String,
     },
     /// A members-only room between the actor's account and `counterpart`,
     /// id [`dm_channel_id`]; creating it twice is a no-op. The only way a
@@ -128,16 +118,6 @@ pub enum Op {
         channel_id: String,
         principal: Principal,
         member: bool,
-    },
-    /// `node_proof` is `node`'s signature over [`HUDDLE_JOIN_NS`] + channel
-    /// id + the origin key (verified by the module, not the rules).
-    JoinHuddle {
-        channel_id: String,
-        node: Vec<u8>,
-        node_proof: Vec<u8>,
-    },
-    LeaveHuddle {
-        channel_id: String,
     },
 }
 
@@ -239,8 +219,6 @@ pub struct ChannelRow {
     pub post_policy: PostPolicy,
     pub owner: Principal,
     pub archived: bool,
-    pub huddle: Vec<HuddleEntry>,
-    pub voice: bool,
 }
 
 impl ChannelRow {
@@ -261,14 +239,6 @@ impl ChannelRow {
 pub struct ChannelInfo {
     pub channel: ChannelRow,
     pub head_seq: u64,
-}
-
-#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct HuddleEntry {
-    pub principal: Principal,
-    /// the node key, hex
-    pub node: String,
-    pub joined_at: u64,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -356,18 +326,31 @@ pub fn dm_peers(channel_id: &str) -> Option<(AccountNumber, AccountNumber)> {
     Some((a.parse().ok()?, b.parse().ok()?))
 }
 
-/// The program a `<program>:<name>` channel id belongs to, or `None` for a
-/// channel people opened. Only that program creates one (a review thread,
-/// say); a reader reaches it through its program, not the channel list.
-/// The program's view opens the room at the id's own path: `forge:web:3`
-/// is `duck://<chain>/forge/web/3`.
-pub fn program_of(channel_id: &str) -> Option<&str> {
-    channel_id.split_once(':').map(|(program, _)| program)
+/// A program's own ids in chat: `<program>:<name>`, a channel (a review
+/// thread, say) or a message. Only that program creates one; a reader
+/// reaches such a room through its program, not the channel list. The
+/// program's view opens the room at the id's own path: `forge:web:3` is
+/// `duck://<chain>/forge/web/3`. Every id is at most [`MAX_ID_BYTES`].
+pub mod namespace {
+    /// `program`'s id `name`: `forge:web:3`.
+    pub fn id(program: &str, name: &str) -> String {
+        format!("{program}:{name}")
+    }
+
+    /// The program an id belongs to, or `None` for one people made.
+    pub fn program(id: &str) -> Option<&str> {
+        id.split_once(':').map(|(program, _)| program)
+    }
 }
 
-/// A program's own post in its own room: written by the account of the
-/// module the `<program>:<name>` room belongs to (`author_module`, the
-/// module the author's account is, from identity's profiles), as one code
+/// The program whose own account wrote `row` in that program's own
+/// `<program>:<name>` room (`author_module`: the module the author's
+/// account is, from identity's profiles).
+pub fn program_author<'a>(row: &'a MsgRow, author_module: Option<&str>) -> Option<&'a str> {
+    namespace::program(&row.channel_id).filter(|program| author_module == Some(*program))
+}
+
+/// A program's own post in its own room ([`program_author`]), as one code
 /// block in that program's language (forge's `opened`, `review 7`). The code
 /// is the program's to word; a reader shows it as that program's event and
 /// points to where the program itself shows the room. `(program, code)`.
@@ -375,15 +358,14 @@ pub fn program_post<'a>(
     row: &'a MsgRow,
     author_module: Option<&str>,
 ) -> Option<(&'a str, &'a str)> {
-    let program = program_of(&row.channel_id)?;
-    let own = author_module == Some(program);
+    let program = program_author(row, author_module)?;
     match row.blocks.as_slice() {
         [
             Block::Code {
                 lang: Some(lang),
                 text,
             },
-        ] if own && lang == program => Some((program, text)),
+        ] if lang == program => Some((program, text)),
         _ => None,
     }
 }
@@ -396,7 +378,6 @@ fn op_variants_only_append() {
         describe::variants::<Op>(),
         [
             "CreateChannel",
-            "CreateVoiceChannel",
             "CreateDmChannel",
             "RenameChannel",
             "SetChannelArchived",
@@ -406,8 +387,6 @@ fn op_variants_only_append() {
             "AddReaction",
             "RemoveReaction",
             "SetMembership",
-            "JoinHuddle",
-            "LeaveHuddle",
         ]
     );
 }

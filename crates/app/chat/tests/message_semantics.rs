@@ -62,3 +62,55 @@ fn emphasis_follows_the_flanking_rule() {
         assert_eq!(got, want, "for `{text}`");
     }
 }
+
+/// `(text, [(span text, code?, bold?)])`
+type CodeRow = (&'static str, &'static [(&'static str, bool, bool)]);
+
+const CODE_ROWS: &[CodeRow] = &[
+    (
+        "run `cargo test` now",
+        &[
+            ("run ", false, false),
+            ("cargo test", true, false),
+            (" now", false, false),
+        ],
+    ),
+    ("a ` b", &[("a ` b", false, false)]),
+    (
+        "`**not bold** <@7> https://x`",
+        &[("**not bold** <@7> https://x", true, false)],
+    ),
+    (
+        "**a `b` c**",
+        &[("a ", false, true), ("b", true, true), (" c", false, true)],
+    ),
+    ("`` a`b ``", &[("a`b", true, false)]),
+    ("``x` y``", &[("x` y", true, false)]),
+];
+
+#[test]
+fn a_backtick_run_opens_a_code_span_only_the_same_run_closes() {
+    for (text, expected) in CODE_ROWS {
+        let got: Vec<(String, bool, bool)> = inline_spans(text)
+            .into_iter()
+            .map(|span| {
+                let code = span.marks.contains(&Mark::Code);
+                let bold = span.marks.contains(&Mark::Bold);
+                assert!(
+                    !code
+                        || !span
+                            .marks
+                            .iter()
+                            .any(|m| matches!(m, Mark::Link(_) | Mark::Mention(_))),
+                    "no link or mention inside code, for `{text}`"
+                );
+                (span.text, code, bold)
+            })
+            .collect();
+        let want: Vec<(String, bool, bool)> = expected
+            .iter()
+            .map(|(text, code, bold)| (text.to_string(), *code, *bold))
+            .collect();
+        assert_eq!(got, want, "for `{text}`");
+    }
+}

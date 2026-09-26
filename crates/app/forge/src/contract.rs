@@ -17,7 +17,8 @@ pub struct Bounds {
     /// Maximum Myers edit distance for one file.
     pub merge_cost: u64,
     pub page_size: u32,
-    /// Maximum commits in a history/compare walk.
+    /// Maximum commits in a history/compare walk; a log's `exclude` side
+    /// walks under its own budget of the same size.
     pub log_walk: u64,
     /// Maximum object reads in a tree/diff/compare query.
     pub tree_walk: u64,
@@ -64,8 +65,8 @@ pub enum Op {
         repo: String,
         settings: Settings,
     },
-    /// Lets a person push, merge and close: an account (all its keys), or
-    /// a key that holds no account.
+    /// Lets a person push, merge and close: an account, through any of its
+    /// keys.
     Grant {
         repo: String,
         principal: Principal,
@@ -161,9 +162,12 @@ pub enum Query {
         repo: String,
         request: Vec<u8>,
     },
+    /// The history `from` reaches, less what `exclude` reaches (`git log
+    /// exclude..from`): a change's own commits exclude its target.
     Log {
         repo: String,
         from: Revision,
+        exclude: Option<Revision>,
         page: PageRequest,
     },
     Tree {
@@ -356,7 +360,10 @@ pub enum OpReply {
     },
 }
 
-pub const MAX_REPO_NAME: usize = 37; // forge:<repo>:<u64> fits chat's 64-byte id.
+/// The longest repository name whose change channels fit chat's id limit:
+/// `forge:<repo>:<n>` is the module, two `:` and up to 20 digits of `n`.
+pub const MAX_REPO_NAME: usize =
+    chat::MAX_ID_BYTES - crate::MODULE.len() - 2 - (u64::MAX.ilog10() as usize + 1);
 
 pub fn valid_repo_name(name: &str) -> bool {
     !name.is_empty()

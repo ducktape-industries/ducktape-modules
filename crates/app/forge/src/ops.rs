@@ -1,13 +1,10 @@
 //! The execute path: who acts, which op, and the repository ops (create,
 //! configure, grant, revoke, push). Change ops live in `changes`.
 
-use abi::role::identity as role;
 use gitcore::server::{Policy, RefUpdate};
 use gitcore::{Error as GitError, Limits, server};
-use guest::{Error, HashKind, code};
-use guest::{
-    ExecCtx, QueryCtx, already_exists, capacity, decoded, invalid, unauthorized, wrong_state,
-};
+use guest::{Error, HashKind};
+use guest::{ExecCtx, QueryCtx, already_exists, capacity, decoded, invalid, unauthorized};
 
 use crate::contract::{Bounds, MAX_PATH_BYTES, Principal, Repo, Settings, valid_repo_name};
 use crate::objects::{ObjectWriter, object_not_held};
@@ -47,11 +44,13 @@ pub(crate) fn signed_account(ctx: &ExecCtx) -> Result<Principal, Error> {
     ctx.sender()
 }
 
-/// Every accepted op marks its repository active at this height.
+/// Every accepted op marks its repository active at this height and counts
+/// as a write, which every listing cursor is pinned to.
 pub(crate) fn touch(ctx: &ExecCtx, name: &str, height: u64) -> Result<(), Error> {
     let mut repo = load_repo(ctx, name)?;
     repo.last_activity = height;
-    save_repo(ctx, name, &repo)
+    save_repo(ctx, name, &repo)?;
+    crate::state::wrote(ctx)
 }
 
 pub(crate) fn create(
@@ -194,47 +193,12 @@ pub(crate) fn require_named(principal: &Principal) -> Result<(), Error> {
 }
 
 /// Whom a person asks to write or review: an account the identity role
-/// profiles as a person or an agent that acts. No absent account, no
-/// module's, no agent suspended or revoked.
+/// profiles as a person or an agent that acts.
 pub(crate) fn require_person_or_agent(ctx: &QueryCtx, principal: &Principal) -> Result<(), Error> {
     let Some(number) = principal.account() else {
         return Err(invalid("only an account is named here"));
     };
-    let asked = role::Query::Profile(number);
-    let role::Reply::Profile(profile) =
-        ctx.ask::<role::Query, role::Reply>(&ctx.env().roles.identity, &asked)?
-    else {
-        return Err(Error::new(
-            code::UNEXPECTED_REPLY,
-            "identity answered Profile with something else",
-        ));
-    };
-    let Some(profile) = profile else {
-        return Err(invalid(format!("there is no account {number}")));
-    };
-    use role::{Kind, Standing};
-    match profile.kind {
-        Kind::Person
-        | Kind::Managed {
-            standing: Standing::Active,
-            ..
-        } => Ok(()),
-        Kind::Managed {
-            standing: Standing::Suspended,
-            ..
-        } => Err(wrong_state(format!(
-            "account {number} is suspended: only agents that act are asked"
-        ))),
-        Kind::Managed {
-            standing: Standing::Revoked,
-            ..
-        } => Err(wrong_state(format!(
-            "account {number} is revoked: only agents that act are asked"
-        ))),
-        Kind::Module(module) => Err(invalid(format!(
-            "account {number} is module {module}'s: only people and agents are asked"
-        ))),
-    }
+    ctx.require_person_or_agent(number)
 }
 
 pub fn limits_of(bounds: &Bounds) -> Limits {

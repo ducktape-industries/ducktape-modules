@@ -7,8 +7,8 @@ use guest::{
 use store::{Item, Map, PageRequest, Set};
 
 use crate::{
-    Acceptance, Account, AccountNumber, Admission, CONSENT_NAMESPACE, Card, Category, Consent,
-    Control, HANDOVER_NAMESPACE, Handover, Key, Life, Reference, Reply,
+    Account, AccountNumber, Admission, CONSENT_NAMESPACE, Card, Category, Consent, Control, Key,
+    Life, Reference, Reply,
 };
 
 pub(crate) const ACCOUNTS: Map<AccountNumber, Account> = Map::new("a/");
@@ -206,7 +206,6 @@ pub(crate) fn create_agent(ctx: &ExecCtx, name: String) -> Result<(), Error> {
             manager,
             category: Category::Agent,
             life: Life::Active { keys: Vec::new() },
-            transfers: 0,
         },
     };
     ACCOUNTS.put(ctx, &number, &account);
@@ -443,70 +442,4 @@ pub(crate) fn revoke(ctx: &ExecCtx, number: AccountNumber) -> Result<(), Error> 
         }
         Life::Revoked => Err(revoked(number)),
     })
-}
-
-/// The manager hands `number` to the person `to`, who accepted this
-/// handover with a key on their account. The agent's keys are dropped, so
-/// nothing the old manager gave it acts on; suspended, it stays so.
-pub(crate) fn transfer_manager(
-    ctx: &ExecCtx,
-    number: AccountNumber,
-    to: AccountNumber,
-    acceptance: Acceptance,
-) -> Result<(), Error> {
-    let env = ctx.env();
-    let mut account = account(ctx, number)?;
-    let Control::Managed {
-        manager,
-        life,
-        transfers,
-        ..
-    } = &mut account.control
-    else {
-        return Err(wrong_state(format!("account {number} is no one's agent")));
-    };
-    managing(ctx, *manager, number)?;
-    let keys = match life {
-        Life::Active { keys } | Life::Suspended { keys } => keys,
-        Life::Revoked => return Err(revoked(number)),
-    };
-    let receiver = self::account(ctx, to)?;
-    let Control::Person {
-        keys: receiver_keys,
-    } = &receiver.control
-    else {
-        return Err(wrong_state(format!("account {to} is not a person's")));
-    };
-    let accepting = receiver_keys
-        .iter()
-        .find(|key| key.key == acceptance.key)
-        .ok_or_else(|| unauthorized("the accepting key is not on the receiver's account"))?;
-    if env.time > acceptance.expires_at {
-        return Err(unauthorized("the acceptance has expired"));
-    }
-    let handover = Handover {
-        network: env.chain_id.clone(),
-        account: number,
-        to,
-        transfers: *transfers,
-        expires_at: acceptance.expires_at,
-    };
-    let accepted = ctx.verify(
-        accepting.scheme,
-        acceptance.key,
-        HANDOVER_NAMESPACE,
-        handover.preimage(),
-        acceptance.proof,
-    )?;
-    if !accepted {
-        return Err(unauthorized("the acceptance does not verify"));
-    }
-    drop_keys(ctx, keys);
-    keys.clear();
-    MANAGED.remove(ctx, &(*manager, number));
-    MANAGED.insert(ctx, &(to, number));
-    *manager = to;
-    *transfers += 1;
-    save(ctx, account);
-    Ok(())
 }

@@ -20,6 +20,10 @@ fn rich_message_keeps_styles_and_dispatches_each_link_by_value() {
             text: "reviewer".into(),
             marks: vec![chat::Mark::Mention(chat::Principal::Account(8))],
         },
+        chat::Span {
+            text: " code".into(),
+            marks: vec![chat::Mark::Code],
+        },
     ];
     view.update(&mut cx, |chat, _, cx| {
         chat.room
@@ -55,18 +59,28 @@ fn rich_message_keeps_styles_and_dispatches_each_link_by_value() {
         text,
         runs,
         clickable_ranges,
+        font_family_overrides,
         ..
     }) = cx.find(key)
     else {
         panic!("message paragraph is one rich text node");
     };
-    assert_eq!(text, "bold italic first @reviewer");
+    assert_eq!(text, "bold italic first @reviewer code");
     let wire::RichTextRuns::Highlights(highlights) = runs else {
         panic!("chat authors highlight ranges");
     };
-    assert_eq!(highlights.len(), 4);
+    assert_eq!(highlights.len(), 5);
     assert!(highlights[0].1.font_weight.is_some());
     assert!(highlights[1].1.font_style.is_some());
+    // a code span: the fenced block's ground, in the mono face
+    assert!(highlights[4].1.background_color.is_some());
+    assert_eq!(
+        *font_family_overrides,
+        vec![(
+            highlights[4].0.clone(),
+            ducktape_view_guest::design::fonts::FAMILY_MONO.into()
+        )]
+    );
     assert_eq!(clickable_ranges.len(), 2);
     assert!(cx.has_text("rust"));
     assert!(cx.has_text("fn main() {}"));

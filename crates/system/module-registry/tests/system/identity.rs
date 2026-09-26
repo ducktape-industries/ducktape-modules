@@ -27,31 +27,6 @@ fn consent(
     }
 }
 
-/// `to`'s acceptance, by `key` (one of theirs), of `agent` at its
-/// `transfers`th handover, signed under `namespace` (the handover's, unless
-/// a test signs under the wrong one).
-fn acceptance(
-    key: &ed25519::PrivateKey,
-    agent: AccountNumber,
-    to: AccountNumber,
-    transfers: u64,
-    expires_at: u64,
-    namespace: &[u8],
-) -> identity::Acceptance {
-    let handover = identity::Handover {
-        network: NETWORK.to_vec(),
-        account: agent,
-        to,
-        transfers,
-        expires_at,
-    };
-    identity::Acceptance {
-        key: key.public_key().as_ref().to_vec(),
-        expires_at,
-        proof: testkit::ed25519_proof(key, namespace, &handover.preimage()),
-    }
-}
-
 /// The founding programs, in admission order: identity numbers their
 /// accounts first, so a person's account comes after them.
 const FOUNDED: [&str; 4] = [
@@ -298,7 +273,7 @@ fn an_agent_acts_until_its_manager_suspends_it() {
         let dir = tempfile::tempdir().unwrap();
         let mut net = Net::found(context, dir.path()).await;
         let alice = net.create(1, "Alice").await;
-        let bob = net.create(2, "Bob").await;
+        net.create(2, "Bob").await;
         let output = net
             .apply(
                 &public(1),
@@ -315,7 +290,6 @@ fn an_agent_acts_until_its_manager_suspends_it() {
                 manager: alice,
                 category: identity::Category::Agent,
                 life: identity::Life::Active { keys: Vec::new() },
-                transfers: 0,
             }
         );
 
@@ -397,72 +371,16 @@ fn an_agent_acts_until_its_manager_suspends_it() {
         };
         assert_eq!(holds, Some(agent), "resumed, its key acts again");
 
-        // handed to Bob, who accepted: its keys go with Alice
-        let expires_at = TIME + 600_000;
-        let handover = identity::HANDOVER_NAMESPACE;
-        let unaccepted = identity::Op::TransferManager {
-            account: agent,
-            to: bob,
-            acceptance: acceptance(&key(1), agent, bob, 0, expires_at, handover),
-        };
-        let not_bobs = net.refuse(&public(1), identity::MODULE, &unaccepted).await;
-        assert_eq!(not_bobs, reason::UNAUTHORIZED);
-        let as_consent = identity::Op::TransferManager {
-            account: agent,
-            to: bob,
-            acceptance: acceptance(
-                &key(2),
-                agent,
-                bob,
-                0,
-                expires_at,
-                identity::CONSENT_NAMESPACE,
-            ),
-        };
-        let wrong_namespace = net.refuse(&public(1), identity::MODULE, &as_consent).await;
-        assert_eq!(wrong_namespace, reason::UNAUTHORIZED);
-        let transfer = identity::Op::TransferManager {
-            account: agent,
-            to: bob,
-            acceptance: acceptance(&key(2), agent, bob, 0, expires_at, handover),
-        };
-        net.apply(&public(1), identity::MODULE, &transfer).await;
-        assert_eq!(
-            net.account(agent).await.control,
-            identity::Control::Managed {
-                manager: bob,
-                category: identity::Category::Agent,
-                life: identity::Life::Active { keys: Vec::new() },
-                transfers: 1,
-            }
-        );
-        let former = net.refuse(&public(1), identity::MODULE, &suspend).await;
-        assert_eq!(former, reason::UNAUTHORIZED);
-        let identity::Reply::Number(holds) = net
-            .ask(
-                identity::MODULE,
-                &identity::Query::OfKey {
-                    key: bot_key.clone(),
-                },
-            )
-            .await
-        else {
-            panic!()
-        };
-        assert_eq!(holds, None, "the key Alice gave it is gone");
-        let replayed = net.refuse(&public(2), identity::MODULE, &transfer).await;
-        assert_eq!(replayed, reason::UNAUTHORIZED, "one consent, one handover");
-
         // then revoked for good
         net.apply(
-            &public(2),
+            &public(1),
             identity::MODULE,
             &identity::Op::Revoke { account: agent },
         )
         .await;
         let revived = net
             .refuse(
-                &public(2),
+                &public(1),
                 identity::MODULE,
                 &identity::Op::Resume { account: agent },
             )
@@ -473,7 +391,7 @@ fn an_agent_acts_until_its_manager_suspends_it() {
         assert_eq!(
             account.kind(),
             identity::Kind::Managed {
-                manager: bob,
+                manager: alice,
                 category: identity::Category::Agent,
                 standing: identity::Standing::Revoked,
             }
@@ -481,13 +399,14 @@ fn an_agent_acts_until_its_manager_suspends_it() {
     });
 }
 
-/// The identity role modules answer is the one ducktape's kernel speaks:
-/// `abi::role::identity` here is a copy of ducktape's, and this compares
-/// the two sources. (The workspace patches ducktape's `abi` to this copy,
-/// so nothing links both: the source is what can drift.) The checkout is
-/// the one cargo resolved `host` from.
+/// The roles modules answer and the env the kernel hands every frame are
+/// ducktape's: `abi::role` (identity, registry, validators), `Env` and what
+/// it carries here are a copy of ducktape's, and this compares the two
+/// sources item by item. (The workspace patches ducktape's `abi` to this
+/// copy, so nothing links both: the source is what can drift.) The
+/// checkout is the one cargo resolved `host` from.
 #[test]
-fn the_identity_role_is_ducktapes_byte_for_byte() {
+fn the_roles_and_the_env_are_ducktapes_byte_for_byte() {
     let metadata = std::process::Command::new(env!("CARGO"))
         .args(["metadata", "--format-version", "1", "--no-deps"])
         .arg("--manifest-path")
@@ -514,25 +433,29 @@ fn the_identity_role_is_ducktapes_byte_for_byte() {
     let ducktape = cargo_git_checkout(rev);
     let theirs = std::fs::read_to_string(ducktape.join("crates/kernel/abi/src/lib.rs")).unwrap();
     let ours = include_str!("../../../../sdk/abi/src/lib.rs");
-    let block = |text: &str| {
+    // each item runs from its first line to the first `}` closing at the
+    // left margin
+    let item = |text: &str, first: &str| {
         let start = text
-            .find("    pub mod identity {")
-            .expect("abi::role::identity");
-        let end = text[start..]
-            .find(
-                "
-    }
-",
-            )
-            .unwrap()
-            + start;
+            .find(&format!("\n{first}"))
+            .unwrap_or_else(|| panic!("abi has `{first}`"));
+        let end = text[start..].find("\n}\n").unwrap() + start;
         text[start..end].to_owned()
     };
-    assert_eq!(
-        block(&theirs),
-        block(ours),
-        "abi::role::identity drifted from ducktape's"
-    );
+    for first in [
+        "pub mod role {",
+        "pub enum Origin {",
+        "pub enum Principal {",
+        "pub struct Roles {",
+        "pub struct Env {",
+        "pub enum Cause {",
+    ] {
+        assert_eq!(
+            item(&theirs, first),
+            item(ours, first),
+            "abi's `{first}` drifted from ducktape's"
+        );
+    }
 }
 
 /// Where cargo checked ducktape out at `rev`: `$CARGO_HOME/git/checkouts/

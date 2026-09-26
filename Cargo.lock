@@ -1059,6 +1059,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "conformance"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "borsh",
+ "guest 0.1.0",
+ "identity",
+ "module-registry",
+ "valset",
+]
+
+[[package]]
 name = "const-hex"
 version = "1.19.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3604,6 +3616,8 @@ name = "members-view"
 version = "0.1.0"
 dependencies = [
  "abi",
+ "chat",
+ "ducklink",
  "futures",
  "identity",
  "module-registry",
@@ -3773,7 +3787,6 @@ version = "0.1.0"
 dependencies = [
  "abi",
  "futures",
- "module-registry",
  "serde",
  "valset",
  "view-guest",
@@ -5271,8 +5284,6 @@ name = "settings-view"
 version = "0.1.0"
 dependencies = [
  "abi",
- "borsh",
- "futures",
  "identity",
  "serde",
  "serde_json",

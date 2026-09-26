@@ -8,7 +8,7 @@ use ducktape_view_guest::Host;
 use ducktape_view_guest::host::{Error, pages, wrong_reply};
 use ducktape_view_guest::methods::{Module, Query as Ask};
 
-use crate::{Kind, PageRequest, Principal, Profile, Query, Reply, Standing};
+use crate::{Kind, MsgRow, PageRequest, Principal, Profile, Query, Reply, Standing};
 
 pub struct Chat;
 impl Module for Chat {
@@ -52,6 +52,38 @@ pub async fn roster(host: Host) -> Result<Names, Error> {
     let mut names = Names::from_roster(rows);
     names.more = next.is_some();
     Ok(names)
+}
+
+/// A channel's roots as `viewer` sees them, oldest first: up to `max_pages`
+/// pages of `per_page` below the cursor `below` (or the newest), and whether
+/// older ones remain.
+pub async fn roots(
+    host: Host,
+    channel_id: String,
+    viewer: Vec<Principal>,
+    below: Option<Vec<u8>>,
+    max_pages: usize,
+    per_page: u64,
+) -> Result<(Vec<MsgRow>, bool), Error> {
+    let (mut rows, next) = pages(below, max_pages, |after| {
+        let ask = host.ask::<Ask<Chat>>(Query::Roots {
+            channel_id: channel_id.clone(),
+            viewer: viewer.clone(),
+            page: PageRequest {
+                after,
+                limit: Some(per_page),
+            },
+        });
+        async move {
+            match ask.await? {
+                Reply::Roots(page) => Ok((page.items, page.next)),
+                _ => Err(wrong_reply()),
+            }
+        }
+    })
+    .await?;
+    rows.sort_by_key(|row| row.seq);
+    Ok((rows, next.is_some()))
 }
 
 /// The roster as a view reads it: each account's profile, by number.
@@ -122,7 +154,7 @@ impl Names {
         self.member(principal)
     }
 
-    /// A member row, a huddle seat or a dm peer: the name, else what the
+    /// A member row or a dm peer: the name, else what the
     /// principal is; noted while the account does not act ("(suspended)").
     pub fn member(&self, principal: &Principal) -> String {
         let name = match self.name(principal) {

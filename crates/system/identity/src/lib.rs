@@ -5,6 +5,11 @@
 //! always built; a view links them with `module` off. The `module` feature
 //! adds its wasm exports. The `view` feature adds the ask a view makes of
 //! identity directly (`view.rs`).
+//!
+//! It fills the kernel's identity role (`abi::role::identity`): the role's
+//! op, queries and replies are the first variants of [`Op`], [`Query`] and
+//! [`Reply`]. Who may do what, op by op: `docs/roles.md` at the repository
+//! root.
 mod program;
 mod rules;
 #[cfg(test)]
@@ -23,9 +28,6 @@ pub use store::{PageRequest, PageResponse};
 pub const MODULE: &str = "identity";
 /// What a key signs to consent to a key joining an account ([`Admission`]).
 pub const CONSENT_NAMESPACE: &[u8] = b"ducktape:identity:consent";
-/// What a person's key signs to accept an agent handed to them
-/// ([`Handover`]): its own namespace, so no add-key consent reads as one.
-pub const HANDOVER_NAMESPACE: &[u8] = b"ducktape:identity:handover";
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct Key {
@@ -59,14 +61,11 @@ pub enum Control {
     /// A person: their own keys, which they add and remove.
     Person { keys: Vec<Key> },
     /// An agent: its `manager`, a person, adds its keys, declares its
-    /// `category`, suspends, resumes, revokes and hands it over.
-    /// `transfers` counts the handovers so far: a receiver's consent
-    /// names it, so no consent takes an agent twice.
+    /// `category`, suspends, resumes and revokes it.
     Managed {
         manager: AccountNumber,
         category: Category,
         life: Life,
-        transfers: u64,
     },
     /// A module's account: the module alone acts as it.
     Module { module: ModuleId },
@@ -163,34 +162,6 @@ impl Admission {
     }
 }
 
-/// A person's acceptance of an agent handed to them: `proof` is `key`'s
-/// signature, under [`HANDOVER_NAMESPACE`], over the [`Handover`]; `key`
-/// is one on their account. The manager signs the frame.
-#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
-pub struct Acceptance {
-    pub key: Vec<u8>,
-    pub expires_at: u64,
-    pub proof: Vec<u8>,
-}
-
-/// What a receiver accepts: the agent (`account`), themselves (`to`), and
-/// the agent's handovers so far (`transfers`, from its
-/// [`Control::Managed`]), so an acceptance fits one transfer alone.
-#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
-pub struct Handover {
-    pub network: Vec<u8>,
-    pub account: AccountNumber,
-    pub to: AccountNumber,
-    pub transfers: u64,
-    pub expires_at: u64,
-}
-
-impl Handover {
-    pub fn preimage(&self) -> Vec<u8> {
-        abi::encode(self)
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Op {
     /// The identity role's op (`abi::role::identity::Op`), first: the
@@ -235,14 +206,6 @@ pub enum Op {
     /// An agent stops for good: its keys are dropped. Its manager's.
     Revoke {
         account: AccountNumber,
-    },
-    /// An agent's manager hands it to the person `to`, who accepted it
-    /// (`acceptance`, over the [`Handover`]). The agent's keys are dropped;
-    /// suspended, it stays suspended.
-    TransferManager {
-        account: AccountNumber,
-        to: AccountNumber,
-        acceptance: Acceptance,
     },
 }
 
@@ -384,19 +347,6 @@ pub fn describe(op: &Op) -> describe::Description {
         Op::Suspend { account: number } => ("Suspend".into(), vec![account(number)]),
         Op::Resume { account: number } => ("Resume".into(), vec![account(number)]),
         Op::Revoke { account: number } => ("Revoke".into(), vec![account(number)]),
-        Op::TransferManager {
-            account: number,
-            to,
-            acceptance,
-        } => (
-            "Transfer manager".into(),
-            vec![
-                account(number),
-                field("to", Value::Account(*to)),
-                field("accepting key", Value::Key(acceptance.key.clone())),
-                field("expires at", Value::Time(acceptance.expires_at)),
-            ],
-        ),
     };
     describe::Description { title, fields }
 }
@@ -420,7 +370,6 @@ fn op_variants_only_append() {
             "Suspend",
             "Resume",
             "Revoke",
-            "TransferManager",
         ]
     );
 }

@@ -120,7 +120,6 @@ pub struct Hits {
 #[derive(Serialize, Deserialize, Default)]
 pub struct ChannelCreate {
     pub(crate) name: String,
-    pub(crate) voice: bool,
     pub(crate) members_only: bool,
     pub(crate) error: String,
     #[serde(skip)]

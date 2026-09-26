@@ -84,7 +84,7 @@ pub mod exports {
 }
 
 /// The module's two wasm exports, `alloc` and `call`, forwarding to
-/// [`exports::alloc`](crate::exports) and `exports::call::<$module>`, where
+/// `exports::alloc` (wasm32 only) and `exports::call::<$module>`, where
 /// the decoding, the error mapping and the response encoding live.
 /// `guest::export!(Counter);` expands to:
 ///

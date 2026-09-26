@@ -1,8 +1,8 @@
 //! Changes: the filter rail with "Needs my judgment" on top, the list, and
 //! the form that opens or edits one.
-use ducktape_view_guest::Div;
 use ducktape_view_guest::design;
 use ducktape_view_guest::prelude::*;
+use ducktape_view_guest::{Div, EditorElement};
 
 use crate::Forge;
 use crate::state::{ChangeForm, Filter};
@@ -305,12 +305,6 @@ fn form_fields(form: &ChangeForm, cx: &mut Context<Forge>, theme: &Theme) -> Div
         }
         cx.notify();
     });
-    let body = cx.listener(|forge, text: &String, _, cx| {
-        if let Some(form) = &mut forge.form {
-            form.body = text.clone();
-        }
-        cx.notify();
-    });
     div()
         .flex()
         .flex_col()
@@ -330,18 +324,21 @@ fn form_fields(form: &ChangeForm, cx: &mut Context<Forge>, theme: &Theme) -> Div
                 .on_input(title),
         )
         .child(
-            Input::new(id("forge-change-body"))
-                .h(design::size::CONTROL)
-                .w_full()
-                .px_2()
-                .border_1()
-                .border_color(theme.border_strong)
-                .bg(theme.background)
-                .text_color(theme.foreground)
-                .value(form.body.clone())
-                .placeholder("Why it changes")
-                .label("Change body")
-                .on_input(body),
+            EditorElement::plain(
+                id("forge-change-body"),
+                &form.body,
+                "forge-change-body",
+                |forge: &mut Forge| forge.form.as_mut().map(|form| &mut form.body),
+            )
+            .min_h(design::size::CONTROL * 4.)
+            .w_full()
+            .px_2()
+            .border_1()
+            .border_color(theme.border_strong)
+            .bg(theme.background)
+            .text_color(theme.foreground)
+            .placeholder("Why it changes")
+            .label("Change body"),
         )
 }
 

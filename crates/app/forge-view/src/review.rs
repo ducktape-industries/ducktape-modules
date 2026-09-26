@@ -110,14 +110,6 @@ impl Forge {
         cx.notify();
     }
 
-    pub(crate) fn typed_review_body(&mut self, body: String, cx: &mut Context<Self>) {
-        let Some(key) = self.review_key() else { return };
-        if let Some(review) = self.reviews.get_mut(&key) {
-            review.body = body;
-        }
-        cx.notify();
-    }
-
     pub(crate) fn finishing(&mut self, on: bool, cx: &mut Context<Self>) {
         let Some(key) = self.review_key() else { return };
         if let Some(review) = self.reviews.get_mut(&key) {
@@ -138,7 +130,7 @@ impl Forge {
         };
         let comments = review.line_comments();
         if matches!(verdict, Verdict::Comment)
-            && review.body.trim().is_empty()
+            && review.body.state_view().text.trim().is_empty()
             && comments.is_empty()
         {
             if let Some(review) = self.reviews.get_mut(&key) {
@@ -151,7 +143,7 @@ impl Forge {
             commit_oid: review.commit.clone(),
             base_oid: review.base.clone(),
             verdict,
-            body: review.body.clone(),
+            body: review.body.text(),
             comments,
         };
         if let Some(review) = self.reviews.get_mut(&key) {

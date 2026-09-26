@@ -35,8 +35,6 @@ fn channel(id: &str, name: &str, head_seq: u64) -> ChannelInfo {
             post_policy: PostPolicy::Open,
             owner: Principal::Account(7),
             archived: false,
-            huddle: Vec::new(),
-            voice: false,
         },
         head_seq,
     }
@@ -138,7 +136,14 @@ fn configure(cx: &mut TestAppContext) {
             Query::Search { text, .. } => {
                 assert_eq!(text, "hello");
                 Reply::Hits(MessageHits {
-                    hits: vec![row(1, 7, "hello")],
+                    // two channels, one seq: the dm's first line says it too
+                    hits: vec![
+                        row(1, 7, "hello"),
+                        MsgRow {
+                            channel_id: "dm-7-8".into(),
+                            ..row(1, 8, "hello")
+                        },
+                    ],
                     capped: false,
                 })
             }

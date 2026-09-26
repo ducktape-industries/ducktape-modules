@@ -392,12 +392,12 @@ impl Chat {
         }
         create.error.clear();
         create.busy = true;
-        let (voice, members_only) = (create.voice, create.members_only);
+        let members_only = create.members_only;
         cx.spawn(async move |this, cx| {
             let host = cx.host();
             let created = async {
                 let channel_id = host.ask::<HostId>("channel".into()).await?;
-                let op = new_channel(channel_id.clone(), name, voice, members_only);
+                let op = new_channel(channel_id.clone(), name, members_only);
                 host.ask::<Submit<ChatApi>>(op).await?;
                 Ok::<_, Error>(channel_id)
             };
@@ -408,9 +408,7 @@ impl Chat {
                     Ok(id) => {
                         chat.create = None;
                         chat.reread_channels(cx);
-                        if !voice {
-                            chat.choose(id, window, cx);
-                        }
+                        chat.choose(id, window, cx);
                     }
                     Err(refusal) => {
                         if let Some(create) = &mut chat.create {
@@ -426,10 +424,7 @@ impl Chat {
     }
 }
 
-fn new_channel(channel_id: String, name: String, voice: bool, members_only: bool) -> Op {
-    if voice {
-        return Op::CreateVoiceChannel { channel_id, name };
-    }
+fn new_channel(channel_id: String, name: String, members_only: bool) -> Op {
     let post_policy = match members_only {
         true => PostPolicy::MembersOnly,
         false => PostPolicy::Open,
