@@ -46,6 +46,16 @@ pub(crate) fn schedule(ctx: &ExecCtx, scheduled: Scheduled) -> Result<(), Error>
         return Err(not_found(format!("code {blob:?} is not published")));
     }
     let name = scheduled.change.program();
+    // the kernel calls these by their genesis binding: with one gone every
+    // frame is refused (identity) or the chain halts (validators), and no
+    // change could land to bring it back
+    let roles = &env.roles;
+    let bound = [&roles.registry, &roles.validators, &roles.identity]
+        .iter()
+        .any(|role| role.as_str() == name);
+    if matches!(scheduled.change, Change::Remove(_)) && bound {
+        return Err(invalid(format!("{name} fills a role the kernel calls")));
+    }
     let (programs, views) = roster(ctx, scheduled.height)?;
     let clash = match &scheduled.change {
         Change::Set(_) => views.contains_key(name) || pending(ctx, name, Kind::View)?,
