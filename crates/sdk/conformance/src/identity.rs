@@ -3,7 +3,7 @@
 
 use abi::role::identity::{Category, Kind, Op, Profile, Query, Reply, Standing};
 use borsh::{BorshDeserialize, BorshSerialize};
-use guest::{AccountNumber, Error, MockHost, Module, Origin, code};
+use guest::{AccountNumber, Error, MockHost, Module, Origin, Principal, code};
 
 use crate::{ask, execute, root, same_bytes};
 
@@ -22,17 +22,35 @@ pub trait Fixture {
     /// agent); its number. `None` for a module whose accounts always act:
     /// that rule is skipped.
     fn stopped(&self, host: &MockHost, key: &[u8]) -> Option<AccountNumber>;
+
+    /// `account`, which `key` holds (an account [`Fixture::account`]
+    /// made), stops holding `key`. The account may be given another key
+    /// first, if yours keeps a last one.
+    fn drop_key(&self, host: &MockHost, account: AccountNumber, key: &[u8]);
+
+    /// `key` comes to hold a new managed account that acts (an active
+    /// agent); its number. `None` for a module with no managed accounts:
+    /// the revoke rule is skipped.
+    fn managed(&self, host: &MockHost, key: &[u8]) -> Option<AccountNumber>;
+
+    /// The managed `account` ([`Fixture::managed`]'s) is revoked, by its
+    /// manager.
+    fn revoke(&self, host: &MockHost, account: AccountNumber);
 }
 
 /// Every identity rule, each on a fresh host.
 pub fn run(fixture: &impl Fixture) {
     the_role_is_the_first_variants(fixture);
     register_module_is_root_only_and_idempotent(fixture);
+    register_module_is_refused_to_a_frame_that_acts(fixture);
     an_unknown_key_or_module_holds_nothing(fixture);
     a_held_key_resolves_to_an_acting_account(fixture);
     an_account_that_does_not_act_is_refused(fixture);
+    a_dropped_key_holds_nothing(fixture);
+    a_revoked_account_s_keys_stop_resolving(fixture);
     an_absent_profile_is_none(fixture);
     profiles_page_ascending(fixture);
+    profiles_of_limit_zero_is_a_page(fixture);
     module_profiles_agree_with_of_module(fixture);
 }
 
@@ -101,11 +119,18 @@ fn every_profile<F: Fixture>(host: &MockHost, limit: u32) -> Vec<Profile> {
     }
 }
 
-fn register<F: Fixture>(host: &MockHost, origin: Origin, name: &str) -> Result<(), Error> {
+/// `RegisterModule { module: name }` from `origin`, acting as `sender`
+/// (ignored from the system, which acts as `Principal::Root`).
+fn register<F: Fixture>(
+    host: &MockHost,
+    origin: Origin,
+    sender: Option<Principal>,
+    name: &str,
+) -> Result<(), Error> {
     let mut env = root(&module(), 1);
     if origin != Origin::Root {
         env.origin = origin;
-        env.sender = None;
+        env.sender = sender;
     }
     execute::<F::Module>(
         host,
@@ -169,19 +194,19 @@ pub fn register_module_is_root_only_and_idempotent<F: Fixture>(fixture: &F) {
         Origin::Module("chat".into()),
     ] {
         // `attempt` also checks a refusal wrote nothing
-        let answer = host.attempt(|| register::<F>(&host, origin.clone(), "probe"));
+        let answer = host.attempt(|| register::<F>(&host, origin.clone(), None, "probe"));
         assert_eq!(
             answer.map_err(|e| e.code),
             Err(code::UNAUTHORIZED.into()),
             "identity: RegisterModule from {origin:?} is refused unauthorized"
         );
     }
-    register::<F>(&host, Origin::Root, "probe")
+    register::<F>(&host, Origin::Root, None, "probe")
         .unwrap_or_else(|e| panic!("identity: the system registers a module: {e:?}"));
     let number = account_of::<F>(&host, Query::OfModule("probe".into()))
         .expect("identity: OfModule answers the account RegisterModule gave");
     let before = every_profile::<F>(&host, 50);
-    register::<F>(&host, Origin::Root, "probe")
+    register::<F>(&host, Origin::Root, None, "probe")
         .unwrap_or_else(|e| panic!("identity: registering a module again is no refusal: {e:?}"));
     assert_eq!(
         account_of::<F>(&host, Query::OfModule("probe".into())),
@@ -198,6 +223,32 @@ pub fn register_module_is_root_only_and_idempotent<F: Fixture>(fixture: &F) {
         Some(Kind::Module("probe".into())),
         "identity: a registered module's profile is Kind::Module"
     );
+}
+
+/// The kernel presents who a frame acts as: a signed frame as its key's
+/// account, a module's frame as the module's account. Neither is the
+/// system, so `RegisterModule` is refused `unauthorized` and writes nothing
+/// though the frame has a sender: the system is the origin, not a sender.
+pub fn register_module_is_refused_to_a_frame_that_acts<F: Fixture>(fixture: &F) {
+    let host = fixture.host();
+    let person = fixture.account(&host, b"someone");
+    register::<F>(&host, Origin::Root, None, "chat")
+        .unwrap_or_else(|e| panic!("identity: the system registers chat: {e:?}"));
+    let chat = account_of::<F>(&host, Query::OfModule("chat".into()))
+        .expect("identity: OfModule answers the account RegisterModule gave");
+    for (origin, sender) in [
+        (Origin::Signed(b"someone".to_vec()), person),
+        (Origin::Module("chat".into()), chat),
+    ] {
+        let sender = Some(Principal::Account(sender));
+        let answer = host.attempt(|| register::<F>(&host, origin.clone(), sender.clone(), "probe"));
+        assert_eq!(
+            answer.map_err(|e| e.code),
+            Err(code::UNAUTHORIZED.into()),
+            "identity: RegisterModule from {origin:?} acting as {sender:?} is refused \
+             unauthorized: only the system's origin registers, whoever the sender"
+        );
+    }
 }
 
 /// A key no account holds, and a module never registered, answer `None`.
@@ -264,6 +315,54 @@ pub fn an_account_that_does_not_act_is_refused<F: Fixture>(fixture: &F) {
     );
 }
 
+/// A key its account no longer holds resolves to no account.
+pub fn a_dropped_key_holds_nothing<F: Fixture>(fixture: &F) {
+    let host = fixture.host();
+    let number = fixture.account(&host, b"dropped key");
+    fixture.drop_key(&host, number, b"dropped key");
+    assert_eq!(
+        account_of::<F>(&host, Query::Account(b"dropped key".to_vec())),
+        None,
+        "identity: Account of a key removed from account {number} is None"
+    );
+}
+
+/// A revoked managed account's keys never act as it again: `Account` of
+/// one is `None` (the keys dropped) or refused `unauthorized` (the account
+/// does not act), and its profile is `Revoked`.
+pub fn a_revoked_account_s_keys_stop_resolving<F: Fixture>(fixture: &F) {
+    let host = fixture.host();
+    let Some(number) = fixture.managed(&host, b"agent key") else {
+        return;
+    };
+    let asked = Query::Account(b"agent key".to_vec());
+    assert_eq!(
+        account_of::<F>(&host, asked.clone()),
+        Some(number),
+        "identity: Account of an active managed account's key answers it"
+    );
+    fixture.revoke(&host, number);
+    match query::<F>(&host, asked) {
+        Ok(Reply::Account(None)) => {}
+        Err(refused) if refused.code == code::UNAUTHORIZED => {}
+        other => panic!(
+            "identity: Account of a key of revoked account {number} is None or refused \
+             unauthorized, not {other:?}"
+        ),
+    }
+    let kind = profile::<F>(&host, number).map(|p| p.kind);
+    assert!(
+        matches!(
+            kind,
+            Some(Kind::Managed {
+                standing: Standing::Revoked,
+                ..
+            })
+        ),
+        "identity: a revoked account's profile is managed and Revoked, not {kind:?}"
+    );
+}
+
 /// `Profile` of a number no account has is `None`.
 pub fn an_absent_profile_is_none<F: Fixture>(fixture: &F) {
     let host = fixture.host();
@@ -311,7 +410,7 @@ pub fn profiles_page_ascending<F: Fixture>(fixture: &F) {
 pub fn module_profiles_agree_with_of_module<F: Fixture>(fixture: &F) {
     let host = fixture.host();
     for name in ["probe", "other"] {
-        register::<F>(&host, Origin::Root, name)
+        register::<F>(&host, Origin::Root, None, name)
             .unwrap_or_else(|e| panic!("identity: the system registers {name}: {e:?}"));
     }
     fixture.account(&host, b"person");
@@ -324,4 +423,38 @@ pub fn module_profiles_agree_with_of_module<F: Fixture>(fixture: &F) {
             );
         }
     }
+}
+
+/// `Profiles { limit: 0 }` is a page, neither a refusal nor a panic: empty
+/// (`next` then `None`), or the module's capped page, the listing's first
+/// profiles with `next` as any page has it.
+pub fn profiles_of_limit_zero_is_a_page<F: Fixture>(fixture: &F) {
+    let host = fixture.host();
+    for n in 0..3u8 {
+        fixture.account(&host, &[b'z', n]);
+    }
+    let all = every_profile::<F>(&host, 50);
+    let asked = Query::Profiles {
+        after: None,
+        limit: 0,
+    };
+    let answer = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        query::<F>(&host, asked.clone())
+    }))
+    .unwrap_or_else(|_| panic!("identity: {asked:?} is a page, not a panic"));
+    let (profiles, next) = match answer {
+        Ok(Reply::Profiles { profiles, next }) => (profiles, next),
+        other => panic!("identity: {asked:?} answers Profiles, not {other:?}"),
+    };
+    let expected = match profiles.last() {
+        None => None,
+        Some(last) => (profiles.len() < all.len()).then_some(last.number),
+    };
+    assert!(
+        all.starts_with(&profiles) && next == expected,
+        "identity: {asked:?} answers empty with no `next`, or the listing's first profiles \
+         with `next` the last of them while more remain; not {profiles:?} with next {next:?} \
+         of {} profiles",
+        all.len()
+    );
 }

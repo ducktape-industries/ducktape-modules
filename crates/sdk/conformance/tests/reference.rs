@@ -25,6 +25,37 @@ impl Identity {
         }
     }
 
+    /// `key` joins `account`, consenting (every consent verifies here).
+    fn add_key(key: &[u8], account: AccountNumber) -> identity::Op {
+        identity::Op::AddKey {
+            scheme: Scheme::Ed25519,
+            label: None,
+            consent: identity::Consent {
+                key: key.to_vec(),
+                account,
+                expires_at: u64::MAX,
+                proof: vec![],
+            },
+        }
+    }
+
+    fn get(host: &MockHost, number: AccountNumber) -> identity::Account {
+        let env = env("identity", 1, Origin::Root, None);
+        match identity::Identity::query(&host.query(env), identity::Query::Get { number }) {
+            Ok(identity::Reply::Account(Some(account))) => account,
+            other => panic!("Get({number}) answers the account, not {other:?}"),
+        }
+    }
+
+    /// `op`, signed by `agent`'s manager.
+    fn as_manager(host: &MockHost, agent: AccountNumber, op: identity::Op) {
+        let identity::Control::Managed { manager, .. } = Self::get(host, agent).control else {
+            panic!("{agent} is managed");
+        };
+        let key = Self::get(host, manager).keys()[0].key.clone();
+        Self::run(host, &key, Some(manager), op);
+    }
+
     fn person(host: &MockHost, key: &[u8]) -> AccountNumber {
         let op = identity::Op::Create {
             name: "person".into(),
@@ -50,24 +81,36 @@ impl conformance::identity::Fixture for Identity {
 
     /// A suspended agent holding `key`.
     fn stopped(&self, host: &MockHost, key: &[u8]) -> Option<AccountNumber> {
+        let agent = self.managed(host, key)?;
+        Self::as_manager(host, agent, identity::Op::Suspend { account: agent });
+        Some(agent)
+    }
+
+    /// A person keeps their last key: a spare joins, then `key` goes.
+    fn drop_key(&self, host: &MockHost, account: AccountNumber, key: &[u8]) {
+        let spare = [key, b"'s spare"].concat();
+        Self::run(host, &spare, None, Self::add_key(key, account));
+        let remove = identity::Op::RemoveKey {
+            account,
+            key: key.to_vec(),
+        };
+        Self::run(host, key, Some(account), remove);
+    }
+
+    /// An active agent holding `key`.
+    fn managed(&self, host: &MockHost, key: &[u8]) -> Option<AccountNumber> {
         let manager_key = [key, b"'s manager"].concat();
         let manager = Self::person(host, &manager_key);
-        let as_manager = |op| Self::run(host, &manager_key, Some(manager), op);
-        let agent = as_manager(identity::Op::CreateAgent {
+        let create = identity::Op::CreateAgent {
             name: "agent".into(),
-        });
-        as_manager(identity::Op::AddKey {
-            scheme: Scheme::Ed25519,
-            label: None,
-            consent: identity::Consent {
-                key: key.to_vec(),
-                account: agent,
-                expires_at: u64::MAX,
-                proof: vec![],
-            },
-        });
-        as_manager(identity::Op::Suspend { account: agent });
+        };
+        let agent = Self::run(host, &manager_key, Some(manager), create);
+        Self::as_manager(host, agent, Self::add_key(key, agent));
         Some(agent)
+    }
+
+    fn revoke(&self, host: &MockHost, account: AccountNumber) {
+        Self::as_manager(host, account, identity::Op::Revoke { account });
     }
 }
 
