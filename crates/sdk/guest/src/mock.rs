@@ -15,7 +15,7 @@ use abi::{
 };
 use sha1::Digest as _;
 
-use crate::{Env, Error, ExecCtx, ModuleId, Order, QueryCtx, Range, code};
+use crate::{Env, Error, ExecCtx, ModuleId, Order, QueryCtx, Range, Roles, code};
 
 pub type Sibling = Box<dyn Fn(&[u8]) -> Result<Vec<u8>, Error>>;
 pub type Verifier = Box<dyn Fn(Scheme, &[u8], &[u8], &[u8], &[u8]) -> bool>;
@@ -38,6 +38,16 @@ pub struct MockState {
 pub struct MockHost(Rc<RefCell<MockState>>);
 
 impl MockHost {
+    /// The roles as the suite's genesis binds them, for a native test's
+    /// env: a sibling registered under `identity` answers the identity role.
+    pub fn roles() -> Roles {
+        Roles {
+            registry: "module-registry".into(),
+            validators: "valset".into(),
+            identity: "identity".into(),
+        }
+    }
+
     /// An execute's context over this host.
     pub fn exec(&self, env: Env) -> ExecCtx {
         ExecCtx::over(self.clone(), env)

@@ -19,25 +19,51 @@ fn status() -> NodeStatus {
         contract: 7,
     }
 }
+/// Maya's account: a person holding one key.
+fn maya(number: u64, label: &str) -> identity::Account {
+    identity::Account {
+        number,
+        name: "Maya".into(),
+        avatar: None,
+        bio: None,
+        updated_at: 1,
+        keys: vec![identity::Key {
+            scheme: abi::Scheme::Ed25519,
+            key: vec![0xab, 0xcd],
+            label: Some(label.into()),
+            added_at: 1,
+        }],
+        module: None,
+        manager: None,
+        status: identity::Status::Active,
+        category: None,
+    }
+}
+/// Scout, the agent Maya (7) manages, keyless.
+fn scout() -> identity::Account {
+    identity::Account {
+        number: 12,
+        name: "Scout".into(),
+        keys: Vec::new(),
+        manager: Some(7),
+        category: Some(identity::Category::Agent),
+        ..maya(12, "")
+    }
+}
 fn respond(cx: &TestAppContext) {
     cx.host().handle::<ChainStatus>(|()| Ok(status()));
     cx.host().handle::<Query<Identity>>(|q| {
         Ok(match q {
             identity::Query::Get { number } => {
                 assert_eq!(number, 7);
-                identity::Reply::Account(Some(identity::Account {
-                    number,
-                    name: "Maya".into(),
-                    control: identity::Control::Keys(vec![identity::Key {
-                        scheme: abi::Scheme::Ed25519,
-                        key: vec![0xab, 0xcd],
-                        label: Some("Laptop key".into()),
-                        added_at: 1,
-                    }]),
-                    avatar: None,
-                    bio: None,
-                    updated_at: 1,
-                }))
+                identity::Reply::Account(Some(maya(number, "Laptop key")))
+            }
+            identity::Query::Managed { by: 7, .. } => {
+                identity::Reply::Accounts(identity::PageResponse {
+                    height: 42,
+                    items: vec![scout()],
+                    next: None,
+                })
             }
             q => panic!("unexpected query: {q:?}"),
         })
@@ -276,20 +302,13 @@ fn unregistered_key_creates_an_account() {
         Ok(match q {
             identity::Query::Get { number } => {
                 assert_eq!(number, 9);
-                identity::Reply::Account(Some(identity::Account {
-                    number,
-                    name: "Maya".into(),
-                    control: identity::Control::Keys(vec![identity::Key {
-                        scheme: abi::Scheme::Ed25519,
-                        key: vec![0xab, 0xcd],
-                        label: Some("Host key".into()),
-                        added_at: 1,
-                    }]),
-                    avatar: None,
-                    bio: None,
-                    updated_at: 1,
-                }))
+                identity::Reply::Account(Some(maya(number, "Host key")))
             }
+            identity::Query::Managed { .. } => identity::Reply::Accounts(identity::PageResponse {
+                height: 42,
+                items: vec![],
+                next: None,
+            }),
             q => panic!("unexpected query: {q:?}"),
         })
     });
@@ -362,4 +381,49 @@ fn long_host_key_is_truncated_and_non_validator_standing_is_quiet() {
         "{:?}",
         cx.texts()
     );
+}
+
+#[test]
+fn a_person_creates_an_agent_and_adds_its_key() {
+    let mut cx = fixture("ready", false);
+    assert!(
+        cx.has_text("Scout: Agent · account 12 · 0 keys · active"),
+        "{:?}",
+        cx.texts()
+    );
+    cx.host().handle::<Submit<Identity>>(|op| {
+        assert_eq!(op, identity::Op::CreateAgent { name: "Bot".into() });
+        Ok(Vec::new())
+    });
+    cx.simulate_input("settings/agents/create/name", " Bot ");
+    cx.simulate_click("settings/agents/create/submit");
+    cx.run_until_parked();
+    assert_eq!(cx.host().requests::<Submit<Identity>>().len(), 1);
+
+    // a request that is not an AddKey for one of Maya's agents never leaves
+    cx.simulate_input("settings/agents/key/request", "zz");
+    cx.simulate_click("settings/agents/key/submit");
+    cx.run_until_parked();
+    assert!(cx.has_text("That isn’t a key request for one of your agents."));
+    let add = identity::Op::AddKey {
+        scheme: abi::Scheme::Ed25519,
+        label: Some("sandbox".into()),
+        consent: identity::Consent {
+            key: vec![0x51; 32],
+            account: 12,
+            expires_at: 500,
+            proof: vec![0x52; 64],
+        },
+    };
+    let expected = add.clone();
+    cx.host().handle::<Submit<Identity>>(move |op| {
+        assert_eq!(op, expected);
+        Ok(Vec::new())
+    });
+    cx.simulate_input("settings/agents/key/request", &abi::hex(&abi::encode(&add)));
+    cx.simulate_click("settings/agents/key/submit");
+    cx.run_until_parked();
+    assert_eq!(cx.host().requests::<Submit<Identity>>().len(), 2);
+    assert!(!cx.has_text("That isn’t a key request for one of your agents."));
+    cx.assert_accessible();
 }

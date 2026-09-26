@@ -5,12 +5,24 @@ use ducktape_view_guest::{
     methods::Query,
 };
 
+use identity::PageRequest;
 use serde::{Deserialize, Serialize};
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Account {
     pub number: Option<u64>,
     pub name: String,
     pub keys: Vec<Key>,
+    /// a person's account manages agents; an agent's or a module's none
+    pub person: bool,
+    pub agents: Vec<Agent>,
+}
+/// An agent the account manages, as its line reads.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Agent {
+    pub number: u64,
+    pub name: String,
+    pub keys: usize,
+    pub status: String,
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Key {
@@ -40,6 +52,8 @@ pub async fn read_account(
             number: None,
             name: "Unregistered key".into(),
             keys: vec![read_key(&host, &key, "Host key".into()).await?],
+            person: false,
+            agents: Vec::new(),
         }));
     };
     let account = match host
@@ -53,7 +67,7 @@ pub async fn read_account(
         return Ok(None);
     };
     let mut keys = Vec::new();
-    for key in account.keys() {
+    for key in &account.keys {
         keys.push(
             read_key(
                 &host,
@@ -63,11 +77,54 @@ pub async fn read_account(
             .await?,
         );
     }
+    let person = account.is_person();
+    let agents = if person {
+        read_agents(&host, number).await?
+    } else {
+        Vec::new()
+    };
     Ok(Some(Account {
         number: Some(number),
         name: account.name,
         keys,
+        person,
+        agents,
     }))
+}
+
+/// Every agent `manager` manages, every page of them.
+async fn read_agents(host: &Host, manager: u64) -> Result<Vec<Agent>, Error> {
+    let mut agents = Vec::new();
+    let mut after = None;
+    loop {
+        let page = PageRequest { after, limit: None };
+        let asked = identity::Query::Managed { by: manager, page };
+        let reply = match host.ask::<Query<Identity>>(asked).await? {
+            identity::Reply::Accounts(reply) => reply,
+            other => {
+                return Err(malformed(format!(
+                    "identity answered Managed with {other:?}"
+                )));
+            }
+        };
+        agents.extend(reply.items.into_iter().map(|agent| {
+            Agent {
+                number: agent.number,
+                name: agent.name,
+                keys: agent.keys.len(),
+                status: match agent.status {
+                    identity::Status::Active => "active",
+                    identity::Status::Suspended => "suspended",
+                    identity::Status::Revoked => "revoked",
+                }
+                .into(),
+            }
+        }));
+        match reply.next {
+            Some(next) => after = Some(next),
+            None => return Ok(agents),
+        }
+    }
 }
 
 async fn read_key(host: &Host, key: &[u8], label: String) -> Result<Key, Error> {

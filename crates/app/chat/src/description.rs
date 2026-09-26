@@ -167,11 +167,10 @@ fn place(channel_id: &str) -> Vec<Field> {
     fields
 }
 
-/// A principal as a describe field shows it: an account or a module.
+/// A principal as a describe field shows it: an account, or the system.
 fn principal(principal: &Principal) -> Value {
     match principal {
         Principal::Account(number) => Value::Account(*number),
-        Principal::Module(module) => Value::Module(module.clone()),
         Principal::Root => Value::text("system"),
     }
 }

@@ -49,6 +49,7 @@ mod tests {
             module: "m".into(),
             origin,
             sender: None,
+            roles: crate::MockHost::roles(),
             cause: Cause::Direct,
         }
     }

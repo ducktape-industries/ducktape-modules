@@ -39,8 +39,8 @@ impl Module for Forge {
     /// Runs one op as the signer's account (`ctx.sender()`).
     /// Every op names its repository; an accepted one marks it active.
     fn execute(ctx: &ExecCtx, op: Op) -> Result<(), Error> {
-        let sender = ctx.sender()?;
-        let actor = person(&sender)?;
+        let sender = person(ctx)?;
+        let actor = &sender;
         let repo = op.repo().to_owned();
         let reply = match op {
             Op::Create { repo, hash } => create(ctx, actor, &repo, hash).map(|()| None),

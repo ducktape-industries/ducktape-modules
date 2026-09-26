@@ -134,11 +134,10 @@ pub fn describe(op: &Op) -> Description {
     }
 }
 
-/// A principal as a describe field shows it: an account or a module.
+/// A principal as a describe field shows it: an account, or the system.
 fn writer(principal: &Principal) -> Value {
     match principal {
         Principal::Account(number) => Value::Account(*number),
-        Principal::Module(module) => Value::Module(module.clone()),
         Principal::Root => Value::text("system"),
     }
 }

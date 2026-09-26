@@ -9,8 +9,9 @@
 //! |-------------------------------------------|------------------------------------------|
 //! | `Refusal { reason, sentence }`, `reason`  | [`Error`] `{ code, message }`, [`code`]  |
 //! | `Origin::{External, Program, System}`     | [`Origin`]`::{Signed, Module, Root}`     |
-//! | `Principal::{Account, Program, System}`   | [`Principal`]`::{Account, Module, Root}` |
+//! | `Principal::{Account, System}`            | [`Principal`]`::{Account, Root}`         |
 //! | `Env { network, me, .. }`                 | [`Env`] `{ chain_id, module, .. }`       |
+//! | `Roles`                                   | [`Roles`] (the same type)                |
 //! | `ProgramId`                               | [`ModuleId`]                             |
 //! | `ItemRef { source, item }`                | [`MessageId`] `{ module, seq }`          |
 //! | `Cause::{Direct, Delivery, Completion}`   | [`Cause`]`::{Direct, Message, Reply}`    |
@@ -22,6 +23,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 /// A module's id on the chain (`"chat"`, `"module-registry"`).
 pub type ModuleId = abi::ProgramId;
 
+pub use abi::Roles;
 pub use error::{Error, code};
 
 /// The kernel's refusal as the SDK's [`Error`]: the same two strings.
@@ -66,11 +68,12 @@ impl From<Origin> for abi::Origin {
 /// An account's number: the identity role's (`abi::role::identity`).
 pub type AccountNumber = abi::role::identity::AccountNumber;
 
-/// Who a write acts as, resolved by the host once per frame from the
-/// [`Origin`]: a signed frame is the account its key holds, a message is the
-/// module that sent it, genesis is `Root`. A key that holds no account acts
-/// as no one ([`ExecCtx::sender`](crate::ExecCtx::sender) refuses), so no
-/// row ever names a bare key.
+/// Who a write acts as, resolved by the host once per frame through the
+/// identity role: a signed frame is the account its key holds, a message
+/// the account of the module that sent it, genesis `Root`. A key that holds
+/// no account (or an account that is not live) acts as no one
+/// ([`ExecCtx::sender`](crate::ExecCtx::sender) refuses), so no row ever
+/// names a bare key.
 ///
 /// There is no default principal: "nobody" is `Option<Principal>::None`,
 /// never the most trusted variant.
@@ -81,10 +84,8 @@ pub type AccountNumber = abi::role::identity::AccountNumber;
     serde(rename_all = "snake_case", deny_unknown_fields)
 )]
 pub enum Principal {
-    /// a person (or an agent): the account the signing key holds.
+    /// a person, an agent or a module: an identity account.
     Account(AccountNumber),
-    /// a module that emitted the write as a follow-up.
-    Module(ModuleId),
     /// genesis and system-internal writes.
     Root,
 }
@@ -94,13 +95,8 @@ impl Principal {
     pub fn account(&self) -> Option<AccountNumber> {
         match self {
             Principal::Account(account) => Some(*account),
-            Principal::Module(_) | Principal::Root => None,
+            Principal::Root => None,
         }
-    }
-
-    /// A person, as opposed to trusted code.
-    pub fn is_person(&self) -> bool {
-        matches!(self, Principal::Account(_))
     }
 
     /// The principal a reader writes as, from the account her seated key
@@ -122,7 +118,6 @@ impl From<abi::Principal> for Principal {
     fn from(p: abi::Principal) -> Self {
         match p {
             abi::Principal::Account(number) => Principal::Account(number),
-            abi::Principal::Program(id) => Principal::Module(id),
             abi::Principal::System => Principal::Root,
         }
     }
@@ -132,7 +127,6 @@ impl From<Principal> for abi::Principal {
     fn from(p: Principal) -> Self {
         match p {
             Principal::Account(number) => abi::Principal::Account(number),
-            Principal::Module(id) => abi::Principal::Program(id),
             Principal::Root => abi::Principal::System,
         }
     }
@@ -231,9 +225,12 @@ pub struct Env {
     /// This module's own id.
     pub module: ModuleId,
     pub origin: Origin,
-    /// Who the frame acts as: `None` for a query, and for a signed frame
-    /// whose key holds no account.
+    /// Who the frame acts as: `None` for a query, and for a frame whose
+    /// key or module holds no account.
     pub sender: Option<Principal>,
+    /// The module genesis bound to each role: ask identity at
+    /// `roles.identity`, never by a name assumed.
+    pub roles: Roles,
     pub cause: Cause,
 }
 
@@ -246,6 +243,7 @@ impl From<abi::Env> for Env {
             module: e.me,
             origin: e.origin.into(),
             sender: e.sender.map(Into::into),
+            roles: e.roles,
             cause: e.cause.into(),
         }
     }
@@ -260,6 +258,7 @@ impl From<Env> for abi::Env {
             me: e.module,
             origin: e.origin.into(),
             sender: e.sender.map(Into::into),
+            roles: e.roles,
             cause: e.cause.into(),
         }
     }
@@ -380,12 +379,7 @@ mod tests {
             Origin::Module("b".into()),
             Origin::Root,
         ];
-        let senders = [
-            Some(Principal::Account(4)),
-            Some(Principal::Module("b".into())),
-            Some(Principal::Root),
-            None,
-        ];
+        let senders = [Some(Principal::Account(4)), Some(Principal::Root), None];
         let calls = origins.into_iter().cycle().zip(senders.into_iter().cycle());
         for (cause, (origin, sender)) in causes.zip(calls) {
             let env = Env {
@@ -395,6 +389,7 @@ mod tests {
                 module: "a".into(),
                 origin,
                 sender,
+                roles: crate::MockHost::roles(),
                 cause,
             };
             let kernel: abi::Env = env.clone().into();

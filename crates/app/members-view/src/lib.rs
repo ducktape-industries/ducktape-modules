@@ -1,6 +1,7 @@
 //! Members: every account the `identity` program holds — its number, its
-//! name, what controls it and how many keys it carries — with the standing
-//! `valset` gives the keys it holds, where it holds one.
+//! name, what it is (a person, an agent and who manages it, a module) and
+//! how many keys it carries — with the standing `valset` gives the keys it
+//! holds, where it holds one.
 //!
 //! The contracts are borsh and this view's state is a serde snapshot, so a
 //! reply is folded to [`Row`]s as it lands: nothing the programs speak is
@@ -39,8 +40,9 @@ pub struct Members {
 struct Row {
     number: u64,
     name: String,
-    /// what holds the account: its own keys, another program, or nothing
-    control: String,
+    /// what the account is: a person, an agent and its manager, a module;
+    /// and whether it is suspended or revoked
+    kind: String,
     keys: usize,
     /// the valset standing of a key this account holds, where it holds one
     standing: Option<String>,
@@ -236,7 +238,7 @@ impl RenderOnce for MemberRow {
                     .child(format!("#{}", row.number)),
             )
             .child(div().flex_1().truncate().child(row.name))
-            .child(Badge::new(row.control, theme.muted, theme.surface_raised))
+            .child(Badge::new(row.kind, theme.muted, theme.surface_raised))
             .child(
                 div()
                     .text_size(design::text::SECONDARY)
@@ -325,21 +327,45 @@ async fn roster(host: Host) -> Result<Vec<Row>, Error> {
     }
     Ok(accounts
         .iter()
-        .map(|account| row(account, &members))
+        .map(|account| row(account, &accounts, &members))
         .collect())
 }
 
-fn row(account: &identity::Account, members: &[valset::Membership]) -> Row {
+/// What an account is: "Person", "Agent · managed by eddy", "Module · chat",
+/// and its status where it does not act.
+fn kind(account: &identity::Account, accounts: &[identity::Account]) -> String {
+    let what = match (&account.module, account.manager) {
+        (Some(module), _) => format!("Module · {module}"),
+        (None, Some(manager)) => {
+            let label = match account.category {
+                Some(identity::Category::Agent) => "Agent",
+                None => "Managed",
+            };
+            let by = accounts
+                .iter()
+                .find(|other| other.number == manager)
+                .map_or_else(|| format!("#{manager}"), |other| other.name.clone());
+            format!("{label} · managed by {by}")
+        }
+        (None, None) => "Person".into(),
+    };
+    match account.status {
+        identity::Status::Active => what,
+        identity::Status::Suspended => format!("{what} · suspended"),
+        identity::Status::Revoked => format!("{what} · revoked"),
+    }
+}
+
+fn row(
+    account: &identity::Account,
+    accounts: &[identity::Account],
+    members: &[valset::Membership],
+) -> Row {
     Row {
         number: account.number,
         name: account.name.clone(),
-        control: match &account.control {
-            identity::Control::Keys(_) => "Person",
-            identity::Control::Program { .. } => "Program",
-            identity::Control::Revoked { .. } => "Revoked",
-        }
-        .into(),
-        keys: account.keys().len(),
+        kind: kind(account, accounts),
+        keys: account.keys.len(),
         standing: members
             .iter()
             .find(|member| account.holds(&member.key))

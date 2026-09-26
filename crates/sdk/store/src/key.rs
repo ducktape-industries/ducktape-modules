@@ -147,11 +147,7 @@ mod tests {
         assert!(round_trip((7u64, "b".to_string())).starts_with(&head));
         assert!(round_trip((7u64, vec![1u8, 2], [9u8; 3])).starts_with(&head));
         assert!(round_trip((1u8, 2u16, 3u32, "s".to_string())).len() == 1 + 2 + 4 + 1 + 2);
-        for principal in [
-            guest::Principal::Account(7),
-            guest::Principal::Module("forge".into()),
-            guest::Principal::Root,
-        ] {
+        for principal in [guest::Principal::Account(7), guest::Principal::Root] {
             round_trip(principal);
         }
         assert_eq!(u64::decode_key(&mut &[1u8, 2][..]), None);

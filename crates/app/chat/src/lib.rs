@@ -38,7 +38,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
 pub use abi::hex;
-pub use abi::role::identity::Profile;
+pub use abi::role::identity::{Category, Profile};
 pub use description::describe;
 pub use guest::{AccountNumber, Principal};
 pub use message::{Block, Mark, Span, parse_message};
@@ -49,10 +49,6 @@ pub use text::{plain_text, tags, tokens};
 
 /// The name this module runs under.
 pub const MODULE: &str = "chat";
-
-/// The program chat asks as the identity role. A module cannot read the
-/// genesis binding, so it names the program every network binds there.
-pub const IDENTITY: &str = "identity";
 
 pub const MAX_ID_BYTES: usize = 64;
 pub const MAX_NAME_BYTES: usize = 128;
@@ -369,14 +365,18 @@ pub fn program_of(channel_id: &str) -> Option<&str> {
     channel_id.split_once(':').map(|(program, _)| program)
 }
 
-/// A program's own post in its own room: written by the module the
-/// `<program>:<name>` room belongs to, as one code block in that program's
-/// language (forge's `opened`, `review 7`). The code is the program's to
-/// word; a reader shows it as that program's event and points to where the
-/// program itself shows the room. `(program, code)`.
-pub fn program_post(row: &MsgRow) -> Option<(&str, &str)> {
+/// A program's own post in its own room: written by the account of the
+/// module the `<program>:<name>` room belongs to (`author_module`, the
+/// module the author's account is, from identity's profiles), as one code
+/// block in that program's language (forge's `opened`, `review 7`). The code
+/// is the program's to word; a reader shows it as that program's event and
+/// points to where the program itself shows the room. `(program, code)`.
+pub fn program_post<'a>(
+    row: &'a MsgRow,
+    author_module: Option<&str>,
+) -> Option<(&'a str, &'a str)> {
     let program = program_of(&row.channel_id)?;
-    let own = matches!(&row.author, Principal::Module(module) if module == program);
+    let own = author_module == Some(program);
     match row.blocks.as_slice() {
         [
             Block::Code {
@@ -423,9 +423,14 @@ fn a_programs_own_code_block_in_its_room_is_its_post() {
         blocks,
         ..MsgRow::by(author)
     };
-    let forge = || Principal::Module("forge".into());
+    // forge's account is 9; account 1 is a person's
+    let forge = || Principal::Account(9);
+    let module_of = |row: &MsgRow| (row.author == forge()).then_some("forge");
     let post = row("forge:web:3", forge(), vec![code("forge")]);
-    assert_eq!(program_post(&post), Some(("forge", "review 7")));
+    assert_eq!(
+        program_post(&post, module_of(&post)),
+        Some(("forge", "review 7"))
+    );
     for other in [
         row("forge:web:3", Principal::Account(1), vec![code("forge")]),
         row("forge:web:3", forge(), vec![code("rust")]),
@@ -433,6 +438,6 @@ fn a_programs_own_code_block_in_its_room_is_its_post() {
         row("general", forge(), vec![code("forge")]),
         row("chess:1", forge(), vec![code("forge")]),
     ] {
-        assert_eq!(program_post(&other), None, "{other:?}");
+        assert_eq!(program_post(&other, module_of(&other)), None, "{other:?}");
     }
 }

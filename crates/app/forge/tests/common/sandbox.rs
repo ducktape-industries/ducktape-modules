@@ -1,8 +1,9 @@
 //! forge's host with chat's beside it: the sibling forge queries, and where
 //! its emissions land when a block delivers them. `accounts` is identity's
 //! roster: each key the account it belongs to, the harness keys
-//! ([`HOLDERS`](super::HOLDERS)) from the start. A signed env's sender is
-//! resolved against it, as the host asks identity.
+//! ([`HOLDERS`](super::HOLDERS)) from the start, and each module its account
+//! ([`MODULES`]). A frame's sender is resolved against it, as the host asks
+//! identity.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -17,6 +18,17 @@ pub struct MemorySandbox {
     pub accounts: Rc<RefCell<BTreeMap<Vec<u8>, u64>>>,
 }
 
+/// The account identity registered for each module.
+pub const MODULES: [(&str, u64); 2] = [("forge", 900), ("chat", 901)];
+
+/// The module whose account `number` is.
+pub fn module_of(number: u64) -> Option<&'static str> {
+    MODULES
+        .iter()
+        .find(|(_, account)| *account == number)
+        .map(|(module, _)| *module)
+}
+
 /// The env of a block at `height`, sent by `origin` acting as `sender`.
 fn env(origin: Origin, sender: Option<Principal>, height: u64, time: u64) -> Env {
     Env {
@@ -26,6 +38,7 @@ fn env(origin: Origin, sender: Option<Principal>, height: u64, time: u64) -> Env
         module: "forge".into(),
         origin,
         sender,
+        roles: guest::MockHost::roles(),
         cause: Cause::Direct,
     }
 }
@@ -67,7 +80,10 @@ impl MemorySandbox {
     pub fn env_at(&self, origin: Origin, height: u64, time: u64) -> Env {
         let sender = match &origin {
             Origin::Signed(key) => self.principal(key),
-            Origin::Module(module) => Some(Principal::Module(module.clone())),
+            Origin::Module(module) => MODULES
+                .iter()
+                .find(|(name, _)| name == module)
+                .map(|(_, account)| Principal::Account(*account)),
             Origin::Root => Some(Principal::Root),
         };
         env(origin, sender, height, time)

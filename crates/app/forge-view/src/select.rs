@@ -235,11 +235,9 @@ impl Forge {
     /// What a person or chat author is called: their account name once
     /// the roster has landed.
     pub(crate) fn principal_name(&self, principal: &Principal) -> String {
-        match (principal, self.names.ready()) {
-            // forge's own lines in a change's channel
-            (Principal::Root, _) => "Forge".into(),
-            (_, Some(names)) => names.member(principal),
-            (_, None) => chat::view::unnamed(principal),
+        match self.names.ready() {
+            Some(names) => names.member(principal),
+            None => chat::view::unnamed(principal),
         }
     }
 

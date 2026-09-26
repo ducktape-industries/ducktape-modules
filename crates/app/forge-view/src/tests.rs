@@ -106,16 +106,31 @@ fn answer(query: &Query, mode: &str) -> Reply {
     }
 }
 
+/// forge's own account.
+const FORGE: u64 = 900;
+
 fn accounts() -> chat::PageResponse<chat::Profile> {
     let row = |number, name: &str| chat::Profile {
         number,
         name: name.into(),
-        agent: false,
+        category: None,
+        manager: None,
+        module: None,
+    };
+    let forge = chat::Profile {
+        module: Some(forge::MODULE.into()),
+        ..row(FORGE, forge::MODULE)
     };
     chat::PageResponse {
         height: 1,
         next: None,
-        items: vec![row(1, "Ada"), row(2, "Rae"), row(4, "Tal"), row(9, "Wren")],
+        items: vec![
+            row(1, "Ada"),
+            row(2, "Rae"),
+            row(4, "Tal"),
+            row(9, "Wren"),
+            forge,
+        ],
     }
 }
 
@@ -142,11 +157,7 @@ fn forge_lines() -> Vec<chat::MsgRow> {
         });
     let forge_line = |seq: u64, message_id: String| chat::MsgRow {
         message_id,
-        ..message(
-            seq,
-            forge::Principal::Module(forge::MODULE.into()),
-            "raw forge text",
-        )
+        ..message(seq, forge::Principal::Account(FORGE), "raw forge text")
     };
     let mut rows = vec![forge_line(1, "forge:0000000000000001".into())];
     for review in reviews {
@@ -183,11 +194,7 @@ pub(crate) fn configure(cx: &mut TestAppContext, mode: &'static str) {
                         .map(|seq| chat::MsgRow {
                             channel_id: channel_id.clone(),
                             message_id: format!("forge:{seq:016x}"),
-                            ..message(
-                                seq,
-                                forge::Principal::Module(forge::MODULE.into()),
-                                "raw forge text",
-                            )
+                            ..message(seq, forge::Principal::Account(FORGE), "raw forge text")
                         })
                         .collect(),
                     _ => Vec::new(),

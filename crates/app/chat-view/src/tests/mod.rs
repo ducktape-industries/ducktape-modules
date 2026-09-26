@@ -104,15 +104,17 @@ fn configure(cx: &mut TestAppContext) {
     cx.host().handle::<Ask<ChatApi>>(|query| {
         Ok(match query {
             Query::Accounts { .. } => Reply::Accounts(page(vec![
+                person(7, "eddy"),
+                // an agent eddy manages
                 chat::Profile {
-                    number: 7,
-                    name: "eddy".into(),
-                    agent: false,
+                    category: Some(chat::Category::Agent),
+                    manager: Some(7),
+                    ..person(8, "reviewer")
                 },
+                // forge's own account
                 chat::Profile {
-                    number: 8,
-                    name: "reviewer".into(),
-                    agent: true,
+                    module: Some("forge".into()),
+                    ..person(9, "forge")
                 },
             ])),
             Query::Channels { .. } => Reply::Channels(page(vec![
@@ -207,4 +209,15 @@ fn export_chat_screens() {
         serde_json::to_vec(cx.root()).unwrap(),
     )
     .unwrap();
+}
+
+/// A person's profile in the roster.
+fn person(number: u64, name: &str) -> chat::Profile {
+    chat::Profile {
+        number,
+        name: name.into(),
+        category: None,
+        manager: None,
+        module: None,
+    }
 }

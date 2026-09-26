@@ -21,13 +21,17 @@ pub struct Settings {
     invite: Loadable<Invite>,
     ttl: usize,
     copied: String,
-    create_account: CreateAccount,
+    create_account: Form,
+    create_agent: Form,
+    agent_key: Form,
     #[serde(skip)]
     watches: Vec<Task<()>>,
 }
 #[derive(Default, Serialize, Deserialize)]
-struct CreateAccount {
-    name: String,
+/// A one-field form: what was typed, whether its submit is in flight, and
+/// the refusal it met.
+struct Form {
+    text: String,
     busy: bool,
     error: String,
 }
@@ -52,7 +56,7 @@ impl View for Settings {
                         match reply {
                             Ok(session) => {
                                 if session.account.is_some() {
-                                    view.create_account = CreateAccount::default();
+                                    view.create_account = Form::default();
                                 }
                                 view.session = session;
                                 view.read_account(cx);
@@ -184,6 +188,9 @@ impl Settings {
                 if a.number.is_none() {
                     body = body.child(self.create_account_form(cx, theme));
                 }
+                if a.person {
+                    body = body.child(self.agents(a, cx, theme));
+                }
                 body.into_any_element()
             }
             Loadable::Ready(None) => div()
@@ -229,7 +236,7 @@ impl Settings {
     fn create_account_form(&self, cx: &mut Context<Self>, theme: &Theme) -> AnyElement {
         let busy = self.create_account.busy;
         let typed = cx.listener(|v, event: &String, _, cx| {
-            v.create_account.name = event.clone();
+            v.create_account.text = event.clone();
             cx.notify();
         });
         let mut name = Input::new("settings/account/create/name")
@@ -239,7 +246,7 @@ impl Settings {
             .border_1()
             .border_color(theme.border_strong)
             .bg(theme.surface)
-            .value(self.create_account.name.clone())
+            .value(self.create_account.text.clone())
             .placeholder("Account name")
             .label("Account name")
             .disabled(busy)
@@ -285,7 +292,7 @@ impl Settings {
         if self.create_account.busy {
             return;
         }
-        let name = self.create_account.name.trim().to_string();
+        let name = self.create_account.text.trim().to_string();
         if name.is_empty() {
             self.create_account.error = "Enter an account name.".into();
             cx.notify();
@@ -311,6 +318,139 @@ impl Settings {
                         format!("Couldn’t create this account: {}", refusal.message);
                 }
                 cx.notify();
+            });
+        })
+        .detach();
+    }
+    /// The agents this person manages, a form to create one, and one to add
+    /// a key to one: the agent's key request (the hex of an `AddKey` whose
+    /// consent the new key signed), which this key submits as the manager.
+    fn agents(&self, a: &Account, cx: &mut Context<Self>, theme: &Theme) -> AnyElement {
+        let create_typed = cx.listener(|v, event: &String, _, cx| {
+            v.create_agent.text = event.clone();
+            cx.notify();
+        });
+        let key_typed = cx.listener(|v, event: &String, _, cx| {
+            v.agent_key.text = event.clone();
+            cx.notify();
+        });
+        let create = cx.listener(|v, _: &ClickEvent, _, cx| v.submit_create_agent(cx));
+        let add = cx.listener(|v, _: &ClickEvent, _, cx| v.submit_agent_key(cx));
+        let mut body = div()
+            .id("settings/agents")
+            .flex()
+            .flex_col()
+            .gap_2()
+            .w_full()
+            .max_w(px(420.))
+            .child(secondary(
+                "settings/agents/help",
+                "Agents act as accounts you manage. You answer for what they do.",
+                theme,
+            ))
+            .children(a.agents.iter().map(|agent| {
+                line(
+                    &format!("agents/{}", agent.number),
+                    &agent.name,
+                    &format!(
+                        "Agent · account {} · {} · {}",
+                        agent.number,
+                        design::plural(agent.keys as u64, "key", "keys"),
+                        agent.status
+                    ),
+                )
+            }))
+            .child(field(
+                "settings/agents/create/name",
+                "Agent name",
+                &self.create_agent,
+                theme,
+                create_typed,
+            ))
+            .child(submit(
+                "settings/agents/create/submit",
+                "Create agent",
+                "Creating…",
+                self.create_agent.busy,
+                theme,
+                create,
+            ))
+            .child(field(
+                "settings/agents/key/request",
+                "Agent key request",
+                &self.agent_key,
+                theme,
+                key_typed,
+            ))
+            .child(submit(
+                "settings/agents/key/submit",
+                "Add key to agent",
+                "Adding…",
+                self.agent_key.busy,
+                theme,
+                add,
+            ));
+        for (key, form) in [("create", &self.create_agent), ("key", &self.agent_key)] {
+            if !form.error.is_empty() {
+                body = body.child(refusal(&format!("agents/{key}"), &form.error, theme));
+            }
+        }
+        body.into_any_element()
+    }
+    fn submit_create_agent(&mut self, cx: &mut Context<Self>) {
+        let name = self.create_agent.text.trim().to_string();
+        if name.is_empty() {
+            self.create_agent.error = "Enter an agent name.".into();
+            cx.notify();
+            return;
+        }
+        let op = identity::Op::CreateAgent { name };
+        self.submit_agent_op(op, |v| &mut v.create_agent, cx);
+    }
+    fn submit_agent_key(&mut self, cx: &mut Context<Self>) {
+        let mine = |account: u64| {
+            self.account
+                .ready()
+                .and_then(Option::as_ref)
+                .is_some_and(|a| a.agents.iter().any(|agent| agent.number == account))
+        };
+        let op = abi::unhex(self.agent_key.text.trim())
+            .and_then(|bytes| abi::decode::<identity::Op>(&bytes).ok())
+            .filter(
+                |op| matches!(op, identity::Op::AddKey { consent, .. } if mine(consent.account)),
+            );
+        let Some(op) = op else {
+            self.agent_key.error = "That isn’t a key request for one of your agents.".into();
+            cx.notify();
+            return;
+        };
+        self.submit_agent_op(op, |v| &mut v.agent_key, cx);
+    }
+    /// Submits `op` from `form`; done, the form clears and the agents are
+    /// read again.
+    fn submit_agent_op(
+        &mut self,
+        op: identity::Op,
+        form: fn(&mut Settings) -> &mut Form,
+        cx: &mut Context<Self>,
+    ) {
+        if form(self).busy {
+            return;
+        }
+        *form(self) = Form {
+            busy: true,
+            ..Form::default()
+        };
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = cx.host().ask::<Submit<Identity>>(op).await;
+            let _ = this.update(cx, |view, cx| {
+                let form = form(view);
+                form.busy = false;
+                if let Err(refusal) = result {
+                    form.error = format!("Couldn’t do that: {}", refusal.message);
+                }
+                view.read_account(cx);
             });
         })
         .detach();
@@ -554,6 +694,41 @@ fn secondary(id: impl Into<String>, text: impl Into<String>, theme: &Theme) -> S
         .text_size(design::text::SECONDARY)
         .text_color(theme.muted)
         .child(text.into())
+}
+/// A labelled text field over `form`.
+fn field(
+    id: &str,
+    label: &str,
+    form: &Form,
+    theme: &Theme,
+    typed: impl Fn(&String, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    Input::new(id.to_owned())
+        .h(px(28.))
+        .px_2()
+        .py_1()
+        .border_1()
+        .border_color(theme.border_strong)
+        .bg(theme.surface)
+        .value(form.text.clone())
+        .placeholder(label.to_owned())
+        .label(label.to_owned())
+        .disabled(form.busy)
+        .on_input(typed)
+}
+/// A form's button: disabled, and saying so, while its submit is in flight.
+fn submit(
+    id: &str,
+    label: &str,
+    busy_label: &str,
+    busy: bool,
+    theme: &Theme,
+    pressed: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    button(id.to_owned(), if busy { busy_label } else { label }, theme)
+        .aria_disabled(busy)
+        .when(busy, |b| b.opacity(0.5).tab_stop(false))
+        .when(!busy, |b| b.on_click(pressed))
 }
 fn button(id: impl Into<String>, label: impl Into<String>, theme: &Theme) -> Stateful<Div> {
     div()

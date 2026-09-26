@@ -32,14 +32,15 @@ pub(crate) fn init(ctx: &ExecCtx, params: &[u8]) -> Result<(), Error> {
     Ok(())
 }
 
-/// Forge is written by people (an account), never by a module or the
-/// system. A key that holds no account never gets here:
-/// [`ExecCtx::sender`](guest::ExecCtx::sender) refuses it.
-pub(crate) fn person(principal: &Principal) -> Result<&Principal, Error> {
-    if !principal.is_person() {
-        return Err(unauthorized("a repository op is signed by a person"));
-    }
-    Ok(principal)
+/// Forge is written by keys (a person's or an agent's account), never by a
+/// module or the system: the frame is signed, and acts as the account its
+/// key holds. A key that holds none, or whose account is not live, never
+/// gets here: [`ExecCtx::sender`](guest::ExecCtx::sender) refuses it.
+pub(crate) fn person(ctx: &ExecCtx) -> Result<Principal, Error> {
+    ctx.env()
+        .signer()
+        .map_err(|_| unauthorized("a repository op is signed by a key"))?;
+    ctx.sender()
 }
 
 /// Every accepted op marks its repository active at this height.
@@ -180,10 +181,10 @@ pub(crate) fn require_writer(
     Ok(())
 }
 
-/// A person an op names (a writer, a reviewer): an account.
+/// Whom an op names (a writer, a reviewer): an account, never the system.
 pub(crate) fn require_named(principal: &Principal) -> Result<(), Error> {
-    if !principal.is_person() {
-        return Err(invalid("only a person is named here"));
+    if principal.account().is_none() {
+        return Err(invalid("only an account is named here"));
     }
     Ok(())
 }

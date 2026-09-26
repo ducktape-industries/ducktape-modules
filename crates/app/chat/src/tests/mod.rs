@@ -17,6 +17,18 @@ mod rooms;
 const ADA: Principal = Principal::Account(1);
 const BO: Principal = Principal::Account(2);
 const CY: Principal = Principal::Account(3);
+/// forge's account; `for` and `bot` are modules too ([`module_of`]).
+const FORGE: Principal = Principal::Account(900);
+
+/// The module an account is the account of, as identity registered it.
+fn module_of(who: &Principal) -> Option<&'static str> {
+    match who {
+        Principal::Account(900) => Some("forge"),
+        Principal::Account(901) => Some("for"),
+        Principal::Account(902) => Some("bot"),
+        _ => None,
+    }
+}
 
 /// A chat store and a clock: every op runs one block later.
 struct Chat {
@@ -34,12 +46,14 @@ impl Default for Chat {
     }
 }
 
-/// The origin that acts as `who`: an account's key (account `n` holds
-/// `n.to_be_bytes()`), the module, the system.
+/// The origin that acts as `who`: a module's own frame, an account's key
+/// (account `n` holds `n.to_be_bytes()`), the system.
 fn signer(who: &Principal) -> Origin {
+    if let Some(module) = module_of(who) {
+        return Origin::Module(module.into());
+    }
     match who {
         Principal::Account(number) => Origin::Signed(number.to_be_bytes().to_vec()),
-        Principal::Module(module) => Origin::Module(module.clone()),
         Principal::Root => Origin::Root,
     }
 }
@@ -60,6 +74,7 @@ impl Chat {
             module: crate::MODULE.into(),
             origin,
             sender,
+            roles: guest::MockHost::roles(),
             cause: Cause::Direct,
         }
     }

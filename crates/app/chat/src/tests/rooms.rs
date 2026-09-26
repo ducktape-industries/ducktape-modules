@@ -28,7 +28,7 @@ fn a_person_takes_one_huddle_seat_and_moves_it_to_a_new_node() {
         (huddle[0].principal.clone(), huddle[0].node.clone()),
         (BO, "02".repeat(32))
     );
-    let module = Principal::Module("forge".into());
+    let module = FORGE;
     assert_eq!(chat.refused(&module, join(1)), code::UNAUTHORIZED);
     let short = Op::JoinHuddle {
         channel_id: "general".into(),

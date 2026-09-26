@@ -14,14 +14,16 @@ const LONE_KEY: [u8; 32] = [2; 32];
 /// Cy's key; she holds account 3.
 const CY_KEY: [u8; 32] = [3; 32];
 
-/// The identity role over three accounts, the third an agent; `Profiles`
-/// pages by number.
+/// The identity role over three accounts, the third an agent Ada manages;
+/// `Profiles` pages by number.
 fn identity() -> guest::Sibling {
     Box::new(move |request| {
         let profile = |number: u64| Profile {
             number,
             name: format!("user{number}"),
-            agent: number == 3,
+            category: (number == 3).then_some(crate::Category::Agent),
+            manager: (number == 3).then_some(1),
+            module: None,
         };
         let role::Query::Profiles { after, limit } =
             abi::decode(request).map_err(guest::kernel::error_from)?
@@ -45,7 +47,7 @@ fn store() -> MockHost {
     store
         .borrow_mut()
         .siblings
-        .insert(crate::IDENTITY.into(), identity());
+        .insert(guest::MockHost::roles().identity, identity());
     store.borrow_mut().verifier = Some(Box::new(|_, _, namespace, message, signature| {
         let expected = [b"general".as_slice(), &ADA_KEY].concat();
         namespace == HUDDLE_JOIN_NS && message == expected && signature == b"signed"
@@ -61,6 +63,7 @@ fn env(origin: Origin, sender: Option<Principal>) -> Env {
         module: crate::MODULE.into(),
         origin,
         sender,
+        roles: guest::MockHost::roles(),
         cause: Cause::Direct,
     }
 }
@@ -103,12 +106,10 @@ fn a_write_acts_as_its_sender() {
     let store = store();
     crate::Chat::execute(&store.exec(ada()), create("a", PostPolicy::Open)).unwrap();
     assert_eq!(owner(&store, "a"), Principal::Account(1));
-    let forge = env(
-        Origin::Module("forge".into()),
-        Some(Principal::Module("forge".into())),
-    );
+    // forge's own frame acts as forge's account
+    let forge = env(Origin::Module("forge".into()), Some(FORGE));
     crate::Chat::execute(&store.exec(forge), create("forge:c", PostPolicy::Open)).unwrap();
-    assert_eq!(owner(&store, "forge:c"), Principal::Module("forge".into()));
+    assert_eq!(owner(&store, "forge:c"), FORGE);
     crate::Chat::execute(&store.exec(root()), create("d", PostPolicy::Open)).unwrap();
     assert_eq!(owner(&store, "d"), Principal::Root);
 }
@@ -253,6 +254,6 @@ fn the_roster_pages_through_the_identity_role() {
     assert_eq!(first.items[0].name, "user1");
     let rest = page(first.next);
     assert_eq!(numbers(&rest.items), [3]);
-    assert!(rest.items[0].agent);
+    assert_eq!(rest.items[0].category, Some(crate::Category::Agent));
     assert_eq!(rest.next, None);
 }

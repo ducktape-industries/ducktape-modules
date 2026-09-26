@@ -33,30 +33,37 @@ fn person(number: u64, name: &str, key: &[u8]) -> identity::Account {
     identity::Account {
         number,
         name: name.into(),
-        control: identity::Control::Keys(vec![identity::Key {
+        avatar: None,
+        bio: None,
+        updated_at: 0,
+        keys: vec![identity::Key {
             scheme: Scheme::Ed25519,
             key: key.to_vec(),
             label: None,
             added_at: 0,
-        }]),
-        avatar: None,
-        bio: None,
-        updated_at: 0,
+        }],
+        module: None,
+        manager: None,
+        status: identity::Status::Active,
+        category: None,
     }
 }
 
-fn program(number: u64, name: &str) -> identity::Account {
+fn module(number: u64, name: &str) -> identity::Account {
     identity::Account {
-        number,
-        name: name.into(),
-        control: identity::Control::Program {
-            executor: "chat".into(),
-            controller: 1,
-            status: identity::Status::Active,
-        },
-        avatar: None,
-        bio: None,
-        updated_at: 0,
+        module: Some(name.into()),
+        keys: Vec::new(),
+        ..person(number, name, b"")
+    }
+}
+
+fn agent(number: u64, name: &str, manager: u64) -> identity::Account {
+    identity::Account {
+        manager: Some(manager),
+        category: Some(identity::Category::Agent),
+        status: identity::Status::Suspended,
+        keys: Vec::new(),
+        ..person(number, name, b"")
     }
 }
 
@@ -81,7 +88,8 @@ fn respond(cx: &mut TestAppContext) {
         assert!(matches!(query, identity::Query::List { .. }));
         Ok(identity::Reply::Accounts(page(vec![
             person(7, "eddy", b"\x01\x02"),
-            program(8, "chat"),
+            module(8, "chat"),
+            agent(9, "scout", 7),
         ])))
     });
     cx.host().handle::<Query<Valset>>(|query| {
@@ -111,9 +119,10 @@ fn the_roster_lists_each_account_with_its_standing() {
         "#7",
         "#8",
         "Person",
-        "Program",
+        "Module · chat",
+        "Agent · managed by eddy · suspended",
         "Validator",
-        "2 accounts",
+        "3 accounts",
     ] {
         assert!(cx.has_text(text), "{:?}", cx.texts());
     }

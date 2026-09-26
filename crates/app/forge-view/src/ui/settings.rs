@@ -213,7 +213,6 @@ fn writer_rows(
 fn principal_id(principal: &forge::Principal) -> String {
     match principal {
         forge::Principal::Account(number) => format!("acct-{number}"),
-        forge::Principal::Module(module) => module.clone(),
         forge::Principal::Root => "system".into(),
     }
 }

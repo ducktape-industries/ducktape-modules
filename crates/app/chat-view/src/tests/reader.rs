@@ -89,17 +89,9 @@ fn a_peers_name_gained_later_replaces_its_numeric_fallback() {
     cx.host().handle::<Ask<ChatApi>>(move |query| {
         Ok(match query {
             Query::Accounts { .. } => {
-                let mut accounts = vec![chat::Profile {
-                    number: 7,
-                    name: "eddy".into(),
-                    agent: false,
-                }];
+                let mut accounts = vec![person(7, "eddy")];
                 if has_gary.get() {
-                    accounts.push(chat::Profile {
-                        number: 9,
-                        name: "gary".into(),
-                        agent: false,
-                    });
+                    accounts.push(person(9, "gary"));
                 }
                 Reply::Accounts(page(accounts))
             }
@@ -169,17 +161,9 @@ fn a_peers_mention_becomes_offerable_once_their_account_is_known() {
     cx.host().handle::<Ask<ChatApi>>(move |query| {
         Ok(match query {
             Query::Accounts { .. } => {
-                let mut accounts = vec![chat::Profile {
-                    number: 7,
-                    name: "eddy".into(),
-                    agent: false,
-                }];
+                let mut accounts = vec![person(7, "eddy")];
                 if has_gary.get() {
-                    accounts.push(chat::Profile {
-                        number: 9,
-                        name: "gary".into(),
-                        agent: false,
-                    });
+                    accounts.push(person(9, "gary"));
                 }
                 Reply::Accounts(page(accounts))
             }
@@ -248,11 +232,7 @@ fn the_roster_is_read_past_its_first_page() {
                 Reply::Accounts(::chat::PageResponse {
                     height: 1,
                     items: (start..=end)
-                        .map(|number| chat::Profile {
-                            number,
-                            name: format!("user{number}"),
-                            agent: false,
-                        })
+                        .map(|number| person(number, &format!("user{number}")))
                         .collect(),
                     next,
                 })

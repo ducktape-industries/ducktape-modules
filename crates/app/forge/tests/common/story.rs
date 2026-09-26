@@ -85,15 +85,17 @@ impl Rig {
     pub fn chat_execute(&mut self, principal: Principal, msg: chat::Op) {
         self.advance();
         let origin = match principal {
-            Principal::Account(number) => {
-                let accounts = self.sandbox.accounts.borrow();
-                let (key, _) = accounts
-                    .iter()
-                    .find(|(_, held)| **held == number)
-                    .expect("a key holds the account");
-                Origin::Signed(key.clone())
-            }
-            Principal::Module(module) => Origin::Module(module),
+            Principal::Account(number) => match sandbox::module_of(number) {
+                Some(module) => Origin::Module(module.into()),
+                None => {
+                    let accounts = self.sandbox.accounts.borrow();
+                    let (key, _) = accounts
+                        .iter()
+                        .find(|(_, held)| **held == number)
+                        .expect("a key holds the account");
+                    Origin::Signed(key.clone())
+                }
+            },
             Principal::Root => Origin::Root,
         };
         self.sandbox

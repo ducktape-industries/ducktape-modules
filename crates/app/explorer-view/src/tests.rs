@@ -83,15 +83,42 @@ fn ada() -> identity::Account {
     identity::Account {
         number: 3,
         name: "Ada".into(),
-        control: identity::Control::Keys(vec![identity::Key {
+        avatar: None,
+        bio: None,
+        updated_at: 0,
+        keys: vec![identity::Key {
             scheme: abi::Scheme::Ed25519,
             key: ADA.to_vec(),
             label: Some("laptop".into()),
             added_at: 0,
-        }]),
-        avatar: None,
-        bio: None,
-        updated_at: 0,
+        }],
+        module: None,
+        manager: None,
+        status: identity::Status::Active,
+        category: None,
+    }
+}
+
+/// The agent Ada manages: no keys yet.
+fn scout() -> identity::Account {
+    identity::Account {
+        number: 5,
+        name: "Scout".into(),
+        keys: Vec::new(),
+        manager: Some(3),
+        category: Some(identity::Category::Agent),
+        ..ada()
+    }
+}
+
+/// forge's own account.
+fn forge() -> identity::Account {
+    identity::Account {
+        number: 6,
+        name: "forge".into(),
+        keys: Vec::new(),
+        module: Some("forge".into()),
+        ..ada()
     }
 }
 
@@ -120,7 +147,7 @@ fn node(
         identity::Query::List { .. } => {
             Ok(identity::Reply::Accounts(module_registry::PageResponse {
                 height: 1,
-                items: vec![ada()],
+                items: vec![ada(), scout(), forge()],
                 next: None,
             }))
         }
@@ -846,4 +873,25 @@ fn a_snapshot_keeps_ops_not_payloads() {
     restored.simulate_click(&format!("explorer-tx-{}", abi::hex(&big)));
     restored.run_until_parked();
     assert!(restored.has_text("Push · app"), "{:?}", restored.texts());
+}
+
+#[test]
+fn accounts_say_which_are_agents_and_which_are_modules() {
+    let mut cx = TestAppContext::new();
+    cx.host().stream::<ChainHeads>();
+    node(&mut cx, Rc::new(RefCell::new(12)));
+    cx.open::<Explorer>();
+    cx.run_until_parked();
+    cx.simulate_click("explorer-tab-accounts");
+    cx.run_until_parked();
+    for text in ["Agent · managed by Ada", "Module · forge"] {
+        assert!(cx.has_text(text), "{text}: {:?}", cx.texts());
+    }
+    cx.simulate_click("explorer-account-5");
+    cx.run_until_parked();
+    assert!(
+        cx.has_text("account 5   Agent · managed by Ada   0 devices"),
+        "{:?}",
+        cx.texts()
+    );
 }

@@ -284,6 +284,7 @@ mod tests {
             module: crate::MODULE.into(),
             origin: Origin::Root,
             sender: Some(guest::Principal::Root),
+            roles: guest::MockHost::roles(),
             cause: Cause::Direct,
         });
         for (repo, n) in [("zz", 1), ("abc", 2), ("ab", 1), ("abc", 1)] {

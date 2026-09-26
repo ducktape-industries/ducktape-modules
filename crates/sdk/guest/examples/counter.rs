@@ -49,6 +49,7 @@ mod tests {
             module: "counter".into(),
             origin: Origin::Signed(vec![1; 32]),
             sender: Some(Principal::Account(1)),
+            roles: guest::MockHost::roles(),
             cause: Cause::Direct,
         }
     }

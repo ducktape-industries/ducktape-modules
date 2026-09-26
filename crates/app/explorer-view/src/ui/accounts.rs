@@ -22,6 +22,12 @@ pub(super) fn accounts(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
             )
             .child(design::avatar(&account.name, px(20.), theme))
             .child(div().flex_1().truncate().child(account.name.clone()))
+            .children(
+                account
+                    .kind
+                    .clone()
+                    .map(|kind| div().text_color(theme.muted).child(kind)),
+            )
             .child(mono(format!("#{}", account.number)).text_color(theme.faint))
             .child(div().w(px(90.)).text_color(theme.muted).child(plural(
                 account.devices.len() as u64,
@@ -176,8 +182,12 @@ pub(super) fn account(view: &Explorer, number: u64, cx: Cx, theme: &Theme) -> An
                         )
                         .child(
                             mono(format!(
-                                "account {}   {}",
+                                "account {}   {}{}",
                                 account.number,
+                                account
+                                    .kind
+                                    .as_ref()
+                                    .map_or_else(String::new, |kind| format!("{kind}   ")),
                                 plural(account.devices.len() as u64, "device", "devices")
                             ))
                             .text_size(design::text::CAPTION)

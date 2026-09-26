@@ -202,8 +202,10 @@ fn forge_line(
     }
 }
 
-fn is_forge(row: &chat::MsgRow) -> bool {
-    row.author == forge::Principal::Module(forge::MODULE.into())
+/// forge's own line: written by the account identity names forge's.
+fn is_forge(forge: &Forge, row: &chat::MsgRow) -> bool {
+    let names = forge.names.ready();
+    names.and_then(|names| names.module(&row.author)) == Some(forge::MODULE)
 }
 
 /// The hidden chat channel of this change, in chat's row shape.
@@ -230,14 +232,17 @@ fn messages(forge: &Forge, theme: &Theme) -> AnyElement {
         )
         .into_any_element(),
         Some(Loadable::Ready((rows, _))) => {
-            let opened = rows.iter().find(|row| is_forge(row)).map(|row| row.seq);
+            let opened = rows
+                .iter()
+                .find(|row| is_forge(forge, row))
+                .map(|row| row.seq);
             let mut column = div()
                 .id(id("forge-conversation-messages"))
                 .flex()
                 .flex_col()
                 .gap_2();
             for message in rows {
-                if is_forge(message) {
+                if is_forge(forge, message) {
                     if let Some(line) =
                         forge_line(forge, message, opened == Some(message.seq), theme)
                     {

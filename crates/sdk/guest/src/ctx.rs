@@ -252,7 +252,7 @@ impl ExecCtx {
     /// key holds no account is refused: a person writes through an account.
     pub fn sender(&self) -> Result<Principal, Error> {
         self.env.sender.clone().ok_or_else(|| {
-            crate::unauthorized("a person writes through an account, and this key holds none")
+            crate::unauthorized("a write acts as an account, and this frame holds none")
         })
     }
 

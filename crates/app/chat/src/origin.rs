@@ -7,7 +7,7 @@ use guest::{Error, QueryCtx, invalid, unauthorized};
 use guest::{Origin, Scheme, code};
 use store::{PageRequest, PageResponse};
 
-use crate::{HUDDLE_JOIN_NS, IDENTITY, Profile};
+use crate::{HUDDLE_JOIN_NS, Profile};
 
 /// A huddle seat names a node, and the node signed its consent to seat
 /// this key in this channel.
@@ -35,8 +35,9 @@ pub(crate) fn node_consents(
     Ok(())
 }
 
-/// One page of the identity role's profiles, so a view links one module.
-/// The cursor is the last account number, big-endian.
+/// One page of the identity role's profiles (asked of the module genesis
+/// bound to the role), so a view links one module. The cursor is the last
+/// account number, big-endian.
 pub(crate) fn accounts(ctx: &QueryCtx, page: PageRequest) -> Result<PageResponse<Profile>, Error> {
     let after = page
         .after
@@ -49,7 +50,7 @@ pub(crate) fn accounts(ctx: &QueryCtx, page: PageRequest) -> Result<PageResponse
         limit: page.limit() as u32,
     };
     let role::Reply::Profiles { profiles, next } =
-        ctx.ask::<role::Query, role::Reply>(IDENTITY, &profiles)?
+        ctx.ask::<role::Query, role::Reply>(&ctx.env().roles.identity, &profiles)?
     else {
         return Err(Error::new(
             code::UNEXPECTED_REPLY,

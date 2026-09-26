@@ -301,6 +301,9 @@ pub struct Account {
     pub number: u64,
     pub name: String,
     pub devices: Vec<Device>,
+    /// what the account is beside a person's: "Agent · managed by Dev",
+    /// "Module · forge"
+    pub kind: Option<String>,
 }
 
 /// One running program: its id and the blob its code lives in.
@@ -795,7 +798,7 @@ fn hash_of(query: &str) -> Option<[u8; 32]> {
 }
 
 async fn accounts(host: Host) -> Result<Vec<Account>, Error> {
-    let mut accounts = Vec::new();
+    let mut listed: Vec<identity::Account> = Vec::new();
     let mut after = None;
     loop {
         let page = registry::PageRequest { after, limit: None };
@@ -806,26 +809,40 @@ async fn accounts(host: Host) -> Result<Vec<Account>, Error> {
             identity::Reply::Accounts(reply) => reply,
             other => return Err(malformed(format!("identity answered List with {other:?}"))),
         };
-        accounts.extend(reply.items.into_iter().map(|account| {
-            Account {
-                number: account.number,
-                devices: account
-                    .keys()
-                    .iter()
-                    .map(|key| Device {
-                        key: key.key.clone(),
-                        scheme: decode::scheme(key.scheme),
-                        label: key.label.clone(),
-                    })
-                    .collect(),
-                name: account.name,
-            }
-        }));
+        listed.extend(reply.items);
         match reply.next {
             Some(next) => after = Some(next),
-            None => return Ok(accounts),
+            None => break,
         }
     }
+    let name_of = |number: u64| {
+        listed
+            .iter()
+            .find(|account| account.number == number)
+            .map_or_else(|| format!("#{number}"), |account| account.name.clone())
+    };
+    let kind = |account: &identity::Account| match (&account.module, account.manager) {
+        (Some(module), _) => Some(format!("Module · {module}")),
+        (None, Some(manager)) => Some(format!("Agent · managed by {}", name_of(manager))),
+        (None, None) => None,
+    };
+    Ok(listed
+        .iter()
+        .map(|account| Account {
+            number: account.number,
+            name: account.name.clone(),
+            devices: account
+                .keys
+                .iter()
+                .map(|key| Device {
+                    key: key.key.clone(),
+                    scheme: decode::scheme(key.scheme),
+                    label: key.label.clone(),
+                })
+                .collect(),
+            kind: kind(account),
+        })
+        .collect())
 }
 
 async fn validators(host: Host) -> Result<Vec<Vec<u8>>, Error> {

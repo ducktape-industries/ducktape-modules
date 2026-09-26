@@ -8,7 +8,9 @@ use chat::view::Names;
 /// account members, labelled without the `@`.
 pub fn mention_choices(names: &Names, members: &[Principal]) -> Vec<MentionChoice> {
     let accounts = names.numbers().map(Principal::Account);
-    let members = members.iter().filter(|principal| principal.is_person());
+    let members = members
+        .iter()
+        .filter(|principal| principal.account().is_some());
     let mut choices: Vec<MentionChoice> = Vec::new();
     for principal in accounts.chain(members.cloned()) {
         if !choices.iter().any(|choice| choice.principal == principal) {
@@ -32,7 +34,7 @@ pub struct MentionChoice {
 pub fn mention_token(principal: &Principal) -> String {
     match principal {
         Principal::Account(account) => format!("<@{account}>"),
-        Principal::Module(_) | Principal::Root => String::new(),
+        Principal::Root => String::new(),
     }
 }
 

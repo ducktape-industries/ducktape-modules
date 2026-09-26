@@ -157,8 +157,10 @@ fn grant_and_revoke_are_the_owners_and_name_a_person() {
         refused_as(&mut rig, STRANGER, &grant(person(STRANGER))),
         code::UNAUTHORIZED
     );
-    let module = Principal::Module("chat".into());
-    assert_eq!(rig.refused(&grant(module)).code, code::INVALID_INPUT);
+    assert_eq!(
+        rig.refused(&grant(Principal::Root)).code,
+        code::INVALID_INPUT
+    );
 }
 
 // ---------------------------------------------------------------- changes

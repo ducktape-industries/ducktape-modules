@@ -1,7 +1,7 @@
 //! One function per [`Op`](crate::Op), each named by [`Chat::execute`](crate::Chat)'s
 //! match. Each checks first (`rules`), then writes, so a refused op leaves
 //! the store as it found it.
-use guest::{Error, ExecCtx, already_exists, capacity, invalid, unauthorized, wrong_state};
+use guest::{Error, ExecCtx, Origin, already_exists, capacity, invalid, unauthorized, wrong_state};
 
 use crate::rules;
 use crate::state::{
@@ -24,7 +24,7 @@ pub(crate) fn create_channel(
     post_policy: PostPolicy,
     voice: bool,
 ) -> Result<(), Error> {
-    rules::channel_id(&id, sender)?;
+    rules::channel_id(&id, ctx.env())?;
     rules::name(&name)?;
     if CHANNELS.has(ctx, &id) {
         return Err(already_exists(format!("channel {id} exists")));
@@ -62,9 +62,10 @@ pub(crate) fn open_dm(
     counterpart: AccountNumber,
     name: String,
 ) -> Result<(), Error> {
-    let Principal::Account(me) = *sender else {
-        return Err(unauthorized("only an account opens a dm"));
+    let (Principal::Account(me), Origin::Signed(_)) = (sender, &ctx.env().origin) else {
+        return Err(unauthorized("only a key opens a dm, not a module"));
     };
+    let me = *me;
     if me == counterpart {
         return Err(invalid("a dm needs two accounts"));
     }
@@ -148,7 +149,7 @@ pub(crate) fn post(
     thread: Option<u64>,
 ) -> Result<(), Error> {
     rules::id("message_id", &message_id)?;
-    rules::namespace(&message_id, sender)?;
+    rules::namespace(&message_id, ctx.env())?;
     rules::writable(ctx, &channel(ctx, &channel_id)?, sender)?;
     if MESSAGE_IDS.has(ctx, &message_id) {
         return Err(already_exists(format!("message {message_id} exists")));
@@ -346,9 +347,6 @@ pub(crate) fn join_huddle(
     node_proof: &[u8],
 ) -> Result<(), Error> {
     crate::origin::node_consents(ctx, &ctx.env().origin, channel_id, node, node_proof)?;
-    if !sender.is_person() {
-        return Err(unauthorized("only people join a huddle"));
-    }
     if node.len() != HUDDLE_NODE_KEY_BYTES {
         return Err(invalid(format!(
             "a node key is {HUDDLE_NODE_KEY_BYTES} bytes"

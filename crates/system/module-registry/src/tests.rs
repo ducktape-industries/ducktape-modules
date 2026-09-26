@@ -15,6 +15,7 @@ fn env(height: u64, origin: Origin) -> Env {
         origin,
         // these rules read the origin alone
         sender: None,
+        roles: guest::MockHost::roles(),
         cause: Cause::Direct,
     }
 }

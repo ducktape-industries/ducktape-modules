@@ -359,7 +359,8 @@ fn replies(
     Some(separator.into_any_element())
 }
 
-/// A run's first message names its author, their agent badge and block.
+/// A run's first message names its author, what the author is (an agent
+/// and its manager, a module) and its block.
 fn header(message: &ChatMessage, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement {
     let mut header = div()
         .id(format!("chat-message-{}-header", message.id))
@@ -372,12 +373,16 @@ fn header(message: &ChatMessage, cx: &mut Context<Chat>, theme: &Theme) -> impl 
                 .font_weight(ducktape_view_guest::FontWeight::MEDIUM)
                 .child(message.author.clone()),
         );
-    if message.agent {
+    if let Some(label) = &message.badge {
+        let (foreground, background) = match message.agent {
+            true => (theme.agent, theme.agent_soft),
+            false => (theme.muted, theme.surface_raised),
+        };
         header = header.child(badge(
-            format!("chat-message-{}-agent", message.id),
-            "Agent",
-            theme.agent,
-            theme.agent_soft,
+            format!("chat-message-{}-badge", message.id),
+            label.clone(),
+            foreground,
+            background,
         ));
     }
     if message.height > 0 {

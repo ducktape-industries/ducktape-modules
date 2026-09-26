@@ -1,6 +1,6 @@
 //! The checks an op passes before it writes. Each refuses with the reason a
 //! view can act on (`guest::refuse`); none writes.
-use guest::{Error, QueryCtx, invalid, unauthorized, wrong_state};
+use guest::{Env, Error, Origin, QueryCtx, invalid, unauthorized, wrong_state};
 
 use crate::state::MEMBERS;
 use crate::{
@@ -18,15 +18,15 @@ pub(crate) fn id(what: &str, id: &str) -> Result<(), Error> {
 }
 
 /// An id with a `:` belongs to the program its prefix names: `forge:web:3`
-/// is forge's alone. The system may use any.
-pub(crate) fn namespace(id: &str, principal: &Principal) -> Result<(), Error> {
+/// is for forge's own frames alone. The system may use any.
+pub(crate) fn namespace(id: &str, env: &Env) -> Result<(), Error> {
     let Some(prefix) = crate::program_of(id) else {
         return Ok(());
     };
-    let allowed = match principal {
-        Principal::Module(program) => prefix == program,
-        Principal::Root => true,
-        Principal::Account(_) => false,
+    let allowed = match &env.origin {
+        Origin::Module(program) => prefix == program,
+        Origin::Root => true,
+        Origin::Signed(_) => false,
     };
     if !allowed {
         return Err(unauthorized("colon ids belong to their program namespace"));
@@ -37,9 +37,9 @@ pub(crate) fn namespace(id: &str, principal: &Principal) -> Result<(), Error> {
 /// A plain channel id: an [`id`] in the actor's [`namespace`], and never a
 /// dm id, which opens only through `CreateDmChannel` with both peers
 /// seated (a plain create would let anyone own the room first).
-pub(crate) fn channel_id(channel_id: &str, principal: &Principal) -> Result<(), Error> {
+pub(crate) fn channel_id(channel_id: &str, env: &Env) -> Result<(), Error> {
     id("channel_id", channel_id)?;
-    namespace(channel_id, principal)?;
+    namespace(channel_id, env)?;
     if dm_peers(channel_id).is_some() {
         return Err(unauthorized("dm ids open only through CreateDmChannel"));
     }
@@ -118,7 +118,6 @@ pub(crate) fn editable(row: &MsgRow, principal: &Principal) -> Result<(), Error>
 fn handle(principal: &Principal) -> String {
     match principal {
         Principal::Account(account) => format!("acct:{account}"),
-        Principal::Module(module) => format!("module:{module}"),
         Principal::Root => "system".to_string(),
     }
 }
