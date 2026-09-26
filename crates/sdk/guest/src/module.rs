@@ -22,10 +22,15 @@ pub trait Module {
 
     /// The outcome of message `id`, which this module emitted with
     /// [`Reply::Wanted`](crate::Reply::Wanted). A refusal here fails the
-    /// frame; Ok absorbs the outcome. Absorbed by default; override only
-    /// where the module wants replies.
-    fn reply(_ctx: &ExecCtx, _id: &MessageId, _outcome: &Outcome) -> Result<(), Error> {
-        Ok(())
+    /// frame; Ok absorbs the outcome. By default an applied message is
+    /// absorbed and a refused one's refusal is returned, failing the frame
+    /// as if the message had been sent with [`Reply::None`](crate::Reply::None);
+    /// override to accept a refusal.
+    fn reply(_ctx: &ExecCtx, _id: &MessageId, outcome: &Outcome) -> Result<(), Error> {
+        match outcome {
+            Outcome::Applied { .. } => Ok(()),
+            Outcome::Rejected(refusal) => Err(refusal.clone()),
+        }
     }
 
     fn query(ctx: &QueryCtx, query: Self::Query) -> Result<Self::Response, Error>;
