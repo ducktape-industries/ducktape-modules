@@ -1,0 +1,18 @@
+[package]
+name = "conformance"
+version.workspace = true
+edition.workspace = true
+
+# The role conformance suite: drives a module's native `guest::Module` over
+# `MockHost` with the role's own bytes. Native only (MockHost is), so a
+# module takes it as a dev-dependency.
+[dependencies]
+abi = { workspace = true }
+borsh = { workspace = true }
+guest = { workspace = true }
+
+# The suite proven on the reference modules (tests/).
+[dev-dependencies]
+identity = { workspace = true }
+valset = { workspace = true }
+module-registry = { workspace = true }
