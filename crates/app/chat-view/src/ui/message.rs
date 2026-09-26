@@ -360,7 +360,7 @@ fn replies(
 }
 
 /// A run's first message names its author, what the author is (an agent
-/// and its manager, a module) and its block.
+/// and its manager, a module), when it was posted and its block.
 fn header(message: &ChatMessage, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement {
     let mut header = div()
         .id(format!("chat-message-{}-header", message.id))
@@ -384,6 +384,20 @@ fn header(message: &ChatMessage, cx: &mut Context<Chat>, theme: &Theme) -> impl 
             foreground,
             background,
         ));
+    }
+    if message.time > 0 {
+        let clock = design::clock(message.time);
+        header = header.child(
+            div()
+                .id(format!("chat-message-{}-time", message.id))
+                .text_size(design::text::CAPTION)
+                .text_color(theme.muted)
+                .whitespace_nowrap()
+                .child(match message.height > 0 {
+                    true => format!("{clock} ·"),
+                    false => clock,
+                }),
+        );
     }
     if message.height > 0 {
         // the link opens Explorer at its block, and the card under it
@@ -547,6 +561,24 @@ fn block_view(
             .text_color(theme.muted)
             .child(rich_line(id.clone(), spans, names, cx, theme))
             .into_any_element(),
-        Block::Paragraph(spans) => rich_line(id, spans, names, cx, theme).into_any_element(),
+        Block::Paragraph(spans) => match chat::list_item(spans) {
+            // a list item: its marker in a hanging gutter, the item beside it
+            Some((marker, item)) => div()
+                .id(format!("chat-message-{}-block-{index}-item", message.id))
+                .flex()
+                .gap_2()
+                .child(
+                    div()
+                        .min_w(px(16.))
+                        .text_color(theme.muted)
+                        .child(match marker {
+                            chat::ListMarker::Bullet => "•".to_owned(),
+                            chat::ListMarker::Ordered(number) => format!("{number}."),
+                        }),
+                )
+                .child(rich_line(id, &item, names, cx, theme))
+                .into_any_element(),
+            None => rich_line(id, spans, names, cx, theme).into_any_element(),
+        },
     }
 }

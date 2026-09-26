@@ -11,7 +11,7 @@ use ducktape_view_guest::{
 use ducktape_view_guest::AnyElement;
 use ducktape_view_guest::view::Loadable;
 
-use crate::message::{ChatMessage, unread_seq};
+use crate::message::{ChatMessage, new_day, unread_seq};
 use crate::ui::room::selection_bar;
 use crate::ui::{message, quiet};
 use crate::{Chat, Pane};
@@ -180,9 +180,11 @@ fn rows(
                     false => div().into_any_element(),
                 };
             };
-            let first_unread = unread == Some(message.seq);
+            let day = new_day(&messages, index - usize::from(lead))
+                .map(|day| day_marker(&message.id, day, &theme).into_any_element());
+            let unread = (unread == Some(message.seq)).then(|| unread_marker(&theme));
             let card = message::card(chat, message, pane, window, cx, &theme);
-            if !first_unread {
+            if day.is_none() && unread.is_none() {
                 return card.into_any_element();
             }
             // full width, as a bare card is: a row shrunk to its words
@@ -191,7 +193,8 @@ fn rows(
                 .w_full()
                 .flex()
                 .flex_col()
-                .child(unread_marker(&theme))
+                .children(day)
+                .children(unread)
                 .child(card)
                 .into_any_element()
         }),
@@ -269,6 +272,23 @@ fn list_state(chat: &Chat, pane: Pane, keys: &[String]) -> ListState {
     }
     *old = keys.to_vec();
     state
+}
+
+/// The day the messages under it were posted on, between two days.
+fn day_marker(id: &str, day: String, theme: &Theme) -> impl IntoElement {
+    let rule = || div().h(px(1.)).flex_1().bg(theme.border);
+    div()
+        .id(format!("chat-day-{id}"))
+        .flex()
+        .items_center()
+        .gap_2()
+        .px_3()
+        .py_1()
+        .text_size(design::text::CAPTION)
+        .text_color(theme.muted)
+        .child(rule())
+        .child(day)
+        .child(rule())
 }
 
 fn unread_marker(theme: &Theme) -> impl IntoElement {

@@ -479,6 +479,23 @@ pub fn date(millis: u64) -> String {
     )
 }
 
+/// A time in milliseconds as a UTC day: `24 Sep 2026`.
+pub fn day(millis: u64) -> String {
+    let date = date(millis);
+    date.split_once(", ")
+        .map_or(date.clone(), |(day, _)| day.to_owned())
+}
+
+/// A time in milliseconds as a UTC clock time: `3:42 PM`.
+// ponytail: UTC, not the reader's zone — a view is handed no UTC offset;
+// shift here once the host hands one over.
+pub fn clock(millis: u64) -> String {
+    let minutes = millis / 60_000 % 1_440;
+    let (hour, minute) = (minutes / 60, minutes % 60);
+    let half = if hour < 12 { "AM" } else { "PM" };
+    format!("{}:{minute:02} {half}", (hour + 11) % 12 + 1)
+}
+
 /// `1 block`, `1,200 blocks`.
 pub fn plural(count: u64, one: &str, many: &str) -> String {
     format!("{} {}", grouped(count), if count == 1 { one } else { many })
@@ -494,6 +511,17 @@ mod tests {
         assert_eq!(super::grouped(1_048_576), "1,048,576");
         assert_eq!(super::plural(1, "block", "blocks"), "1 block");
         assert_eq!(super::plural(1200, "block", "blocks"), "1,200 blocks");
+    }
+
+    #[test]
+    fn a_time_reads_as_its_day_and_clock() {
+        // 24 Sep 2026, 15:42:07 UTC
+        let at = 1_790_264_527_000;
+        assert_eq!(super::date(at), "24 Sep 2026, 15:42:07");
+        assert_eq!(super::day(at), "24 Sep 2026");
+        assert_eq!(super::clock(at), "3:42 PM");
+        assert_eq!(super::clock(0), "12:00 AM");
+        assert_eq!(super::clock(12 * 3_600_000 + 5 * 60_000), "12:05 PM");
     }
 
     #[test]

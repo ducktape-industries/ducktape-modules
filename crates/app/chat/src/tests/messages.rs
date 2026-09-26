@@ -104,6 +104,21 @@ fn only_the_author_edits_and_search_follows_the_edit() {
     assert_eq!(chat.refused(&BO, edit(1, "undead")), code::WRONG_STATE);
 }
 
+/// A row carries its block's time beside its height; an edit stamps its
+/// own time and keeps the post's.
+#[test]
+fn a_row_keeps_its_posts_block_time_through_an_edit() {
+    let mut chat = Chat::with_channel(PostPolicy::Open);
+    chat.post(&BO, "m1", "hello", None);
+    let posted = chat.message(1);
+    assert!(posted.time > 0);
+    assert_eq!(posted.time, posted.height * 1000, "the env's block time");
+    chat.ok(&BO, edit(1, "goodbye"));
+    let edited = chat.message(1);
+    assert_eq!((edited.height, edited.time), (posted.height, posted.time));
+    assert!(edited.edited_at.is_some_and(|at| at > posted.time));
+}
+
 #[test]
 fn the_author_or_the_owner_deletes_and_a_tombstone_stays() {
     let mut chat = Chat::with_channel(PostPolicy::Open);
