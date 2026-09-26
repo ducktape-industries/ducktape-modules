@@ -20,12 +20,10 @@ only.
   involvement, authored reviews) and the counters. A remove path takes its index
   rows with it. Git objects are the one exception: an object is the blob whose
   id is its oid, with no table between them (`src/objects.rs`).
-- Forge queues chat creation for `forge:<repo>:<n>` and system lines for opening,
+- Forge emits chat creation for `forge:<repo>:<n>` and system lines for opening,
   closing, merging, and submitting a review. Chat owns all conversation replies.
-  The host commits the record and emitted queue items atomically; delivery is in
-  the **next block**, per the present ABI, not synchronous cross-module execution.
-  A change in flight renames `send`/`call`/`ask` to `emit`/`query` and delivers
-  within the same frame; until it lands, next-block delivery is what runs.
+  The kernel runs each emission once the handler returns Ok, in the same frame,
+  so the record and its channel land in one block or not at all.
 - A review is one immutable operation: verdict, body, pinned head and base, and
   up to `MAX_REVIEW_COMMENTS` line comments. An anchor is `(path, side, line)`;
   `Old` addresses `base_oid`, `New` addresses `commit_oid`. Both are retained.
