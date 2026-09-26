@@ -281,6 +281,8 @@ pub const MAX_DEPTH: u32 = 8;
 /// run past [`MAX_DEPTH`] fails the whole frame: every seated host's state
 /// and blobs as they were before it. Messages are numbered from 0 in each
 /// frame, whichever run emitted them. No fuel: a native run is not metered.
+/// Events are not undone: each host keeps every run's, as the kernel's
+/// receipts keep a refused run's events under its refusal.
 #[derive(Clone, Default)]
 pub struct MockChain {
     seats: BTreeMap<ModuleId, Seat>,
@@ -334,7 +336,9 @@ impl MockChain {
         {
             let mut mock = seat.host.borrow_mut();
             mock.next_item = first;
+            // each run's output is its own, as the kernel's is
             mock.emissions.clear();
+            mock.output.clear();
         }
         let ran = (seat.execute)(&ctx, payload);
         *next_item = seat.host.borrow().next_item;
@@ -694,5 +698,32 @@ mod tests {
             Outcome::Rejected(Error::new(code::UNKNOWN_MODULE, "nobody"))
         );
         assert!(!wrote(&chain, "a"));
+    }
+
+    #[test]
+    fn a_refused_runs_output_is_not_a_later_runs() {
+        fn leaky(ctx: &ExecCtx, payload: &[u8]) -> Result<(), Error> {
+            if payload.is_empty() {
+                return Ok(());
+            }
+            ctx.set_return_data(b"stale".to_vec());
+            Err(Error::new(code::WRONG_STATE, "refused"))
+        }
+        let mut chain = MockChain::default();
+        chain.seat("x", MockHost::default(), None, leaky);
+        let env = Env {
+            chain_id: b"n".to_vec(),
+            height: 1,
+            time: 2,
+            module: "x".into(),
+            origin: Origin::Root,
+            sender: Some(Principal::Root),
+            roles: MockHost::roles(),
+            cause: Cause::Direct,
+        };
+        let refused = chain.execute(env.clone(), &[1]);
+        assert!(matches!(refused, Outcome::Rejected(_)));
+        let outcome = chain.execute(env, &[]);
+        assert_eq!(outcome, Outcome::Applied { output: Vec::new() });
     }
 }
