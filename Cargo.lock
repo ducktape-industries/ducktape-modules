@@ -1059,6 +1059,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "conformance"
+version = "0.1.0"
+dependencies = [
+ "abi",
+ "borsh",
+ "guest 0.1.0",
+ "identity",
+ "module-registry",
+ "valset",
+]
+
+[[package]]
 name = "const-hex"
 version = "1.19.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -4,7 +4,7 @@ The ducktape contract line and the modules written against it, one
 repository. Only what compiles to wasm lives here:
 
 ```
-crates/sdk/     abi error guest store describe ducklink view-wire view-guest view-guest-derive design
+crates/sdk/     abi error guest store conformance describe ducklink view-wire view-guest view-guest-derive design
 crates/system/  module-registry valset identity
 crates/app/     chat chat-view forge forge-view members-view node-view explorer-view settings-view
 crates/lib/     gitcore
@@ -16,6 +16,7 @@ crates/lib/     gitcore
 | `crates/sdk/error` | `Error { code, message }` and its `code` tokens, the one error type a module, the host and a view share (borsh; serde behind a feature). Depends on no ducktape crate; `guest` re-exports it and `view-wire` carries it |
 | `crates/sdk/guest` | the minimal module SDK, enough alone: the `Module` trait, the `ExecCtx` and `QueryCtx` contexts its entry points receive (env, raw state, blobs, `send`/`call`, events, `set_return_data`, sibling queries, `verify`), `ExecCtx::sender` (the `Principal` the host resolved: an account, a module's too, or `Root`), `Env.roles` (the module genesis bound to each role), the `Env` origin checks (`signer`, `sending_module`, `sent_by`) and `authority` (a stub that admits anyone), `export!`, `Error` and its constructors and `decoded`, and `MockHost`, the native host the same contexts run over in a test. `src/kernel.rs` is the one place the kernel's names (`Refusal`, `ProgramId`, `ItemRef`, `Scan`, …) become the SDK's (`Error`, `ModuleId`, `MessageId`, `Range`, …), byte for byte; `kernel::error_from`/`refusal_from` convert an error. `examples/counter.rs` is a module written with it alone |
 | `crates/sdk/store` | optional typed storage over `guest`'s contexts: the `Map`/`Set`/`Item` descriptors with `KeyCodec`, and `PageRequest`/`PageResponse`. A read takes `&QueryCtx` (an `&ExecCtx` serves it), a write `&ExecCtx`. A view links it and calls none of it |
+| `crates/sdk/conformance` | proof that a module fills a role the kernel calls (`registry`, `validators`, `identity`), native over `MockHost`: a module takes it as a dev-dependency, implements the role's `Fixture` and calls its `run` in a test; see its [README](crates/sdk/conformance/README.md) |
 | `crates/sdk/describe` | what an op means to a person: the pure wasm module a program ships in its `ducktape.describe` section, and the sandbox that runs it |
 | `crates/sdk/ducklink` | the `duck://` link: `duck://<chain>/<program>/<tail…>`, one spelling per name, no program names known here |
 | `crates/sdk/view-wire`, `view-guest`, `view-guest-derive`, `design` | the host<->view wire, the runtime a wasm view is written against, the palette |
