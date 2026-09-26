@@ -26,11 +26,6 @@ pub fn describe(op: &Op) -> Description {
                 ),
             ],
         ),
-        Op::CreateVoiceChannel { channel_id, name } => (
-            "Create voice channel",
-            channel_id,
-            vec![field("name", Value::text(name))],
-        ),
         Op::CreateDmChannel { counterpart, name } => {
             return Description {
                 title: "Open a DM".into(),
@@ -125,20 +120,12 @@ pub fn describe(op: &Op) -> Description {
             channel_id,
             vec![field("member", principal(who))],
         ),
-        Op::JoinHuddle {
-            channel_id, node, ..
-        } => (
-            "Join huddle",
-            channel_id,
-            vec![field("node", Value::Key(node.clone()))],
-        ),
-        Op::LeaveHuddle { channel_id } => ("Leave huddle", channel_id, vec![]),
     };
     let mut all = place(channel);
     all.extend(fields);
     // a created channel's id is opaque; its name is what a person picked
     let shown = match op {
-        Op::CreateChannel { name, .. } | Op::CreateVoiceChannel { name, .. } => format!("#{name}"),
+        Op::CreateChannel { name, .. } => format!("#{name}"),
         _ => room(channel),
     };
     Description {

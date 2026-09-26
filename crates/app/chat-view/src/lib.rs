@@ -1,4 +1,4 @@
-//! Chat: channels, direct messages, threads, search and the room's huddle.
+//! Chat: channels, direct messages, threads and search.
 //!
 //! The view's state is one struct per pane (`state.rs`). Rows come from the
 //! `chat` program through its own types (`queries.rs`), are folded with the

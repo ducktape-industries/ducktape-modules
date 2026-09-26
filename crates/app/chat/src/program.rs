@@ -4,14 +4,13 @@
 use guest::{Error, ExecCtx, Module, QueryCtx};
 
 use crate::ops::{
-    create_channel, delete, edit, join_huddle, leave_huddle, open_dm, post, react, rename,
-    set_archived, set_membership,
+    create_channel, delete, edit, open_dm, post, react, rename, set_archived, set_membership,
 };
 use crate::queries::{
     around, attention, by_id, channel, channels, roots, search, seen_by, tagged, thread,
 };
 use crate::state::MEMBERS;
-use crate::{Op, PostPolicy, Query, Reply};
+use crate::{Op, Query, Reply};
 
 pub struct Chat;
 
@@ -27,10 +26,7 @@ impl Module for Chat {
                 channel_id,
                 name,
                 post_policy,
-            } => create_channel(ctx, &sender, channel_id, name, post_policy, false),
-            Op::CreateVoiceChannel { channel_id, name } => {
-                create_channel(ctx, &sender, channel_id, name, PostPolicy::Open, true)
-            }
+            } => create_channel(ctx, &sender, channel_id, name, post_policy),
             Op::CreateDmChannel { counterpart, name } => open_dm(ctx, &sender, counterpart, name),
             Op::RenameChannel { channel_id, name } => rename(ctx, &sender, &channel_id, name),
             Op::SetChannelArchived {
@@ -65,12 +61,6 @@ impl Module for Chat {
                 principal,
                 member,
             } => set_membership(ctx, &sender, &channel_id, principal, member),
-            Op::JoinHuddle {
-                channel_id,
-                node,
-                node_proof,
-            } => join_huddle(ctx, &sender, &channel_id, &node, &node_proof),
-            Op::LeaveHuddle { channel_id } => leave_huddle(ctx, &sender, &channel_id),
         }
     }
 

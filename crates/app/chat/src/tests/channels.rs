@@ -10,7 +10,7 @@ fn a_channel_is_created_once_owned_by_its_creator() {
     }) else {
         panic!("the channel reads back");
     };
-    assert_eq!((channel.owner, channel.voice, head_seq), (ADA, false, 0));
+    assert_eq!((channel.owner, head_seq), (ADA, 0));
     let again = chat.refused(&BO, create("general", PostPolicy::Open));
     assert_eq!(again, code::ALREADY_EXISTS);
 }
@@ -40,34 +40,14 @@ fn a_channel_id_is_bounded_and_a_colon_id_is_its_programs_alone() {
 }
 
 #[test]
-fn a_voice_channel_is_open_and_marked_voice() {
-    let mut chat = Chat::default();
-    let voice = |id: &str| Op::CreateVoiceChannel {
-        channel_id: id.into(),
-        name: "standup".into(),
-    };
-    chat.ok(&ADA, voice("standup"));
-    let channel = crate::state::channel(&chat.reads(), "standup").unwrap();
-    assert!(channel.voice && channel.post_policy == PostPolicy::Open);
-    assert_eq!(chat.refused(&ADA, voice("forge:x")), code::UNAUTHORIZED);
-}
-
-#[test]
 fn nobody_squats_a_dm_id_with_a_plain_create() {
     let dm = dm_channel_id(3, 5);
     // a third account, and each peer, try the plain creates on the dm id
     for who in [7, 3, 5] {
         let mut chat = Chat::default();
         let who = Principal::Account(who);
-        for op in [
-            create(&dm, PostPolicy::Open),
-            Op::CreateVoiceChannel {
-                channel_id: dm.clone(),
-                name: "mine".into(),
-            },
-        ] {
-            assert_eq!(chat.refused(&who, op), code::UNAUTHORIZED, "{who:?}");
-        }
+        let op = create(&dm, PostPolicy::Open);
+        assert_eq!(chat.refused(&who, op), code::UNAUTHORIZED, "{who:?}");
         assert!(chat.store.borrow().state.is_empty());
         // the real dm still opens with both peers seated
         chat.ok(&Principal::Account(3), open_dm(5));

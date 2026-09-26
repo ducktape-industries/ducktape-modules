@@ -9,9 +9,8 @@ use crate::state::{
     fits, message, newest_first, replace_message, toggle,
 };
 use crate::{
-    AccountNumber, Block, ChannelRow, HUDDLE_NODE_KEY_BYTES, HuddleEntry, MAX_HUDDLE_MEMBERS,
-    MAX_REACTION_EMOJIS, MAX_REVISIONS, MAX_THREAD_REPLIES, MemberRow, MsgRow, PostPolicy,
-    Principal, Reaction, dm_channel_id, hex, plain_text, tags,
+    AccountNumber, Block, ChannelRow, MAX_REACTION_EMOJIS, MAX_REVISIONS, MAX_THREAD_REPLIES,
+    MemberRow, MsgRow, PostPolicy, Principal, Reaction, dm_channel_id, plain_text, tags,
 };
 
 // ── channels ────────────────────────────────────────────────────────────────
@@ -22,25 +21,23 @@ pub(crate) fn create_channel(
     id: String,
     name: String,
     post_policy: PostPolicy,
-    voice: bool,
 ) -> Result<(), Error> {
     rules::channel_id(&id, ctx.env())?;
     rules::name(&name)?;
     if CHANNELS.has(ctx, &id) {
         return Err(already_exists(format!("channel {id} exists")));
     }
-    CHANNELS.put(ctx, &id, &room(ctx, sender, &id, name, post_policy, voice));
+    CHANNELS.put(ctx, &id, &room(ctx, sender, &id, name, post_policy));
     Ok(())
 }
 
-/// A new room the actor owns, unarchived with no one in its huddle.
+/// A new room the actor owns, unarchived.
 fn room(
     ctx: &ExecCtx,
     sender: &Principal,
     id: &str,
     name: String,
     post_policy: PostPolicy,
-    voice: bool,
 ) -> ChannelRow {
     ChannelRow {
         id: id.to_owned(),
@@ -49,8 +46,6 @@ fn room(
         post_policy,
         owner: sender.clone(),
         archived: false,
-        huddle: Vec::new(),
-        voice,
     }
 }
 
@@ -76,7 +71,7 @@ pub(crate) fn open_dm(
         return Ok(());
     }
     rules::name(&name)?;
-    let channel = room(ctx, sender, &id, name, PostPolicy::MembersOnly, false);
+    let channel = room(ctx, sender, &id, name, PostPolicy::MembersOnly);
     CHANNELS.put(ctx, &id, &channel);
     for peer in [me, counterpart] {
         seat(ctx, &id, Principal::Account(peer));
@@ -335,50 +330,4 @@ fn count_out(reactions: &mut Vec<Reaction>, emoji: &str) {
             reactions.remove(at);
         }
     }
-}
-
-// ── huddles ─────────────────────────────────────────────────────────────────
-
-/// Seats the actor's node in the channel's huddle, or moves their seat to a
-/// new node, once the node's consent verifies (`origin::node_consents`).
-pub(crate) fn join_huddle(
-    ctx: &ExecCtx,
-    sender: &Principal,
-    channel_id: &str,
-    node: &[u8],
-    node_proof: &[u8],
-) -> Result<(), Error> {
-    crate::origin::node_consents(ctx, &ctx.env().origin, channel_id, node, node_proof)?;
-    if node.len() != HUDDLE_NODE_KEY_BYTES {
-        return Err(invalid(format!(
-            "a node key is {HUDDLE_NODE_KEY_BYTES} bytes"
-        )));
-    }
-    let mut channel = channel(ctx, channel_id)?;
-    rules::writable(ctx, &channel, sender)?;
-    let seat = HuddleEntry {
-        principal: sender.clone(),
-        node: hex(node),
-        joined_at: ctx.env().time,
-    };
-    match channel.huddle.iter().position(|e| e.principal == *sender) {
-        Some(at) => channel.huddle[at] = seat,
-        None if channel.huddle.len() >= MAX_HUDDLE_MEMBERS => {
-            return Err(capacity("the huddle is full"));
-        }
-        None => channel.huddle.push(seat),
-    }
-    CHANNELS.put(ctx, &channel.id, &channel);
-    Ok(())
-}
-
-pub(crate) fn leave_huddle(
-    ctx: &ExecCtx,
-    sender: &Principal,
-    channel_id: &str,
-) -> Result<(), Error> {
-    let mut channel = channel(ctx, channel_id)?;
-    channel.huddle.retain(|e| e.principal != *sender);
-    CHANNELS.put(ctx, &channel.id, &channel);
-    Ok(())
 }

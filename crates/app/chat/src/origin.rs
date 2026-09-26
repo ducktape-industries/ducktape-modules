@@ -1,39 +1,11 @@
-//! What the host and the identity role say about who is asking: a huddle
-//! join's node proof checked, and the role's profiles as chat's views read
-//! them. The sender itself is the host's, read first thing in
+//! What the identity role says about who is asking: the role's profiles as
+//! chat's views read them. The sender itself is the host's, read first thing in
 //! [`Chat::execute`](crate::Chat).
 use abi::role::identity as role;
-use guest::{Error, QueryCtx, invalid, unauthorized};
-use guest::{Origin, Scheme, code};
+use guest::{Error, QueryCtx, code, invalid};
 use store::{PageRequest, PageResponse};
 
-use crate::{HUDDLE_JOIN_NS, Profile};
-
-/// A huddle seat names a node, and the node signed its consent to seat
-/// this key in this channel.
-pub(crate) fn node_consents(
-    ctx: &QueryCtx,
-    origin: &Origin,
-    channel_id: &str,
-    node: &[u8],
-    proof: &[u8],
-) -> Result<(), Error> {
-    let Origin::Signed(key) = origin else {
-        return Err(unauthorized("only a key joins a huddle"));
-    };
-    let message = [channel_id.as_bytes(), key].concat();
-    let signed = ctx.verify(
-        Scheme::Ed25519,
-        node.to_vec(),
-        HUDDLE_JOIN_NS,
-        message,
-        proof.to_vec(),
-    )?;
-    if !signed {
-        return Err(invalid("the node proof does not verify"));
-    }
-    Ok(())
-}
+use crate::Profile;
 
 /// One page of the identity role's profiles (asked of the module genesis
 /// bound to the role), so a view links one module. The cursor is the last

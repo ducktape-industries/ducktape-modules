@@ -57,7 +57,7 @@ fn a_send_shows_pending_then_lands_and_a_refusal_is_a_banner() {
 }
 
 #[test]
-fn channel_create_preserves_busy_account_and_voice_gates() {
+fn channel_create_preserves_busy_and_account_gates() {
     fn disabled(cx: &TestAppContext, id: &str) -> bool {
         let Some(wire::Node::Container(ducktape_view_guest::wire::ContainerNode {
             interactivity,
@@ -85,7 +85,6 @@ fn channel_create_preserves_busy_account_and_voice_gates() {
     assert!(options.disabled);
     assert!(on_submit.is_none());
     for id in [
-        "chat-create-voice",
         "chat-create-members",
         "chat-create-cancel",
         "chat-create-submit",
@@ -96,12 +95,10 @@ fn channel_create_preserves_busy_account_and_voice_gates() {
     view.update(&mut cx, |chat, _, cx| {
         let create = chat.create.as_mut().unwrap();
         create.busy = false;
-        create.voice = true;
         chat.session.account = None;
         cx.notify();
     });
     cx.run_until_parked();
-    assert!(disabled(&cx, "chat-create-members"));
     assert!(disabled(&cx, "chat-create-submit"));
     assert!(cx.has_text("Create an account to create a channel"));
     assert!(!disabled(&cx, "chat-create-cancel"));

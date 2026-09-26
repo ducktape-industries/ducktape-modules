@@ -154,7 +154,7 @@ impl Names {
         self.member(principal)
     }
 
-    /// A member row, a huddle seat or a dm peer: the name, else what the
+    /// A member row or a dm peer: the name, else what the
     /// principal is; noted while the account does not act ("(suspended)").
     pub fn member(&self, principal: &Principal) -> String {
         let name = match self.name(principal) {

@@ -1,5 +1,4 @@
-//! The `chat` module: channels, messages, threads, reactions, members and
-//! huddles.
+//! The `chat` module: channels, messages, threads, reactions, and members.
 //!
 //! A write is an [`Op`], a read a [`Query`] answered by a [`Reply`], all
 //! borsh, the same types `chat-view` links. The acting [`Principal`] is the
@@ -12,7 +11,7 @@
 //! - `state.rs`: every table and index the module keeps, declared once
 //! - `rules.rs`: the checks an op passes before it writes
 //! - `ops.rs`: one short function per op
-//! - `origin.rs`: a huddle join's node proof, and the identity role's roster
+//! - `origin.rs`: the identity role's roster
 //! - `queries.rs`: one short function per question
 //! - `text.rs`: what search and tags read out of a message
 //! - `description.rs`: [`describe()`], an op in a person's words
@@ -57,13 +56,8 @@ pub const MAX_REVISIONS: u32 = 256;
 pub const MAX_EMOJI_BYTES: usize = 64;
 pub const MAX_REACTION_EMOJIS: usize = 64;
 pub const MAX_THREAD_REPLIES: u64 = 4096;
-pub const MAX_HUDDLE_MEMBERS: usize = 32;
 /// The most principals a read's `viewer` names (a reader is one account).
 pub const MAX_VIEWERS: usize = 8;
-pub const HUDDLE_NODE_KEY_BYTES: usize = 32;
-/// The namespace a node key signs under to join a huddle; the message is
-/// the channel id then the joining origin key.
-pub const HUDDLE_JOIN_NS: &[u8] = b"ducktape/huddle-join/v1";
 pub const MAX_TAGS_PER_MESSAGE: usize = 16;
 pub const MAX_TAG_CHARS: usize = 64;
 /// How many postings a search reads before it reports `capped`.
@@ -76,10 +70,6 @@ pub enum Op {
         channel_id: String,
         name: String,
         post_policy: PostPolicy,
-    },
-    CreateVoiceChannel {
-        channel_id: String,
-        name: String,
     },
     /// A members-only room between the actor's account and `counterpart`,
     /// id [`dm_channel_id`]; creating it twice is a no-op. The only way a
@@ -128,16 +118,6 @@ pub enum Op {
         channel_id: String,
         principal: Principal,
         member: bool,
-    },
-    /// `node_proof` is `node`'s signature over [`HUDDLE_JOIN_NS`] + channel
-    /// id + the origin key (verified by the module, not the rules).
-    JoinHuddle {
-        channel_id: String,
-        node: Vec<u8>,
-        node_proof: Vec<u8>,
-    },
-    LeaveHuddle {
-        channel_id: String,
     },
 }
 
@@ -239,8 +219,6 @@ pub struct ChannelRow {
     pub post_policy: PostPolicy,
     pub owner: Principal,
     pub archived: bool,
-    pub huddle: Vec<HuddleEntry>,
-    pub voice: bool,
 }
 
 impl ChannelRow {
@@ -261,14 +239,6 @@ impl ChannelRow {
 pub struct ChannelInfo {
     pub channel: ChannelRow,
     pub head_seq: u64,
-}
-
-#[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct HuddleEntry {
-    pub principal: Principal,
-    /// the node key, hex
-    pub node: String,
-    pub joined_at: u64,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -408,7 +378,6 @@ fn op_variants_only_append() {
         describe::variants::<Op>(),
         [
             "CreateChannel",
-            "CreateVoiceChannel",
             "CreateDmChannel",
             "RenameChannel",
             "SetChannelArchived",
@@ -418,8 +387,6 @@ fn op_variants_only_append() {
             "AddReaction",
             "RemoveReaction",
             "SetMembership",
-            "JoinHuddle",
-            "LeaveHuddle",
         ]
     );
 }

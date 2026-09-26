@@ -35,8 +35,6 @@ fn channel(id: &str, name: &str, head_seq: u64) -> ChannelInfo {
             post_policy: PostPolicy::Open,
             owner: Principal::Account(7),
             archived: false,
-            huddle: Vec::new(),
-            voice: false,
         },
         head_seq,
     }

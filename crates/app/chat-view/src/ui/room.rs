@@ -4,7 +4,7 @@ use ducktape_view_guest::design;
 use ducktape_view_guest::prelude::*;
 use ducktape_view_guest::{AnyElement, ClickEvent, Context, ParentElement, Styled, Theme, div, px};
 
-use chat::{ChannelInfo, MsgRow};
+use chat::MsgRow;
 use ducktape_view_guest::view::Loadable;
 
 use super::timeline;
@@ -30,15 +30,10 @@ pub fn render(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoEl
         true => timeline::list(chat, Pane::Timeline, cx, theme).into_any_element(),
         false => search_results(chat, cx, theme).into_any_element(),
     };
-    let huddled = chat
-        .room_info()
-        .filter(|info| !info.channel.huddle.is_empty())
-        .map(|info| huddle(info, theme));
     pane.child(header(chat, room, cx, theme))
         .children(notice(chat, cx, theme))
         .children(confirmation(chat, cx, theme))
         .child(body)
-        .children(huddled)
         .child(compose(chat, room, cx, theme))
 }
 
@@ -271,30 +266,6 @@ fn no_room(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement {
         }
     }
     .into_any_element()
-}
-
-fn huddle(info: &ChannelInfo, theme: &Theme) -> impl IntoElement {
-    div()
-        .id("chat-room-huddle")
-        .flex()
-        .items_center()
-        .gap_2()
-        .mx_3()
-        .my_1()
-        .p_2()
-        .bg(theme.surface)
-        .child(badge(
-            "chat-room-huddle-live",
-            "Voice",
-            theme.success,
-            theme.success_soft,
-        ))
-        .child(
-            div()
-                .text_size(design::text::SECONDARY)
-                .text_color(theme.muted)
-                .child(format!("{} people", info.channel.huddle.len())),
-        )
 }
 
 fn search_results(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement {
