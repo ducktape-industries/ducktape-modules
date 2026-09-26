@@ -30,6 +30,12 @@ impl conformance::identity::Fixture for Mine {
     fn account(&self, host: &MockHost, key: &[u8]) -> AccountNumber { todo!() }
     /// `key` comes to hold an account that does not act; `None` if yours always act.
     fn stopped(&self, host: &MockHost, key: &[u8]) -> Option<AccountNumber> { None }
+    /// `account` (one `account` made) stops holding `key`.
+    fn drop_key(&self, host: &MockHost, account: AccountNumber, key: &[u8]) { todo!() }
+    /// `key` comes to hold an active managed account; `None` if yours has none.
+    fn managed(&self, host: &MockHost, key: &[u8]) -> Option<AccountNumber> { None }
+    /// `account` (one `managed` made) is revoked; unused while `managed` is `None`.
+    fn revoke(&self, host: &MockHost, account: AccountNumber) {}
 }
 
 #[test]
@@ -50,14 +56,20 @@ names itself; `run` calls them all, each on a fresh host.
 **identity**: the role's `Op`, `Query` and `Reply` are the module's first
 variants, byte for byte; `RegisterModule` is refused `unauthorized` from a
 signed frame or a module and writes nothing, and from the system it is
-idempotent (one account, `Kind::Module`); `Account` of an unknown key and
+idempotent (one account, `Kind::Module`); a signed or module frame is
+refused though the kernel gives it a sender (its key's account, the
+module's account): only the system's origin registers; `Account` of an unknown key and
 `OfModule` of an unregistered module are `None`; a key that holds an
 acting account resolves to it (a person or an active managed account); a
 key whose account does not act is refused `unauthorized`, and its profile
-is managed and not active; `Profile` past every account is `None`;
+is managed and not active; a key dropped from its account (the fixture's
+`drop_key`) resolves to `None`; a revoked managed account's keys (`managed`,
+`revoke`) resolve to `None` or are refused, and its profile is `Revoked`;
+`Profile` past every account is `None`;
 `Profiles` ascends, holds at most `limit`, `next` is the last number of a
 page that has more, the listing is the same whatever the limit and agrees
-with `Profile`; every `Kind::Module(id)` is the account `OfModule(id)`
+with `Profile`; `Profiles { limit: 0 }` is a page, empty with no `next` or
+the module's capped first page with `next` as any page has it; every `Kind::Module(id)` is the account `OfModule(id)`
 answers.
 
 **validators**: the role's `Query` and `Reply` are the first variants;
