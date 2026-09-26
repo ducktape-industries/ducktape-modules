@@ -4,7 +4,7 @@ use guest::{BlobId, Cause, Env, Origin, code};
 use guest::{MockHost, Module};
 use store::PageRequest;
 
-use crate::{AUTHORITY, Change, Entry, Genesis, Modules, Op, Query, Reply, Scheduled, View};
+use crate::{Change, Entry, Genesis, Modules, Op, Query, Reply, Scheduled, View};
 
 fn env(height: u64, origin: Origin) -> Env {
     Env {
@@ -21,7 +21,7 @@ fn env(height: u64, origin: Origin) -> Env {
 }
 
 fn authority(height: u64) -> Env {
-    env(height, Origin::Module(AUTHORITY.into()))
+    env(height, Origin::Signed(vec![9]))
 }
 
 fn entry(program: &str, code: BlobId) -> Entry {
@@ -77,17 +77,9 @@ fn publishing_stores_the_code_under_its_blob_id() {
 }
 
 #[test]
-fn only_the_authority_schedules_and_only_published_code_in_the_future() {
+fn anyone_schedules_but_only_published_code_in_the_future() {
     let (store, code) = founded();
     let set = Change::Set(entry("new", code));
-    let stranger = Modules::execute(
-        &store.exec(env(1, Origin::Signed(vec![9]))),
-        Op::Schedule(Scheduled {
-            height: 5,
-            change: set.clone(),
-        }),
-    );
-    assert_eq!(stranger.unwrap_err().code, code::UNAUTHORIZED);
     assert_eq!(
         schedule(&store, 1, set.clone()).unwrap_err().code,
         code::INVALID_INPUT
@@ -209,14 +201,6 @@ fn a_view_is_listed_apart_from_the_programs_and_scheduled_like_one() {
         name: "explorer".into(),
         view: code,
     });
-    let stranger = Modules::execute(
-        &store.exec(env(1, Origin::Signed(vec![9]))),
-        Op::Schedule(Scheduled {
-            height: 5,
-            change: explorer.clone(),
-        }),
-    );
-    assert_eq!(stranger.unwrap_err().code, code::UNAUTHORIZED);
     let unpublished = Change::SetView(View {
         name: "explorer".into(),
         view: BlobId::Sha256([7; 32]),

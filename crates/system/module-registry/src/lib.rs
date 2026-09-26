@@ -1,5 +1,5 @@
 //! The `module-registry` module: the roster of modules a network runs, and
-//! the scheduled changes to it, taken from the [`AUTHORITY`].
+//! the scheduled changes to it (from anyone, for now: `Env::authority`).
 //!
 //! The types, rules and [`Modules`] module are always built; a view links
 //! them with `module` off. The `module` feature adds its wasm exports.
@@ -12,9 +12,6 @@ pub mod view;
 
 pub use program::Modules;
 pub use store::{PageRequest, PageResponse};
-
-/// The module whose frames this registry accepts as governance.
-pub const AUTHORITY: &str = "governance";
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use guest::ModuleId;

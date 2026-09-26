@@ -24,6 +24,13 @@ impl Env {
         }
     }
 
+    /// Who may change the modules and the validators. A stub that admits
+    /// every origin until the chain has an authority to ask; swapping it
+    /// for the real check is this one function.
+    pub fn authority(&self) -> Result<(), Error> {
+        Ok(())
+    }
+
     /// Refused unless `module` or the chain itself sent this.
     pub fn sent_by(&self, module: &str) -> Result<(), Error> {
         let by_module = matches!(&self.origin, Origin::Module(sender) if sender == module);

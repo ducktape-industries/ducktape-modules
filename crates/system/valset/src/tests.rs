@@ -4,7 +4,7 @@ use guest::{Cause, Env, Origin, code};
 use guest::{MockHost, Module};
 use store::PageRequest;
 
-use crate::{AUTHORITY, Genesis, Member, Membership, Op, Query, Reply, Role, Valset};
+use crate::{Genesis, Member, Membership, Op, Query, Reply, Role, Valset};
 
 fn key(n: u8) -> Vec<u8> {
     vec![n; 32]
@@ -43,7 +43,7 @@ fn founded() -> MockHost {
 }
 
 fn govern(store: &MockHost, op: Op) -> Result<(), guest::Error> {
-    Valset::execute(&store.exec(env(Origin::Module(AUTHORITY.into()))), op)
+    Valset::execute(&store.exec(env(Origin::Signed(key(9)))), op)
 }
 
 fn ask(store: &MockHost, query: Query) -> Reply {
@@ -72,13 +72,8 @@ fn founding_seats_the_validators_in_key_order() {
 }
 
 #[test]
-fn only_the_authority_writes_and_a_key_is_32_bytes() {
+fn anyone_writes_and_a_key_is_32_bytes() {
     let store = founded();
-    let stranger = Valset::execute(
-        &store.exec(env(Origin::Signed(key(9)))),
-        Op::Set(membership(3, Role::Resident)),
-    );
-    assert_eq!(stranger.unwrap_err().code, code::UNAUTHORIZED);
     let short = govern(
         &store,
         Op::Set(Membership {

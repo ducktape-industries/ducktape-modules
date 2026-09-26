@@ -1,28 +1,12 @@
 use super::*;
 
 #[test]
-fn the_authority_seats_members_and_the_next_epoch_reads_them() {
+fn anyone_seats_members_and_the_next_epoch_reads_them() {
     deterministic::Runner::default().start(|context| async move {
         let dir = tempfile::tempdir().unwrap();
         let mut net = Net::found(context, dir.path()).await;
-        let stranger = net
-            .refuse(
-                &public(1),
-                valset::MODULE,
-                &valset::Op::Set(membership(3, valset::Role::Resident)),
-            )
-            .await;
-        assert_eq!(stranger, reason::UNAUTHORIZED);
-        let other_program = net
-            .sent_by(
-                "probe",
-                valset::MODULE,
-                &valset::Op::Set(membership(3, valset::Role::Resident)),
-            )
-            .await;
-        assert_eq!(refusal_of(&other_program), reason::UNAUTHORIZED);
         let admitted = net
-            .as_authority(
+            .as_anyone(
                 valset::MODULE,
                 &valset::Op::Set(membership(3, valset::Role::Resident)),
             )
@@ -37,7 +21,7 @@ fn the_authority_seats_members_and_the_next_epoch_reads_them() {
         };
         assert_eq!(members.len(), 3);
         let promoted = net
-            .as_authority(
+            .as_anyone(
                 valset::MODULE,
                 &valset::Op::Set(membership(3, valset::Role::Validator)),
             )
@@ -51,17 +35,17 @@ fn the_authority_seats_members_and_the_next_epoch_reads_them() {
         assert_eq!(net.host.epoch_members(epoch).unwrap().unwrap().len(), 3);
         for seed in [1, 2] {
             let removed = net
-                .as_authority(valset::MODULE, &valset::Op::Remove { key: public(seed) })
+                .as_anyone(valset::MODULE, &valset::Op::Remove { key: public(seed) })
                 .await;
             output_of(&removed);
         }
         assert_eq!(net.validators().await, vec![public(3)]);
         let last = net
-            .as_authority(valset::MODULE, &valset::Op::Remove { key: public(3) })
+            .as_anyone(valset::MODULE, &valset::Op::Remove { key: public(3) })
             .await;
         assert_eq!(refusal_of(&last), reason::WRONG_STATE);
         let demoted = net
-            .as_authority(
+            .as_anyone(
                 valset::MODULE,
                 &valset::Op::Set(membership(3, valset::Role::Resident)),
             )

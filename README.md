@@ -19,7 +19,7 @@ crates/lib/     gitcore
 | `crates/sdk/describe` | what an op means to a person: the pure wasm module a program ships in its `ducktape.describe` section, and the sandbox that runs it |
 | `crates/sdk/ducklink` | the `duck://` link: `duck://<chain>/<program>/<tail…>`, one spelling per name, no program names known here |
 | `crates/sdk/view-wire`, `view-guest`, `view-guest-derive`, `design` | the host<->view wire, the runtime a wasm view is written against, the palette |
-| `crates/system/module-registry` | the boot set's root: the registry module (its `Op`, `Query`, `Reply`) and its `AUTHORITY`. Its `tests/system.rs` founds ducktape's host over the bytes `make wasm-programs` built and drives every system module |
+| `crates/system/module-registry` | the boot set's root: the registry module (its `Op`, `Query`, `Reply`). Its `tests/system.rs` founds ducktape's host over the bytes `make wasm-programs` built and drives every system module |
 | `crates/system/valset`, `identity` | the other two boot modules, the same shape: types always built, the wasm exports behind `module`. identity holds every account that acts: a person's, an agent's (managed by a person) and each module's (registered by the kernel as it admits the module) |
 | `crates/app/chat`, `chat-view` | the reference app module: `chat` is one crate whose types, rules and `Chat` module are always built (native, tested over `MockHost`), and whose wasm exports sit behind its `module` feature. `chat-view` links `chat` with the feature off: the types, no host import, no module export |
 | `crates/app/forge`, `forge-view` | the git server as a module, the same shape as `chat`: a push is one op whose input is the receive-pack body a client sent, a merge is an op that lands the commit the client built, fetch and the ref advertisement are queries; a git object's blob id is its oid. it links `gitcore` for the git; merging is the client's. The module runs natively over `MemorySandbox` (forge's and chat's `MockHost`), which is where `fixtures/` comes from; `forge-view` links `forge` with `module` off |
@@ -36,9 +36,9 @@ What is not wasm lives elsewhere: the forge smoke (real git against
 `forge.wasm` on ducktape's runtime) and `view-pack` (a view into its module)
 are in the qa repo, which packs and founds what this repo builds.
 
-`valset` and `module-registry` take their writes from the module named
-`governance` (each crate's `AUTHORITY`); no module in this tree
-implements it. The system modules beyond the boot set are archived at
+`valset` and `module-registry` take their writes from anyone for now
+(`guest::Env::authority` is a stub until the chain has an authority). An
+update replaces a module's code under the same id. The system modules beyond the boot set are archived at
 `ducktape-industries/ducktape-system-modules-archive`.
 
 ## A module

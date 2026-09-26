@@ -6,7 +6,7 @@ use guest::{Error, ExecCtx, QueryCtx, already_exists, invalid, not_found};
 use guest::{HashKind, ModuleId};
 use store::{Item, Map};
 
-use crate::{AUTHORITY, CODE_KIND, Change, Entry, Genesis, Scheduled, View};
+use crate::{CODE_KIND, Change, Entry, Genesis, Scheduled, View};
 
 const PROGRAMS: Map<ModuleId, Entry> = Map::new("p/");
 const VIEWS: Map<ModuleId, View> = Map::new("v/");
@@ -32,7 +32,7 @@ pub(crate) fn publish(ctx: &ExecCtx, body: Vec<u8>) -> Result<(), Error> {
 
 pub(crate) fn schedule(ctx: &ExecCtx, scheduled: Scheduled) -> Result<(), Error> {
     let env = ctx.env();
-    env.sent_by(AUTHORITY)?;
+    env.authority()?;
     let in_the_future = scheduled.height > env.height;
     if !in_the_future {
         return Err(invalid(format!(
@@ -82,7 +82,7 @@ pub(crate) fn schedule(ctx: &ExecCtx, scheduled: Scheduled) -> Result<(), Error>
 
 pub(crate) fn cancel(ctx: &ExecCtx, height: u64, program: ModuleId) -> Result<(), Error> {
     let env = ctx.env();
-    env.sent_by(AUTHORITY)?;
+    env.authority()?;
     let key = (height, program);
     let Some(change) = SCHEDULE.get(ctx, &key)? else {
         return Err(not_found(format!("{} does not change at {height}", key.1)));
