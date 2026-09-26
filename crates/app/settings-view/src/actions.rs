@@ -125,7 +125,11 @@ impl Settings {
             self.account
                 .ready()
                 .and_then(Option::as_ref)
-                .is_some_and(|a| a.agents.iter().any(|agent| agent.number == account))
+                .is_some_and(|a| {
+                    a.agents.iter().any(|agent| {
+                        agent.number == account && agent.standing() != identity::Standing::Revoked
+                    })
+                })
         };
         let op = abi::unhex(self.agent_key.text.trim())
             .and_then(|bytes| abi::decode::<identity::Op>(&bytes).ok())

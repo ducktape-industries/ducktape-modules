@@ -131,6 +131,17 @@ fn a_scheduled_change_is_seen_at_its_height_and_folded_by_the_next_op() {
 }
 
 #[test]
+fn a_program_bound_to_a_role_is_never_removed() {
+    let (store, code) = founded();
+    for role in ["module-registry", "valset", "identity"] {
+        let removed = schedule(&store, 5, Change::Remove(role.into())).unwrap_err();
+        assert_eq!(removed.code, code::INVALID_INPUT, "{role}");
+    }
+    // its code still changes
+    schedule(&store, 5, Change::Set(entry("identity", code))).unwrap();
+}
+
+#[test]
 fn the_schedule_pages_in_height_order_and_a_cancel_removes_one_change() {
     let (store, code) = founded();
     for height in [30u64, 4, 200] {
