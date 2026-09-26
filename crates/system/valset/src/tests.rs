@@ -165,3 +165,29 @@ fn the_host_contract_is_a_prefix_of_the_program_contract() {
         abi::encode(&super::Reply::Members(vec![member]))
     );
 }
+
+#[test]
+fn role_asks_the_program_bound_to_the_validators_role() {
+    let store = founded();
+    let valset = store.clone();
+    store.borrow_mut().siblings.insert(
+        "third-party-valset".into(),
+        Box::new(move |request| {
+            let reply = Valset::query(
+                &valset.query(env(Origin::Root)),
+                abi::decode(request).unwrap(),
+            )?;
+            Ok(abi::encode(&reply))
+        }),
+    );
+    let mut bound = env(Origin::Root);
+    bound.roles = guest::Roles {
+        validators: "third-party-valset".into(),
+        ..MockHost::roles()
+    };
+    // nothing answers at the literal name: only the binding reaches valset
+    assert_eq!(
+        crate::role(&store.query(bound), &key(1)).unwrap(),
+        Some(Role::Validator)
+    );
+}

@@ -61,9 +61,11 @@ pub enum Reply {
     Membership(Option<Membership>),
 }
 
-/// The ask another module makes of valset.
+/// The ask another module makes of valset, at the program genesis bound to
+/// the validators role.
 pub fn role(ctx: &guest::QueryCtx, key: &[u8]) -> Result<Option<Role>, guest::Error> {
-    match ctx.ask::<Query, Reply>(MODULE, &Query::Membership { key: key.to_vec() })? {
+    let validators = &ctx.env().roles.validators;
+    match ctx.ask::<Query, Reply>(validators, &Query::Membership { key: key.to_vec() })? {
         Reply::Membership(membership) => Ok(membership.map(|membership| membership.role)),
         other => Err(guest::Error::new(
             guest::code::UNEXPECTED_REPLY,
