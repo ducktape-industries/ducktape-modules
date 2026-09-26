@@ -1,5 +1,5 @@
 //! forge's host with chat's beside it: the sibling forge queries, and where
-//! its emissions land when a block delivers them. `accounts` is identity's
+//! its emissions land, in the frame that emitted them. `accounts` is identity's
 //! roster: each key the account it belongs to, the harness keys
 //! ([`HOLDERS`](super::HOLDERS)) from the start, each module its account
 //! ([`MODULES`]) and each agent its standing (`agents`). A frame's sender
@@ -165,8 +165,8 @@ impl MemorySandbox {
         chat::Chat::query(&self.chat.query(env(Origin::Root, None, 0, 0)), q)
     }
 
-    /// Delivers what forge emitted so far to chat, the way the kernel delivers
-    /// the previous block's queue: as forge, at the delivering height.
+    /// Runs what forge emitted to chat, as the kernel runs it once forge's
+    /// handler returns: as forge, in the same frame.
     pub fn deliver(&mut self, height: u64, time: u64) -> Vec<Result<(), Error>> {
         self.forge
             .take_emissions()

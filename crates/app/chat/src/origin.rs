@@ -50,7 +50,7 @@ pub(crate) fn accounts(ctx: &QueryCtx, page: PageRequest) -> Result<PageResponse
         limit: page.limit() as u32,
     };
     let role::Reply::Profiles { profiles, next } =
-        ctx.ask::<role::Query, role::Reply>(&ctx.env().roles.identity, &profiles)?
+        ctx.query::<role::Query, role::Reply>(&ctx.env().roles.identity, &profiles)?
     else {
         return Err(Error::new(
             code::UNEXPECTED_REPLY,

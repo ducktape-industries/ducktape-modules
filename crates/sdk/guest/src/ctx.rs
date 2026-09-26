@@ -23,10 +23,21 @@ pub struct QueryCtx {
 }
 
 /// An execute's (or init's) context: every read of [`QueryCtx`] and the
-/// writes: state, blobs, and what leaves the module (`send`, `call`,
-/// `event`, `set_return_data`).
+/// writes: state, blobs, and what leaves the module (`emit`, `event`,
+/// `set_return_data`).
 pub struct ExecCtx {
     reads: QueryCtx,
+}
+
+/// Whether an emitted message's outcome comes back to this module, as a
+/// [`Cause::Reply`](crate::Cause::Reply) in the same frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Reply {
+    /// The target's refusal fails this whole frame.
+    None,
+    /// The target's refusal undoes its writes and comes back as the
+    /// reply; the reply's refusal fails the frame, its Ok absorbs it.
+    Wanted,
 }
 
 impl Deref for ExecCtx {
@@ -105,7 +116,7 @@ impl QueryCtx {
         #[cfg(target_arch = "wasm32")]
         return ffi::host(&op);
         #[cfg(not(target_arch = "wasm32"))]
-        return self.host.serve(op);
+        return self.host.serve(&self.env.module, op);
     }
 
     fn done(&self, op: HostOp) {
@@ -189,8 +200,9 @@ impl QueryCtx {
         }
     }
 
-    /// Another module's answer to `request`, raw.
-    pub fn query(
+    /// Another module's answer to `request`, raw. A query reads: it moves
+    /// no state and runs in this frame.
+    pub fn query_raw(
         &self,
         module: impl Into<ModuleId>,
         request: impl Into<Vec<u8>>,
@@ -205,12 +217,13 @@ impl QueryCtx {
     }
 
     /// Another module's answer to `request`, borsh both ways.
-    pub fn ask<Q: BorshSerialize, R: BorshDeserialize>(
+    pub fn query<Q: BorshSerialize, R: BorshDeserialize>(
         &self,
         module: impl Into<ModuleId>,
         request: &Q,
     ) -> Result<R, Error> {
-        abi::decode(&self.query(module, abi::encode(request))?).map_err(crate::kernel::error_from)
+        abi::decode(&self.query_raw(module, abi::encode(request))?)
+            .map_err(crate::kernel::error_from)
     }
 
     pub fn sha256(&self, bytes: impl Into<Vec<u8>>) -> [u8; 32] {
@@ -288,26 +301,20 @@ impl ExecCtx {
         }
     }
 
-    /// Sends `payload` to `target`, delivered after this block; no reply.
-    pub fn send(&self, target: impl Into<ModuleId>, payload: impl Into<Vec<u8>>) -> MessageId {
-        self.message(target, payload, false)
-    }
-
-    /// Sends `payload` to `target`; its outcome comes back as a reply.
-    pub fn call(&self, target: impl Into<ModuleId>, payload: impl Into<Vec<u8>>) -> MessageId {
-        self.message(target, payload, true)
-    }
-
-    fn message(
+    /// Has `target` run `payload` in this frame, once this handler returns
+    /// Ok, as a message from this module. Messages run in the order
+    /// emitted, each before the next, and `reply` says what its refusal
+    /// does.
+    pub fn emit(
         &self,
         target: impl Into<ModuleId>,
         payload: impl Into<Vec<u8>>,
-        reply: bool,
+        reply: Reply,
     ) -> MessageId {
         match self.host(HostOp::Emit(Message {
             target: target.into(),
             payload: payload.into(),
-            reply,
+            reply: reply == Reply::Wanted,
         })) {
             HostReply::Item(item) => item.into(),
             other => protocol("item", other),
@@ -321,5 +328,51 @@ impl ExecCtx {
     /// The execute's return value (the last one set wins).
     pub fn set_return_data(&self, bytes: impl Into<Vec<u8>>) {
         self.done(HostOp::Output(bytes.into()))
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use abi::Message;
+
+    use super::*;
+    use crate::{Cause, MessageId, MockHost, Origin};
+
+    #[test]
+    fn emit_hands_the_host_the_message_and_names_it_in_this_frame() {
+        let host = MockHost::default();
+        let env = Env {
+            chain_id: b"n".to_vec(),
+            height: 1,
+            time: 2,
+            module: "forge".into(),
+            origin: Origin::Root,
+            sender: None,
+            roles: MockHost::roles(),
+            cause: Cause::Direct,
+        };
+        let ctx = host.exec(env);
+        let first = ctx.emit("chat", b"a".to_vec(), Reply::None);
+        let second = ctx.emit("chat", b"b".to_vec(), Reply::Wanted);
+        let id = |seq| MessageId {
+            module: "forge".into(),
+            seq,
+        };
+        assert_eq!((first, second), (id(0), id(1)));
+        assert_eq!(
+            host.take_emissions(),
+            [
+                Message {
+                    target: "chat".into(),
+                    payload: b"a".to_vec(),
+                    reply: false,
+                },
+                Message {
+                    target: "chat".into(),
+                    payload: b"b".to_vec(),
+                    reply: true,
+                },
+            ]
+        );
     }
 }

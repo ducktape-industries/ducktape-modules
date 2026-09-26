@@ -202,7 +202,7 @@ pub(crate) fn require_person_or_agent(ctx: &QueryCtx, principal: &Principal) -> 
     };
     let asked = role::Query::Profile(number);
     let role::Reply::Profile(profile) =
-        ctx.ask::<role::Query, role::Reply>(&ctx.env().roles.identity, &asked)?
+        ctx.query::<role::Query, role::Reply>(&ctx.env().roles.identity, &asked)?
     else {
         return Err(Error::new(
             code::UNEXPECTED_REPLY,

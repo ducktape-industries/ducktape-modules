@@ -1,9 +1,10 @@
 //! The minimal module SDK. A module is a type implementing [`Module`] and one
 //! [`export!`]; its entry points receive an [`ExecCtx`] or a [`QueryCtx`],
 //! whose methods are the whole host surface: `env`, raw state (`get`, `set`,
-//! `delete`, `scan`), blobs, `send`/`call`, `event`, `set_return_data`,
-//! `query`/`ask` of another module, `sha256` and `verify`. On wasm32 they are host calls;
-//! natively the same contexts run over a [`MockHost`].
+//! `delete`, `scan`), blobs, `event`, `set_return_data`, `sha256` and
+//! `verify`, and the two ways to another module: `emit` (a write it runs
+//! in this frame, replying or not) and `query` (a read). On wasm32 they
+//! are host calls; natively the same contexts run over a [`MockHost`].
 //!
 //! ```ignore
 //! use guest::{Error, ExecCtx, Module, QueryCtx};
@@ -43,7 +44,7 @@ pub use abi;
 pub use abi::{
     Blob, BlobHeader, BlobId, CryptoOp, CryptoReply, Entry, HashKind, Message, Root, Scheme,
 };
-pub use ctx::{ExecCtx, QueryCtx};
+pub use ctx::{ExecCtx, QueryCtx, Reply};
 pub use kernel::{
     AccountNumber, Cause, Env, Error, MessageId, ModuleId, Order, Origin, Outcome, Principal,
     Range, Roles, code,

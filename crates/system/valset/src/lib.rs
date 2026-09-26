@@ -63,7 +63,7 @@ pub enum Reply {
 
 /// The ask another module makes of valset.
 pub fn role(ctx: &guest::QueryCtx, key: &[u8]) -> Result<Option<Role>, guest::Error> {
-    match ctx.ask::<Query, Reply>(MODULE, &Query::Membership { key: key.to_vec() })? {
+    match ctx.query::<Query, Reply>(MODULE, &Query::Membership { key: key.to_vec() })? {
         Reply::Membership(membership) => Ok(membership.map(|membership| membership.role)),
         other => Err(guest::Error::new(
             guest::code::UNEXPECTED_REPLY,

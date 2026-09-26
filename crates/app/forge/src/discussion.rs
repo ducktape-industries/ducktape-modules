@@ -32,7 +32,8 @@ impl Event {
     }
 }
 
-/// Queues the change's channel. Chat creates it in the next block.
+/// Opens the change's channel: chat creates it in this frame, and its
+/// refusal fails the op.
 pub fn create(ctx: &ExecCtx, repo: &str, change: &Change) {
     emit(
         ctx,
@@ -44,8 +45,8 @@ pub fn create(ctx: &ExecCtx, repo: &str, change: &Change) {
     );
 }
 
-/// Queues one system line into the change's channel: the event's code in
-/// a `forge` block, no name and no sentence.
+/// Posts one system line into the change's channel, in this frame: the
+/// event's code in a `forge` block, no name and no sentence.
 pub fn post(ctx: &ExecCtx, change: &Change, message_id: String, event: Event) {
     emit(
         ctx,
@@ -62,7 +63,7 @@ pub fn post(ctx: &ExecCtx, change: &Change, message_id: String, event: Event) {
 }
 
 fn emit(ctx: &ExecCtx, message: Op) {
-    ctx.send(chat::MODULE, abi::encode(&message));
+    ctx.emit(chat::MODULE, abi::encode(&message), guest::Reply::None);
 }
 
 /// The chat root a review posted, by its message id.
@@ -70,7 +71,7 @@ pub fn message(ctx: &QueryCtx, id: &str) -> Result<Option<MsgRow>, Error> {
     let query = Query::MessageById {
         message_id: id.into(),
     };
-    match ctx.ask::<Query, Reply>(chat::MODULE, &query)? {
+    match ctx.query::<Query, Reply>(chat::MODULE, &query)? {
         Reply::Message(row) => Ok(row),
         other => Err(unexpected("MessageById", &other)),
     }
@@ -86,7 +87,7 @@ pub fn attention(
         channel_id: channel.into(),
         author: principal.clone(),
     };
-    match ctx.ask::<Query, Reply>(chat::MODULE, &query)? {
+    match ctx.query::<Query, Reply>(chat::MODULE, &query)? {
         Reply::Attention(row) => Ok(row),
         other => Err(unexpected("ThreadAttention", &other)),
     }
