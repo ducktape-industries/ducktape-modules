@@ -1,6 +1,7 @@
 //! The recent window: the last [`WINDOW`] finalized blocks and the
 //! transactions they carry, folded in a page at a time.
-use ducktape_view_guest::methods::{Block, Description};
+use ducktape_view_guest::host::Error;
+use ducktape_view_guest::methods::{Block, Description, Outcome, Receipt};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::cell::{Cell, OnceCell};
@@ -31,6 +32,32 @@ pub struct TxRow {
     /// what the host answered for it (`Explorer::describe`), or its bytes
     pub(crate) op: OnceCell<Description>,
     pub(crate) asked: Cell<bool>,
+    /// how its run ended, where the node kept its receipt
+    pub run: Option<Run>,
+}
+
+/// A receipt as the explorer shows it: whose run, its refusal where it was
+/// rejected, and the runs its messages caused. Outputs and events are left
+/// behind: nothing here shows them, and a snapshot need not carry them.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Run {
+    pub program: String,
+    pub refusal: Option<Error>,
+    pub nested: Vec<Run>,
+}
+
+impl From<Receipt> for Run {
+    fn from(receipt: Receipt) -> Run {
+        let refusal = match receipt.outcome {
+            Outcome::Applied { .. } => None,
+            Outcome::Rejected(refusal) => Some(refusal),
+        };
+        Run {
+            program: receipt.program,
+            refusal,
+            nested: receipt.nested.into_iter().map(Run::from).collect(),
+        }
+    }
 }
 
 impl TxRow {
@@ -56,6 +83,7 @@ struct StoredTx<'a> {
     target: Cow<'a, str>,
     op: Option<Description>,
     payload: Cow<'a, [u8]>,
+    run: Cow<'a, Option<Run>>,
 }
 
 impl Serialize for TxRow {
@@ -74,6 +102,7 @@ impl Serialize for TxRow {
             target: Cow::Borrowed(&self.target),
             op,
             payload: Cow::Borrowed(payload),
+            run: Cow::Borrowed(&self.run),
         }
         .serialize(s)
     }
@@ -92,6 +121,7 @@ impl<'de> Deserialize<'de> for TxRow {
             payload: stored.payload.into_owned(),
             op: stored.op.map(Into::into).unwrap_or_default(),
             asked: Default::default(),
+            run: stored.run.into_owned(),
         })
     }
 }
@@ -121,6 +151,7 @@ pub(crate) fn rows(block: Block) -> (BlockRow, Vec<TxRow>) {
             payload: tx.payload,
             op: Default::default(),
             asked: Default::default(),
+            run: tx.receipt.map(Run::from),
         })
         .collect();
     (row, txs)

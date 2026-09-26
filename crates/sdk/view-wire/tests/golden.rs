@@ -263,6 +263,20 @@ fn every_method() -> Vec<(Exchange, serde_json::Value)> {
                     seq: 1,
                     target: "chat".into(),
                     payload: vec![9],
+                    receipt: Some(Receipt {
+                        program: "chat".into(),
+                        outcome: Outcome::Rejected(Error {
+                            code: "unauthorized".into(),
+                            message: "not a member".into(),
+                        }),
+                        events: vec![vec![1]],
+                        nested: vec![Receipt {
+                            program: "identity".into(),
+                            outcome: Outcome::Applied { output: vec![2] },
+                            events: Vec::new(),
+                            nested: Vec::new(),
+                        }],
+                    }),
                 }],
             }],
         ),

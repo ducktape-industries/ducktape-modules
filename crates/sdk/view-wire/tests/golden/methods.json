@@ -346,7 +346,35 @@
             "target": "chat",
             "payload": [
               9
-            ]
+            ],
+            "receipt": {
+              "program": "chat",
+              "outcome": {
+                "Rejected": {
+                  "code": "unauthorized",
+                  "message": "not a member"
+                }
+              },
+              "events": [
+                [
+                  1
+                ]
+              ],
+              "nested": [
+                {
+                  "program": "identity",
+                  "outcome": {
+                    "Applied": {
+                      "output": [
+                        2
+                      ]
+                    }
+                  },
+                  "events": [],
+                  "nested": []
+                }
+              ]
+            }
           }
         ]
       }

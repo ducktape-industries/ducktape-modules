@@ -244,7 +244,9 @@ pub enum BlockRef {
     Id([u8; 32]),
 }
 /// One applied frame of a block. `hash` is sha256 over the frame's exact
-/// bytes; `payload` is the op the target program was handed.
+/// bytes; `payload` is the op the target program was handed. `receipt` is
+/// its run as the node kept it when it applied the block; `None` where the
+/// node keeps none (it never ran the block: one below its state-sync anchor).
 #[derive(
     Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize,
 )]
@@ -254,6 +256,24 @@ pub struct Tx {
     pub seq: u64,
     pub target: String,
     pub payload: Vec<u8>,
+    pub receipt: Option<Receipt>,
+}
+/// One run: the program's, how it ended, what it announced, and the runs
+/// its messages caused, in order. A nested run's `Applied` stands only
+/// where every run above it applied too: an ancestor's rejection undid it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+pub struct Receipt {
+    pub program: String,
+    pub outcome: Outcome,
+    pub events: Vec<Vec<u8>>,
+    pub nested: Vec<Receipt>,
+}
+/// How a run ended: applied with the program's output, or rejected with
+/// its refusal (`code` the refusal's reason token, `message` its sentence).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+pub enum Outcome {
+    Applied { output: Vec<u8> },
+    Rejected(crate::Error),
 }
 /// A finalized block as the node's archive keeps it. `proposer` is the
 /// validator key that led its round, where the node holds its certificate.

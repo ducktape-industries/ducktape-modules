@@ -12,10 +12,11 @@ pub(crate) use std::rc::Rc;
 
 pub(crate) use crate::*;
 pub(crate) use abi::BlobId;
+pub(crate) use ducktape_view_guest::host::Error;
 pub(crate) use ducktape_view_guest::methods::{
     Block, BlockPage, BlockRef, ChainBlock, ChainBlocks, ChainHeads, ChainStatus, Changes,
     ClipboardWrite, ClockTicks, Description, Head, HostRoute, HostSession, ModuleDescribe,
-    NodeStatus, Query, Session, Tx, Value,
+    NodeStatus, Outcome, Query, Receipt, Session, Tx, Value,
 };
 pub(crate) use ducktape_view_guest::testing::{StreamSender, TestAppContext};
 pub(crate) use identity::view::Identity;
@@ -46,6 +47,27 @@ pub(crate) fn tx(seed: u8, signer: [u8; 32], target: &str, payload: Vec<u8>) -> 
         seq: seed as u64,
         target: target.into(),
         payload,
+        receipt: None,
+    }
+}
+
+pub(crate) fn receipt(
+    program: &str,
+    refused: Option<(&str, &str)>,
+    nested: Vec<Receipt>,
+) -> Receipt {
+    let outcome = match refused {
+        None => Outcome::Applied { output: Vec::new() },
+        Some((code, message)) => Outcome::Rejected(Error {
+            code: code.into(),
+            message: message.into(),
+        }),
+    };
+    Receipt {
+        program: program.into(),
+        outcome,
+        events: Vec::new(),
+        nested,
     }
 }
 
@@ -61,11 +83,36 @@ pub(crate) fn chain(tip: u64) -> Vec<Block> {
             epoch: height / 10,
             proposer: Some(VALIDATOR.to_vec()),
             txs: match height {
+                // Ada's post applied and emitted a message whose own
+                // message was refused; the stranger's op was rejected; the
+                // DM ran where the node kept no receipt
                 11 => vec![
-                    tx(0xa1, ADA, "chat", post("design", "hello there")),
+                    Tx {
+                        receipt: Some(receipt(
+                            "chat",
+                            None,
+                            vec![receipt(
+                                "notify",
+                                None,
+                                vec![receipt(
+                                    "mail",
+                                    Some(("capacity", "the inbox is full")),
+                                    Vec::new(),
+                                )],
+                            )],
+                        )),
+                        ..tx(0xa1, ADA, "chat", post("design", "hello there"))
+                    },
                     tx(0xc3, ADA, "chat", post(&chat::dm_channel_id(7, 3), "ping")),
                 ],
-                12 => vec![tx(0xb2, STRANGER, "mystery", vec![1, 2, 3, 4])],
+                12 => vec![Tx {
+                    receipt: Some(receipt(
+                        "mystery",
+                        Some(("unauthorized", "not a member")),
+                        Vec::new(),
+                    )),
+                    ..tx(0xb2, STRANGER, "mystery", vec![1, 2, 3, 4])
+                }],
                 _ => Vec::new(),
             },
         })

@@ -23,7 +23,7 @@ mod state;
 pub(crate) mod ui;
 mod watch;
 
-pub use chain::{BlockRow, Chain, TxRow};
+pub use chain::{BlockRow, Chain, Run, TxRow};
 pub use state::{Accounts, Explorer, Network, Note, Route};
 
 use ducktape_view_guest::{Context, IntoElement, Render, View, Window, export_view};
