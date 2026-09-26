@@ -136,8 +136,13 @@ pub fn describe(op: &Op) -> Description {
     };
     let mut all = place(channel);
     all.extend(fields);
+    // a created channel's id is opaque; its name is what a person picked
+    let shown = match op {
+        Op::CreateChannel { name, .. } | Op::CreateVoiceChannel { name, .. } => format!("#{name}"),
+        _ => room(channel),
+    };
     Description {
-        title: format!("{title} · {}", room(channel)),
+        title: format!("{title} · {shown}"),
         fields: all,
     }
 }

@@ -66,7 +66,7 @@ pub fn short(raw: &[u8]) -> String {
     short_hex(&abi::hex(raw))
 }
 
-pub use ducktape_view_guest::design::{grouped, plural, short_hex};
+pub use ducktape_view_guest::design::{date, grouped, plural, short_hex};
 
 /// How long before `now` a time in milliseconds was: `2s`, `3m`, `4h`, `5d`.
 pub fn ago(now: u64, then: u64) -> String {
@@ -77,32 +77,6 @@ pub fn ago(now: u64, then: u64) -> String {
         3_600..86_400 => format!("{}h", seconds / 3_600),
         _ => format!("{}d", seconds / 86_400),
     }
-}
-
-/// A time in milliseconds as a UTC date: `24 Sep 2026, 05:12:07`.
-pub fn date(millis: u64) -> String {
-    const MONTHS: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ];
-    let seconds = millis / 1000;
-    let (days, of_day) = (seconds / 86_400, seconds % 86_400);
-    // days since 1970-01-01 to a civil date (Howard Hinnant's algorithm)
-    let z = days as i64 + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + i64::from(month <= 2);
-    format!(
-        "{day} {} {year}, {:02}:{:02}:{:02}",
-        MONTHS[(month - 1) as usize],
-        of_day / 3_600,
-        of_day % 3_600 / 60,
-        of_day % 60
-    )
 }
 
 /// A signing scheme by its short name: `ed25519`, `p256`.

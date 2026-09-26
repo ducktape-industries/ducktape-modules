@@ -91,7 +91,7 @@ fn network(view: &Settings, cx: &mut Context<Settings>, theme: &Theme) -> impl I
             let mark = if view.ttl == i { "✓ " } else { "" };
             button(
                 format!("settings/ttl/{days}"),
-                format!("{mark}{days} days"),
+                format!("{mark}{}", design::plural(days, "day", "days")),
                 theme,
             )
             .on_click(cx.listener(move |v: &mut Settings, _: &ClickEvent, _, cx| {

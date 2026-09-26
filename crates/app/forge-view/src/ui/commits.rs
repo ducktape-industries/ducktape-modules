@@ -63,7 +63,7 @@ pub(crate) fn log(
         )
         .into_any_element();
     }
-    let rows: Vec<(String, String, String, String, usize)> = page
+    let rows: Vec<(String, String, String, i64, usize)> = page
         .items
         .iter()
         .map(|commit| {
@@ -71,7 +71,7 @@ pub(crate) fn log(
                 commit.oid.clone(),
                 summary(commit),
                 String::from_utf8_lossy(&commit.author.name).into_owned(),
-                commit.author.time.to_string(),
+                commit.author.time,
                 commit.parents.len(),
             )
         })
@@ -100,7 +100,10 @@ pub(crate) fn log(
             )
             .cell(div().flex_1().truncate().child(summary))
             .cell(quiet(author, &theme))
-            .cell(quiet(format!("t{time}"), &theme));
+            .cell(quiet(
+                design::date(u64::try_from(time).unwrap_or(0).saturating_mul(1000)),
+                &theme,
+            ));
         if parents > 1 {
             row = row.cell(badge(
                 id(format!("forge-commit-merge-{oid}")),

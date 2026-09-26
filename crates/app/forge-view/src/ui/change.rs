@@ -116,6 +116,7 @@ fn title_line(
     let mut top = div()
         .id(id("forge-change-head"))
         .flex()
+        .flex_wrap()
         .items_center()
         .gap_2()
         .child(button(id("forge-change-back"), "← Changes", theme, back))

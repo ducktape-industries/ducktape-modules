@@ -98,6 +98,13 @@ fn a_dm_title_names_no_account_numbers_and_its_accounts_are_fields() {
     assert_eq!(channel.title, "Delete message · #old-launch");
     assert!(channel.fields.iter().all(|f| f.label != "between"));
     assert_eq!(describe(&open_dm(3)).title, "Open a DM");
+    // a created channel is titled by the name a person picked, not its id
+    let created = describe(&Op::CreateChannel {
+        channel_id: "channel-18d8db5b".into(),
+        name: "[qa] probe".into(),
+        post_policy: PostPolicy::Open,
+    });
+    assert_eq!(created.title, "Create channel · #[qa] probe");
     assert_eq!(
         describe(&post("design", "m", "hi", None)).title,
         "Post in #design"
