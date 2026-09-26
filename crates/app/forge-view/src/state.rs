@@ -324,22 +324,9 @@ pub(crate) struct ChangeForm {
     pub into: Vec<u8>,
     pub title: String,
     /// the multi-line body, as the host's editor holds it
-    #[serde(with = "editor_snapshot")]
     pub body: Editor,
     pub reviewers: Vec<forge::Principal>,
     pub error: String,
-}
-
-mod editor_snapshot {
-    use ducktape_view_guest::Editor;
-    use serde::{Deserialize, Serialize};
-    pub fn serialize<S: serde::Serializer>(editor: &Editor, s: S) -> Result<S::Ok, S::Error> {
-        editor.snapshot().serialize(s)
-    }
-    pub fn deserialize<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Editor, D::Error> {
-        Editor::restore(&Vec::<u8>::deserialize(d)?)
-            .ok_or_else(|| serde::de::Error::custom("invalid change body"))
-    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
