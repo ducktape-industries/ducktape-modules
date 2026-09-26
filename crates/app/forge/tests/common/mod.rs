@@ -59,22 +59,21 @@ pub fn person(key: &[u8]) -> Principal {
 }
 
 /// `actor`'s op at `height`, run as the wasm module runs it: the signer
-/// resolved to its account, then the typed execute.
+/// resolved to its account, then the typed execute and what it emitted, in
+/// one frame. forge's output.
 pub fn signed_op(
     sandbox: &MemorySandbox,
     actor: &[u8],
     height: u64,
     op: &Op,
-) -> Result<(), guest::Error> {
-    let env = sandbox.env_at(Origin::Signed(actor.to_vec()), height, TIME);
-    Forge::execute(&sandbox.forge.exec(env), op.clone())
+) -> Result<Vec<u8>, guest::Error> {
+    sandbox.frame(Origin::Signed(actor.to_vec()), height, TIME, op)
 }
 
 /// `actor`'s op; a refusal left forge's store as it was.
 #[track_caller]
 pub fn act(sandbox: &mut MemorySandbox, actor: &[u8], op: &Op) -> Result<Vec<u8>, guest::Error> {
-    sandbox.forge.attempt(|| signed_op(sandbox, actor, 1, op))?;
-    Ok(sandbox.forge.take_output())
+    sandbox.forge.attempt(|| signed_op(sandbox, actor, 1, op))
 }
 
 /// The refusal of `actor`'s op, which left forge's store as it was.

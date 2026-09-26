@@ -1,7 +1,7 @@
 //! The host a native test runs a module over: maps for state and blobs, and
 //! what the module sent (`output`, `response`, `emissions`, `events`) kept
-//! for the test to read; a harness runs the emissions itself, as the kernel
-//! runs them once the handler returns. Sibling modules answer through `siblings`;
+//! for the test to read. [`MockChain`] runs the emissions as the kernel runs
+//! them once the handler returns, in the same frame. Sibling modules answer through `siblings`;
 //! signatures verify through `verifier` (none set: verification is refused).
 //! A `MockHost` is a shared handle: the contexts made over it and the test
 //! see one host.
@@ -17,7 +17,10 @@ use abi::{
 };
 use sha1::Digest as _;
 
-use crate::{Env, Error, ExecCtx, ModuleId, Order, QueryCtx, Range, Roles, code};
+use crate::{
+    Cause, Env, Error, ExecCtx, MessageId, ModuleId, Order, Origin, Outcome, Principal, QueryCtx,
+    Range, Roles, code,
+};
 
 pub type Sibling = Box<dyn Fn(&[u8]) -> Result<Vec<u8>, Error>>;
 
@@ -68,6 +71,9 @@ pub struct MockState {
     /// The last query's response.
     pub response: Vec<u8>,
     pub emissions: Vec<Message>,
+    /// The number the next emitted message takes in its frame: 0 in each
+    /// new [`MockHost::exec`]; [`MockChain`] carries it across the frame.
+    pub next_item: u64,
     pub events: Vec<Vec<u8>>,
     pub siblings: BTreeMap<ModuleId, Sibling>,
     pub verifier: Option<Verifier>,
@@ -87,8 +93,10 @@ impl MockHost {
         }
     }
 
-    /// An execute's context over this host.
+    /// An execute's context over this host, in a frame of its own: its
+    /// messages are numbered from 0.
     pub fn exec(&self, env: Env) -> ExecCtx {
+        self.borrow_mut().next_item = 0;
         ExecCtx::over(self.clone(), env)
     }
 
@@ -157,8 +165,8 @@ impl MockHost {
     }
 
     /// One host call by `me`, as the real host answers it. An emitted
-    /// message is kept, numbered in order, for the harness to run once the
-    /// handler returns.
+    /// message is kept, numbered in its frame, for [`MockChain`] (or the
+    /// test) to run once the handler returns.
     pub(crate) fn serve(&self, me: &str, op: HostOp) -> HostReply {
         if let HostOp::Query { program, request } = op {
             // The sibling leaves the map while it answers, so it may use
@@ -230,7 +238,8 @@ impl MockHost {
                 Err(error) => HostReply::Refused(crate::kernel::refusal_from(error)),
             },
             HostOp::Emit(message) => {
-                let item = mock.emissions.len() as u64;
+                let item = mock.next_item;
+                mock.next_item += 1;
                 mock.emissions.push(message);
                 HostReply::Item(abi::ItemRef {
                     source: me.to_owned(),
@@ -250,6 +259,142 @@ impl MockHost {
                 HostReply::Done
             }
             HostOp::Query { .. } => unreachable!("answered above"),
+        }
+    }
+}
+
+/// A module's execute as a frame runs it, over its context: its op bytes
+/// (empty for a [`Cause::Reply`], as the kernel sends them). A
+/// [`Module`](crate::Module)'s is [`execute::<M>`](crate::execute).
+pub type Execute = fn(&ExecCtx, &[u8]) -> Result<(), Error>;
+
+/// How deep messages nest in one frame, the kernel's `MAX_DEPTH`: a frame's
+/// first run is at depth 0, each message or reply one deeper than its emitter.
+pub const MAX_DEPTH: u32 = 8;
+
+/// Native modules, each over its own [`MockHost`], and a frame run as the
+/// kernel runs one: the first run, then each message it emitted in order,
+/// depth first, as [`Cause::Message`] from the emitter acting as its account;
+/// a message with [`Reply::Wanted`](crate::Reply::Wanted) comes back to the
+/// emitter as [`Cause::Reply`] (an empty payload), the target's writes undone
+/// when it refused. A refused message without a reply, a refused reply, or a
+/// run past [`MAX_DEPTH`] fails the whole frame: every seated host's state
+/// and blobs as they were before it. Messages are numbered from 0 in each
+/// frame, whichever run emitted them. No fuel: a native run is not metered.
+#[derive(Clone, Default)]
+pub struct MockChain {
+    seats: BTreeMap<ModuleId, Seat>,
+}
+
+/// Each seated host's state and blobs, in seat order.
+type Checkpoint = Vec<(BTreeMap<Vec<u8>, Vec<u8>>, BTreeMap<BlobId, Blob>)>;
+
+#[derive(Clone)]
+struct Seat {
+    host: MockHost,
+    account: Option<Principal>,
+    execute: Execute,
+}
+
+impl MockChain {
+    /// Seats `module` over `host`, acting as `account` in what it emits.
+    pub fn seat(
+        &mut self,
+        module: impl Into<ModuleId>,
+        host: MockHost,
+        account: Option<Principal>,
+        execute: Execute,
+    ) {
+        let seat = Seat {
+            host,
+            account,
+            execute,
+        };
+        self.seats.insert(module.into(), seat);
+    }
+
+    /// One frame: `env.module` runs `payload`, then what it emitted. The
+    /// first run's outcome, or the rejection that failed the frame.
+    pub fn execute(&self, env: Env, payload: &[u8]) -> Outcome {
+        self.run(env, payload, &mut 0, 0)
+    }
+
+    fn run(&self, env: Env, payload: &[u8], next_item: &mut u64, depth: u32) -> Outcome {
+        if depth > MAX_DEPTH {
+            let deep = format!("messages nest deeper than {MAX_DEPTH}");
+            return Outcome::Rejected(Error::new(code::CAPACITY, deep));
+        }
+        let Some(seat) = self.seats.get(&env.module) else {
+            return Outcome::Rejected(Error::new(code::UNKNOWN_MODULE, env.module));
+        };
+        let checkpoint = self.checkpoint();
+        let emitter = env.clone();
+        let ctx = seat.host.exec(env);
+        let first = *next_item;
+        {
+            let mut mock = seat.host.borrow_mut();
+            mock.next_item = first;
+            mock.emissions.clear();
+        }
+        let ran = (seat.execute)(&ctx, payload);
+        *next_item = seat.host.borrow().next_item;
+        let emitted = seat.host.take_emissions();
+        if let Err(error) = ran {
+            self.restore(checkpoint);
+            return Outcome::Rejected(error);
+        }
+        let output = seat.host.take_output();
+        let env = |module: &ModuleId, from: &ModuleId, cause| Env {
+            module: module.clone(),
+            origin: Origin::Module(from.clone()),
+            sender: self.seats.get(from).and_then(|seat| seat.account.clone()),
+            cause,
+            ..emitter.clone()
+        };
+        let me = &emitter.module;
+        for (seq, message) in (first..).zip(emitted) {
+            let id = MessageId {
+                module: me.clone(),
+                seq,
+            };
+            let cause = Cause::Message(id.clone());
+            let outcome = self.run(
+                env(&message.target, me, cause),
+                &message.payload,
+                next_item,
+                depth + 1,
+            );
+            let failed = match (outcome, message.reply) {
+                (Outcome::Applied { .. }, false) => continue,
+                (rejected, false) => rejected,
+                (outcome, true) => {
+                    let cause = Cause::Reply { id, outcome };
+                    let reply = env(me, &message.target, cause);
+                    match self.run(reply, &[], next_item, depth + 1) {
+                        Outcome::Applied { .. } => continue,
+                        rejected => rejected,
+                    }
+                }
+            };
+            self.restore(checkpoint);
+            return failed;
+        }
+        Outcome::Applied { output }
+    }
+
+    // ponytail: copies every seated host's state and blobs per run; an
+    // undo log if a harness's state grows large enough to feel it.
+    fn checkpoint(&self) -> Checkpoint {
+        let seats = self.seats.values().map(|seat| seat.host.borrow());
+        seats
+            .map(|mock| (mock.state.clone(), mock.blobs.clone()))
+            .collect()
+    }
+
+    fn restore(&self, checkpoint: Checkpoint) {
+        for (seat, (state, blobs)) in self.seats.values().zip(checkpoint) {
+            let mut mock = seat.host.borrow_mut();
+            (mock.state, mock.blobs) = (state, blobs);
         }
     }
 }
@@ -291,4 +436,263 @@ pub fn blob_id(hash: HashKind, kind: &str, body: &[u8]) -> Result<BlobId, Error>
         HashKind::Sha256 => BlobId::Sha256(sha2::Sha256::digest(&framed).into()),
         HashKind::Sha1 => BlobId::Sha1(sha1::Sha1::digest(&framed).into()),
     })
+}
+
+/// [`MockChain`] against the kernel's frame (ducktape's
+/// `crates/kernel/host/src/lib.rs`, `run_frame`): a probe module seated
+/// under several names, each run of it logged with its env.
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+
+    use borsh::{BorshDeserialize, BorshSerialize};
+
+    use super::*;
+    use crate::Reply;
+
+    #[derive(BorshSerialize, BorshDeserialize)]
+    enum Probe {
+        /// writes `wrote`, then emits each `(target, op, reply wanted)`
+        Emit(Vec<(String, Vec<u8>, bool)>),
+        /// writes `wrote`, then refuses
+        Refuse,
+        /// writes `wrote`, then emits `Chain(n - 1)` to itself while `n > 0`
+        Chain(u32),
+    }
+
+    thread_local! {
+        static RUNS: RefCell<Vec<Env>> = const { RefCell::new(Vec::new()) };
+    }
+
+    /// The probe: a reply is logged and absorbed, except by `sour`, which
+    /// refuses every reply.
+    fn probe(ctx: &ExecCtx, payload: &[u8]) -> Result<(), Error> {
+        RUNS.with(|runs| runs.borrow_mut().push(ctx.env().clone()));
+        if let Cause::Reply { .. } = ctx.env().cause {
+            return match ctx.env().module.as_str() {
+                "sour" => Err(Error::new(code::INVALID_INPUT, "sour")),
+                _ => Ok(()),
+            };
+        }
+        ctx.set("wrote", b"yes".to_vec());
+        let op: Probe = abi::decode(payload).map_err(crate::kernel::error_from)?;
+        match op {
+            Probe::Emit(messages) => {
+                for (target, op, reply) in messages {
+                    let reply = if reply { Reply::Wanted } else { Reply::None };
+                    ctx.emit(target, op, reply);
+                }
+                ctx.set_return_data(b"out".to_vec());
+                Ok(())
+            }
+            Probe::Refuse => Err(Error::new(code::WRONG_STATE, "refused")),
+            Probe::Chain(0) => Ok(()),
+            Probe::Chain(n) => {
+                let me = ctx.env().module.clone();
+                ctx.emit(me, abi::encode(&Probe::Chain(n - 1)), Reply::None);
+                Ok(())
+            }
+        }
+    }
+
+    const MODULES: [(&str, u64); 4] = [("a", 1), ("b", 2), ("c", 3), ("sour", 4)];
+
+    fn chain() -> MockChain {
+        RUNS.with(|runs| runs.borrow_mut().clear());
+        let mut chain = MockChain::default();
+        for (module, account) in MODULES {
+            let account = Some(Principal::Account(account));
+            chain.seat(module, MockHost::default(), account, probe);
+        }
+        chain
+    }
+
+    fn frame(chain: &MockChain, module: &str, op: &Probe) -> Outcome {
+        let env = Env {
+            chain_id: b"n".to_vec(),
+            height: 1,
+            time: 2,
+            module: module.into(),
+            origin: Origin::Root,
+            sender: Some(Principal::Root),
+            roles: MockHost::roles(),
+            cause: Cause::Direct,
+        };
+        chain.execute(env, &abi::encode(op))
+    }
+
+    fn wrote(chain: &MockChain, module: &str) -> bool {
+        chain.seats[module]
+            .host
+            .borrow()
+            .state
+            .contains_key(&b"wrote"[..])
+    }
+
+    fn runs() -> Vec<Env> {
+        RUNS.with(|runs| runs.borrow().clone())
+    }
+
+    fn to(target: &str, op: &Probe, reply: bool) -> (String, Vec<u8>, bool) {
+        (target.into(), abi::encode(op), reply)
+    }
+
+    fn id(module: &str, seq: u64) -> MessageId {
+        MessageId {
+            module: module.into(),
+            seq,
+        }
+    }
+
+    #[test]
+    fn a_message_runs_as_a_message_numbered_in_its_frame_from_zero() {
+        let chain = chain();
+        let inner = Probe::Emit(vec![to("c", &Probe::Emit(vec![]), false)]);
+        let op = Probe::Emit(vec![
+            to("b", &inner, false),
+            to("c", &Probe::Emit(vec![]), false),
+        ]);
+        for _ in 0..2 {
+            RUNS.with(|runs| runs.borrow_mut().clear());
+            let outcome = frame(&chain, "a", &op);
+            assert_eq!(
+                outcome,
+                Outcome::Applied {
+                    output: b"out".to_vec()
+                }
+            );
+            let seen: Vec<_> = runs()
+                .into_iter()
+                .map(|env| (env.module, env.origin, env.sender, env.cause))
+                .collect();
+            let from = |module: &str, account| {
+                (
+                    Origin::Module(module.into()),
+                    Some(Principal::Account(account)),
+                )
+            };
+            let (a, b) = (from("a", 1), from("b", 2));
+            assert_eq!(
+                seen,
+                [
+                    (
+                        "a".into(),
+                        Origin::Root,
+                        Some(Principal::Root),
+                        Cause::Direct
+                    ),
+                    (
+                        "b".into(),
+                        a.0.clone(),
+                        a.1.clone(),
+                        Cause::Message(id("a", 0))
+                    ),
+                    // b's message is the frame's third: a's two were numbered first
+                    ("c".into(), b.0, b.1, Cause::Message(id("b", 2))),
+                    ("c".into(), a.0, a.1, Cause::Message(id("a", 1))),
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn a_refused_message_without_a_reply_fails_the_whole_frame() {
+        let chain = chain();
+        let op = Probe::Emit(vec![
+            to("c", &Probe::Emit(vec![]), false),
+            to("b", &Probe::Refuse, false),
+        ]);
+        let outcome = frame(&chain, "a", &op);
+        assert_eq!(
+            outcome,
+            Outcome::Rejected(Error::new(code::WRONG_STATE, "refused"))
+        );
+        assert!(!wrote(&chain, "a") && !wrote(&chain, "b") && !wrote(&chain, "c"));
+    }
+
+    #[test]
+    fn a_wanted_reply_undoes_the_refusal_and_comes_back_in_the_frame() {
+        let chain = chain();
+        let op = Probe::Emit(vec![
+            to("b", &Probe::Refuse, true),
+            to("c", &Probe::Emit(vec![]), true),
+        ]);
+        let outcome = frame(&chain, "a", &op);
+        assert_eq!(
+            outcome,
+            Outcome::Applied {
+                output: b"out".to_vec()
+            }
+        );
+        assert!(wrote(&chain, "a") && !wrote(&chain, "b") && wrote(&chain, "c"));
+        let replies: Vec<_> = runs()
+            .into_iter()
+            .filter(|env| matches!(env.cause, Cause::Reply { .. }))
+            .map(|env| (env.module, env.origin, env.sender, env.cause))
+            .collect();
+        let refused = Outcome::Rejected(Error::new(code::WRONG_STATE, "refused"));
+        let applied = Outcome::Applied {
+            output: b"out".to_vec(),
+        };
+        assert_eq!(
+            replies,
+            [
+                (
+                    "a".into(),
+                    Origin::Module("b".into()),
+                    Some(Principal::Account(2)),
+                    Cause::Reply {
+                        id: id("a", 0),
+                        outcome: refused
+                    },
+                ),
+                (
+                    "a".into(),
+                    Origin::Module("c".into()),
+                    Some(Principal::Account(3)),
+                    Cause::Reply {
+                        id: id("a", 1),
+                        outcome: applied
+                    },
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_refused_reply_fails_the_whole_frame() {
+        let chain = chain();
+        let op = Probe::Emit(vec![to("b", &Probe::Emit(vec![]), true)]);
+        let outcome = frame(&chain, "sour", &op);
+        assert_eq!(
+            outcome,
+            Outcome::Rejected(Error::new(code::INVALID_INPUT, "sour"))
+        );
+        assert!(!wrote(&chain, "sour") && !wrote(&chain, "b"));
+    }
+
+    #[test]
+    fn messages_nest_eight_deep_and_no_deeper() {
+        let chain = chain();
+        let outcome = frame(&chain, "a", &Probe::Chain(MAX_DEPTH));
+        assert!(matches!(outcome, Outcome::Applied { .. }), "{outcome:?}");
+        assert_eq!(runs().len(), MAX_DEPTH as usize + 1);
+        chain.seats["a"].host.borrow_mut().state.clear();
+        let outcome = frame(&chain, "a", &Probe::Chain(MAX_DEPTH + 1));
+        let deep = Error::new(code::CAPACITY, "messages nest deeper than 8");
+        assert_eq!(outcome, Outcome::Rejected(deep));
+        assert!(!wrote(&chain, "a"));
+    }
+
+    #[test]
+    fn a_message_to_no_module_fails_the_frame() {
+        let chain = chain();
+        let op = Probe::Emit(vec![to("nobody", &Probe::Emit(vec![]), false)]);
+        let outcome = frame(&chain, "a", &op);
+        assert_eq!(
+            outcome,
+            Outcome::Rejected(Error::new(code::UNKNOWN_MODULE, "nobody"))
+        );
+        assert!(!wrote(&chain, "a"));
+    }
 }

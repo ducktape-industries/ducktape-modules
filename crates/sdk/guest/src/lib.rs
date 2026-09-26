@@ -50,7 +50,9 @@ pub use kernel::{
     Range, Roles, code,
 };
 #[cfg(not(target_arch = "wasm32"))]
-pub use mock::{MockHost, MockState, Sibling, Verifier, blob_id, identity_role};
+pub use mock::{
+    Execute, MAX_DEPTH, MockChain, MockHost, MockState, Sibling, Verifier, blob_id, identity_role,
+};
 #[cfg(target_arch = "wasm32")]
 pub use module::exports;
 pub use module::{Module, execute, query};
