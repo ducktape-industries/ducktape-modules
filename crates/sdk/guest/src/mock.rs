@@ -265,7 +265,8 @@ impl MockHost {
 
 /// A module's execute as a frame runs it, over its context: its op bytes
 /// (empty for a [`Cause::Reply`], as the kernel sends them). A
-/// [`Module`](crate::Module)'s is [`execute::<M>`](crate::execute).
+/// [`Module`](crate::Module)'s is [`execute::<M>`](crate::execute), which
+/// hands a reply to [`Module::reply`](crate::Module::reply).
 pub type Execute = fn(&ExecCtx, &[u8]) -> Result<(), Error>;
 
 /// How deep messages nest in one frame, the kernel's `MAX_DEPTH`: a frame's
@@ -468,34 +469,47 @@ mod tests {
         static RUNS: RefCell<Vec<Env>> = const { RefCell::new(Vec::new()) };
     }
 
-    /// The probe: a reply is logged and absorbed, except by `sour`, which
-    /// refuses every reply.
-    fn probe(ctx: &ExecCtx, payload: &[u8]) -> Result<(), Error> {
-        RUNS.with(|runs| runs.borrow_mut().push(ctx.env().clone()));
-        if let Cause::Reply { .. } = ctx.env().cause {
-            return match ctx.env().module.as_str() {
+    /// The probe, a plain [`Module`](crate::Module): each run logged; a
+    /// reply absorbed, except by `sour`, which refuses every reply.
+    struct Prober;
+
+    impl crate::Module for Prober {
+        type Op = Probe;
+        type Query = ();
+        type Response = ();
+
+        fn execute(ctx: &ExecCtx, op: Probe) -> Result<(), Error> {
+            RUNS.with(|runs| runs.borrow_mut().push(ctx.env().clone()));
+            ctx.set("wrote", b"yes".to_vec());
+            match op {
+                Probe::Emit(messages) => {
+                    for (target, op, reply) in messages {
+                        let reply = if reply { Reply::Wanted } else { Reply::None };
+                        ctx.emit(target, op, reply);
+                    }
+                    ctx.set_return_data(b"out".to_vec());
+                    Ok(())
+                }
+                Probe::Refuse => Err(Error::new(code::WRONG_STATE, "refused")),
+                Probe::Chain(0) => Ok(()),
+                Probe::Chain(n) => {
+                    let me = ctx.env().module.clone();
+                    ctx.emit(me, abi::encode(&Probe::Chain(n - 1)), Reply::None);
+                    Ok(())
+                }
+            }
+        }
+
+        fn reply(ctx: &ExecCtx, _: &MessageId, _: &Outcome) -> Result<(), Error> {
+            RUNS.with(|runs| runs.borrow_mut().push(ctx.env().clone()));
+            match ctx.env().module.as_str() {
                 "sour" => Err(Error::new(code::INVALID_INPUT, "sour")),
                 _ => Ok(()),
-            };
+            }
         }
-        ctx.set("wrote", b"yes".to_vec());
-        let op: Probe = abi::decode(payload).map_err(crate::kernel::error_from)?;
-        match op {
-            Probe::Emit(messages) => {
-                for (target, op, reply) in messages {
-                    let reply = if reply { Reply::Wanted } else { Reply::None };
-                    ctx.emit(target, op, reply);
-                }
-                ctx.set_return_data(b"out".to_vec());
-                Ok(())
-            }
-            Probe::Refuse => Err(Error::new(code::WRONG_STATE, "refused")),
-            Probe::Chain(0) => Ok(()),
-            Probe::Chain(n) => {
-                let me = ctx.env().module.clone();
-                ctx.emit(me, abi::encode(&Probe::Chain(n - 1)), Reply::None);
-                Ok(())
-            }
+
+        fn query(_: &QueryCtx, (): ()) -> Result<(), Error> {
+            Ok(())
         }
     }
 
@@ -506,7 +520,12 @@ mod tests {
         let mut chain = MockChain::default();
         for (module, account) in MODULES {
             let account = Some(Principal::Account(account));
-            chain.seat(module, MockHost::default(), account, probe);
+            chain.seat(
+                module,
+                MockHost::default(),
+                account,
+                crate::execute::<Prober>,
+            );
         }
         chain
     }

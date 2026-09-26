@@ -8,6 +8,9 @@
 //! they are host calls; natively the same contexts run over a [`MockHost`].
 //! [`Env`] adds the origin checks (`signer`, `sending_module`, `sent_by`) and
 //! `authority`, a stub that admits anyone for now.
+//! A message emitted with [`Reply::Wanted`] comes back to its emitter in
+//! the same frame as [`Module::reply`], with its id and outcome; a module
+//! that never wants a reply leaves `reply` at its default.
 //!
 //! ```ignore
 //! use guest::{Error, ExecCtx, Module, QueryCtx};
