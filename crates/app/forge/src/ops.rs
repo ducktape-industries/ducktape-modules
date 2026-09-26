@@ -47,11 +47,13 @@ pub(crate) fn signed_account(ctx: &ExecCtx) -> Result<Principal, Error> {
     ctx.sender()
 }
 
-/// Every accepted op marks its repository active at this height.
+/// Every accepted op marks its repository active at this height and counts
+/// as a write, which every listing cursor is pinned to.
 pub(crate) fn touch(ctx: &ExecCtx, name: &str, height: u64) -> Result<(), Error> {
     let mut repo = load_repo(ctx, name)?;
     repo.last_activity = height;
-    save_repo(ctx, name, &repo)
+    save_repo(ctx, name, &repo)?;
+    crate::state::wrote(ctx)
 }
 
 pub(crate) fn create(

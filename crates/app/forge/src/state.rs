@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use gitcore::{Hash, Oid};
 use guest::{Error, code};
-use guest::{ExecCtx, QueryCtx, Range, invalid, not_found};
+use guest::{ExecCtx, QueryCtx, invalid, not_found};
 use store::{Item, Map, Set};
 
 use crate::contract::{Bounds, Change, Principal, Repo, Review, Revision, valid_repo_name};
@@ -14,6 +14,10 @@ use crate::objects::hash_of;
 
 /// The bounds forge was founded with.
 const BOUNDS: Item<Bounds> = Item::new("bounds");
+/// How many ops forge has accepted. Every listing cursor is pinned to it:
+/// only a forge op rewrites a listing, and two ops in one block share a
+/// height but not a count.
+const WRITES: Item<u64> = Item::new("writes");
 /// One record per repository, by name.
 const REPOS: Map<String, Repo> = Map::new("p/");
 /// Index: every repository by its last activity, newest first.
@@ -75,11 +79,15 @@ pub fn save_repo(ctx: &ExecCtx, name: &str, repo: &Repo) -> Result<(), Error> {
     Ok(())
 }
 
-/// The height of forge's latest accepted op: every one marks its repository
-/// active, so it is the newest activity row (0 before any).
-pub(crate) fn last_write(ctx: &QueryCtx) -> Result<u64, Error> {
-    let newest = ACTIVITY.scan(ctx, Range::prefix(ACTIVITY.prefix()).limit(1))?;
-    Ok(newest.first().map_or(0, |(key, _)| newest_first(*key)))
+/// How many ops forge has accepted so far (0 before any).
+pub(crate) fn writes(ctx: &QueryCtx) -> Result<u64, Error> {
+    Ok(WRITES.get(ctx)?.unwrap_or(0))
+}
+
+/// Counts an accepted op.
+pub(crate) fn wrote(ctx: &ExecCtx) -> Result<(), Error> {
+    WRITES.put(ctx, &(writes(ctx)? + 1));
+    Ok(())
 }
 
 /// An activity key: a later height sorts first.

@@ -13,9 +13,7 @@ use store::Listing;
 use crate::contract::*;
 use crate::objects::ObjectStore;
 use crate::ops::{cap, refusal_of};
-use crate::state::{
-    ACTIVITY, REFS, last_write, load_bounds, load_refs, load_repo, repo_hash, storage,
-};
+use crate::state::{ACTIVITY, REFS, load_bounds, load_refs, load_repo, repo_hash, storage, writes};
 
 const AGENT: &[u8] = b"ducktape-forge";
 
@@ -46,20 +44,21 @@ pub(crate) fn refs(
         })
 }
 
-/// A forge listing is rewritten only by a forge op, and every accepted op
-/// marks its repository active, so a cursor is good until forge next writes
-/// after the height that answered it: a walk crosses the blocks that wrote
-/// nothing here, and a push mid-walk still restarts it.
+/// A forge listing is rewritten only by a forge op, so a cursor is pinned
+/// to the count of ops accepted when it was answered and is good until
+/// forge next writes: a walk crosses the blocks that wrote nothing here,
+/// and a push mid-walk restarts it, even one in the block that answered
+/// the cursor (the preconfirmed layer answers at the height its ops run
+/// at, so a height alone would not tell).
 pub(crate) fn listing(
     ctx: &QueryCtx,
     page: PageRequest,
     scope: Vec<u8>,
     height: u64,
 ) -> Result<Listing, Error> {
-    let listing = page.listing(scope, height)?;
-    if let Some(answered) = listing.cursor_height
-        && last_write(ctx)? > answered
-    {
+    let writes = writes(ctx)?;
+    let listing = page.listing(scope, height)?.pinned(writes);
+    if listing.cursor_pin.is_some_and(|pinned| pinned != writes) {
         return Err(stale("the listing changed; restart it"));
     }
     Ok(listing)
