@@ -17,6 +17,10 @@ identity = { workspace = true, features = ["view"] }
 valset = { workspace = true, features = ["view"] }
 module-registry.workspace = true
 serde.workspace = true
+# `dm_channel_id`: the room Open DM opens
+chat.workspace = true
+# mints the `duck://<chain>/chat/<room>` link Open DM opens
+ducklink.workspace = true
 
 # Typed fake-host tests use the program contracts.
 [dev-dependencies]
