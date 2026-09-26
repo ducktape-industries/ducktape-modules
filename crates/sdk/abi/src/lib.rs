@@ -575,7 +575,12 @@ impl role::identity::Kind {
                 standing: Standing::Revoked,
                 ..
             } => Some("revoked"),
-            Kind::Person | Kind::Module(_) | Kind::Managed { .. } => None,
+            Kind::Person
+            | Kind::Module(_)
+            | Kind::Managed {
+                standing: Standing::Active,
+                ..
+            } => None,
         }
     }
 }

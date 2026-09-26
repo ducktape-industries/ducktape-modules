@@ -216,6 +216,53 @@ fn live_updates_retry_and_restore() {
     assert!(cx.has_text("Network: Workshop"));
 }
 #[test]
+fn an_account_changed_elsewhere_is_read_again() {
+    let mut cx = TestAppContext::new();
+    cx.host().stream::<ClockTicks>();
+    cx.host().stream::<Changes<Valset>>();
+    let accounts = cx.host().stream::<Changes<Identity>>();
+    let props = cx.host().stream::<HostSession>();
+    respond(&cx);
+    cx.open::<Settings>();
+    props.send(Session {
+        signer: "abcd".into(),
+        account: Some(7),
+        ..Session::default()
+    });
+    cx.run_until_parked();
+    assert!(cx.find("settings/agents/12/suspend").is_some());
+    // Maya suspends Scout from another device
+    cx.host().handle::<Query<Identity>>(|q| {
+        Ok(match q {
+            identity::Query::Get { number } => {
+                identity::Reply::Account(Some(maya(number, "Laptop key")))
+            }
+            identity::Query::Managed { .. } => {
+                let mut scout = scout();
+                scout.control = identity::Control::Managed {
+                    manager: 7,
+                    category: identity::Category::Agent,
+                    life: identity::Life::Suspended { keys: Vec::new() },
+                    transfers: 0,
+                };
+                identity::Reply::Accounts(identity::PageResponse {
+                    height: 43,
+                    items: vec![scout],
+                    next: None,
+                })
+            }
+            q => panic!("unexpected query: {q:?}"),
+        })
+    });
+    accounts.send(Some(43));
+    cx.run_until_parked();
+    assert!(
+        cx.find("settings/agents/12/resume").is_some(),
+        "{:?}",
+        cx.texts()
+    );
+}
+#[test]
 fn export_settings_screens() {
     if std::env::var_os("SETTINGS_SCREEN_EXPORT").is_none() {
         return;

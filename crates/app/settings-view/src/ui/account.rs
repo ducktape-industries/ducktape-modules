@@ -117,8 +117,14 @@ fn agents(
         v.agent_key.text = text.clone();
         cx.notify();
     });
-    let create = cx.listener(|v: &mut Settings, _: &ClickEvent, _, cx| v.submit_create_agent(cx));
-    let add = cx.listener(|v: &mut Settings, _: &ClickEvent, _, cx| v.submit_agent_key(cx));
+    let create = cx.listener(|v: &mut Settings, _: &ClickEvent, _, cx| {
+        v.revoking = None;
+        v.submit_create_agent(cx)
+    });
+    let add = cx.listener(|v: &mut Settings, _: &ClickEvent, _, cx| {
+        v.revoking = None;
+        v.submit_agent_key(cx)
+    });
     let lines: Vec<AnyElement> = account
         .agents
         .iter()
