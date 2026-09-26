@@ -4,7 +4,6 @@ use guest::{Env, Origin, Scheme};
 use guest::{
     Error, ExecCtx, QueryCtx, already_exists, invalid, not_found, unauthorized, wrong_state,
 };
-use module_registry::helpers;
 use store::{Item, Map, PageRequest, Set};
 
 use crate::{
@@ -87,7 +86,7 @@ fn named(name: String) -> Result<String, Error> {
 
 pub(crate) fn create(ctx: &ExecCtx, name: String, scheme: Scheme) -> Result<(), Error> {
     let env = ctx.env();
-    let signer = helpers::external(env)?;
+    let signer = env.signer()?;
     let number = next_number(ctx)?;
     admit_key(ctx, &signer, number)?;
     ACCOUNTS.put(
@@ -118,7 +117,7 @@ pub(crate) fn add_key(
     consent: Consent,
 ) -> Result<(), Error> {
     let env = ctx.env();
-    let signer = helpers::external(env)?;
+    let signer = env.signer()?;
     let mut account = account(ctx, consent.account)?;
     let Control::Keys(keys) = &mut account.control else {
         return Err(wrong_state("a program account holds no keys"));
@@ -164,7 +163,7 @@ pub(crate) fn add_key(
 
 pub(crate) fn remove_key(ctx: &ExecCtx, key: &Vec<u8>) -> Result<(), Error> {
     let env = ctx.env();
-    let signer = helpers::external(env)?;
+    let signer = env.signer()?;
     let mut account = account_of_key(ctx, &signer)?;
     let Control::Keys(keys) = &mut account.control else {
         return Err(wrong_state("a program account holds no keys"));
@@ -249,7 +248,7 @@ pub(crate) fn create_program(
     controller: AccountNumber,
 ) -> Result<(), Error> {
     let env = ctx.env();
-    let executor = helpers::program(env)?;
+    let executor = env.sending_module()?;
     let controlling = account(ctx, controller)?;
     if !controlling.live() {
         return Err(wrong_state(format!("account {controller} is not live")));
@@ -282,7 +281,7 @@ pub(crate) fn set_status(
     status: Status,
 ) -> Result<(), Error> {
     let env = ctx.env();
-    let program = helpers::program(env)?;
+    let program = env.sending_module()?;
     let mut account = account(ctx, number)?;
     let Control::Program {
         executor,

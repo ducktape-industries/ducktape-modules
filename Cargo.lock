@@ -3109,7 +3109,6 @@ dependencies = [
  "borsh",
  "describe",
  "guest 0.1.0",
- "module-registry",
  "serde",
  "store",
  "view-guest",
@@ -6361,7 +6360,6 @@ dependencies = [
  "borsh",
  "describe",
  "guest 0.1.0",
- "module-registry",
  "store",
  "view-guest",
 ]

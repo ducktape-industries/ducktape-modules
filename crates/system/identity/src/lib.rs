@@ -16,7 +16,7 @@ pub use program::Identity;
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use guest::{BlobId, ModuleId, Scheme};
-use module_registry::{PageRequest, PageResponse};
+use store::{PageRequest, PageResponse};
 
 pub const MODULE: &str = "identity";
 pub const CONSENT_NAMESPACE: &[u8] = b"ducktape:identity:consent";

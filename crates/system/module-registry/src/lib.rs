@@ -1,12 +1,8 @@
 //! The `module-registry` module: the roster of modules a network runs, and
-//! the scheduled changes to it. The root of the boot set: `valset` and
-//! `identity` link this crate for the origin ([`helpers`]) conventions every
-//! system module shares, and for the authority every system module takes
-//! its governance ops from.
+//! the scheduled changes to it, taken from the [`AUTHORITY`].
 //!
 //! The types, rules and [`Modules`] module are always built; a view links
 //! them with `module` off. The `module` feature adds its wasm exports.
-pub mod helpers;
 mod program;
 mod rules;
 #[cfg(test)]
@@ -17,7 +13,7 @@ pub mod view;
 pub use program::Modules;
 pub use store::{PageRequest, PageResponse};
 
-/// The module whose frames `valset` and this registry accept as governance.
+/// The module whose frames this registry accepts as governance.
 pub const AUTHORITY: &str = "governance";
 
 use borsh::{BorshDeserialize, BorshSerialize};

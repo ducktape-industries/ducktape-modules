@@ -32,7 +32,7 @@ pub(crate) fn publish(ctx: &ExecCtx, body: Vec<u8>) -> Result<(), Error> {
 
 pub(crate) fn schedule(ctx: &ExecCtx, scheduled: Scheduled) -> Result<(), Error> {
     let env = ctx.env();
-    crate::helpers::from(env, AUTHORITY)?;
+    env.sent_by(AUTHORITY)?;
     let in_the_future = scheduled.height > env.height;
     if !in_the_future {
         return Err(invalid(format!(
@@ -82,7 +82,7 @@ pub(crate) fn schedule(ctx: &ExecCtx, scheduled: Scheduled) -> Result<(), Error>
 
 pub(crate) fn cancel(ctx: &ExecCtx, height: u64, program: ModuleId) -> Result<(), Error> {
     let env = ctx.env();
-    crate::helpers::from(env, AUTHORITY)?;
+    env.sent_by(AUTHORITY)?;
     let key = (height, program);
     let Some(change) = SCHEDULE.get(ctx, &key)? else {
         return Err(not_found(format!("{} does not change at {height}", key.1)));

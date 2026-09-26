@@ -2,10 +2,9 @@
 
 use guest::{Cause, Env, Origin, code};
 use guest::{MockHost, Module};
-use module_registry::AUTHORITY;
 use store::PageRequest;
 
-use crate::{Genesis, Member, Membership, Op, Query, Reply, Role, Valset};
+use crate::{AUTHORITY, Genesis, Member, Membership, Op, Query, Reply, Role, Valset};
 
 fn key(n: u8) -> Vec<u8> {
     vec![n; 32]

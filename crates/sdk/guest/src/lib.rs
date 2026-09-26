@@ -36,6 +36,7 @@ pub mod kernel;
 #[cfg(not(target_arch = "wasm32"))]
 mod mock;
 mod module;
+mod origin;
 pub mod refuse;
 
 pub use abi;
