@@ -12,7 +12,7 @@ use host::{
 };
 use identity::AccountNumber;
 use keyscheme::testkit;
-use module_registry::{AUTHORITY, PageRequest};
+use module_registry::PageRequest;
 
 /// Where `make wasm-programs` left the boot set: the bytes are a build
 /// output, never committed.
@@ -124,7 +124,6 @@ impl Net {
                 founding(module_registry::MODULE, &program("module_registry")),
                 founding(valset::MODULE, &program("valset")),
                 founding(identity::MODULE, &program("identity")),
-                probe(AUTHORITY),
                 probe("probe"),
             ],
             views: vec![FoundingView {
@@ -242,8 +241,8 @@ impl Net {
             .unwrap()
     }
 
-    async fn as_authority<T: BorshSerialize>(&mut self, target: &str, op: &T) -> Receipt {
-        self.sent_by(AUTHORITY, target, op).await
+    async fn as_anyone<T: BorshSerialize>(&mut self, target: &str, op: &T) -> Receipt {
+        self.sent_by("probe", target, op).await
     }
 
     /// A query the module refuses.

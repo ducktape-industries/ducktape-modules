@@ -54,16 +54,15 @@ fn acceptance(
 
 /// The founding programs, in admission order: identity numbers their
 /// accounts first, so a person's account comes after them.
-const FOUNDED: [&str; 5] = [
+const FOUNDED: [&str; 4] = [
     module_registry::MODULE,
     valset::MODULE,
     identity::MODULE,
-    AUTHORITY,
     "probe",
 ];
 
-/// The first person's account: the founding programs hold 1..=5.
-const ALICE: AccountNumber = 6;
+/// The first person's account: the founding programs hold 1..=4.
+const ALICE: AccountNumber = 5;
 
 impl Net {
     async fn account(&self, number: AccountNumber) -> identity::Account {
@@ -259,7 +258,7 @@ fn every_module_has_its_account_from_its_admission() {
             params: abi::encode(&Vec::<Step>::new()),
         };
         let scheduled = net
-            .as_authority(
+            .as_anyone(
                 module_registry::MODULE,
                 &module_registry::Op::Schedule(module_registry::Scheduled {
                     height: lands_at,
@@ -610,9 +609,9 @@ fn account_lists_resume_with_the_answering_height() {
             assert_eq!(
                 numbers,
                 if managed {
-                    vec![9, 10, 11]
+                    vec![8, 9, 10]
                 } else {
-                    (1..=11).collect::<Vec<_>>()
+                    (1..=10).collect::<Vec<_>>()
                 }
             );
         }

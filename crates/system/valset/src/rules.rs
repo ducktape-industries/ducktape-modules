@@ -1,4 +1,4 @@
-// The rules: governance-only writes, the last validator kept seated.
+// The rules: writes from anyone for now (`Env::authority`), the last validator kept seated.
 
 use guest::{Error, ExecCtx, QueryCtx, invalid, wrong_state};
 use store::Map;

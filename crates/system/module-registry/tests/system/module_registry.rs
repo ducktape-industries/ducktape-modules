@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn a_published_program_is_scheduled_by_the_authority_and_seated_at_its_height() {
+fn a_published_program_is_scheduled_by_anyone_and_seated_at_its_height() {
     deterministic::Runner::default().start(|context| async move {
         let dir = tempfile::tempdir().unwrap();
         let mut net = Net::found(context, dir.path()).await;
@@ -20,19 +20,8 @@ fn a_published_program_is_scheduled_by_the_authority_and_seated_at_its_height() 
             code,
             params: Vec::new(),
         };
-        let stranger = net
-            .refuse(
-                &public(7),
-                module_registry::MODULE,
-                &module_registry::Op::Schedule(module_registry::Scheduled {
-                    height: net.height + 3,
-                    change: module_registry::Change::Set(entry.clone()),
-                }),
-            )
-            .await;
-        assert_eq!(stranger, reason::UNAUTHORIZED);
         let unpublished = net
-            .as_authority(
+            .as_anyone(
                 module_registry::MODULE,
                 &module_registry::Op::Schedule(module_registry::Scheduled {
                     height: net.height + 3,
@@ -46,7 +35,7 @@ fn a_published_program_is_scheduled_by_the_authority_and_seated_at_its_height() 
             .await;
         assert_eq!(refusal_of(&unpublished), reason::NOT_FOUND);
         let past = net
-            .as_authority(
+            .as_anyone(
                 module_registry::MODULE,
                 &module_registry::Op::Schedule(module_registry::Scheduled {
                     height: net.height,
@@ -57,7 +46,7 @@ fn a_published_program_is_scheduled_by_the_authority_and_seated_at_its_height() 
         assert_eq!(refusal_of(&past), reason::INVALID_INPUT);
         let lands_at = net.height + 6;
         let scheduled = net
-            .as_authority(
+            .as_anyone(
                 module_registry::MODULE,
                 &module_registry::Op::Schedule(module_registry::Scheduled {
                     height: lands_at,
@@ -67,7 +56,7 @@ fn a_published_program_is_scheduled_by_the_authority_and_seated_at_its_height() 
             .await;
         output_of(&scheduled);
         let taken = net
-            .as_authority(
+            .as_anyone(
                 module_registry::MODULE,
                 &module_registry::Op::Schedule(module_registry::Scheduled {
                     height: lands_at,
@@ -145,7 +134,7 @@ fn a_published_program_is_scheduled_by_the_authority_and_seated_at_its_height() 
         assert_eq!(seated, entry);
         let removal_at = net.height + 5;
         let removal = net
-            .as_authority(
+            .as_anyone(
                 module_registry::MODULE,
                 &module_registry::Op::Schedule(module_registry::Scheduled {
                     height: removal_at,
@@ -155,7 +144,7 @@ fn a_published_program_is_scheduled_by_the_authority_and_seated_at_its_height() 
             .await;
         output_of(&removal);
         let cancelled = net
-            .as_authority(
+            .as_anyone(
                 module_registry::MODULE,
                 &module_registry::Op::Cancel {
                     height: removal_at,
@@ -168,7 +157,7 @@ fn a_published_program_is_scheduled_by_the_authority_and_seated_at_its_height() 
         assert!(net.host.programs().unwrap().contains_key("identity2"));
         let removal_at = net.height + 3;
         let removal = net
-            .as_authority(
+            .as_anyone(
                 module_registry::MODULE,
                 &module_registry::Op::Schedule(module_registry::Scheduled {
                     height: removal_at,
@@ -199,7 +188,7 @@ fn schedule_pages_and_missing_programs_report_the_answering_height() {
         let code: BlobId = abi::decode(&output).unwrap();
         for program in ["z", "a", "m"] {
             let receipt = net
-                .as_authority(
+                .as_anyone(
                     module_registry::MODULE,
                     &module_registry::Op::Schedule(module_registry::Scheduled {
                         height: 100,

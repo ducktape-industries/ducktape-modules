@@ -17,9 +17,6 @@ pub use abi::role::validators::{Genesis, Member};
 
 pub const MODULE: &str = "valset";
 
-/// The module whose frames valset accepts as governance.
-pub const AUTHORITY: &str = "governance";
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Role {
     Validator,

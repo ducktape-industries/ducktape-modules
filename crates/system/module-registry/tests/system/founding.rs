@@ -6,12 +6,7 @@ fn founding_seats_the_validators_and_every_program_answers() {
         let dir = tempfile::tempdir().unwrap();
         let net = Net::found(context, dir.path()).await;
         let programs = net.host.programs().unwrap();
-        for program in [
-            module_registry::MODULE,
-            valset::MODULE,
-            identity::MODULE,
-            AUTHORITY,
-        ] {
+        for program in [module_registry::MODULE, valset::MODULE, identity::MODULE] {
             assert!(programs.contains_key(program), "{program} is not rostered");
         }
         assert!(!programs.contains_key("lens"), "a view is never admitted");
@@ -65,7 +60,6 @@ fn founding_seats_the_validators_and_every_program_answers() {
                 module(module_registry::MODULE),
                 module(valset::MODULE),
                 module(identity::MODULE),
-                module(AUTHORITY),
                 module("probe"),
             ]
         );
