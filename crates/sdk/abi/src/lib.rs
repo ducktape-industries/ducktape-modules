@@ -543,8 +543,8 @@ pub mod role {
 /// chat's, forge's and identity's screens agree. Not in ducktape's copy of
 /// this crate: the kernel shows no one anything.
 impl role::identity::Kind {
-    /// The badge beside an account's name: "Agent · managed by <name>" or
-    /// "Module · <program>". A person wears none. `name_of` names the
+    /// The badge beside an account's name: `"Agent · managed by <name>"` or
+    /// `"Module · <program>"`. A person wears none. `name_of` names the
     /// manager.
     pub fn badge(
         &self,
