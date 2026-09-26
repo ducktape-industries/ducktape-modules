@@ -45,21 +45,15 @@ pub(crate) async fn roots(
     below: Option<Vec<u8>>,
     limit: usize,
 ) -> Result<(Vec<MsgRow>, bool), Error> {
-    let (all, next) = pages(below, limit.div_ceil(PAGE), |after| {
-        let ask = host.ask::<Ask<ChatApi>>(Query::Roots {
-            channel_id: channel_id.clone(),
-            viewer: viewer.clone(),
-            page: page(after, PAGE),
-        });
-        async move {
-            match ask.await? {
-                Reply::Roots(reply) => Ok((reply.items, reply.next)),
-                _ => Err(wrong_reply()),
-            }
-        }
-    })
-    .await?;
-    Ok((sorted(all), next.is_some()))
+    ::chat::view::roots(
+        host,
+        channel_id,
+        viewer,
+        below,
+        limit.div_ceil(PAGE),
+        PAGE as u64,
+    )
+    .await
 }
 
 /// The rows around a landing seq, oldest first.

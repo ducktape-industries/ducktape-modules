@@ -203,10 +203,14 @@ fn forge_line(
     }
 }
 
-/// forge's own line: written by the account identity names forge's.
+/// forge's own line: written in its room by the account identity names
+/// forge's ([`chat::program_author`]).
 fn is_forge(forge: &Forge, row: &chat::MsgRow) -> bool {
-    let names = forge.names.ready();
-    names.and_then(|names| names.module(&row.author)) == Some(forge::MODULE)
+    let module = forge
+        .names
+        .ready()
+        .and_then(|names| names.module(&row.author));
+    chat::program_author(row, module) == Some(forge::MODULE)
 }
 
 /// The hidden chat channel of this change, in chat's row shape.

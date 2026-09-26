@@ -11,7 +11,6 @@ use ducktape_view_guest::methods::{HostBadge, Notification, NotifyPost, NotifySe
 use crate::api::{Ask, ChatApi};
 use crate::message::message_body;
 use crate::names::dm_peer_of;
-use crate::watch::log;
 use crate::{Chat, links};
 use chat::view::Names;
 
@@ -102,8 +101,14 @@ impl Chat {
                 cx.notify();
                 let rows = match asked {
                     Ok(Reply::Messages(rows)) => rows,
-                    Ok(_) => return log(cx, "news", &ducktape_view_guest::host::wrong_reply()),
-                    Err(refusal) => return log(cx, "news", &refusal),
+                    Ok(_) => {
+                        return cx.host().log_refused(
+                            "chat",
+                            "news",
+                            &ducktape_view_guest::host::wrong_reply(),
+                        );
+                    }
+                    Err(refusal) => return cx.host().log_refused("chat", "news", &refusal),
                 };
                 let empty = Names::default();
                 let names = chat.names.ready().unwrap_or(&empty);

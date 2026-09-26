@@ -110,7 +110,7 @@ fn rooms(chat: &Chat, cx: &mut Context<Chat>, theme: &Theme) -> impl IntoElement
     let mut dms = Vec::new();
     for info in channels {
         let id = info.channel.id.as_str();
-        if chat::program_of(id).is_some() {
+        if chat::namespace::program(id).is_some() {
             continue;
         }
         if chat::dm_peers(id).is_some() {

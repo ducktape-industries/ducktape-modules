@@ -2,9 +2,8 @@
 
 The source of truth is `src/contract.rs`, `src/read_contract.rs`, and
 `src/review_contract.rs`, re-exported by `forge`. All forge requests, records,
-UI replies, and new operation outputs use Borsh. Serde is for fixture sidecars
-only. No legacy wire/layout conversion exists. Found this version with its new
-`Bounds`; do not seat it over an older forge layout.
+UI replies, and operation outputs use Borsh. Serde is for fixture sidecars
+only.
 
 ## Decisions in one screen
 
@@ -24,7 +23,7 @@ only. No legacy wire/layout conversion exists. Found this version with its new
 - Forge queues chat creation for `forge:<repo>:<n>` and system lines for opening,
   closing, merging, and submitting a review. Chat owns all conversation replies.
   The host commits the record and emitted queue items atomically; delivery is in
-  the **next block**, per the present ABI, not synchronous cross-module execution.
+  the **next block**, not synchronous cross-module execution.
 - A review is one immutable operation: verdict, body, pinned head and base, and
   up to `MAX_REVIEW_COMMENTS` line comments. An anchor is `(path, side, line)`;
   `Old` addresses `base_oid`, `New` addresses `commit_oid`. Both are retained.
@@ -134,8 +133,8 @@ requested changes never block that CAS.
 Authors are always derived from the signed external origin, never the payload.
 Any authenticated member key may open/review. Only the author edits title/body/
 review requests; author or repository writer closes; repository writers merge.
-Reviews remain appendable on closed/merged changes, as in the previous tracker.
-Closing is terminal in this v1; there is no reopen operation.
+Reviews remain appendable on closed/merged changes.
+Closing is terminal; there is no reopen operation.
 
 | Operation example | Effect/output |
 | --- | --- |
@@ -177,7 +176,7 @@ have derived read budgets (`2 * log_walk + 1` and `8 * log_walk + tree_walk`).
 encoded change/review; `MAX_REVIEW_COMMENTS`, `MAX_REVIEWERS`, `MAX_TITLE_BYTES`,
 `MAX_PATH_BYTES`, `MAX_KEY_BYTES` (a granted or requested key) and `MAX_REPO_NAME`
 are exported contract constants; a configured head is at most `MAX_PATH_BYTES`. Repo names
-are at most 37 bytes so even `forge:<repo>:<u64::MAX>` fits chat's channel ID.
+are at most `MAX_REPO_NAME`, derived from chat's `MAX_ID_BYTES` so even `forge:<repo>:<u64::MAX>` fits.
 
 A UI query failure is an ABI `Refusal { reason, sentence }`. Stable reasons
 include `object_not_held`, `capacity`, `invalid_input`, `not_found`, `stale`, and

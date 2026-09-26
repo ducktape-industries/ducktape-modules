@@ -132,6 +132,8 @@ pub fn describe(op: &Op) -> Description {
     }
 }
 
+describe::export!(Op, describe);
+
 /// A principal as a describe field shows it: an account, or the system.
 fn principal(principal: &Principal) -> Value {
     match principal {

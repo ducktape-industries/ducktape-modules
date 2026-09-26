@@ -15,7 +15,7 @@
 //! - `origin.rs`: a huddle join's node proof, and the identity role's roster
 //! - `queries.rs`: one short function per question
 //! - `text.rs`: what search and tags read out of a message
-//! - `description.rs`: [`describe`], an op in a person's words
+//! - `description.rs`: [`describe()`], an op in a person's words
 //!
 //! The module runs over `guest`'s contexts, so a native test runs it over
 //! [`guest::MockHost`] exactly as the host does. The `module` feature adds
@@ -356,18 +356,31 @@ pub fn dm_peers(channel_id: &str) -> Option<(AccountNumber, AccountNumber)> {
     Some((a.parse().ok()?, b.parse().ok()?))
 }
 
-/// The program a `<program>:<name>` channel id belongs to, or `None` for a
-/// channel people opened. Only that program creates one (a review thread,
-/// say); a reader reaches it through its program, not the channel list.
-/// The program's view opens the room at the id's own path: `forge:web:3`
-/// is `duck://<chain>/forge/web/3`.
-pub fn program_of(channel_id: &str) -> Option<&str> {
-    channel_id.split_once(':').map(|(program, _)| program)
+/// A program's own ids in chat: `<program>:<name>`, a channel (a review
+/// thread, say) or a message. Only that program creates one; a reader
+/// reaches such a room through its program, not the channel list. The
+/// program's view opens the room at the id's own path: `forge:web:3` is
+/// `duck://<chain>/forge/web/3`. Every id is at most [`MAX_ID_BYTES`].
+pub mod namespace {
+    /// `program`'s id `name`: `forge:web:3`.
+    pub fn id(program: &str, name: &str) -> String {
+        format!("{program}:{name}")
+    }
+
+    /// The program an id belongs to, or `None` for one people made.
+    pub fn program(id: &str) -> Option<&str> {
+        id.split_once(':').map(|(program, _)| program)
+    }
 }
 
-/// A program's own post in its own room: written by the account of the
-/// module the `<program>:<name>` room belongs to (`author_module`, the
-/// module the author's account is, from identity's profiles), as one code
+/// The program whose own account wrote `row` in that program's own
+/// `<program>:<name>` room (`author_module`: the module the author's
+/// account is, from identity's profiles).
+pub fn program_author<'a>(row: &'a MsgRow, author_module: Option<&str>) -> Option<&'a str> {
+    namespace::program(&row.channel_id).filter(|program| author_module == Some(*program))
+}
+
+/// A program's own post in its own room ([`program_author`]), as one code
 /// block in that program's language (forge's `opened`, `review 7`). The code
 /// is the program's to word; a reader shows it as that program's event and
 /// points to where the program itself shows the room. `(program, code)`.
@@ -375,15 +388,14 @@ pub fn program_post<'a>(
     row: &'a MsgRow,
     author_module: Option<&str>,
 ) -> Option<(&'a str, &'a str)> {
-    let program = program_of(&row.channel_id)?;
-    let own = author_module == Some(program);
+    let program = program_author(row, author_module)?;
     match row.blocks.as_slice() {
         [
             Block::Code {
                 lang: Some(lang),
                 text,
             },
-        ] if own && lang == program => Some((program, text)),
+        ] if lang == program => Some((program, text)),
         _ => None,
     }
 }
