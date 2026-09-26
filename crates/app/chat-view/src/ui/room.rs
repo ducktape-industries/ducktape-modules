@@ -2,9 +2,7 @@
 
 use ducktape_view_guest::design;
 use ducktape_view_guest::prelude::*;
-use ducktape_view_guest::{
-    AnyElement, ClickEvent, Context, ElementId, ParentElement, Styled, Theme, div, px,
-};
+use ducktape_view_guest::{AnyElement, ClickEvent, Context, ParentElement, Styled, Theme, div, px};
 
 use chat::{ChannelInfo, MsgRow};
 use ducktape_view_guest::view::Loadable;
@@ -358,12 +356,14 @@ fn hit_list(chat: &Chat, hits: &Hits, cx: &mut Context<Chat>, theme: &Theme) -> 
 fn hit(row: &MsgRow, cx: &mut Context<Chat>, theme: &Theme) -> AnyElement {
     let id = row.channel_id.clone();
     let seq = row.seq;
+    // seq is per channel: two channels' hits at one seq are two rows
+    let key = format!("chat-search-hit-{id}-{seq}");
     let open = cx.listener(move |chat, _: &ClickEvent, window, cx| {
         cx.notify();
         chat.open_hit(id.clone(), seq, window, cx)
     });
     div()
-        .id(ElementId::named_usize("chat-search-hit", seq as usize))
+        .id(key)
         .flex()
         .flex_col()
         .gap_1()

@@ -29,7 +29,7 @@ fn a_send_shows_pending_then_lands_and_a_refusal_is_a_banner() {
     cx.simulate_input("chat-sidebar-search", "hello");
     cx.simulate_submit("chat-sidebar-search");
     cx.run_until_parked();
-    assert!(cx.has_text("1 result for “hello”"), "{:?}", cx.texts());
+    assert!(cx.has_text("2 results for “hello”"), "{:?}", cx.texts());
     cx.simulate_click("chat-sidebar-clear-search");
     view.read(|chat| assert!(chat.search.query.is_empty()));
     cx.host().handle::<HostId>(|kind| {
@@ -156,4 +156,18 @@ fn a_members_only_room_takes_its_owner_and_its_members() {
         Some(crate::session::Gate::NotMember),
         "a stranger reads"
     );
+}
+
+/// Hits in two channels at the same seq are two rows the host can tell
+/// apart; one identity for both stopped the view.
+#[test]
+fn search_hits_in_two_channels_at_one_seq_are_two_rows() {
+    let (mut cx, _) = opened();
+    cx.simulate_input("chat-sidebar-search", "hello");
+    cx.simulate_submit("chat-sidebar-search");
+    cx.run_until_parked();
+    assert!(cx.find("chat-search-hit-general-1").is_some());
+    assert!(cx.find("chat-search-hit-dm-7-8-1").is_some());
+    // the host's sanitizer refuses duplicate typed identities among siblings
+    cx.frame_bytes();
 }

@@ -6,7 +6,7 @@
 //! into the lists — the next query reconciles them.
 use ducktape_view_guest::methods::HostId;
 use ducktape_view_guest::view::Submit;
-use ducktape_view_guest::{Context, Window};
+use ducktape_view_guest::{Context, Editor, Window};
 
 use crate::api::{ChatApi, SubmitForge};
 use crate::state::{ChangeForm, Forge, NewRepo, Pending, Progress, change_key};
@@ -132,7 +132,7 @@ impl Forge {
             },
             into: change.into.clone(),
             title: change.title.clone(),
-            body: change.body.clone(),
+            body: Editor::new(change.body.clone()),
             reviewers: change.reviewers.clone(),
             error: String::new(),
         });
@@ -160,7 +160,7 @@ impl Forge {
                     repo: repo.clone(),
                     n,
                     title: Some(form.title.clone()),
-                    body: Some(form.body.clone()),
+                    body: Some(form.body.text()),
                     reviewers: Some(form.reviewers.clone()),
                 },
                 "Saving the change".to_owned(),
@@ -172,7 +172,7 @@ impl Forge {
                     from: Revision::Ref(form.from.clone()),
                     into: form.into.clone(),
                     title: form.title.clone(),
-                    body: form.body.clone(),
+                    body: form.body.text(),
                     reviewers: form.reviewers.clone(),
                 },
                 format!("Opening “{}”", form.title.trim()),
