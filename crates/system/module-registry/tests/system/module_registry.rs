@@ -101,13 +101,14 @@ fn a_published_program_is_scheduled_by_anyone_and_seated_at_its_height() {
         }
         let applied = net.tick().await;
         assert_eq!(applied.height, lands_at);
-        // the admission, then identity giving identity2 its account
+        // identity giving identity2 its account, then the admission: a
+        // program has its account before its init runs
         let admitted: Vec<&str> = applied
             .admissions
             .iter()
             .map(|receipt| receipt.program.as_str())
             .collect();
-        assert_eq!(admitted, ["identity2", identity::MODULE]);
+        assert_eq!(admitted, [identity::MODULE, "identity2"]);
         assert!(net.host.programs().unwrap().contains_key("identity2"));
         net.apply(
             &public(7),

@@ -77,10 +77,12 @@ fn a_transaction_shows_its_block_signer_and_operation() {
     assert!(cx.has_text("code abababab…abab"), "{texts:?}");
     assert!(cx.has_text("channel") && cx.has_text("#design"));
     assert!(cx.has_text("text") && cx.has_text("hello there"));
+    assert!(cx.has_text("Accepted"), "{texts:?}");
+    // the message it emitted, and that one's refused message under it
+    assert!(cx.has_text("Messages") && cx.has_text("notify") && cx.has_text("mail"));
     assert!(
-        !texts
-            .iter()
-            .any(|t| t.contains("Applied") || t.contains("Rejected"))
+        cx.has_text("Rejected") && cx.has_text("the inbox is full") && cx.has_text("capacity"),
+        "{texts:?}"
     );
     cx.assert_accessible();
     cx.simulate_click("explorer-from");
@@ -89,6 +91,45 @@ fn a_transaction_shows_its_block_signer_and_operation() {
         cx.has_text("2 transactions in the last 13 blocks"),
         "{:?}",
         cx.texts()
+    );
+}
+
+#[test]
+fn a_rejected_transaction_says_so_and_why() {
+    let (mut cx, _) = ready();
+    let hash = abi::hex(&[0xb2; 32]);
+    assert!(
+        cx.find(&format!("explorer-tx-mark-{hash}")).is_some(),
+        "its row marks it"
+    );
+    cx.simulate_click(&format!("explorer-tx-{hash}"));
+    cx.run_until_parked();
+    let texts = cx.texts();
+    assert!(
+        cx.has_text("Rejected") && cx.has_text("not a member") && cx.has_text("unauthorized"),
+        "{texts:?}"
+    );
+    assert!(
+        !cx.has_text("Accepted") && !cx.has_text("Messages"),
+        "{texts:?}"
+    );
+    cx.assert_accessible();
+}
+
+#[test]
+fn a_transaction_without_a_receipt_shows_no_outcome() {
+    let (mut cx, _) = ready();
+    let hash = abi::hex(&[0xc3; 32]);
+    assert!(cx.find(&format!("explorer-tx-mark-{hash}")).is_none());
+    cx.simulate_click(&format!("explorer-tx-{hash}"));
+    cx.run_until_parked();
+    let texts = cx.texts();
+    assert!(cx.has_text("ping"), "{texts:?}");
+    assert!(
+        !texts
+            .iter()
+            .any(|t| t == "Status" || t == "Accepted" || t == "Rejected"),
+        "{texts:?}"
     );
 }
 

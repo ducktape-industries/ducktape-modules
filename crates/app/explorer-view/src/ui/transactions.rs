@@ -99,6 +99,11 @@ pub(super) fn tx(view: &Explorer, hash: &[u8; 32], cx: Cx, theme: &Theme) -> Any
             ),
             theme,
         ))
+        .children(
+            tx.run
+                .as_ref()
+                .map(|run| field("Status", status(run, "explorer-tx", theme), theme)),
+        )
         .child(field("Hash", mono(abi::hex(&tx.hash)), theme))
         .child(field("From", from(view, tx, cx, theme), theme))
         .child(field("Program", program, theme))
@@ -125,7 +130,75 @@ pub(super) fn tx(view: &Explorer, hash: &[u8; 32], cx: Cx, theme: &Theme) -> Any
                 .child("Operation"),
         )
         .child(operation(view, tx, cx, theme))
+        .children(tx.run.as_ref().and_then(|run| messages(run, theme)))
         .into_any_element()
+}
+
+/// A run's outcome as a badge and, where it was rejected, the refusal's
+/// sentence and reason. `id` keeps the badge's id its own.
+fn status(run: &Run, id: &str, theme: &Theme) -> Div {
+    let (word, color, soft) = outcome(run, theme);
+    let refusal = run.refusal.as_ref().map(|refusal| {
+        div()
+            .flex()
+            .gap_2()
+            .min_w_0()
+            .child(div().truncate().child(refusal.message.clone()))
+            .child(mono(refusal.code.clone()).text_color(theme.faint))
+    });
+    div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .min_w_0()
+        .child(design::badge(format!("{id}-status"), word, color, soft))
+        .children(refusal)
+}
+
+/// The runs a transaction's messages caused, each under the run that sent
+/// it; `None` where it sent none.
+fn messages(run: &Run, theme: &Theme) -> Option<impl IntoElement> {
+    if run.nested.is_empty() {
+        return None;
+    }
+    let mut rows = Vec::new();
+    nested(&run.nested, 0, "explorer-run", theme, &mut rows);
+    Some(
+        div()
+            .child(
+                div()
+                    .id("explorer-messages-heading")
+                    .px_5()
+                    .py_2()
+                    .text_size(design::text::SECTION)
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .role(Role::Heading)
+                    .aria_level(2)
+                    .child("Messages"),
+            )
+            .child(div().id("explorer-messages").mx_5().mb_4().children(rows)),
+    )
+}
+
+/// `runs` and theirs below them, one row each, stepped in by `depth`.
+fn nested(runs: &[Run], depth: usize, at: &str, theme: &Theme, rows: &mut Vec<AnyElement>) {
+    for (index, run) in runs.iter().enumerate() {
+        let id = format!("{at}-{index}");
+        rows.push(
+            div()
+                .flex()
+                .items_center()
+                .gap_4()
+                .min_h(ROW_H)
+                .pl(NEST_W * depth as f32)
+                .border_b_1()
+                .border_color(theme.border)
+                .child(mono(run.program.clone()).flex_shrink_0())
+                .child(status(run, &id, theme))
+                .into_any_element(),
+        );
+        nested(&run.nested, depth + 1, &id, theme, rows);
+    }
 }
 
 /// Who signed: the account holding the key and which of its keys, or the
