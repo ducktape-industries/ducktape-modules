@@ -62,7 +62,12 @@ struct Mark {
 
 struct Frontier<'a, S: ?Sized> {
     store: &'a S,
+    /// how many commits each side may enqueue, the side to list and the side
+    /// that stops it counted apart, so a long `stop_at` history (a target
+    /// that moved on since a branch point) never starves the listed one
     cap: usize,
+    /// commits enqueued as `[interesting, uninteresting]`
+    enqueued: [usize; 2],
     marks: BTreeMap<Oid, Mark>,
     queue: BinaryHeap<(i64, Reverse<Oid>)>,
     pending_interesting: usize,
@@ -70,10 +75,11 @@ struct Frontier<'a, S: ?Sized> {
 
 impl<S: Objects + ?Sized> Frontier<'_, S> {
     fn enqueue(&mut self, id: Oid, uninteresting: bool) -> Result<()> {
-        let over_cap = self.marks.len() >= self.cap;
-        if over_cap {
+        let side = &mut self.enqueued[usize::from(uninteresting)];
+        if *side >= self.cap {
             return Err(Error::CapReached);
         }
+        *side += 1;
         let commit = commit_of(self.store, &id)?;
         self.marks.insert(
             id,
@@ -127,6 +133,7 @@ pub fn commits<S: Objects + ?Sized>(
     let mut frontier = Frontier {
         store,
         cap,
+        enqueued: [0; 2],
         marks: BTreeMap::new(),
         queue: BinaryHeap::new(),
         pending_interesting: 0,

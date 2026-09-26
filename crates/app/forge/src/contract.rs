@@ -17,7 +17,8 @@ pub struct Bounds {
     /// Maximum Myers edit distance for one file.
     pub merge_cost: u64,
     pub page_size: u32,
-    /// Maximum commits in a history/compare walk.
+    /// Maximum commits in a history/compare walk; a log's `exclude` side
+    /// walks under its own budget of the same size.
     pub log_walk: u64,
     /// Maximum object reads in a tree/diff/compare query.
     pub tree_walk: u64,

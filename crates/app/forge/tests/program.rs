@@ -453,3 +453,31 @@ fn a_forge_write_at_the_answering_height_restarts_the_walk() {
     .unwrap();
     assert_eq!(rig.query(&log(page.next)).unwrap_err().code, code::STALE);
 }
+
+/// What `exclude` reaches walks under its own budget: a target with more
+/// history than the change's own commits does not refuse the listing.
+#[test]
+fn a_log_exclude_spends_its_own_walk_budget() {
+    use common::story::*;
+    let mut rig = Rig::start(
+        forge::Bounds {
+            log_walk: 2,
+            ..bounds()
+        },
+        HashKind::Sha1,
+    );
+    let story = Story::pushed(&mut rig);
+    let bytes = rig
+        .query(&Query::Log {
+            repo: REPO.into(),
+            from: reference("feature"),
+            exclude: Some(reference("unrelated")),
+            page: PageRequest::first(64),
+        })
+        .unwrap();
+    let Reply::Log { page, .. } = abi::decode(&bytes).unwrap() else {
+        panic!("a log");
+    };
+    let oids: Vec<_> = page.items.into_iter().map(|c| c.oid).collect();
+    assert_eq!(oids, [story.feature, story.root]);
+}
