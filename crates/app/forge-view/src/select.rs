@@ -253,6 +253,12 @@ impl Forge {
             .get(&change_key(self.nav.repo.as_deref()?, self.nav.change?))
     }
 
+    /// The open change's review being written, to edit.
+    pub(crate) fn review_mut(&mut self) -> Option<&mut state::ReviewSession> {
+        let key = change_key(self.nav.repo.as_deref()?, self.nav.change?);
+        self.reviews.get_mut(&key)
+    }
+
     pub(crate) fn pending_in(&self, scope: &str) -> Vec<&state::Pending> {
         self.pending.iter().filter(|op| op.scope == scope).collect()
     }

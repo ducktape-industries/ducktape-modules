@@ -6,7 +6,7 @@
 //! into the lists — the next query reconciles them.
 use ducktape_view_guest::methods::HostId;
 use ducktape_view_guest::view::Submit;
-use ducktape_view_guest::{Context, Window};
+use ducktape_view_guest::{Context, Editor, Window};
 
 use crate::api::{ChatApi, SubmitForge};
 use crate::state::{ChangeForm, Forge, NewRepo, Pending, Progress, change_key};
@@ -310,7 +310,7 @@ impl Forge {
     /// A reply in the change's hidden channel. Chat owns every reply; forge
     /// owns only the change's own body.
     pub(crate) fn post_reply(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        let text = self.reply.trim().to_owned();
+        let text = self.reply.state_view().text.trim().to_owned();
         if text.is_empty() {
             return;
         }
@@ -318,7 +318,8 @@ impl Forge {
             return;
         };
         let channel = change.channel.clone();
-        self.reply.clear();
+        self.reply
+            .replace(Editor::default(), self.reply.reset_revision());
         cx.notify();
         cx.spawn(async move |this, cx| {
             let host = cx.host();
