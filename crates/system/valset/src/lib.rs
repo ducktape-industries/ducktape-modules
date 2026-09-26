@@ -13,7 +13,9 @@ pub use program::Valset;
 use borsh::{BorshDeserialize, BorshSerialize};
 use module_registry::{PageRequest, PageResponse};
 
-pub use abi::valset::{Genesis, Member, PROGRAM as MODULE};
+pub use abi::role::validators::{Genesis, Member};
+
+pub const MODULE: &str = "valset";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Role {

@@ -23,7 +23,9 @@ pub const AUTHORITY: &str = "governance";
 use borsh::{BorshDeserialize, BorshSerialize};
 use guest::ModuleId;
 
-pub use abi::module_registry::{Entry, Genesis, PROGRAM as MODULE, View};
+pub use abi::role::registry::{Entry, Genesis, View};
+
+pub const MODULE: &str = "module-registry";
 
 pub const CODE_KIND: &str = "program";
 

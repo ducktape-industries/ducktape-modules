@@ -329,16 +329,16 @@ fn a_removal_names_one_of_its_own_kind() {
 #[test]
 fn the_host_contract_is_a_prefix_of_the_program_contract() {
     assert_eq!(
-        abi::encode(&abi::module_registry::Query::At(9)),
+        abi::encode(&abi::role::registry::Query::At(9)),
         abi::encode(&super::Query::At(9))
     );
-    let entry = abi::module_registry::Entry {
+    let entry = abi::role::registry::Entry {
         program: "p".into(),
         code: abi::BlobId::Sha256([1; 32]),
         params: vec![2],
     };
     assert_eq!(
-        abi::encode(&abi::module_registry::Reply::Programs(vec![entry.clone()])),
+        abi::encode(&abi::role::registry::Reply::Programs(vec![entry.clone()])),
         abi::encode(&super::Reply::Programs(vec![entry]))
     );
 }

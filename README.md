@@ -12,7 +12,7 @@ crates/lib/     gitcore
 
 | Path | What |
 |---|---|
-| `crates/sdk/abi` | the borsh bytes ABI a module and the host share: `GuestCall`, `HostOp`/`HostReply`, `Env`, `Refusal`, the `module_registry` and `valset` contracts, under the kernel's names. A copy of ducktape's `crates/kernel/abi` |
+| `crates/sdk/abi` | the borsh bytes ABI a module and the host share: `GuestCall`, `HostOp`/`HostReply`, `Env`, `Refusal`, the `role::registry` and `role::validators` interfaces the kernel calls, under the kernel's names. A copy of ducktape's `crates/kernel/abi` |
 | `crates/sdk/error` | `Error { code, message }` and its `code` tokens, the one error type a module, the host and a view share (borsh; serde behind a feature). Depends on no ducktape crate; `guest` re-exports it and `view-wire` carries it |
 | `crates/sdk/guest` | the minimal module SDK, enough alone: the `Module` trait, the `ExecCtx` and `QueryCtx` contexts its entry points receive (env, raw state, blobs, `send`/`call`, events, `set_return_data`, sibling queries, `verify`), `export!`, `Error` and its constructors and `decoded`, and `MockHost`, the native host the same contexts run over in a test. `src/kernel.rs` is the one place the kernel's names (`Refusal`, `ProgramId`, `ItemRef`, `Scan`, …) become the SDK's (`Error`, `ModuleId`, `MessageId`, `Range`, …), byte for byte; `kernel::error_from`/`refusal_from` convert an error. `examples/counter.rs` is a module written with it alone |
 | `crates/sdk/store` | optional typed storage over `guest`'s contexts: the `Map`/`Set`/`Item` descriptors with `KeyCodec`, and `PageRequest`/`PageResponse`. A read takes `&QueryCtx` (an `&ExecCtx` serves it), a write `&ExecCtx`. A view links it and calls none of it |

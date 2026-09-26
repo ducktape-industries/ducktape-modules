@@ -7,7 +7,7 @@ use commonware_cryptography::{Signer as _, ed25519};
 use commonware_runtime::{Runner as _, deterministic};
 use fixture_probe::Step;
 use host::{
-    Applied, Block, BlockId, Founding, FoundingView, Genesis, Host, Layer, Limits, Receipt,
+    Applied, Block, BlockId, Founding, FoundingView, Genesis, Host, Layer, Limits, Receipt, Roles,
     Submission,
 };
 use identity::AccountNumber;
@@ -114,10 +114,15 @@ impl Net {
     async fn found(context: Ctx, dir: &std::path::Path) -> Net {
         let genesis = Genesis {
             network: NETWORK.to_vec(),
-            module_registry: program("module_registry"),
-            valset: program("valset"),
+            roles: Roles {
+                registry: module_registry::MODULE.into(),
+                validators: valset::MODULE.into(),
+                identity: identity::MODULE.into(),
+            },
             validators: vec![member(1), member(2)],
             programs: vec![
+                founding(module_registry::MODULE, &program("module_registry")),
+                founding(valset::MODULE, &program("valset")),
                 founding(identity::MODULE, &program("identity")),
                 probe(AUTHORITY),
                 probe("probe"),
