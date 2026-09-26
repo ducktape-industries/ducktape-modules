@@ -11,7 +11,7 @@ fn the_overview_shows_the_head_and_the_latest_blocks_and_transactions() {
     assert!(cx.has_text("Next in 7 blocks"), "{texts:?}");
     assert!(cx.has_text("Validators") && cx.has_text("Accounts"));
     assert!(!cx.has_text("Transactions ") && !texts.iter().any(|t| t.contains("tx count")));
-    assert!(cx.has_text("Latest blocks") && cx.has_text("Latest transactions"));
+    assert!(cx.has_text("Latest activity") && cx.has_text("Latest transactions"));
     assert!(cx.has_text("Post in #design") && cx.has_text("Ada") && cx.has_text("#3"));
     assert!(cx.has_text("mystery · 4 bytes") && cx.has_text("02020202…0202"));
     assert!(

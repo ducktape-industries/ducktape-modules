@@ -9,6 +9,8 @@ pub(super) fn account(view: &Settings, cx: &mut Context<Settings>, theme: &Theme
         Loadable::Ready(Some(account)) => {
             let who = match account.number {
                 Some(number) => format!("{} · account {number}", account.name),
+                // a key held by an agent that does not act goes by the agent
+                None if account.note.is_some() => account.name.clone(),
                 None => "Unregistered key".into(),
             };
             let keys = account.keys.iter().enumerate().map(|(i, key)| {
@@ -30,7 +32,10 @@ pub(super) fn account(view: &Settings, cx: &mut Context<Settings>, theme: &Theme
                 .children(keys)
                 // a bare key is seated: `queries::account` answers no
                 // account at all while none is
-                .when(account.number.is_none(), |body| {
+                .when_some(account.note.as_ref(), |body, note| {
+                    body.child(secondary("settings/account/note", note, theme))
+                })
+                .when(account.number.is_none() && account.note.is_none(), |body| {
                     body.child(create_account(view, cx, theme))
                 })
                 .when(account.manages, |body| {

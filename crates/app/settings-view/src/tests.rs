@@ -96,8 +96,31 @@ fn seated(state: &str, dark: bool) -> (TestAppContext, StreamSender<HostSession>
     let props = cx.host().stream::<HostSession>();
     respond(&cx);
     match state {
-        "unregistered" => cx.host().handle::<Query<Identity>>(|q| {
-            panic!("an unregistered key asks identity nothing: {q:?}")
+        "unregistered" => cx.host().handle::<Query<Identity>>(|q| match q {
+            identity::Query::Resolve { references } => {
+                Ok(identity::Reply::Resolved(vec![None; references.len()]))
+            }
+            q => panic!("an unregistered key asks identity who holds it, nothing more: {q:?}"),
+        }),
+        "suspended" => cx.host().handle::<Query<Identity>>(|q| {
+            Ok(match q {
+                identity::Query::Resolve { references } => {
+                    assert_eq!(references, vec![identity::Reference::Key(vec![0xab, 0xcd])]);
+                    identity::Reply::Resolved(vec![Some(12)])
+                }
+                identity::Query::Profile { number: 12 } => {
+                    identity::Reply::Profile(Some(identity::Profile {
+                        number: 12,
+                        name: "Scout".into(),
+                        kind: identity::Kind::Managed {
+                            manager: 7,
+                            category: identity::Category::Agent,
+                            standing: identity::Standing::Suspended,
+                        },
+                    }))
+                }
+                q => panic!("unexpected query: {q:?}"),
+            })
         }),
         "loading" => {
             cx.host().never::<ChainStatus>();
@@ -119,7 +142,7 @@ fn seated(state: &str, dark: bool) -> (TestAppContext, StreamSender<HostSession>
         } else {
             "abcd".into()
         },
-        account: (!matches!(state, "empty" | "unregistered")).then_some(7),
+        account: (!matches!(state, "empty" | "unregistered" | "suspended")).then_some(7),
         dark,
         endpoint: "http://127.0.0.1:19001".into(),
         ..Session::default()
@@ -272,6 +295,14 @@ fn no_key_offers_no_form() {
 }
 
 #[test]
+fn a_suspended_agents_key_reads_as_such_and_creates_nothing() {
+    let cx = fixture("suspended", false);
+    assert!(cx.has_text("Who I am: Scout"), "{:?}", cx.texts());
+    assert!(cx.has_text("This key belongs to Scout, suspended by its manager."));
+    assert!(cx.find("settings/account/create").is_none());
+    cx.assert_accessible();
+}
+#[test]
 fn unregistered_key_creates_an_account() {
     let (mut cx, props) = seated("unregistered", false);
     assert!(cx.has_text(
@@ -371,6 +402,10 @@ fn long_host_key_is_truncated_and_non_validator_standing_is_quiet() {
             valset::Query::Membership { .. } => valset::Reply::Membership(None),
             q => panic!("unexpected query: {q:?}"),
         })
+    });
+    cx.host().handle::<Query<Identity>>(|q| match q {
+        identity::Query::Resolve { .. } => Ok(identity::Reply::Resolved(vec![None])),
+        q => panic!("unexpected query: {q:?}"),
     });
     cx.set_global(Theme::light());
     cx.open::<Settings>();

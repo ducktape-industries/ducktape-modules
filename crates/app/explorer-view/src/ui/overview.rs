@@ -128,7 +128,7 @@ fn latest_blocks(view: &Explorer, cx: Cx, theme: &Theme) -> impl IntoElement {
         .border_color(theme.border)
         .child(heading(
             "explorer-latest-blocks-heading",
-            "Latest blocks",
+            "Latest activity",
             Some(all),
             theme,
         ))

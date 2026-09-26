@@ -4,7 +4,7 @@
 use ducktape_view_guest::Host;
 use ducktape_view_guest::host::{Error, malformed, pages, wrong_reply};
 use ducktape_view_guest::methods::Query;
-use identity::{Control, Kind, PageRequest, Standing};
+use identity::{Control, Kind, PageRequest, Reference, Standing};
 use serde::{Deserialize, Serialize};
 
 use crate::api::{Identity, Valset};
@@ -24,6 +24,9 @@ pub struct Account {
     pub agents: Vec<Agent>,
     /// the agent read stopped at [`AGENT_PAGES`]: more agents exist
     pub more_agents: bool,
+    /// why a key that resolves to no account acts as no one: the agent
+    /// holding it does not act. `None` for a key no account holds.
+    pub note: Option<String>,
 }
 
 /// An agent the account manages.
@@ -66,13 +69,23 @@ pub(crate) async fn account(
     let key = abi::unhex(&signer)
         .ok_or_else(|| malformed("the session's signer is not hexadecimal".into()))?;
     let Some(number) = number else {
+        // the host resolves no account for a suspended agent's key, which
+        // identity still holds (and so refuses to create an account with)
+        let (name, note) = match held_by(&host, &key).await? {
+            Some((name, note)) => {
+                let sentence = format!("This key belongs to {name}, {note} by its manager.");
+                (name, Some(sentence))
+            }
+            None => (String::new(), None),
+        };
         return Ok(Some(Account {
             number: None,
-            name: String::new(),
+            name,
             keys: vec![read_key(&host, key, None).await?],
             manages: false,
             agents: Vec::new(),
             more_agents: false,
+            note,
         }));
     };
     let account = match host
@@ -102,7 +115,32 @@ pub(crate) async fn account(
         manages,
         agents,
         more_agents,
+        note: None,
     }))
+}
+
+/// The account holding `key` that does not act, by its name and why not
+/// (`Kind::note`); `None` for a key no account holds.
+async fn held_by(host: &Host, key: &[u8]) -> Result<Option<(String, &'static str)>, Error> {
+    let references = vec![Reference::Key(key.to_vec())];
+    let number = match host
+        .ask::<Query<Identity>>(identity::Query::Resolve { references })
+        .await?
+    {
+        identity::Reply::Resolved(numbers) => numbers.into_iter().next().flatten(),
+        _ => return Err(wrong_reply()),
+    };
+    let Some(number) = number else {
+        return Ok(None);
+    };
+    let profile = match host
+        .ask::<Query<Identity>>(identity::Query::Profile { number })
+        .await?
+    {
+        identity::Reply::Profile(p) => p,
+        _ => return Err(wrong_reply()),
+    };
+    Ok(profile.and_then(|p| Some((p.name, p.kind.note()?))))
 }
 
 /// The agents `manager` manages, up to [`AGENT_PAGES`] pages, and whether
