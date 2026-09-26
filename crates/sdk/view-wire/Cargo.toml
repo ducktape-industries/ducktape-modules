@@ -34,9 +34,9 @@ uuid = "1.1.2"
 # `task` and `subscription` share the SDK futures runtime.
 futures = "0.3"
 design = { path = "../design" }
-# `Error` is the module SDK's: one type for an error a module wrote and one
+# `Error` is the one error type: the same for an error a module wrote and one
 # the host wrote.
-guest = { workspace = true }
+error = { workspace = true, features = ["serde"] }
 # `module.describe` answers what a program says its op means.
 describe = { workspace = true, features = ["serde"] }
 memchr = "2"

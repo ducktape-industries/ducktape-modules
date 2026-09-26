@@ -145,14 +145,19 @@ impl QueryCtx {
 
     pub fn record<T: BorshDeserialize>(&self, key: impl AsRef<[u8]>) -> Result<Option<T>, Error> {
         self.get(key)
-            .map(|bytes| abi::decode(&bytes).map_err(Error::from))
+            .map(|bytes| abi::decode(&bytes).map_err(crate::kernel::error_from))
             .transpose()
     }
 
     pub fn records<T: BorshDeserialize>(&self, range: Range) -> Result<Vec<(Vec<u8>, T)>, Error> {
         self.scan(range)
             .into_iter()
-            .map(|entry| Ok((entry.key, abi::decode(&entry.value)?)))
+            .map(|entry| {
+                Ok((
+                    entry.key,
+                    abi::decode(&entry.value).map_err(crate::kernel::error_from)?,
+                ))
+            })
             .collect()
     }
 
@@ -194,7 +199,7 @@ impl QueryCtx {
             program: module.into(),
             request: request.into(),
         }) {
-            HostReply::Query(answer) => answer.map_err(Error::from),
+            HostReply::Query(answer) => answer.map_err(crate::kernel::error_from),
             other => protocol("query answer", other),
         }
     }
@@ -205,7 +210,7 @@ impl QueryCtx {
         module: impl Into<ModuleId>,
         request: &Q,
     ) -> Result<R, Error> {
-        Ok(abi::decode(&self.query(module, abi::encode(request))?)?)
+        abi::decode(&self.query(module, abi::encode(request))?).map_err(crate::kernel::error_from)
     }
 
     pub fn sha256(&self, bytes: impl Into<Vec<u8>>) -> [u8; 32] {
@@ -231,7 +236,7 @@ impl QueryCtx {
             signature: signature.into(),
         })) {
             HostReply::Crypto(CryptoReply::Verified(valid)) => Ok(valid),
-            HostReply::Refused(refusal) => Err(refusal.into()),
+            HostReply::Refused(refusal) => Err(crate::kernel::error_from(refusal)),
             other => protocol("verdict", other),
         }
     }
@@ -270,7 +275,7 @@ impl ExecCtx {
             body: body.into(),
         }) {
             HostReply::BlobId(id) => Ok(id),
-            HostReply::Refused(refusal) => Err(refusal.into()),
+            HostReply::Refused(refusal) => Err(crate::kernel::error_from(refusal)),
             other => protocol("blob id", other),
         }
     }

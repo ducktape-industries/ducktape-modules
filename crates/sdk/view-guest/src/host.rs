@@ -20,13 +20,13 @@ use crate::wire::Request;
 /// `message`.
 pub type Answer = Result<Vec<u8>, Error>;
 
-pub use crate::wire::Error;
+pub use error::Error;
 
 /// The host answered and the bytes are not what this view expected — a decode
 /// failure on OUR side, not a refusal anyone authored. One token in one place,
 /// so `.map_err(host::malformed)` reads the same in every view.
 pub fn malformed(error: String) -> Error {
-    Error::new(crate::wire::code::UNEXPECTED_REPLY, error)
+    Error::new(::error::code::UNEXPECTED_REPLY, error)
 }
 
 /// A reply of another variant than the question asks for: the program

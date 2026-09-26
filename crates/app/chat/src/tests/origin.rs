@@ -51,24 +51,25 @@ fn identity(claimed: Rc<Cell<bool>>) -> guest::Sibling {
             account(2, lone),
             account(3, vec![CY_KEY.to_vec()]),
         ];
-        let reply = match abi::decode::<identity::Query>(request)? {
-            identity::Query::OfKey { key } => identity::Reply::Number(
-                roster
-                    .iter()
-                    .find(|account| account.holds(&key))
-                    .map(|account| account.number),
-            ),
-            identity::Query::List { page } => {
-                let from = page.after.as_ref().map_or(0, |after| after[0] as usize);
-                let to = (from + page.limit() as usize).min(roster.len());
-                identity::Reply::Accounts(PageResponse {
-                    height: 1,
-                    items: roster[from..to].to_vec(),
-                    next: (to < roster.len()).then(|| vec![to as u8]),
-                })
-            }
-            other => panic!("chat never asks identity {other:?}"),
-        };
+        let reply =
+            match abi::decode::<identity::Query>(request).map_err(guest::kernel::error_from)? {
+                identity::Query::OfKey { key } => identity::Reply::Number(
+                    roster
+                        .iter()
+                        .find(|account| account.holds(&key))
+                        .map(|account| account.number),
+                ),
+                identity::Query::List { page } => {
+                    let from = page.after.as_ref().map_or(0, |after| after[0] as usize);
+                    let to = (from + page.limit() as usize).min(roster.len());
+                    identity::Reply::Accounts(PageResponse {
+                        height: 1,
+                        items: roster[from..to].to_vec(),
+                        next: (to < roster.len()).then(|| vec![to as u8]),
+                    })
+                }
+                other => panic!("chat never asks identity {other:?}"),
+            };
         Ok(abi::encode(&reply))
     })
 }

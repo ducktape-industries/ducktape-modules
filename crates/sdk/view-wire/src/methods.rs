@@ -226,7 +226,6 @@ pub struct CreateInvite {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub struct Invite {
     pub invite: String,
-    #[serde(with = "crate::protocol::errors")]
     pub notes: Vec<crate::Error>,
 }
 /// A page of finalized blocks, newest first: those below `before` (from the

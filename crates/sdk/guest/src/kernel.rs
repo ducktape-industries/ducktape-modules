@@ -21,47 +21,16 @@ use borsh::{BorshDeserialize, BorshSerialize};
 /// A module's id on the chain (`"chat"`, `"module-registry"`).
 pub type ModuleId = abi::ProgramId;
 
-/// Why a call failed: a [`code`] naming the class of failure (how a caller
-/// recovers) and one sentence for a person.
-#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
-pub struct Error {
-    pub code: String,
-    pub message: String,
+pub use error::{Error, code};
+
+/// The kernel's refusal as the SDK's [`Error`]: the same two strings.
+pub fn error_from(refusal: abi::Refusal) -> Error {
+    Error::new(refusal.reason, refusal.sentence)
 }
 
-impl Error {
-    pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
-        Error {
-            code: code.into(),
-            message: message.into(),
-        }
-    }
-}
-
-impl core::fmt::Display for Error {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{}: {}", self.code, self.message)
-    }
-}
-
-impl std::error::Error for Error {}
-
-/// An [`Error`]'s code: two errors share one exactly when a caller does the
-/// same thing about them. The kernel's `reason` tokens, same strings.
-pub mod code {
-    pub use abi::reason::*;
-}
-
-impl From<abi::Refusal> for Error {
-    fn from(r: abi::Refusal) -> Self {
-        Error::new(r.reason, r.sentence)
-    }
-}
-
-impl From<Error> for abi::Refusal {
-    fn from(e: Error) -> Self {
-        abi::Refusal::new(e.code, e.message)
-    }
+/// The SDK's [`Error`] as the kernel's refusal.
+pub fn refusal_from(error: Error) -> abi::Refusal {
+    abi::Refusal::new(error.code, error.message)
 }
 
 /// Who called: a signed transaction (the signer's key), another module, or
@@ -128,7 +97,7 @@ impl From<abi::Outcome> for Outcome {
     fn from(o: abi::Outcome) -> Self {
         match o {
             abi::Outcome::Applied { output } => Outcome::Applied { output },
-            abi::Outcome::Rejected(r) => Outcome::Rejected(r.into()),
+            abi::Outcome::Rejected(r) => Outcome::Rejected(error_from(r)),
         }
     }
 }
@@ -137,7 +106,7 @@ impl From<Outcome> for abi::Outcome {
     fn from(o: Outcome) -> Self {
         match o {
             Outcome::Applied { output } => abi::Outcome::Applied { output },
-            Outcome::Rejected(e) => abi::Outcome::Rejected(e.into()),
+            Outcome::Rejected(e) => abi::Outcome::Rejected(refusal_from(e)),
         }
     }
 }
@@ -345,9 +314,9 @@ mod tests {
             assert_eq!(Env::from(kernel), env);
         }
         let error = Error::new(code::STALE, "behind");
-        let refusal: abi::Refusal = error.clone().into();
+        let refusal = refusal_from(error.clone());
         assert_eq!(abi::encode(&error), abi::encode(&refusal));
-        assert_eq!(Error::from(refusal), error);
+        assert_eq!(error_from(refusal), error);
         for range in [
             Range::prefix(b"t/").after(b"t/7").reverse().limit(2),
             Range::new(b"a".to_vec(), None),
@@ -360,5 +329,40 @@ mod tests {
         assert!(!range.admits(b"t/7"));
         assert!(range.admits(b"t/8"));
         assert!(!range.admits(b"u"));
+    }
+
+    #[test]
+    fn codes_are_the_kernels_reasons() {
+        use abi::reason as r;
+        let pairs = [
+            (code::UNKNOWN_PROGRAM, r::UNKNOWN_PROGRAM),
+            (code::TRAP, r::TRAP),
+            (code::PROTOCOL, r::PROTOCOL),
+            (code::SEQUENCE, r::SEQUENCE),
+            (code::NOT_FOUND, r::NOT_FOUND),
+            (code::ALREADY_EXISTS, r::ALREADY_EXISTS),
+            (code::STALE, r::STALE),
+            (code::WRONG_STATE, r::WRONG_STATE),
+            (code::INVALID_INPUT, r::INVALID_INPUT),
+            (code::CAPACITY, r::CAPACITY),
+            (code::NOT_YET, r::NOT_YET),
+            (code::EXHAUSTED, r::EXHAUSTED),
+            (code::UNAUTHORIZED, r::UNAUTHORIZED),
+            (code::UNSUPPORTED, r::UNSUPPORTED),
+            (code::CORRUPT, r::CORRUPT),
+            (code::UNEXPECTED_REPLY, r::UNEXPECTED_REPLY),
+        ];
+        for (code, reason) in pairs {
+            assert_eq!(code, reason);
+        }
+        // one for one: a token added on either side is missing here
+        let count = |text: &str| text.matches("pub const").count();
+        let reasons = include_str!("../../abi/src/lib.rs");
+        let reasons = &reasons[reasons.find("pub mod reason").unwrap()..];
+        let reasons = &reasons[..reasons.find("\n}").unwrap()];
+        let codes = include_str!("../../error/src/lib.rs");
+        let codes = &codes[codes.find("pub mod code").unwrap()..];
+        assert_eq!(count(reasons), pairs.len());
+        assert_eq!(count(codes), pairs.len());
     }
 }

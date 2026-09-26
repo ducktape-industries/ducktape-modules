@@ -115,7 +115,7 @@ impl MockHost {
             let sibling = self.borrow_mut().siblings.remove(&program);
             return HostReply::Query(match sibling {
                 Some(sibling) => {
-                    let answer = sibling(&request).map_err(abi::Refusal::from);
+                    let answer = sibling(&request).map_err(crate::kernel::refusal_from);
                     self.borrow_mut().siblings.insert(program, sibling);
                     answer
                 }
@@ -176,7 +176,7 @@ impl MockHost {
                     mock.blobs.insert(id, Blob { kind, body });
                     HostReply::BlobId(id)
                 }
-                Err(error) => HostReply::Refused(error.into()),
+                Err(error) => HostReply::Refused(crate::kernel::refusal_from(error)),
             },
             HostOp::Emit(message) => {
                 mock.emissions.push(message);
