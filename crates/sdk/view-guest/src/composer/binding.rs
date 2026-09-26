@@ -319,7 +319,9 @@ pub fn view<V: View + 'static>(
                 .text_size(crate::design::text::CAPTION)
         }),
         ("“", "Quote", "quote", |sign| sign.text_size(px(16.))),
-        ("•", "List", "list", |sign| sign.text_size(px(16.))),
+        ("•", "List", "list", |sign| {
+            sign.text_size(px(22.)).font_weight(crate::FontWeight::BOLD)
+        }),
     ];
     for (sign, label, tag, face) in faces {
         toolbar = toolbar.child(Mark {
