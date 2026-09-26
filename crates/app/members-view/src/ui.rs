@@ -184,13 +184,15 @@ fn rows(view: &Members, cx: &mut Context<Members>, theme: &Theme) -> AnyElement 
     }
     let shown = view.shown();
     if shown.is_empty() {
-        return design::empty_state(
-            "members-no-match",
-            "Nothing matches",
-            format!("No account reads like “{}”.", view.filter.trim()),
-            theme,
-        )
-        .into_any_element();
+        // the chip alone, or the filter (with or without a chip)
+        let detail = match (view.filter.trim(), view.only) {
+            ("", Some(group)) => {
+                format!("No {} on this network yet.", group.label().to_lowercase())
+            }
+            (needle, _) => format!("No account reads like “{needle}”."),
+        };
+        return design::empty_state("members-no-match", "Nothing matches", detail, theme)
+            .into_any_element();
     }
     let stepped =
         cx.listener(
@@ -219,11 +221,6 @@ fn rows(view: &Members, cx: &mut Context<Members>, theme: &Theme) -> AnyElement 
         if members.is_empty() {
             continue;
         }
-        let label = match group {
-            Group::People => "People",
-            Group::Agents => "Agents",
-            Group::Modules => "Modules",
-        };
         list = list.child(
             div()
                 .flex()
@@ -236,7 +233,7 @@ fn rows(view: &Members, cx: &mut Context<Members>, theme: &Theme) -> AnyElement 
                 .when(index > 0, |head| {
                     head.border_t_1().border_color(theme.border)
                 })
-                .child(label)
+                .child(group.label())
                 .child(design::mono(members.len().to_string()).text_size(text::CAPTION)),
         );
         for row in members {

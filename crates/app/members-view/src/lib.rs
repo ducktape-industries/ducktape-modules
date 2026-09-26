@@ -63,6 +63,14 @@ pub enum Group {
 impl Group {
     pub const ALL: [Group; 3] = [Group::People, Group::Agents, Group::Modules];
 
+    pub fn label(self) -> &'static str {
+        match self {
+            Group::People => "People",
+            Group::Agents => "Agents",
+            Group::Modules => "Modules",
+        }
+    }
+
     fn of(kind: &identity::Kind) -> Group {
         match kind {
             identity::Kind::Person => Group::People,

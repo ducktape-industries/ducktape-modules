@@ -423,3 +423,29 @@ fn the_list_and_the_detail_are_accessible() {
     cx.run_until_parked();
     cx.assert_accessible();
 }
+
+#[test]
+fn a_kind_with_no_one_in_it_says_so_without_quoting_an_empty_filter() {
+    let mut cx = TestAppContext::new();
+    cx.host().stream::<HostSession>();
+    cx.host().stream::<Changes<Identity>>();
+    cx.host().handle::<Query<Identity>>(|_| {
+        Ok(identity::Reply::Accounts(page(vec![person(
+            7,
+            "eddy",
+            vec![key(EDDY, "laptop")],
+        )])))
+    });
+    cx.host()
+        .handle::<Query<Valset>>(|_| Ok(valset::Reply::Memberships(page(vec![]))));
+    cx.open::<Members>();
+    cx.run_until_parked();
+    cx.simulate_click("members-chip-2");
+    assert!(
+        cx.has_text("No agents on this network yet."),
+        "{:?}",
+        cx.texts()
+    );
+    cx.simulate_input("members-filter", "zz");
+    assert!(cx.has_text("No account reads like “zz”."));
+}
