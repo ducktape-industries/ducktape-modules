@@ -127,7 +127,6 @@ pub(crate) fn scout() -> identity::Account {
             manager: 3,
             category: identity::Category::Agent,
             life: identity::Life::Suspended { keys: Vec::new() },
-            transfers: 0,
         },
     )
 }

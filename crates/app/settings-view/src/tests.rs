@@ -49,7 +49,6 @@ fn scout() -> identity::Account {
             manager: 7,
             category: identity::Category::Agent,
             life: identity::Life::Active { keys: Vec::new() },
-            transfers: 0,
         },
     )
 }
@@ -266,7 +265,6 @@ fn an_account_changed_elsewhere_is_read_again() {
                     manager: 7,
                     category: identity::Category::Agent,
                     life: identity::Life::Suspended { keys: Vec::new() },
-                    transfers: 0,
                 };
                 identity::Reply::Accounts(identity::PageResponse {
                     height: 43,
@@ -562,10 +560,7 @@ fn a_manager_renames_suspends_and_revokes_an_agent() {
                 }
                 identity::Query::Managed { by: 7, .. } => {
                     let identity::Control::Managed {
-                        manager,
-                        category,
-                        transfers,
-                        ..
+                        manager, category, ..
                     } = scout().control
                     else {
                         panic!()
@@ -574,7 +569,6 @@ fn a_manager_renames_suspends_and_revokes_an_agent() {
                         manager,
                         category,
                         life,
-                        transfers,
                     };
                     identity::Reply::Accounts(identity::PageResponse {
                         height: 42,

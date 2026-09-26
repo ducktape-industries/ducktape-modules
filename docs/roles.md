@@ -57,10 +57,10 @@ Everything that acts is an account in `identity`:
 avatar, bio); the `Control` is who acts as it:
 
 - `Person { keys }`: a person and the keys they hold.
-- `Managed { manager, category, life, transfers }`: an agent. Its manager, a
-  person, gives it keys and decides its `Life`: `Active { keys }`,
+- `Managed { manager, category, life }`: an agent. Its manager, a person,
+  gives it keys and decides its `Life`: `Active { keys }`,
   `Suspended { keys }` (keys kept, frames refused) or `Revoked` (keys
-  dropped, final). `transfers` counts handovers, so an acceptance fits one.
+  dropped, final).
 - `Module { module }`: a module's account, registered by the kernel as it
   admits the module. It holds no keys; the module alone acts as it.
 
@@ -75,7 +75,6 @@ Who may do what (the acting account is `ctx.sender()`):
 | `RemoveKey` | a person removes their own key or a junior one, never their last. An agent's manager removes any of its keys |
 | `SetName`, `SetProfile` | a person or a module on its own account; an agent's manager on the agent's (not once revoked) |
 | `Suspend`, `Resume`, `Revoke` | the agent's manager |
-| `TransferManager { account, to, acceptance }` | the agent's manager, with an acceptance signed by a key on `to`'s account (a person's); the agent's keys are dropped, a suspended agent stays suspended |
 
 The role's queries, which views and other modules ask too, are
 `Account(key)`, `OfModule(module)`, `Profile(number)` and
