@@ -50,7 +50,8 @@ fn room(
 }
 
 /// The members-only room of the actor's account and `counterpart`, both
-/// seated. Opening it again changes nothing.
+/// seated; the counterpart a person or an agent that acts. Opening it again
+/// changes nothing, even once the counterpart is suspended.
 pub(crate) fn open_dm(
     ctx: &ExecCtx,
     sender: &Principal,
@@ -70,6 +71,7 @@ pub(crate) fn open_dm(
     if CHANNELS.has(ctx, &id) {
         return Ok(());
     }
+    ctx.require_person_or_agent(counterpart)?;
     rules::name(&name)?;
     let channel = room(ctx, sender, &id, name, PostPolicy::MembersOnly);
     CHANNELS.put(ctx, &id, &channel);

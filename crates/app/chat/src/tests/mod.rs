@@ -36,12 +36,55 @@ struct Chat {
     height: u64,
 }
 
+/// An agent Ada manages that acts; one suspended; one revoked.
+const AGENT: u64 = 10;
+const SUSPENDED: u64 = 11;
+const REVOKED: u64 = 12;
+
+/// The identity role over the accounts the suite names: people 1 to 7, the
+/// modules of [`module_of`], and Ada's agents.
+fn roster() -> Vec<crate::Profile> {
+    use crate::{Category, Kind, Profile, Standing};
+    let profile = |number: u64, kind| Profile {
+        number,
+        name: format!("user{number}"),
+        kind,
+    };
+    let agent = |number, standing| {
+        let kind = Kind::Managed {
+            manager: 1,
+            category: Category::Agent,
+            standing,
+        };
+        profile(number, kind)
+    };
+    let people = (1..=7).map(|number| profile(number, Kind::Person));
+    let modules = [900, 901, 902].map(|number| {
+        let module = module_of(&Principal::Account(number)).unwrap();
+        profile(number, Kind::Module(module.into()))
+    });
+    people
+        .chain(modules)
+        .chain([
+            agent(AGENT, Standing::Active),
+            agent(SUSPENDED, Standing::Suspended),
+            agent(REVOKED, Standing::Revoked),
+        ])
+        .collect()
+}
+
 impl Default for Chat {
-    /// An empty store and a verifier that takes every node proof
-    /// (`origin.rs` checks the proof itself).
+    /// An empty store, the identity role over [`roster`] beside it, and a
+    /// verifier that takes every node proof (`origin.rs` checks the proof
+    /// itself).
     fn default() -> Chat {
         let store = MockHost::default();
         store.borrow_mut().verifier = Some(Box::new(|_, _, _, _, _| true));
+        let roster = roster();
+        store.borrow_mut().siblings.insert(
+            MockHost::roles().identity,
+            Box::new(move |request| guest::identity_role(&roster, request)),
+        );
         Chat { store, height: 0 }
     }
 }

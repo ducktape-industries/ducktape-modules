@@ -35,6 +35,7 @@
 //! `store` is the optional typed layer on top (`Map`/`Set`/`Item`, pages).
 
 mod ctx;
+mod identity;
 pub mod kernel;
 #[cfg(not(target_arch = "wasm32"))]
 mod mock;

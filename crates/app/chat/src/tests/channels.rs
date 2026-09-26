@@ -79,6 +79,49 @@ fn a_dm_seats_both_accounts_opens_once_and_keeps_others_out() {
     assert_eq!(chat.refused(&module, open_dm(1)), code::UNAUTHORIZED);
 }
 
+#[test]
+fn a_dm_opens_only_to_a_person_or_an_agent_that_acts() {
+    let mut chat = Chat::default();
+    chat.ok(&ADA, open_dm(2));
+    chat.ok(&ADA, open_dm(AGENT));
+    for (counterpart, refusal) in [
+        (900, code::INVALID_INPUT),
+        (SUSPENDED, code::WRONG_STATE),
+        (REVOKED, code::WRONG_STATE),
+        (404, code::INVALID_INPUT),
+    ] {
+        assert_eq!(
+            chat.refused(&ADA, open_dm(counterpart)),
+            refusal,
+            "{counterpart}"
+        );
+    }
+}
+
+#[test]
+fn a_dm_stays_open_once_its_counterpart_is_suspended() {
+    let mut chat = Chat::default();
+    chat.ok(&BO, open_dm(AGENT));
+    let dm = dm_channel_id(2, AGENT);
+    // identity suspends the agent after the room opened
+    let mut roster = roster();
+    for profile in &mut roster {
+        if let crate::Kind::Managed { standing, .. } = &mut profile.kind
+            && profile.number == AGENT
+        {
+            *standing = crate::Standing::Suspended;
+        }
+    }
+    chat.store.borrow_mut().siblings.insert(
+        MockHost::roles().identity,
+        Box::new(move |request| guest::identity_role(&roster, request)),
+    );
+    assert_eq!(chat.refused(&CY, open_dm(AGENT)), code::WRONG_STATE);
+    chat.ok(&BO, open_dm(AGENT));
+    assert!(is_member(&chat, &dm, Principal::Account(AGENT)));
+    chat.ok(&BO, post(&dm, "m1", "still here", None));
+}
+
 /// The peer who opened a dm owns it, but owning it gives nothing: neither
 /// peer adds a third account, removes the other, renames or archives it.
 #[test]
