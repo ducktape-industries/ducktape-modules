@@ -15,6 +15,8 @@ pub enum Mark {
     /// a mention names a principal: `<@7>` an account.
     /// chat keeps it as typed; a view names it at render time.
     Mention(Principal),
+    /// an inline code span: rendered mono, never parsed further.
+    Code,
 }
 
 /// a run of text with uniform marks.
@@ -54,7 +56,8 @@ impl Block {
 
 /// Parse composer text into wire `Block`s: fenced ```code``` (optional language),
 /// `>` quotes, `---`/`***` dividers, and paragraphs with inline `**bold**` /
-/// `__bold__`, `*italic*` / `_italic_`, and bare `http(s)` links. Everything the
+/// `__bold__`, `*italic*` / `_italic_`, `` `code` ``, `<@7>` mentions,
+/// `[label](url)` references and bare `http(s)`/`duck` links. Everything the
 /// `chat` wire enums can round-trip — nothing client-only.
 ///
 /// A SINGLE NEWLINE IS A HARD BREAK, not CommonMark's soft break. The composer
@@ -142,7 +145,9 @@ fn push_paragraph_block(lines: &[&str], start: usize, blocks: &mut Vec<Block>) -
 /// Scan a single line of text for inline marks, preserving mention identity
 /// inside emphasis. Bare `http(s)://` and `duck://`
 /// runs become `Link`s, as does a `[label](url)` reference — one span whose
-/// text is the label and whose mark carries the target.
+/// text is the label and whose mark carries the target. A backtick run opens
+/// a code span that only a run of the same length closes; nothing inside it
+/// is a mark, and an unclosed run stays the plain text it was typed as.
 pub fn inline_spans(text: &str) -> Vec<Span> {
     let chars: Vec<char> = text.chars().collect();
     let mut spans: Vec<Span> = Vec::new();
@@ -153,7 +158,14 @@ pub fn inline_spans(text: &str) -> Vec<Span> {
         let reference = reference_at(&chars, index);
         let bold = fenced(&chars, index, "**").or_else(|| fenced(&chars, index, "__"));
         let italic = fenced(&chars, index, "*").or_else(|| fenced(&chars, index, "_"));
-        if let Some((target, len)) = mention_at(&chars, index) {
+        if let Some((inner, len)) = code_at(&chars, index) {
+            flush_plain(&mut plain, &mut spans);
+            spans.push(Span {
+                text: inner,
+                marks: vec![Mark::Code],
+            });
+            index += len;
+        } else if let Some((target, len)) = mention_at(&chars, index) {
             flush_plain(&mut plain, &mut spans);
             let handle: String = chars[index..index + len].iter().collect();
             spans.push(Span {
@@ -291,6 +303,36 @@ pub fn mention_at(chars: &[char], at: usize) -> Option<(Principal, usize)> {
         return None;
     }
     Some((Principal::Account(id.parse().ok()?), end + 1 - at))
+}
+
+/// If `chars[at..]` opens a backtick run that a later run of exactly the same
+/// length closes (CommonMark's code span), the enclosed text and the total
+/// consumed length. One space is stripped from both ends when both are there,
+/// so ``` `` `a` `` ``` is `` `a` ``.
+fn code_at(chars: &[char], at: usize) -> Option<(String, usize)> {
+    let open = chars[at..].iter().take_while(|&&c| c == '`').count();
+    if open == 0 {
+        return None;
+    }
+    let mut cursor = at + open;
+    while cursor < chars.len() {
+        let run = chars[cursor..].iter().take_while(|&&c| c == '`').count();
+        if run == open {
+            let inner: String = chars[at + open..cursor].iter().collect();
+            let padded = inner.len() > 1
+                && inner.starts_with(' ')
+                && inner.ends_with(' ')
+                && !inner.trim().is_empty();
+            let inner = if padded {
+                inner[1..inner.len() - 1].to_owned()
+            } else {
+                inner
+            };
+            return Some((inner, cursor + run - at));
+        }
+        cursor += run.max(1);
+    }
+    None
 }
 
 /// If `chars[at..]` opens with `marker` and has a later closing `marker`, the

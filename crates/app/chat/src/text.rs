@@ -46,7 +46,12 @@ pub fn tags(blocks: &[Block]) -> Vec<String> {
         Block::Code { .. } | Block::Divider => &[],
     });
     let mut out: Vec<String> = Vec::new();
-    for span in spans.filter(|span| !span.marks.iter().any(|m| matches!(m, Mark::Link(_)))) {
+    for span in spans.filter(|span| {
+        !span
+            .marks
+            .iter()
+            .any(|m| matches!(m, Mark::Link(_) | Mark::Code))
+    }) {
         for label in span_tags(&span.text) {
             if !out.contains(&label) {
                 out.push(label);
