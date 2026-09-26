@@ -13,6 +13,12 @@ use design::{empty_state, mono};
 const LIST_ROWS: usize = 50;
 /// The rows each Overview panel draws.
 const LATEST: usize = 12;
+/// The bar's height, and each line of it once the search wraps under the tabs.
+const BAR_H: Pixels = px(44.);
+/// The search field grows to this; the tabs keep their room first.
+const SEARCH_W: Pixels = px(360.);
+/// The search field keeps this much of the bar: past it, it wraps under the tabs.
+const SEARCH_MIN_W: Pixels = px(160.);
 
 type Cx<'a, 'b> = &'a mut Context<'b, Explorer>;
 
@@ -91,33 +97,41 @@ fn bar(view: &Explorer, cx: Cx, theme: &Theme) -> impl IntoElement {
         .h_full()
         .mx_1()
     });
+    // on a narrow window the search wraps under the tabs, a line of its own
     div()
         .id("explorer-bar")
         .w_full()
         .flex()
+        .flex_wrap()
         .items_center()
         .justify_between()
-        .h(px(44.))
         .px_3()
         .border_b_1()
         .border_color(theme.border)
-        .child(div().h_full().flex().items_center().children(tabs))
+        .child(div().h(BAR_H).flex().items_center().children(tabs))
         .child(
-            div().w(px(360.)).flex_shrink_0().child(
-                Input::new("explorer-search")
-                    .w_full()
-                    .h(px(28.))
-                    .px_2()
-                    .border_1()
-                    .border_color(theme.border)
-                    .bg(theme.background)
-                    .text_size(design::text::SECONDARY)
-                    .value(view.search.clone())
-                    .placeholder("Search by height, hash, account or program")
-                    .label("Search the chain")
-                    .on_input(typed)
-                    .on_submit(submit),
-            ),
+            div()
+                .flex_1()
+                .min_w(SEARCH_MIN_W)
+                .max_w(SEARCH_W)
+                .h(BAR_H)
+                .flex()
+                .items_center()
+                .child(
+                    Input::new("explorer-search")
+                        .w_full()
+                        .h(px(28.))
+                        .px_2()
+                        .border_1()
+                        .border_color(theme.border)
+                        .bg(theme.background)
+                        .text_size(design::text::SECONDARY)
+                        .value(view.search.clone())
+                        .placeholder("Search by height, hash, account or program")
+                        .label("Search the chain")
+                        .on_input(typed)
+                        .on_submit(submit),
+                ),
         )
 }
 
