@@ -481,13 +481,14 @@ fn an_agent_acts_until_its_manager_suspends_it() {
     });
 }
 
-/// The identity role modules answer is the one ducktape's kernel speaks:
-/// `abi::role::identity` here is a copy of ducktape's, and this compares
-/// the two sources. (The workspace patches ducktape's `abi` to this copy,
-/// so nothing links both: the source is what can drift.) The checkout is
-/// the one cargo resolved `host` from.
+/// The roles modules answer and the env the kernel hands every frame are
+/// ducktape's: `abi::role` (identity, registry, validators), `Env` and what
+/// it carries here are a copy of ducktape's, and this compares the two
+/// sources item by item. (The workspace patches ducktape's `abi` to this
+/// copy, so nothing links both: the source is what can drift.) The
+/// checkout is the one cargo resolved `host` from.
 #[test]
-fn the_identity_role_is_ducktapes_byte_for_byte() {
+fn the_roles_and_the_env_are_ducktapes_byte_for_byte() {
     let metadata = std::process::Command::new(env!("CARGO"))
         .args(["metadata", "--format-version", "1", "--no-deps"])
         .arg("--manifest-path")
@@ -514,25 +515,29 @@ fn the_identity_role_is_ducktapes_byte_for_byte() {
     let ducktape = cargo_git_checkout(rev);
     let theirs = std::fs::read_to_string(ducktape.join("crates/kernel/abi/src/lib.rs")).unwrap();
     let ours = include_str!("../../../../sdk/abi/src/lib.rs");
-    let block = |text: &str| {
+    // each item runs from its first line to the first `}` closing at the
+    // left margin
+    let item = |text: &str, first: &str| {
         let start = text
-            .find("    pub mod identity {")
-            .expect("abi::role::identity");
-        let end = text[start..]
-            .find(
-                "
-    }
-",
-            )
-            .unwrap()
-            + start;
+            .find(&format!("\n{first}"))
+            .unwrap_or_else(|| panic!("abi has `{first}`"));
+        let end = text[start..].find("\n}\n").unwrap() + start;
         text[start..end].to_owned()
     };
-    assert_eq!(
-        block(&theirs),
-        block(ours),
-        "abi::role::identity drifted from ducktape's"
-    );
+    for first in [
+        "pub mod role {",
+        "pub enum Origin {",
+        "pub enum Principal {",
+        "pub struct Roles {",
+        "pub struct Env {",
+        "pub enum Cause {",
+    ] {
+        assert_eq!(
+            item(&theirs, first),
+            item(ours, first),
+            "abi's `{first}` drifted from ducktape's"
+        );
+    }
 }
 
 /// Where cargo checked ducktape out at `rev`: `$CARGO_HOME/git/checkouts/
