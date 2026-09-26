@@ -173,6 +173,20 @@ impl Editor {
     }
 }
 
+/// A view snapshot carries an editor as its [`Editor::snapshot`] bytes.
+impl serde::Serialize for Editor {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serde::Serialize::serialize(&self.snapshot(), serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Editor {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let bytes = <Vec<u8> as serde::Deserialize>::deserialize(deserializer)?;
+        Editor::restore(&bytes).ok_or_else(|| serde::de::Error::custom("invalid editor document"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

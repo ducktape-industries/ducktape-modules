@@ -28,8 +28,8 @@ pub struct Forge {
     pub(crate) new_repo: Option<NewRepo>,
     pub(crate) form: Option<ChangeForm>,
     pub(crate) repo_settings: Option<SettingsForm>,
-    /// the conversation composer of the open change
-    pub(crate) reply: String,
+    /// the conversation composer of the open change, multi-line
+    pub(crate) reply: Editor,
     pub(crate) notice: String,
     /// the repository whose address was copied last, so its row says so
     #[serde(skip)]
@@ -241,7 +241,8 @@ pub(crate) struct ReviewSession {
     pub comments: Vec<PendingComment>,
     /// the anchor whose composer is open
     pub open: Option<PendingComment>,
-    pub body: String,
+    /// what the review says overall, multi-line
+    pub body: Editor,
     pub finishing: bool,
     pub error: String,
 }
@@ -323,22 +324,9 @@ pub(crate) struct ChangeForm {
     pub into: Vec<u8>,
     pub title: String,
     /// the multi-line body, as the host's editor holds it
-    #[serde(with = "editor_snapshot")]
     pub body: Editor,
     pub reviewers: Vec<forge::Principal>,
     pub error: String,
-}
-
-mod editor_snapshot {
-    use ducktape_view_guest::Editor;
-    use serde::{Deserialize, Serialize};
-    pub fn serialize<S: serde::Serializer>(editor: &Editor, s: S) -> Result<S::Ok, S::Error> {
-        editor.snapshot().serialize(s)
-    }
-    pub fn deserialize<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Editor, D::Error> {
-        Editor::restore(&Vec::<u8>::deserialize(d)?)
-            .ok_or_else(|| serde::de::Error::custom("invalid change body"))
-    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

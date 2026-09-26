@@ -35,7 +35,6 @@ pub struct History {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Draft {
-    #[serde(with = "document_snapshot")]
     pub editor: Editor,
     pub mentions: Vec<Mention>,
     pub failed_send: Option<Send>,
@@ -165,23 +164,6 @@ impl Draft {
         }
         self.paste = None;
         self.clipboard = None;
-    }
-}
-
-mod document_snapshot {
-    use serde::{Deserialize, Serialize};
-    pub fn serialize<S: serde::Serializer>(
-        editor: &crate::Editor,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        editor.snapshot().serialize(serializer)
-    }
-    pub fn deserialize<'de, D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<crate::Editor, D::Error> {
-        let bytes = Vec::<u8>::deserialize(deserializer)?;
-        crate::Editor::restore(&bytes)
-            .ok_or_else(|| serde::de::Error::custom("invalid composer document"))
     }
 }
 

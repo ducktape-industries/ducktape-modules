@@ -116,7 +116,12 @@ impl Module for Forge {
         let bounds = load_bounds(ctx)?;
         let scope = query.scope();
         let listing = |page: &PageRequest| {
-            listing(page.bounded(bounds.page_size as u64), scope.clone(), height)
+            listing(
+                ctx,
+                page.bounded(bounds.page_size as u64),
+                scope.clone(),
+                height,
+            )
         };
         let reply = match &query {
             Query::Advertise { repo, service } => {
@@ -146,9 +151,20 @@ impl Module for Forge {
                 height,
                 last_height: load_repo(ctx, repo)?.last_activity,
             },
-            Query::Log { repo, from, page } => {
-                log(ctx, height, &bounds, repo, from, &listing(page)?)?
-            }
+            Query::Log {
+                repo,
+                from,
+                exclude,
+                page,
+            } => log(
+                ctx,
+                height,
+                &bounds,
+                repo,
+                from,
+                exclude.as_ref(),
+                &listing(page)?,
+            )?,
             Query::Tree {
                 repo,
                 at,

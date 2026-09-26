@@ -1,5 +1,6 @@
 //! Host-native multiline editor recipe.
 
+use crate::context::Callback;
 use crate::{
     wire, Editor, EditorBinding, EditorDocumentUpdate, EditorTransaction, Element, IntoElement,
     Lowering,
@@ -78,6 +79,48 @@ impl<P: 'static, M: 'static> EditorElement<P, M> {
     pub fn rich_presentation(mut self, value: wire::editor_rich::RichPresentation) -> Self {
         self.rich = Some(Box::new(value));
         self
+    }
+}
+
+impl<V: 'static> EditorElement<(), Callback<V>> {
+    /// A plain multi-line field over one [`Editor`] the view owns: `field`
+    /// finds it (`None` once the draft is gone), and every document update
+    /// and transaction the host sends lands on it.
+    pub fn plain(
+        id: impl Into<ElementId>,
+        editor: &Editor,
+        document: impl Into<String>,
+        field: fn(&mut V) -> Option<&mut Editor>,
+    ) -> Self {
+        Self::new(
+            id,
+            editor,
+            document,
+            EditorBinding::plain(),
+            move |event| -> Callback<V> {
+                match event {
+                    EditorElementEvent::Document(update) => Rc::new(move |view, _, cx| {
+                        if let Some(editor) = field(view) {
+                            update.clone().apply(editor, cx);
+                            cx.notify();
+                        }
+                    }),
+                    EditorElementEvent::Observed(()) => Rc::new(|_, _, _| {}),
+                    EditorElementEvent::Transaction(transaction) => {
+                        Rc::new(move |view, window, cx| {
+                            let Some(editor) = field(view) else {
+                                return;
+                            };
+                            let then = transaction.clone().apply(editor, cx);
+                            if let Some(then) = then {
+                                then(view, window, cx);
+                            }
+                            cx.notify();
+                        })
+                    }
+                }
+            },
+        )
     }
 }
 

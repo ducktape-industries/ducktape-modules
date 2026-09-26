@@ -361,3 +361,95 @@ fn a_walk_past_the_bound_asks_for_smaller_steps() {
         ]
     );
 }
+
+/// A walk outlives the blocks that wrote nothing to forge, so a long log
+/// finishes while the chain moves; forge writing mid-walk restarts it.
+#[test]
+fn a_cursor_outlives_empty_blocks_and_a_forge_write_restarts_it() {
+    use common::story::*;
+    let mut rig = Rig::start(bounds(), HashKind::Sha1);
+    let story = Story::pushed(&mut rig);
+    let log = |after| Query::Log {
+        repo: REPO.into(),
+        from: forge::Revision::Oid(story.feature.clone()),
+        exclude: None,
+        page: PageRequest {
+            after,
+            limit: Some(1),
+        },
+    };
+    let page = |rig: &Rig, after| match abi::decode(&rig.query(&log(after)).unwrap()).unwrap() {
+        Reply::Log { page, .. } => page,
+        _ => panic!("a log"),
+    };
+    let first = page(&rig, None);
+    assert_eq!(first.items[0].oid, story.feature);
+    rig.advance();
+    rig.advance();
+    let second = page(&rig, first.next.clone());
+    assert_eq!(second.items[0].oid, story.root);
+    rig.sandbox.hold(b"ninth", 9);
+    rig.execute(&Op::Grant {
+        repo: REPO.into(),
+        principal: Principal::Account(9),
+    })
+    .unwrap();
+    assert_eq!(rig.query(&log(first.next)).unwrap_err().code, code::STALE);
+}
+
+/// A change's commits are its source's history less its target's.
+#[test]
+fn a_log_leaves_out_what_its_exclude_reaches() {
+    use common::story::*;
+    let mut rig = Rig::start(bounds(), HashKind::Sha1);
+    let story = Story::pushed(&mut rig);
+    let bytes = rig
+        .query(&Query::Log {
+            repo: REPO.into(),
+            from: reference("feature"),
+            exclude: Some(reference("main")),
+            page: PageRequest::first(64),
+        })
+        .unwrap();
+    let Reply::Log { page, .. } = abi::decode(&bytes).unwrap() else {
+        panic!("a log");
+    };
+    let oids: Vec<_> = page.items.into_iter().map(|c| c.oid).collect();
+    assert_eq!(oids, [story.feature]);
+}
+
+/// The app reads at the preconfirmed layer, whose height is the one its
+/// next ops run at: a push in the block that answered the cursor rewrites
+/// the log at the same height, and the cursor still tells.
+#[test]
+fn a_forge_write_at_the_answering_height_restarts_the_walk() {
+    use common::story::*;
+    let mut rig = Rig::start(bounds(), HashKind::Sha1);
+    let story = Story::pushed(&mut rig);
+    let log = |after| Query::Log {
+        repo: REPO.into(),
+        from: reference("feature"),
+        exclude: None,
+        page: PageRequest {
+            after,
+            limit: Some(1),
+        },
+    };
+    let Reply::Log { page, .. } = abi::decode(&rig.query(&log(None)).unwrap()).unwrap() else {
+        panic!("a log");
+    };
+    assert_eq!(page.items[0].oid, story.feature);
+    // no advance: the same height the page was answered at
+    rig.sandbox.hold(b"ninth", 9);
+    signed_op(
+        &rig.sandbox,
+        &rig.actor,
+        rig.height,
+        &Op::Grant {
+            repo: REPO.into(),
+            principal: Principal::Account(9),
+        },
+    )
+    .unwrap();
+    assert_eq!(rig.query(&log(page.next)).unwrap_err().code, code::STALE);
+}

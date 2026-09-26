@@ -191,7 +191,19 @@ fn the_conversation_is_the_hidden_chat_channel_and_the_forge_body() {
             .iter()
             .any(|text| text.starts_with("merged into"))
     );
-    cx.simulate_input("forge-reply", "looks right to me");
+    assert!(
+        matches!(
+            cx.find("forge-reply"),
+            Some(ducktape_view_guest::wire::Node::Editor { .. })
+        ),
+        "the reply is the host's multi-line editor"
+    );
+    // what the host's editor holds once the reply is typed
+    view.update(&mut cx, |forge, _, cx| {
+        forge.reply = ducktape_view_guest::Editor::new("looks right to me");
+        cx.notify();
+    });
+    cx.run_until_parked();
     cx.simulate_click("forge-reply-send");
     cx.run_until_parked();
     assert!(
@@ -203,7 +215,7 @@ fn the_conversation_is_the_hidden_chat_channel_and_the_forge_body() {
                 chat::Op::PostMessage { channel_id, .. } if channel_id == "forge:project:1"
             ))
     );
-    view.read(|forge| assert!(forge.reply.is_empty()));
+    view.read(|forge| assert!(forge.reply.text().is_empty()));
 }
 
 #[test]
@@ -323,7 +335,18 @@ fn a_review_batches_every_anchor_into_exactly_one_operation() {
 
     cx.simulate_click("forge-finish-review");
     cx.run_until_parked();
-    cx.simulate_input("forge-review-body", "one batch, one op");
+    assert!(
+        matches!(
+            cx.find("forge-review-body"),
+            Some(ducktape_view_guest::wire::Node::Editor { .. })
+        ),
+        "the review body is the host's multi-line editor"
+    );
+    view.update(&mut cx, |forge, _, cx| {
+        forge.review_mut().unwrap().body = ducktape_view_guest::Editor::new("one batch, one op");
+        cx.notify();
+    });
+    cx.run_until_parked();
     cx.simulate_click("forge-verdict-request-changes");
     cx.run_until_parked();
 
@@ -476,5 +499,22 @@ fn editing_a_change_keeps_the_paragraphs_of_its_body() {
         cx.host().requests::<SubmitForge>().iter().any(
             |op| matches!(op, Op::ChangeEdit { n: 1, body: Some(saved), .. } if saved == body)
         ),
+    );
+}
+
+/// A change's Commits tab lists the change's own commits: the log of its
+/// source less what its target reaches, not the target's whole history.
+#[test]
+fn a_change_lists_its_own_commits() {
+    let (cx, view) = change_screen("default", ChangeTab::Commits);
+    let into = view.read(|forge| forge.change().map(|(change, ..)| change.into.clone()));
+    let into = into.expect("the change landed");
+    let asked = cx.host().requests::<crate::api::Ask>();
+    assert!(
+        asked.iter().any(|query| matches!(
+            query,
+            forge::Query::Log { exclude: Some(forge::Revision::Ref(target)), .. } if *target == into
+        )),
+        "{asked:?}"
     );
 }
