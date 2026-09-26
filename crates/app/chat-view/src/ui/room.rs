@@ -212,7 +212,11 @@ fn header(chat: &Chat, room: &Room, cx: &mut Context<Chat>, theme: &Theme) -> im
         .child(div().flex_1().child(title))
         .child(button(
             "chat-room-details",
-            if direct { "Details" } else { "Channel details" },
+            if direct {
+                "Conversation details"
+            } else {
+                "Channel details"
+            },
             theme,
             details,
         ))
