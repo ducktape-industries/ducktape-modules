@@ -335,7 +335,7 @@ mod tests {
     fn codes_are_the_kernels_reasons() {
         use abi::reason as r;
         let pairs = [
-            (code::UNKNOWN_PROGRAM, r::UNKNOWN_PROGRAM),
+            (code::UNKNOWN_MODULE, r::UNKNOWN_PROGRAM),
             (code::TRAP, r::TRAP),
             (code::PROTOCOL, r::PROTOCOL),
             (code::SEQUENCE, r::SEQUENCE),

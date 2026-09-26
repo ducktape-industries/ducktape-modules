@@ -119,7 +119,7 @@ impl MockHost {
                     self.borrow_mut().siblings.insert(program, sibling);
                     answer
                 }
-                None => Err(abi::Refusal::new(code::UNKNOWN_PROGRAM, program)),
+                None => Err(abi::Refusal::new(code::UNKNOWN_MODULE, program)),
             });
         }
         let mut mock = self.borrow_mut();

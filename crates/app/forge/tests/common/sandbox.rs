@@ -119,7 +119,7 @@ impl MemorySandbox {
             .into_iter()
             .map(|m| {
                 if m.target != "chat" {
-                    return Err(Error::new(code::UNKNOWN_PROGRAM, m.target));
+                    return Err(Error::new(code::UNKNOWN_MODULE, m.target));
                 }
                 let forge = Origin::Module("forge".into());
                 self.chat_execute(

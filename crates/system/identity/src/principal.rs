@@ -105,7 +105,7 @@ pub fn principal_of(ctx: &QueryCtx, origin: &Origin) -> Result<Principal, Error>
         Origin::Signed(key) => match crate::account_of(ctx, key) {
             Ok(Some(number)) => Principal::Account(number),
             Ok(None) => return Err(unauthorized(NO_ACCOUNT)),
-            Err(r) if r.code == code::UNKNOWN_PROGRAM => return Err(unauthorized(NO_ACCOUNT)),
+            Err(r) if r.code == code::UNKNOWN_MODULE => return Err(unauthorized(NO_ACCOUNT)),
             Err(r) => return Err(r),
         },
         Origin::Module(id) => Principal::Module(id.clone()),
