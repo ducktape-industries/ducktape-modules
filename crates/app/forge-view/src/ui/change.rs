@@ -47,7 +47,11 @@ pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
         ChangeTab::Conversation => crate::ui::conversation::render(forge, cx, theme),
         ChangeTab::Commits => commits::log(
             forge,
-            &commits::query(forge, change.from.clone()),
+            &commits::query(
+                forge,
+                change.from.clone(),
+                Some(forge::Revision::Ref(change.into.clone())),
+            ),
             "forge-change-log",
             cx,
             theme,

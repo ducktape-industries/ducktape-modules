@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use gitcore::{Hash, Oid};
 use guest::{Error, code};
-use guest::{ExecCtx, QueryCtx, invalid, not_found};
+use guest::{ExecCtx, QueryCtx, Range, invalid, not_found};
 use store::{Item, Map, Set};
 
 use crate::contract::{Bounds, Change, Principal, Repo, Review, Revision, valid_repo_name};
@@ -73,6 +73,13 @@ pub fn save_repo(ctx: &ExecCtx, name: &str, repo: &Repo) -> Result<(), Error> {
     ACTIVITY.insert(ctx, &(newest_first(repo.last_activity), name.to_owned()));
     REPOS.put(ctx, &name.to_owned(), repo);
     Ok(())
+}
+
+/// The height of forge's latest accepted op: every one marks its repository
+/// active, so it is the newest activity row (0 before any).
+pub(crate) fn last_write(ctx: &QueryCtx) -> Result<u64, Error> {
+    let newest = ACTIVITY.scan(ctx, Range::prefix(ACTIVITY.prefix()).limit(1))?;
+    Ok(newest.first().map_or(0, |(key, _)| newest_first(*key)))
 }
 
 /// An activity key: a later height sorts first.

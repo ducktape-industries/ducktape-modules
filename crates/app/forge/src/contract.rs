@@ -161,9 +161,12 @@ pub enum Query {
         repo: String,
         request: Vec<u8>,
     },
+    /// The history `from` reaches, less what `exclude` reaches (`git log
+    /// exclude..from`): a change's own commits exclude its target.
     Log {
         repo: String,
         from: Revision,
+        exclude: Option<Revision>,
         page: PageRequest,
     },
     Tree {

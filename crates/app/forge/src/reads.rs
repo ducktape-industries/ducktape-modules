@@ -140,23 +140,28 @@ fn reading<'a>(
     })
 }
 
-/// A page of the history below `from`.
+/// A page of the history below `from`, less what `exclude` reaches.
 pub fn log(
     ctx: &QueryCtx,
     height: u64,
     bounds: &Bounds,
     name: &str,
     from: &Revision,
+    exclude: Option<&Revision>,
     listing: &Listing,
 ) -> Result<Reply, Error> {
-    let reads = bounds.log_walk.saturating_mul(2).saturating_add(1);
+    let reads = bounds.log_walk.saturating_mul(2).saturating_add(2);
     let r = reading(ctx, name, bounds, reads)?;
     let tip = r.commit_id(resolve(ctx, name, from, r.hash)?)?;
+    let hidden = match exclude {
+        Some(exclude) => vec![r.commit_id(resolve(ctx, name, exclude, r.hash)?)?],
+        None => Vec::new(),
+    };
     // ponytail: repeat the complete walk up to log_walk; index history if larger repos need it.
     let ids = r.result(gitcore::walk::commits(
         &r.store,
         &[tip],
-        &[],
+        &hidden,
         cap(bounds.log_walk),
     ))?;
     let page = listing.slice(&ids)?.try_map(|id| {
