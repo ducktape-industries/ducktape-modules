@@ -280,6 +280,7 @@ fn every_method() -> Vec<(Exchange, serde_json::Value)> {
             },
         ),
         exchange::<HostVisible>((), true),
+        exchange::<HostOffset>((), -330),
         exchange::<HostBadge>(3, ()),
         exchange::<LinkOpen>("duck://chat/room".into(), ()),
         exchange::<HostRoute>((), "tx/00ff".into()),

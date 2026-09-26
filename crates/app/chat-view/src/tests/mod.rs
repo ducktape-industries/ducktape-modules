@@ -82,6 +82,7 @@ fn row(seq: u64, author: u64, text: &str) -> MsgRow {
 /// The host methods chat only talks to, never hears back from here.
 fn quiet_methods(cx: &mut TestAppContext) {
     cx.host().never::<api::HostRoute>();
+    cx.host().never::<api::HostOffset>();
     cx.host().never::<ducktape_view_guest::methods::HostBadge>();
     cx.host()
         .never::<ducktape_view_guest::methods::NotifyPost>();

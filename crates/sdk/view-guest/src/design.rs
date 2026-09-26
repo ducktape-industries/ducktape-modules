@@ -453,12 +453,31 @@ pub fn initial(name: &str) -> String {
         .map_or_else(|| "•".into(), str::to_uppercase)
 }
 
-/// A time in milliseconds as a UTC date: `24 Sep 2026, 05:12:07`.
+thread_local! {
+    static UTC_OFFSET_MINUTES: std::cell::Cell<i32> = const { std::cell::Cell::new(0) };
+}
+
+/// Sets the reader's UTC offset in minutes, as `host.offset` hands it, for
+/// [`date`], [`day`], [`clock`] and [`local`]. Until a view sets it they
+/// read UTC.
+pub fn set_utc_offset(minutes: i32) {
+    UTC_OFFSET_MINUTES.set(minutes);
+}
+
+/// A UTC time in milliseconds shifted into the reader's zone: the instant
+/// whose UTC reading is the reader's wall clock. Day arithmetic on it
+/// (`local(t) / 86_400_000`) falls on the reader's midnights.
+pub fn local(millis: u64) -> u64 {
+    let shift = i64::from(UTC_OFFSET_MINUTES.get()) * 60_000;
+    millis.saturating_add_signed(shift)
+}
+
+/// A time in milliseconds as the reader's date: `24 Sep 2026, 05:12:07`.
 pub fn date(millis: u64) -> String {
     const MONTHS: [&str; 12] = [
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
-    let seconds = millis / 1000;
+    let seconds = local(millis) / 1000;
     let (days, of_day) = (seconds / 86_400, seconds % 86_400);
     // days since 1970-01-01 to a civil date (Howard Hinnant's algorithm)
     let z = days as i64 + 719_468;
@@ -479,18 +498,16 @@ pub fn date(millis: u64) -> String {
     )
 }
 
-/// A time in milliseconds as a UTC day: `24 Sep 2026`.
+/// A time in milliseconds as the reader's day: `24 Sep 2026`.
 pub fn day(millis: u64) -> String {
     let date = date(millis);
     date.split_once(", ")
         .map_or(date.clone(), |(day, _)| day.to_owned())
 }
 
-/// A time in milliseconds as a UTC clock time: `3:42 PM`.
-// ponytail: UTC, not the reader's zone — a view is handed no UTC offset;
-// shift here once the host hands one over.
+/// A time in milliseconds as the reader's clock time: `3:42 PM`.
 pub fn clock(millis: u64) -> String {
-    let minutes = millis / 60_000 % 1_440;
+    let minutes = local(millis) / 60_000 % 1_440;
     let (hour, minute) = (minutes / 60, minutes % 60);
     let half = if hour < 12 { "AM" } else { "PM" };
     format!("{}:{minute:02} {half}", (hour + 11) % 12 + 1)
@@ -522,6 +539,22 @@ mod tests {
         assert_eq!(super::clock(at), "3:42 PM");
         assert_eq!(super::clock(0), "12:00 AM");
         assert_eq!(super::clock(12 * 3_600_000 + 5 * 60_000), "12:05 PM");
+    }
+
+    #[test]
+    fn a_utc_instant_reads_in_the_readers_offset() {
+        // 24 Sep 2026, 15:42:07 UTC
+        let at = 1_790_264_527_000;
+        super::set_utc_offset(540); // Seoul: past midnight, the next day
+        assert_eq!(super::date(at), "25 Sep 2026, 00:42:07");
+        assert_eq!(super::day(at), "25 Sep 2026");
+        assert_eq!(super::clock(at), "12:42 AM");
+        super::set_utc_offset(-330);
+        assert_eq!(super::clock(at), "10:12 AM");
+        super::set_utc_offset(-60); // before the epoch holds at the epoch
+        assert_eq!(super::clock(0), "12:00 AM");
+        super::set_utc_offset(0);
+        assert_eq!(super::clock(at), "3:42 PM");
     }
 
     #[test]

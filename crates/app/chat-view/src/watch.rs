@@ -3,9 +3,10 @@
 //! Every follower says what a refusal means to it; none ends on one.
 use ducktape_view_guest::Context;
 
-use crate::api::{Changes, ChatApi, HostRoute, HostSession, HostVisible};
+use crate::api::{Changes, ChatApi, HostOffset, HostRoute, HostSession, HostVisible};
 use crate::{Chat, links};
 use ::chat::view::Identity;
+use ducktape_view_guest::design;
 
 impl Chat {
     /// Subscribes every follower; the ones before are dropped with them.
@@ -16,6 +17,7 @@ impl Chat {
         let routes = host.subscribe::<HostRoute>(());
         let visible = host.subscribe::<HostVisible>(());
         let identity = host.subscribe::<Changes<Identity>>(());
+        let offset = host.subscribe::<HostOffset>(());
         self.followers = vec![
             cx.for_each(props, |chat, props, _, cx| match props {
                 Ok(next) => chat.session_changed(next, cx),
@@ -50,6 +52,11 @@ impl Chat {
                 Err(refusal) => cx
                     .host()
                     .log_refused("chat", "identity's live heads", &refusal),
+            }),
+            // the reader's zone, for the day and clock a message reads
+            cx.for_each(offset, |_, offset, _, cx| match offset {
+                Ok(minutes) => design::set_utc_offset(minutes),
+                Err(refusal) => cx.host().log_refused("chat", "the UTC offset", &refusal),
             }),
         ];
     }

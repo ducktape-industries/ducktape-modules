@@ -299,6 +299,8 @@ pub(crate) fn heavy(cx: &mut TestAppContext) {
 
 /// The live heads of the three programs whose lists the explorer shows.
 pub(crate) fn follow(cx: &TestAppContext) {
+    cx.host()
+        .stream::<ducktape_view_guest::methods::HostOffset>();
     cx.host().stream::<Changes<Identity>>();
     cx.host().stream::<Changes<Valset>>();
     cx.host().stream::<Changes<Registry>>();

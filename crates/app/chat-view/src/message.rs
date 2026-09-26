@@ -150,7 +150,9 @@ const DAY_MS: u64 = 86_400_000;
 pub fn new_day(messages: &[ChatMessage], index: usize) -> Option<String> {
     let time = messages.get(index)?.time;
     let above = messages[..index].iter().rev().find(|above| above.time > 0);
-    let opens = time > 0 && above.is_none_or(|above| above.time / DAY_MS != time / DAY_MS);
+    let opens = time > 0
+        && above
+            .is_none_or(|above| design::local(above.time) / DAY_MS != design::local(time) / DAY_MS);
     opens.then(|| design::day(time))
 }
 
@@ -168,7 +170,8 @@ pub fn mark_message_groups(messages: &mut [ChatMessage], boundary: Option<u64>) 
                 || above.from != this.from
                 || unread == Some(this.seq)
                 || this.time.saturating_sub(above.time) > GROUP_GAP_MS
-                || (above.time > 0 && above.time / DAY_MS != this.time / DAY_MS)
+                || (above.time > 0
+                    && design::local(above.time) / DAY_MS != design::local(this.time) / DAY_MS)
         });
         messages[index].show_author = opens;
     }
