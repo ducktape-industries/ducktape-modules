@@ -1,12 +1,15 @@
 //! The Programs tab: what the registry runs, lists and will change.
 use super::*;
-use ducktape_view_guest::design;
+use crate::Network;
+use module_registry::Scheduled;
 
 pub(super) fn programs(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
     let network = match &view.network {
         Loadable::Ready(network) => network,
         Loadable::Failed(refusal) => return failed(&refusal.message, cx, theme),
-        _ => return quiet("explorer-programs-loading", "Reading the registry…", theme),
+        Loadable::Idle | Loadable::Loading(_) => {
+            return quiet("explorer-programs-loading", "Reading the registry…", theme);
+        }
     };
     if network.programs.is_empty() && network.views.is_empty() && network.changes.is_empty() {
         return empty_state(
@@ -17,92 +20,13 @@ pub(super) fn programs(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
         )
         .into_any_element();
     }
-    let running = network.programs.iter().map(|entry| {
-        let go = Route::Transactions(Some(entry.program.clone()));
-        row(
-            SharedString::from(format!("explorer-program-{}", entry.program)).into(),
-            entry.program.clone(),
-            go,
-            cx,
-            theme,
-        )
-        .child(mono(entry.program.clone()).flex_1())
-        .child(
-            div()
-                .text_size(design::text::SECONDARY)
-                .text_color(theme.muted)
-                .child(plural(entry.params as u64, "param byte", "param bytes")),
-        )
-        .child(mono(design::short_hex(&entry.code)).text_color(theme.muted))
-        .into_any_element()
-    });
-    let running: Vec<_> = running.collect();
-    // A view-only entry sends nothing, so it has no transactions to open.
-    let listed = network.views.iter().map(|(name, code)| {
-        div()
-            .id(SharedString::from(format!("explorer-view-{name}")))
-            .flex()
-            .items_center()
-            .gap_4()
-            .h(px(40.))
-            .px_5()
-            .border_b_1()
-            .border_color(theme.border)
-            .child(mono(name.clone()).flex_1())
-            .child(
-                div()
-                    .text_size(design::text::SECONDARY)
-                    .text_color(theme.muted)
-                    .child("view only"),
-            )
-            .child(mono(design::short_hex(code)).text_color(theme.muted))
-            .into_any_element()
-    });
-    let listed: Vec<_> = listed.collect();
+    let running = running(network, cx, theme);
+    let listed = listed(network, theme);
     let scheduled: Vec<_> = network
         .changes
         .iter()
         .enumerate()
-        .map(|(index, scheduled)| {
-            let change = &scheduled.change;
-            let removal = change.code().is_none();
-            div()
-                .id(ElementId::named_usize("explorer-change", index))
-                .flex()
-                .items_center()
-                .gap_4()
-                .h(px(40.))
-                .px_5()
-                .border_b_1()
-                .border_color(theme.border)
-                .child(
-                    div()
-                        .px_1()
-                        .text_size(design::text::CAPTION)
-                        .text_color(if removal {
-                            theme.danger
-                        } else {
-                            theme.accent_foreground
-                        })
-                        .bg(if removal {
-                            theme.danger_soft
-                        } else {
-                            theme.accent_soft
-                        })
-                        .child(change.verb()),
-                )
-                .child(mono(change.program().to_string()).flex_1())
-                .child(
-                    div()
-                        .text_size(design::text::SECONDARY)
-                        .text_color(theme.muted)
-                        .child(format!("at {}", scheduled.height)),
-                )
-                .children(change.code().map(|code| {
-                    mono(design::short_hex(&abi::hex(code.digest()))).text_color(theme.muted)
-                }))
-                .into_any_element()
-        })
+        .map(|(index, change)| scheduled(index, change, theme))
         .collect();
     let nothing_scheduled = scheduled.is_empty().then(|| {
         quiet(
@@ -140,5 +64,106 @@ pub(super) fn programs(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
         ))
         .children(scheduled)
         .children(nothing_scheduled)
+        .children(
+            network
+                .more
+                .then(|| design::more_not_shown("explorer-changes-more", theme).px_5()),
+        )
         .into_any_element()
+}
+
+/// Each running program, a row that opens its transactions.
+fn running(network: &Network, cx: Cx, theme: &Theme) -> Vec<AnyElement> {
+    network
+        .programs
+        .iter()
+        .map(|entry| {
+            row(
+                SharedString::from(format!("explorer-program-{}", entry.program)).into(),
+                entry.program.clone(),
+                Route::Transactions(Some(entry.program.clone())),
+                cx,
+                theme,
+            )
+            .child(mono(entry.program.clone()).flex_1())
+            .child(
+                div()
+                    .text_size(design::text::SECONDARY)
+                    .text_color(theme.muted)
+                    .child(plural(
+                        entry.params.len() as u64,
+                        "param byte",
+                        "param bytes",
+                    )),
+            )
+            .child(mono(short(entry.code.digest())).text_color(theme.muted))
+            .into_any_element()
+        })
+        .collect()
+}
+
+/// The view-only entries. One sends nothing, so it has no transactions to
+/// open.
+fn listed(network: &Network, theme: &Theme) -> Vec<AnyElement> {
+    network
+        .views
+        .iter()
+        .map(|listed| {
+            line(
+                SharedString::from(format!("explorer-view-{}", listed.name)).into(),
+                theme,
+            )
+            .child(mono(listed.name.clone()).flex_1())
+            .child(
+                div()
+                    .text_size(design::text::SECONDARY)
+                    .text_color(theme.muted)
+                    .child("view only"),
+            )
+            .child(mono(short(listed.view.digest())).text_color(theme.muted))
+            .into_any_element()
+        })
+        .collect()
+}
+
+/// One change the registry will fold in: what it does, to what, when.
+fn scheduled(index: usize, scheduled: &Scheduled, theme: &Theme) -> AnyElement {
+    let change = &scheduled.change;
+    let (foreground, background) = match change.code() {
+        None => (theme.danger, theme.danger_soft),
+        Some(_) => (theme.accent_foreground, theme.accent_soft),
+    };
+    line(ElementId::named_usize("explorer-change", index), theme)
+        .child(design::badge(
+            ElementId::named_usize("explorer-change-verb", index),
+            change.verb(),
+            foreground,
+            background,
+        ))
+        .child(mono(change.program().to_string()).flex_1())
+        .child(
+            div()
+                .text_size(design::text::SECONDARY)
+                .text_color(theme.muted)
+                .child(format!("at {}", scheduled.height)),
+        )
+        .children(
+            change
+                .code()
+                .map(|code| mono(short(code.digest())).text_color(theme.muted)),
+        )
+        .into_any_element()
+}
+
+/// A list row that opens nothing.
+fn line(id: ElementId, theme: &Theme) -> Stateful<Div> {
+    div()
+        .id(id)
+        .flex()
+        .items_center()
+        .gap_4()
+        .h(ROW_H)
+        .px_5()
+        .border_b_1()
+        .border_color(theme.border)
 }

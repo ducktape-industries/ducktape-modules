@@ -3773,7 +3773,6 @@ version = "0.1.0"
 dependencies = [
  "abi",
  "futures",
- "module-registry",
  "serde",
  "valset",
  "view-guest",
@@ -5271,8 +5270,6 @@ name = "settings-view"
 version = "0.1.0"
 dependencies = [
  "abi",
- "borsh",
- "futures",
  "identity",
  "serde",
  "serde_json",

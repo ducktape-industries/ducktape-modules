@@ -1,4 +1,5 @@
 use super::*;
+use ducktape_view_guest::methods::Query;
 use ducktape_view_guest::testing::TestAppContext;
 
 #[test]
@@ -40,8 +41,8 @@ fn validators() -> valset::Reply {
     valset::Reply::Validators(vec![vec![0xab, 0xcd]])
 }
 
-fn page<T>(items: Vec<T>) -> module_registry::PageResponse<T> {
-    module_registry::PageResponse {
+fn page<T>(items: Vec<T>) -> valset::PageResponse<T> {
+    valset::PageResponse {
         height: 1,
         items,
         next: None,
@@ -76,7 +77,7 @@ fn ready() -> TestAppContext {
         vec![
             valset::Query::Validators,
             valset::Query::Memberships {
-                page: module_registry::PageRequest {
+                page: valset::PageRequest {
                     after: None,
                     limit: None
                 }
@@ -213,4 +214,23 @@ fn a_live_bump_re_reads_and_a_snapshot_restores_the_screen() {
 #[test]
 fn the_ready_set_is_accessible() {
     ready().assert_accessible();
+}
+
+#[test]
+fn a_refused_live_head_is_logged_and_the_set_stays() {
+    let mut cx = TestAppContext::new();
+    cx.host()
+        .refuse::<Changes<Valset>>("unavailable", "no live heads here");
+    respond(&mut cx);
+    cx.open::<Nodes>();
+    cx.run_until_parked();
+    assert!(cx.has_text("10.0.0.1:4000"));
+    assert!(
+        cx.host()
+            .logs()
+            .iter()
+            .any(|line| line.contains("valset's live heads") && line.contains("no live heads here")),
+        "{:?}",
+        cx.host().logs()
+    );
 }

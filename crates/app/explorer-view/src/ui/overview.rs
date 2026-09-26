@@ -1,33 +1,26 @@
 //! The Overview tab: the head, the latest blocks and transactions.
 use super::*;
-use ducktape_view_guest::design;
 
 pub(super) fn overview(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
+    div()
+        .id("explorer-overview")
+        .flex()
+        .flex_col()
+        .flex_1()
+        .child(stats(view, theme))
+        .child(
+            div()
+                .flex()
+                .flex_1()
+                .child(latest_blocks(view, cx, theme))
+                .child(latest_txs(view, cx, theme)),
+        )
+        .into_any_element()
+}
+
+/// The row of figures: height, epoch, validators, accounts.
+fn stats(view: &Explorer, theme: &Theme) -> impl IntoElement {
     let status = view.status.ready();
-    let stat = |id: &'static str, label: &'static str, value: String, note: String| {
-        div()
-            .id(id)
-            .flex_1()
-            .flex()
-            .flex_col()
-            .gap_1()
-            .px_5()
-            .py_4()
-            .border_r_1()
-            .border_color(theme.border)
-            .child(
-                mono(label)
-                    .text_size(design::text::CAPTION)
-                    .text_color(theme.muted),
-            )
-            .child(div().text_size(px(22.)).child(value))
-            .child(
-                div()
-                    .text_size(design::text::SECONDARY)
-                    .text_color(theme.muted)
-                    .child(note),
-            )
-    };
     let dash = || "—".to_string();
     let (height, cadence) = match status {
         Some(status) => (
@@ -54,9 +47,70 @@ pub(super) fn overview(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
     let accounts = view
         .accounts
         .ready()
-        .map_or_else(dash, |accounts| grouped(accounts.len() as u64));
-    let now = view.chain.now();
-    let all_blocks = link(
+        .map_or_else(dash, |accounts| grouped(accounts.list.len() as u64));
+    div()
+        .id("explorer-stats")
+        .flex()
+        .border_b_1()
+        .border_color(theme.border)
+        .child(stat(
+            "explorer-stat-height",
+            "Height",
+            height,
+            cadence,
+            theme,
+        ))
+        .child(stat("explorer-stat-epoch", "Epoch", epoch, next, theme))
+        .child(stat(
+            "explorer-stat-validators",
+            "Validators",
+            validators,
+            String::new(),
+            theme,
+        ))
+        .child(stat(
+            "explorer-stat-accounts",
+            "Accounts",
+            accounts,
+            String::new(),
+            theme,
+        ))
+}
+
+/// One figure: its label, its value, and a note under it.
+fn stat(
+    id: &'static str,
+    label: &'static str,
+    value: String,
+    note: String,
+    theme: &Theme,
+) -> impl IntoElement {
+    div()
+        .id(id)
+        .flex_1()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .px_5()
+        .py_4()
+        .border_r_1()
+        .border_color(theme.border)
+        .child(
+            mono(label)
+                .text_size(design::text::CAPTION)
+                .text_color(theme.muted),
+        )
+        .child(div().text_size(design::text::TITLE).child(value))
+        .child(
+            div()
+                .text_size(design::text::SECONDARY)
+                .text_color(theme.muted)
+                .child(note),
+        )
+}
+
+fn latest_blocks(view: &Explorer, cx: Cx, theme: &Theme) -> impl IntoElement {
+    let all = link(
         "explorer-all-blocks".into(),
         "All blocks →".into(),
         Route::Blocks,
@@ -65,7 +119,24 @@ pub(super) fn overview(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
     )
     .text_size(design::text::SECONDARY)
     .into_any_element();
-    let all_txs = link(
+    let blocks = block_lines(&view.chain.blocks, LATEST, view.chain.now(), cx, theme);
+    div()
+        .id("explorer-latest-blocks")
+        .w(LATEST_BLOCKS_W)
+        .flex_shrink_0()
+        .border_r_1()
+        .border_color(theme.border)
+        .child(heading(
+            "explorer-latest-blocks-heading",
+            "Latest blocks",
+            Some(all),
+            theme,
+        ))
+        .children(blocks)
+}
+
+fn latest_txs(view: &Explorer, cx: Cx, theme: &Theme) -> impl IntoElement {
+    let all = link(
         "explorer-all-txs".into(),
         "All transactions →".into(),
         Route::Transactions(None),
@@ -74,7 +145,6 @@ pub(super) fn overview(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
     )
     .text_size(design::text::SECONDARY)
     .into_any_element();
-    let blocks = block_lines(&view.chain.blocks, LATEST, now, cx, theme);
     let txs: Vec<_> = view
         .chain
         .txs
@@ -82,8 +152,8 @@ pub(super) fn overview(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
         .take(LATEST)
         .map(|tx| tx_row(view, tx, false, true, cx, theme).into_any_element())
         .collect();
-    let no_txs = txs.is_empty().then(|| {
-        quiet_owned(
+    let none = txs.is_empty().then(|| {
+        quiet(
             "explorer-no-txs",
             format!(
                 "No transactions in the last {}.",
@@ -93,63 +163,14 @@ pub(super) fn overview(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
         )
     });
     div()
-        .id("explorer-overview")
-        .flex()
-        .flex_col()
+        .id("explorer-latest-txs")
         .flex_1()
-        .child(
-            div()
-                .id("explorer-stats")
-                .flex()
-                .border_b_1()
-                .border_color(theme.border)
-                .child(stat("explorer-stat-height", "Height", height, cadence))
-                .child(stat("explorer-stat-epoch", "Epoch", epoch, next))
-                .child(stat(
-                    "explorer-stat-validators",
-                    "Validators",
-                    validators,
-                    String::new(),
-                ))
-                .child(stat(
-                    "explorer-stat-accounts",
-                    "Accounts",
-                    accounts,
-                    String::new(),
-                )),
-        )
-        .child(
-            div()
-                .flex()
-                .flex_1()
-                .child(
-                    div()
-                        .id("explorer-latest-blocks")
-                        .w(px(420.))
-                        .flex_shrink_0()
-                        .border_r_1()
-                        .border_color(theme.border)
-                        .child(heading(
-                            "explorer-latest-blocks-heading",
-                            "Latest blocks",
-                            Some(all_blocks),
-                            theme,
-                        ))
-                        .children(blocks),
-                )
-                .child(
-                    div()
-                        .id("explorer-latest-txs")
-                        .flex_1()
-                        .child(heading(
-                            "explorer-latest-txs-heading",
-                            "Latest transactions",
-                            Some(all_txs),
-                            theme,
-                        ))
-                        .children(txs)
-                        .children(no_txs),
-                ),
-        )
-        .into_any_element()
+        .child(heading(
+            "explorer-latest-txs-heading",
+            "Latest transactions",
+            Some(all),
+            theme,
+        ))
+        .children(txs)
+        .children(none)
 }

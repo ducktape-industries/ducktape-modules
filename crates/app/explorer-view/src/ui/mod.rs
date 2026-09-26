@@ -6,13 +6,42 @@ use ducktape_view_guest::view::Loadable;
 use ducktape_view_guest::{Div, FontWeight, Stateful};
 
 use crate::decode::{ago, clip, date, grouped, plural, short};
-use crate::{Account, BlockRow, Explorer, Route, TxRow};
+use crate::{BlockRow, Explorer, Note, Route, TxRow};
 use design::{empty_state, mono};
 
 /// The most rows one list draws; the rest is reached by search.
 const LIST_ROWS: usize = 50;
 /// The rows each Overview panel draws.
 const LATEST: usize = 12;
+
+/// The bar's height, and a section heading's.
+const BAR_H: Pixels = px(44.);
+/// The search field's width.
+const SEARCH_W: Pixels = px(360.);
+/// A list row's height, and a detail field's least.
+const ROW_H: Pixels = px(40.);
+/// The signer column.
+const SIGNER_W: Pixels = px(180.);
+/// A block list's height column.
+const HEIGHT_W: Pixels = px(72.);
+/// The age column: `59s`, `3h`.
+const AGE_W: Pixels = px(36.);
+/// A transaction row's short hash.
+const HASH_W: Pixels = px(100.);
+/// A detail page's field labels.
+const LABEL_W: Pixels = px(110.);
+/// An operation's field labels.
+const OP_LABEL_W: Pixels = px(90.);
+/// The Accounts list's device count.
+const DEVICES_W: Pixels = px(90.);
+/// The Accounts list's transaction count.
+const COUNT_W: Pixels = px(60.);
+/// An account page's side column: devices and programs used.
+const SIDE_W: Pixels = px(380.);
+/// The Overview's latest blocks, beside the latest transactions.
+const LATEST_BLOCKS_W: Pixels = px(420.);
+/// The avatar an account page opens with.
+const PAGE_AVATAR: Pixels = px(40.);
 
 type Cx<'a, 'b> = &'a mut Context<'b, Explorer>;
 
@@ -39,6 +68,7 @@ pub fn render(view: &Explorer, cx: Cx) -> AnyElement {
         .text_size(design::text::BODY)
         .child(bar(view, cx, &theme));
     if let Some(note) = &view.note {
+        let note = worded(note);
         root = root.child(
             div()
                 .id("explorer-note")
@@ -49,7 +79,7 @@ pub fn render(view: &Explorer, cx: Cx) -> AnyElement {
                 .bg(theme.surface)
                 .text_size(design::text::SECONDARY)
                 .text_color(theme.muted)
-                .child(note.clone()),
+                .child(note),
         );
     }
     root.child(
@@ -64,32 +94,40 @@ pub fn render(view: &Explorer, cx: Cx) -> AnyElement {
     .into_any_element()
 }
 
+/// The line under the bar, in words.
+fn worded(note: &Note) -> String {
+    match note {
+        Note::NotFound(query) => format!("Nothing here is called “{query}”."),
+        Note::NoSuchHash { blocks } => format!(
+            "No block has this hash, and no transaction in the last {} does.",
+            plural(*blocks, "block", "blocks")
+        ),
+        Note::Unlinked(route) => format!("This link names nothing the Explorer shows: {route}"),
+        Note::Copied => "Copied the link.".into(),
+        Note::Refused(message) => message.clone(),
+    }
+}
+
 fn bar(view: &Explorer, cx: Cx, theme: &Theme) -> impl IntoElement {
     let tabs = [
-        ("Overview", Route::Overview),
-        ("Blocks", Route::Blocks),
-        ("Transactions", Route::Transactions(None)),
-        ("Accounts", Route::Accounts),
-        ("Programs", Route::Programs),
+        ("overview", "Overview", Route::Overview),
+        ("blocks", "Blocks", Route::Blocks),
+        ("transactions", "Transactions", Route::Transactions(None)),
+        ("accounts", "Accounts", Route::Accounts),
+        ("programs", "Programs", Route::Programs),
     ];
     let typed = cx.listener(|view: &mut Explorer, text: &String, _, cx| {
         view.search = text.clone();
         cx.notify();
     });
     let submit = cx.listener(|view: &mut Explorer, _: &(), _, cx| view.search(cx));
-    let tabs = tabs.into_iter().map(|(label, route)| {
+    let tabs = tabs.into_iter().map(|(key, label, route)| {
         let active = view.route.tab() == route.tab();
         let go = cx
             .listener(move |view: &mut Explorer, _: &ClickEvent, _, cx| view.go(route.clone(), cx));
-        design::tab(
-            format!("explorer-tab-{}", label.to_lowercase()),
-            label,
-            active,
-            theme,
-            go,
-        )
-        .h_full()
-        .mx_1()
+        design::tab(format!("explorer-tab-{key}"), label, active, theme, go)
+            .h_full()
+            .mx_1()
     });
     div()
         .id("explorer-bar")
@@ -97,16 +135,16 @@ fn bar(view: &Explorer, cx: Cx, theme: &Theme) -> impl IntoElement {
         .flex()
         .items_center()
         .justify_between()
-        .h(px(44.))
+        .h(BAR_H)
         .px_3()
         .border_b_1()
         .border_color(theme.border)
         .child(div().h_full().flex().items_center().children(tabs))
         .child(
-            div().w(px(360.)).flex_shrink_0().child(
+            div().w(SEARCH_W).flex_shrink_0().child(
                 Input::new("explorer-search")
                     .w_full()
-                    .h(px(28.))
+                    .h(design::size::CONTROL)
                     .px_2()
                     .border_1()
                     .border_color(theme.border)
@@ -142,7 +180,7 @@ fn page(view: &Explorer, cx: Cx, theme: &Theme) -> AnyElement {
 
 // ---------- pieces ----------
 
-fn quiet(id: &'static str, text: &'static str, theme: &Theme) -> AnyElement {
+fn quiet(id: &'static str, text: impl Into<SharedString>, theme: &Theme) -> AnyElement {
     design::quiet(text, theme)
         .id(id)
         .px_5()
@@ -163,7 +201,7 @@ fn heading(id: &str, title: &str, right: Option<AnyElement>, theme: &Theme) -> i
         .id(SharedString::from(id.to_string()))
         .flex()
         .items_center()
-        .h(px(44.))
+        .h(BAR_H)
         .px_5()
         .border_b_1()
         .border_color(theme.border)
@@ -201,7 +239,7 @@ fn row(id: ElementId, label: String, route: Route, cx: Cx, theme: &Theme) -> Sta
         .flex()
         .items_center()
         .gap_4()
-        .h(px(40.))
+        .h(ROW_H)
         .px_5()
         .border_b_1()
         .border_color(theme.border)
@@ -215,16 +253,16 @@ fn row(id: ElementId, label: String, route: Route, cx: Cx, theme: &Theme) -> Sta
 /// Who signed: the account holding the key, or the key itself.
 fn signer(view: &Explorer, key: &[u8], theme: &Theme) -> impl IntoElement {
     let (name, number) = match view.holder(key) {
-        Some((account, _)) => (account.name.clone(), Some(account.number)),
+        Some((account, _)) => (account.card.name.clone(), Some(account.number)),
         None => (short(key), None),
     };
     div()
         .flex()
         .items_center()
         .gap_2()
-        .w(px(180.))
+        .w(SIGNER_W)
         .flex_shrink_0()
-        .child(design::avatar(&name, px(20.), theme))
+        .child(design::avatar(&name, design::size::AVATAR, theme))
         .child(div().truncate().child(name))
         .children(number.map(|number| {
             mono(format!("#{number}"))
@@ -245,7 +283,7 @@ fn block_row(block: &BlockRow, now: u64, cx: Cx, theme: &Theme) -> impl IntoElem
     .when(block.txs == 0, |row| row.text_color(theme.faint))
     .child(
         mono(grouped(block.height))
-            .w(px(72.))
+            .w(HEIGHT_W)
             .when(block.txs > 0, |height| {
                 height.font_weight(FontWeight::SEMIBOLD)
             }),
@@ -258,7 +296,7 @@ fn block_row(block: &BlockRow, now: u64, cx: Cx, theme: &Theme) -> impl IntoElem
     )
     .child(
         mono(ago(now, block.time))
-            .w(px(36.))
+            .w(AGE_W)
             .flex()
             .justify_end()
             .text_color(theme.faint),
@@ -314,7 +352,7 @@ fn block_lines(
                 .id(SharedString::from(format!("explorer-empty-{newest}")))
                 .flex()
                 .items_center()
-                .h(px(40.))
+                .h(ROW_H)
                 .px_5()
                 .border_b_1()
                 .border_color(theme.border)
@@ -352,7 +390,7 @@ fn tx_row(
         cx,
         theme,
     )
-    .child(mono(short(&tx.hash)).w(px(100.)).text_color(theme.muted))
+    .child(mono(short(&tx.hash)).w(HASH_W).text_color(theme.muted))
     .child(
         div()
             .flex_1()
@@ -371,7 +409,7 @@ fn tx_row(
     .children(height.then(|| mono(grouped(tx.height)).text_color(theme.muted)))
     .child(
         mono(ago(now, tx.time))
-            .w(px(36.))
+            .w(AGE_W)
             .flex()
             .justify_end()
             .text_color(theme.faint),
@@ -383,14 +421,14 @@ fn field(label: &str, value: impl IntoElement, theme: &Theme) -> impl IntoElemen
     div()
         .flex()
         .items_center()
-        .min_h(px(40.))
+        .min_h(ROW_H)
         .px_5()
         .gap_4()
         .border_b_1()
         .border_color(theme.border)
         .child(
             mono(label.to_string())
-                .w(px(110.))
+                .w(LABEL_W)
                 .flex_shrink_0()
                 .text_color(theme.muted),
         )
@@ -412,22 +450,11 @@ fn titled(kind: &str, title: String, theme: &Theme) -> impl IntoElement {
         .child(
             div()
                 .id("explorer-title")
-                .text_size(px(22.))
+                .text_size(design::text::TITLE)
                 .role(Role::Heading)
                 .aria_level(1)
                 .child(title),
         )
-}
-
-fn quiet_owned(id: &'static str, text: String, theme: &Theme) -> AnyElement {
-    div()
-        .id(id)
-        .px_5()
-        .py_4()
-        .text_size(design::text::SECONDARY)
-        .text_color(theme.muted)
-        .child(text)
-        .into_any_element()
 }
 
 /// "Copy link": this page's `duck://<chain>/explorer/…` link, onto the
@@ -441,7 +468,7 @@ fn copy_button(view: &Explorer, route: &Route, cx: Cx, theme: &Theme) -> Option<
         div()
             .id("explorer-copy-link")
             .px_3()
-            .h(px(28.))
+            .h(design::size::CONTROL)
             .flex()
             .items_center()
             .border_1()

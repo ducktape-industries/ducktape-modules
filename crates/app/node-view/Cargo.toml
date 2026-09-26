@@ -16,9 +16,4 @@ futures.workspace = true
 abi.workspace = true
 ducktape-view-guest.workspace = true
 valset = { workspace = true, features = ["view"] }
-module-registry.workspace = true
 serde.workspace = true
-
-# What a test needs to play the node: the borsh replies the program would
-# write, and the envelope the host method would open.
-[dev-dependencies]

@@ -11,7 +11,7 @@ pub mod view;
 pub use program::Valset;
 
 use borsh::{BorshDeserialize, BorshSerialize};
-use store::{PageRequest, PageResponse};
+pub use store::{PageRequest, PageResponse};
 
 pub use abi::role::validators::{Genesis, Member};
 

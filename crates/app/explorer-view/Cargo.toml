@@ -14,7 +14,6 @@ crate-type = ["cdylib", "rlib"]
 futures.workspace = true
 # `abi::hex` is how a code blob id reaches the screen.
 abi.workspace = true
-borsh.workspace = true
 ducktape-view-guest.workspace = true
 # mints the `duck://<chain>/explorer/…` link a page copies
 ducklink.workspace = true
@@ -31,5 +30,6 @@ serde.workspace = true
 [dev-dependencies]
 # the ops a test posts, and the describe functions its host answers with,
 # as the modules in those programs' code would
+borsh.workspace = true
 chat.workspace = true
 forge.workspace = true
