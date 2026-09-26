@@ -87,7 +87,7 @@ impl conformance::identity::Fixture for Identity {
     }
 
     /// A person keeps their last key: a spare joins, then `key` goes.
-    fn drop_key(&self, host: &MockHost, account: AccountNumber, key: &[u8]) {
+    fn drop_key(&self, host: &MockHost, account: AccountNumber, key: &[u8]) -> bool {
         let spare = [key, b"'s spare"].concat();
         Self::run(host, &spare, None, Self::add_key(key, account));
         let remove = identity::Op::RemoveKey {
@@ -95,6 +95,7 @@ impl conformance::identity::Fixture for Identity {
             key: key.to_vec(),
         };
         Self::run(host, key, Some(account), remove);
+        true
     }
 
     /// An active agent holding `key`.

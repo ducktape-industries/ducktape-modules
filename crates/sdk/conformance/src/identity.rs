@@ -24,9 +24,10 @@ pub trait Fixture {
     fn stopped(&self, host: &MockHost, key: &[u8]) -> Option<AccountNumber>;
 
     /// `account`, which `key` holds (an account [`Fixture::account`]
-    /// made), stops holding `key`. The account may be given another key
-    /// first, if yours keeps a last one.
-    fn drop_key(&self, host: &MockHost, account: AccountNumber, key: &[u8]);
+    /// made), stops holding `key`; true once it has. The account may be
+    /// given another key first, if yours keeps a last one. `false` for a
+    /// module whose keys are never removed: that rule is skipped.
+    fn drop_key(&self, host: &MockHost, account: AccountNumber, key: &[u8]) -> bool;
 
     /// `key` comes to hold a new managed account that acts (an active
     /// agent); its number. `None` for a module with no managed accounts:
@@ -319,7 +320,9 @@ pub fn an_account_that_does_not_act_is_refused<F: Fixture>(fixture: &F) {
 pub fn a_dropped_key_holds_nothing<F: Fixture>(fixture: &F) {
     let host = fixture.host();
     let number = fixture.account(&host, b"dropped key");
-    fixture.drop_key(&host, number, b"dropped key");
+    if !fixture.drop_key(&host, number, b"dropped key") {
+        return;
+    }
     assert_eq!(
         account_of::<F>(&host, Query::Account(b"dropped key".to_vec())),
         None,
