@@ -437,18 +437,18 @@ impl Settings {
         if form(self).busy {
             return;
         }
-        *form(self) = Form {
-            busy: true,
-            ..Form::default()
-        };
+        let pending = form(self);
+        pending.busy = true;
+        pending.error.clear();
         cx.notify();
         cx.spawn(async move |this, cx| {
             let result = cx.host().ask::<Submit<Identity>>(op).await;
             let _ = this.update(cx, |view, cx| {
                 let form = form(view);
                 form.busy = false;
-                if let Err(refusal) = result {
-                    form.error = format!("Couldn’t do that: {}", refusal.message);
+                match result {
+                    Ok(_) => form.text.clear(),
+                    Err(refusal) => form.error = format!("Couldn’t do that: {}", refusal.message),
                 }
                 view.read_account(cx);
             });

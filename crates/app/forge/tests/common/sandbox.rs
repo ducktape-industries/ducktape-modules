@@ -61,12 +61,52 @@ impl Default for MemorySandbox {
                 Ok(abi::encode(&reply))
             }),
         );
+        let roster = accounts.clone();
+        forge.borrow_mut().siblings.insert(
+            "identity".into(),
+            Box::new(move |request| profiles(&roster, request)),
+        );
         MemorySandbox {
             forge,
             chat,
             accounts,
         }
     }
+}
+
+/// The identity role's `Profiles` over the roster: each key's account a
+/// person's, each of [`MODULES`] its module's.
+fn profiles(roster: &RefCell<BTreeMap<Vec<u8>, u64>>, request: &[u8]) -> Result<Vec<u8>, Error> {
+    use abi::role::identity as role;
+    let role::Query::Profiles { after, limit } =
+        abi::decode(request).map_err(guest::kernel::error_from)?
+    else {
+        panic!("forge asks the identity role only for profiles");
+    };
+    let people = roster
+        .borrow()
+        .values()
+        .map(|number| (*number, None))
+        .collect::<Vec<_>>();
+    let modules = MODULES.map(|(module, number)| (number, Some(module.to_owned())));
+    let every: BTreeMap<u64, Option<String>> = people.into_iter().chain(modules).collect();
+    let profiles = every
+        .into_iter()
+        .filter(|(number, _)| after.is_none_or(|after| *number > after))
+        .take(limit as usize)
+        .map(|(number, module)| role::Profile {
+            number,
+            name: format!("account {number}"),
+            category: None,
+            manager: None,
+            module,
+            status: role::Status::Active,
+        })
+        .collect();
+    Ok(abi::encode(&role::Reply::Profiles {
+        profiles,
+        next: None,
+    }))
 }
 
 impl MemorySandbox {

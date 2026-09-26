@@ -8,7 +8,7 @@ use ducktape_view_guest::Host;
 use ducktape_view_guest::host::{Error, pages, wrong_reply};
 use ducktape_view_guest::methods::{Module, Query as Ask};
 
-use crate::{Category, PageRequest, Principal, Profile, Query, Reply};
+use crate::{Category, PageRequest, Principal, Profile, Query, Reply, Status};
 
 pub struct Chat;
 impl Module for Chat {
@@ -84,9 +84,23 @@ impl Names {
         self.more
     }
 
-    /// Every named account, ascending.
-    pub fn numbers(&self) -> impl Iterator<Item = u64> + '_ {
-        self.profiles.keys().copied()
+    /// The accounts a person picks, as a reviewer or a mention: people and
+    /// agents that act, ascending. No module's account, none suspended or
+    /// revoked.
+    pub fn people(&self) -> impl Iterator<Item = u64> + '_ {
+        self.profiles
+            .values()
+            .filter(|profile| picks(profile))
+            .map(|profile| profile.number)
+    }
+
+    /// Whether a person picks `principal` ([`Names::people`]). An account
+    /// past the roster's read is picked by its number.
+    pub fn pickable(&self, principal: &Principal) -> bool {
+        match self.profile(principal) {
+            Some(profile) => picks(profile),
+            None => principal.account().is_some(),
+        }
     }
 
     fn profile(&self, principal: &Principal) -> Option<&Profile> {
@@ -104,11 +118,16 @@ impl Names {
     }
 
     /// A member row, a huddle seat or a dm peer: the name, else what the
-    /// principal is.
+    /// principal is; marked while the account does not act.
     pub fn member(&self, principal: &Principal) -> String {
-        match self.name(principal) {
+        let name = match self.name(principal) {
             Some(name) => name.to_owned(),
             None => unnamed(principal),
+        };
+        match self.profile(principal).map(|profile| profile.status) {
+            Some(Status::Suspended) => format!("{name} (suspended)"),
+            Some(Status::Revoked) => format!("{name} (revoked)"),
+            Some(Status::Active) | None => name,
         }
     }
 
@@ -146,6 +165,11 @@ impl Names {
         (profile.category == Some(Category::Agent))
             .then(|| format!("Agent · managed by {}", self.member(&manager)))
     }
+}
+
+/// A person picks a person or an agent that acts.
+fn picks(profile: &Profile) -> bool {
+    profile.module.is_none() && profile.status == Status::Active
 }
 
 /// A principal no roster names: its account number, or the system.

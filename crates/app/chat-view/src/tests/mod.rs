@@ -219,5 +219,6 @@ fn person(number: u64, name: &str) -> chat::Profile {
         category: None,
         manager: None,
         module: None,
+        status: chat::Status::Active,
     }
 }

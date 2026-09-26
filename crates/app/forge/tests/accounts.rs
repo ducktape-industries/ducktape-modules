@@ -300,3 +300,45 @@ fn opened(rig: &mut Rig, story: &Story) -> u64 {
     };
     n
 }
+
+/// A module's account is never asked to review or write: identity's
+/// profile of it names its module.
+#[test]
+fn a_modules_account_is_neither_reviewer_nor_writer() {
+    let (mut rig, story) = story();
+    let chat = Principal::Account(sandbox::MODULES[1].1);
+    let Op::ChangeOpen {
+        repo,
+        from,
+        into,
+        title,
+        body,
+        ..
+    } = story.open("Asks chat")
+    else {
+        panic!()
+    };
+    let open = Op::ChangeOpen {
+        repo,
+        from,
+        into,
+        title,
+        body,
+        reviewers: vec![Principal::Account(2), chat.clone()],
+    };
+    assert_eq!(rig.refused(&open).code, code::INVALID_INPUT);
+    let n = opened(&mut rig, &story);
+    let edit = Op::ChangeEdit {
+        repo: REPO.into(),
+        n,
+        title: None,
+        body: None,
+        reviewers: Some(vec![chat.clone()]),
+    };
+    assert_eq!(rig.refused(&edit).code, code::INVALID_INPUT);
+    let grant = Op::Grant {
+        repo: REPO.into(),
+        principal: chat,
+    };
+    assert_eq!(rig.refused(&grant).code, code::INVALID_INPUT);
+}

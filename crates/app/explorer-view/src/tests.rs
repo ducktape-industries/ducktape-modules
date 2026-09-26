@@ -99,7 +99,7 @@ fn ada() -> identity::Account {
     }
 }
 
-/// The agent Ada manages: no keys yet.
+/// The agent Ada manages, suspended: no keys yet.
 fn scout() -> identity::Account {
     identity::Account {
         number: 5,
@@ -107,6 +107,7 @@ fn scout() -> identity::Account {
         keys: Vec::new(),
         manager: Some(3),
         category: Some(identity::Category::Agent),
+        status: identity::Status::Suspended,
         ..ada()
     }
 }
@@ -426,7 +427,7 @@ fn an_account_shows_its_devices_and_what_it_used_in_the_window() {
     cx.simulate_submit("explorer-search");
     cx.run_until_parked();
     let texts = cx.texts();
-    assert!(cx.has_text("account 3   1 device"), "{texts:?}");
+    assert!(cx.has_text("account 3   Person   1 device"), "{texts:?}");
     assert!(
         cx.has_text("laptop") && cx.has_text("last used 1s ago"),
         "{texts:?}"
@@ -447,7 +448,7 @@ fn search_finds_heights_hashes_accounts_and_programs() {
     search(&mut cx, &abi::hex(&[0xb2; 32]));
     assert!(cx.has_text("In block 12"), "{:?}", cx.texts());
     search(&mut cx, "#3");
-    assert!(cx.has_text("account 3   1 device"));
+    assert!(cx.has_text("account 3   Person   1 device"));
     search(&mut cx, "chat");
     assert!(cx.has_text("Transactions · chat") && cx.has_text("Post in #design"));
     assert!(!cx.has_text("mystery · 4 bytes"));
@@ -658,7 +659,7 @@ fn a_link_opens_the_page_it_names() {
     open(&mut cx, &format!("block/{}", abi::hex(&[105; 32])));
     assert!(cx.has_text(&abi::hex(&[105; 32])), "a block by its hash");
     open(&mut cx, "account/3");
-    assert!(cx.has_text("account 3   1 device"));
+    assert!(cx.has_text("account 3   Person   1 device"));
     open(&mut cx, "program/chat");
     assert!(cx.has_text("Transactions · chat"));
     // a transaction the window does not hold says how far it looked
@@ -876,7 +877,7 @@ fn a_snapshot_keeps_ops_not_payloads() {
 }
 
 #[test]
-fn accounts_say_which_are_agents_and_which_are_modules() {
+fn accounts_say_what_each_is_as_members_does() {
     let mut cx = TestAppContext::new();
     cx.host().stream::<ChainHeads>();
     node(&mut cx, Rc::new(RefCell::new(12)));
@@ -884,13 +885,17 @@ fn accounts_say_which_are_agents_and_which_are_modules() {
     cx.run_until_parked();
     cx.simulate_click("explorer-tab-accounts");
     cx.run_until_parked();
-    for text in ["Agent · managed by Ada", "Module · forge"] {
+    for text in [
+        "Person",
+        "Agent · managed by Ada · suspended",
+        "Module · forge",
+    ] {
         assert!(cx.has_text(text), "{text}: {:?}", cx.texts());
     }
     cx.simulate_click("explorer-account-5");
     cx.run_until_parked();
     assert!(
-        cx.has_text("account 5   Agent · managed by Ada   0 devices"),
+        cx.has_text("account 5   Agent · managed by Ada · suspended   0 devices"),
         "{:?}",
         cx.texts()
     );

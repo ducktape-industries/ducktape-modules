@@ -213,10 +213,13 @@ fn messages(forge: &Forge, theme: &Theme) -> AnyElement {
     let Some((change, _, _, _)) = forge.change() else {
         return div().into_any_element();
     };
+    // forge's own lines are told by their author, whom the roster names
+    let naming = forge.names.is_idle() || forge.names.is_loading();
     match forge.messages.get(&change.channel) {
         None | Some(Loadable::Idle) | Some(Loadable::Loading(_)) => {
             quiet("Reading the conversation…", theme)
         }
+        Some(Loadable::Ready(_)) if naming => quiet("Reading the conversation…", theme),
         Some(Loadable::Failed(refusal)) => div()
             .id(id("forge-conversation-refused"))
             .p_2()

@@ -12,7 +12,7 @@ mod tests;
 #[cfg(feature = "view")]
 pub mod view;
 
-pub use abi::role::identity::{Category, Profile};
+pub use abi::role::identity::{Category, Profile, Status};
 pub use guest::AccountNumber;
 pub use program::Identity;
 
@@ -29,14 +29,6 @@ pub struct Key {
     pub key: Vec<u8>,
     pub label: Option<String>,
     pub added_at: u64,
-}
-
-/// Whether an account acts. Only a manager changes it; `Revoked` is final.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
-pub enum Status {
-    Active,
-    Suspended,
-    Revoked,
 }
 
 /// One account. A person holds keys and has no manager; an agent is
@@ -78,6 +70,7 @@ impl Account {
             category: self.category,
             manager: self.manager,
             module: self.module.clone(),
+            status: self.status,
         }
     }
 }

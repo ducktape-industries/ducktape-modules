@@ -301,9 +301,9 @@ pub struct Account {
     pub number: u64,
     pub name: String,
     pub devices: Vec<Device>,
-    /// what the account is beside a person's: "Agent · managed by Dev",
-    /// "Module · forge"
-    pub kind: Option<String>,
+    /// what the account is, as members shows it (`identity::view::kind`):
+    /// "Person", "Agent · managed by Dev · suspended", "Module · forge"
+    pub kind: String,
 }
 
 /// One running program: its id and the blob its code lives in.
@@ -815,17 +815,6 @@ async fn accounts(host: Host) -> Result<Vec<Account>, Error> {
             None => break,
         }
     }
-    let name_of = |number: u64| {
-        listed
-            .iter()
-            .find(|account| account.number == number)
-            .map_or_else(|| format!("#{number}"), |account| account.name.clone())
-    };
-    let kind = |account: &identity::Account| match (&account.module, account.manager) {
-        (Some(module), _) => Some(format!("Module · {module}")),
-        (None, Some(manager)) => Some(format!("Agent · managed by {}", name_of(manager))),
-        (None, None) => None,
-    };
     Ok(listed
         .iter()
         .map(|account| Account {
@@ -840,7 +829,7 @@ async fn accounts(host: Host) -> Result<Vec<Account>, Error> {
                     label: key.label.clone(),
                 })
                 .collect(),
-            kind: kind(account),
+            kind: identity::view::kind(account, &listed),
         })
         .collect())
 }

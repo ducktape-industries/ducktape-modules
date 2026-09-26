@@ -24,6 +24,7 @@ fn identity() -> guest::Sibling {
             category: (number == 3).then_some(crate::Category::Agent),
             manager: (number == 3).then_some(1),
             module: None,
+            status: crate::Status::Active,
         };
         let role::Query::Profiles { after, limit } =
             abi::decode(request).map_err(guest::kernel::error_from)?

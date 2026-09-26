@@ -8,7 +8,7 @@ use guest::{Error, ExecCtx, QueryCtx, capacity, invalid, stale, unauthorized, wr
 
 use crate::contract::*;
 use crate::discussion::{self, Event};
-use crate::ops::{require_named, require_writer};
+use crate::ops::{require_person_or_agent, require_writer};
 use crate::state::{
     load_bounds, load_change, load_ref, load_repo, next, next_message, next_number, parse_oid,
     peek_message, repo_hash, resolve, save_change, save_review, set_ref,
@@ -32,7 +32,7 @@ pub(crate) fn open(
     let env = ctx.env();
     let record = load_repo(ctx, repo)?;
     check_title(&draft.title)?;
-    check_reviewers(&draft.reviewers)?;
+    check_reviewers(ctx, &draft.reviewers)?;
     check_endpoints(&draft.into, &draft.from)?;
     let hash = repo_hash(&record);
     let source = resolve(ctx, repo, &draft.from, hash)?;
@@ -107,7 +107,7 @@ pub(crate) fn edit(
         change.body = body;
     }
     if let Some(reviewers) = fields.reviewers {
-        check_reviewers(&reviewers)?;
+        check_reviewers(ctx, &reviewers)?;
         change.reviewers = reviewers;
     }
     touched(&mut change, env);
@@ -299,7 +299,7 @@ fn check_title(title: &str) -> Result<(), Error> {
     Ok(())
 }
 
-fn check_reviewers(reviewers: &[Principal]) -> Result<(), Error> {
+fn check_reviewers(ctx: &QueryCtx, reviewers: &[Principal]) -> Result<(), Error> {
     if reviewers.len() > MAX_REVIEWERS {
         return Err(capacity(format!(
             "a change asks at most {MAX_REVIEWERS} reviewers"
@@ -307,7 +307,7 @@ fn check_reviewers(reviewers: &[Principal]) -> Result<(), Error> {
     }
     let mut seen = BTreeSet::new();
     for reviewer in reviewers {
-        require_named(reviewer)?;
+        require_person_or_agent(ctx, reviewer)?;
         if !seen.insert(reviewer) {
             return Err(invalid("each reviewer is asked once"));
         }

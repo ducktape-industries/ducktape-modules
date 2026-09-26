@@ -256,7 +256,7 @@ fn the_roster_is_read_past_its_first_page() {
     cx.run_until_parked();
     view.read(|chat| {
         let names = chat.names.ready().expect("the roster landed");
-        assert_eq!(names.numbers().count(), 600);
+        assert_eq!(names.people().count(), 600);
         assert_eq!(names.name(&Principal::Account(600)), Some("user600"));
         assert!(!names.more(), "the whole roster was read");
     });

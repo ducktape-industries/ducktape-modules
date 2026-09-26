@@ -116,15 +116,21 @@ fn add_agent_key(
     agent: u64,
     key: &[u8],
 ) -> Result<u64, guest::Error> {
+    run(store, &signed(store, manager), agent_key(agent, key, 0))
+}
+
+/// `key`'s consent to joining `agent`, proved over its `generation`,
+/// expiring at 200.
+fn agent_key(agent: u64, key: &[u8], generation: u64) -> Op {
     let admission = Admission {
         network: b"net".to_vec(),
         scheme: Scheme::Ed25519,
         key: key.to_vec(),
-        generation: 0,
+        generation,
         account: agent,
         expires_at: 200,
     };
-    let op = Op::AddKey {
+    Op::AddKey {
         scheme: Scheme::Ed25519,
         label: Some("sandbox".into()),
         consent: Consent {
@@ -133,8 +139,7 @@ fn add_agent_key(
             expires_at: 200,
             proof: admission.preimage(),
         },
-    };
-    run(store, &signed(store, manager), op)
+    }
 }
 
 #[test]
@@ -267,6 +272,8 @@ fn a_person_manages_an_agent_and_its_keys() {
     };
     let by_itself = run(&store, &signed(&store, BOT), remove.clone());
     assert_eq!(by_itself.unwrap_err().code, code::UNAUTHORIZED);
+    let by_stranger = run(&store, &signed(&store, b"bob"), remove.clone());
+    assert_eq!(by_stranger.unwrap_err().code, code::UNAUTHORIZED);
     run(&store, &signed(&store, ALICE), remove).unwrap();
     assert_eq!(signed(&store, BOT).sender, None);
 }
@@ -332,6 +339,14 @@ fn the_system_registers_a_module_which_alone_names_its_account() {
     run(&store, &root(), register()).unwrap();
     run(&store, &root(), register()).unwrap();
     let forge = from_module(&store, "forge");
+    let by_module = run(
+        &store,
+        &forge,
+        Op::RegisterModule {
+            module: "other".into(),
+        },
+    );
+    assert_eq!(by_module.unwrap_err().code, code::UNAUTHORIZED);
     assert_eq!(forge.sender, Some(Principal::Account(2)));
     let account = get(&store, 2);
     assert_eq!(
@@ -467,6 +482,7 @@ fn the_identity_role_is_its_first_variants() {
         category: None,
         manager: None,
         module: None,
+        status: Status::Active,
     }];
     assert_eq!(
         abi::encode(&role::Reply::Profiles {
@@ -519,4 +535,73 @@ fn profiles_page_in_number_order_and_say_what_each_is() {
         [(3, Some("chat"))]
     );
     assert_eq!(next, None);
+}
+
+/// An account's profile is set by the account itself or its manager; a
+/// stranger sets none, nor anyone a module's.
+#[test]
+fn a_profile_is_set_by_its_account_or_its_manager() {
+    let store = memory();
+    create(&store, ALICE, "Alice");
+    create(&store, b"bob", "Bob");
+    let agent = create_agent(&store, ALICE, "Scout");
+    add_agent_key(&store, ALICE, agent, BOT).unwrap();
+    run(
+        &store,
+        &root(),
+        Op::RegisterModule {
+            module: "forge".into(),
+        },
+    )
+    .unwrap();
+    let forge = from_module(&store, "forge");
+    let Some(Principal::Account(forge_account)) = forge.sender else {
+        panic!("forge acts as its account");
+    };
+    let bio = |account: u64, bio: &str| Op::SetProfile {
+        account,
+        avatar: None,
+        bio: Some(bio.into()),
+    };
+    run(&store, &signed(&store, ALICE), bio(1, " mine ")).unwrap();
+    assert_eq!(get(&store, 1).bio.as_deref(), Some("mine"));
+    run(&store, &signed(&store, BOT), bio(agent, "itself")).unwrap();
+    run(&store, &signed(&store, ALICE), bio(agent, "managed")).unwrap();
+    assert_eq!(get(&store, agent).bio.as_deref(), Some("managed"));
+    for (by, account) in [
+        (signed(&store, b"bob"), 1),
+        (signed(&store, b"bob"), agent),
+        (signed(&store, BOT), 1),
+        (forge.clone(), 1),
+        (signed(&store, ALICE), forge_account),
+        (signed(&store, BOT), forge_account),
+    ] {
+        let refused = run(&store, &by, bio(account, "not yours"));
+        assert_eq!(refused.unwrap_err().code, code::UNAUTHORIZED, "{account}");
+    }
+    run(&store, &forge, bio(forge_account, "the forge")).unwrap();
+    assert_eq!(get(&store, forge_account).bio.as_deref(), Some("the forge"));
+}
+
+/// An agent's new key consents over its generation and before it expires:
+/// a consent past its time, or replayed once the key has left, is refused.
+#[test]
+fn an_agents_key_consent_expires_and_is_not_replayed() {
+    let store = memory();
+    create(&store, ALICE, "Alice");
+    let agent = create_agent(&store, ALICE, "Scout");
+    let late = signed_at(&store, ALICE, 300).unwrap();
+    let expired = run(&store, &late, agent_key(agent, BOT, 0));
+    assert_eq!(expired.unwrap_err().code, code::UNAUTHORIZED);
+    add_agent_key(&store, ALICE, agent, BOT).unwrap();
+    let remove = Op::RemoveKey {
+        account: agent,
+        key: BOT.to_vec(),
+    };
+    run(&store, &signed(&store, ALICE), remove).unwrap();
+    let replayed = add_agent_key(&store, ALICE, agent, BOT);
+    assert_eq!(replayed.unwrap_err().code, code::UNAUTHORIZED);
+    let fresh = agent_key(agent, BOT, 1);
+    run(&store, &signed(&store, ALICE), fresh).unwrap();
+    assert!(get(&store, agent).holds(BOT));
 }

@@ -38,16 +38,14 @@ pub fn describe(op: &Op) -> Description {
                 ),
             ],
         ),
-        Op::Grant { repo, principal } => (
-            "Grant writer",
+        Op::Grant {
             repo,
-            vec![field("writer", writer(principal))],
-        ),
-        Op::Revoke { repo, principal } => (
-            "Revoke writer",
+            principal: who,
+        } => ("Grant writer", repo, vec![field("writer", principal(who))]),
+        Op::Revoke {
             repo,
-            vec![field("writer", writer(principal))],
-        ),
+            principal: who,
+        } => ("Revoke writer", repo, vec![field("writer", principal(who))]),
         Op::Push { repo, request } => ("Push", repo, vec![field("request", Value::bytes(request))]),
         Op::Merge {
             repo,
@@ -83,7 +81,7 @@ pub fn describe(op: &Op) -> Description {
                 field("into", text(into)),
                 field(
                     "reviewers",
-                    Value::List(reviewers.iter().map(writer).collect()),
+                    Value::List(reviewers.iter().map(principal).collect()),
                 ),
             ],
         ),
@@ -102,7 +100,7 @@ pub fn describe(op: &Op) -> Description {
                 ),
             ];
             if let Some(reviewers) = reviewers {
-                let reviewers = reviewers.iter().map(writer).collect();
+                let reviewers = reviewers.iter().map(principal).collect();
                 fields.push(field("reviewers", Value::List(reviewers)));
             }
             ("Edit change", repo, fields)
@@ -135,7 +133,7 @@ pub fn describe(op: &Op) -> Description {
 }
 
 /// A principal as a describe field shows it: an account, or the system.
-fn writer(principal: &Principal) -> Value {
+fn principal(principal: &Principal) -> Value {
     match principal {
         Principal::Account(number) => Value::Account(*number),
         Principal::Root => Value::text("system"),

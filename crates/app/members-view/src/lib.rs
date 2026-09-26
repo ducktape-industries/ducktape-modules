@@ -331,31 +331,6 @@ async fn roster(host: Host) -> Result<Vec<Row>, Error> {
         .collect())
 }
 
-/// What an account is: "Person", "Agent · managed by eddy", "Module · chat",
-/// and its status where it does not act.
-fn kind(account: &identity::Account, accounts: &[identity::Account]) -> String {
-    let what = match (&account.module, account.manager) {
-        (Some(module), _) => format!("Module · {module}"),
-        (None, Some(manager)) => {
-            let label = match account.category {
-                Some(identity::Category::Agent) => "Agent",
-                None => "Managed",
-            };
-            let by = accounts
-                .iter()
-                .find(|other| other.number == manager)
-                .map_or_else(|| format!("#{manager}"), |other| other.name.clone());
-            format!("{label} · managed by {by}")
-        }
-        (None, None) => "Person".into(),
-    };
-    match account.status {
-        identity::Status::Active => what,
-        identity::Status::Suspended => format!("{what} · suspended"),
-        identity::Status::Revoked => format!("{what} · revoked"),
-    }
-}
-
 fn row(
     account: &identity::Account,
     accounts: &[identity::Account],
@@ -364,7 +339,7 @@ fn row(
     Row {
         number: account.number,
         name: account.name.clone(),
-        kind: kind(account, accounts),
+        kind: identity::view::kind(account, accounts),
         keys: account.keys.len(),
         standing: members
             .iter()

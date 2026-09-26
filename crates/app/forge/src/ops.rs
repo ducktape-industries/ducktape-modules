@@ -1,9 +1,10 @@
 //! The execute path: who acts, which op, and the repository ops (create,
 //! configure, grant, revoke, push). Change ops live in `changes`.
 
+use abi::role::identity as role;
 use gitcore::server::{Policy, RefUpdate};
 use gitcore::{Error as GitError, Limits, server};
-use guest::{Error, HashKind};
+use guest::{Error, HashKind, code};
 use guest::{ExecCtx, QueryCtx, already_exists, capacity, decoded, invalid, unauthorized};
 
 use crate::contract::{Bounds, MAX_PATH_BYTES, Principal, Repo, Settings, valid_repo_name};
@@ -34,9 +35,10 @@ pub(crate) fn init(ctx: &ExecCtx, params: &[u8]) -> Result<(), Error> {
 
 /// Forge is written by keys (a person's or an agent's account), never by a
 /// module or the system: the frame is signed, and acts as the account its
-/// key holds. A key that holds none, or whose account is not live, never
-/// gets here: [`ExecCtx::sender`](guest::ExecCtx::sender) refuses it.
-pub(crate) fn person(ctx: &ExecCtx) -> Result<Principal, Error> {
+/// key holds. The host rejects a frame whose key's account is not live
+/// before it gets here; [`ExecCtx::sender`](guest::ExecCtx::sender) refuses
+/// a key that holds no account.
+pub(crate) fn signed_account(ctx: &ExecCtx) -> Result<Principal, Error> {
     ctx.env()
         .signer()
         .map_err(|_| unauthorized("a repository op is signed by a key"))?;
@@ -96,7 +98,7 @@ pub(crate) fn grant(
     principal: Principal,
 ) -> Result<(), Error> {
     require_owner(&load_repo(ctx, name)?, actor)?;
-    require_named(&principal)?;
+    require_person_or_agent(ctx, &principal)?;
     WRITERS.insert(ctx, &(name.to_owned(), principal));
     Ok(())
 }
@@ -185,6 +187,37 @@ pub(crate) fn require_writer(
 pub(crate) fn require_named(principal: &Principal) -> Result<(), Error> {
     if principal.account().is_none() {
         return Err(invalid("only an account is named here"));
+    }
+    Ok(())
+}
+
+/// Whom a person asks to write or review: an account that is not a
+/// module's, as the identity role's profile of it says. The role pages
+/// profiles by number, so the page of one past `number - 1` is its own.
+pub(crate) fn require_person_or_agent(ctx: &QueryCtx, principal: &Principal) -> Result<(), Error> {
+    let Some(number) = principal.account() else {
+        return Err(invalid("only an account is named here"));
+    };
+    let asked = role::Query::Profiles {
+        after: number.checked_sub(1),
+        limit: 1,
+    };
+    let role::Reply::Profiles { profiles, .. } =
+        ctx.ask::<role::Query, role::Reply>(&ctx.env().roles.identity, &asked)?
+    else {
+        return Err(Error::new(
+            code::UNEXPECTED_REPLY,
+            "identity answered Profiles with something else",
+        ));
+    };
+    let module = profiles
+        .iter()
+        .find(|profile| profile.number == number)
+        .and_then(|profile| profile.module.as_ref());
+    if let Some(module) = module {
+        return Err(invalid(format!(
+            "account {number} is module {module}'s: only people and agents are asked"
+        )));
     }
     Ok(())
 }

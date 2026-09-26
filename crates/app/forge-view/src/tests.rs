@@ -116,6 +116,7 @@ fn accounts() -> chat::PageResponse<chat::Profile> {
         category: None,
         manager: None,
         module: None,
+        status: chat::Status::Active,
     };
     let forge = chat::Profile {
         module: Some(forge::MODULE.into()),
