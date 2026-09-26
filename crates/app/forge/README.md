@@ -14,7 +14,7 @@ only. No legacy wire/layout conversion exists. Found this version with its new
   objects are computed and published by the client; `Merge` checks both endpoint
   OIDs and atomically changes the target ref and optional change record. It does
   not inspect locally held objects or enforce review verdicts.
-- Changes keep their title, body, author key, and lifecycle on the forge record.
+- Changes keep their title, body, author account, and lifecycle on the forge record.
   A repository's number counter allocates the shared future issue/change number space.
 - Every table is declared once in `src/state.rs` as a typed `store::Map`/`Set`/`Item`:
   records (repos, refs, changes, reviews), the indexes over them (activity,
@@ -25,6 +25,8 @@ only. No legacy wire/layout conversion exists. Found this version with its new
   closing, merging, and submitting a review. Chat owns all conversation replies.
   The host commits the record and emitted queue items atomically; delivery is in
   the **next block**, per the present ABI, not synchronous cross-module execution.
+  A change in flight renames `send`/`call`/`ask` to `emit`/`query` and delivers
+  within the same frame; until it lands, next-block delivery is what runs.
 - A review is one immutable operation: verdict, body, pinned head and base, and
   up to `MAX_REVIEW_COMMENTS` line comments. An anchor is `(path, side, line)`;
   `Old` addresses `base_oid`, `New` addresses `commit_oid`. Both are retained.
@@ -35,6 +37,8 @@ only. No legacy wire/layout conversion exists. Found this version with its new
 - Chat's colon namespace is reserved to its exact module prefix (or Root).
   External keys/accounts cannot create these channels or reserve system-message
   IDs. Hide colon channels in the view's rail/search; they are not private rooms.
+- Forge's messages to chat act as forge's own account (the identity role's
+  `OfModule`), which the kernel registered as it admitted forge.
 
 ## Common types and pagination
 
@@ -66,7 +70,7 @@ and decode a `forge::Reply` from the concatenated `Respond` bytes.
 | Query example | Reply data besides `height` |
 | --- | --- |
 | `Repos { cursor: None, limit: 20 }` | `page<RepoInfo>`: name, hash, owner, settings, ref count, last activity |
-| `Repo { repo: r, cursor: None, limit: 20 }` | repo record, founded bounds, `writers: PageResponse<Vec<u8>>` (owner is separate) |
+| `Repo { repo: r, cursor: None, limit: 20 }` | repo record, founded bounds, `writers: PageResponse<Principal>` (owner is separate) |
 | `Refs { repo: r, cursor: None, limit: 20 }` | `page<RefInfo>`: full ref name and target OID |
 | `Log { repo: r, from: feature, cursor: None, limit: 20 }` | resolved tip, `page<CommitInfo>`: OID, tree, all parents, full message, author and committer with time/timezone |
 | `Tree { repo: r, at: b, path: b"src".to_vec(), cursor: None, limit: 20 }` | resolved tree OID and `page<TreeInfo>`: name, OID, kind/mode; `at` accepts commit or tree |
@@ -76,7 +80,7 @@ and decode a `forge::Reply` from the concatenated `Respond` bytes.
 | `Activity { repo: r }` | `last_height`: last successful forge operation in the repo |
 | `Changes { repo: r, filter: ChangeFilter { state: Some(ChangeState::Open), ..Default::default() }, cursor: None, limit: 20 }` | `page<ChangeSummary>` with author, endpoints, counts and historical verdict totals |
 | `Change { repo: r, n: 1, cursor: None, limit: 20 }` | full change record/body/channel, optional current source/target heads, `reviews: PageResponse<Review>` |
-| `Judgment { key: reviewer_key, cursor: None, limit: 20 }` | `page<Judgment>`: open changes requesting this key at the current head or containing an answered thread it authored |
+| `Judgment { principal: reviewer, cursor: None, limit: 20 }` | `page<Judgment>`: open changes requesting this account at the current head or containing an answered thread it authored |
 | `Advertise { repo: r, service: Service::UploadPack }` | raw Git protocol v2 advertisement |
 | `Upload { repo: r, request: git_v2_request_bytes }` | streamed raw Git protocol response/pack |
 
@@ -88,17 +92,17 @@ An unborn ref returns `not_found`; an empty directory/list is a successful empty
 page. Missing current change refs are `None` on the detail, so a deleted branch
 does not make the conversation or review history unreadable.
 
-`ChangeFilter` combines optional state, author key, and involvement key with AND.
+`ChangeFilter` combines optional state, author and involved account with AND.
 Involvement means author, requested reviewer, or submitted reviewer. A reviewer
 taken off the request stays involved only if they submitted a review. Chat-only participation is represented by chat itself.
 Judgment additionally joins ordinary chat-authored threads and **all** reviews
-by the key, not just its latest review. The newest answered root is returned as
+by the account, not just its latest review. The newest answered root is returned as
 `ReplyAttention { review: Option<u64>, root_seq, last_reply_seq }`; `None` identifies
-a conversation root. Requested judgment clears when that key submits any verdict
+a conversation root. Requested judgment clears when that account submits any verdict
 at the current source head, and returns when the head moves. Read/unread markers
 and dismissals are local view state, not notification records or new operations.
-Chat resolves a requested key to its current identity account as well as its raw
-key handle. Forge author/filter keys remain exact signing keys.
+Authors, reviewers, writers and filters are accounts (`Principal`), never keys:
+an account acts through any of its keys.
 
 ## Blobs, diffs, and mergeability
 
@@ -131,8 +135,8 @@ requested changes never block that CAS.
 
 ## Operations and examples
 
-Authors are always derived from the signed external origin, never the payload.
-Any authenticated member key may open/review. Only the author edits title/body/
+Authors are always the account the signed frame acts as (`ctx.sender()`), never
+the payload; forge takes signed frames alone. Any account may open/review. Only the author edits title/body/
 review requests; author or repository writer closes; repository writers merge.
 Reviews remain appendable on closed/merged changes, as in the previous tracker.
 Closing is terminal in this v1; there is no reopen operation.
@@ -141,10 +145,10 @@ Closing is terminal in this v1; there is no reopen operation.
 | --- | --- |
 | `Create { repo: r, hash: HashKind::Sha1 }` | actor owns a new repo; empty output |
 | `Configure { repo: r, settings: Settings::default() }` | owner configures default ref and force/delete policy; empty output |
-| `Grant { repo: r, key: writer_key }` | owner grants writes; empty output |
-| `Revoke { repo: r, key: writer_key }` | owner revokes writes; empty output |
+| `Grant { repo: r, principal: writer }` | owner grants writes to an account; empty output |
+| `Revoke { repo: r, principal: writer }` | owner revokes writes; empty output |
 | `Push { repo: r, request: receive_pack_bytes }` | existing Git receive-pack operation/report |
-| `ChangeOpen { repo: r, from: feature, into: b"refs/heads/main".to_vec(), title: "Fix parser".into(), body: "Why this changes".into(), reviewers: vec![reviewer_key] }` | assigns `n`, stores body, queues channel/opened line; `OpReply::Change { height, n }` |
+| `ChangeOpen { repo: r, from: feature, into: b"refs/heads/main".to_vec(), title: "Fix parser".into(), body: "Why this changes".into(), reviewers: vec![reviewer] }` | assigns `n`, stores body, queues channel/opened line; `OpReply::Change { height, n }` |
 | `ChangeEdit { repo: r, n: 1, title: None, body: Some("Updated rationale".into()), reviewers: None }` | `None` leaves a field unchanged; `Some(vec![])` clears requests; `OpReply::Change` |
 | `ChangeClose { repo: r, n: 1 }` | open to closed, queues system line; `OpReply::Change` |
 | `ReviewSubmit { repo: r, n: 1, review: ReviewDraft { commit_oid: b, base_oid: Some(a), verdict: Verdict::RequestChanges, body: "Please check this".into(), comments: vec![LineComment { path: b"src/lib.rs".to_vec(), side: Side::New, line: 12, body: "Check this bound".into() }] } }` | one immutable review and all comments, one chat root; `OpReply::Review { height, n, id }` |
@@ -175,7 +179,7 @@ have derived read budgets (`2 * log_walk + 1` and `8 * log_walk + tree_walk`).
 `diff_bytes` bounds aggregate object bytes read, including metadata; existing
 `merge_cost` bounds Myers edit distance per file. `record_bytes` bounds each
 encoded change/review; `MAX_REVIEW_COMMENTS`, `MAX_REVIEWERS`, `MAX_TITLE_BYTES`,
-`MAX_PATH_BYTES`, `MAX_KEY_BYTES` (a granted or requested key) and `MAX_REPO_NAME`
+`MAX_PATH_BYTES` and `MAX_REPO_NAME`
 are exported contract constants; a configured head is at most `MAX_PATH_BYTES`. Repo names
 are at most 37 bytes so even `forge:<repo>:<u64::MAX>` fits chat's channel ID.
 
@@ -220,7 +224,7 @@ version proves atomic record+queue and next-block delivery, including restart.
 - Keep pending drafts, viewed-file checks, unread heights/reply sequences and
   last-reviewed filtering in view state. Do not silently retarget draft anchors.
 - Deploy the matching chat adapter: it exposes `MessageById` and `ThreadAttention`
-  and resolves key/account attention. Screenshots and live app walks are outside
+  and answers attention by account. Screenshots and live app walks are outside
   this module task.
 
 See [the fixture manifest](fixtures/FIXTURES.md) for the module's real

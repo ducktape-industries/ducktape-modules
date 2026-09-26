@@ -64,8 +64,8 @@ pub enum Op {
         repo: String,
         settings: Settings,
     },
-    /// Lets a person push, merge and close: an account (all its keys), or
-    /// a key that holds no account.
+    /// Lets a person push, merge and close: an account, through any of its
+    /// keys.
     Grant {
         repo: String,
         principal: Principal,

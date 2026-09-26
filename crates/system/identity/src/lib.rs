@@ -5,6 +5,11 @@
 //! always built; a view links them with `module` off. The `module` feature
 //! adds its wasm exports. The `view` feature adds the ask a view makes of
 //! identity directly (`view.rs`).
+//!
+//! It fills the kernel's identity role (`abi::role::identity`): the role's
+//! op, queries and replies are the first variants of [`Op`], [`Query`] and
+//! [`Reply`]. Who may do what, op by op: `docs/roles.md` at the repository
+//! root.
 mod program;
 mod rules;
 #[cfg(test)]

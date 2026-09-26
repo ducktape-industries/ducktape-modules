@@ -4,7 +4,7 @@ The ducktape contract line and the modules written against it, one
 repository. Only what compiles to wasm lives here:
 
 ```
-crates/sdk/     abi guest store describe ducklink view-wire view-guest view-guest-derive design
+crates/sdk/     abi error guest store describe ducklink view-wire view-guest view-guest-derive design
 crates/system/  module-registry valset identity
 crates/app/     chat chat-view forge forge-view members-view node-view explorer-view settings-view
 crates/lib/     gitcore
@@ -12,15 +12,15 @@ crates/lib/     gitcore
 
 | Path | What |
 |---|---|
-| `crates/sdk/abi` | the borsh bytes ABI a module and the host share: `GuestCall`, `HostOp`/`HostReply`, `Env`, `Refusal`, the `role::registry` and `role::validators` interfaces the kernel calls, under the kernel's names. A copy of ducktape's `crates/kernel/abi` |
+| `crates/sdk/abi` | the borsh bytes ABI a module and the host share: `GuestCall`, `HostOp`/`HostReply`, `Env`, `Refusal`, `Principal`, `Roles`, and the `role::registry`, `role::validators` and `role::identity` interfaces the kernel calls, under the kernel's names. A copy of ducktape's `crates/kernel/abi`, plus what only a view needs (`unhex`, `preview`, and `Kind::badge`/`note`, an account's badge) |
 | `crates/sdk/error` | `Error { code, message }` and its `code` tokens, the one error type a module, the host and a view share (borsh; serde behind a feature). Depends on no ducktape crate; `guest` re-exports it and `view-wire` carries it |
-| `crates/sdk/guest` | the minimal module SDK, enough alone: the `Module` trait, the `ExecCtx` and `QueryCtx` contexts its entry points receive (env, raw state, blobs, `send`/`call`, events, `set_return_data`, sibling queries, `verify`), `ExecCtx::sender` (the `Principal` the host resolved: an account, a module's too, or `Root`), `Env.roles` (the module genesis bound to each role), the `Env` origin checks (`signer`, `sending_module`, `sent_by`), `export!`, `Error` and its constructors and `decoded`, and `MockHost`, the native host the same contexts run over in a test. `src/kernel.rs` is the one place the kernel's names (`Refusal`, `ProgramId`, `ItemRef`, `Scan`, …) become the SDK's (`Error`, `ModuleId`, `MessageId`, `Range`, …), byte for byte; `kernel::error_from`/`refusal_from` convert an error. `examples/counter.rs` is a module written with it alone |
+| `crates/sdk/guest` | the minimal module SDK, enough alone: the `Module` trait, the `ExecCtx` and `QueryCtx` contexts its entry points receive (env, raw state, blobs, `send`/`call`, events, `set_return_data`, sibling queries, `verify`), `ExecCtx::sender` (the `Principal` the host resolved: an account, a module's too, or `Root`), `Env.roles` (the module genesis bound to each role), the `Env` origin checks (`signer`, `sending_module`, `sent_by`) and `authority` (a stub that admits anyone), `export!`, `Error` and its constructors and `decoded`, and `MockHost`, the native host the same contexts run over in a test. `src/kernel.rs` is the one place the kernel's names (`Refusal`, `ProgramId`, `ItemRef`, `Scan`, …) become the SDK's (`Error`, `ModuleId`, `MessageId`, `Range`, …), byte for byte; `kernel::error_from`/`refusal_from` convert an error. `examples/counter.rs` is a module written with it alone |
 | `crates/sdk/store` | optional typed storage over `guest`'s contexts: the `Map`/`Set`/`Item` descriptors with `KeyCodec`, and `PageRequest`/`PageResponse`. A read takes `&QueryCtx` (an `&ExecCtx` serves it), a write `&ExecCtx`. A view links it and calls none of it |
 | `crates/sdk/describe` | what an op means to a person: the pure wasm module a program ships in its `ducktape.describe` section, and the sandbox that runs it |
 | `crates/sdk/ducklink` | the `duck://` link: `duck://<chain>/<program>/<tail…>`, one spelling per name, no program names known here |
 | `crates/sdk/view-wire`, `view-guest`, `view-guest-derive`, `design` | the host<->view wire, the runtime a wasm view is written against, the palette |
 | `crates/system/module-registry` | the boot set's root: the registry module (its `Op`, `Query`, `Reply`). Its `tests/system.rs` founds ducktape's host over the bytes `make wasm-programs` built and drives every system module |
-| `crates/system/valset`, `identity` | the other two boot modules, the same shape: types always built, the wasm exports behind `module`. identity holds every account that acts: a person's, an agent's (managed by a person) and each module's (registered by the kernel as it admits the module) |
+| `crates/system/valset`, `identity` | the other two boot modules, the same shape: types always built, the wasm exports behind `module`. identity holds every account that acts, `Account { number, card, control }`: a person's, an agent's (managed by a person, who suspends, resumes, revokes and hands it over) and each module's (registered by the kernel as it admits the module) |
 | `crates/app/chat`, `chat-view` | the reference app module: `chat` is one crate whose types, rules and `Chat` module are always built (native, tested over `MockHost`), and whose wasm exports sit behind its `module` feature. `chat-view` links `chat` with the feature off: the types, no host import, no module export |
 | `crates/app/forge`, `forge-view` | the git server as a module, the same shape as `chat`: a push is one op whose input is the receive-pack body a client sent, a merge is an op that lands the commit the client built, fetch and the ref advertisement are queries; a git object's blob id is its oid. it links `gitcore` for the git; merging is the client's. The module runs natively over `MemorySandbox` (forge's and chat's `MockHost`), which is where `fixtures/` comes from; `forge-view` links `forge` with `module` off |
 | `crates/app/members-view`, `node-view`, `explorer-view`, `settings-view` | the system views, which link the system crates with `module` off |
@@ -36,6 +36,15 @@ What is not wasm lives elsewhere: the forge smoke (real git against
 `forge.wasm` on ducktape's runtime) and `view-pack` (a view into its module)
 are in the qa repo, which packs and founds what this repo builds.
 
+The kernel calls the boot modules by role, never by id: genesis binds
+`registry`, `validators` and `identity` to founding modules (the founding's
+`[roles]`), and every `Env` carries the bindings (`env.roles`). The host asks
+the identity role once per frame which account the frame acts as, and hands
+it to the module as `ctx.sender()`. A role is an interface in `abi`, so
+another module that speaks it can fill the role at genesis.
+[`docs/roles.md`](docs/roles.md) has the three roles, the account model,
+the update path, and how to write a module for a role.
+
 `valset` and `module-registry` take their writes from anyone for now
 (`guest::Env::authority` is a stub until the chain has an authority). An
 update replaces a module's code under the same id. The system modules beyond the boot set are archived at
@@ -44,23 +53,25 @@ update replaces a module's code under the same id. The system modules beyond the
 ## A module
 
 ```rust
-use guest::{Error, ExecCtx, Module, QueryCtx};
+use guest::{Error, ExecCtx, Module, Principal, QueryCtx};
 
+/// A count per account.
 pub struct Counter;
 
 impl Module for Counter {
     type Op = u64;
-    type Query = ();
+    type Query = Principal;
     type Response = u64;
 
     fn execute(ctx: &ExecCtx, by: u64) -> Result<(), Error> {
-        let n: u64 = ctx.record("n")?.unwrap_or(0);
-        ctx.put("n", &(n + by));
+        let who = guest::abi::encode(&ctx.sender()?);
+        let n: u64 = ctx.record(&who)?.unwrap_or(0);
+        ctx.put(who, &(n + by));
         Ok(())
     }
 
-    fn query(ctx: &QueryCtx, (): ()) -> Result<u64, Error> {
-        Ok(ctx.record("n")?.unwrap_or(0))
+    fn query(ctx: &QueryCtx, who: Principal) -> Result<u64, Error> {
+        Ok(ctx.record(guest::abi::encode(&who))?.unwrap_or(0))
     }
 }
 
@@ -69,7 +80,9 @@ guest::export!(Counter);
 
 An entry point receives its context (`ExecCtx` reads, writes, sends and
 sets return data; `QueryCtx` reads) and nothing else: `ctx.env()` is the call's
-`Env`, and nothing reaches the host by any other path. `export!` only emits
+`Env`, and nothing reaches the host by any other path. `ctx.sender()` is who
+the write acts as, the account the host resolved (`Principal::Account`) or
+the chain (`Principal::Root`); it refuses a frame whose key holds no account. `export!` only emits
 the `alloc`/`call` exports, which decode the invocation and encode the
 answer through `guest::execute`/`guest::query`. The same contexts run over a
 `MockHost` natively, so a module's test runs its real code

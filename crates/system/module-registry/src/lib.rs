@@ -1,5 +1,9 @@
 //! The `module-registry` module: the roster of modules a network runs, and
 //! the scheduled changes to it (from anyone, for now: `Env::authority`).
+//! It fills the kernel's registry role: each block the kernel asks
+//! `Query::At(height)` and runs what it answers. An update is a
+//! `Change::Set` of published code under a running id: the kernel swaps the
+//! code and keeps the module's state and account; `init` does not run again.
 //!
 //! The types, rules and [`Modules`] module are always built; a view links
 //! them with `module` off. The `module` feature adds its wasm exports.
