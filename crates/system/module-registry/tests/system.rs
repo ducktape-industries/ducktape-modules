@@ -112,6 +112,11 @@ struct Net {
 
 impl Net {
     async fn found(context: Ctx, dir: &std::path::Path) -> Net {
+        Net::found_with(context, dir, Vec::new()).await
+    }
+
+    /// The system set and the probe, then `apps`.
+    async fn found_with(context: Ctx, dir: &std::path::Path, apps: Vec<Founding>) -> Net {
         let genesis = Genesis {
             network: NETWORK.to_vec(),
             roles: Roles {
@@ -125,7 +130,10 @@ impl Net {
                 founding(valset::MODULE, &program("valset")),
                 founding(identity::MODULE, &program("identity")),
                 probe("probe"),
-            ],
+            ]
+            .into_iter()
+            .chain(apps)
+            .collect(),
             views: vec![FoundingView {
                 name: "lens".into(),
                 view: b"a view".to_vec(),
@@ -228,16 +236,12 @@ impl Net {
         let submission = self.submission(&signer, program, abi::encode(&script));
         let applied = self.block(vec![submission]).await;
         self.consumed(&signer, &applied.submissions[0]);
-        match &applied.submissions[0].outcome {
-            Outcome::Applied { .. } => {}
-            Outcome::Rejected(refusal) => panic!("{program} rejected the script: {refusal}"),
-        }
-        let applied = self.tick().await;
-        applied
-            .deliveries
-            .into_iter()
-            .map(|delivered| delivered.receipt)
+        // the message ran in the probe's frame; its refusal is the frame's
+        applied.submissions[0]
+            .nested
+            .iter()
             .find(|receipt| receipt.program == target)
+            .cloned()
             .unwrap()
     }
 
@@ -313,6 +317,8 @@ fn refusal_of(receipt: &Receipt) -> &str {
     }
 }
 
+#[path = "system/discussion.rs"]
+mod discussion_tests;
 #[path = "system/founding.rs"]
 mod founding_tests;
 #[path = "system/identity.rs"]

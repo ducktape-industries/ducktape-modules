@@ -261,23 +261,10 @@ fn system_lines_carry_an_event_code_and_no_name() {
         n,
     })
     .unwrap();
-    let lines: Vec<chat::Block> = rig
-        .sandbox
-        .forge
-        .borrow()
-        .emissions
-        .iter()
-        .filter_map(|message| match abi::decode(&message.payload).unwrap() {
-            chat::Op::PostMessage { blocks, .. } => Some(blocks),
-            _ => None,
-        })
-        .flatten()
-        .collect();
     let code = |text: &str| chat::Block::Code {
         lang: Some("forge".into()),
         text: text.into(),
     };
-    assert_eq!(lines, [code("closed")]);
     let chat::Reply::Roots(page) = rig
         .sandbox
         .chat_query(chat::Query::Roots {
@@ -289,8 +276,10 @@ fn system_lines_carry_an_event_code_and_no_name() {
     else {
         panic!()
     };
+    // each line landed in its op's own frame; newest first
     let texts: Vec<&str> = page.items.iter().map(|row| row.text.as_str()).collect();
-    assert_eq!(texts, ["review 1", "opened"], "delivered, newest first");
+    assert_eq!(texts, ["closed", "review 1", "opened"]);
+    assert_eq!(page.items[0].blocks, [code("closed")]);
 }
 
 fn opened(rig: &mut Rig, story: &Story) -> u64 {

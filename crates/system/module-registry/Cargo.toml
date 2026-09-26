@@ -28,6 +28,9 @@ store = { workspace = true }
 
 # The founding suite (`tests/system.rs`) drives the built boot set on the host.
 [dev-dependencies]
+chat = { workspace = true }
+forge = { workspace = true }
+gitcore = { workspace = true }
 identity = { workspace = true }
 valset = { workspace = true }
 commonware-cryptography = { workspace = true }

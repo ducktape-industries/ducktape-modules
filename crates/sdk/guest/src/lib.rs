@@ -2,11 +2,15 @@
 //! [`export!`]; its entry points receive an [`ExecCtx`] or a [`QueryCtx`],
 //! whose methods are the whole host surface: `env`, `sender` (the account a
 //! write acts as, which the host resolved through the identity role), raw
-//! state (`get`, `set`, `delete`, `scan`), blobs, `send`/`call`, `event`,
-//! `set_return_data`, `query`/`ask` of another module, `sha256` and `verify`.
-//! On wasm32 they are host calls; natively the same contexts run over a
-//! [`MockHost`]. [`Env`] adds the origin checks (`signer`, `sending_module`,
-//! `sent_by`) and `authority`, a stub that admits anyone for now.
+//! state (`get`, `set`, `delete`, `scan`), blobs, `event`, `set_return_data`,
+//! `sha256` and `verify`, and the two ways to another module: `emit` (a write
+//! it runs in this frame, replying or not) and `query` (a read). On wasm32
+//! they are host calls; natively the same contexts run over a [`MockHost`].
+//! [`Env`] adds the origin checks (`signer`, `sending_module`, `sent_by`) and
+//! `authority`, a stub that admits anyone for now.
+//! A message emitted with [`Reply::Wanted`] comes back to its emitter in
+//! the same frame as [`Module::reply`], with its id and outcome; a module
+//! that never wants a reply leaves `reply` at its default.
 //!
 //! ```ignore
 //! use guest::{Error, ExecCtx, Module, QueryCtx};
@@ -47,13 +51,15 @@ pub use abi;
 pub use abi::{
     Blob, BlobHeader, BlobId, CryptoOp, CryptoReply, Entry, HashKind, Message, Root, Scheme,
 };
-pub use ctx::{ExecCtx, QueryCtx};
+pub use ctx::{ExecCtx, QueryCtx, Reply};
 pub use kernel::{
     AccountNumber, Cause, Env, Error, MessageId, ModuleId, Order, Origin, Outcome, Principal,
     Range, Roles, code,
 };
 #[cfg(not(target_arch = "wasm32"))]
-pub use mock::{MockHost, MockState, Sibling, Verifier, blob_id, identity_role};
+pub use mock::{
+    Execute, MAX_DEPTH, MockChain, MockHost, MockState, Sibling, Verifier, blob_id, identity_role,
+};
 #[cfg(target_arch = "wasm32")]
 pub use module::exports;
 pub use module::{Module, execute, query};
