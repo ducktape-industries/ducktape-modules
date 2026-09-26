@@ -841,7 +841,7 @@ fn refs_carry_their_distance_from_the_default_head_and_open_a_draft() {
 
 #[test]
 fn settings_shows_only_what_the_contract_exposes_and_grants_by_account() {
-    let (mut cx, _) = opened("default");
+    let (mut cx, view) = opened("default");
     cx.simulate_click("forge-tab-settings");
     cx.run_until_parked();
     assert!(cx.has_text("Allow force pushes"));
@@ -861,6 +861,28 @@ fn settings_shows_only_what_the_contract_exposes_and_grants_by_account() {
     cx.run_until_parked();
     assert!(cx.host().requests::<SubmitForge>().iter().any(
         |op| matches!(op, Op::Grant { principal, .. } if *principal == forge::Principal::Account(1))
+    ));
+    // a name searches the roster; picking fills the number Grant sends
+    cx.simulate_input("forge-settings-grant-input", "ra");
+    cx.run_until_parked();
+    assert!(cx.find("forge-grant-pick-2").is_some(), "Rae matches");
+    assert!(cx.find("forge-grant-pick-1").is_none(), "Ada does not");
+    assert!(
+        cx.find(&format!("forge-grant-pick-{FORGE}")).is_none(),
+        "no module"
+    );
+    cx.simulate_click("forge-grant-pick-2");
+    cx.run_until_parked();
+    let filled = view.read(|forge| forge.repo_settings.as_ref().map(|form| form.grant.clone()));
+    assert_eq!(filled.as_deref(), Some("2"));
+    assert!(
+        cx.find("forge-grant-pick-2").is_none(),
+        "a number searches nothing"
+    );
+    cx.simulate_click("forge-settings-grant");
+    cx.run_until_parked();
+    assert!(cx.host().requests::<SubmitForge>().iter().any(
+        |op| matches!(op, Op::Grant { principal, .. } if *principal == forge::Principal::Account(2))
     ));
     cx.simulate_click("forge-settings-revoke-acct-9");
     cx.run_until_parked();

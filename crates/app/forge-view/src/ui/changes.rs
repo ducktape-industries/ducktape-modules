@@ -342,48 +342,83 @@ fn form_fields(form: &ChangeForm, cx: &mut Context<Forge>, theme: &Theme) -> Div
         )
 }
 
-/// The identity picker: the people and agents chat's mentions offer.
+/// The Change's reviewers, picked from the roster.
 fn reviewers(
     form: &ChangeForm,
     forge: &Forge,
     cx: &mut Context<Forge>,
     theme: &Theme,
 ) -> AnyElement {
-    let Some(names) = forge.names.ready() else {
+    if forge.names.ready().is_none() {
         return quiet("Reading the roster…", theme);
+    }
+    let toggle = |forge: &mut Forge, key: forge::Principal| {
+        if let Some(form) = &mut forge.form {
+            if let Some(at) = form.reviewers.iter().position(|held| *held == key) {
+                form.reviewers.remove(at);
+            } else if form.reviewers.len() < forge::MAX_REVIEWERS {
+                form.reviewers.push(key);
+            }
+        }
     };
-    let mut bar = div()
+    div()
         .id(id("forge-change-reviewers"))
         .flex()
         .flex_wrap()
         .items_center()
         .gap_1()
-        .child(quiet("Reviewers", theme));
-    for number in names.people().take(24) {
-        let key = forge::Principal::Account(number);
-        let picked = form.reviewers.contains(&key);
-        let toggle = cx.listener({
-            let key = key.clone();
-            move |forge, _: &ClickEvent, _, cx| {
-                if let Some(form) = &mut forge.form {
-                    if let Some(at) = form.reviewers.iter().position(|held| *held == key) {
-                        form.reviewers.remove(at);
-                    } else if form.reviewers.len() < forge::MAX_REVIEWERS {
-                        form.reviewers.push(key.clone());
-                    }
+        .child(quiet("Reviewers", theme))
+        .children(people_picker(
+            forge,
+            "forge-reviewer",
+            "",
+            |key| form.reviewers.contains(key),
+            toggle,
+            cx,
+            theme,
+        ))
+        .into_any_element()
+}
+
+/// The identity picker: the people and agents chat's mentions offer — no
+/// module's account, none suspended ([`chat::view::Names::people`]) — whose
+/// name holds `needle`, each a button `{key}-{number}` that `pick`s it.
+/// Nothing while the roster is still being read.
+pub(crate) fn people_picker(
+    forge: &Forge,
+    key: &str,
+    needle: &str,
+    picked: impl Fn(&forge::Principal) -> bool,
+    pick: impl Fn(&mut Forge, forge::Principal) + Clone + 'static,
+    cx: &mut Context<Forge>,
+    theme: &Theme,
+) -> Vec<AnyElement> {
+    let Some(names) = forge.names.ready() else {
+        return Vec::new();
+    };
+    let needle = needle.trim().to_lowercase();
+    names
+        .people()
+        .map(forge::Principal::Account)
+        .filter(|person| {
+            let name = names.name(person).unwrap_or_default().to_lowercase();
+            needle.is_empty() || name.contains(&needle)
+        })
+        .take(24)
+        .map(|person| {
+            let number = person.account().unwrap_or_default();
+            let chosen = picked(&person);
+            let label = names.member(&person);
+            let click = cx.listener({
+                let pick = pick.clone();
+                move |forge, _: &ClickEvent, _, cx| {
+                    pick(forge, person.clone());
+                    cx.notify();
                 }
-                cx.notify();
-            }
-        });
-        bar = bar.child(
-            button(
-                id(format!("forge-reviewer-{number}")),
-                names.member(&key),
-                theme,
-                toggle,
-            )
-            .selected(picked),
-        );
-    }
-    bar.into_any_element()
+            });
+            button(id(format!("{key}-{number}")), label, theme, click)
+                .selected(chosen)
+                .into_any_element()
+        })
+        .collect()
 }

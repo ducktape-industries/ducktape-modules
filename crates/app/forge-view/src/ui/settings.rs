@@ -6,6 +6,7 @@ use ducktape_view_guest::{Div, Stateful};
 
 use crate::Forge;
 use crate::state::SettingsForm;
+use crate::ui::changes::people_picker;
 use crate::ui::components::{button, empty_state, heading, id, quiet, ref_label, row};
 use crate::ui::{pending, scroller, staged};
 use forge::Reply;
@@ -131,7 +132,8 @@ fn flags(
         )
 }
 
-/// Who to grant write access to, and Grant.
+/// Who to grant write access to, and Grant: an account number typed, or a
+/// name searched and picked from the roster, which fills in its number.
 fn grant_field(
     forge: &Forge,
     form: &SettingsForm,
@@ -145,8 +147,29 @@ fn grant_field(
         cx.notify();
     });
     let grant = cx.listener(|forge, _: &ClickEvent, _, cx| forge.grant(cx));
-    div()
-        .id(id("forge-settings-access"))
+    // a typed number needs no search; a name does
+    let needle = form.grant.trim();
+    let searching = !needle.is_empty() && forge::Principal::parse(needle).is_none();
+    let matches = match searching {
+        true => {
+            let fill = |forge: &mut Forge, person: forge::Principal| {
+                if let (Some(form), Some(number)) = (&mut forge.repo_settings, person.account()) {
+                    form.grant = number.to_string();
+                }
+            };
+            people_picker(
+                forge,
+                "forge-grant-pick",
+                needle,
+                |_| false,
+                fill,
+                cx,
+                theme,
+            )
+        }
+        false => Vec::new(),
+    };
+    let field = div()
         .flex()
         .gap_2()
         .items_center()
@@ -160,11 +183,22 @@ fn grant_field(
                 .bg(theme.surface)
                 .text_color(theme.foreground)
                 .value(form.grant.clone())
-                .placeholder("account number")
+                .placeholder("name or account number")
                 .label("Grant write access")
                 .on_input(typed),
         )
-        .child(button(id("forge-settings-grant"), "Grant", theme, grant).enabled(forge.may_write()))
+        .child(
+            button(id("forge-settings-grant"), "Grant", theme, grant).enabled(forge.may_write()),
+        );
+    div()
+        .id(id("forge-settings-access"))
+        .flex()
+        .flex_col()
+        .gap_1()
+        .child(field)
+        .when(!matches.is_empty(), |access| {
+            access.child(div().flex().flex_wrap().gap_1().children(matches))
+        })
 }
 
 /// One row per writer with its Revoke, or the owner-only empty state.
