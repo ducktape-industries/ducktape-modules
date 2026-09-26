@@ -12,15 +12,15 @@ crates/lib/     gitcore
 
 | Path | What |
 |---|---|
-| `crates/sdk/abi` | the borsh bytes ABI a module and the host share: `GuestCall`, `HostOp`/`HostReply`, `Env`, `Refusal`, the `module_registry` and `valset` contracts, under the kernel's names. A copy of ducktape's `crates/kernel/abi` |
+| `crates/sdk/abi` | the borsh bytes ABI a module and the host share: `GuestCall`, `HostOp`/`HostReply`, `Env`, `Refusal`, the `role::registry` and `role::validators` interfaces the kernel calls, under the kernel's names. A copy of ducktape's `crates/kernel/abi` |
 | `crates/sdk/error` | `Error { code, message }` and its `code` tokens, the one error type a module, the host and a view share (borsh; serde behind a feature). Depends on no ducktape crate; `guest` re-exports it and `view-wire` carries it |
-| `crates/sdk/guest` | the minimal module SDK, enough alone: the `Module` trait, the `ExecCtx` and `QueryCtx` contexts its entry points receive (env, raw state, blobs, `send`/`call`, events, `set_return_data`, sibling queries, `verify`), `export!`, `Error` and its constructors and `decoded`, and `MockHost`, the native host the same contexts run over in a test. `src/kernel.rs` is the one place the kernel's names (`Refusal`, `ProgramId`, `ItemRef`, `Scan`, …) become the SDK's (`Error`, `ModuleId`, `MessageId`, `Range`, …), byte for byte; `kernel::error_from`/`refusal_from` convert an error. `examples/counter.rs` is a module written with it alone |
+| `crates/sdk/guest` | the minimal module SDK, enough alone: the `Module` trait, the `ExecCtx` and `QueryCtx` contexts its entry points receive (env, raw state, blobs, `send`/`call`, events, `set_return_data`, sibling queries, `verify`), `ExecCtx::sender` (the `Principal` the host resolved: an account, a module's too, or `Root`), `Env.roles` (the module genesis bound to each role), the `Env` origin checks (`signer`, `sending_module`, `sent_by`), `export!`, `Error` and its constructors and `decoded`, and `MockHost`, the native host the same contexts run over in a test. `src/kernel.rs` is the one place the kernel's names (`Refusal`, `ProgramId`, `ItemRef`, `Scan`, …) become the SDK's (`Error`, `ModuleId`, `MessageId`, `Range`, …), byte for byte; `kernel::error_from`/`refusal_from` convert an error. `examples/counter.rs` is a module written with it alone |
 | `crates/sdk/store` | optional typed storage over `guest`'s contexts: the `Map`/`Set`/`Item` descriptors with `KeyCodec`, and `PageRequest`/`PageResponse`. A read takes `&QueryCtx` (an `&ExecCtx` serves it), a write `&ExecCtx`. A view links it and calls none of it |
 | `crates/sdk/describe` | what an op means to a person: the pure wasm module a program ships in its `ducktape.describe` section, and the sandbox that runs it |
 | `crates/sdk/ducklink` | the `duck://` link: `duck://<chain>/<program>/<tail…>`, one spelling per name, no program names known here |
 | `crates/sdk/view-wire`, `view-guest`, `view-guest-derive`, `design` | the host<->view wire, the runtime a wasm view is written against, the palette |
-| `crates/system/module-registry` | the boot set's root: the registry module (its `Op`, `Query`, `Reply`), `AUTHORITY` and the origin/key/error `helpers` every system module links. Its `tests/system.rs` founds ducktape's host over the bytes `make wasm-programs` built and drives every system module |
-| `crates/system/valset`, `identity` | the other two boot modules, the same shape: types always built, the wasm exports behind `module`, the asks another module makes of them (`identity::account_of`, `valset::role`) behind `guest` |
+| `crates/system/module-registry` | the boot set's root: the registry module (its `Op`, `Query`, `Reply`) and its `AUTHORITY`. Its `tests/system.rs` founds ducktape's host over the bytes `make wasm-programs` built and drives every system module |
+| `crates/system/valset`, `identity` | the other two boot modules, the same shape: types always built, the wasm exports behind `module`. identity holds every account that acts: a person's, an agent's (managed by a person) and each module's (registered by the kernel as it admits the module) |
 | `crates/app/chat`, `chat-view` | the reference app module: `chat` is one crate whose types, rules and `Chat` module are always built (native, tested over `MockHost`), and whose wasm exports sit behind its `module` feature. `chat-view` links `chat` with the feature off: the types, no host import, no module export |
 | `crates/app/forge`, `forge-view` | the git server as a module, the same shape as `chat`: a push is one op whose input is the receive-pack body a client sent, a merge is an op that lands the commit the client built, fetch and the ref advertisement are queries; a git object's blob id is its oid. it links `gitcore` for the git; merging is the client's. The module runs natively over `MemorySandbox` (forge's and chat's `MockHost`), which is where `fixtures/` comes from; `forge-view` links `forge` with `module` off |
 | `crates/app/members-view`, `node-view`, `explorer-view`, `settings-view` | the system views, which link the system crates with `module` off |
@@ -37,7 +37,7 @@ What is not wasm lives elsewhere: the forge smoke (real git against
 are in the qa repo, which packs and founds what this repo builds.
 
 `valset` and `module-registry` take their writes from the module named
-`module_registry::AUTHORITY` (`governance`); no module in this tree
+`governance` (each crate's `AUTHORITY`); no module in this tree
 implements it. The system modules beyond the boot set are archived at
 `ducktape-industries/ducktape-system-modules-archive`.
 

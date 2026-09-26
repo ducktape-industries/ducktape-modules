@@ -20,7 +20,6 @@ chat = { workspace = true, features = ["view"] }
 ducklink.workspace = true
 forge = { workspace = true, features = ["view"] }
 futures.workspace = true
-identity = { workspace = true, features = ["view"] }
 pulldown-cmark.workspace = true
 serde.workspace = true
 serde_json.workspace = true

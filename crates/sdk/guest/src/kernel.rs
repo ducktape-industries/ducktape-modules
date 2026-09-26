@@ -9,7 +9,9 @@
 //! |-------------------------------------------|------------------------------------------|
 //! | `Refusal { reason, sentence }`, `reason`  | [`Error`] `{ code, message }`, [`code`]  |
 //! | `Origin::{External, Program, System}`     | [`Origin`]`::{Signed, Module, Root}`     |
+//! | `Principal::{Account, System}`            | [`Principal`]`::{Account, Root}`         |
 //! | `Env { network, me, .. }`                 | [`Env`] `{ chain_id, module, .. }`       |
+//! | `Roles`                                   | [`Roles`] (the same type)                |
 //! | `ProgramId`                               | [`ModuleId`]                             |
 //! | `ItemRef { source, item }`                | [`MessageId`] `{ module, seq }`          |
 //! | `Cause::{Direct, Delivery, Completion}`   | [`Cause`]`::{Direct, Message, Reply}`    |
@@ -21,6 +23,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 /// A module's id on the chain (`"chat"`, `"module-registry"`).
 pub type ModuleId = abi::ProgramId;
 
+pub use abi::Roles;
 pub use error::{Error, code};
 
 /// The kernel's refusal as the SDK's [`Error`]: the same two strings.
@@ -58,6 +61,73 @@ impl From<Origin> for abi::Origin {
             Origin::Signed(key) => abi::Origin::External(key),
             Origin::Module(id) => abi::Origin::Program(id),
             Origin::Root => abi::Origin::System,
+        }
+    }
+}
+
+/// An account's number: the identity role's (`abi::role::identity`).
+pub type AccountNumber = abi::role::identity::AccountNumber;
+
+/// Who a write acts as, resolved by the host once per frame through the
+/// identity role: a signed frame is the account its key holds, a message
+/// the account of the module that sent it, genesis `Root`. A key that holds
+/// no account (or an account that is not live) acts as no one
+/// ([`ExecCtx::sender`](crate::ExecCtx::sender) refuses), so no row ever
+/// names a bare key.
+///
+/// There is no default principal: "nobody" is `Option<Principal>::None`,
+/// never the most trusted variant.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, BorshSerialize, BorshDeserialize)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(rename_all = "snake_case", deny_unknown_fields)
+)]
+pub enum Principal {
+    /// a person, an agent or a module: an identity account.
+    Account(AccountNumber),
+    /// genesis and system-internal writes.
+    Root,
+}
+
+impl Principal {
+    /// The account this principal is, if it is one.
+    pub fn account(&self) -> Option<AccountNumber> {
+        match self {
+            Principal::Account(account) => Some(*account),
+            Principal::Root => None,
+        }
+    }
+
+    /// The principal a reader writes as, from the account their seated key
+    /// holds. None while it holds none: every view gates its writes on this,
+    /// the way [`ExecCtx::sender`](crate::ExecCtx::sender) refuses them.
+    pub fn writer(account: Option<AccountNumber>) -> Option<Principal> {
+        account.map(Principal::Account)
+    }
+
+    /// A principal typed by a person: an account number, `acct:<n>` too.
+    pub fn parse(text: &str) -> Option<Principal> {
+        let text = text.trim();
+        let number = text.strip_prefix("acct:").unwrap_or(text);
+        number.parse().ok().map(Principal::Account)
+    }
+}
+
+impl From<abi::Principal> for Principal {
+    fn from(p: abi::Principal) -> Self {
+        match p {
+            abi::Principal::Account(number) => Principal::Account(number),
+            abi::Principal::System => Principal::Root,
+        }
+    }
+}
+
+impl From<Principal> for abi::Principal {
+    fn from(p: Principal) -> Self {
+        match p {
+            Principal::Account(number) => abi::Principal::Account(number),
+            Principal::Root => abi::Principal::System,
         }
     }
 }
@@ -155,6 +225,12 @@ pub struct Env {
     /// This module's own id.
     pub module: ModuleId,
     pub origin: Origin,
+    /// Who the frame acts as: `None` for a query, and for a frame whose
+    /// key or module holds no account.
+    pub sender: Option<Principal>,
+    /// The module genesis bound to each role: ask identity at
+    /// `roles.identity`, never by a name assumed.
+    pub roles: Roles,
     pub cause: Cause,
 }
 
@@ -166,6 +242,8 @@ impl From<abi::Env> for Env {
             time: e.time,
             module: e.me,
             origin: e.origin.into(),
+            sender: e.sender.map(Into::into),
+            roles: e.roles,
             cause: e.cause.into(),
         }
     }
@@ -179,6 +257,8 @@ impl From<Env> for abi::Env {
             time: e.time,
             me: e.module,
             origin: e.origin.into(),
+            sender: e.sender.map(Into::into),
+            roles: e.roles,
             cause: e.cause.into(),
         }
     }
@@ -299,13 +379,17 @@ mod tests {
             Origin::Module("b".into()),
             Origin::Root,
         ];
-        for (cause, origin) in causes.zip(origins.into_iter().cycle()) {
+        let senders = [Some(Principal::Account(4)), Some(Principal::Root), None];
+        let calls = origins.into_iter().cycle().zip(senders.into_iter().cycle());
+        for (cause, (origin, sender)) in causes.zip(calls) {
             let env = Env {
                 chain_id: b"n".to_vec(),
                 height: 7,
                 time: 9,
                 module: "a".into(),
                 origin,
+                sender,
+                roles: crate::MockHost::roles(),
                 cause,
             };
             let kernel: abi::Env = env.clone().into();
@@ -329,6 +413,17 @@ mod tests {
         assert!(!range.admits(b"t/7"));
         assert!(range.admits(b"t/8"));
         assert!(!range.admits(b"u"));
+    }
+
+    #[test]
+    fn a_principal_reads_back_from_input() {
+        assert_eq!(Principal::parse(" 7 "), Some(Principal::Account(7)));
+        assert_eq!(Principal::parse("acct:7"), Some(Principal::Account(7)));
+        for nothing in ["acct:x", "user:ab01", "ab01", "", "someone"] {
+            assert_eq!(Principal::parse(nothing), None, "{nothing}");
+        }
+        assert_eq!(Principal::writer(Some(3)), Some(Principal::Account(3)));
+        assert_eq!(Principal::writer(None), None);
     }
 
     #[test]

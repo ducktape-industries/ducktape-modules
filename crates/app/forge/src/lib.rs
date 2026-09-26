@@ -3,9 +3,9 @@
 //! over `guest::MockHost` (tests, fixtures); the `module` feature adds its
 //! wasm exports.
 //!
-//! A write is an [`Op`] run as a [`Principal`] (an account: the signer resolved
-//! by identity's [`principal_of`](identity::principal_of), which refuses a key that
-//! holds none), a read
+//! A write is an [`Op`] run as a [`Principal`] (an account: the signer the
+//! host resolved, [`ExecCtx::sender`](guest::ExecCtx::sender), which refuses a
+//! key that holds none), a read
 //! a [`Query`] answered by a [`Reply`]. The layout, in reading order:
 //!
 //! - `contract.rs`, `read_contract.rs`, `review_contract.rs`: the wire

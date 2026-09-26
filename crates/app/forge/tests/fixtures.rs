@@ -153,6 +153,7 @@ fn replay(tape: &mut Tape) {
             page: PageRequest::first(2),
         },
     );
+    rig.sandbox.hold(b"ninth", 9);
     rig.execute(&Op::Grant {
         repo: REPO.into(),
         principal: Principal::Account(9),

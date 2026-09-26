@@ -36,6 +36,7 @@ pub mod kernel;
 #[cfg(not(target_arch = "wasm32"))]
 mod mock;
 mod module;
+mod origin;
 pub mod refuse;
 
 pub use abi;
@@ -43,9 +44,12 @@ pub use abi::{
     Blob, BlobHeader, BlobId, CryptoOp, CryptoReply, Entry, HashKind, Message, Root, Scheme,
 };
 pub use ctx::{ExecCtx, QueryCtx};
-pub use kernel::{Cause, Env, Error, MessageId, ModuleId, Order, Origin, Outcome, Range, code};
+pub use kernel::{
+    AccountNumber, Cause, Env, Error, MessageId, ModuleId, Order, Origin, Outcome, Principal,
+    Range, Roles, code,
+};
 #[cfg(not(target_arch = "wasm32"))]
-pub use mock::{MockHost, MockState, Sibling, Verifier, blob_id};
+pub use mock::{MockHost, MockState, Sibling, Verifier, blob_id, identity_role};
 #[cfg(target_arch = "wasm32")]
 pub use module::exports;
 pub use module::{Module, execute, query};

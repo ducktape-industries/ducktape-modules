@@ -265,6 +265,8 @@ mod tests {
             time: 0,
             module: "test".into(),
             origin: Origin::Root,
+            sender: Some(guest::Principal::Root),
+            roles: guest::MockHost::roles(),
             cause: Cause::Direct,
         })
     }

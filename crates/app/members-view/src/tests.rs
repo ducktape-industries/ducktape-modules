@@ -29,35 +29,51 @@ fn the_root_tracks_the_shared_theme() {
     assert_eq!(style.text.color, Some(dark.foreground));
 }
 
-fn person(number: u64, name: &str, key: &[u8]) -> identity::Account {
+fn account(number: u64, name: &str, control: identity::Control) -> identity::Account {
     identity::Account {
         number,
-        name: name.into(),
-        control: identity::Control::Keys(vec![identity::Key {
-            scheme: Scheme::Ed25519,
-            key: key.to_vec(),
-            label: None,
-            added_at: 0,
-        }]),
-        avatar: None,
-        bio: None,
-        updated_at: 0,
+        card: identity::Card {
+            name: name.into(),
+            avatar: None,
+            bio: None,
+            updated_at: 0,
+        },
+        control,
     }
 }
 
-fn program(number: u64, name: &str) -> identity::Account {
-    identity::Account {
+fn person(number: u64, name: &str, key: &[u8]) -> identity::Account {
+    let keys = vec![identity::Key {
+        scheme: Scheme::Ed25519,
+        key: key.to_vec(),
+        label: None,
+        added_at: 0,
+    }];
+    account(number, name, identity::Control::Person { keys })
+}
+
+fn module(number: u64, name: &str) -> identity::Account {
+    account(
         number,
-        name: name.into(),
-        control: identity::Control::Program {
-            executor: "chat".into(),
-            controller: 1,
-            status: identity::Status::Active,
+        name,
+        identity::Control::Module {
+            module: name.into(),
         },
-        avatar: None,
-        bio: None,
-        updated_at: 0,
-    }
+    )
+}
+
+/// A suspended agent `manager` manages, keyless.
+fn agent(number: u64, name: &str, manager: u64) -> identity::Account {
+    account(
+        number,
+        name,
+        identity::Control::Managed {
+            manager,
+            category: identity::Category::Agent,
+            life: identity::Life::Suspended { keys: Vec::new() },
+            transfers: 0,
+        },
+    )
 }
 
 fn membership(key: &[u8], role: valset::Role) -> valset::Membership {
@@ -81,7 +97,8 @@ fn respond(cx: &mut TestAppContext) {
         assert!(matches!(query, identity::Query::List { .. }));
         Ok(identity::Reply::Accounts(page(vec![
             person(7, "eddy", b"\x01\x02"),
-            program(8, "chat"),
+            module(8, "chat"),
+            agent(9, "scout", 7),
         ])))
     });
     cx.host().handle::<Query<Valset>>(|query| {
@@ -111,9 +128,10 @@ fn the_roster_lists_each_account_with_its_standing() {
         "#7",
         "#8",
         "Person",
-        "Program",
+        "Module · chat",
+        "Agent · managed by eddy · suspended",
         "Validator",
-        "2 accounts",
+        "3 accounts",
     ] {
         assert!(cx.has_text(text), "{:?}", cx.texts());
     }

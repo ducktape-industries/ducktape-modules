@@ -7,7 +7,10 @@ fn the_room_shows_its_rows_intro_and_actions() {
     let texts = cx.texts();
     assert!(cx.has_text("hello"), "{texts:?}");
     assert!(cx.has_text("eddy") && cx.has_text("reviewer"));
-    assert!(cx.has_text("Agent"), "a program account wears the badge");
+    assert!(
+        cx.has_text("Agent · managed by eddy"),
+        "an agent wears its badge and its manager: {texts:?}"
+    );
     assert!(
         texts
             .iter()
@@ -316,7 +319,8 @@ fn a_link_to_a_forge_room_lands_in_it() {
                 lang: Some("forge".into()),
                 text: "review 7".into(),
             }],
-            ..chat::MsgRow::by(Principal::Module("forge".into()))
+            // forge's own account (9)
+            ..chat::MsgRow::by(Principal::Account(9))
         };
         let room = chat.room.as_mut().unwrap();
         room.messages = Loadable::Ready(vec![line]);

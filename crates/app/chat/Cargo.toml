@@ -22,8 +22,7 @@ ducktape-view-guest = { workspace = true, optional = true }
 abi = { workspace = true }
 describe = { workspace = true }
 borsh = { workspace = true }
-guest = { workspace = true }
-identity = { workspace = true }
+guest = { workspace = true, features = ["serde"] }
 serde = { workspace = true }
 store = { workspace = true }
 unicode-normalization = { workspace = true }

@@ -14,8 +14,8 @@ use ducktape_view_guest::{Entity, Theme, wire};
 use forge::{ChangeFilter, ChangeState, Op, PageRequest, PageResponse, Query, Reply};
 
 use crate::api::{ChatApi, ForgeProgram};
+use chat::view::Identity;
 use ducktape_view_guest::methods::Changes;
-use identity::view::Identity;
 
 #[path = "../../forge/fixtures/loader.rs"]
 mod loader;
@@ -106,26 +106,33 @@ fn answer(query: &Query, mode: &str) -> Reply {
     }
 }
 
-fn accounts() -> chat::PageResponse<chat::AccountRow> {
-    let row = |number, name: &str, keys: &[&[u8]]| chat::AccountRow {
+/// forge's own account.
+const FORGE: u64 = 900;
+
+fn accounts() -> chat::PageResponse<chat::Profile> {
+    let row = |number, name: &str| chat::Profile {
         number,
         name: name.into(),
-        program: false,
-        keys: keys.iter().map(|key| abi::hex(key)).collect(),
+        kind: chat::Kind::Person,
+    };
+    let forge = chat::Profile {
+        kind: chat::Kind::Module(forge::MODULE.into()),
+        ..row(FORGE, forge::MODULE)
     };
     chat::PageResponse {
         height: 1,
         next: None,
         items: vec![
-            row(1, "Ada", &[b"tester", b"tester-laptop"]),
-            row(2, "Rae", &[b"reviewer", b"reviewer-phone"]),
-            row(4, "Tal", &[b"talker"]),
-            row(9, "Wren", &[b"writer"]),
+            row(1, "Ada"),
+            row(2, "Rae"),
+            row(4, "Tal"),
+            row(9, "Wren"),
+            forge,
         ],
     }
 }
 
-fn message(seq: u64, author: identity::Principal, text: &str) -> chat::MsgRow {
+fn message(seq: u64, author: forge::Principal, text: &str) -> chat::MsgRow {
     chat::MsgRow {
         channel_id: "forge:project:1".into(),
         seq,
@@ -148,11 +155,7 @@ fn forge_lines() -> Vec<chat::MsgRow> {
         });
     let forge_line = |seq: u64, message_id: String| chat::MsgRow {
         message_id,
-        ..message(
-            seq,
-            identity::Principal::Module(forge::MODULE.into()),
-            "raw forge text",
-        )
+        ..message(seq, forge::Principal::Account(FORGE), "raw forge text")
     };
     let mut rows = vec![forge_line(1, "forge:0000000000000001".into())];
     for review in reviews {
@@ -160,7 +163,7 @@ fn forge_lines() -> Vec<chat::MsgRow> {
     }
     rows.push(message(
         rows.len() as u64 + 1,
-        identity::Principal::Account(2),
+        forge::Principal::Account(2),
         "Reading it now",
     ));
     rows.push(forge_line(
@@ -189,11 +192,7 @@ pub(crate) fn configure(cx: &mut TestAppContext, mode: &'static str) {
                         .map(|seq| chat::MsgRow {
                             channel_id: channel_id.clone(),
                             message_id: format!("forge:{seq:016x}"),
-                            ..message(
-                                seq,
-                                identity::Principal::Module(forge::MODULE.into()),
-                                "raw forge text",
-                            )
+                            ..message(seq, forge::Principal::Account(FORGE), "raw forge text")
                         })
                         .collect(),
                     _ => Vec::new(),
@@ -255,7 +254,7 @@ fn session_key_resolves_to_its_account() {
     let (_cx, view) = booted("default");
     view.read(|forge| {
         assert_eq!(forge.my_account(), Some(2));
-        assert_eq!(forge.me_principal(), Some(identity::Principal::Account(2)));
+        assert_eq!(forge.me_principal(), Some(forge::Principal::Account(2)));
     });
 }
 
@@ -285,7 +284,7 @@ fn seated(key: &[u8], account: Option<u64>) -> (TestAppContext, Entity<Forge>) {
 }
 
 /// The principals forge was asked to judge.
-fn judged(cx: &TestAppContext) -> Vec<identity::Principal> {
+fn judged(cx: &TestAppContext) -> Vec<forge::Principal> {
     cx.host()
         .requests::<Ask>()
         .into_iter()
@@ -331,13 +330,13 @@ fn a_second_device_key_reads_as_the_same_person() {
     cx.run_until_parked();
     let authored = cx.host().requests::<Ask>().into_iter().any(|query| {
         matches!(query, Query::Changes { filter, .. }
-            if filter.author == Some(identity::Principal::Account(1)))
+            if filter.author == Some(forge::Principal::Account(1)))
     });
     assert!(authored, "my changes are my account's");
-    view.read(|forge| assert_eq!(forge.me_principal(), Some(identity::Principal::Account(1))));
+    view.read(|forge| assert_eq!(forge.me_principal(), Some(forge::Principal::Account(1))));
     cx.simulate_click("forge-filter-judgment");
     cx.run_until_parked();
-    assert_eq!(judged(&cx), [identity::Principal::Account(1)]);
+    assert_eq!(judged(&cx), [forge::Principal::Account(1)]);
 }
 
 /// The reader creates the account in Settings, then switches to Forge: the
@@ -375,7 +374,7 @@ fn an_account_gained_later_is_who_forge_judges() {
     assert!(cx.find("forge-no-account").is_none());
     cx.simulate_click("forge-filter-judgment");
     cx.run_until_parked();
-    assert_eq!(judged(&cx), [identity::Principal::Account(2)]);
+    assert_eq!(judged(&cx), [forge::Principal::Account(2)]);
 }
 
 #[test]
@@ -859,16 +858,14 @@ fn settings_shows_only_what_the_contract_exposes_and_grants_by_account() {
     cx.simulate_input("forge-settings-grant-input", "acct:1");
     cx.simulate_click("forge-settings-grant");
     cx.run_until_parked();
-    assert!(
-        cx.host().requests::<SubmitForge>().iter().any(
-            |op| matches!(op, Op::Grant { principal, .. } if *principal == identity::Principal::Account(1))
-        )
-    );
+    assert!(cx.host().requests::<SubmitForge>().iter().any(
+        |op| matches!(op, Op::Grant { principal, .. } if *principal == forge::Principal::Account(1))
+    ));
     cx.simulate_click("forge-settings-revoke-acct-9");
     cx.run_until_parked();
     assert!(
         cx.host().requests::<SubmitForge>().iter().any(
-            |op| matches!(op, Op::Revoke { principal, .. } if *principal == identity::Principal::Account(9))
+            |op| matches!(op, Op::Revoke { principal, .. } if *principal == forge::Principal::Account(9))
         )
     );
 }
@@ -932,7 +929,7 @@ fn judgment_is_its_own_query_keyed_by_the_readers_account() {
         cx.host()
             .requests::<Ask>()
             .iter()
-            .any(|query| matches!(query, Query::Judgment { principal, .. } if *principal == identity::Principal::Account(2))),
+            .any(|query| matches!(query, Query::Judgment { principal, .. } if *principal == forge::Principal::Account(2))),
         "the reader is their account, from the session"
     );
     assert!(cx.has_text("review requested"), "{:?}", cx.texts());

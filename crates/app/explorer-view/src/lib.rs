@@ -296,11 +296,26 @@ pub struct Device {
     pub label: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Account {
     pub number: u64,
     pub name: String,
     pub devices: Vec<Device>,
+    /// what the account is, labelled as members labels it
+    /// ([`identity::view::kind`]) when it is drawn
+    #[serde(with = "borsh_bytes")]
+    pub kind: identity::Kind,
+}
+
+/// What `account` is, its manager named from `accounts`: "Person", "Agent ·
+/// managed by Dev · suspended", "Module · forge".
+pub fn kind_of(account: &Account, accounts: &[Account]) -> String {
+    identity::view::kind(&account.kind, |manager| {
+        accounts
+            .iter()
+            .find(|other| other.number == manager)
+            .map(|other| other.name.clone())
+    })
 }
 
 /// One running program: its id and the blob its code lives in.
@@ -311,23 +326,7 @@ pub struct Entry {
     pub params: usize,
 }
 
-/// A borsh value in the view's serde snapshot, as its bytes: the registry's
-/// own types, kept as they came.
-mod borsh_bytes {
-    use borsh::{BorshDeserialize, BorshSerialize};
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    pub fn serialize<T: BorshSerialize, S: Serializer>(value: &T, s: S) -> Result<S::Ok, S::Error> {
-        Serialize::serialize(&abi::encode(value), s)
-    }
-
-    pub fn deserialize<'de, T: BorshDeserialize, D: Deserializer<'de>>(
-        d: D,
-    ) -> Result<T, D::Error> {
-        abi::decode(&<Vec<u8> as Deserialize>::deserialize(d)?)
-            .map_err(|refusal| serde::de::Error::custom(refusal.sentence))
-    }
-}
+use ducktape_view_guest::borsh_bytes;
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Network {
@@ -795,7 +794,7 @@ fn hash_of(query: &str) -> Option<[u8; 32]> {
 }
 
 async fn accounts(host: Host) -> Result<Vec<Account>, Error> {
-    let mut accounts = Vec::new();
+    let mut listed: Vec<identity::Account> = Vec::new();
     let mut after = None;
     loop {
         let page = registry::PageRequest { after, limit: None };
@@ -806,26 +805,29 @@ async fn accounts(host: Host) -> Result<Vec<Account>, Error> {
             identity::Reply::Accounts(reply) => reply,
             other => return Err(malformed(format!("identity answered List with {other:?}"))),
         };
-        accounts.extend(reply.items.into_iter().map(|account| {
-            Account {
-                number: account.number,
-                devices: account
-                    .keys()
-                    .iter()
-                    .map(|key| Device {
-                        key: key.key.clone(),
-                        scheme: decode::scheme(key.scheme),
-                        label: key.label.clone(),
-                    })
-                    .collect(),
-                name: account.name,
-            }
-        }));
+        listed.extend(reply.items);
         match reply.next {
             Some(next) => after = Some(next),
-            None => return Ok(accounts),
+            None => break,
         }
     }
+    Ok(listed
+        .iter()
+        .map(|account| Account {
+            number: account.number,
+            name: account.card.name.clone(),
+            devices: account
+                .keys()
+                .iter()
+                .map(|key| Device {
+                    key: key.key.clone(),
+                    scheme: decode::scheme(key.scheme),
+                    label: key.label.clone(),
+                })
+                .collect(),
+            kind: account.kind(),
+        })
+        .collect())
 }
 
 async fn validators(host: Host) -> Result<Vec<Vec<u8>>, Error> {

@@ -15,23 +15,12 @@ pub use guest::{MockHost, Module};
 
 pub mod sandbox;
 pub mod story;
-pub use sandbox::{MemorySandbox, env_at};
+pub use sandbox::MemorySandbox;
 
 pub const OWNER: &[u8] = b"owner-key";
 pub const WRITER: &[u8] = b"writer-key";
 pub const STRANGER: &[u8] = b"stranger-key";
 pub const TIME: u64 = 1_700_000_000;
-
-pub fn env(actor: &[u8]) -> Env {
-    Env {
-        chain_id: b"net".to_vec(),
-        height: 1,
-        time: TIME,
-        module: "forge".into(),
-        origin: Origin::Signed(actor.to_vec()),
-        cause: Cause::Direct,
-    }
-}
 
 pub fn bounds() -> Bounds {
     Bounds {
@@ -70,27 +59,28 @@ pub fn person(key: &[u8]) -> Principal {
 }
 
 /// `actor`'s op at `height`, run as the wasm module runs it: the signer
-/// resolved through identity, then the typed execute.
-pub fn signed_op(store: &MockHost, actor: &[u8], height: u64, op: &Op) -> Result<(), guest::Error> {
-    let origin = Origin::Signed(actor.to_vec());
-    Forge::execute(&store.exec(env_at(origin, height, TIME)), op.clone())
+/// resolved to its account, then the typed execute.
+pub fn signed_op(
+    sandbox: &MemorySandbox,
+    actor: &[u8],
+    height: u64,
+    op: &Op,
+) -> Result<(), guest::Error> {
+    let env = sandbox.env_at(Origin::Signed(actor.to_vec()), height, TIME);
+    Forge::execute(&sandbox.forge.exec(env), op.clone())
 }
 
 /// `actor`'s op; a refusal left forge's store as it was.
 #[track_caller]
 pub fn act(sandbox: &mut MemorySandbox, actor: &[u8], op: &Op) -> Result<Vec<u8>, guest::Error> {
-    sandbox
-        .forge
-        .attempt(|| signed_op(&sandbox.forge, actor, 1, op))?;
+    sandbox.forge.attempt(|| signed_op(sandbox, actor, 1, op))?;
     Ok(sandbox.forge.take_output())
 }
 
 /// The refusal of `actor`'s op, which left forge's store as it was.
 #[track_caller]
 pub fn refused(sandbox: &mut MemorySandbox, actor: &[u8], op: &Op) -> guest::Error {
-    sandbox
-        .forge
-        .refused(|| signed_op(&sandbox.forge, actor, 1, op))
+    sandbox.forge.refused(|| signed_op(sandbox, actor, 1, op))
 }
 
 pub fn ask(sandbox: &MemorySandbox, query: &Query) -> Result<Vec<u8>, guest::Error> {

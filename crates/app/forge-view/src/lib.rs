@@ -29,7 +29,7 @@ use ducktape_view_guest::methods::{Changes, HostRoute, HostVisible};
 use ducktape_view_guest::{Context, IntoElement, Render, View, Window, export_view};
 
 use api::{ChatApi, ForgeProgram, HostSession};
-use identity::view::Identity;
+use chat::view::Identity;
 pub(crate) use select::Stage;
 pub use state::Forge;
 

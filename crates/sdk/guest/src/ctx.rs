@@ -13,7 +13,7 @@ use abi::{
 };
 use borsh::{BorshDeserialize, BorshSerialize};
 
-use crate::{Env, Error, MessageId, ModuleId, Range};
+use crate::{Env, Error, MessageId, ModuleId, Principal, Range};
 
 /// A query's context: the env and the reads. It has no write methods.
 pub struct QueryCtx {
@@ -248,6 +248,14 @@ impl QueryCtx {
 }
 
 impl ExecCtx {
+    /// Who this write acts as, as the host resolved it. A signed frame whose
+    /// key holds no account is refused: a person writes through an account.
+    pub fn sender(&self) -> Result<Principal, Error> {
+        self.env.sender.clone().ok_or_else(|| {
+            crate::unauthorized("a write acts as an account, and this frame holds none")
+        })
+    }
+
     pub fn set(&self, key: impl Into<Vec<u8>>, value: impl Into<Vec<u8>>) {
         self.done(HostOp::Set {
             key: key.into(),

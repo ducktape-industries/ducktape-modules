@@ -279,7 +279,7 @@ impl Forge {
             .as_ref()
             .map(|form| form.grant.trim().to_owned())
             .unwrap_or_default();
-        let Some(principal) = identity::Principal::parse(&typed) else {
+        let Some(principal) = forge::Principal::parse(&typed) else {
             self.notice = "Grant takes an account number".into();
             cx.notify();
             return;
@@ -295,7 +295,7 @@ impl Forge {
         );
     }
 
-    pub(crate) fn revoke(&mut self, principal: identity::Principal, cx: &mut Context<Self>) {
+    pub(crate) fn revoke(&mut self, principal: forge::Principal, cx: &mut Context<Self>) {
         let repo = self.repo_name();
         self.submit(
             Op::Revoke { repo, principal },

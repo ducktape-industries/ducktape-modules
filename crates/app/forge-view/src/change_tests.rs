@@ -44,7 +44,7 @@ fn the_change_header_carries_its_endpoints_and_a_merge_the_program_allows() {
     };
     assert!(node.interactivity.on_click.is_some());
     assert_ne!(node.interactivity.aria.disabled, Some(true));
-    // The reader is not the author, so editing is closed to her.
+    // The reader is not the author, so editing is closed to them.
     let Some(ducktape_view_guest::wire::Node::Container(edit)) = cx.find("forge-edit-change")
     else {
         panic!("the edit button stays visible")

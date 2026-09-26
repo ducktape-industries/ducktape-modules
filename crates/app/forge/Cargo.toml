@@ -21,11 +21,10 @@ describe = []
 ducktape-view-guest = { workspace = true, optional = true }
 abi = { workspace = true }
 describe = { workspace = true }
-guest = { workspace = true }
+guest = { workspace = true, features = ["serde"] }
 borsh = { workspace = true }
 chat = { workspace = true }
 gitcore = { workspace = true }
-identity = { workspace = true }
 store = { workspace = true }
 
 [dev-dependencies]

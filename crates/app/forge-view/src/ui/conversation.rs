@@ -176,7 +176,7 @@ fn forge_line(
     if reviews.next.is_some() {
         return None;
     }
-    let actor = |principal: &Option<identity::Principal>| {
+    let actor = |principal: &Option<forge::Principal>| {
         principal
             .as_ref()
             .map(|principal| forge.principal_name(principal))
@@ -202,8 +202,10 @@ fn forge_line(
     }
 }
 
-fn is_forge(row: &chat::MsgRow) -> bool {
-    row.author == identity::Principal::Module(forge::MODULE.into())
+/// forge's own line: written by the account identity names forge's.
+fn is_forge(forge: &Forge, row: &chat::MsgRow) -> bool {
+    let names = forge.names.ready();
+    names.and_then(|names| names.module(&row.author)) == Some(forge::MODULE)
 }
 
 /// The hidden chat channel of this change, in chat's row shape.
@@ -211,10 +213,13 @@ fn messages(forge: &Forge, theme: &Theme) -> AnyElement {
     let Some((change, _, _, _)) = forge.change() else {
         return div().into_any_element();
     };
+    // forge's own lines are told by their author, whom the roster names
+    let naming = forge.names.is_idle() || forge.names.is_loading();
     match forge.messages.get(&change.channel) {
         None | Some(Loadable::Idle) | Some(Loadable::Loading(_)) => {
             quiet("Reading the conversation…", theme)
         }
+        Some(Loadable::Ready(_)) if naming => quiet("Reading the conversation…", theme),
         Some(Loadable::Failed(refusal)) => div()
             .id(id("forge-conversation-refused"))
             .p_2()
@@ -230,14 +235,17 @@ fn messages(forge: &Forge, theme: &Theme) -> AnyElement {
         )
         .into_any_element(),
         Some(Loadable::Ready((rows, _))) => {
-            let opened = rows.iter().find(|row| is_forge(row)).map(|row| row.seq);
+            let opened = rows
+                .iter()
+                .find(|row| is_forge(forge, row))
+                .map(|row| row.seq);
             let mut column = div()
                 .id(id("forge-conversation-messages"))
                 .flex()
                 .flex_col()
                 .gap_2();
             for message in rows {
-                if is_forge(message) {
+                if is_forge(forge, message) {
                     if let Some(line) =
                         forge_line(forge, message, opened == Some(message.seq), theme)
                     {

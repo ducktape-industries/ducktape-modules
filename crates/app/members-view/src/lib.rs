@@ -1,6 +1,7 @@
 //! Members: every account the `identity` program holds — its number, its
-//! name, what controls it and how many keys it carries — with the standing
-//! `valset` gives the keys it holds, where it holds one.
+//! name, what it is (a person, an agent and who manages it, a module) and
+//! how many keys it carries — with the standing `valset` gives the keys it
+//! holds, where it holds one.
 //!
 //! The contracts are borsh and this view's state is a serde snapshot, so a
 //! reply is folded to [`Row`]s as it lands: nothing the programs speak is
@@ -39,8 +40,9 @@ pub struct Members {
 struct Row {
     number: u64,
     name: String,
-    /// what holds the account: its own keys, another program, or nothing
-    control: String,
+    /// what the account is; labelled as it is drawn ([`identity::view::kind`])
+    #[serde(with = "ducktape_view_guest::borsh_bytes")]
+    kind: identity::Kind,
     keys: usize,
     /// the valset standing of a key this account holds, where it holds one
     standing: Option<String>,
@@ -188,7 +190,11 @@ impl Members {
                     .flex()
                     .flex_col()
                     .gap_2()
-                    .children(shown.into_iter().map(|row| MemberRow::new(row, theme)))
+                    .children(
+                        shown
+                            .into_iter()
+                            .map(|row| MemberRow::new(row, rows, theme)),
+                    )
                     .into_any_element()
             }
         }
@@ -205,13 +211,21 @@ impl Members {
 #[derive(IntoElement)]
 struct MemberRow {
     row: Row,
+    /// what the account is, its manager named from `rows`
+    kind: String,
     theme: Theme,
 }
 
 impl MemberRow {
-    fn new(row: &Row, theme: &Theme) -> Self {
+    fn new(row: &Row, rows: &[Row], theme: &Theme) -> Self {
+        let name_of = |manager| {
+            rows.iter()
+                .find(|other| other.number == manager)
+                .map(|other| other.name.clone())
+        };
         Self {
             row: row.clone(),
+            kind: identity::view::kind(&row.kind, name_of),
             theme: *theme,
         }
     }
@@ -219,8 +233,7 @@ impl MemberRow {
 
 impl RenderOnce for MemberRow {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
-        let row = self.row;
-        let theme = self.theme;
+        let (row, kind, theme) = (self.row, self.kind, self.theme);
         let mut element = div()
             .id(ElementId::named_usize("members-row", row.number as usize))
             .flex()
@@ -236,7 +249,7 @@ impl RenderOnce for MemberRow {
                     .child(format!("#{}", row.number)),
             )
             .child(div().flex_1().truncate().child(row.name))
-            .child(Badge::new(row.control, theme.muted, theme.surface_raised))
+            .child(Badge::new(kind, theme.muted, theme.surface_raised))
             .child(
                 div()
                     .text_size(design::text::SECONDARY)
@@ -332,13 +345,8 @@ async fn roster(host: Host) -> Result<Vec<Row>, Error> {
 fn row(account: &identity::Account, members: &[valset::Membership]) -> Row {
     Row {
         number: account.number,
-        name: account.name.clone(),
-        control: match &account.control {
-            identity::Control::Keys(_) => "Person",
-            identity::Control::Program { .. } => "Program",
-            identity::Control::Revoked { .. } => "Revoked",
-        }
-        .into(),
+        name: account.card.name.clone(),
+        kind: account.kind(),
         keys: account.keys().len(),
         standing: members
             .iter()

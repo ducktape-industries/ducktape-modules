@@ -33,7 +33,7 @@ fn tx(seed: u8, signer: [u8; 32], target: &str, payload: Vec<u8>) -> Tx {
     }
 }
 
-/// Blocks 0..=`tip`: 11 carries Ada's post and her DM to account 7, 12 a
+/// Blocks 0..=`tip`: 11 carries Ada's post and their DM to account 7, 12 a
 /// stranger's op to a program that describes nothing.
 fn chain(tip: u64) -> Vec<Block> {
     (0..=tip)
@@ -79,22 +79,53 @@ fn status(height: u64) -> NodeStatus {
     }
 }
 
-fn ada() -> identity::Account {
+fn account(number: u64, name: &str, control: identity::Control) -> identity::Account {
     identity::Account {
-        number: 3,
-        name: "Ada".into(),
-        control: identity::Control::Keys(vec![identity::Key {
-            scheme: abi::Scheme::Ed25519,
-            key: ADA.to_vec(),
-            label: Some("laptop".into()),
-            added_at: 0,
-        }]),
-        avatar: None,
-        bio: None,
-        updated_at: 0,
+        number,
+        card: identity::Card {
+            name: name.into(),
+            avatar: None,
+            bio: None,
+            updated_at: 0,
+        },
+        control,
     }
 }
 
+fn ada() -> identity::Account {
+    let keys = vec![identity::Key {
+        scheme: abi::Scheme::Ed25519,
+        key: ADA.to_vec(),
+        label: Some("laptop".into()),
+        added_at: 0,
+    }];
+    account(3, "Ada", identity::Control::Person { keys })
+}
+
+/// The agent Ada manages, suspended: no keys yet.
+fn scout() -> identity::Account {
+    account(
+        5,
+        "Scout",
+        identity::Control::Managed {
+            manager: 3,
+            category: identity::Category::Agent,
+            life: identity::Life::Suspended { keys: Vec::new() },
+            transfers: 0,
+        },
+    )
+}
+
+/// forge's own account.
+fn forge() -> identity::Account {
+    account(
+        6,
+        "forge",
+        identity::Control::Module {
+            module: "forge".into(),
+        },
+    )
+}
 /// A node at `tip`, whose tip the test may move.
 fn node(
     cx: &mut TestAppContext,
@@ -120,7 +151,7 @@ fn node(
         identity::Query::List { .. } => {
             Ok(identity::Reply::Accounts(module_registry::PageResponse {
                 height: 1,
-                items: vec![ada()],
+                items: vec![ada(), scout(), forge()],
                 next: None,
             }))
         }
@@ -399,7 +430,7 @@ fn an_account_shows_its_devices_and_what_it_used_in_the_window() {
     cx.simulate_submit("explorer-search");
     cx.run_until_parked();
     let texts = cx.texts();
-    assert!(cx.has_text("account 3   1 device"), "{texts:?}");
+    assert!(cx.has_text("account 3   Person   1 device"), "{texts:?}");
     assert!(
         cx.has_text("laptop") && cx.has_text("last used 1s ago"),
         "{texts:?}"
@@ -420,7 +451,7 @@ fn search_finds_heights_hashes_accounts_and_programs() {
     search(&mut cx, &abi::hex(&[0xb2; 32]));
     assert!(cx.has_text("In block 12"), "{:?}", cx.texts());
     search(&mut cx, "#3");
-    assert!(cx.has_text("account 3   1 device"));
+    assert!(cx.has_text("account 3   Person   1 device"));
     search(&mut cx, "chat");
     assert!(cx.has_text("Transactions · chat") && cx.has_text("Post in #design"));
     assert!(!cx.has_text("mystery · 4 bytes"));
@@ -631,7 +662,7 @@ fn a_link_opens_the_page_it_names() {
     open(&mut cx, &format!("block/{}", abi::hex(&[105; 32])));
     assert!(cx.has_text(&abi::hex(&[105; 32])), "a block by its hash");
     open(&mut cx, "account/3");
-    assert!(cx.has_text("account 3   1 device"));
+    assert!(cx.has_text("account 3   Person   1 device"));
     open(&mut cx, "program/chat");
     assert!(cx.has_text("Transactions · chat"));
     // a transaction the window does not hold says how far it looked
@@ -846,4 +877,29 @@ fn a_snapshot_keeps_ops_not_payloads() {
     restored.simulate_click(&format!("explorer-tx-{}", abi::hex(&big)));
     restored.run_until_parked();
     assert!(restored.has_text("Push · app"), "{:?}", restored.texts());
+}
+
+#[test]
+fn accounts_say_what_each_is_as_members_does() {
+    let mut cx = TestAppContext::new();
+    cx.host().stream::<ChainHeads>();
+    node(&mut cx, Rc::new(RefCell::new(12)));
+    cx.open::<Explorer>();
+    cx.run_until_parked();
+    cx.simulate_click("explorer-tab-accounts");
+    cx.run_until_parked();
+    for text in [
+        "Person",
+        "Agent · managed by Ada · suspended",
+        "Module · forge",
+    ] {
+        assert!(cx.has_text(text), "{text}: {:?}", cx.texts());
+    }
+    cx.simulate_click("explorer-account-5");
+    cx.run_until_parked();
+    assert!(
+        cx.has_text("account 5   Agent · managed by Ada · suspended   0 devices"),
+        "{:?}",
+        cx.texts()
+    );
 }

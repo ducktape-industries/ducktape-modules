@@ -25,14 +25,11 @@ fn a_channel_id_is_bounded_and_a_colon_id_is_its_programs_alone() {
             code::INVALID_INPUT
         );
     }
-    for who in [ADA, Principal::Module("for".into())] {
+    for who in [ADA, Principal::Account(901)] {
         let squat = chat.refused(&who, create("forge:repo:1", PostPolicy::Open));
         assert_eq!(squat, code::UNAUTHORIZED);
     }
-    chat.ok(
-        &Principal::Module("forge".into()),
-        create("forge:repo:1", PostPolicy::Open),
-    );
+    chat.ok(&FORGE, create("forge:repo:1", PostPolicy::Open));
     chat.ok(&Principal::Root, create("system:room", PostPolicy::Open));
     let blank = Op::CreateChannel {
         channel_id: "blank".into(),
@@ -98,7 +95,7 @@ fn a_dm_seats_both_accounts_opens_once_and_keeps_others_out() {
         code::UNAUTHORIZED
     );
     assert_eq!(chat.refused(&ADA, open_dm(1)), code::INVALID_INPUT);
-    let module = Principal::Module("bot".into());
+    let module = Principal::Account(902);
     assert_eq!(chat.refused(&module, open_dm(1)), code::UNAUTHORIZED);
 }
 

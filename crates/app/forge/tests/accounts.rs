@@ -300,3 +300,64 @@ fn opened(rig: &mut Rig, story: &Story) -> u64 {
     };
     n
 }
+
+/// A module's account is never asked to review or write: identity's
+/// profile of it names its module.
+#[test]
+fn a_modules_account_is_neither_reviewer_nor_writer() {
+    let (mut rig, story) = story();
+    let chat = Principal::Account(sandbox::MODULES[1].1);
+    let Op::ChangeOpen {
+        repo,
+        from,
+        into,
+        title,
+        body,
+        ..
+    } = story.open("Asks chat")
+    else {
+        panic!()
+    };
+    let open = Op::ChangeOpen {
+        repo,
+        from,
+        into,
+        title,
+        body,
+        reviewers: vec![Principal::Account(2), chat.clone()],
+    };
+    assert_eq!(rig.refused(&open).code, code::INVALID_INPUT);
+    let n = opened(&mut rig, &story);
+    let edit = Op::ChangeEdit {
+        repo: REPO.into(),
+        n,
+        title: None,
+        body: None,
+        reviewers: Some(vec![chat.clone()]),
+    };
+    assert_eq!(rig.refused(&edit).code, code::INVALID_INPUT);
+    let grant = Op::Grant {
+        repo: REPO.into(),
+        principal: chat,
+    };
+    assert_eq!(rig.refused(&grant).code, code::INVALID_INPUT);
+}
+
+/// Nor is an account identity has none of, nor an agent that does not act:
+/// the profile of each says so, and only an active agent is asked.
+#[test]
+fn an_absent_account_and_an_idle_agent_are_neither_reviewer_nor_writer() {
+    use abi::role::identity::Standing;
+    let (mut rig, _) = story();
+    let grant = |number| Op::Grant {
+        repo: REPO.into(),
+        principal: Principal::Account(number),
+    };
+    assert_eq!(rig.refused(&grant(404)).code, code::INVALID_INPUT);
+    for (agent, standing) in [(31, Standing::Suspended), (32, Standing::Revoked)] {
+        rig.sandbox.agents.borrow_mut().insert(agent, standing);
+        assert_eq!(rig.refused(&grant(agent)).code, code::WRONG_STATE);
+    }
+    rig.sandbox.agents.borrow_mut().insert(33, Standing::Active);
+    rig.execute(&grant(33)).unwrap();
+}

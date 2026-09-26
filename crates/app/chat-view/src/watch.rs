@@ -6,7 +6,7 @@ use ducktape_view_guest::host::Error;
 
 use crate::api::{Changes, ChatApi, HostRoute, HostSession, HostVisible};
 use crate::{Chat, links};
-use identity::view::Identity;
+use ::chat::view::Identity;
 
 impl Chat {
     /// Subscribes every follower; the ones before are dropped with them.

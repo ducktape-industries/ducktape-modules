@@ -37,7 +37,7 @@ guest::export!(Counter);
 
 #[cfg(test)]
 mod tests {
-    use guest::{Cause, Env, MockHost, Origin, code};
+    use guest::{Cause, Env, MockHost, Origin, Principal, code};
 
     use super::*;
 
@@ -48,6 +48,8 @@ mod tests {
             time: 0,
             module: "counter".into(),
             origin: Origin::Signed(vec![1; 32]),
+            sender: Some(Principal::Account(1)),
+            roles: guest::MockHost::roles(),
             cause: Cause::Direct,
         }
     }

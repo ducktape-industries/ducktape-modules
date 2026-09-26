@@ -8,7 +8,7 @@ use ducktape_view_guest::wire;
 use ducktape_view_guest::{Entity, StyleRefinement, Styled};
 
 use crate::api::{Ask, Changes, ChatApi, HostId, HostSession, HostVisible, Session, Submit};
-use identity::view::Identity;
+use ::chat::view::Identity;
 
 mod menus;
 mod message;
@@ -104,17 +104,20 @@ fn configure(cx: &mut TestAppContext) {
     cx.host().handle::<Ask<ChatApi>>(|query| {
         Ok(match query {
             Query::Accounts { .. } => Reply::Accounts(page(vec![
-                chat::AccountRow {
-                    number: 7,
-                    name: "eddy".into(),
-                    program: false,
-                    keys: vec!["0102".into()],
+                person(7, "eddy"),
+                // an agent eddy manages
+                chat::Profile {
+                    kind: chat::Kind::Managed {
+                        manager: 7,
+                        category: chat::Category::Agent,
+                        standing: chat::Standing::Active,
+                    },
+                    ..person(8, "reviewer")
                 },
-                chat::AccountRow {
-                    number: 8,
-                    name: "reviewer".into(),
-                    program: true,
-                    keys: Vec::new(),
+                // forge's own account
+                chat::Profile {
+                    kind: chat::Kind::Module("forge".into()),
+                    ..person(9, "forge")
                 },
             ])),
             Query::Channels { .. } => Reply::Channels(page(vec![
@@ -209,4 +212,13 @@ fn export_chat_screens() {
         serde_json::to_vec(cx.root()).unwrap(),
     )
     .unwrap();
+}
+
+/// A person's profile in the roster.
+fn person(number: u64, name: &str) -> chat::Profile {
+    chat::Profile {
+        number,
+        name: name.into(),
+        kind: chat::Kind::Person,
+    }
 }

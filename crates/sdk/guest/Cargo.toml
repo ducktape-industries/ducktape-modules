@@ -6,10 +6,15 @@ edition.workspace = true
 # The minimal module SDK: a module can be written with this crate alone. On
 # wasm32 its contexts call the host through the `ducktape.*` imports; natively
 # they run over `MockHost`, so a module's native test is its real code.
+[features]
+# `Principal` as serde: the rows modules serve carry it.
+serde = ["dep:serde"]
+
 [dependencies]
 abi = { workspace = true }
 error = { workspace = true }
 borsh = { workspace = true }
+serde = { workspace = true, optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 sha1 = "0.10"

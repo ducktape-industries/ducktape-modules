@@ -5,12 +5,25 @@ use ducktape_view_guest::{
     methods::Query,
 };
 
+use identity::{Control, Kind, PageRequest, Standing};
 use serde::{Deserialize, Serialize};
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Account {
     pub number: Option<u64>,
     pub name: String,
     pub keys: Vec<Key>,
+    /// a person's account manages agents; an agent's or a module's none
+    pub manages: bool,
+    pub agents: Vec<Agent>,
+}
+/// An agent the account manages, as its line reads.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Agent {
+    pub number: u64,
+    pub name: String,
+    pub keys: usize,
+    #[serde(with = "ducktape_view_guest::borsh_bytes")]
+    pub standing: Standing,
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Key {
@@ -40,6 +53,8 @@ pub async fn read_account(
             number: None,
             name: "Unregistered key".into(),
             keys: vec![read_key(&host, &key, "Host key".into()).await?],
+            manages: false,
+            agents: Vec::new(),
         }));
     };
     let account = match host
@@ -63,11 +78,55 @@ pub async fn read_account(
             .await?,
         );
     }
+    let manages = matches!(account.control, Control::Person { .. });
+    let agents = if manages {
+        read_agents(&host, number).await?
+    } else {
+        Vec::new()
+    };
     Ok(Some(Account {
         number: Some(number),
-        name: account.name,
+        name: account.card.name,
         keys,
+        manages,
+        agents,
     }))
+}
+
+/// Every agent `manager` manages, every page of them.
+async fn read_agents(host: &Host, manager: u64) -> Result<Vec<Agent>, Error> {
+    let mut agents = Vec::new();
+    let mut after = None;
+    loop {
+        let page = PageRequest { after, limit: None };
+        let asked = identity::Query::Managed { by: manager, page };
+        let reply = match host.ask::<Query<Identity>>(asked).await? {
+            identity::Reply::Accounts(reply) => reply,
+            other => {
+                return Err(malformed(format!(
+                    "identity answered Managed with {other:?}"
+                )));
+            }
+        };
+        for agent in reply.items {
+            let Kind::Managed { standing, .. } = agent.kind() else {
+                return Err(malformed(format!(
+                    "identity lists account {} as managed, and it is not",
+                    agent.number
+                )));
+            };
+            agents.push(Agent {
+                number: agent.number,
+                keys: agent.keys().len(),
+                name: agent.card.name,
+                standing,
+            });
+        }
+        match reply.next {
+            Some(next) => after = Some(next),
+            None => return Ok(agents),
+        }
+    }
 }
 
 async fn read_key(host: &Host, key: &[u8], label: String) -> Result<Key, Error> {

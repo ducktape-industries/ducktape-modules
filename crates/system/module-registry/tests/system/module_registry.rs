@@ -112,8 +112,13 @@ fn a_published_program_is_scheduled_by_the_authority_and_seated_at_its_height() 
         }
         let applied = net.tick().await;
         assert_eq!(applied.height, lands_at);
-        assert_eq!(applied.admissions.len(), 1);
-        assert_eq!(applied.admissions[0].program, "identity2");
+        // the admission, then identity giving identity2 its account
+        let admitted: Vec<&str> = applied
+            .admissions
+            .iter()
+            .map(|receipt| receipt.program.as_str())
+            .collect();
+        assert_eq!(admitted, ["identity2", identity::MODULE]);
         assert!(net.host.programs().unwrap().contains_key("identity2"));
         net.apply(
             &public(7),

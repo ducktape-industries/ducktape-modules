@@ -34,7 +34,11 @@ pub struct ChatMessage {
     /// [`mark_message_groups`]).
     pub show_author: bool,
     pub initial: String,
+    /// the author is an agent: its face wears the agent tint
     pub agent: bool,
+    /// what the author is beside a person, by its name: "Agent · managed
+    /// by Dev", "Module · forge" ([`Names::badge`])
+    pub badge: Option<String>,
     pub height: u64,
     /// block time in milliseconds; 0 for a pending row
     pub time: u64,
@@ -65,7 +69,8 @@ pub enum SpanStyle {
 }
 
 pub fn chat_message(row: MsgRow, names: &Names) -> ChatMessage {
-    let system = chat::program_post(&row).map(|(program, code)| (program.into(), code.into()));
+    let system = chat::program_post(&row, names.module(&row.author))
+        .map(|(program, code)| (program.into(), code.into()));
     let edited = row.rev > 0;
     let meta = match (row.seq, edited) {
         (0, _) => "sending…".to_string(),
@@ -101,13 +106,26 @@ pub fn chat_message(row: MsgRow, names: &Names) -> ChatMessage {
         thread: row.thread,
         show_author: true,
         initial: design::initial(&names.member(&row.author)),
-        agent: names.is_agent(&row.author),
+        agent: agent(names, &row.author),
+        badge: names.badge(&row.author),
         from: row.author,
         height: row.height,
         time: row.time,
         reactions: row.reactions,
         system,
     }
+}
+
+/// Whether the roster says `principal` is an agent: its face wears the
+/// agent tint.
+pub fn agent(names: &Names, principal: &chat::Principal) -> bool {
+    matches!(
+        names.kind(principal),
+        Some(chat::Kind::Managed {
+            category: chat::Category::Agent,
+            ..
+        })
+    )
 }
 
 /// A quiet longer than this opens a new run, as Slack's does.

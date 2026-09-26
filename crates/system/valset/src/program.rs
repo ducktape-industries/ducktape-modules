@@ -1,10 +1,9 @@
 //! The module: every op and every query, each handed to its rule.
 
 use guest::{Error, ExecCtx, Module, QueryCtx, decoded};
-use module_registry::AUTHORITY;
 
 use crate::rules::{MEMBERS, init, memberships, remove, set};
-use crate::{Genesis, MODULE, Membership, Op, Query, Reply, Role};
+use crate::{AUTHORITY, Genesis, MODULE, Membership, Op, Query, Reply, Role};
 
 pub struct Valset;
 
@@ -18,7 +17,7 @@ impl Module for Valset {
     }
 
     fn execute(ctx: &ExecCtx, op: Op) -> Result<(), Error> {
-        module_registry::helpers::from(ctx.env(), AUTHORITY)?;
+        ctx.env().sent_by(AUTHORITY)?;
         match op {
             Op::Set(membership) => set(ctx, membership),
             Op::Remove { key } => remove(ctx, &key),

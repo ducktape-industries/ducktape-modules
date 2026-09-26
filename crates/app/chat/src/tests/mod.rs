@@ -1,11 +1,11 @@
 //! Every op, once as meant and once as an attack: each refusal leaves the
 //! store exactly as it was. The harness is the [`crate::Chat`] module over a
-//! [`MockHost`] whose identity holds each account's key, and the accounts
-//! that act on it.
+//! [`MockHost`], and the principals that act on it, each the sender of the
+//! env it signs.
 use guest::{Cause, Env, Origin, code};
 use guest::{ExecCtx, MockHost, Module, QueryCtx};
 
-use crate::{Op, PageRequest, PageResponse, PostPolicy, Principal, Query, Reply, parse_message};
+use crate::{Op, PageRequest, PostPolicy, Principal, Query, Reply, parse_message};
 
 mod channels;
 mod messages;
@@ -17,6 +17,18 @@ mod rooms;
 const ADA: Principal = Principal::Account(1);
 const BO: Principal = Principal::Account(2);
 const CY: Principal = Principal::Account(3);
+/// forge's account; `for` and `bot` are modules too ([`module_of`]).
+const FORGE: Principal = Principal::Account(900);
+
+/// The module an account is the account of, as identity registered it.
+fn module_of(who: &Principal) -> Option<&'static str> {
+    match who {
+        Principal::Account(900) => Some("forge"),
+        Principal::Account(901) => Some("for"),
+        Principal::Account(902) => Some("bot"),
+        _ => None,
+    }
+}
 
 /// A chat store and a clock: every op runs one block later.
 struct Chat {
@@ -25,33 +37,23 @@ struct Chat {
 }
 
 impl Default for Chat {
-    /// An empty store beside an identity where account `n` holds the key
-    /// `n.to_be_bytes()` ([`signer`]), and a verifier that takes every node
-    /// proof (`origin.rs` checks the proof itself).
+    /// An empty store and a verifier that takes every node proof
+    /// (`origin.rs` checks the proof itself).
     fn default() -> Chat {
         let store = MockHost::default();
         store.borrow_mut().verifier = Some(Box::new(|_, _, _, _, _| true));
-        store.borrow_mut().siblings.insert(
-            identity::MODULE.into(),
-            Box::new(|request| {
-                let identity::Query::OfKey { key } =
-                    abi::decode(request).map_err(guest::kernel::error_from)?
-                else {
-                    panic!("the harness answers identity's OfKey only");
-                };
-                let number = <[u8; 8]>::try_from(key.as_slice()).map(u64::from_be_bytes);
-                Ok(abi::encode(&identity::Reply::Number(number.ok())))
-            }),
-        );
         Chat { store, height: 0 }
     }
 }
 
-/// The origin that acts as `who`: an account's key, the module, the system.
+/// The origin that acts as `who`: a module's own frame, an account's key
+/// (account `n` holds `n.to_be_bytes()`), the system.
 fn signer(who: &Principal) -> Origin {
+    if let Some(module) = module_of(who) {
+        return Origin::Module(module.into());
+    }
     match who {
         Principal::Account(number) => Origin::Signed(number.to_be_bytes().to_vec()),
-        Principal::Module(module) => Origin::Module(module.clone()),
         Principal::Root => Origin::Root,
     }
 }
@@ -64,13 +66,15 @@ impl Chat {
         chat
     }
 
-    fn env(&self, origin: Origin) -> Env {
+    fn env(&self, origin: Origin, sender: Option<Principal>) -> Env {
         Env {
             chain_id: vec![],
             height: self.height,
             time: self.height * 1000,
             module: crate::MODULE.into(),
             origin,
+            sender,
+            roles: guest::MockHost::roles(),
             cause: Cause::Direct,
         }
     }
@@ -78,12 +82,12 @@ impl Chat {
     /// The context of the next block, signed by `who`.
     fn next(&mut self, who: &Principal) -> ExecCtx {
         self.height += 1;
-        self.store.exec(self.env(signer(who)))
+        self.store.exec(self.env(signer(who), Some(who.clone())))
     }
 
     /// A read at the current block.
     fn reads(&self) -> QueryCtx {
-        self.store.query(self.env(Origin::Root))
+        self.store.query(self.env(Origin::Root, None))
     }
 
     fn run(&mut self, who: &Principal, op: Op) -> Result<(), guest::Error> {

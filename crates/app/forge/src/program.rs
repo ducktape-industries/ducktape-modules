@@ -10,7 +10,7 @@ use guest::{Error, ExecCtx, Module, QueryCtx};
 use crate::change_queries::{change, changes, judgment};
 use crate::changes::{Draft, Edit, MergeRequest, close, edit, merge_heads, open, submit_review};
 use crate::contract::*;
-use crate::ops::{configure, create, grant, init, person, push, revoke, touch};
+use crate::ops::{configure, create, grant, init, push, revoke, signed_account, touch};
 use crate::queries::{advertise, listing, refs, repos, upload};
 use crate::reads::{blob, comparison, diff, log, tree};
 use crate::state::{WRITERS, load_bounds, load_repo};
@@ -36,11 +36,10 @@ impl Module for Forge {
         init(ctx, params)
     }
 
-    /// Runs one op as the signer's account ([`identity::principal_of`]).
+    /// Runs one op as the signer's account (`ctx.sender()`).
     /// Every op names its repository; an accepted one marks it active.
     fn execute(ctx: &ExecCtx, op: Op) -> Result<(), Error> {
-        let sender = identity::principal_of(ctx, &ctx.env().origin)?;
-        let actor = person(&sender)?;
+        let actor = &signed_account(ctx)?;
         let repo = op.repo().to_owned();
         let reply = match op {
             Op::Create { repo, hash } => create(ctx, actor, &repo, hash).map(|()| None),

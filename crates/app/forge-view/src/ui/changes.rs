@@ -345,7 +345,7 @@ fn form_fields(form: &ChangeForm, cx: &mut Context<Forge>, theme: &Theme) -> Div
         )
 }
 
-/// The identity picker, the same roster chat picks from.
+/// The identity picker: the people and agents chat's mentions offer.
 fn reviewers(
     form: &ChangeForm,
     forge: &Forge,
@@ -362,8 +362,8 @@ fn reviewers(
         .items_center()
         .gap_1()
         .child(quiet("Reviewers", theme));
-    for number in names.numbers().take(24) {
-        let key = identity::Principal::Account(number);
+    for number in names.people().take(24) {
+        let key = forge::Principal::Account(number);
         let picked = form.reviewers.contains(&key);
         let toggle = cx.listener({
             let key = key.clone();

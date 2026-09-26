@@ -37,10 +37,7 @@ fn a_message_id_is_unique_and_a_colon_id_is_its_programs_alone() {
     assert_eq!(again, code::ALREADY_EXISTS);
     let squat = chat.refused(&BO, post("general", "forge:0001", "hi", None));
     assert_eq!(squat, code::UNAUTHORIZED);
-    chat.ok(
-        &Principal::Module("forge".into()),
-        post("general", "forge:0001", "opened", None),
-    );
+    chat.ok(&FORGE, post("general", "forge:0001", "opened", None));
     let Reply::Message(Some(row)) = chat.ask(Query::MessageById {
         message_id: "forge:0001".into(),
     }) else {

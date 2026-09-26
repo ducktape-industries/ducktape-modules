@@ -11,9 +11,14 @@ pub mod view;
 pub use program::Valset;
 
 use borsh::{BorshDeserialize, BorshSerialize};
-use module_registry::{PageRequest, PageResponse};
+use store::{PageRequest, PageResponse};
 
-pub use abi::valset::{Genesis, Member, PROGRAM as MODULE};
+pub use abi::role::validators::{Genesis, Member};
+
+pub const MODULE: &str = "valset";
+
+/// The module whose frames valset accepts as governance.
+pub const AUTHORITY: &str = "governance";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Role {

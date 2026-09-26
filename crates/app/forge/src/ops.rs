@@ -1,10 +1,13 @@
 //! The execute path: who acts, which op, and the repository ops (create,
 //! configure, grant, revoke, push). Change ops live in `changes`.
 
+use abi::role::identity as role;
 use gitcore::server::{Policy, RefUpdate};
 use gitcore::{Error as GitError, Limits, server};
-use guest::{Error, HashKind};
-use guest::{ExecCtx, QueryCtx, already_exists, capacity, decoded, invalid, unauthorized};
+use guest::{Error, HashKind, code};
+use guest::{
+    ExecCtx, QueryCtx, already_exists, capacity, decoded, invalid, unauthorized, wrong_state,
+};
 
 use crate::contract::{Bounds, MAX_PATH_BYTES, Principal, Repo, Settings, valid_repo_name};
 use crate::objects::{ObjectWriter, object_not_held};
@@ -32,14 +35,16 @@ pub(crate) fn init(ctx: &ExecCtx, params: &[u8]) -> Result<(), Error> {
     Ok(())
 }
 
-/// Forge is written by people (an account), never by a module or the
-/// system. A key that holds no account never gets here: identity's
-/// [`principal_of`](identity::principal_of) refuses it.
-pub(crate) fn person(principal: &Principal) -> Result<&Principal, Error> {
-    if !principal.is_person() {
-        return Err(unauthorized("a repository op is signed by a person"));
-    }
-    Ok(principal)
+/// Forge is written by keys (a person's or an agent's account), never by a
+/// module or the system: the frame is signed, and acts as the account its
+/// key holds. The host rejects a frame whose key's account is not live
+/// before it gets here; [`ExecCtx::sender`](guest::ExecCtx::sender) refuses
+/// a key that holds no account.
+pub(crate) fn signed_account(ctx: &ExecCtx) -> Result<Principal, Error> {
+    ctx.env()
+        .signer()
+        .map_err(|_| unauthorized("a repository op is signed by a key"))?;
+    ctx.sender()
 }
 
 /// Every accepted op marks its repository active at this height.
@@ -95,7 +100,7 @@ pub(crate) fn grant(
     principal: Principal,
 ) -> Result<(), Error> {
     require_owner(&load_repo(ctx, name)?, actor)?;
-    require_named(&principal)?;
+    require_person_or_agent(ctx, &principal)?;
     WRITERS.insert(ctx, &(name.to_owned(), principal));
     Ok(())
 }
@@ -180,12 +185,56 @@ pub(crate) fn require_writer(
     Ok(())
 }
 
-/// A person an op names (a writer, a reviewer): an account.
+/// Whom an op names (a writer, a reviewer): an account, never the system.
 pub(crate) fn require_named(principal: &Principal) -> Result<(), Error> {
-    if !principal.is_person() {
-        return Err(invalid("only a person is named here"));
+    if principal.account().is_none() {
+        return Err(invalid("only an account is named here"));
     }
     Ok(())
+}
+
+/// Whom a person asks to write or review: an account the identity role
+/// profiles as a person or an agent that acts. No absent account, no
+/// module's, no agent suspended or revoked.
+pub(crate) fn require_person_or_agent(ctx: &QueryCtx, principal: &Principal) -> Result<(), Error> {
+    let Some(number) = principal.account() else {
+        return Err(invalid("only an account is named here"));
+    };
+    let asked = role::Query::Profile(number);
+    let role::Reply::Profile(profile) =
+        ctx.ask::<role::Query, role::Reply>(&ctx.env().roles.identity, &asked)?
+    else {
+        return Err(Error::new(
+            code::UNEXPECTED_REPLY,
+            "identity answered Profile with something else",
+        ));
+    };
+    let Some(profile) = profile else {
+        return Err(invalid(format!("there is no account {number}")));
+    };
+    use role::{Kind, Standing};
+    match profile.kind {
+        Kind::Person
+        | Kind::Managed {
+            standing: Standing::Active,
+            ..
+        } => Ok(()),
+        Kind::Managed {
+            standing: Standing::Suspended,
+            ..
+        } => Err(wrong_state(format!(
+            "account {number} is suspended: only agents that act are asked"
+        ))),
+        Kind::Managed {
+            standing: Standing::Revoked,
+            ..
+        } => Err(wrong_state(format!(
+            "account {number} is revoked: only agents that act are asked"
+        ))),
+        Kind::Module(module) => Err(invalid(format!(
+            "account {number} is module {module}'s: only people and agents are asked"
+        ))),
+    }
 }
 
 pub fn limits_of(bounds: &Bounds) -> Limits {

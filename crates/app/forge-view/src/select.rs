@@ -5,10 +5,10 @@ use ducktape_view_guest::view::Loadable;
 
 use crate::queries::PAGE;
 use crate::state::{self, ChangeTab, Forge, Nav, change_key};
+use forge::Principal;
 use forge::{
     Bounds, Change, Comparison, PageResponse, Query, RefInfo, Reply, RepoInfo, Review, Revision,
 };
-use identity::Principal;
 
 /// The open change, as its screens read it: the record, its two current
 /// endpoints (either can be gone) and the reviews landed so far.
@@ -32,9 +32,9 @@ impl Forge {
         self.session.account
     }
 
-    /// The reader as a principal: her account; nobody while her seated key
+    /// The reader as a principal: their account; nobody while their seated key
     /// holds none. [`Principal::writer`] is the one rule every view gates its
-    /// writes on, as identity's `principal_of` refuses them.
+    /// writes on, as `ExecCtx::sender` refuses them.
     pub(crate) fn me_principal(&self) -> Option<Principal> {
         Principal::writer(self.my_account())
     }
@@ -235,11 +235,9 @@ impl Forge {
     /// What a person or chat author is called: their account name once
     /// the roster has landed.
     pub(crate) fn principal_name(&self, principal: &Principal) -> String {
-        match (principal, self.names.ready()) {
-            // forge's own lines in a change's channel
-            (Principal::Root, _) => "Forge".into(),
-            (_, Some(names)) => names.member(principal),
-            (_, None) => chat::view::unnamed(principal),
+        match self.names.ready() {
+            Some(names) => names.member(principal),
+            None => chat::view::unnamed(principal),
         }
     }
 

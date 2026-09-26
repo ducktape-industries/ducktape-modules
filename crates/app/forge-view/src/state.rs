@@ -323,7 +323,7 @@ pub(crate) struct ChangeForm {
     pub into: Vec<u8>,
     pub title: String,
     pub body: String,
-    pub reviewers: Vec<identity::Principal>,
+    pub reviewers: Vec<forge::Principal>,
     pub error: String,
 }
 
@@ -342,7 +342,7 @@ pub(crate) struct SettingsForm {
     pub grant: String,
 }
 
-/// An operation the reader issued: shown where she issued it until the
+/// An operation the reader issued: shown where they issued it until the
 /// next query reconciles it, or refused with the reason inline.
 #[derive(Clone, Debug)]
 pub(crate) struct Pending {

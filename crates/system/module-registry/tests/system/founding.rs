@@ -52,6 +52,22 @@ fn founding_seats_the_validators_and_every_program_answers() {
         };
         assert_eq!(accounts.height, net.height);
         assert_eq!(accounts.next, None);
-        assert!(accounts.items.is_empty());
+        // every founding program, and only they: each has its account
+        let modules: Vec<_> = accounts
+            .items
+            .iter()
+            .map(|account| account.kind())
+            .collect();
+        let module = |module: &str| identity::Kind::Module(module.into());
+        assert_eq!(
+            modules,
+            [
+                module(module_registry::MODULE),
+                module(valset::MODULE),
+                module(identity::MODULE),
+                module(AUTHORITY),
+                module("probe"),
+            ]
+        );
     });
 }

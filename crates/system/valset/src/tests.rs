@@ -2,10 +2,9 @@
 
 use guest::{Cause, Env, Origin, code};
 use guest::{MockHost, Module};
-use module_registry::AUTHORITY;
 use store::PageRequest;
 
-use crate::{Genesis, Member, Membership, Op, Query, Reply, Role, Valset};
+use crate::{AUTHORITY, Genesis, Member, Membership, Op, Query, Reply, Role, Valset};
 
 fn key(n: u8) -> Vec<u8> {
     vec![n; 32]
@@ -18,6 +17,9 @@ fn env(origin: Origin) -> Env {
         time: 0,
         module: crate::MODULE.into(),
         origin,
+        // these rules read the origin alone
+        sender: None,
+        roles: guest::MockHost::roles(),
         cause: Cause::Direct,
     }
 }
@@ -148,23 +150,23 @@ fn memberships_page_in_key_order_at_the_answering_height() {
 #[test]
 fn the_host_contract_is_a_prefix_of_the_program_contract() {
     assert_eq!(
-        abi::encode(&abi::valset::Query::Validators),
+        abi::encode(&abi::role::validators::Query::Validators),
         abi::encode(&super::Query::Validators)
     );
     assert_eq!(
-        abi::encode(&abi::valset::Query::Members),
+        abi::encode(&abi::role::validators::Query::Members),
         abi::encode(&super::Query::Members)
     );
-    let member = abi::valset::Member {
+    let member = abi::role::validators::Member {
         key: vec![1],
         address: "a".into(),
     };
     assert_eq!(
-        abi::encode(&abi::valset::Reply::Validators(vec![vec![1]])),
+        abi::encode(&abi::role::validators::Reply::Validators(vec![vec![1]])),
         abi::encode(&super::Reply::Validators(vec![vec![1]]))
     );
     assert_eq!(
-        abi::encode(&abi::valset::Reply::Members(vec![member.clone()])),
+        abi::encode(&abi::role::validators::Reply::Members(vec![member.clone()])),
         abi::encode(&super::Reply::Members(vec![member]))
     );
 }

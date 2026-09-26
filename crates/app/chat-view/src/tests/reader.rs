@@ -89,19 +89,9 @@ fn a_peers_name_gained_later_replaces_its_numeric_fallback() {
     cx.host().handle::<Ask<ChatApi>>(move |query| {
         Ok(match query {
             Query::Accounts { .. } => {
-                let mut accounts = vec![chat::AccountRow {
-                    number: 7,
-                    name: "eddy".into(),
-                    program: false,
-                    keys: vec!["0102".into()],
-                }];
+                let mut accounts = vec![person(7, "eddy")];
                 if has_gary.get() {
-                    accounts.push(chat::AccountRow {
-                        number: 9,
-                        name: "gary".into(),
-                        program: false,
-                        keys: Vec::new(),
-                    });
+                    accounts.push(person(9, "gary"));
                 }
                 Reply::Accounts(page(accounts))
             }
@@ -171,19 +161,9 @@ fn a_peers_mention_becomes_offerable_once_their_account_is_known() {
     cx.host().handle::<Ask<ChatApi>>(move |query| {
         Ok(match query {
             Query::Accounts { .. } => {
-                let mut accounts = vec![chat::AccountRow {
-                    number: 7,
-                    name: "eddy".into(),
-                    program: false,
-                    keys: vec!["0102".into()],
-                }];
+                let mut accounts = vec![person(7, "eddy")];
                 if has_gary.get() {
-                    accounts.push(chat::AccountRow {
-                        number: 9,
-                        name: "gary".into(),
-                        program: false,
-                        keys: Vec::new(),
-                    });
+                    accounts.push(person(9, "gary"));
                 }
                 Reply::Accounts(page(accounts))
             }
@@ -252,12 +232,7 @@ fn the_roster_is_read_past_its_first_page() {
                 Reply::Accounts(::chat::PageResponse {
                     height: 1,
                     items: (start..=end)
-                        .map(|number| chat::AccountRow {
-                            number,
-                            name: format!("user{number}"),
-                            program: false,
-                            keys: Vec::new(),
-                        })
+                        .map(|number| person(number, &format!("user{number}")))
                         .collect(),
                     next,
                 })
@@ -281,7 +256,7 @@ fn the_roster_is_read_past_its_first_page() {
     cx.run_until_parked();
     view.read(|chat| {
         let names = chat.names.ready().expect("the roster landed");
-        assert_eq!(names.numbers().count(), 600);
+        assert_eq!(names.people().count(), 600);
         assert_eq!(names.name(&Principal::Account(600)), Some("user600"));
         assert!(!names.more(), "the whole roster was read");
     });
