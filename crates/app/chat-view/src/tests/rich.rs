@@ -201,3 +201,34 @@ fn list_lines_render_as_list_rows() {
         "a plain line stays a paragraph"
     );
 }
+
+/// The reader's offset landing after the rows moves the day dividers onto
+/// the reader's midnights without a refresh.
+#[test]
+fn an_offset_landing_late_moves_the_day_dividers() {
+    let (mut cx, view) = opened();
+    // 24 Sep 2026, 13:00 and 16:00 UTC: one UTC day, two in Seoul
+    let afternoon = 1_790_254_800_000;
+    let evening = afternoon + 3 * 3_600_000;
+    let offset = cx.host().stream::<api::HostOffset>();
+    view.update(&mut cx, |chat, _, cx| {
+        let messages = chat.room.as_mut().unwrap().messages.ready_mut().unwrap();
+        for (seq, time) in [(3, afternoon), (4, evening)] {
+            let mut late = row(seq, 7, "late");
+            late.time = time;
+            messages.push(late);
+        }
+        chat.watch(cx);
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(cx.find("chat-day-m3").is_some());
+    assert!(cx.find("chat-day-m4").is_none(), "one UTC day");
+    offset.send(540);
+    cx.run_until_parked();
+    assert!(
+        cx.find("chat-day-m4").is_some(),
+        "Seoul's midnight falls between"
+    );
+    assert!(cx.has_text("25 Sep 2026"));
+}

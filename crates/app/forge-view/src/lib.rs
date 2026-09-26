@@ -24,8 +24,8 @@ mod navigate;
 mod review;
 mod ui;
 
-use ducktape_view_guest::methods::{Changes, HostRoute, HostVisible};
-use ducktape_view_guest::{Context, IntoElement, Render, View, Window, export_view};
+use ducktape_view_guest::methods::{Changes, HostOffset, HostRoute, HostVisible};
+use ducktape_view_guest::{Context, IntoElement, Render, View, Window, design, export_view};
 
 use api::{ChatApi, ForgeProgram, HostSession};
 use chat::view::Identity;
@@ -98,6 +98,13 @@ impl View for Forge {
                 Ok(true) => forge.refresh(cx),
                 Ok(false) => {}
                 Err(refusal) => cx.host().log_refused("forge", "visibility", &refusal),
+            }));
+        // the reader's zone, for the dates a commit reads
+        let offset = cx.host().subscribe::<HostOffset>(());
+        self.watches
+            .push(cx.for_each(offset, |_, offset, _, cx| match offset {
+                Ok(minutes) => design::set_utc_offset(minutes),
+                Err(refusal) => cx.host().log_refused("forge", "the UTC offset", &refusal),
             }));
         if self.names.is_idle() {
             self.names = cx.load(chat::view::roster(cx.host()), |forge| &mut forge.names);

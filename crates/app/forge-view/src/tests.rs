@@ -209,6 +209,8 @@ pub(crate) fn configure(cx: &mut TestAppContext, mode: &'static str) {
     cx.host().never::<Changes<ChatApi>>();
     cx.host().never::<Changes<Identity>>();
     cx.host().never::<HostVisible>();
+    cx.host()
+        .never::<ducktape_view_guest::methods::HostOffset>();
 }
 
 /// Boots the view, seats a reader and waits for the first reads to land.
@@ -483,6 +485,8 @@ fn a_refused_read_keeps_its_reason_and_offers_one_retry() {
     cx.host().never::<Changes<ChatApi>>();
     cx.host().never::<Changes<Identity>>();
     cx.host().never::<HostVisible>();
+    cx.host()
+        .never::<ducktape_view_guest::methods::HostOffset>();
     cx.host().never::<HostSession>();
     cx.host().never::<ducktape_view_guest::methods::HostRoute>();
     cx.open::<Forge>();

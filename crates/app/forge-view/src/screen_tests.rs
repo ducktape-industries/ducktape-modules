@@ -80,6 +80,8 @@ fn screen(state: &str) -> TestAppContext {
             cx.host().never::<Changes<ChatApi>>();
             cx.host().never::<Changes<Identity>>();
             cx.host().never::<HostVisible>();
+            cx.host()
+                .never::<ducktape_view_guest::methods::HostOffset>();
             cx.host().never::<HostSession>();
             cx.open::<Forge>();
             cx.run_until_parked();
