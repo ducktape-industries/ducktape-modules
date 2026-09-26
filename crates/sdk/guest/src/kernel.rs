@@ -14,7 +14,7 @@
 //! | `Roles`                                   | [`Roles`] (the same type)                |
 //! | `ProgramId`                               | [`ModuleId`]                             |
 //! | `ItemRef { source, item }`                | [`MessageId`] `{ module, seq }`          |
-//! | `Cause::{Direct, Delivery, Completion}`   | [`Cause`]`::{Direct, Message, Reply}`    |
+//! | `Cause::{Direct, Message, Completion}`    | [`Cause`]`::{Direct, Message, Reply}`    |
 //! | `Outcome` (carries a `Refusal`)           | [`Outcome`] (carries an [`Error`])       |
 //! | `Scan { lo, hi, reverse, limit }`         | [`Range`] `{ start, end, order, limit }` |
 
@@ -132,7 +132,8 @@ impl From<Principal> for abi::Principal {
     }
 }
 
-/// A message a module sent: the sender and its sequence there.
+/// A message a module emitted: the emitter and the message's number in
+/// its frame.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, BorshSerialize, BorshDeserialize)]
 pub struct MessageId {
     pub module: ModuleId,
@@ -181,8 +182,9 @@ impl From<Outcome> for abi::Outcome {
     }
 }
 
-/// Why this call runs: a transaction, a message another module sent, or the
-/// reply to a message this module sent with `call`.
+/// Why this call runs: a transaction, a message another module emitted in
+/// this frame, or the reply to a message this module emitted with
+/// [`Reply::Wanted`](crate::Reply::Wanted).
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub enum Cause {
     Direct,
@@ -194,7 +196,7 @@ impl From<abi::Cause> for Cause {
     fn from(c: abi::Cause) -> Self {
         match c {
             abi::Cause::Direct => Cause::Direct,
-            abi::Cause::Delivery(item) => Cause::Message(item.into()),
+            abi::Cause::Message(item) => Cause::Message(item.into()),
             abi::Cause::Completion { item, outcome } => Cause::Reply {
                 id: item.into(),
                 outcome: outcome.into(),
@@ -207,7 +209,7 @@ impl From<Cause> for abi::Cause {
     fn from(c: Cause) -> Self {
         match c {
             Cause::Direct => abi::Cause::Direct,
-            Cause::Message(id) => abi::Cause::Delivery(id.into()),
+            Cause::Message(id) => abi::Cause::Message(id.into()),
             Cause::Reply { id, outcome } => abi::Cause::Completion {
                 item: id.into(),
                 outcome: outcome.into(),

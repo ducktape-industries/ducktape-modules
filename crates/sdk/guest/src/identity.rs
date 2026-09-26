@@ -11,7 +11,7 @@ impl QueryCtx {
     pub fn require_person_or_agent(&self, number: AccountNumber) -> Result<(), Error> {
         let asked = Query::Profile(number);
         let Reply::Profile(profile) =
-            self.ask::<Query, Reply>(&self.env().roles.identity, &asked)?
+            self.query::<Query, Reply>(&self.env().roles.identity, &asked)?
         else {
             return Err(Error::new(
                 code::UNEXPECTED_REPLY,

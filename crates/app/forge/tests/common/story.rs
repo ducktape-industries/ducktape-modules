@@ -13,8 +13,8 @@ pub const TESTER: &[u8] = b"tester";
 pub const HELD: [(&[u8], u64); 3] = [(TESTER, 1), (b"reviewer", 2), (b"talker", 4)];
 
 /// One module over `MemorySandbox` with the kernel's height discipline: an
-/// op lands in a new block, whose queue (forge's chat emissions) is delivered
-/// first; a chat write is a block of its own; a query moves nothing.
+/// op lands in a new block, and what it emits to chat runs in its frame; a
+/// chat write is a block of its own; a query moves nothing.
 pub struct Rig {
     pub sandbox: MemorySandbox,
     pub height: u64,
@@ -50,12 +50,10 @@ impl Rig {
 
     pub fn advance(&mut self) {
         self.height += 1;
-        for delivered in self.sandbox.deliver(self.height, TIME) {
-            delivered.unwrap();
-        }
     }
 
-    /// The actor's op in a new block; a refusal left forge's store as it was.
+    /// The actor's op in a new block, and what it emitted run in its frame;
+    /// a refusal left forge's store as it was.
     #[track_caller]
     pub fn execute(&mut self, op: &Op) -> Result<Vec<u8>, guest::Error> {
         self.advance();
@@ -63,6 +61,9 @@ impl Rig {
         self.sandbox
             .forge
             .attempt(|| signed_op(&self.sandbox, &actor, height, op))?;
+        for landed in self.sandbox.deliver(height, TIME) {
+            landed.unwrap();
+        }
         Ok(self.sandbox.forge.take_output())
     }
 

@@ -1,6 +1,7 @@
 //! The host a native test runs a module over: maps for state and blobs, and
 //! what the module sent (`output`, `response`, `emissions`, `events`) kept
-//! for the test to read. Sibling modules answer through `siblings`;
+//! for the test to read; a harness runs the emissions itself, as the kernel
+//! runs them once the handler returns. Sibling modules answer through `siblings`;
 //! signatures verify through `verifier` (none set: verification is refused).
 //! A `MockHost` is a shared handle: the contexts made over it and the test
 //! see one host.
@@ -155,8 +156,10 @@ impl MockHost {
         )
     }
 
-    /// One host call, as the real host answers it.
-    pub(crate) fn serve(&self, op: HostOp) -> HostReply {
+    /// One host call by `me`, as the real host answers it. An emitted
+    /// message is kept, numbered in order, for the harness to run once the
+    /// handler returns.
+    pub(crate) fn serve(&self, me: &str, op: HostOp) -> HostReply {
         if let HostOp::Query { program, request } = op {
             // The sibling leaves the map while it answers, so it may use
             // this host itself.
@@ -227,10 +230,11 @@ impl MockHost {
                 Err(error) => HostReply::Refused(crate::kernel::refusal_from(error)),
             },
             HostOp::Emit(message) => {
+                let item = mock.emissions.len() as u64;
                 mock.emissions.push(message);
                 HostReply::Item(abi::ItemRef {
-                    source: String::new(),
-                    item: mock.emissions.len() as u64,
+                    source: me.to_owned(),
+                    item,
                 })
             }
             HostOp::Event(payload) => {
