@@ -147,6 +147,7 @@ impl Forge {
                 let log = Query::Log {
                     repo: repo.clone(),
                     from: self.revision(),
+                    exclude: None,
                     page: PAGE,
                 };
                 let diff = self.nav.commit.clone().map(|commit| Query::Diff {
@@ -189,11 +190,12 @@ impl Forge {
         };
         wanted.extend(self.compare_query());
         if self.nav.change_tab == ChangeTab::Commits {
-            wanted.push(Query::Log {
-                repo: repo.to_owned(),
-                from: change.from.clone(),
-                page: PAGE,
-            });
+            // the change's own commits: what its target does not reach
+            wanted.push(crate::ui::commits::query(
+                self,
+                change.from.clone(),
+                Some(Revision::Ref(change.into.clone())),
+            ));
         }
         if let (ChangeTab::Files, Some(head), Some(comparison)) =
             (self.nav.change_tab, source_head.clone(), self.compare())

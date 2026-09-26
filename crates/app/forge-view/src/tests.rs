@@ -784,6 +784,7 @@ fn commits_follows_the_cursor_and_opens_one_commit_with_its_diff() {
         let Some(Reply::Log { page, .. }) = forge.ready(&Query::Log {
             repo: "project".into(),
             from: forge.revision(),
+            exclude: None,
             page: crate::queries::PAGE,
         }) else {
             panic!("the log landed");

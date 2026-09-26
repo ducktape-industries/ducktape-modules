@@ -133,6 +133,7 @@ fn replay(tape: &mut Tape) {
         Query::Log {
             repo: REPO.into(),
             from: reference("main"),
+            exclude: None,
             page: PageRequest::first(2),
         },
     );
@@ -181,6 +182,7 @@ fn replay(tape: &mut Tape) {
         Query::Log {
             repo: REPO.into(),
             from: reference("feature"),
+            exclude: None,
             page: PageRequest::first(1),
         },
     ) else {
@@ -192,6 +194,7 @@ fn replay(tape: &mut Tape) {
         Query::Log {
             repo: REPO.into(),
             from: reference("feature"),
+            exclude: None,
             page: PageRequest {
                 after: page.next,
                 limit: Some(1),
@@ -388,6 +391,7 @@ fn replay(tape: &mut Tape) {
         Query::Log {
             repo: REPO.into(),
             from: reference("feature"),
+            exclude: None,
             page: PageRequest {
                 after: Some(vec![1]),
                 limit: Some(1),
@@ -404,7 +408,14 @@ fn replay(tape: &mut Tape) {
     ) else {
         panic!();
     };
+    // an empty block keeps the cursor; forge writing after it does not
     rig.advance();
+    rig.sandbox.hold(b"tenth", 10);
+    rig.execute(&Op::Grant {
+        repo: REPO.into(),
+        principal: Principal::Account(10),
+    })
+    .unwrap();
     tape.refusal(
         &rig,
         "refused-stale",
@@ -602,6 +613,7 @@ fn replay(tape: &mut Tape) {
         Query::Log {
             repo: REPO.into(),
             from: reference("feature"),
+            exclude: None,
             page: PageRequest::first(1),
         },
     );

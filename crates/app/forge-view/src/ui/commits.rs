@@ -12,10 +12,16 @@ use crate::ui::components::{badge, button, empty_state, heading, id, quiet, shor
 use crate::ui::{diff, fact, staged};
 use forge::{CommitInfo, Query, Reply};
 
-pub(crate) fn query(forge: &Forge, from: forge::Revision) -> Query {
+/// The log of `from`, less what `exclude` reaches.
+pub(crate) fn query(
+    forge: &Forge,
+    from: forge::Revision,
+    exclude: Option<forge::Revision>,
+) -> Query {
     Query::Log {
         repo: forge.repo_name(),
         from,
+        exclude,
         page: PAGE,
     }
 }
@@ -26,7 +32,7 @@ pub(crate) fn render(forge: &Forge, cx: &mut Context<Forge>, theme: &Theme) -> A
     }
     log(
         forge,
-        &query(forge, forge.revision()),
+        &query(forge, forge.revision(), None),
         "forge-log",
         cx,
         theme,
@@ -155,7 +161,7 @@ fn summary(commit: &CommitInfo) -> String {
 
 fn detail(forge: &Forge, oid: &str, cx: &mut Context<Forge>, theme: &Theme) -> AnyElement {
     let close = cx.listener(|forge, _: &ClickEvent, _, cx| forge.open_commit(None, cx));
-    let commit = match forge.ready(&query(forge, forge.revision())) {
+    let commit = match forge.ready(&query(forge, forge.revision(), None)) {
         Some(Reply::Log { page, .. }) => page.items.iter().find(|c| c.oid == oid),
         _ => None,
     };

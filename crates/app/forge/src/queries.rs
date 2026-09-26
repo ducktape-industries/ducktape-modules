@@ -13,7 +13,9 @@ use store::Listing;
 use crate::contract::*;
 use crate::objects::ObjectStore;
 use crate::ops::{cap, refusal_of};
-use crate::state::{ACTIVITY, REFS, load_bounds, load_refs, load_repo, repo_hash, storage};
+use crate::state::{
+    ACTIVITY, REFS, last_write, load_bounds, load_refs, load_repo, repo_hash, storage,
+};
 
 const AGENT: &[u8] = b"ducktape-forge";
 
@@ -44,12 +46,21 @@ pub(crate) fn refs(
         })
 }
 
-/// A forge listing can be rewritten by a push, so a cursor is good for the
-/// height that answered it and no other.
-pub(crate) fn listing(page: PageRequest, scope: Vec<u8>, height: u64) -> Result<Listing, Error> {
+/// A forge listing is rewritten only by a forge op, and every accepted op
+/// marks its repository active, so a cursor is good until forge next writes
+/// after the height that answered it: a walk crosses the blocks that wrote
+/// nothing here, and a push mid-walk still restarts it.
+pub(crate) fn listing(
+    ctx: &QueryCtx,
+    page: PageRequest,
+    scope: Vec<u8>,
+    height: u64,
+) -> Result<Listing, Error> {
     let listing = page.listing(scope, height)?;
-    if listing.cursor_height.is_some_and(|h| h != height) {
-        return Err(stale("cursor height changed; restart the listing"));
+    if let Some(answered) = listing.cursor_height
+        && last_write(ctx)? > answered
+    {
+        return Err(stale("the listing changed; restart it"));
     }
     Ok(listing)
 }

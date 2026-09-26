@@ -449,3 +449,20 @@ fn the_docked_panels_show_one_at_a_time_and_jump_to_a_line() {
     cx.run_until_parked();
     view.read(|forge| assert!(forge.nav().dock.is_none()));
 }
+
+/// A change's Commits tab lists the change's own commits: the log of its
+/// source less what its target reaches, not the target's whole history.
+#[test]
+fn a_change_lists_its_own_commits() {
+    let (cx, view) = change_screen("default", ChangeTab::Commits);
+    let into = view.read(|forge| forge.change().map(|(change, ..)| change.into.clone()));
+    let into = into.expect("the change landed");
+    let asked = cx.host().requests::<crate::api::Ask>();
+    assert!(
+        asked.iter().any(|query| matches!(
+            query,
+            forge::Query::Log { exclude: Some(forge::Revision::Ref(target)), .. } if *target == into
+        )),
+        "{asked:?}"
+    );
+}

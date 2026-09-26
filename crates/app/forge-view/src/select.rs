@@ -166,6 +166,7 @@ impl Forge {
         let log = self.ready(&Query::Log {
             repo: self.repo_name(),
             from: self.revision(),
+            exclude: None,
             page: PAGE,
         })?;
         let Reply::Log { page, .. } = log else {
