@@ -205,6 +205,27 @@ fn open_numbers_changes_and_refuses_what_cannot_merge() {
     assert_eq!(rig.refused(&gone).code, code::NOT_FOUND);
 }
 
+/// Chat's refusal of a message forge sent without a reply fails forge's
+/// whole frame, as the kernel fails it: the change is never opened.
+#[test]
+fn chat_refusing_the_channel_fails_the_open_it_came_from() {
+    let (mut rig, story) = story();
+    // forge itself, outside any change: the channel the change will want
+    let forge = Principal::Account(sandbox::MODULES[0].1);
+    rig.chat_execute(
+        forge,
+        chat::Op::CreateChannel {
+            channel_id: "forge:project:1".into(),
+            name: "squat".into(),
+            post_policy: chat::PostPolicy::Open,
+        },
+    );
+    let before = rig.sandbox.forge.borrow().state.clone();
+    let refusal = rig.execute(&story.open("Feature")).unwrap_err();
+    assert_eq!(refusal.code, code::ALREADY_EXISTS);
+    assert_eq!(rig.sandbox.forge.borrow().state, before);
+}
+
 #[test]
 fn edit_is_the_authors_and_drops_the_reviewers_it_unasks() {
     let (mut rig, story) = story();

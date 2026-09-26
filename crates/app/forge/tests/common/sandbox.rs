@@ -1,5 +1,6 @@
 //! forge's host with chat's beside it: the sibling forge queries, and where
-//! its emissions land, in the frame that emitted them. `accounts` is identity's
+//! its emissions land, in the frame that emitted them, run as the kernel
+//! runs a frame by `chain` ([`guest::MockChain`]). `accounts` is identity's
 //! roster: each key the account it belongs to, the harness keys
 //! ([`HOLDERS`](super::HOLDERS)) from the start, each module its account
 //! ([`MODULES`]) and each agent its standing (`agents`). A frame's sender
@@ -10,12 +11,14 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use abi::role::identity::{Category, Kind, Profile, Standing};
-use guest::{Cause, Env, Error, Origin, Principal, code};
-use guest::{ExecCtx, MockHost, Module, QueryCtx};
+use guest::{Cause, Env, Error, Origin, Outcome, Principal};
+use guest::{ExecCtx, MockChain, MockHost, Module, QueryCtx};
 
 pub struct MemorySandbox {
     pub forge: MockHost,
     pub chat: MockHost,
+    /// forge and chat, each acting as its [`MODULES`] account
+    pub chain: MockChain,
     pub accounts: Rc<RefCell<BTreeMap<Vec<u8>, u64>>>,
     /// the agents [`AGENT_MANAGER`] manages, each with its standing
     pub agents: Rc<RefCell<BTreeMap<u64, Standing>>>,
@@ -35,13 +38,13 @@ pub fn module_of(number: u64) -> Option<&'static str> {
         .map(|(module, _)| *module)
 }
 
-/// The env of a block at `height`, sent by `origin` acting as `sender`.
-fn env(origin: Origin, sender: Option<Principal>, height: u64, time: u64) -> Env {
+/// `module`'s env in a block at `height`, sent by `origin` acting as `sender`.
+fn env(module: &str, origin: Origin, sender: Option<Principal>, height: u64, time: u64) -> Env {
     Env {
         chain_id: b"net".to_vec(),
         height,
         time,
-        module: "forge".into(),
+        module: module.into(),
         origin,
         sender,
         roles: guest::MockHost::roles(),
@@ -59,7 +62,7 @@ impl Default for MemorySandbox {
         forge.borrow_mut().siblings.insert(
             "chat".into(),
             Box::new(move |request| {
-                let reads = sibling.query(env(Origin::Root, None, 0, 0));
+                let reads = sibling.query(env("chat", Origin::Root, None, 0, 0));
                 let reply = chat::Chat::query(
                     &reads,
                     abi::decode(request).map_err(guest::kernel::error_from)?,
@@ -75,9 +78,27 @@ impl Default for MemorySandbox {
                 guest::identity_role(&profiles(&roster.borrow(), &standing.borrow()), request)
             }),
         );
+        let mut chain = MockChain::default();
+        let account = |module| {
+            let (_, number) = MODULES.iter().find(|(name, _)| *name == module).unwrap();
+            Some(Principal::Account(*number))
+        };
+        chain.seat(
+            "forge",
+            forge.clone(),
+            account("forge"),
+            guest::execute::<forge::Forge>,
+        );
+        chain.seat(
+            "chat",
+            chat.clone(),
+            account("chat"),
+            guest::execute::<chat::Chat>,
+        );
         MemorySandbox {
             forge,
             chat,
+            chain,
             accounts,
             agents,
         }
@@ -115,9 +136,14 @@ impl MemorySandbox {
         self.accounts.borrow_mut().insert(key.to_vec(), account);
     }
 
-    /// The env of a block at `height`, sent by `origin`: its sender resolved
-    /// as the host resolves it, a key through the roster.
+    /// forge's env in a block at `height`, sent by `origin`: its sender
+    /// resolved as the host resolves it, a key through the roster.
     pub fn env_at(&self, origin: Origin, height: u64, time: u64) -> Env {
+        self.env_of("forge", origin, height, time)
+    }
+
+    /// `module`'s env in a block at `height`, sent by `origin`.
+    fn env_of(&self, module: &str, origin: Origin, height: u64, time: u64) -> Env {
         let sender = match &origin {
             Origin::Signed(key) => self.principal(key),
             Origin::Module(module) => MODULES
@@ -126,7 +152,7 @@ impl MemorySandbox {
                 .map(|(_, account)| Principal::Account(*account)),
             Origin::Root => Some(Principal::Root),
         };
-        env(origin, sender, height, time)
+        env(module, origin, sender, height, time)
     }
 
     /// A write to forge's host at `height`, signed by the system.
@@ -138,7 +164,7 @@ impl MemorySandbox {
     /// A read of forge's host at `height`.
     pub fn reads(&self, height: u64) -> QueryCtx {
         self.forge
-            .query(env(Origin::Root, None, height, super::TIME))
+            .query(env("forge", Origin::Root, None, height, super::TIME))
     }
 
     /// Who `key` signs as: the account it holds, if any.
@@ -158,32 +184,29 @@ impl MemorySandbox {
         time: u64,
         msg: chat::Op,
     ) -> Result<(), Error> {
-        chat::Chat::execute(&self.chat.exec(self.env_at(origin, height, time)), msg)
+        let env = self.env_of("chat", origin, height, time);
+        chat::Chat::execute(&self.chat.exec(env), msg)
     }
 
     pub fn chat_query(&self, q: chat::Query) -> Result<chat::Reply, Error> {
-        chat::Chat::query(&self.chat.query(env(Origin::Root, None, 0, 0)), q)
+        chat::Chat::query(&self.chat.query(env("chat", Origin::Root, None, 0, 0)), q)
     }
 
-    /// Runs what forge emitted to chat, as the kernel runs it once forge's
-    /// handler returns: as forge, in the same frame.
-    pub fn deliver(&mut self, height: u64, time: u64) -> Vec<Result<(), Error>> {
-        self.forge
-            .take_emissions()
-            .into_iter()
-            .map(|m| {
-                if m.target != "chat" {
-                    return Err(Error::new(code::UNKNOWN_MODULE, m.target));
-                }
-                let forge = Origin::Module("forge".into());
-                self.chat_execute(
-                    forge,
-                    height,
-                    time,
-                    abi::decode(&m.payload).map_err(guest::kernel::error_from)?,
-                )
-            })
-            .collect()
+    /// forge's op signed by `origin` in a block at `height`, and what it
+    /// emitted, in one frame as the kernel runs it: forge's output, or the
+    /// refusal that failed the frame (which left every host as it was).
+    pub fn frame(
+        &self,
+        origin: Origin,
+        height: u64,
+        time: u64,
+        op: &forge::Op,
+    ) -> Result<Vec<u8>, Error> {
+        let env = self.env_at(origin, height, time);
+        match self.chain.execute(env, &abi::encode(op)) {
+            Outcome::Applied { output } => Ok(output),
+            Outcome::Rejected(error) => Err(error),
+        }
     }
 
     pub fn blob_count(&self) -> usize {

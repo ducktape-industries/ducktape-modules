@@ -60,11 +60,7 @@ impl Rig {
         let (actor, height) = (self.actor.clone(), self.height);
         self.sandbox
             .forge
-            .attempt(|| signed_op(&self.sandbox, &actor, height, op))?;
-        for landed in self.sandbox.deliver(height, TIME) {
-            landed.unwrap();
-        }
-        Ok(self.sandbox.forge.take_output())
+            .attempt(|| signed_op(&self.sandbox, &actor, height, op))
     }
 
     /// The refusal of the actor's op, which left forge's store as it was.
