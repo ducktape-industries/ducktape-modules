@@ -1,8 +1,11 @@
 //! Changes: the filter rail with "Needs my judgment" on top, the list, and
 //! the form that opens or edits one.
-use ducktape_view_guest::Div;
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use ducktape_view_guest::design;
 use ducktape_view_guest::prelude::*;
+use ducktape_view_guest::{Div, EditorBinding, EditorElement, EditorElementEvent};
 
 use crate::Forge;
 use crate::state::{ChangeForm, Filter};
@@ -305,12 +308,32 @@ fn form_fields(form: &ChangeForm, cx: &mut Context<Forge>, theme: &Theme) -> Div
         }
         cx.notify();
     });
-    let body = cx.listener(|forge, text: &String, _, cx| {
-        if let Some(form) = &mut forge.form {
-            form.body = text.clone();
-        }
-        cx.notify();
-    });
+    // the host's editor speaks in document updates and transactions; each
+    // becomes a callback the driver runs against the form's body
+    let body = |event: EditorElementEvent<(), Callback>| -> Callback {
+        let event = RefCell::new(Some(event));
+        Rc::new(
+            move |forge: &mut Forge, window: &mut Window, cx: &mut Context<Forge>| {
+                let (Some(event), Some(form)) = (event.borrow_mut().take(), &mut forge.form) else {
+                    return;
+                };
+                let run = match event {
+                    EditorElementEvent::Document(update) => {
+                        update.apply(&mut form.body, cx);
+                        None
+                    }
+                    EditorElementEvent::Transaction(transaction) => {
+                        transaction.apply(&mut form.body, cx)
+                    }
+                    EditorElementEvent::Observed(()) => None,
+                };
+                if let Some(run) = run {
+                    run(forge, window, cx);
+                }
+                cx.notify();
+            },
+        )
+    };
     div()
         .flex()
         .flex_col()
@@ -330,20 +353,27 @@ fn form_fields(form: &ChangeForm, cx: &mut Context<Forge>, theme: &Theme) -> Div
                 .on_input(title),
         )
         .child(
-            Input::new(id("forge-change-body"))
-                .h(design::size::CONTROL)
-                .w_full()
-                .px_2()
-                .border_1()
-                .border_color(theme.border_strong)
-                .bg(theme.background)
-                .text_color(theme.foreground)
-                .value(form.body.clone())
-                .placeholder("Why it changes")
-                .label("Change body")
-                .on_input(body),
+            EditorElement::new(
+                id("forge-change-body"),
+                &form.body,
+                "forge-change-body",
+                EditorBinding::plain(),
+                body,
+            )
+            .min_h(design::size::CONTROL * 4.)
+            .w_full()
+            .px_2()
+            .border_1()
+            .border_color(theme.border_strong)
+            .bg(theme.background)
+            .text_color(theme.foreground)
+            .placeholder("Why it changes")
+            .label("Change body"),
         )
 }
+
+/// What the driver runs for an editor event: the SDK's own callback shape.
+type Callback = Rc<dyn Fn(&mut Forge, &mut Window, &mut Context<Forge>)>;
 
 /// The identity picker: the people and agents chat's mentions offer.
 fn reviewers(

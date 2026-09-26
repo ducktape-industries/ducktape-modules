@@ -4,6 +4,7 @@ use super::{booted, change_screen, opened};
 use crate::api::{ChatApi, SubmitForge};
 use crate::state::ChangeTab;
 use ducktape_view_guest::view::Submit;
+use ducktape_view_guest::wire;
 use forge::{LineComment, Op, Side, Verdict};
 
 #[test]
@@ -448,4 +449,32 @@ fn the_docked_panels_show_one_at_a_time_and_jump_to_a_line() {
     cx.simulate_click("forge-dock-comments");
     cx.run_until_parked();
     view.read(|forge| assert!(forge.nav().dock.is_none()));
+}
+
+/// The edit form's body is a multi-line editor: a body of paragraphs comes
+/// back from the form with its breaks, not as one line.
+#[test]
+fn editing_a_change_keeps_the_paragraphs_of_its_body() {
+    let (mut cx, view) = change_screen("default", ChangeTab::Conversation);
+    let body = "What: a body.\n\nWhy: it reads.\n\nTest: this one.";
+    view.update(&mut cx, |forge, _, cx| {
+        forge.start_edit(cx);
+        // what the host's editor holds once the paragraphs are typed
+        forge.form.as_mut().unwrap().body = ducktape_view_guest::Editor::new(body);
+    });
+    cx.run_until_parked();
+    assert!(
+        matches!(
+            cx.find("forge-change-body"),
+            Some(wire::Node::Editor { .. })
+        ),
+        "the body field is the host's multi-line editor"
+    );
+    cx.simulate_click("forge-change-submit");
+    cx.run_until_parked();
+    assert!(
+        cx.host().requests::<SubmitForge>().iter().any(
+            |op| matches!(op, Op::ChangeEdit { n: 1, body: Some(saved), .. } if saved == body)
+        ),
+    );
 }
