@@ -27,15 +27,17 @@ fn consent(
     }
 }
 
-/// `to`'s consent, by `key` (one of theirs), to receiving `agent` at its
-/// `transfers`th handover.
-fn handover(
+/// `to`'s acceptance, by `key` (one of theirs), of `agent` at its
+/// `transfers`th handover, signed under `namespace` (the handover's, unless
+/// a test signs under the wrong one).
+fn acceptance(
     key: &ed25519::PrivateKey,
     agent: AccountNumber,
     to: AccountNumber,
     transfers: u64,
     expires_at: u64,
-) -> identity::Consent {
+    namespace: &[u8],
+) -> identity::Acceptance {
     let handover = identity::Handover {
         network: NETWORK.to_vec(),
         account: agent,
@@ -43,11 +45,10 @@ fn handover(
         transfers,
         expires_at,
     };
-    identity::Consent {
+    identity::Acceptance {
         key: key.public_key().as_ref().to_vec(),
-        account: agent,
         expires_at,
-        proof: testkit::ed25519_proof(key, identity::CONSENT_NAMESPACE, &handover.preimage()),
+        proof: testkit::ed25519_proof(key, namespace, &handover.preimage()),
     }
 }
 
@@ -397,19 +398,34 @@ fn an_agent_acts_until_its_manager_suspends_it() {
         };
         assert_eq!(holds, Some(agent), "resumed, its key acts again");
 
-        // handed to Bob, who consented: its keys go with Alice
+        // handed to Bob, who accepted: its keys go with Alice
         let expires_at = TIME + 600_000;
-        let unconsented = identity::Op::TransferManager {
+        let handover = identity::HANDOVER_NAMESPACE;
+        let unaccepted = identity::Op::TransferManager {
             account: agent,
             to: bob,
-            consent: handover(&key(1), agent, bob, 0, expires_at),
+            acceptance: acceptance(&key(1), agent, bob, 0, expires_at, handover),
         };
-        let not_bobs = net.refuse(&public(1), identity::MODULE, &unconsented).await;
+        let not_bobs = net.refuse(&public(1), identity::MODULE, &unaccepted).await;
         assert_eq!(not_bobs, reason::UNAUTHORIZED);
+        let as_consent = identity::Op::TransferManager {
+            account: agent,
+            to: bob,
+            acceptance: acceptance(
+                &key(2),
+                agent,
+                bob,
+                0,
+                expires_at,
+                identity::CONSENT_NAMESPACE,
+            ),
+        };
+        let wrong_namespace = net.refuse(&public(1), identity::MODULE, &as_consent).await;
+        assert_eq!(wrong_namespace, reason::UNAUTHORIZED);
         let transfer = identity::Op::TransferManager {
             account: agent,
             to: bob,
-            consent: handover(&key(2), agent, bob, 0, expires_at),
+            acceptance: acceptance(&key(2), agent, bob, 0, expires_at, handover),
         };
         net.apply(&public(1), identity::MODULE, &transfer).await;
         assert_eq!(

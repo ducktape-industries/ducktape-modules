@@ -21,7 +21,11 @@ use guest::{BlobId, ModuleId, Scheme};
 pub use store::{PageRequest, PageResponse};
 
 pub const MODULE: &str = "identity";
+/// What a key signs to consent to a key joining an account ([`Admission`]).
 pub const CONSENT_NAMESPACE: &[u8] = b"ducktape:identity:consent";
+/// What a person's key signs to accept an agent handed to them
+/// ([`Handover`]): its own namespace, so no add-key consent reads as one.
+pub const HANDOVER_NAMESPACE: &[u8] = b"ducktape:identity:handover";
 
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct Key {
@@ -131,13 +135,10 @@ impl Account {
     }
 }
 
-/// A key's consent, `proof` being `key`'s signature over what it agrees
-/// to. To a new key joining an account (`AddKey`, over the [`Admission`]):
-/// for a person, `key` is one already on the account and the new key signs
-/// the frame; for an agent, `key` is the new key itself and the manager
-/// signs the frame. To receiving an agent (`TransferManager`, over the
-/// [`Handover`]): `key` is one on the receiver's account, `account` the
-/// agent, and the manager signs the frame.
+/// A key's consent to a new key joining an account: `proof` is `key`'s
+/// signature over the [`Admission`]. For a person, `key` is one already on
+/// the account and the new key signs the frame; for an agent, `key` is the
+/// new key itself and the manager signs the frame.
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct Consent {
     pub key: Vec<u8>,
@@ -162,9 +163,19 @@ impl Admission {
     }
 }
 
-/// What a receiver signs to take an agent over: the agent (`account`),
-/// themselves (`to`), and the agent's handovers so far (`transfers`, from
-/// its [`Control::Managed`]), so the consent fits one transfer alone.
+/// A person's acceptance of an agent handed to them: `proof` is `key`'s
+/// signature, under [`HANDOVER_NAMESPACE`], over the [`Handover`]; `key`
+/// is one on their account. The manager signs the frame.
+#[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
+pub struct Acceptance {
+    pub key: Vec<u8>,
+    pub expires_at: u64,
+    pub proof: Vec<u8>,
+}
+
+/// What a receiver accepts: the agent (`account`), themselves (`to`), and
+/// the agent's handovers so far (`transfers`, from its
+/// [`Control::Managed`]), so an acceptance fits one transfer alone.
 #[derive(Clone, Debug, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 pub struct Handover {
     pub network: Vec<u8>,
@@ -225,13 +236,13 @@ pub enum Op {
     Revoke {
         account: AccountNumber,
     },
-    /// An agent's manager hands it to the person `to`, who consented
-    /// (`consent` is over the [`Handover`]). The agent's keys are dropped;
+    /// An agent's manager hands it to the person `to`, who accepted it
+    /// (`acceptance`, over the [`Handover`]). The agent's keys are dropped;
     /// suspended, it stays suspended.
     TransferManager {
         account: AccountNumber,
         to: AccountNumber,
-        consent: Consent,
+        acceptance: Acceptance,
     },
 }
 
@@ -376,14 +387,14 @@ pub fn describe(op: &Op) -> describe::Description {
         Op::TransferManager {
             account: number,
             to,
-            consent,
+            acceptance,
         } => (
             "Transfer manager".into(),
             vec![
                 account(number),
                 field("to", Value::Account(*to)),
-                field("consenting key", Value::Key(consent.key.clone())),
-                field("expires at", Value::Time(consent.expires_at)),
+                field("accepting key", Value::Key(acceptance.key.clone())),
+                field("expires at", Value::Time(acceptance.expires_at)),
             ],
         ),
     };

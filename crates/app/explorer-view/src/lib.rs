@@ -326,7 +326,7 @@ pub struct Entry {
     pub params: usize,
 }
 
-use identity::view::borsh_bytes;
+use ducktape_view_guest::borsh_bytes;
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Network {

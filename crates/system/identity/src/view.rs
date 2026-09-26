@@ -29,21 +29,3 @@ pub fn kind(
         None => what,
     }
 }
-
-/// A borsh value in a view's serde snapshot, as its bytes: what a program
-/// said, kept as it came (`#[serde(with = "identity::view::borsh_bytes")]`).
-pub mod borsh_bytes {
-    use borsh::{BorshDeserialize, BorshSerialize};
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    pub fn serialize<T: BorshSerialize, S: Serializer>(value: &T, s: S) -> Result<S::Ok, S::Error> {
-        Serialize::serialize(&abi::encode(value), s)
-    }
-
-    pub fn deserialize<'de, T: BorshDeserialize, D: Deserializer<'de>>(
-        d: D,
-    ) -> Result<T, D::Error> {
-        abi::decode(&<Vec<u8> as Deserialize>::deserialize(d)?)
-            .map_err(|refusal| serde::de::Error::custom(refusal.sentence))
-    }
-}

@@ -7,8 +7,8 @@ use guest::{
 use store::{Item, Map, PageRequest, Set};
 
 use crate::{
-    Account, AccountNumber, Admission, CONSENT_NAMESPACE, Card, Category, Consent, Control,
-    Handover, Key, Life, Reference, Reply,
+    Acceptance, Account, AccountNumber, Admission, CONSENT_NAMESPACE, Card, Category, Consent,
+    Control, HANDOVER_NAMESPACE, Handover, Key, Life, Reference, Reply,
 };
 
 pub(crate) const ACCOUNTS: Map<AccountNumber, Account> = Map::new("a/");
@@ -445,14 +445,14 @@ pub(crate) fn revoke(ctx: &ExecCtx, number: AccountNumber) -> Result<(), Error> 
     })
 }
 
-/// The manager hands `number` to the person `to`, who consented to this
+/// The manager hands `number` to the person `to`, who accepted this
 /// handover with a key on their account. The agent's keys are dropped, so
 /// nothing the old manager gave it acts on; suspended, it stays so.
 pub(crate) fn transfer_manager(
     ctx: &ExecCtx,
     number: AccountNumber,
     to: AccountNumber,
-    consent: Consent,
+    acceptance: Acceptance,
 ) -> Result<(), Error> {
     let env = ctx.env();
     let mut account = account(ctx, number)?;
@@ -470,9 +470,6 @@ pub(crate) fn transfer_manager(
         Life::Active { keys } | Life::Suspended { keys } => keys,
         Life::Revoked => return Err(revoked(number)),
     };
-    if consent.account != number {
-        return Err(invalid("the consent names another account"));
-    }
     let receiver = self::account(ctx, to)?;
     let Control::Person {
         keys: receiver_keys,
@@ -480,29 +477,29 @@ pub(crate) fn transfer_manager(
     else {
         return Err(wrong_state(format!("account {to} is not a person's")));
     };
-    let consenting = receiver_keys
+    let accepting = receiver_keys
         .iter()
-        .find(|key| key.key == consent.key)
-        .ok_or_else(|| unauthorized("the consenting key is not on the receiver's account"))?;
-    if env.time > consent.expires_at {
-        return Err(unauthorized("the consent has expired"));
+        .find(|key| key.key == acceptance.key)
+        .ok_or_else(|| unauthorized("the accepting key is not on the receiver's account"))?;
+    if env.time > acceptance.expires_at {
+        return Err(unauthorized("the acceptance has expired"));
     }
     let handover = Handover {
         network: env.chain_id.clone(),
         account: number,
         to,
         transfers: *transfers,
-        expires_at: consent.expires_at,
+        expires_at: acceptance.expires_at,
     };
-    let consented = ctx.verify(
-        consenting.scheme,
-        consent.key,
-        CONSENT_NAMESPACE,
+    let accepted = ctx.verify(
+        accepting.scheme,
+        acceptance.key,
+        HANDOVER_NAMESPACE,
         handover.preimage(),
-        consent.proof,
+        acceptance.proof,
     )?;
-    if !consented {
-        return Err(unauthorized("the consent does not verify"));
+    if !accepted {
+        return Err(unauthorized("the acceptance does not verify"));
     }
     drop_keys(ctx, keys);
     keys.clear();

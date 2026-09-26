@@ -434,6 +434,7 @@ fn a_person_creates_an_agent_and_adds_its_key() {
 
 /// The manager alone renames, suspends, resumes and revokes an agent from
 /// its line; each is one op, and the agents are read again after it.
+/// Revoking is final, so it takes a second press.
 #[test]
 fn a_manager_renames_suspends_and_revokes_an_agent() {
     let mut cx = fixture("ready", false);
@@ -511,14 +512,34 @@ fn a_manager_renames_suspends_and_revokes_an_agent() {
         cx.texts()
     );
     assert!(cx.find("settings/agents/12/resume").is_some());
-    cx.host().handle::<Submit<Identity>>(|op| {
-        assert_eq!(op, identity::Op::Revoke { account: 12 });
+    let log = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let logged = log.clone();
+    cx.host().handle::<Submit<Identity>>(move |op| {
+        logged.borrow_mut().push(op);
         Ok(Vec::new())
     });
+    cx.simulate_click("settings/agents/12/revoke");
+    cx.run_until_parked();
+    assert_eq!(sent(&cx), 2, "the first press only asks");
+    assert!(cx.has_text("Revoking is final: its keys stop working and it never acts again."));
+    assert!(cx.has_text("Revoke for good"));
+    // another action drops the question
+    cx.simulate_click("settings/agents/12/resume");
+    cx.run_until_parked();
+    assert!(!cx.has_text("Revoke for good"));
+    cx.simulate_click("settings/agents/12/revoke");
+    cx.run_until_parked();
+    assert!(cx.has_text("Revoke for good"));
     suspended(&cx, identity::Life::Revoked);
     cx.simulate_click("settings/agents/12/revoke");
     cx.run_until_parked();
-    assert_eq!(sent(&cx), 3);
+    assert_eq!(
+        *log.borrow(),
+        [
+            identity::Op::Resume { account: 12 },
+            identity::Op::Revoke { account: 12 },
+        ]
+    );
     assert!(cx.has_text("Scout: Agent · account 12 · 0 keys · revoked"));
     for action in ["rename", "suspend", "resume", "revoke"] {
         assert!(cx.find(&format!("settings/agents/12/{action}")).is_none());

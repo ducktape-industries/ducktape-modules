@@ -32,6 +32,9 @@ pub struct Settings {
     /// the one suspend, resume or revoke in flight
     #[serde(default)]
     agent_standing: Form,
+    /// the agent whose revoke waits for a second press: revoking is final
+    #[serde(default)]
+    revoking: Option<u64>,
     #[serde(skip)]
     watches: Vec<Task<()>>,
 }
@@ -400,8 +403,9 @@ impl Settings {
         }
         body.into_any_element()
     }
-    /// One agent's line and what its manager does to it. Revoked, it only
-    /// reads as such.
+    /// One agent's line and what its manager does to it: rename, suspend
+    /// or resume, revoke (a second press confirms, since revoking is
+    /// final). Revoked, it only reads as such.
     fn agent(&self, agent: &account::Agent, cx: &mut Context<Self>, theme: &Theme) -> AnyElement {
         let number = agent.number;
         let standing = match agent.standing {
@@ -440,15 +444,25 @@ impl Settings {
             ),
         };
         let busy = self.agent_standing.busy;
-        let standing_op = |op: identity::Op| {
-            cx.listener(move |v, _: &ClickEvent, _, cx| {
-                v.submit_agent_op(op.clone(), |v| &mut v.agent_standing, cx)
-            })
-        };
-        let toggle = standing_op(toggle_op);
-        let revoke = standing_op(identity::Op::Revoke { account: number });
-        let renamed =
-            cx.listener(move |v, _: &ClickEvent, _, cx| v.submit_rename_agent(number, cx));
+        let toggle = cx.listener(move |v, _: &ClickEvent, _, cx| {
+            v.revoking = None;
+            v.submit_agent_op(toggle_op.clone(), |v| &mut v.agent_standing, cx)
+        });
+        let confirming = self.revoking == Some(number);
+        let revoke = cx.listener(move |v, _: &ClickEvent, _, cx| {
+            if v.revoking == Some(number) {
+                v.revoking = None;
+                let op = identity::Op::Revoke { account: number };
+                v.submit_agent_op(op, |v| &mut v.agent_standing, cx);
+            } else {
+                v.revoking = Some(number);
+                cx.notify();
+            }
+        });
+        let renamed = cx.listener(move |v, _: &ClickEvent, _, cx| {
+            v.revoking = None;
+            v.submit_rename_agent(number, cx)
+        });
         body = body
             .child(field(
                 &format!("settings/agents/{number}/name"),
@@ -482,13 +496,24 @@ impl Settings {
                     ))
                     .child(submit(
                         &format!("settings/agents/{number}/revoke"),
-                        "Revoke",
+                        if confirming {
+                            "Revoke for good"
+                        } else {
+                            "Revoke"
+                        },
                         "Working…",
                         busy,
                         theme,
                         revoke,
                     )),
             );
+        if confirming {
+            body = body.child(secondary(
+                format!("settings/agents/{number}/revoke/warning"),
+                "Revoking is final: its keys stop working and it never acts again.",
+                theme,
+            ));
+        }
         if !rename.error.is_empty() {
             body = body.child(refusal(
                 &format!("agents/{number}/rename"),

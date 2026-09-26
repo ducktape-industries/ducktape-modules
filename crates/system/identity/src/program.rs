@@ -39,8 +39,8 @@ impl Module for Identity {
             Op::TransferManager {
                 account,
                 to,
-                consent,
-            } => transfer_manager(ctx, account, to, consent),
+                acceptance,
+            } => transfer_manager(ctx, account, to, acceptance),
         }
     }
 

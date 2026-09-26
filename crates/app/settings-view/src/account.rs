@@ -22,7 +22,7 @@ pub struct Agent {
     pub number: u64,
     pub name: String,
     pub keys: usize,
-    #[serde(with = "identity::view::borsh_bytes")]
+    #[serde(with = "ducktape_view_guest::borsh_bytes")]
     pub standing: Standing,
 }
 #[derive(Clone, Serialize, Deserialize)]

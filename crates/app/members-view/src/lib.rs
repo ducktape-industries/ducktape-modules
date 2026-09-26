@@ -41,7 +41,7 @@ struct Row {
     number: u64,
     name: String,
     /// what the account is; labelled as it is drawn ([`identity::view::kind`])
-    #[serde(with = "identity::view::borsh_bytes")]
+    #[serde(with = "ducktape_view_guest::borsh_bytes")]
     kind: identity::Kind,
     keys: usize,
     /// the valset standing of a key this account holds, where it holds one

@@ -5,8 +5,8 @@ use guest::{MockHost, Module};
 use store::PageRequest;
 
 use crate::{
-    Account, Admission, CONSENT_NAMESPACE, Category, Consent, Control, Handover, Identity, Kind,
-    Life, Op, Query, Reply, Standing,
+    Acceptance, Account, Admission, CONSENT_NAMESPACE, Category, Consent, Control,
+    HANDOVER_NAMESPACE, Handover, Identity, Kind, Life, Op, Query, Reply, Standing,
 };
 
 const ALICE: &[u8] = b"alice-key";
@@ -62,14 +62,20 @@ fn root() -> Env {
     env(Origin::Root, Some(Principal::Root), 100)
 }
 
-/// A consent proof, natively: the signature is the preimage itself, and the
-/// verifier checks it names the consenting key.
+/// A proof, natively: the signature is the namespace then the preimage
+/// ([`proof`]), so a signature made under one namespace verifies under no
+/// other; the verifier checks it names a key.
 fn memory() -> MockHost {
     let host = MockHost::default();
     host.borrow_mut().verifier = Some(Box::new(|_, key, namespace, message, signature| {
-        namespace == CONSENT_NAMESPACE && message == signature && !key.is_empty()
+        signature == proof(namespace, message) && !key.is_empty()
     }));
     host
+}
+
+/// What [`memory`]'s verifier takes as a signature under `namespace`.
+fn proof(namespace: &[u8], preimage: &[u8]) -> Vec<u8> {
+    [namespace, preimage].concat()
 }
 
 fn run(store: &MockHost, env: &Env, op: Op) -> Result<u64, guest::Error> {
@@ -144,13 +150,13 @@ fn agent_key(agent: u64, key: &[u8], generation: u64) -> Op {
             key: key.to_vec(),
             account: agent,
             expires_at: 200,
-            proof: admission.preimage(),
+            proof: proof(CONSENT_NAMESPACE, &admission.preimage()),
         },
     }
 }
 
-/// `to`'s consent, by `key`, to receiving `agent` at its `transfers`th
-/// handover, expiring at `expires_at`.
+/// `to`'s acceptance, by `key`, of `agent` at its `transfers`th handover,
+/// expiring at `expires_at`.
 fn handover(agent: u64, to: u64, key: &[u8], transfers: u64, expires_at: u64) -> Op {
     let handover = Handover {
         network: b"net".to_vec(),
@@ -162,11 +168,10 @@ fn handover(agent: u64, to: u64, key: &[u8], transfers: u64, expires_at: u64) ->
     Op::TransferManager {
         account: agent,
         to,
-        consent: Consent {
+        acceptance: Acceptance {
             key: key.to_vec(),
-            account: agent,
             expires_at,
-            proof: handover.preimage(),
+            proof: proof(HANDOVER_NAMESPACE, &handover.preimage()),
         },
     }
 }
@@ -236,12 +241,13 @@ fn a_key_joins_by_consent_and_leaves_only_junior_to_its_remover() {
         label: Some("laptop".into()),
         consent: consent(proof, expires_at),
     };
+    let consented = proof(CONSENT_NAMESPACE, &admission.preimage());
     let second = |time| signed_at(&store, SECOND, time).unwrap();
     let forged = refused(&store, &second(100), add(b"nope".to_vec(), 200));
     assert_eq!(forged.code, code::UNAUTHORIZED);
-    let expired = refused(&store, &second(300), add(admission.preimage(), 200));
+    let expired = refused(&store, &second(300), add(consented.clone(), 200));
     assert_eq!(expired.code, code::UNAUTHORIZED);
-    run(&store, &second(150), add(admission.preimage(), 200)).unwrap();
+    run(&store, &second(150), add(consented, 200)).unwrap();
     assert_eq!(get(&store, 1).keys().len(), 2);
     assert_eq!(
         query(
@@ -515,17 +521,31 @@ fn a_manager_hands_an_agent_to_a_consenting_person() {
     assert_eq!(to_module.code, code::WRONG_STATE);
     let not_bobs = refused(&store, &alice(), handover(agent, 2, ALICE, 0, 200));
     assert_eq!(not_bobs.code, code::UNAUTHORIZED);
-    let forged = Op::TransferManager {
+    let accepted_as = |proof: Vec<u8>| Op::TransferManager {
         account: agent,
         to: 2,
-        consent: Consent {
+        acceptance: Acceptance {
             key: BOB.to_vec(),
-            account: agent,
             expires_at: 200,
-            proof: b"nope".to_vec(),
+            proof,
         },
     };
+    let forged = accepted_as(b"nope".to_vec());
     assert_eq!(refused(&store, &alice(), forged).code, code::UNAUTHORIZED);
+    // a signature under the add-key namespace is no acceptance, even over
+    // the very handover
+    let first = Handover {
+        network: b"net".to_vec(),
+        account: agent,
+        to: 2,
+        transfers: 0,
+        expires_at: 200,
+    };
+    let as_consent = accepted_as(proof(CONSENT_NAMESPACE, &first.preimage()));
+    assert_eq!(
+        refused(&store, &alice(), as_consent).code,
+        code::UNAUTHORIZED
+    );
     let late = signed_at(&store, ALICE, 300).unwrap();
     let expired = refused(&store, &late, handover(agent, 2, BOB, 0, 200));
     assert_eq!(expired.code, code::UNAUTHORIZED);
